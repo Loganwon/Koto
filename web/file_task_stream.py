@@ -88,7 +88,7 @@ def _normalize_file_task_payload(data: dict) -> dict:
     from web.runtime_context import get_configured_local_model_id
 
     payload = dict(data or {})
-    model_mode = normalize_model_mode(payload.get("model_mode"), default="cloud")
+    model_mode = normalize_model_mode(payload.get("model_mode"), default="deepseek")
     payload["model_mode"] = model_mode
     raw_options = payload.get("options")
     options = dict(raw_options) if isinstance(raw_options, dict) else {}
@@ -460,6 +460,148 @@ def _file_task_event_to_safe_sse(event) -> str:
     return event_to_sse(_safe_file_task_event_dict(event))
 
 
+def _file_task_change_path(change: dict) -> str:
+    for key in ("path", "file_path", "output_path", "target_path", "destination", "revised_file"):
+        value = str((change or {}).get(key) or "").strip()
+        if value:
+            return value.replace("\\", "/")
+    return ""
+
+
+def _append_file_task_artifact_changes(file_changes: list[dict], changes) -> None:
+    seen = {
+        (
+            _file_task_change_path(item).lower(),
+            str(item.get("operation") or "").strip().lower(),
+            str(item.get("summary") or "").strip().lower(),
+        )
+        for item in file_changes
+        if isinstance(item, dict)
+    }
+    for item in changes or []:
+        if not isinstance(item, dict):
+            continue
+        path = _file_task_change_path(item)
+        if not path:
+            continue
+        key = (
+            path.lower(),
+            str(item.get("operation") or "").strip().lower(),
+            str(item.get("summary") or "").strip().lower(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        file_changes.append(dict(item))
+
+
+def _collect_file_task_artifact_changes(event: dict, file_changes: list[dict]) -> None:
+    event_type = str((event or {}).get("type") or "").strip()
+    payload = event.get("payload") if isinstance((event or {}).get("payload"), dict) else {}
+    if event_type == "file.changed":
+        _append_file_task_artifact_changes(file_changes, [payload])
+    if isinstance(payload.get("file_changes"), list):
+        _append_file_task_artifact_changes(file_changes, payload.get("file_changes"))
+
+
+def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
+    terminal_status = _file_task_terminal_status(event_type, event_payload)
+    if terminal_status:
+        return terminal_status
+    runtime = event_payload.get("runtime") if isinstance(event_payload.get("runtime"), dict) else {}
+    raw_status = str(
+        runtime.get("terminal_status")
+        or event_payload.get("terminal_status")
+        or event_payload.get("status")
+        or ""
+    ).strip().lower()
+    if raw_status in {
+        "awaiting_confirmation",
+        "waiting",
+        "needs_attention",
+        "needs_review",
+        "pending",
+        "failed",
+        "error",
+        "write_blocked",
+        "tool_gap",
+    }:
+        return raw_status
+    if event_type in {"run.error", "run.cancelled"}:
+        return "failed"
+    return "running"
+
+
+def _should_attach_file_task_artifact_result(
+    event_type: str,
+    event_payload: dict,
+    file_changes: list[dict],
+) -> bool:
+    if isinstance(event_payload.get("artifact_result"), dict):
+        return False
+    if event_type in {"run.finished", "multi_target.finished", "run.error", "run.cancelled"}:
+        return True
+    if event_type == "file.changed":
+        return True
+    if event_type in {"step.result", "check.finished"} and file_changes:
+        return True
+    if isinstance(event_payload.get("next_action_artifact"), dict):
+        return True
+    return False
+
+
+def _attach_file_task_artifact_result(request_payload, event: dict, file_changes: list[dict]) -> dict:
+    event_type = str((event or {}).get("type") or "").strip()
+    event_payload = event.get("payload") if isinstance((event or {}).get("payload"), dict) else {}
+    if not _should_attach_file_task_artifact_result(event_type, event_payload, file_changes):
+        return event
+    try:
+        from app.core.artifacts import build_file_task_artifact_result
+
+        task_id = str(
+            event.get("task_id")
+            or getattr(request_payload, "task_id", "")
+            or event.get("run_id")
+            or getattr(request_payload, "run_id", "")
+            or ""
+        ).strip()
+        run_id = str(event.get("run_id") or getattr(request_payload, "run_id", "") or "").strip()
+        task = str(event_payload.get("task") or getattr(request_payload, "task", "") or "").strip()
+        summary = str(
+            event_payload.get("summary")
+            or event_payload.get("text")
+            or event_payload.get("detail")
+            or ""
+        ).strip()
+        target_path = str(
+            event_payload.get("target_path")
+            or event_payload.get("target")
+            or getattr(request_payload, "target_path", "")
+            or ""
+        ).strip()
+        result = build_file_task_artifact_result(
+            task_id=task_id,
+            task=task,
+            run_id=run_id,
+            status=_file_task_artifact_status(event_type, event_payload),
+            summary=summary,
+            file_changes=file_changes,
+            event_payload=event_payload,
+            source_files=getattr(request_payload, "files", []) or [],
+            current_file=getattr(request_payload, "current_file", None),
+            selection_source=str(getattr(request_payload, "selection_source", "") or ""),
+            target_path=target_path,
+        )
+        outbound_event = dict(event)
+        outbound_payload = dict(event_payload)
+        outbound_payload["artifact_result"] = result.to_dict()
+        outbound_event["payload"] = outbound_payload
+        return outbound_event
+    except Exception as exc:
+        logger.debug("[FileTaskRuntime] artifact result attachment skipped: %s", exc)
+        return event
+
+
 def _build_file_task_ui_message_sse(request_payload, event, *, normalize_event_fn, seq_override=None):
     try:
         ui_message = normalize_event_fn(event)
@@ -531,8 +673,11 @@ def _iter_file_task_stream_events(
     persist_progress_fn,
 ):
     outbound_seq = 0
+    file_changes: list[dict] = []
     for event in event_iterable:
         safe_event = _safe_file_task_event_dict(event)
+        _collect_file_task_artifact_changes(safe_event, file_changes)
+        safe_event = _attach_file_task_artifact_result(request_payload, safe_event, file_changes)
         _persist_file_task_summary_event(
             request_payload,
             safe_event,
@@ -576,6 +721,199 @@ def _fallback_file_task_request_for_error(data: dict):
         target_path=str((data or {}).get("target_path") or (data or {}).get("target") or ""),
     )
 
+
+def stream_file_task_chat_request(
+    task_type,
+    user_input,
+    session_name,
+    effective_input=None,
+    workspace_dir=None,
+    yield_thinking=None,
+    _app_logger=None,
+    session_manager=None,
+    settings_manager=None,
+    MODEL_MAP=None,
+    context_info=None,
+    system_instruction=None,
+    _rag_context_block=None,
+    history=None,
+    request=None,
+    client=None,
+    _interrupt_manager=None,
+    _safe_sse=None,
+):
+    import uuid
+    import time as _time
+    import json as _json
+
+    start_time = _time.time()
+    effective = effective_input or user_input
+
+    if _safe_sse:
+        yield _safe_sse({"type": "progress", "message": f"开始处理{task_type}任务...", "detail": ""})
+
+    try:
+        from app.core.agent.file_task_contract import FileTaskRequest
+        from app.core.agent.file_task_model import FileTaskModelClient
+        from app.core.agent.file_task_runtime import FileTaskRuntime
+
+        run_id = uuid.uuid4().hex[:12]
+        raw_data = {
+            "task": effective,
+            "run_id": run_id,
+            "session_id": session_name or "",
+            "model_mode": "deepseek",
+            "history": history if isinstance(history, list) else [],
+            "options": {
+                "system_instruction": system_instruction or "",
+                "context_info": context_info or {},
+                "rag_context": _rag_context_block or "",
+                "task_type": task_type,
+            },
+        }
+        task_request = FileTaskRequest.from_mapping(raw_data)
+
+        runtime = FileTaskRuntime(
+            workspace_root=workspace_dir or "",
+            gemini_client=client,
+            model_client=FileTaskModelClient(),
+        )
+
+        token_buffer = []
+        had_error = False
+        final_summary = ""
+        saved_files = []
+
+        for event in runtime.run(task_request):
+            event_type = getattr(event, "type", "")
+            payload = getattr(event, "payload", {}) or {}
+
+            try:
+                from app.core.agent.file_task_ui_stream import normalize_ui_state
+                ui = normalize_ui_state(event)
+            except Exception:
+                ui = None
+
+            if ui and _safe_sse:
+                progress_kwargs = {
+                    "type": "progress",
+                    "message": getattr(ui, "title", "") or str(event_type),
+                    "detail": f"{getattr(ui, 'progress', 0)}%" if hasattr(ui, 'progress') else "",
+                    "stage": getattr(ui, "phase", ""),
+                    "progress": getattr(ui, "progress", 0),
+                }
+                if hasattr(ui, "terminal") and ui.terminal:
+                    progress_kwargs["terminal"] = True
+                    progress_kwargs["status"] = getattr(ui, "status", "")
+                yield _safe_sse(progress_kwargs)
+
+            if event_type in ("plan.created", "plan.proposed"):
+                steps = payload.get("steps", []) or payload.get("dynamic_steps", []) or []
+                for step in steps[:8]:
+                    step_title = step.get("title", "") if isinstance(step, dict) else str(step)
+                    if _safe_sse and step_title:
+                        yield _safe_sse({
+                            "type": "progress",
+                            "message": f"📋 {step_title}",
+                            "detail": "",
+                            "stage": "planning",
+                        })
+
+            if event_type == "task.classified":
+                clf = payload.get("classification", {}) or {}
+                task_family = str(clf.get("task_family", "") or "")
+                op_kind = str(clf.get("operation_kind", "") or "")
+                if task_family and _safe_sse:
+                    detail_msg = f"📊 任务类型: {task_family}"
+                    if op_kind:
+                        detail_msg += f" · {op_kind}"
+                    yield _safe_sse({
+                        "type": "progress",
+                        "message": detail_msg,
+                        "detail": "",
+                        "stage": "classifying",
+                    })
+
+            if event_type in ("run.started", "task.classified", "plan.checked"):
+                msg = str(payload.get("task", payload.get("message", ""))) if payload else ""
+                if _safe_sse and msg:
+                    yield _safe_sse({"type": "progress", "message": msg[:200], "detail": ""})
+
+            elif event_type == "tool.started":
+                tool_name = str(payload.get("tool_name", "")) if payload else ""
+                if _safe_sse and tool_name:
+                    yield _safe_sse({"type": "progress", "message": f"🔧 调用工具: {tool_name}", "detail": ""})
+
+            elif event_type == "tool.finished":
+                result_preview = str(payload.get("result_preview", "")) if payload else ""
+                if _safe_sse and result_preview:
+                    yield _safe_sse({"type": "info", "message": result_preview[:300]})
+
+            elif event_type == "step.done":
+                text = str(payload.get("text", "")) if payload else ""
+                token_stream = payload.get("token_stream", []) if payload else []
+                if token_stream:
+                    for token_text in token_stream:
+                        token_buffer.append(str(token_text))
+                        if _safe_sse:
+                            yield _safe_sse({"type": "token", "content": str(token_text)})
+                elif text and _safe_sse:
+                    yield _safe_sse({"type": "token", "content": text})
+
+            elif event_type == "run.finished":
+                summary = str(payload.get("summary", "")) if payload else ""
+                completed = bool(payload.get("completed_task", True)) if payload else True
+                target = str(payload.get("target", "")) if payload else ""
+                final_summary = summary
+                if target:
+                    saved_files.append(target)
+                file_changes = getattr(event, "file_changes", []) or []
+                for fc in file_changes:
+                    if isinstance(fc, dict) and fc.get("path"):
+                        saved_files.append(str(fc.get("path")))
+                artifact = getattr(event, "artifact_result", {}) or {}
+                if artifact and isinstance(artifact, dict):
+                    art_path = artifact.get("path", "")
+                    if art_path:
+                        saved_files.append(str(art_path))
+                if not completed and _safe_sse:
+                    yield _safe_sse({"type": "token", "content": f"\n⚠️ 任务未完全完成。{summary}"})
+
+            elif event_type == "run.error":
+                error_text = str(payload.get("text", str(payload))) if payload else "未知错误"
+                had_error = True
+                if _safe_sse:
+                    yield _safe_sse({"type": "token", "content": f"\n❌ 执行错误: {error_text[:500]}"})
+
+            if session_manager and session_name:
+                try:
+                    if final_summary:
+                        session_manager.append_and_save(
+                            f"{session_name}.json",
+                            effective,
+                            final_summary,
+                            task=task_type,
+                        )
+                except Exception:
+                    pass
+
+        if _safe_sse:
+            total_time = round(_time.time() - start_time, 1)
+            yield _safe_sse({
+                "type": "done",
+                "images": [],
+                "saved_files": list(dict.fromkeys(saved_files)),
+                "total_time": total_time,
+                "had_error": had_error,
+            })
+
+    except Exception as e:
+        import traceback
+        if _app_logger:
+            _app_logger.error(f"[file_task_chat] 异常: {traceback.format_exc()}")
+        if _safe_sse:
+            yield _safe_sse({"type": "token", "content": f"\n❌ 任务异常: {str(e)[:300]}"})
+            yield _safe_sse({"type": "done", "images": [], "saved_files": [], "total_time": round(_time.time() - start_time, 1)})
 
 def _drain_file_task_stream_output_in_background(request_payload, stream_iter) -> None:
     task_id = str(getattr(request_payload, "task_id", "") or "").strip()

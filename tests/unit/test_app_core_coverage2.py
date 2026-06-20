@@ -71,34 +71,6 @@ class TestRoutingInit:
         result = routing_mod.__getattr__("AIRouter")
         assert result is not None
 
-    @patch.dict("sys.modules", {"app.core.routing.task_decomposer": MagicMock()})
-    def test_task_decomposer_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("TaskDecomposer")
-        assert result is not None
-
-    @patch.dict("sys.modules", {"app.core.routing.local_planner": MagicMock()})
-    def test_local_planner_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("LocalPlanner")
-        assert result is not None
-
-    @patch.dict("sys.modules", {"app.core.routing.plan_executor": MagicMock()})
-    def test_plan_executor_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("PlanExecutor")
-        assert result is not None
-
-    @patch.dict("sys.modules", {"app.core.routing.plan_executor": MagicMock()})
-    def test_build_handlers_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("build_handlers_from_orchestrator")
-        assert result is not None
-
     @patch.dict("sys.modules", {"app.core.routing.tool_router": MagicMock()})
     def test_tool_router_lazy_import(self):
         import app.core.routing as routing_mod

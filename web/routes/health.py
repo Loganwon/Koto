@@ -148,17 +148,29 @@ def ping():
 
 @health_bp.route("/api/ping/cloud", methods=["GET"])
 def ping_cloud():
-    """Measure round-trip latency to the configured cloud AI API endpoint."""
+    """Measure round-trip latency to the configured cloud AI API endpoint.
+    Supports Gemini and DeepSeek based on the configured cloud provider.
+    """
     from urllib.parse import urlparse
 
-    base = os.getenv("GEMINI_API_BASE", "").strip()
-    if base:
-        parsed = urlparse(base)
-        netloc = parsed.netloc or parsed.path.split("/")[0]
-        scheme = parsed.scheme or "https"
-        target_url = f"{scheme}://{netloc}"
+    # Determine the cloud provider and target URL
+    try:
+        from app.core.llm.model_selection import get_configured_cloud_provider
+        provider = get_configured_cloud_provider()
+    except Exception:
+        provider = "gemini"
+
+    if provider == "deepseek":
+        target_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip()
     else:
-        target_url = "https://generativelanguage.googleapis.com"
+        base = os.getenv("GEMINI_API_BASE", "").strip()
+        if base:
+            parsed = urlparse(base)
+            netloc = parsed.netloc or parsed.path.split("/")[0]
+            scheme = parsed.scheme or "https"
+            target_url = f"{scheme}://{netloc}"
+        else:
+            target_url = "https://generativelanguage.googleapis.com"
 
     try:
         t0 = time.monotonic()
@@ -166,7 +178,7 @@ def ping_cloud():
         latency_ms = round((time.monotonic() - t0) * 1000)
         return (
             jsonify(
-                {"reachable": True, "latency_ms": latency_ms, "target": target_url}
+                {"reachable": True, "latency_ms": latency_ms, "target": target_url, "provider": provider}
             ),
             200,
         )
@@ -178,6 +190,7 @@ def ping_cloud():
                     "latency_ms": None,
                     "error": "timeout",
                     "target": target_url,
+                    "provider": provider,
                 }
             ),
             200,
@@ -190,7 +203,55 @@ def ping_cloud():
                     "latency_ms": None,
                     "error": str(exc),
                     "target": target_url,
+                    "provider": provider,
                 }
             ),
             200,
         )
+
+
+@health_bp.route("/api/ping/cloud/all", methods=["GET"])
+def ping_cloud_all():
+    """Measure round-trip latency to both Gemini and DeepSeek API endpoints.
+    Returns latency for each provider independently.
+    """
+    from urllib.parse import urlparse
+
+    results = {}
+
+    providers = {
+        "gemini": os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com").strip(),
+        "deepseek": os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip(),
+    }
+
+    for provider, base_url in providers.items():
+        parsed = urlparse(base_url)
+        netloc = parsed.netloc or parsed.path.split("/")[0]
+        scheme = parsed.scheme or "https"
+        target_url = f"{scheme}://{netloc}"
+
+        try:
+            t0 = time.monotonic()
+            requests.head(target_url, timeout=5, allow_redirects=False)
+            latency_ms = round((time.monotonic() - t0) * 1000)
+            results[provider] = {
+                "reachable": True,
+                "latency_ms": latency_ms,
+                "target": target_url,
+            }
+        except requests.exceptions.Timeout:
+            results[provider] = {
+                "reachable": False,
+                "latency_ms": None,
+                "error": "timeout",
+                "target": target_url,
+            }
+        except Exception as exc:
+            results[provider] = {
+                "reachable": False,
+                "latency_ms": None,
+                "error": str(exc),
+                "target": target_url,
+            }
+
+    return jsonify(results), 200

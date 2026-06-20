@@ -16,7 +16,23 @@
     } = deps;
 
     const SVG_NS = 'http://www.w3.org/2000/svg';
-    const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 200;
+    const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;
+    const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;
+
+    function _reviewLayoutScale(element, rect) {
+      if (!element || !rect) return { x: 1, y: 1 };
+      const width = Number(element.offsetWidth) || Number(element.clientWidth) || 0;
+      const height = Number(element.offsetHeight) || Number(element.clientHeight) || 0;
+      return {
+        x: width > 0 ? Math.max(0.01, rect.width / width) : 1,
+        y: height > 0 ? Math.max(0.01, rect.height / height) : 1,
+      };
+    }
+
+    function _screenDeltaToLayout(delta, scale) {
+      const safeScale = Number.isFinite(scale) && scale > 0.01 ? scale : 1;
+      return Math.round((Number(delta) || 0) / safeScale);
+    }
 
     function _reviewRailLeftShift(host) {
       if (!host || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
@@ -24,7 +40,7 @@
       }
       const raw = window.getComputedStyle(host).getPropertyValue('--wa-review-rail-left-shift');
       const parsed = parseFloat(raw);
-      return Number.isFinite(parsed) ? Math.max(0, Math.round(parsed)) : DEFAULT_REVIEW_RAIL_LEFT_SHIFT;
+      return Number.isFinite(parsed) ? Math.round(parsed) : DEFAULT_REVIEW_RAIL_LEFT_SHIFT;
     }
 
     function _shiftReviewRailLeft(value, host) {
@@ -32,8 +48,34 @@
       return Math.max(0, left);
     }
 
+    function _reviewRailRightShift(host) {
+      if (!host || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') {
+        return DEFAULT_REVIEW_RAIL_RIGHT_SHIFT;
+      }
+      const raw = window.getComputedStyle(host).getPropertyValue('--wa-review-rail-right-shift');
+      const parsed = parseFloat(raw);
+      return Number.isFinite(parsed) ? Math.round(parsed) : DEFAULT_REVIEW_RAIL_RIGHT_SHIFT;
+    }
+
+    function _positionReviewRail(value, host) {
+      const offset = _reviewRailRightShift(host) - _reviewRailLeftShift(host);
+      return Math.max(0, Math.round(Number(value) || 0) + offset);
+    }
+
     function _normalizeReviewSearchText(value) {
       return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+    }
+
+    function _buildReviewMarkerIndex(root) {
+      const index = new Map();
+      if (!root || !root.querySelectorAll) return index;
+      root.querySelectorAll('[data-koto-review-id]').forEach((element) => {
+        const key = String(element.getAttribute('data-koto-review-id') || '').trim();
+        if (!key) return;
+        if (!index.has(key)) index.set(key, []);
+        index.get(key).push(element);
+      });
+      return index;
     }
 
     function _parseReviewScaleFromTransform(transformValue) {
@@ -184,16 +226,18 @@
       return bestMatch;
     }
 
-    function _findDocxReviewAnchorRange(root, item, textIndex) {
+    function _findDocxReviewAnchorRange(root, item, layoutCache) {
       if (!root) return null;
       const reviewKey = String(item && (item.id || item.review_id || '') || '')
         .replace(/^proposal:/, '')
         .replace(/^comment:/, '')
         .trim();
       if (reviewKey) {
-        const exact = Array.from(root.querySelectorAll('[data-koto-review-id]')).find((element) => {
-          return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
-        }) || null;
+        const exact = layoutCache && layoutCache.markerIndex instanceof Map
+          ? ((layoutCache.markerIndex.get(reviewKey) || [])[0] || null)
+          : (Array.from(root.querySelectorAll('[data-koto-review-id]')).find((element) => {
+              return String(element.getAttribute('data-koto-review-id') || '').trim() === reviewKey;
+            }) || null);
         if (exact && exact.ownerDocument && exact.ownerDocument.createRange) {
           const range = exact.ownerDocument.createRange();
           range.selectNodeContents(exact);
@@ -203,7 +247,11 @@
       const anchorText = _normalizeReviewSearchText(
         item && (item.anchor_text || item.original_text || item.text || '')
       );
-      if (!anchorText || !textIndex || !textIndex.normalizedText) return null;
+      if (!anchorText) return null;
+      const textIndex = layoutCache && typeof layoutCache.getTextIndex === 'function'
+        ? layoutCache.getTextIndex()
+        : layoutCache;
+      if (!textIndex || !textIndex.normalizedText) return null;
       const matches = _collectReviewTextMatches(textIndex.normalizedText, anchorText);
       if (!matches.length) return null;
       const selectedMatch = _selectReviewTextMatch(textIndex, matches, item);
@@ -218,12 +266,18 @@
 
     function _screenXToReviewContentX(screenX, layoutState) {
       if (!layoutState || !layoutState.viewportRect) return Math.round(screenX || 0);
-      return Math.round(layoutState.viewportScrollLeft + (screenX - layoutState.viewportRect.left));
+      const scale = layoutState.layoutScale && Number.isFinite(layoutState.layoutScale.x)
+        ? layoutState.layoutScale.x
+        : 1;
+      return Math.round(layoutState.viewportScrollLeft + ((screenX - layoutState.viewportRect.left) / scale));
     }
 
     function _screenYToReviewContentY(screenY, layoutState) {
       if (!layoutState || !layoutState.viewportRect) return Math.round(screenY || 0);
-      return Math.round(layoutState.viewportScrollTop + (screenY - layoutState.viewportRect.top));
+      const scale = layoutState.layoutScale && Number.isFinite(layoutState.layoutScale.y)
+        ? layoutState.layoutScale.y
+        : 1;
+      return Math.round(layoutState.viewportScrollTop + ((screenY - layoutState.viewportRect.top) / scale));
     }
 
     function _collectReviewVisualPageBounds(layoutState, root) {
@@ -232,6 +286,9 @@
         ? root
         : (layoutState.pageEl || $('wa-docx-editor')?.querySelector('.ProseMirror'));
       if (!pageRoot || typeof pageRoot.getBoundingClientRect !== 'function') return [];
+      if (layoutState._reviewVisualPageRoot === pageRoot && Array.isArray(layoutState._reviewVisualPageBounds)) {
+        return layoutState._reviewVisualPageBounds;
+      }
       const rootRect = pageRoot.getBoundingClientRect();
       if (!rootRect || rootRect.height <= 0) return [];
 
@@ -266,6 +323,8 @@
       if (rootBottom > currentTop + 8) {
         bounds.push({ top: currentTop, bottom: rootBottom });
       }
+      layoutState._reviewVisualPageRoot = pageRoot;
+      layoutState._reviewVisualPageBounds = bounds;
       return bounds;
     }
 
@@ -322,9 +381,9 @@
       return { top, bottom, pageEl: bestPage.pageEl };
     }
 
-    function _resolveReviewAnchorGeometry(root, item, layoutState, textIndex) {
+    function _resolveReviewAnchorGeometry(root, item, layoutState, layoutCache) {
       if (!root || !layoutState || !layoutState.viewportRect) return null;
-      const range = _findDocxReviewAnchorRange(root, item, textIndex);
+      const range = _findDocxReviewAnchorRange(root, item, layoutCache);
       const rangeRects = _collectRangeClientRects(range);
       if (rangeRects.length) {
         const lastRect = rangeRects[rangeRects.length - 1];
@@ -391,8 +450,15 @@
     function _resolveReviewAnchorTarget(item) {
       const root = _getReviewContentRoot();
       if (!root) return null;
-      const textIndex = _buildReviewTextIndex(root);
-      const range = _findDocxReviewAnchorRange(root, item, textIndex);
+      let textIndex = null;
+      const layoutCache = {
+        markerIndex: _buildReviewMarkerIndex(root),
+        getTextIndex() {
+          if (!textIndex) textIndex = _buildReviewTextIndex(root);
+          return textIndex;
+        },
+      };
+      const range = _findDocxReviewAnchorRange(root, item, layoutCache);
       const rangeRects = _collectRangeClientRects(range);
       const rangeRect = _getRangeBoundingRect(range, rangeRects);
       if (rangeRect) {
@@ -566,7 +632,9 @@
             scaleY:             geo.zoom ? geo.zoom.y : 1,
             viewportScrollLeft: geo.scrollLeft,
             viewportScrollTop:  geo.scrollTop,
-            viewportRight:      Math.round(geo.scrollLeft + (geo.viewportRect ? geo.viewportRect.width : 0)),
+            viewportRight:      Number.isFinite(geo.viewportRight)
+              ? geo.viewportRight
+              : Math.round(geo.scrollLeft + (geo.viewportWidth || 0)),
           });
         }
       }
@@ -574,6 +642,7 @@
       // Fallback: inline geometry (geometry module not yet loaded).
       const hostRect = host.getBoundingClientRect();
       const viewportRect = viewport.getBoundingClientRect();
+      const layoutScale = _reviewLayoutScale(viewport, viewportRect);
       const viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
       const viewportScrollTop  = Math.max(0, Math.round(viewport.scrollTop  || 0));
       const pageEl   = host.querySelector('.ProseMirror');
@@ -593,7 +662,7 @@
       if (!pageRect) {
         const contentWidth = Math.max(
           Math.round(viewport.scrollWidth || 0),
-          Math.round(viewportRect.width || 0),
+          Math.round((viewportRect.width || 0) / layoutScale.x),
           Math.round(railWidth + railGap + 24),
         );
         const textColRight = Math.max(0, Math.round(contentWidth - railWidth - safeInset));
@@ -615,25 +684,31 @@
           railWidth,
           scaleX:             1,
           scaleY:             1,
-          shellLeft:          Math.round(viewportRect.left - hostRect.left - viewportScrollLeft),
+          layoutScale,
+          shellLeft:          _screenDeltaToLayout(viewportRect.left - hostRect.left, layoutScale.x),
+          shellTop:           _screenDeltaToLayout(viewportRect.top - hostRect.top, layoutScale.y),
           textColRight,
           viewportRect,
-          viewportRight:      Math.round(viewportScrollLeft + viewportRect.width),
+          viewportRight:      Math.round(viewportScrollLeft + ((viewportRect.width || 0) / layoutScale.x)),
+          viewportWidth:      Math.round((viewportRect.width || 0) / layoutScale.x),
           viewportScrollLeft,
           viewportScrollTop,
         };
       }
+      const transformScale = _parseReviewScaleFromTransform(
+        window.getComputedStyle(pageEl.closest('.koto-zoom-wrapper') || pageEl).transform
+      ) || { x: 1, y: 1 };
       const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);
-      const pageContentLeft  = Math.max(0, Math.round(viewportScrollLeft + (pageRect.left - viewportRect.left)));
-      const pageContentTop   = Math.max(0, Math.round(viewportScrollTop  + (pageRect.top  - viewportRect.top)));
-      const pageContentRight = Math.round(pageContentLeft + pageRect.width);
-      const textColRight     = Math.round(pageContentRight - pagePaddingRight);
-      const viewportRight    = Math.round(viewportScrollLeft + viewportRect.width);
+      const pageContentLeft  = Math.max(0, Math.round(viewportScrollLeft + ((pageRect.left - viewportRect.left) / layoutScale.x)));
+      const pageContentTop   = Math.max(0, Math.round(viewportScrollTop  + ((pageRect.top  - viewportRect.top) / layoutScale.y)));
+      const pageContentRight = Math.round(viewportScrollLeft + ((pageRect.right - viewportRect.left) / layoutScale.x));
+      const textColRight     = Math.round(pageContentRight - (pagePaddingRight * (transformScale.x || 1)));
+      const viewportRight    = Math.round(viewportScrollLeft + ((viewportRect.width || 0) / layoutScale.x));
       const anchorGap        = Math.max(6, railGap) + 10;
       const laneLeft         = Math.round(textColRight + anchorGap);
       const contentWidth = Math.max(
         Math.round(viewport.scrollWidth || 0),
-        Math.round(viewportRect.width   || 0),
+        Math.round((viewportRect.width || 0) / layoutScale.x),
         Math.round(laneLeft + railWidth + safeInset),
       );
       _setDocxReviewRailWidth(host, railWidth);
@@ -647,18 +722,21 @@
         pageContentTop,
         pageEdgeRight:    pageContentRight,
         pageEl,
-        pageOffsetHeight: Math.round(pageRect.height || 0),
-        pageOffsetWidth:  Math.round(pageRect.width  || 0),
+        pageOffsetHeight: Math.round((pageRect.height || 0) / layoutScale.y),
+        pageOffsetWidth:  Math.round((pageRect.width  || 0) / layoutScale.x),
         pagePaddingRight: Math.round(pagePaddingRight || 0),
         pageRect,
         railGap,
         railWidth,
-        scaleX:           1,
-        scaleY:           1,
-        shellLeft:        Math.round(viewportRect.left - hostRect.left - viewportScrollLeft),
+        scaleX:           transformScale.x || 1,
+        scaleY:           transformScale.y || 1,
+        layoutScale,
+        shellLeft:        _screenDeltaToLayout(viewportRect.left - hostRect.left, layoutScale.x),
+        shellTop:         _screenDeltaToLayout(viewportRect.top - hostRect.top, layoutScale.y),
         textColRight,
         viewportRect,
         viewportRight,
+        viewportWidth:    Math.round((viewportRect.width || 0) / layoutScale.x),
         viewportScrollLeft,
         viewportScrollTop,
       };
@@ -682,23 +760,47 @@
       const railMetrics = getDocxReviewRailMetrics(host, viewport);
       const hostRect = railMetrics ? railMetrics.hostRect : host.getBoundingClientRect();
       const viewportRect = railMetrics ? railMetrics.viewportRect : viewport.getBoundingClientRect();
+      const layoutScale = railMetrics && railMetrics.layoutScale
+        ? railMetrics.layoutScale
+        : _reviewLayoutScale(viewport, viewportRect);
+      const viewportWidth = Math.round(
+        (railMetrics && Number.isFinite(railMetrics.viewportWidth))
+          ? railMetrics.viewportWidth
+          : ((viewportRect.width || viewport.clientWidth || 0) / layoutScale.x)
+      );
       const viewportScrollTop = Math.max(0, Math.round(viewport.scrollTop || 0));
       const viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
-      const shellTop = Math.round(viewportRect.top - hostRect.top);
+      const shellTop = railMetrics && Number.isFinite(railMetrics.shellTop)
+        ? Math.round(railMetrics.shellTop)
+        : _screenDeltaToLayout(viewportRect.top - hostRect.top, layoutScale.y);
+      const viewportHeight = Math.round(
+        viewport.clientHeight ||
+        ((viewportRect.height || 0) / layoutScale.y)
+      );
       if (railMetrics) {
-        shell.style.left = Math.round(viewportRect.left - hostRect.left) + 'px';
+        const shellLeft = Number.isFinite(railMetrics.shellLeft)
+          ? Math.round(railMetrics.shellLeft)
+          : _screenDeltaToLayout(viewportRect.left - hostRect.left, layoutScale.x);
+        shell.style.left = shellLeft + 'px';
         shell.style.right = 'auto';
-        shell.style.width = Math.round(viewportRect.width || viewport.clientWidth || railMetrics.contentWidth) + 'px';
+        shell.style.width = Math.max(0, viewportWidth) + 'px';
       }
       shell.style.top = shellTop + 'px';
       shell.style.bottom = 'auto';
-      shell.style.height = Math.round(viewport.clientHeight || viewportRect.height || 0) + 'px';
+      shell.style.height = viewportHeight + 'px';
       listEl.style.transform = `translate(${-viewportScrollLeft}px, ${-viewportScrollTop}px)`;
       listEl.style.width = Math.max(160, Math.round(railMetrics && railMetrics.contentWidth || viewport.scrollWidth || viewportRect.width || 0)) + 'px';
       const contentRoot = railMetrics && railMetrics.pageEl
         ? railMetrics.pageEl
         : (host.querySelector('.ProseMirror') || host);
-      const textIndex = _buildReviewTextIndex(contentRoot);
+      let textIndex = null;
+      const layoutCache = {
+        markerIndex: _buildReviewMarkerIndex(contentRoot),
+        getTextIndex() {
+          if (!textIndex) textIndex = _buildReviewTextIndex(contentRoot);
+          return textIndex;
+        },
+      };
       const connectorLayer = _ensureReviewConnectorLayer(listEl);
       if (connectorLayer) {
         connectorLayer.innerHTML = '';
@@ -711,29 +813,49 @@
       const rawCardColLeft = railMetrics
         ? Math.max(12, Math.round(railMetrics.cardColLeft || (railMetrics.textColRight || 0) + Math.max(6, railMetrics.railGap) + 10))
         : 12;
-      const cardColWidth = railMetrics ? railMetrics.railWidth : 148;
-      const shiftedCardColLeft = Math.max(12, _shiftReviewRailLeft(rawCardColLeft, host));
-      const shellLeft = railMetrics
-        ? Math.round(railMetrics.shellLeft || 0)
-        : Math.round(viewportRect.left - hostRect.left);
-      const viewportRightRelHost = railMetrics
-        ? Math.round((railMetrics.viewportScrollLeft || 0) + (viewportRect.width || 0))
-        : Math.round(viewportRect.right - hostRect.left);
-      const maxCardColLeft = Math.max(
-        12,
-        Math.round(viewportRightRelHost - shellLeft - cardColWidth - 12),
+      const cardColWidth = Math.max(
+        railMetrics ? railMetrics.railWidth : 148,
+        ...cards.map((card) => Math.round(card.offsetWidth || 0)),
       );
-      const cardColLeft = Math.max(12, Math.min(shiftedCardColLeft, maxCardColLeft));
+      const desiredCardColLeft = Math.max(12, _positionReviewRail(rawCardColLeft, host));
+      const viewportRight = railMetrics && Number.isFinite(railMetrics.viewportRight)
+        ? Math.round(railMetrics.viewportRight)
+        : Math.round(viewportScrollLeft + viewportWidth);
+      // Anchor rail to the text-column right edge so cards never drift
+      // leftward into the document when the viewport is narrow (e.g. wide AI panel).
+      const minCardColFromText = railMetrics && Number.isFinite(railMetrics.textColRight)
+        ? Math.round(railMetrics.textColRight + Math.max(6, railMetrics.railGap || 12) + 4)
+        : 12;
+      const maxVisibleCardColLeft = Math.round(viewportRight - cardColWidth - 12);
+      const cardColLeft = Math.max(
+        12,
+        minCardColFromText,
+        Math.min(desiredCardColLeft, maxVisibleCardColLeft),
+      );
       const connectorOriginX = railMetrics
         ? Math.round(railMetrics.textColRight || 0)
         : Math.max(0, cardColLeft - 20);
+
+      // Expand shell to cover the card column horizontally while still clipping
+      // vertically to the editor viewport.
+      const shellCoverWidth = Math.max(
+        viewportWidth,
+        railMetrics ? railMetrics.contentWidth || 0 : 0,
+        cardColLeft + cardColWidth + 14
+      );
+      shell.style.width = Math.max(0, viewportWidth) + 'px';
+      shell.style.overflow = 'hidden';
+      listEl.style.width = Math.max(160, Math.round(shellCoverWidth)) + 'px';
+      if (connectorLayer) {
+        connectorLayer.setAttribute('width', String(Math.max(160, Math.round(shellCoverWidth))));
+      }
 
       const layoutEntries = [];
       const measuredCards = cards.map((card, index) => {
         const reviewId = String(card.dataset.reviewId || '').trim();
         const entry = _findReviewEntry(reviewId);
         const anchorGeometry = entry && entry.item
-          ? _resolveReviewAnchorGeometry(contentRoot, entry.item, railMetrics, textIndex)
+          ? _resolveReviewAnchorGeometry(contentRoot, entry.item, railMetrics, layoutCache)
           : null;
         // All cards in the same column — never vary left by anchor X.
         card.style.left = cardColLeft + 'px';
@@ -856,7 +978,7 @@
       listEl.style.minHeight = contentHeight + 'px';
       if (connectorLayer) {
         connectorLayer.setAttribute('height', String(contentHeight));
-        connectorLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(railMetrics && railMetrics.contentWidth || viewport.scrollWidth || viewportRect.width || 0))} ${contentHeight}`);
+        connectorLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(shellCoverWidth))} ${contentHeight}`);
       }
     }
 
@@ -894,9 +1016,26 @@
       const railMetrics = getDocxReviewRailMetrics(host, viewport);
       const hostRect = railMetrics ? railMetrics.hostRect : host.getBoundingClientRect();
       const viewportRect = railMetrics ? railMetrics.viewportRect : viewport.getBoundingClientRect();
-      const shellTop = Math.max(0, Math.round(viewportRect.top - hostRect.top + 18));
-      const maxTop = Math.max(shellTop, Math.round(viewportRect.bottom - hostRect.top - 54));
-      const top = Math.max(shellTop, Math.min(Math.round(bounds.top - hostRect.top - 8), maxTop));
+      const layoutScale = railMetrics && railMetrics.layoutScale
+        ? railMetrics.layoutScale
+        : _reviewLayoutScale(viewport, viewportRect);
+      const viewportHostLeft = _screenDeltaToLayout(viewportRect.left - hostRect.left, layoutScale.x);
+      const viewportHostTop = _screenDeltaToLayout(viewportRect.top - hostRect.top, layoutScale.y);
+      const viewportHostRight = viewportHostLeft + Math.round(
+        (railMetrics && Number.isFinite(railMetrics.viewportWidth))
+          ? railMetrics.viewportWidth
+          : ((viewportRect.width || viewport.clientWidth || 0) / layoutScale.x)
+      );
+      const viewportHostBottom = viewportHostTop + Math.round(
+        viewport.clientHeight ||
+        ((viewportRect.height || 0) / layoutScale.y)
+      );
+      const shellTop = Math.max(0, viewportHostTop + 18);
+      const maxTop = Math.max(shellTop, viewportHostBottom - 54);
+      const top = Math.max(
+        shellTop,
+        Math.min(_screenDeltaToLayout(bounds.top - hostRect.top, layoutScale.y) - 8, maxTop),
+      );
       if (railMetrics) {
         // Use the selection end rect (cursor position) instead of the rightmost
         // bounding edge across all line fragments — this places the launcher
@@ -914,9 +1053,9 @@
           }
         }
         const selectionRight = Number.isFinite(cursorRight)
-          ? Math.round(cursorRight - hostRect.left + railMetrics.railGap)
-          : Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 12);
-        const maxLauncherLeft = Math.max(0, Math.round(viewportRect.right - hostRect.left - railMetrics.railWidth - 14));
+          ? _screenDeltaToLayout(cursorRight - hostRect.left, layoutScale.x) + Math.max(6, railMetrics.railGap || 12)
+          : viewportHostRight - railMetrics.railWidth - 12;
+        const maxLauncherLeft = Math.max(0, viewportHostRight - railMetrics.railWidth - 14);
         const launcherLeft = Math.min(selectionRight, maxLauncherLeft);
         launcher.style.left = launcherLeft + 'px';
         launcher.style.right = 'auto';
@@ -950,6 +1089,16 @@
           if (shell && shell.style.display !== 'none') scheduleReviewShellLayout();
           renderReviewSelectionLauncher();
         });
+      }
+      const host = $('wa-docx-editor');
+      if (host && !host._waReviewShellResizeObserved) {
+        host._waReviewShellResizeObserved = true;
+        var ro = new ResizeObserver(function () {
+          var shell = $('wa-review-shell');
+          if (shell && shell.style.display !== 'none') scheduleReviewShellLayout();
+          renderReviewSelectionLauncher();
+        });
+        ro.observe(host);
       }
     }
 

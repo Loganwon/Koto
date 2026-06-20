@@ -113,7 +113,7 @@ class QuestionnaireFiller(WorkflowExecutor):
         返回: [{row: int, question: str, other_cols: dict}]
         """
         try:
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
             result = parse_xlsx(file_path, "")
             for sheet_id, sheet in result.get("sheets", {}).items():
                 cell_data = sheet.get("cellData", {})
@@ -244,7 +244,7 @@ class QuestionnaireFiller(WorkflowExecutor):
         低置信度行用黄色背景标注，需要人工复核的行用橙色标注。
         """
         try:
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
             xlsx_result = parse_xlsx(original_file, "")
         except Exception as e:
             logger.warning(f"[QuestionnaireFiller] 原始 Excel 读取失败: {e}, 重建空工作簿")

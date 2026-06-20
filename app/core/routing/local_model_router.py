@@ -1,4 +1,4 @@
-# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+﻿# Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import json
 import logging
@@ -216,7 +216,11 @@ class LocalModelRouter:
 
 【附件分析 vs DOC_ANNOTATE vs FILE_GEN（输入含 [FILE_ATTACHED:xxx] 标记 = 用户上传了文件）】
 - [FILE_ATTACHED] + 提问/分析/告诉我/帮我看/检查/评估/是否/有没有/怎么/什么意思 → CHAT（读文件作答）
-- [FILE_ATTACHED:.docx/.doc] + 标注/批注/润色/修改/改善/校对/标记/标出/改正/纠正/优化翻译/语序 → DOC_ANNOTATE（在上传文件上直接标注修改）
+- [FILE_ATTACHED:.docx/.doc] + **明确要求在文档内标注/批注/Track Changes/修订** → DOC_ANNOTATE（在文件上标注修改）
+- [FILE_ATTACHED:.docx/.doc] + **分析/评估/通读/审阅报告/指出问题（口头）** → CHAT（纯阅读分析，不修改文件）
+- 关键区分："标注这篇文档" → DOC_ANNOTATE  |  "分析这篇文档的问题" → CHAT
+- 关键区分："在文档里标出错误" → DOC_ANNOTATE  |  "告诉我这篇文档有什么问题" → CHAT
+- 只有用户明确说"在文档上"/"写回"/"标注到"/"Track Changes"/"修订模式"等才走 DOC_ANNOTATE
 - [FILE_ATTACHED] + 明确含"深入/全面/系统/详尽"等词 + 具体研究主题 → RESEARCH
 - [FILE_ATTACHED] + 明确要生成新文件（含格式词 word/ppt/pdf/excel + 生成动作词） → FILE_GEN
 - 关键原则：用户传文件是为了让你"读"它，不是让你"生成"它——默认走 CHAT，除非明确说要生成新文件或编辑原文
@@ -288,6 +292,12 @@ class LocalModelRouter:
 输入: [FILE_ATTACHED:.docx] 深入分析这家公司的财务状况和经营风险
 输出: {{"task":"RESEARCH","confidence":0.87}}
 （有"深入分析"信号词 + 具体研究主题 → RESEARCH）
+输入: [FILE_ATTACHED:.docx] 通读这篇口播稿，分析其优劣，指出用语问题和逻辑问题
+输出: {{"task":"CHAT","confidence":0.90}}
+（"分析优劣/指出问题"=口头分析报告，不是要求文档标注 → CHAT）
+输入: [FILE_ATTACHED:.docx] 评估这个presentation是否可行，有什么改进建议
+输出: {{"task":"CHAT","confidence":0.89}}
+（"评估是否可行"=内容分析问答 → CHAT，不在文件上标注修改）
 输入: [FILE_ATTACHED:.pdf] 帮我看看这里有没有法律风险
 输出: {{"task":"CHAT","confidence":0.90}}
 （"帮我看看/有没有"=内容问答 → CHAT，不是生成文件）
@@ -492,7 +502,7 @@ class LocalModelRouter:
         return True
 
     # ══════════════════════════════════════════════════════════════════
-    # 共享 Ollama 调用工具 — 消除 intent_analyzer / local_planner 中的重复 HTTP 代码
+    # 共享 Ollama 调用工具 — 消除各路由辅助模块中的重复 HTTP 代码
     # ══════════════════════════════════════════════════════════════════
 
     @classmethod

@@ -1,7 +1,14 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-Koto 全格式 AI 工作区 BFF 层 — Phase 1-5 后端路由
+Koto unified file-workstation BFF.
+
+Retention note:
+  The module name `workspace_assistant` is legacy, but the blueprint is still
+  active runtime code. It owns the file-workstation API used by the unified
+  `/` shell. Do not delete or rename it until every registration, isolated
+  Flask test, and `/api/v1/workspace/*` caller has migrated to a new BFF module.
+
 Routes:
   POST /api/v1/workspace/open_file   — 上传并解析文件，返回标准化 JSON
   GET  /api/v1/workspace/raw/<id>    — 返回暂存的原始文件字节（供 PDF.js 渲染）
@@ -16,11 +23,53 @@ import uuid
 from pathlib import Path
 
 from flask import Blueprint, Response, current_app, jsonify, request, send_file, session, stream_with_context
+from app.core.file.file_parser import export_docx, export_xlsx
+from app.core.file_assistant import (
+    ALLOWED_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    TEXT_EXTENSIONS,
+    AutoSavePermissionError,
+    AutoSavePersistenceService,
+    FileContextPreviewService,
+    FileAssistantService,
+    FileTooLargeError,
+    OpenFileByPathService,
+    OpenFileCopyError,
+    OpenFileEmptyError,
+    OpenFileInConfigError,
+    OpenFileNotFoundError,
+    OpenFilePermissionError,
+    OpenFileUnsupportedTypeError,
+    PptxPreflightError,
+    PptxPreflightService,
+    TempFileInvalidIdError,
+    TempFileNotFoundError,
+    UnsupportedFileTypeError,
+    UploadedOpenFileService,
+    WorkspaceFileDownloadService,
+    WorkspaceFileNotFoundError,
+    WorkspaceFilePermissionError,
+    WorkspaceFileUnsupportedTypeError,
+    WorkspaceFsError,
+    WorkspaceFsService,
+    WorkspaceTempStore,
+    WorkspaceTreeService,
+)
 from web.shared import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
 
 workspace_assistant_bp = Blueprint("workspace_assistant", __name__)
+_FILE_ASSISTANT = FileAssistantService()
+_AUTO_SAVE_PERSISTENCE = AutoSavePersistenceService()
+_OPEN_FILE_BY_PATH = OpenFileByPathService()
+_UPLOADED_OPEN_FILE = UploadedOpenFileService()
+_FILE_CONTEXT_PREVIEW = FileContextPreviewService()
+_WORKSPACE_TEMP_STORE = WorkspaceTempStore()
+_WORKSPACE_TREE = WorkspaceTreeService()
+_WORKSPACE_FILE_DOWNLOAD = WorkspaceFileDownloadService()
+_PPTX_PREFLIGHT = PptxPreflightService()
+_WORKSPACE_FS = WorkspaceFsService()
 
 # ─── Critical static asset check ─────────────────────────────────────────────
 # Prevents silent failures when univer-dist bundle files are missing.
@@ -28,7 +77,8 @@ _STATIC_ROOT = Path(__file__).resolve().parent.parent / "static"
 _CRITICAL_ASSETS = [
     _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.js",
     _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.css",
-    _STATIC_ROOT / "js" / "workspace-assistant.js",
+    _STATIC_ROOT / "js" / "build" / "workspace-bundle.js",
+    _STATIC_ROOT / "js" / "build" / "review-bundle.js",
 ]
 
 def _check_critical_assets() -> list[str]:
@@ -54,20 +104,13 @@ _TMP_DIR = _DEFAULT_TMP_DIR
 _TMP_ROOT = _DEFAULT_TMP_DIR
 
 # 纯文本 / 代码文件后缀（直接读取 UTF-8 内容）
-_TEXT_EXTS = {
-    ".txt", ".md", ".markdown",
-    ".py", ".js", ".ts", ".json", ".html", ".css", ".xml",
-    ".sh", ".bash", ".yaml", ".yml",
-    ".c", ".cpp", ".h", ".hpp", ".java", ".rb", ".go",
-    ".rs", ".cs", ".php", ".swift", ".kt", ".r", ".sql",
-    ".toml", ".ini", ".cfg", ".conf",
-}
+_TEXT_EXTS = TEXT_EXTENSIONS
 
 # 图片文件后缀
-_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
+_IMAGE_EXTS = IMAGE_EXTENSIONS
 
 # 允许上传的文件后缀
-_ALLOWED_EXT = {".docx", ".xlsx", ".pptx", ".pdf"} | _TEXT_EXTS | _IMAGE_EXTS
+_ALLOWED_EXT = ALLOWED_EXTENSIONS
 
 
 def _get_session_id() -> str:
@@ -132,10 +175,6 @@ def _export_workspace_pptx(file_id: str, data) -> bytes:
 
     orig_bytes = matches[0].read_bytes()
     return _pptx_apply(orig_bytes, data["slides"])
-
-
-def _ext(filename: str) -> str:
-    return Path(filename).suffix.lower()
 
 
 def _minimal_pdf_bytes() -> bytes:
@@ -206,9 +245,9 @@ def _seed_new_file(target: Path) -> None:
 
 
 def _repair_zero_byte_office_file(target: Path) -> bool:
-    """Seed legacy 0-byte Office files before parsing them in the workspace."""
+    """Seed legacy 0-byte workspace documents before parsing them."""
     target = Path(target)
-    if target.suffix.lower() not in {".docx", ".xlsx", ".pptx"}:
+    if target.suffix.lower() not in {".docx", ".xlsx", ".pptx", ".pdf"}:
         return False
     try:
         if not target.is_file() or target.stat().st_size != 0:
@@ -312,56 +351,6 @@ def _copy_file_to_tmp_with_validation(src_path: Path, tmp_path: Path, *, ext: st
     raise RuntimeError(f"临时副本创建失败: {last_error}")
 
 
-def _should_retry_docx_tmp_parse(exc: Exception, tmp_path: Path) -> bool:
-    import zipfile
-
-    if isinstance(exc, zipfile.BadZipFile):
-        return True
-
-    message = str(exc or "")
-    tmp_str = str(tmp_path)
-    return (
-        ("Package not found at" in message and tmp_str in message)
-        or "File is not a zip file" in message
-        or "not a zip file" in message
-        or not tmp_path.is_file()
-    )
-
-
-def _parse_docx_workspace_open(tmp_path: Path, file_id: str, *, source_path: Path | None = None) -> dict:
-    from app.core.file.file_parser import parse_docx
-
-    try:
-        data = parse_docx(str(tmp_path))
-    except Exception as exc:
-        if not source_path or not _should_retry_docx_tmp_parse(exc, tmp_path):
-            raise
-        logger.warning(
-            "[WorkspaceAssistant] DOCX tmp parse failed, recreating sandbox copy %s from %s: %s",
-            tmp_path,
-            source_path,
-            exc,
-        )
-        _copy_file_to_tmp_with_validation(source_path, tmp_path, ext=".docx")
-        data = parse_docx(str(tmp_path))
-
-    data["raw_url"] = f"/api/v1/workspace/raw/{file_id}"
-    return data
-
-
-def _sample_ai_context_text(text: str, limit: int = 12_000) -> str:
-    content = str(text or "")
-    if len(content) <= limit:
-        return content
-
-    marker = "\n\n...[中间内容已省略]...\n\n"
-    head = max(int(limit * 0.7), 1)
-    tail = max(limit - head - len(marker), 0)
-    if tail <= 0:
-        return content[:limit]
-    return content[:head] + marker + content[-tail:]
-
-
 def _build_workspace_capability_profile(*, file_type: str, path: str = "", name: str = "") -> dict:
     from app.core.agent.file_task_capability import build_file_capability_profile
 
@@ -436,82 +425,13 @@ def list_workspace_files():
 
     root_path = Path(WORKSPACE_DIR).resolve()
     cleanup_tmp_dir()
-
-    # Extensions that Koto can open and parse
-    _openable = frozenset(_ALLOWED_EXT)
-
-    def _file_category(ext: str) -> str:
-        _map = {
-            ".docx": "docx", ".doc": "docx",
-            ".xlsx": "xlsx", ".xls": "xlsx",
-            ".pptx": "pptx", ".ppt": "pptx",
-            ".pdf": "pdf",
-            ".txt": "text", ".md": "text", ".markdown": "text",
-            ".py": "code", ".js": "code", ".ts": "code", ".json": "code",
-            ".html": "code", ".css": "code", ".sh": "code", ".yaml": "code",
-            ".png": "image", ".jpg": "image", ".jpeg": "image",
-            ".gif": "image", ".svg": "image", ".webp": "image",
-        }
-        return _map.get(ext, "other")
-
-    def _build_tree(dir_path: Path) -> list[dict]:
-        items = []
-        _skip = {
-            "tmp",
-            "backups",
-            "editor-docs",
-            "images",
-            "ppt_sessions",
-            "__pycache__",
-            "node_modules",
-            ".git",
-            ".venv",
-            "venv",
-        }
-        try:
-            for p in sorted(dir_path.iterdir(), key=lambda x: (x.is_file(), x.name.lower())):
-                if p.name.startswith(".") or p.name in _skip:
-                    continue
-
-                rel_path = p.relative_to(root_path).as_posix()
-
-                if p.is_dir():
-                    children = _build_tree(p)
-                    items.append({
-                        "name": p.name,
-                        "type": "folder",
-                        "path": rel_path,
-                        "children": children,
-                    })
-                elif p.is_file():
-                    ext = p.suffix.lower()
-                    try:
-                        stat = p.stat()
-                        size_b = stat.st_size
-                        size_str = (f"{size_b}B" if size_b < 1024
-                                    else f"{size_b / 1024:.1f}KB" if size_b < 1048576
-                                    else f"{size_b / 1048576:.1f}MB")
-                        mtime_ms = int(stat.st_mtime * 1000)
-                    except OSError:
-                        size_str = ""
-                        mtime_ms = 0
-                    items.append({
-                        "name": p.name,
-                        "type": "file",
-                        "ext": ext.lstrip("."),
-                        "path": rel_path,
-                        "size": size_str,
-                        "mtime": mtime_ms,
-                        "supported": ext in _openable,
-                        "category": _file_category(ext),
-                    })
-        except PermissionError:
-            pass
-
-        return items
-
-    tree = _build_tree(root_path)
-    return jsonify({"files": tree, "workspace_name": root_path.name, "workspace_path": str(root_path)})
+    return jsonify(
+        _WORKSPACE_TREE.build_workspace_tree(
+            root_path=root_path,
+            allowed_extensions=_ALLOWED_EXT,
+            skip_names=WorkspaceTreeService.DEFAULT_SKIP_NAMES | {"ppt_sessions"},
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -527,30 +447,24 @@ def serve_workspace_file(filepath: str):
     """
     from web.shared import WORKSPACE_DIR
 
-    root = Path(WORKSPACE_DIR).resolve()
-    target = root.joinpath(filepath).resolve()
-
-    # Security: prevent path traversal
     try:
-        target.relative_to(root)
-    except ValueError:
+        served = _WORKSPACE_FILE_DOWNLOAD.serve_file(
+            workspace_dir=WORKSPACE_DIR,
+            filepath=filepath,
+            allowed_extensions=_ALLOWED_EXT,
+        )
+    except WorkspaceFilePermissionError:
         return jsonify({"error": "路径不合法"}), 403
-
-    if not target.is_file():
+    except WorkspaceFileNotFoundError:
         return jsonify({"error": "文件不存在"}), 404
-
-    if target.suffix.lower() not in _ALLOWED_EXT:
+    except WorkspaceFileUnsupportedTypeError:
         return jsonify({"error": "不支持的文件类型"}), 400
 
-    mime_map = {
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        ".pdf": "application/pdf",
-    }
-    mime = mime_map.get(target.suffix.lower(), "application/octet-stream")
     return send_file(
-        str(target), mimetype=mime, as_attachment=False, download_name=target.name
+        str(served.path),
+        mimetype=served.mime_type,
+        as_attachment=False,
+        download_name=served.download_name,
     )
 
 
@@ -568,74 +482,64 @@ def open_file_by_path():
     Response: 同 open_file
     """
     body = request.get_json(force=True, silent=True) or {}
-    rel_path = (body.get("path") or "").strip()
-    if not rel_path:
+    raw_path = (body.get("path") or "").strip()
+    if not raw_path:
         return jsonify({"error": "缺少 path 字段"}), 400
 
-    from web.shared import WORKSPACE_DIR
-
-    root = Path(WORKSPACE_DIR).resolve()
-    target = root.joinpath(rel_path).resolve()
-
-    # Security: prevent path traversal
-    try:
-        target.relative_to(root)
-    except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
-
-    if not target.is_file():
-        return jsonify({"error": "文件不存在"}), 404
-
-    ext = target.suffix.lower()
-    if ext not in _ALLOWED_EXT:
-        return jsonify({"error": f"不支持的格式: {ext}"}), 400
-
-    _repair_zero_byte_office_file(target)
-
-    # Copy to tmp so editor can work with it (same as open_file)
     file_id = uuid.uuid4().hex
-    tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
     try:
-        _copy_file_to_tmp_with_validation(target, tmp_path, ext=ext)
-    except Exception as ce:
-        return jsonify({"error": f"文件复制失败: {ce}"}), 500
+        from web.shared import WORKSPACE_DIR
+
+        prepared = _OPEN_FILE_BY_PATH.prepare(
+            raw_path=raw_path,
+            workspace_dir=WORKSPACE_DIR,
+            app_config_dir=_APP_CONFIG_DIR,
+            tmp_dir=_ensure_tmp_dir(),
+            file_id=file_id,
+            allowed_extensions=_ALLOWED_EXT,
+            fs_guard=_fs_guard,
+            repair_zero_byte_file=_repair_zero_byte_office_file,
+            copy_to_tmp=_copy_file_to_tmp_with_validation,
+        )
+    except OpenFileInConfigError:
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except OpenFilePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+    except OpenFileNotFoundError:
+        return jsonify({"error": "文件不存在"}), 404
+    except OpenFileUnsupportedTypeError as e:
+        return jsonify({"error": str(e)}), 400
+    except OpenFileCopyError as e:
+        return jsonify({"error": str(e)}), 500
+
+    target = prepared.target_path
+    tmp_path = prepared.tmp_path
+    ext = prepared.extension
 
     try:
-        from app.core.file.file_parser import parse_pdf, parse_xlsx
-
-        if ext == ".docx":
-            data = _parse_docx_workspace_open(tmp_path, file_id, source_path=target)
+        parsed = _FILE_ASSISTANT.parse_editor_file(
+            tmp_path,
+            file_id=file_id,
+            display_name=target.name,
+            text_source_path=target,
+            source_path=target,
+            docx_copy_to_tmp=_copy_file_to_tmp_with_validation,
+        )
+        file_type = parsed.file_type
+        data = parsed.data
+        if file_type == "docx":
             html_len = len(data.get("html", ""))
-            logger.info(f"[open_file_by_path] {target.name} 解析成功, HTML={html_len // 1024}KB, messages={data.get('messages', [])}")
-            file_type = "docx"
-        elif ext == ".xlsx":
-            data = parse_xlsx(str(tmp_path), original_name=target.name)
-            file_type = "xlsx"
-        elif ext == ".pptx":
-            _pptx_size = tmp_path.stat().st_size
-            if _pptx_size > 100 * 1024 * 1024:
-                return jsonify({
-                    "error": f"PPTX 文件过大 ({_pptx_size / 1048576:.0f} MB)，可能包含嵌入视频。"
-                              f"Koto 当前不支持超过 100 MB 的 PPTX 文件，建议先在 PowerPoint 中删除视频后再打开。"
-                }), 413
-            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
-            with open(str(tmp_path), "rb") as _f:
-                _raw = _f.read()
-            data = _pptx_rich_parse(_raw)
-            file_type = "pptx"
-        elif ext == ".pdf":
-            data = parse_pdf(str(tmp_path), file_id)
-            file_type = "pdf"
-        elif ext in _IMAGE_EXTS:
-            file_type = "image"
-            data = {"raw_url": f"/api/v1/workspace/raw/{file_id}"}
-        elif ext in _TEXT_EXTS:
-            content = target.read_text(encoding="utf-8", errors="replace")
-            file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
-            data = {"content": content, "language": ext.lstrip("."), "extension": ext}
-        else:
-            return jsonify({"error": "内部格式路由错误"}), 500
+            logger.info(
+                "[open_file_by_path] %s 解析成功, HTML=%dKB, messages=%s",
+                target.name,
+                html_len // 1024,
+                data.get("messages", []),
+            )
 
+    except FileTooLargeError as e:
+        return jsonify({"error": str(e)}), e.status_code
+    except UnsupportedFileTypeError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.error(f"[WorkspaceAssistant] 解析失败 {target.name}: {e}", exc_info=True)
         try:
@@ -649,7 +553,7 @@ def open_file_by_path():
             file_id=file_id,
             file_name=target.name,
             file_type=file_type,
-            ws_source_path=rel_path,
+            ws_source_path=raw_path,
             temp_path=_tmp_workspace_relpath(file_id, ext),
             data=data,
             source_path=str(target),
@@ -674,64 +578,42 @@ def open_file():
         return jsonify({"error": "缺少 file 字段"}), 400
 
     uploaded = request.files["file"]
-    original_name = uploaded.filename or "unknown"
-    ext = _ext(original_name)
-
-    if ext not in _ALLOWED_EXT:
-        return (
-            jsonify({"error": f"不支持的格式: {ext}，仅支持 {sorted(_ALLOWED_EXT)}"}),
-            400,
-        )
-
-    # 暂存原始文件（用于 PDF.js raw 渲染等）
     file_id = uuid.uuid4().hex
-    tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
-    uploaded.save(str(tmp_path))
-    if tmp_path.stat().st_size == 0:
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return jsonify({"error": f"{original_name} 文件内容为空，无法打开。请重新选择非空文件。"}), 400
+    try:
+        prepared = _UPLOADED_OPEN_FILE.prepare(
+            original_name=uploaded.filename or "unknown",
+            tmp_dir=_ensure_tmp_dir(),
+            file_id=file_id,
+            allowed_extensions=_ALLOWED_EXT,
+            save_upload=lambda target: uploaded.save(str(target)),
+        )
+    except OpenFileUnsupportedTypeError as e:
+        return jsonify({"error": str(e)}), 400
+    except OpenFileEmptyError as e:
+        return jsonify({"error": str(e)}), 400
+
+    original_name = prepared.original_name
+    tmp_path = prepared.tmp_path
+    ext = prepared.extension
 
     # 文件只暂存在 tmp 目录，不立即写入工作区。
     # 用户显式保存后才会写入 WORKSPACE_DIR（由 auto_save explicit=true 处理）。
     ws_path = request.form.get("ws_path", "").strip()
 
     try:
-        from app.core.file.file_parser import parse_pdf, parse_xlsx
+        parsed = _FILE_ASSISTANT.parse_editor_file(
+            tmp_path,
+            file_id=file_id,
+            display_name=original_name,
+            docx_copy_to_tmp=_copy_file_to_tmp_with_validation,
+        )
+        file_type = parsed.file_type
+        data = parsed.data
 
-        if ext == ".docx":
-            data = _parse_docx_workspace_open(tmp_path, file_id)
-            file_type = "docx"
-        elif ext == ".xlsx":
-            data = parse_xlsx(str(tmp_path), original_name=original_name)
-            file_type = "xlsx"
-        elif ext == ".pptx":
-            _pptx_size = tmp_path.stat().st_size
-            if _pptx_size > 100 * 1024 * 1024:
-                return jsonify({
-                    "error": f"PPTX 文件过大 ({_pptx_size / 1048576:.0f} MB)，可能包含嵌入视频。"
-                              f"Koto 当前不支持超过 100 MB 的 PPTX 文件，建议先在 PowerPoint 中删除视频后再打开。"
-                }), 413
-            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
-            with open(str(tmp_path), "rb") as _f:
-                _raw = _f.read()
-            data = _pptx_rich_parse(_raw)
-            file_type = "pptx"
-        elif ext == ".pdf":
-            data = parse_pdf(str(tmp_path), file_id)
-            file_type = "pdf"
-        elif ext in _IMAGE_EXTS:
-            file_type = "image"
-            data = {"raw_url": f"/api/v1/workspace/raw/{file_id}"}
-        elif ext in _TEXT_EXTS:
-            content = tmp_path.read_text(encoding="utf-8", errors="replace")
-            file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
-            data = {"content": content, "language": ext.lstrip("."), "extension": ext}
-        else:
-            return jsonify({"error": "内部格式路由错误"}), 500
-
+    except FileTooLargeError as e:
+        return jsonify({"error": str(e)}), e.status_code
+    except UnsupportedFileTypeError as e:
+        return jsonify({"error": str(e)}), 400
     except Exception as e:
         logger.error(
             f"[WorkspaceAssistant] 解析失败 {original_name}: {e}", exc_info=True
@@ -773,92 +655,35 @@ def ai_context_preview():
         preview_limit = int(body.get("max_chars") or 12_000)
     except (TypeError, ValueError):
         preview_limit = 12_000
-    preview_limit = max(1_000, min(preview_limit, 24_000))
-    extraction_limit = min(max(preview_limit * 2, 4_000), 60_000)
 
-    candidate = Path(raw_path)
-    target: Path | None = None
-    if candidate.is_absolute():
-        target = candidate.resolve()
-        try:
-            target.relative_to(_APP_CONFIG_DIR)
-            return jsonify({"error": "不允许访问应用配置目录"}), 403
-        except ValueError:
-            pass
-        if not _fs_guard(target):
-            return jsonify({"error": "路径不合法"}), 403
-    else:
+    try:
         from web.shared import WORKSPACE_DIR
 
-        ws_root = Path(WORKSPACE_DIR).resolve()
-        target = ws_root.joinpath(raw_path).resolve()
-        try:
-            target.relative_to(ws_root)
-        except ValueError:
-            return jsonify({"error": "路径不合法"}), 403
-
-    if target is None or not target.is_file():
+        preview = _FILE_CONTEXT_PREVIEW.build(
+            raw_path=raw_path,
+            workspace_dir=WORKSPACE_DIR,
+            app_config_dir=_APP_CONFIG_DIR,
+            allowed_extensions=_ALLOWED_EXT,
+            fs_guard=_fs_guard,
+            preview_limit=preview_limit,
+        )
+    except OpenFileInConfigError:
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except OpenFilePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+    except OpenFileNotFoundError:
         return jsonify({"error": "文件不存在"}), 404
-
-    ext = target.suffix.lower()
-    if ext not in _ALLOWED_EXT:
-        return jsonify({"error": f"不支持的格式: {ext}"}), 400
-
-    if ext == ".docx":
-        file_type = "docx"
-    elif ext == ".xlsx":
-        file_type = "xlsx"
-    elif ext == ".pptx":
-        file_type = "pptx"
-    elif ext == ".pdf":
-        file_type = "pdf"
-    elif ext in _IMAGE_EXTS:
-        file_type = "image"
-    elif ext in (".txt", ".md", ".markdown"):
-        file_type = "text"
-    else:
-        file_type = "code"
-
-    preview_text = ""
-    preview_error = ""
-    original_chars = 0
-    if ext not in _IMAGE_EXTS:
-        try:
-            from app.core.agent.task_tools import parse_file_to_text
-
-            preview_text = parse_file_to_text(str(target), max_chars=extraction_limit)
-        except Exception as exc:
-            logger.exception("[ai_context_preview] 文本预览异常 %s", target.name)
-            preview_text = ""
-            preview_error = f"文件预览解析失败: {exc}"
-        else:
-            if preview_text.startswith("Error parsing file:"):
-                logger.warning("[ai_context_preview] 文本预览解析失败 %s: %s", target.name, preview_text)
-                preview_error = preview_text
-                preview_text = ""
-            elif preview_text.startswith("(File parsed but no text content:"):
-                preview_text = ""
-        preview_chars = len("".join(preview_text.split()))
-        if ext == ".docx":
-            try:
-                from app.core.file.file_parser import count_docx_visible_chars
-
-                original_chars = count_docx_visible_chars(str(target)) or preview_chars
-            except Exception as exc:
-                logger.debug("[ai_context_preview] DOCX 字数统计回退到预览长度 %s: %s", target.name, exc)
-                original_chars = preview_chars
-        else:
-            original_chars = preview_chars
-        preview_text = _sample_ai_context_text(preview_text, preview_limit)
+    except OpenFileUnsupportedTypeError as e:
+        return jsonify({"error": str(e)}), 400
 
     return jsonify(
         {
-            "path": raw_path,
-            "file_name": target.name,
-            "file_type": file_type,
-            "content_preview": preview_text,
-            "original_chars": original_chars,
-            "preview_error": preview_error,
+            "path": preview.path,
+            "file_name": preview.file_name,
+            "file_type": preview.file_type,
+            "content_preview": preview.content_preview,
+            "original_chars": preview.original_chars,
+            "preview_error": preview.preview_error,
         }
     )
 
@@ -874,35 +699,17 @@ def raw_file(file_id: str):
     返回暂存的原始文件（用于 PDF.js 直接渲染）。
     file_id 只允许十六进制字符，防止路径遍历。
     """
-    # 安全校验：仅允许十六进制 file_id
-    if not file_id.isalnum():
+    try:
+        raw = _WORKSPACE_TEMP_STORE.raw_file(tmp_dir=_ensure_tmp_dir(), file_id=file_id)
+    except TempFileInvalidIdError:
         return jsonify({"error": "无效的 file_id"}), 400
-
-    tmp_dir = _ensure_tmp_dir()
-    # 搜索匹配的文件（file_id + 任意后缀）
-    matches = list(tmp_dir.glob(f"{file_id}.*"))
-    if not matches:
+    except TempFileNotFoundError:
         return jsonify({"error": "文件不存在或已过期"}), 404
 
-    target = matches[0].resolve()  # Always use absolute path for send_file
-    mime_map = {
-        ".pdf": "application/pdf",
-        ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-        ".png": "image/png",
-        ".jpg": "image/jpeg",
-        ".jpeg": "image/jpeg",
-        ".gif": "image/gif",
-        ".bmp": "image/bmp",
-        ".webp": "image/webp",
-        ".svg": "image/svg+xml",
-    }
-    mime = mime_map.get(target.suffix.lower(), "application/octet-stream")
-    resp = send_file(str(target), mimetype=mime)
+    resp = send_file(str(raw.path), mimetype=raw.mime_type)
     # Prevent browser from caching — each save produces new bytes at the same URL
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-    resp.headers["Pragma"] = "no-cache"
+    for key, value in raw.headers.items():
+        resp.headers[key] = value
     return resp
 
 
@@ -931,46 +738,14 @@ def save_file():
         return jsonify({"error": "缺少 file_type 或 data 字段"}), 400
 
     try:
-        from app.core.file.file_parser import export_docx, export_xlsx
-
-        if file_type == "docx":
-            # Use original DOCX as template if available
-            _orig = _ensure_tmp_dir() / f"{file_id}.docx" if file_id else None
-            _orig_path = str(_orig) if _orig and _orig.is_file() else None
-            raw_bytes = export_docx(data, original_path=_orig_path)
-            mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-            if not file_name.endswith(".docx"):
-                file_name = Path(file_name).stem + ".docx"
-
-        elif file_type == "xlsx":
-            # data is {snapshot: IWorkbookData, _images: []} from Univer frontend,
-            # or a bare IWorkbookData dict.
-            if isinstance(data, dict):
-                # Prefer 'snapshot' key (new Univer format), fall back to whole dict
-                wb_data = data.get("snapshot") or data
-                images_data = data.get("_images", [])
-            else:
-                wb_data = data
-                images_data = []
-            raw_bytes = export_xlsx(wb_data, images_data)
-            mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            if not file_name.endswith(".xlsx"):
-                file_name = Path(file_name).stem + ".xlsx"
-
-        elif file_type == "pptx":
-            raw_bytes = _export_workspace_pptx(file_id, data)
-            mime = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-            if not file_name.endswith(".pptx"):
-                file_name = Path(file_name).stem + ".pptx"
-
-        elif file_type in ("text", "code"):
-            content = data if isinstance(data, str) else (data.get("content", "") if isinstance(data, dict) else "")
-            raw_bytes = content.encode("utf-8")
-            ext_guess = Path(file_name).suffix.lower() if file_name else ".txt"
-            mime = "text/markdown; charset=utf-8" if ext_guess == ".md" else "text/plain; charset=utf-8"
-
-        else:
-            return jsonify({"error": f"不支持的导出格式: {file_type}"}), 400
+        exported = _FILE_ASSISTANT.export_editor_file(
+            file_type=file_type,
+            file_id=file_id,
+            data=data,
+            file_name=file_name,
+            tmp_dir=_ensure_tmp_dir(),
+            pptx_exporter=_export_workspace_pptx,
+        )
 
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 404
@@ -983,10 +758,10 @@ def save_file():
     import io
 
     return send_file(
-        io.BytesIO(raw_bytes),
-        mimetype=mime,
+        io.BytesIO(exported.raw_bytes),
+        mimetype=exported.mime,
         as_attachment=True,
-        download_name=file_name,
+        download_name=exported.file_name,
     )
 
 
@@ -1293,8 +1068,6 @@ def auto_save():
        "data": <editor_payload>}
     Returns: {"ok": true, "saved_at": "<ISO timestamp>"}
     """
-    import datetime
-
     body = request.get_json(force=True, silent=True) or {}
     file_type = body.get("file_type", "").lower()
     file_id = body.get("file_id", "")
@@ -1318,36 +1091,22 @@ def auto_save():
     )
 
     try:
-        from app.core.file.file_parser import export_docx, export_xlsx
-
-        if file_type == "docx":
-            _orig = _ensure_tmp_dir() / f"{file_id}.docx" if file_id else None
-            _orig_path = str(_orig) if _orig and _orig.is_file() else None
-            raw_bytes = export_docx(data, original_path=_orig_path)
-            suffix = ".docx"
-        elif file_type == "xlsx":
-            # data is {snapshot: IWorkbookData, _images: []} from Univer frontend.
-            # Fall back to bare dict or list for legacy compatibility.
-            if isinstance(data, dict):
-                wb_data = data.get("snapshot") or data
-                images_data = data.get("_images", [])
-            else:
-                wb_data = data
-                images_data = []
-            raw_bytes = export_xlsx(wb_data, images_data)
-            suffix = ".xlsx"
-        elif file_type == "pptx":
-            raw_bytes = _export_workspace_pptx(file_id, data)
-            suffix = ".pptx"
-        elif file_type in ("text", "code"):
-            content = data if isinstance(data, str) else (data.get("content", "") if isinstance(data, dict) else "")
-            raw_bytes = content.encode("utf-8")
-            # Derive the original extension from the tmp file
-            tmp_dir = _ensure_tmp_dir()
+        tmp_dir = _ensure_tmp_dir()
+        auto_save_name = f"koto_autosave.{file_type}"
+        if file_type in ("text", "code"):
             existing = [f for f in tmp_dir.glob(f"{file_id}.*") if f.suffix.lower() in _TEXT_EXTS]
-            suffix = existing[0].suffix.lower() if existing else ".txt"
-        else:
-            return jsonify({"error": f"不支持的格式: {file_type}"}), 400
+            auto_save_name = f"koto_autosave{existing[0].suffix.lower() if existing else '.txt'}"
+
+        exported = _FILE_ASSISTANT.export_editor_file(
+            file_type=file_type,
+            file_id=file_id,
+            data=data,
+            file_name=auto_save_name,
+            tmp_dir=tmp_dir,
+            pptx_exporter=_export_workspace_pptx,
+        )
+        raw_bytes = exported.raw_bytes
+        suffix = exported.suffix
 
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 404
@@ -1359,93 +1118,37 @@ def auto_save():
         )
         return jsonify({"error": f"自动保存失败: {str(e)}"}), 500
 
-    # 1. Overwrite the tmp file so raw/<file_id> still works for PDF.js etc.
-    tmp_path = _ensure_tmp_dir() / f"{file_id}{suffix}"
-    tmp_path.write_bytes(raw_bytes)
-    logger.info(
-        "[WorkspaceAssistant] auto_save tmp → %s (%d bytes)", tmp_path, len(raw_bytes)
+    try:
+        from web.shared import WORKSPACE_DIR
+
+        persisted = _AUTO_SAVE_PERSISTENCE.persist(
+            tmp_dir=_ensure_tmp_dir(),
+            file_id=file_id,
+            raw_bytes=raw_bytes,
+            suffix=suffix,
+            explicit=bool(explicit),
+            ws_source_path=ws_source_path,
+            workspace_dir=WORKSPACE_DIR,
+            allowed_extensions=_ALLOWED_EXT,
+            fs_guard=_fs_guard,
+        )
+    except AutoSavePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+    except Exception as e:
+        logger.warning(
+            "[WorkspaceAssistant] auto_save: could not write source file: %s", e
+        )
+        if explicit:
+            return jsonify({"error": f"保存失败: {str(e)}"}), 500
+        return jsonify({"error": f"自动保存失败: {str(e)}"}), 500
+
+    return jsonify(
+        {
+            "ok": True,
+            "saved_at": persisted.saved_at,
+            "src_written": persisted.src_written,
+        }
     )
-
-    # 2. Only write back to the original source file on explicit (user-triggered) saves.
-    #    ws_source_path may be either a workspace-relative path or an absolute
-    #    external path opened from the local file browser.
-    src_written = False
-    if explicit and ws_source_path:
-        try:
-            from web.shared import WORKSPACE_DIR
-
-            ws_root = Path(WORKSPACE_DIR).resolve()
-            requested_path = Path(str(ws_source_path).strip())
-            src_path = None
-            src_is_workspace_file = False
-
-            if requested_path.is_absolute():
-                src_path = requested_path.resolve()
-                if not _fs_guard(src_path):
-                    return jsonify({"error": "路径不合法"}), 403
-                try:
-                    src_path.relative_to(ws_root)
-                    src_is_workspace_file = True
-                except ValueError:
-                    src_is_workspace_file = False
-            else:
-                src_path = ws_root.joinpath(requested_path).resolve()
-                try:
-                    src_path.relative_to(ws_root)
-                except ValueError:
-                    return jsonify({"error": "路径不合法"}), 403
-                src_is_workspace_file = True
-
-            if src_path and src_path.suffix.lower() in _ALLOWED_EXT:
-                if src_is_workspace_file:
-                    src_path.parent.mkdir(parents=True, exist_ok=True)
-                elif not src_path.parent.exists():
-                    logger.info(
-                        "[WorkspaceAssistant] auto_save external parent missing, skip src write: %s",
-                        src_path,
-                    )
-                    src_path = None
-
-                if src_path is not None:
-                    src_path.write_bytes(raw_bytes)
-                    src_written = True
-                    logger.info(
-                        "[WorkspaceAssistant] auto_save src → %s (%d bytes)",
-                        src_path,
-                        len(raw_bytes),
-                    )
-                    if src_is_workspace_file:
-                        # 3. Sync file registry so FileHub shows updated mtime & preview.
-                        try:
-                            from app.core.file.file_registry import get_file_registry
-
-                            _reg = get_file_registry()
-                            _reg.batch_register([str(src_path)], source="editor", extract_content=False)
-                            logger.debug("[WorkspaceAssistant] auto_save registry synced: %s", src_path.name)
-                        except Exception as _re:
-                            logger.debug("[WorkspaceAssistant] auto_save registry sync skipped: %s", _re)
-                        # 4. Version snapshot — keep last 10 versions per file.
-                        try:
-                            snap_dir = src_path.parent / ".koto_versions" / src_path.stem
-                            snap_dir.mkdir(parents=True, exist_ok=True)
-                            ts_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-                            snap_path = snap_dir / f"{ts_str}{suffix}"
-                            snap_path.write_bytes(raw_bytes)
-                            snaps = sorted(snap_dir.glob(f"*{suffix}"))
-                            for old_snap in snaps[:-10]:
-                                old_snap.unlink(missing_ok=True)
-                            logger.debug("[WorkspaceAssistant] version snapshot: %s", snap_path.name)
-                        except Exception as _ve:
-                            logger.debug("[WorkspaceAssistant] version snapshot failed: %s", _ve)
-        except Exception as e:
-            logger.warning(
-                "[WorkspaceAssistant] auto_save: could not write source file: %s", e
-            )
-            if explicit:
-                return jsonify({"error": f"保存失败: {str(e)}"}), 500
-
-    saved_at = datetime.datetime.now().strftime("%H:%M")
-    return jsonify({"ok": True, "saved_at": saved_at, "src_written": src_written})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1583,36 +1286,15 @@ def delete_workspace_file():
     """
     from web.shared import WORKSPACE_DIR
 
-    root = Path(WORKSPACE_DIR).resolve()
     filepath = request.args.get("path", "").strip()
-    if not filepath:
-        return jsonify({"error": "缺少 path 参数"}), 400
-
-    target = root.joinpath(filepath).resolve()
     try:
-        target.relative_to(root)
-    except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
-
-    if not target.is_file():
-        return jsonify({"error": "文件不存在"}), 404
-
-    if target.suffix.lower() not in _ALLOWED_EXT:
-        return jsonify({"error": "不支持的文件类型"}), 400
-
-    try:
-        from send2trash import send2trash
-
-        send2trash(str(target))
-        logger.info(f"[WorkspaceAssistant] 将文件放入回收站: {target}")
-    except Exception as e:
-        logger.warning(f"[WorkspaceAssistant] 移动文件到回收站失败，改为直接删除: {e}")
-        # 降级处理：直接删除
-        if target.exists():
-            target.unlink()
-            logger.info(f"[WorkspaceAssistant] 直接删除文件: {target}")
-        else:
-            logger.info(f"[WorkspaceAssistant] 文件已不存在，跳过直接删除: {target}")
+        _WORKSPACE_FS.delete_file(
+            workspace_dir=WORKSPACE_DIR,
+            rel_path=filepath,
+            allowed_extensions=_ALLOWED_EXT,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
 
     return jsonify({"ok": True})
 
@@ -1631,52 +1313,20 @@ def rename_workspace_file():
     """
     from web.shared import WORKSPACE_DIR
 
-    root = Path(WORKSPACE_DIR).resolve()
     body = request.get_json(silent=True) or {}
     old_path = body.get("path", "").strip()
     new_name = body.get("name", "").strip()
-
-    if not old_path or not new_name:
-        return jsonify({"error": "缺少 path 或 name 参数"}), 400
-
-    if "/" in new_name or "\\" in new_name:
-        return jsonify({"error": "文件名不能包含路径分隔符"}), 400
-
-    old_target = root.joinpath(old_path).resolve()
     try:
-        old_target.relative_to(root)
-    except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
+        result = _WORKSPACE_FS.rename(
+            workspace_dir=WORKSPACE_DIR,
+            rel_path=old_path,
+            new_name=new_name,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
 
-    if not old_target.is_file():
-        if old_target.is_dir():
-            # Folder rename — no extension enforcement
-            if not new_name:
-                return jsonify({"error": "文件夹名无效"}), 400
-            new_target = old_target.parent / new_name
-            if new_target.exists():
-                return jsonify({"error": "名称已存在"}), 409
-            old_target.rename(new_target)
-            new_rel = new_target.relative_to(root).as_posix()
-            logger.info(f"[WorkspaceAssistant] 重命名文件夹: {old_path} -> {new_rel}")
-            return jsonify({"ok": True, "path": new_rel, "name": new_name})
-        return jsonify({"error": "文件不存在"}), 404
-
-    # Preserve original extension even if user omitted/changed it
-    old_ext = old_target.suffix.lower()
-    stem = Path(new_name).stem
-    if not stem:
-        return jsonify({"error": "文件名无效"}), 400
-    final_name = stem + old_ext
-
-    new_target = old_target.parent / final_name
-    if new_target.exists():
-        return jsonify({"error": "文件名已存在"}), 409
-
-    old_target.rename(new_target)
-    new_rel = new_target.relative_to(root).as_posix()
-    logger.info(f"[WorkspaceAssistant] 重命名: {old_path} -> {new_rel}")
-    return jsonify({"ok": True, "path": new_rel, "name": final_name})
+    logger.info("[WorkspaceAssistant] 重命名: %s -> %s", old_path, result.path)
+    return jsonify({"ok": True, "path": result.path, "name": result.name})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1690,44 +1340,16 @@ def delete_workspace_folder():
     递归删除工作区中的一个文件夹。
     Query param:  path=relative/path/to/folder
     """
-    import shutil
-
     from web.shared import WORKSPACE_DIR
 
-    root = Path(WORKSPACE_DIR).resolve()
     folderpath = request.args.get("path", "").strip()
-    if not folderpath:
-        return jsonify({"error": "缺少 path 参数"}), 400
-
-    target = root.joinpath(folderpath).resolve()
     try:
-        target.relative_to(root)
-    except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
-
-    if not target.is_dir():
-        return jsonify({"error": "文件夹不存在"}), 404
-
-    # Safety: never delete the workspace root itself
-    if target == root:
-        return jsonify({"error": "不能删除根工作区"}), 403
-
-    try:
-        from send2trash import send2trash
-
-        send2trash(str(target))
-        logger.info(f"[WorkspaceAssistant] 将文件夹放入回收站: {target}")
-        if target.exists():
-            shutil.rmtree(target)
-            logger.info(f"[WorkspaceAssistant] 回收站移动后路径仍存在，已直接删除文件夹: {target}")
-    except Exception as e:
-        logger.warning(f"[WorkspaceAssistant] 移动文件夹到回收站失败，改为直接删除: {e}")
-        # 降级处理：直接删除
-        if target.exists():
-            shutil.rmtree(target)
-            logger.info(f"[WorkspaceAssistant] 直接删除文件夹: {target}")
-        else:
-            logger.info(f"[WorkspaceAssistant] 文件夹已不存在，跳过直接删除: {target}")
+        _WORKSPACE_FS.delete_folder(
+            workspace_dir=WORKSPACE_DIR,
+            rel_path=folderpath,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
 
     return jsonify({"ok": True})
 
@@ -1744,45 +1366,25 @@ def create_workspace_file():
     Body (JSON): {"folder": "relative/path", "name": "filename.txt"}
     folder 为 "" 时在工作区根目录创建。
     """
-    import re
-
     from web.shared import WORKSPACE_DIR
 
     body = request.get_json(force=True, silent=True) or {}
     folder = (body.get("folder") or "").strip().strip("/")
     name = (body.get("name") or "").strip()
 
-    # Validate name — must not contain path separators or forbidden chars
-    if not name:
-        return jsonify({"error": "文件名不能为空"}), 400
-    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
-        return jsonify({"error": "文件名包含非法字符"}), 400
-
-    root = Path(WORKSPACE_DIR).resolve()
-    parent = root.joinpath(folder).resolve() if folder else root
-
-    # Security: prevent path traversal
     try:
-        parent.relative_to(root)
-    except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
+        result = _WORKSPACE_FS.create_file(
+            workspace_dir=WORKSPACE_DIR,
+            folder=folder,
+            name=name,
+            allowed_extensions=_ALLOWED_EXT,
+            seed_file=_seed_new_file,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
 
-    if not parent.is_dir():
-        return jsonify({"error": "目标目录不存在"}), 404
-
-    target = parent / name
-    if target.exists():
-        return jsonify({"error": f'"{name}" 已存在'}), 409
-    if target.suffix.lower() not in _ALLOWED_EXT:
-        return jsonify({"error": f"不支持的格式: {target.suffix.lower()}"}), 400
-
-    try:
-        _seed_new_file(target)
-        rel = target.relative_to(root).as_posix()
-        logger.info("[WorkspaceAssistant] 创建文件: %s", target)
-        return jsonify({"ok": True, "path": rel, "name": name})
-    except Exception as e:
-        return jsonify({"error": f"创建失败: {e}"}), 500
+    logger.info("[WorkspaceAssistant] 创建文件: %s", result.path)
+    return jsonify({"ok": True, "path": result.path, "name": result.name})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1797,41 +1399,23 @@ def create_workspace_folder():
     Body (JSON): {"parent": "relative/path", "name": "foldername"}
     parent 为 "" 时在工作区根目录创建。
     """
-    import re
-
     from web.shared import WORKSPACE_DIR
 
     body = request.get_json(force=True, silent=True) or {}
     parent_rel = (body.get("parent") or "").strip().strip("/")
     name = (body.get("name") or "").strip()
 
-    if not name:
-        return jsonify({"error": "文件夹名不能为空"}), 400
-    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
-        return jsonify({"error": "文件夹名包含非法字符"}), 400
-
-    root = Path(WORKSPACE_DIR).resolve()
-    parent = root.joinpath(parent_rel).resolve() if parent_rel else root
-
     try:
-        parent.relative_to(root)
-    except ValueError:
-        return jsonify({"error": "路径不合法"}), 403
+        result = _WORKSPACE_FS.create_folder(
+            workspace_dir=WORKSPACE_DIR,
+            parent_rel=parent_rel,
+            name=name,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
 
-    if not parent.is_dir():
-        return jsonify({"error": "父目录不存在"}), 404
-
-    target = parent / name
-    if target.exists():
-        return jsonify({"error": f'"{name}" 已存在'}), 409
-
-    try:
-        target.mkdir()
-        rel = target.relative_to(root).as_posix()
-        logger.info("[WorkspaceAssistant] 创建文件夹: %s", target)
-        return jsonify({"ok": True, "path": rel, "name": name})
-    except Exception as e:
-        return jsonify({"error": f"创建失败: {e}"}), 500
+    logger.info("[WorkspaceAssistant] 创建文件夹: %s", result.path)
+    return jsonify({"ok": True, "path": result.path, "name": result.name})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1865,8 +1449,8 @@ def set_workspace_dir_endpoint():
         return jsonify({"error": "路径不是文件夹"}), 400
 
     # Persist to user_settings.json
-    from web.shared import PROJECT_ROOT, clear_user_settings_cache
-    settings_path = Path(PROJECT_ROOT) / "config" / "user_settings.json"
+    from web.shared import clear_user_settings_cache, get_user_settings_path
+    settings_path = Path(get_user_settings_path())
     try:
         try:
             with open(settings_path, "r", encoding="utf-8") as f:
@@ -1951,20 +1535,6 @@ def browse_local():
 
     _openable = frozenset(_ALLOWED_EXT)
 
-    def _file_category(ext: str) -> str:
-        _MAP = {
-            ".docx": "docx", ".doc": "docx",
-            ".xlsx": "xlsx", ".xls": "xlsx",
-            ".pptx": "pptx", ".ppt": "pptx",
-            ".pdf": "pdf",
-            ".txt": "text", ".md": "text", ".markdown": "text",
-            ".py": "code", ".js": "code", ".ts": "code", ".json": "code",
-            ".html": "code", ".css": "code", ".sh": "code", ".yaml": "code",
-            ".png": "image", ".jpg": "image", ".jpeg": "image",
-            ".gif": "image", ".svg": "image", ".webp": "image",
-        }
-        return _MAP.get(ext, "other")
-
     if not path:
         # Root level: drives + quick-access locations
         try:
@@ -2002,29 +1572,13 @@ def browse_local():
             if p.is_dir():
                 entries.append({"name": p.name, "path": str(p), "type": "folder"})
             elif p.is_file():
-                ext = p.suffix.lower()
-                try:
-                    st = p.stat()
-                    sb = st.st_size
-                    size_str = (
-                        f"{sb}B" if sb < 1024
-                        else f"{sb / 1024:.1f}KB" if sb < 1048576
-                        else f"{sb / 1048576:.1f}MB"
+                entries.append(
+                    _WORKSPACE_TREE.file_entry(
+                        p,
+                        str(p),
+                        _openable,
                     )
-                    mtime_ms = int(st.st_mtime * 1000)
-                except OSError:
-                    size_str = ""
-                    mtime_ms = 0
-                entries.append({
-                    "name": p.name,
-                    "path": str(p),
-                    "type": "file",
-                    "ext": ext.lstrip("."),
-                    "size": size_str,
-                    "mtime": mtime_ms,
-                    "supported": ext in _openable,
-                    "category": _file_category(ext),
-                })
+                )
     except PermissionError:
         return jsonify({"error": "无访问权限", "entries": []}), 403
 
@@ -2048,12 +1602,6 @@ _APP_CONFIG_DIR = (Path(__file__).resolve().parents[2] / "config").resolve()
 # POST /api/v1/workspace/open_abs_file
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Video extensions stored inside PPTX/DOCX ZIP packages
-_PPTX_VIDEO_EXTS = frozenset({
-    '.mp4', '.mov', '.wmv', '.avi', '.m4v', '.mkv', '.flv', '.webm', '.asf', '.mpg', '.mpeg',
-})
-
-
 @workspace_assistant_bp.route("/api/v1/workspace/open_abs_file", methods=["POST"])
 def open_abs_file():
     """
@@ -2070,89 +1618,54 @@ def open_abs_file():
     if not abs_path:
         return jsonify({"error": "缺少 path 字段"}), 400
 
-    target = Path(abs_path).resolve()
-
-    # Security: block config dir and system dirs
-    try:
-        target.relative_to(_APP_CONFIG_DIR)
-        return jsonify({"error": "不允许访问应用配置目录"}), 403
-    except ValueError:
-        pass
-    if not _fs_guard(target):
-        return jsonify({"error": "路径不合法"}), 403
-
-    if not target.is_file():
-        return jsonify({"error": "文件不存在"}), 404
-
-    ext = target.suffix.lower()
-    if ext not in _ALLOWED_EXT:
-        return jsonify({"error": f"不支持的格式: {ext}"}), 400
-
-    _repair_zero_byte_office_file(target)
-    file_size = target.stat().st_size
-
-    # ── PPTX pre-flight checks (must run BEFORE copying or reading file bytes) ──
-    if ext == ".pptx":
-        # 1. Fast ZIP scan for embedded video — reads only central directory (~milliseconds)
-        import zipfile as _zipfile
-        _found_video = None
-        try:
-            with _zipfile.ZipFile(str(target)) as _zf:
-                for _zname in _zf.namelist():
-                    if Path(_zname).suffix.lower() in _PPTX_VIDEO_EXTS:
-                        _found_video = Path(_zname).name
-                        break
-        except Exception:
-            pass
-        if _found_video:
-            logger.warning("[open_abs_file] PPTX contains video %s, rejecting", _found_video)
-            return jsonify({
-                "error": (
-                    f"该 PPTX 包含嵌入视频（{_found_video}），Koto 当前不支持含视频的 PPTX 文件。\n"
-                    f"请先在 PowerPoint 中选中视频 → 删除 → 另存为，然后重新打开。"
-                )
-            }), 415
-        # 2. Size guard (no video found but still very large → likely huge images)
-        if file_size > 50 * 1024 * 1024:
-            return jsonify({
-                "error": f"PPTX 文件过大（{file_size / 1048576:.0f} MB），Koto 限制 50 MB。"
-                         f"建议压缩图片后重试。"
-            }), 413
-
-    # Copy to session tmp dir (parser works on a sandboxed copy)
     file_id = uuid.uuid4().hex
-    tmp_path = _ensure_tmp_dir() / f"{file_id}{ext}"
     try:
-        _copy_file_to_tmp_with_validation(target, tmp_path, ext=ext)
-    except Exception as ce:
-        return jsonify({"error": f"文件读取失败: {ce}"}), 500
+        from web.shared import WORKSPACE_DIR
+
+        prepared = _OPEN_FILE_BY_PATH.prepare(
+            raw_path=str(Path(abs_path).resolve()),
+            workspace_dir=WORKSPACE_DIR,
+            app_config_dir=_APP_CONFIG_DIR,
+            tmp_dir=_ensure_tmp_dir(),
+            file_id=file_id,
+            allowed_extensions=_ALLOWED_EXT,
+            fs_guard=_fs_guard,
+            repair_zero_byte_file=_repair_zero_byte_office_file,
+            copy_to_tmp=_copy_file_to_tmp_with_validation,
+            pre_copy_check=_PPTX_PREFLIGHT.check,
+            copy_error_prefix="文件读取失败",
+            allow_external_absolute=True,
+        )
+    except OpenFileInConfigError:
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except OpenFilePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+    except OpenFileNotFoundError:
+        return jsonify({"error": "文件不存在"}), 404
+    except OpenFileUnsupportedTypeError as e:
+        return jsonify({"error": str(e)}), 400
+    except PptxPreflightError as e:
+        return jsonify({"error": str(e)}), e.status_code
+    except OpenFileCopyError as e:
+        return jsonify({"error": str(e)}), 500
+
+    target = prepared.target_path
+    tmp_path = prepared.tmp_path
+    ext = prepared.extension
 
     try:
-        from app.core.file.file_parser import parse_pdf, parse_xlsx
-
-        if ext == ".docx":
-            data = _parse_docx_workspace_open(tmp_path, file_id, source_path=target)
-            file_type = "docx"
-        elif ext == ".xlsx":
-            data = parse_xlsx(str(tmp_path), original_name=target.name)
-            file_type = "xlsx"
-        elif ext == ".pptx":
-            from web.blueprints.pptx_editor import _parse_slides as _pptx_rich_parse
-            raw = tmp_path.read_bytes()
-            data = _pptx_rich_parse(raw)
-            file_type = "pptx"
-        elif ext == ".pdf":
-            data = parse_pdf(str(tmp_path), file_id)
-            file_type = "pdf"
-        elif ext in _IMAGE_EXTS:
-            file_type = "image"
-            data = {"raw_url": f"/api/v1/workspace/raw/{file_id}"}
-        elif ext in _TEXT_EXTS:
-            content = target.read_text(encoding="utf-8", errors="replace")
-            file_type = "text" if ext in (".txt", ".md", ".markdown") else "code"
-            data = {"content": content, "language": ext.lstrip("."), "extension": ext.lstrip(".")}
-        else:
-            return jsonify({"error": "内部格式路由错误"}), 500
+        parsed = _FILE_ASSISTANT.parse_editor_file(
+            tmp_path,
+            file_id=file_id,
+            display_name=target.name,
+            text_source_path=target,
+            source_path=target,
+            docx_copy_to_tmp=_copy_file_to_tmp_with_validation,
+        )
+        file_type = parsed.file_type
+        data = parsed.data
+        if file_type in ("text", "code") and isinstance(data, dict):
+            data["extension"] = ext.lstrip(".")
 
     except Exception as e:
         logger.error("[open_abs_file] 解析失败 %s: %s", target.name, e, exc_info=True)
@@ -2186,10 +1699,7 @@ def load_full_docx():
         return jsonify({"error": "DOCX 临时文件不存在或已过期"}), 404
 
     try:
-        from app.core.file.file_parser import parse_docx
-
-        data = parse_docx(str(tmp_path))
-        data["raw_url"] = f"/api/v1/workspace/raw/{file_id}"
+        data = _FILE_ASSISTANT.load_full_docx(tmp_path, file_id=file_id)
     except Exception as exc:
         logger.error("[load_full_docx] 完整解析失败 %s: %s", file_id, exc, exc_info=True)
         return jsonify({"error": f"DOCX 完整加载失败: {exc}"}), 500
@@ -2233,37 +1743,23 @@ def fs_create_file():
     Create a file by absolute parent path for the lazy filesystem browser.
     Body (JSON): {"parent": "<absolute folder>", "name": "filename.docx"}
     """
-    import re
-
     body = request.get_json(force=True, silent=True) or {}
     parent_raw = (body.get("parent") or "").strip()
     name = (body.get("name") or "").strip()
 
-    if not parent_raw:
-        return jsonify({"error": "缺少 parent 参数"}), 400
-    if not name:
-        return jsonify({"error": "文件名不能为空"}), 400
-    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
-        return jsonify({"error": "文件名包含非法字符"}), 400
-
-    parent = Path(parent_raw).resolve()
-    if not _fs_guard(parent):
-        return jsonify({"error": "不允许在系统路径中创建文件"}), 403
-    if not parent.is_dir():
-        return jsonify({"error": "父目录不存在"}), 404
-
-    target = parent / name
-    if target.exists():
-        return jsonify({"error": f'"{name}" 已存在'}), 409
-    if target.suffix.lower() not in _ALLOWED_EXT:
-        return jsonify({"error": f"不支持的格式: {target.suffix.lower()}"}), 400
-
     try:
-        _seed_new_file(target)
-        logger.info("[Browser] 创建文件: %s", target)
-        return jsonify({"ok": True, "path": str(target), "name": target.name})
-    except Exception as e:
-        return jsonify({"error": f"创建失败: {e}"}), 500
+        result = _WORKSPACE_FS.create_absolute_file(
+            parent_raw=parent_raw,
+            name=name,
+            allowed_extensions=_ALLOWED_EXT,
+            seed_file=_seed_new_file,
+            path_guard=_fs_guard,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
+
+    logger.info("[Browser] 创建文件: %s", result.path)
+    return jsonify({"ok": True, "path": result.path, "name": result.name})
 
 
 @workspace_assistant_bp.route("/api/v1/fs/create_folder", methods=["POST"])
@@ -2272,35 +1768,21 @@ def fs_create_folder():
     Create a folder by absolute parent path for the lazy filesystem browser.
     Body (JSON): {"parent": "<absolute folder>", "name": "foldername"}
     """
-    import re
-
     body = request.get_json(force=True, silent=True) or {}
     parent_raw = (body.get("parent") or "").strip()
     name = (body.get("name") or "").strip()
 
-    if not parent_raw:
-        return jsonify({"error": "缺少 parent 参数"}), 400
-    if not name:
-        return jsonify({"error": "文件夹名不能为空"}), 400
-    if re.search(r'[/\\<>:"|?*\x00-\x1f]', name):
-        return jsonify({"error": "文件夹名包含非法字符"}), 400
-
-    parent = Path(parent_raw).resolve()
-    if not _fs_guard(parent):
-        return jsonify({"error": "不允许在系统路径中创建文件夹"}), 403
-    if not parent.is_dir():
-        return jsonify({"error": "父目录不存在"}), 404
-
-    target = parent / name
-    if target.exists():
-        return jsonify({"error": f'"{name}" 已存在'}), 409
-
     try:
-        target.mkdir()
-        logger.info("[Browser] 创建文件夹: %s", target)
-        return jsonify({"ok": True, "path": str(target), "name": target.name})
-    except Exception as e:
-        return jsonify({"error": f"创建失败: {e}"}), 500
+        result = _WORKSPACE_FS.create_absolute_folder(
+            parent_raw=parent_raw,
+            name=name,
+            path_guard=_fs_guard,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
+
+    logger.info("[Browser] 创建文件夹: %s", result.path)
+    return jsonify({"ok": True, "path": result.path, "name": result.name})
 
 
 @workspace_assistant_bp.route("/api/v1/workspace/fs_delete", methods=["DELETE"])
@@ -2309,26 +1791,12 @@ def fs_delete():
     Delete any file or folder by absolute path from the filesystem browser.
     Query param: path=<abs_path>
     """
-    import shutil
-
     path = request.args.get("path", "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 参数"}), 400
-    target = Path(path).resolve()
-    if not _fs_guard(target):
-        return jsonify({"error": "不允许删除系统路径"}), 403
-    if not target.exists():
-        return jsonify({"error": "路径不存在"}), 404
     try:
-        if target.is_dir():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
-    except PermissionError:
-        return jsonify({"error": "权限不足，无法删除"}), 403
-    except Exception as e:
-        return jsonify({"error": f"删除失败: {e}"}), 500
-    logger.info("[Browser] 删除: %s", target)
+        _WORKSPACE_FS.delete_absolute_path(raw_path=path, path_guard=_fs_guard)
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
+    logger.info("[Browser] 删除: %s", path)
     return jsonify({"ok": True})
 
 
@@ -2341,33 +1809,18 @@ def fs_rename():
     body = request.get_json(silent=True) or {}
     path = (body.get("path") or "").strip()
     new_name = (body.get("name") or "").strip()
-    if not path or not new_name:
-        return jsonify({"error": "缺少 path 或 name 参数"}), 400
-    if "/" in new_name or "\\" in new_name:
-        return jsonify({"error": "名称不能包含路径分隔符"}), 400
 
-    target = Path(path).resolve()
-    if not _fs_guard(target):
-        return jsonify({"error": "不允许重命名系统路径"}), 403
-    if not target.exists():
-        return jsonify({"error": "路径不存在"}), 404
-
-    if target.is_file():
-        stem = Path(new_name).stem or new_name
-        final_name = stem + target.suffix.lower()
-    else:
-        final_name = new_name
-    new_target = target.parent / final_name
-    if new_target.exists():
-        return jsonify({"error": "名称已存在"}), 409
     try:
-        target.rename(new_target)
-    except PermissionError:
-        return jsonify({"error": "权限不足，无法重命名"}), 403
-    except Exception as e:
-        return jsonify({"error": f"重命名失败: {e}"}), 500
-    logger.info("[Browser] 重命名: %s -> %s", target, new_target)
-    return jsonify({"ok": True, "name": final_name, "path": str(new_target)})
+        result = _WORKSPACE_FS.rename_absolute_path(
+            raw_path=path,
+            new_name=new_name,
+            path_guard=_fs_guard,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
+
+    logger.info("[Browser] 重命名: %s -> %s", path, result.path)
+    return jsonify({"ok": True, "name": result.name, "path": result.path})
 
 
 @workspace_assistant_bp.route("/api/v1/workspace/fs_copy", methods=["POST"])
@@ -2376,48 +1829,23 @@ def fs_copy():
     Copy or move a file/folder to a destination directory.
     Body (JSON): {"src": "<abs>", "dst_dir": "<abs_dir>", "move": false}
     """
-    import shutil
-
     body = request.get_json(silent=True) or {}
     src = (body.get("src") or "").strip()
     dst_dir = (body.get("dst_dir") or "").strip()
     do_move = bool(body.get("move", False))
-    if not src or not dst_dir:
-        return jsonify({"error": "缺少 src 或 dst_dir 参数"}), 400
-    src_path = Path(src).resolve()
-    dst_path = Path(dst_dir).resolve()
-    if not _fs_guard(src_path) or not _fs_guard(dst_path):
-        return jsonify({"error": "不允许操作系统路径"}), 403
-    if not src_path.exists():
-        return jsonify({"error": "源路径不存在"}), 404
-    if not dst_path.is_dir():
-        return jsonify({"error": "目标不是有效文件夹"}), 400
-
-    final = dst_path / src_path.name
-    if final.exists():
-        base = src_path.stem
-        ext = src_path.suffix
-        n = 1
-        while (dst_path / f"{base} ({n}){ext}").exists():
-            n += 1
-        final = dst_path / f"{base} ({n}){ext}"
 
     try:
-        if do_move:
-            shutil.move(str(src_path), str(final))
-            op = "移动"
-        else:
-            if src_path.is_dir():
-                shutil.copytree(str(src_path), str(final))
-            else:
-                shutil.copy2(str(src_path), str(final))
-            op = "复制"
-    except PermissionError:
-        return jsonify({"error": "权限不足"}), 403
-    except Exception as e:
-        return jsonify({"error": f"操作失败: {e}"}), 500
-    logger.info("[Browser] %s: %s -> %s", op, src_path, final)
-    return jsonify({"ok": True, "name": final.name, "path": str(final)})
+        result = _WORKSPACE_FS.copy_or_move_absolute_path(
+            src_raw=src,
+            dst_dir_raw=dst_dir,
+            move=do_move,
+            path_guard=_fs_guard,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
+
+    logger.info("[Browser] %s: %s -> %s", "移动" if do_move else "复制", src, result.path)
+    return jsonify({"ok": True, "name": result.name, "path": result.path})
 
 
 @workspace_assistant_bp.route("/api/v1/workspace/upload-to-folder", methods=["POST"])
@@ -2426,45 +1854,24 @@ def upload_to_folder():
     Receive one or more uploaded files and write them into a filesystem-browser folder.
     Form fields: dest_dir=<absolute folder>, file=<one or more uploads>
     """
-    import werkzeug.utils as _wz
-
     dest_dir = (request.form.get("dest_dir") or "").strip()
-    if not dest_dir:
-        return jsonify({"error": "缺少 dest_dir 参数"}), 400
-
-    dst = Path(dest_dir).resolve()
-    if not _fs_guard(dst):
-        return jsonify({"error": "不允许操作系统路径"}), 403
-    if not dst.is_dir():
-        return jsonify({"error": "目标不是有效文件夹"}), 400
-
     uploaded_files = request.files.getlist("file")
-    if not uploaded_files:
-        return jsonify({"error": "没有收到文件"}), 400
+    try:
+        saved = _WORKSPACE_FS.upload_to_absolute_folder(
+            dest_dir_raw=dest_dir,
+            uploaded_files=uploaded_files,
+            path_guard=_fs_guard,
+        )
+    except WorkspaceFsError as exc:
+        return jsonify({"error": str(exc)}), exc.status_code
 
-    saved = []
-    for f in uploaded_files:
-        raw_name = _wz.secure_filename(f.filename or "file")
-        if not raw_name:
-            continue
-        target = dst / raw_name
-        if target.exists():
-            stem = Path(raw_name).stem
-            ext = Path(raw_name).suffix
-            n = 1
-            while (dst / f"{stem} ({n}){ext}").exists():
-                n += 1
-            target = dst / f"{stem} ({n}){ext}"
-        try:
-            f.save(str(target))
-            saved.append({"name": target.name, "path": str(target)})
-            logger.info("[Browser] upload-to-folder: %s -> %s", f.filename, target)
-        except PermissionError:
-            return jsonify({"error": f"权限不足，无法写入 {target.name}"}), 403
-        except Exception as e:
-            return jsonify({"error": f"上传失败: {e}"}), 500
-
-    return jsonify({"ok": True, "saved": saved})
+    logger.info("[Browser] upload-to-folder: %s files -> %s", len(saved), dest_dir)
+    return jsonify(
+        {
+            "ok": True,
+            "saved": [{"name": item.name, "path": item.path} for item in saved],
+        }
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

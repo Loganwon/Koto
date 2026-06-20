@@ -190,6 +190,36 @@ def _get_app_shutdown_reason():
         return _shutdown_reason
 
 
+def _set_window_icon(icon_path=None):
+    if not icon_path:
+        return
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        user32 = ctypes.windll.user32
+        hwnd = user32.FindWindowW(None, "Koto - AI 个人助手")
+        if not hwnd:
+            return
+
+        # Load the .ico file as a Windows icon handle
+        # Use LoadImageW with IMAGE_ICON (1) | LR_LOADFROMFILE (16)
+        LR_LOADFROMFILE = 0x00000010
+        IMAGE_ICON = 1
+        hIcon = user32.LoadImageW(
+            None, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE
+        )
+        if hIcon:
+            WM_SETICON = 0x0080
+            ICON_BIG = 1
+            ICON_SMALL = 0
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_BIG, hIcon)
+            user32.SendMessageW(hwnd, WM_SETICON, ICON_SMALL, hIcon)
+            _write_log(f"✔ 窗口图标已设置: {icon_path}")
+    except Exception as e:
+        _write_log(f"⚠️ 设置窗口图标失败: {e}")
+
+
 def _handle_webview_exit():
     shutdown_reason = _get_app_shutdown_reason()
     if shutdown_reason:
@@ -1629,6 +1659,7 @@ def main():
         """窗口显示后的回调"""
         _window_shown.set()  # 通知看门狗：窗口已加载
         _write_log("✔ 窗口已显示，应用正常运行中")
+        _set_window_icon(icon_path)
 
     def _startup_watchdog(timeout_sec: int = 45):
         """启动看门狗：如果窗口在 timeout_sec 内未显示，记录诊断信息。
@@ -1646,7 +1677,6 @@ def main():
 
     _write_log("🚀 启动 webview.start（窗口事件循环）")
 
-    # 在启动时设置图标（仅Windows支持）
     # private_mode=False：关闭隐私模式，使麦克风等权限、Cookie 在重启后保留
     # storage_path：指定持久化用户数据目录（与前面创建的 .webview2_profile 一致）
     start_kwargs = {
@@ -1655,9 +1685,6 @@ def main():
         "private_mode": False,
         "storage_path": str(_webview_data_dir),
     }
-    if icon_path:
-        start_kwargs["icon"] = icon_path
-        _write_log(f"✔ 设置应用图标: {icon_path}")
 
     webview.start(**start_kwargs)
     _handle_webview_exit()

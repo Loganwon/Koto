@@ -2,35 +2,18 @@
 # -*- coding: utf-8 -*-
 """
 Comprehensive tests for PPT generation, document generation,
-document workflow executor, speech transcriber, and file service modules.
+speech transcriber, and file service modules.
 """
 
-import asyncio
-import json
 import os
 import re
 import shutil
 import sys
 import tempfile
-from datetime import datetime
 from pathlib import Path
-from unittest.mock import MagicMock, Mock, PropertyMock, patch
+from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _run_async(coro):
-    """Run an async coroutine synchronously."""
-    loop = asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(coro)
-    finally:
-        loop.close()
-
 
 @pytest.fixture()
 def tmp_dir():
@@ -376,198 +359,6 @@ class TestDocumentGenerator:
         assert os.path.exists(path)
 
 
-# ===========================================================================
-# 3. DocumentWorkflowExecutor
-# ===========================================================================
-
-
-@pytest.mark.unit
-class TestDocumentWorkflowExecutor:
-    """Tests for web.document_workflow_executor module."""
-
-    def _make_executor(self, client=None):
-        from web.document_workflow_executor import DocumentWorkflowExecutor
-
-        return DocumentWorkflowExecutor(
-            client=client or MagicMock(), workspace_dir="workspace"
-        )
-
-    # -- WorkflowStep --------------------------------------------------
-
-    def test_workflow_step_defaults(self):
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(step_id=1, description="Do thing", step_type="CODE")
-        assert step.status == "pending"
-        assert step.result is None
-        assert step.error is None
-
-    def test_workflow_step_to_dict(self):
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(step_id=2, description="Search", step_type="WEB_SEARCH")
-        d = step.to_dict()
-        assert d["step_id"] == 2
-        assert d["step_type"] == "WEB_SEARCH"
-        assert d["status"] == "pending"
-        assert d["duration"] is None
-
-    def test_workflow_step_duration(self):
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(step_id=1, description="t", step_type="CODE")
-        step.start_time = datetime(2025, 1, 1, 0, 0, 0)
-        step.end_time = datetime(2025, 1, 1, 0, 0, 10)
-        assert step._duration() == 10.0
-
-    def test_workflow_step_duration_none_when_no_times(self):
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(step_id=1, description="t", step_type="CODE")
-        assert step._duration() is None
-
-    # -- Executor init -------------------------------------------------
-
-    def test_executor_init(self):
-        exe = self._make_executor()
-        assert exe.steps == []
-        assert exe.workflow_name == ""
-
-    def test_keyword_to_task_mapping(self):
-        from web.document_workflow_executor import DocumentWorkflowExecutor
-
-        assert "识别" in DocumentWorkflowExecutor.KEYWORD_TO_TASK
-        assert DocumentWorkflowExecutor.KEYWORD_TO_TASK["搜索"] == "WEB_SEARCH"
-        assert DocumentWorkflowExecutor.KEYWORD_TO_TASK["python"] == "CODE"
-
-    # -- load_from_document (JSON) ------------------------------------
-
-    def test_load_json_workflow(self, tmp_dir):
-        exe = self._make_executor()
-        data = {
-            "name": "Test Workflow",
-            "context": "Testing",
-            "steps": [
-                {
-                    "description": "Step 1",
-                    "type": "CODE",
-                    "input": "x",
-                    "expected_output": "y",
-                },
-                {"description": "Step 2", "type": "WEB_SEARCH"},
-            ],
-        }
-        json_path = os.path.join(tmp_dir, "workflow.json")
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(data, f)
-
-        result = _run_async(exe.load_from_document(json_path))
-        assert result["success"] is True
-        assert result["steps_count"] == 2
-        assert exe.workflow_name == "Test Workflow"
-
-    def test_load_unsupported_extension(self):
-        exe = self._make_executor()
-        result = _run_async(exe.load_from_document("file.xyz"))
-        assert result["success"] is False
-        assert "不支持" in result["error"]
-
-    def test_read_text_file(self, tmp_dir):
-        exe = self._make_executor()
-        txt_path = os.path.join(tmp_dir, "test.txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("Hello workflow")
-        content = exe._read_text(txt_path)
-        assert content == "Hello workflow"
-
-    # -- execute_step_standalone ---------------------------------------
-
-    def test_execute_step_standalone_vlm(self):
-        exe = self._make_executor()
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(1, "Analyze image", "VLM")
-        result = _run_async(exe._execute_step_standalone(step))
-        assert "VLM" in result["output"]
-
-    def test_execute_step_standalone_search(self):
-        exe = self._make_executor()
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(1, "Find info", "WEB_SEARCH")
-        result = _run_async(exe._execute_step_standalone(step))
-        assert "搜索" in result["output"]
-
-    def test_execute_step_standalone_general(self):
-        exe = self._make_executor()
-        from web.document_workflow_executor import WorkflowStep
-
-        step = WorkflowStep(1, "Generic", "OTHER")
-        result = _run_async(exe._execute_step_standalone(step))
-        assert "OTHER" in result["output"]
-
-    # -- should_continue_on_error ------------------------------------
-
-    def test_should_continue_on_error_default_true(self):
-        exe = self._make_executor()
-        assert exe._should_continue_on_error() is True
-
-    # -- generate_summary --------------------------------------------
-
-    def test_generate_summary(self):
-        exe = self._make_executor()
-        results = {
-            "workflow_name": "Test",
-            "overall_status": "completed",
-            "steps": [
-                {
-                    "step_id": 1,
-                    "description": "Step 1",
-                    "status": "completed",
-                    "error": None,
-                },
-                {
-                    "step_id": 2,
-                    "description": "Step 2",
-                    "status": "failed",
-                    "error": "boom",
-                },
-            ],
-        }
-        summary = exe._generate_summary(results)
-        assert "50.0%" in summary
-        assert "失败" in summary or "Step 2" in summary
-
-    # -- execute_workflow (standalone, no orchestrator) ----------------
-
-    def test_execute_workflow_standalone(self):
-        exe = self._make_executor()
-        from web.document_workflow_executor import WorkflowStep
-
-        exe.workflow_name = "Quick test"
-        exe.workflow_context = "ctx"
-        exe.steps = [
-            WorkflowStep(1, "Do A", "CODE"),
-            WorkflowStep(2, "Do B", "WEB_SEARCH"),
-        ]
-        result = _run_async(exe.execute_workflow(task_orchestrator=None))
-        assert result["overall_status"] == "completed"
-        assert len(result["steps"]) == 2
-
-    # -- save_results -------------------------------------------------
-
-    def test_save_results(self, tmp_dir):
-        exe = self._make_executor()
-        results = {
-            "workflow_name": "SaveTest",
-            "overall_status": "completed",
-            "steps": [],
-            "summary": "All good",
-        }
-        output_dir = os.path.join(tmp_dir, "workflows")
-        path = _run_async(exe.save_results(results, output_dir=output_dir))
-        assert os.path.exists(path)
-        assert path.endswith(".json")
         report_path = path.replace(".json", "_report.txt")
         assert os.path.exists(report_path)
 

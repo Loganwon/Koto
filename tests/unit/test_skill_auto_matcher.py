@@ -58,16 +58,16 @@ class TestMatchContract:
 
     def test_skips_when_user_has_active_skills(self, mocker):
         matcher = _get_matcher()
-        # The new logic queries SkillManager._registry directly to find active skills.
-        # Patch _ensure_init to be a no-op and _registry to contain s1 as enabled.
+        # Active-skill detection uses the public list_skills view.
         from app.core.skills import skill_manager as sm_mod
 
         mocker.patch.object(sm_mod.SkillManager, "_ensure_init", return_value=None)
         mocker.patch.object(
             sm_mod.SkillManager,
-            "_registry",
-            new={"s1": {"enabled": True, "skill_nature": "custom", "task_types": []}},
-            create=True,
+            "list_skills",
+            return_value=[
+                {"id": "s1", "enabled": True, "skill_nature": "custom", "task_types": []}
+            ],
         )
         mocker.patch.object(
             matcher,

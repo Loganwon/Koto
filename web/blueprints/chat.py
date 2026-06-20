@@ -19,70 +19,25 @@ import logging
 from flask import Blueprint, Response, jsonify, request
 
 from web.runtime_context import (
-    get_app_attr,
+    get_brain,
+    get_chat_stream_handler,
     get_client_proxy,
+    get_default_chat_system_instruction,
+    get_interrupt_flags,
+    get_interrupt_manager,
+    get_local_executor,
     get_model_map,
+    get_session_manager,
+    get_smart_dispatcher,
     get_types,
+    get_utils,
+    get_web_searcher,
     resolve_requested_model_id,
 )
 
 _logger = logging.getLogger("koto.routes.chat")
 
 chat_bp = Blueprint("chat", __name__)
-
-
-# ---------------------------------------------------------------------------
-# Lazy accessors for runtime services still owned by web.app.
-# ---------------------------------------------------------------------------
-
-
-def _required_attr(name: str):
-    value = get_app_attr(name)
-    if value is None:
-        raise RuntimeError(f"runtime service is unavailable: {name}")
-    return value
-
-
-def _get_utils():
-    return _required_attr("Utils")
-
-
-def _get_session_manager():
-    return _required_attr("session_manager")
-
-
-def _get_brain():
-    return _required_attr("brain")
-
-
-def _get_smart_dispatcher():
-    return _required_attr("SmartDispatcher")
-
-
-def _get_web_searcher():
-    return _required_attr("WebSearcher")
-
-
-def _get_local_executor():
-    return _required_attr("LocalExecutor")
-
-
-def _get_interrupt_manager():
-    return _required_attr("_interrupt_manager")
-
-
-def _get_interrupt_flags():
-    flags = _required_attr("_interrupt_flags")
-    if not isinstance(flags, dict):
-        raise RuntimeError("runtime interrupt flags are unavailable")
-    return flags
-
-
-def _get_default_chat_system_instruction() -> str:
-    getter = get_app_attr("_get_DEFAULT_CHAT_SYSTEM_INSTRUCTION")
-    if callable(getter):
-        return str(getter() or "")
-    return ""
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +57,8 @@ def chat() -> Response:
     if not session_name or not str(user_input or "").strip():
         return jsonify({"error": "Missing session or message"}), 400
 
-    utils = _get_utils()
-    session_manager = _get_session_manager()
+    utils = get_utils()
+    session_manager = get_session_manager()
     model_map = get_model_map()
     user_input = utils.sanitize_string(user_input)
     full_history = session_manager.load_full(f"{session_name}.json")
@@ -122,7 +77,7 @@ def chat() -> Response:
     )
     auto_model = not bool(requested_model) or requested_model.lower() in {"auto", "cloud"}
 
-    result = _get_brain().chat(
+    result = get_brain().chat(
         history,
         user_input,
         model=model,
@@ -154,7 +109,7 @@ def chat() -> Response:
 
 @chat_bp.route("/api/chat/stream", methods=["POST"])
 def chat_stream() -> Response:
-    handler = get_app_attr("chat_stream")
+    handler = get_chat_stream_handler()
     if not callable(handler):
         return jsonify({"error": "Chat stream service is unavailable"}), 503
     return handler()
@@ -234,8 +189,8 @@ def interrupt_chat() -> Response:
     if not session_name:
         return jsonify({"error": "Missing session"}), 400
 
-    _get_interrupt_manager().set_interrupt(session_name)
-    _get_interrupt_flags()[session_name] = True
+    get_interrupt_manager().set_interrupt(session_name)
+    get_interrupt_flags()[session_name] = True
 
     if task_id:
         try:
@@ -254,8 +209,8 @@ def reset_interrupt() -> Response:
     """重置中断标志"""
     session_name: str | None = (request.json or {}).get("session")
     if session_name:
-        _get_interrupt_manager().reset(session_name)
-        flags = _get_interrupt_flags()
+        get_interrupt_manager().reset(session_name)
+        flags = get_interrupt_flags()
         if session_name in flags:
             del flags[session_name]
     return jsonify({"success": True})
@@ -269,9 +224,9 @@ def mini_chat() -> Response:
     if not user_input:
         return jsonify({"error": "消息不能为空"}), 400
 
-    utils = _get_utils()
-    session_manager = _get_session_manager()
-    brain = _get_brain()
+    utils = get_utils()
+    session_manager = get_session_manager()
+    brain = get_brain()
     model_map = get_model_map()
     client = get_client_proxy()
     types = get_types()
@@ -280,7 +235,7 @@ def mini_chat() -> Response:
     session_name = "MiniKoto_Quick"
     history = session_manager.load(f"{session_name}.json")
 
-    task_type, route_method, context_info = _get_smart_dispatcher().analyze(
+    task_type, route_method, context_info = get_smart_dispatcher().analyze(
         user_input, history
     )
     _logger.debug(
@@ -296,7 +251,7 @@ def mini_chat() -> Response:
     try:
         if task_type == "WEB_SEARCH":
             _mini_skill_prompt = (context_info or {}).get("skill_prompt")
-            search_result = _get_web_searcher().search_with_grounding(
+            search_result = get_web_searcher().search_with_grounding(
                 user_input, skill_prompt=_mini_skill_prompt
             )
             response_text = search_result.get("response", "")
@@ -319,7 +274,7 @@ def mini_chat() -> Response:
                         ),
                     )
                     fixed_query = (fix_resp.text or user_input).strip()
-                    search_result = _get_web_searcher().search_with_grounding(fixed_query)
+                    search_result = get_web_searcher().search_with_grounding(fixed_query)
                     response_text = search_result.get("response", "")
                 except Exception as e:
                     _logger.debug("[MINI_CHAT] 修正查询失败: %s", e)
@@ -329,7 +284,7 @@ def mini_chat() -> Response:
 
         elif task_type == "SYSTEM":
             try:
-                exec_result = _get_local_executor().execute(user_input)
+                exec_result = get_local_executor().execute(user_input)
                 response_text = exec_result.get("message", "命令执行失败")
                 if exec_result.get("details"):
                     response_text += f"\n\n{exec_result['details']}"
@@ -344,7 +299,7 @@ def mini_chat() -> Response:
                             model="gemini-2.5-flash",
                             contents=fix_prompt,
                             config=types.GenerateContentConfig(
-                                system_instruction=_get_default_chat_system_instruction(),
+                                system_instruction=get_default_chat_system_instruction(),
                                 temperature=0.4,
                                 max_output_tokens=1000,
                             ),

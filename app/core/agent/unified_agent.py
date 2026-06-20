@@ -162,6 +162,76 @@ class UnifiedAgent(Agent):
         else:
             self._tool_router = None
 
+    def _resolve_auto_skills(self, user_input: str, task_type: str) -> list:
+        """Auto-match skills via AutoMatcher + TriggerBinding."""
+        skill_ids: list = []
+        try:
+            from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
+            skill_ids = SkillAutoMatcher.match(
+                user_input=user_input,
+                task_type=task_type,
+            )
+            if skill_ids:
+                logger.info(
+                    "[UnifiedAgent] AutoMatcher recommended: %s",
+                    SkillAutoMatcher.describe_matched(skill_ids),
+                )
+        except Exception as e:
+            logger.debug("[UnifiedAgent] AutoMatcher skip: %s", e)
+
+        try:
+            from app.core.skills.skill_trigger_binding import SkillBindingManager
+
+            mgr = SkillBindingManager()
+            mgr.ensure_recommended_bindings()
+            binding_ids = mgr.match_intent(user_input)
+            if binding_ids:
+                skill_ids = list(dict.fromkeys(skill_ids + binding_ids))[:6]
+                logger.info("[UnifiedAgent] TriggerBinding merged: %s", binding_ids)
+        except Exception as e:
+            logger.debug("[UnifiedAgent] TriggerBinding skip: %s", e)
+
+        return skill_ids
+
+    def _filter_tools_for_llm(
+        self,
+        all_tools: list,
+        user_input: str,
+        skill_id: str | None,
+        executor_whitelist: set | None,
+    ) -> list:
+        """Filter tool definitions through ToolRouter and executor_tools whitelist."""
+        if self._tool_router and all_tools:
+            tools = self._tool_router.select(all_tools, user_input)
+        else:
+            tools = list(all_tools)
+
+        if executor_whitelist and tools:
+            filtered = [t for t in tools if t.get("name") in executor_whitelist]
+            if filtered:
+                tools = filtered
+                logger.debug("[UnifiedAgent] executor_tools filtered: %s", [t.get("name") for t in tools])
+
+        if skill_id:
+            try:
+                from app.core.skills.skill_manager import SkillManager
+
+                sk_def = SkillManager.get_definition(skill_id)
+                if sk_def and sk_def.executor_tools:
+                    allowed = set(sk_def.executor_tools)
+                    et_filtered = [t for t in tools if t.get("name") in allowed]
+                    if et_filtered:
+                        tools = et_filtered
+                        logger.debug(
+                            "[UnifiedAgent] Skill '%s' executor_tools: %d -> %d",
+                            skill_id, len(all_tools), len(tools),
+                        )
+            except Exception as e:
+                logger.debug("[UnifiedAgent] executor_tools filter skip: %s", e)
+
+        return tools
+
     def run(
         self,
         input_text: str,
@@ -257,6 +327,9 @@ class UnifiedAgent(Agent):
                         f"[UnifiedAgent] 🔒 PII 脱敏完成，共 {len(mask_result.mask_map)} 处，"
                         f"统计: {mask_result.stats}"
                     )
+            except (ImportError, ModuleNotFoundError) as e:
+                logger.debug(f"[UnifiedAgent] PII 过滤模块不可用: {e}")
+                safe_input = input_text
             except Exception as e:
                 logger.warning(f"[UnifiedAgent] PII 过滤异常（跳过）: {e}")
                 safe_input = input_text
@@ -273,8 +346,12 @@ class UnifiedAgent(Agent):
             _hook_mgr = get_hook_manager()
             if _hook_mgr.has_hooks("pre_message"):
                 safe_input = _hook_mgr.fire_pre_message(safe_input, _hook_ctx)
+        except (ImportError, AttributeError) as _hk_err:
+            logger.debug(f"[UnifiedAgent] pre_message 钩子系统不可用: {_hk_err}")
+            _hook_ctx = None
+            _hook_mgr = None
         except Exception as _hk_err:
-            logger.debug(f"[UnifiedAgent] pre_message 钩子跳过: {_hk_err}")
+            logger.warning(f"[UnifiedAgent] pre_message 钩子异常: {_hk_err}", exc_info=True)
             _hook_ctx = None
             _hook_mgr = None
 
@@ -292,45 +369,10 @@ class UnifiedAgent(Agent):
 
         # ── Skill 注入：将启用的 Skills 注入到 system_instruction ──────────────
         _effective_instruction = self.base_system_instruction
-        _auto_skill_ids: list = []  # 提前初始化保证后续规划步骤可引用
+        _auto_skill_ids: list = self._resolve_auto_skills(safe_input, _task_type or "CHAT")
+
         try:
             from app.core.skills.skill_manager import SkillManager
-
-            # 自动匹配：当用户没有手动启用适合本轮任务的 Skill 时，
-            # 使用本地模型（或规则兜底）推荐最合适的临时 Skill
-            _auto_skill_ids: list = []
-            try:
-                from app.core.skills.skill_auto_matcher import SkillAutoMatcher
-
-                _auto_skill_ids = SkillAutoMatcher.match(
-                    user_input=safe_input,
-                    task_type=_task_type or "CHAT",
-                )
-                if _auto_skill_ids:
-                    logger.info(
-                        f"[UnifiedAgent] 🤖 AutoMatcher 推荐: "
-                        f"{SkillAutoMatcher.describe_matched(_auto_skill_ids)}"
-                    )
-            except Exception as _ame:
-                logger.debug(f"[UnifiedAgent] AutoMatcher 跳过: {_ame}")
-
-            # ── TriggerBinding 补充匹配：将用户配置的意图绑定合并进来 ──────────
-            try:
-                from app.core.skills.skill_trigger_binding import SkillBindingManager
-
-                _binding_mgr = SkillBindingManager()
-                _binding_mgr.ensure_recommended_bindings()
-                _binding_ids = _binding_mgr.match_intent(safe_input)
-                if _binding_ids:
-                    # 去重并合并，AutoMatcher 推荐优先，Binding 补充在后
-                    _merged = list(dict.fromkeys(_auto_skill_ids + _binding_ids))
-                    _auto_skill_ids = _merged[:6]
-                    logger.info(
-                        f"[UnifiedAgent] 🔗 TriggerBinding 补充: "
-                        f"{_binding_ids} → 合并后: {_auto_skill_ids}"
-                    )
-            except Exception as _tbe:
-                logger.debug(f"[UnifiedAgent] TriggerBinding 跳过: {_tbe}")
 
             _effective_instruction = SkillManager.inject_into_prompt(
                 self.base_system_instruction,
@@ -339,7 +381,6 @@ class UnifiedAgent(Agent):
                 temp_skill_ids=_auto_skill_ids,
             )
 
-            # 显式 skill_id 允许在单次请求中强制注入一个未启用的技能。
             if _skill_id:
                 runtime_state = getattr(SkillManager, "_registry", {}).get(
                     _skill_id, {}
@@ -455,47 +496,9 @@ class UnifiedAgent(Agent):
             steps_taken += 1
 
             all_tools_def = self.registry.get_definitions()
-            # v3: 用 ToolRouter 过滤工具，减少 token 消耗
-            if self._tool_router and all_tools_def:
-                tools_def = self._tool_router.select(all_tools_def, safe_input)
-            else:
-                tools_def = all_tools_def
-            # v3.1: executor_tools 白名单过滤（Skill 显式声明时生效）
-            if _executor_tool_whitelist and tools_def:
-                filtered = [
-                    t for t in tools_def if t.get("name") in _executor_tool_whitelist
-                ]
-                if (
-                    filtered
-                ):  # 非空才应用，防止白名单与 ToolRouter 结果完全不重叠时工具断供
-                    tools_def = filtered
-                    logger.debug(
-                        f"[UnifiedAgent] 工具白名单过滤后: {[t.get('name') for t in tools_def]}"
-                    )
-
-            # v4: skill executor_tools 精确工具集（优先级高于 ToolRouter）
-            # 当 Skill 声明了 executor_tools，只向 LLM 暴露该子集，
-            # 避免无关工具稀释 context 并让模型精确使用设计好的工具。
-            if _skill_id:
-                try:
-                    from app.core.skills.skill_manager import SkillManager as _SM
-
-                    _sk_def = _SM.get_definition(_skill_id)
-                    if _sk_def and _sk_def.executor_tools:
-                        _allowed = set(_sk_def.executor_tools)
-                        _et_filtered = [
-                            t for t in tools_def if t.get("name") in _allowed
-                        ]
-                        if _et_filtered:
-                            tools_def = _et_filtered
-                            logger.debug(
-                                "[UnifiedAgent] 🎯 Skill '%s' executor_tools 过滤: %d → %d 工具",
-                                _skill_id,
-                                len(all_tools_def),
-                                len(tools_def),
-                            )
-                except Exception as _ste:
-                    logger.debug("[UnifiedAgent] executor_tools 过滤跳过: %s", _ste)
+            tools_def = self._filter_tools_for_llm(
+                all_tools_def, safe_input, _skill_id, _executor_tool_whitelist
+            )
 
             try:
                 # 使用 ModelFallbackExecutor：首选 _active_model_id，失败时自动降级

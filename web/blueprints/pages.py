@@ -16,12 +16,12 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
-    GET /workspace-assistant     — workspace_assistant_page
+  GET /workspace-assistant     — unified_workspace_redirect
 """
 
 import os
 
-from flask import Blueprint, Response, make_response, render_template, send_from_directory
+from flask import Blueprint, Response, make_response, redirect, render_template, request, send_from_directory, url_for
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -129,8 +129,11 @@ def notebook_ui() -> str:
 
 @pages_bp.route("/workspace-assistant")
 def workspace_assistant_page() -> Response:
-    """全格式 AI 原生工作区"""
-    resp = make_response(render_template("workspace_assistant.html"))
+    """Legacy workspace URL kept as a compatibility alias for the unified app."""
+    target = url_for("pages.index")
+    if request.query_string:
+        target = f"{target}?{request.query_string.decode('utf-8', errors='ignore')}"
+    resp = redirect(target, code=302)
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     return resp

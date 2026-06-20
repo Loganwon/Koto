@@ -16,5 +16,5 @@ def restore_current_module(module_file: str, namespace: MutableMapping[str, Any]
     if len(data) < 16:
         raise ImportError(f"Compiled module header is invalid: {pyc_path}")
 
-    code = marshal.loads(data[16:])
-    exec(code, namespace, namespace)
+    code = marshal.loads(data[16:])  # nosec B302 — trusted .pyc from own bundle
+    exec(code, namespace, namespace)  # nosec B102 — trusted .pyc from own bundle

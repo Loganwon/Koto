@@ -9,7 +9,7 @@ FLAKE8 := flake8
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev test lint format build clean install pre-commit-install mutation-test test-ai-assistant-smoke test-ai-assistant test-ai-assistant-browser test-ai-assistant-release
+.PHONY: help dev test lint format build clean install pre-commit-install mutation-test test-ai-assistant-smoke test-ai-assistant test-ai-assistant-browser test-ai-assistant-release test-eval test-eval-intent test-eval-exec
 
 help:  ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-20s\033[0m %s\n", $$1, $$2}'
@@ -41,6 +41,15 @@ test-ai-assistant-browser:  ## Run browser smoke tests for the AI assistant
 
 test-ai-assistant-release:  ## Run the AI assistant release suite (includes browser smoke)
 	$(PYTHON) scripts/run_ai_assistant_flow_tests.py release
+
+test-eval:  ## Run AI evaluation suite (intent accuracy + execution quality, needs GOOGLE_API_KEY)
+	$(PYTEST) tests/evaluation/ -v --tb=short
+
+test-eval-intent:  ## Run intent accuracy evaluation only (needs GOOGLE_API_KEY)
+	$(PYTEST) tests/evaluation/test_intent_accuracy.py -v --tb=short
+
+test-eval-exec:  ## Run execution quality evaluation only (needs GOOGLE_API_KEY)
+	$(PYTEST) tests/evaluation/test_execution_quality.py -v --tb=short
 
 lint:  ## Run linters (flake8 + bandit)
 	$(FLAKE8) src/ app/ tests/ --max-line-length=100 --extend-ignore=E203,E501,W503

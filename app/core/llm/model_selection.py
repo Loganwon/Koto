@@ -7,6 +7,7 @@ from .deepseek_config import DEEPSEEK_DEFAULT_MODEL
 
 CLOUD_PROVIDER_NAMES = {"gemini", "deepseek", "openai", "anthropic"}
 PROVIDER_MODEL_MODES = CLOUD_PROVIDER_NAMES | {"ollama"}
+DEFAULT_CLOUD_PROVIDER = "deepseek"
 
 _PROVIDER_MODEL_DEFAULTS = {
     "deepseek": DEEPSEEK_DEFAULT_MODEL,
@@ -15,15 +16,15 @@ _PROVIDER_MODEL_DEFAULTS = {
 _GEMINI_ONLY_TASKS = {"PAINTER", "VISION"}
 
 
-def normalize_cloud_provider(value: Any, default: str = "gemini") -> str:
+def normalize_cloud_provider(value: Any, default: str = DEFAULT_CLOUD_PROVIDER) -> str:
     provider = str(value or "").strip().lower()
     if provider in CLOUD_PROVIDER_NAMES:
         return provider
-    default_provider = str(default or "gemini").strip().lower()
-    return default_provider if default_provider in CLOUD_PROVIDER_NAMES else "gemini"
+    default_provider = str(default or DEFAULT_CLOUD_PROVIDER).strip().lower()
+    return default_provider if default_provider in CLOUD_PROVIDER_NAMES else DEFAULT_CLOUD_PROVIDER
 
 
-def get_configured_cloud_provider(default: str = "gemini") -> str:
+def get_configured_cloud_provider(default: str = DEFAULT_CLOUD_PROVIDER) -> str:
     env_provider = os.getenv("KOTO_CLOUD_PROVIDER") or os.getenv("KOTO_LLM_PROVIDER")
     if env_provider:
         return normalize_cloud_provider(env_provider, default=default)
@@ -33,10 +34,10 @@ def get_configured_cloud_provider(default: str = "gemini") -> str:
         configured = SettingsManager().get("ai", "cloud_provider")
         return normalize_cloud_provider(configured, default=default)
     except Exception:
-        return normalize_cloud_provider(default, default="gemini")
+        return normalize_cloud_provider(default, default=DEFAULT_CLOUD_PROVIDER)
 
 
-def get_provider_for_model_mode(model_mode: str, default: str = "gemini") -> str:
+def get_provider_for_model_mode(model_mode: str, default: str = DEFAULT_CLOUD_PROVIDER) -> str:
     normalized = str(model_mode or "").strip().lower()
     if normalized in CLOUD_PROVIDER_NAMES:
         return normalized

@@ -3,7 +3,7 @@
 """
 Deep coverage tests for web/app.py internal classes and functions.
 
-Targets large, under-tested components: KotoBrain, TaskOrchestrator,
+Targets large, under-tested components: KotoBrain,
 _TrackedModels, run_with_timeout, run_with_heartbeat,
 stream_with_keepalive, LocalDispatcher, auto_save_files, and many more.
 """
@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 
@@ -50,6 +51,24 @@ def _import_app():
     import web.app as app_mod
 
     return app_mod
+
+
+def _import_memory_runtime():
+    import web.memory_runtime as memory_runtime
+
+    return memory_runtime
+
+
+def _import_task_orchestrator():
+    from web.task_orchestrator import TaskOrchestrator
+
+    return TaskOrchestrator
+
+
+def _import_filegen_time_context():
+    import web.filegen_time_context as filegen_time_context
+
+    return filegen_time_context
 
 
 # =====================================================================
@@ -536,40 +555,40 @@ class TestStreamWithKeepalive:
 @pytest.mark.unit
 class TestFilegenTimeContext:
     def test_no_month_detected(self):
-        app = _import_app()
-        ctx_text, parsed = app._build_filegen_time_context("做一个文档")
+        helper = _import_filegen_time_context()
+        ctx_text, parsed = helper.build_filegen_time_context("做一个文档")
         assert "未检测到明确月份" in ctx_text
         assert parsed["rule_hit"] is False
 
     def test_month_only(self):
-        app = _import_app()
-        ctx_text, parsed = app._build_filegen_time_context("1月新番列表")
+        helper = _import_filegen_time_context()
+        ctx_text, parsed = helper.build_filegen_time_context("1月新番列表")
         assert parsed["resolved_month"] == 1
         assert parsed["rule_hit"] is True
         assert "按当前年份解析" in ctx_text
 
     def test_year_and_month(self):
-        app = _import_app()
-        ctx_text, parsed = app._build_filegen_time_context("2024年3月报告")
+        helper = _import_filegen_time_context()
+        ctx_text, parsed = helper.build_filegen_time_context("2024年3月报告")
         assert parsed["resolved_year"] == 2024
         assert parsed["resolved_month"] == 3
         assert parsed["rule_hit"] is False
 
     def test_parse_time_info_no_match(self):
-        app = _import_app()
-        info = app._parse_time_info_for_filegen("no time info here")
+        helper = _import_filegen_time_context()
+        info = helper.parse_time_info_for_filegen("no time info here")
         assert info["rule_hit"] is False
         assert info["month"] is None
 
     def test_parse_time_info_month_12(self):
-        app = _import_app()
-        info = app._parse_time_info_for_filegen("12月动漫推荐")
+        helper = _import_filegen_time_context()
+        info = helper.parse_time_info_for_filegen("12月动漫推荐")
         assert info["month"] == 12
         assert info["rule_hit"] is True
 
 
 # =====================================================================
-# 12. _error_response (Flask context required)
+# 12. error response helpers (Flask context required)
 # =====================================================================
 @pytest.mark.unit
 class TestErrorResponse:
@@ -578,18 +597,19 @@ class TestErrorResponse:
         flask_app = app_mod.app
         with flask_app.test_request_context("/test"):
             flask_app.preprocess_request()  # triggers _assign_request_id
-            resp, status = app_mod._error_response("bad request", 400)
+            resp, status = app_mod.error_response("bad request", 400)
             data = resp.get_json()
         assert status == 400
         assert data["error"] == "bad request"
         assert "request_id" in data
+        assert not hasattr(app_mod, "_error_response")
 
     def test_error_with_details(self):
         app_mod = _import_app()
         flask_app = app_mod.app
         with flask_app.test_request_context("/test"):
             flask_app.preprocess_request()
-            resp, status = app_mod._error_response(
+            resp, status = app_mod.error_response(
                 "fail", 422, details={"field": "name"}
             )
             data = resp.get_json()
@@ -601,10 +621,20 @@ class TestErrorResponse:
         flask_app = app_mod.app
         with flask_app.test_request_context("/test"):
             # Don't call preprocess_request, so g.request_id is not set
-            resp, status = app_mod._error_response("oops", 500)
+            resp, status = app_mod.error_response("oops", 500)
             data = resp.get_json()
         assert data["error"] == "oops"
         assert "request_id" not in data
+
+    def test_shared_error_response_keeps_legacy_envelope(self):
+        app_mod = _import_app()
+        from web.shared import _error_response
+
+        with app_mod.app.test_request_context("/test"):
+            resp, status = _error_response("oops", 500, error_type="unit")
+            data = resp.get_json()
+        assert status == 500
+        assert data == {"error": "oops", "success": False, "type": "unit"}
 
 
 # =====================================================================
@@ -640,7 +670,7 @@ class TestAssignRequestId:
 @pytest.mark.unit
 class TestTaskOrchestratorMergeResults:
     def test_merge_with_completed_subtasks(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         subtasks = [
             {
                 "task_type": "WEB_SEARCH",
@@ -657,12 +687,12 @@ class TestTaskOrchestratorMergeResults:
                 "error": None,
             },
         ]
-        merged = app.TaskOrchestrator._merge_results(subtasks, {})
+        merged = orchestrator._merge_results(subtasks, {})
         assert len(merged["steps"]) == 2
         assert merged["final_output"] == "generated"
 
     def test_merge_with_failed_subtask(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         subtasks = [
             {
                 "task_type": "WEB_SEARCH",
@@ -672,13 +702,13 @@ class TestTaskOrchestratorMergeResults:
                 "error": "timeout",
             },
         ]
-        merged = app.TaskOrchestrator._merge_results(subtasks, {})
+        merged = orchestrator._merge_results(subtasks, {})
         assert merged["steps"][0]["error"] == "timeout"
         assert merged["final_output"] == ""
 
     def test_merge_empty(self):
-        app = _import_app()
-        merged = app.TaskOrchestrator._merge_results([], {})
+        orchestrator = _import_task_orchestrator()
+        merged = orchestrator._merge_results([], {})
         assert merged["final_output"] == ""
         assert len(merged["steps"]) == 0
 
@@ -689,40 +719,40 @@ class TestTaskOrchestratorMergeResults:
 @pytest.mark.unit
 class TestTaskOrchestratorValidateQuality:
     def test_no_output(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         combined = {"steps": [], "final_output": ""}
         score = asyncio.get_event_loop().run_until_complete(
-            app.TaskOrchestrator._validate_quality("test", combined, {})
+            orchestrator._validate_quality("test", combined, {})
         )
         assert 0 <= score <= 100
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_with_completed_steps(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         combined = {
             "steps": [{"status": "completed"}, {"status": "completed"}],
             "final_output": "some output",
         }
         mock_resp = Mock()
         mock_resp.text = "25"
-        with patch.object(app, "client") as mock_client:
+        with patch("web.task_orchestrator_quality.client") as mock_client:
             mock_client.models.generate_content.return_value = mock_resp
             score = asyncio.get_event_loop().run_until_complete(
-                app.TaskOrchestrator._validate_quality("test", combined, {})
+                orchestrator._validate_quality("test", combined, {})
             )
         assert score >= 40
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_semantic_scoring_fails_gracefully(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         combined = {
             "steps": [{"status": "completed"}],
             "final_output": "output",
         }
-        with patch.object(app, "client") as mock_client:
+        with patch("web.task_orchestrator_quality.client") as mock_client:
             mock_client.models.generate_content.side_effect = Exception("API down")
             score = asyncio.get_event_loop().run_until_complete(
-                app.TaskOrchestrator._validate_quality("test", combined, {})
+                orchestrator._validate_quality("test", combined, {})
             )
         assert 0 <= score <= 100
 
@@ -734,16 +764,16 @@ class TestTaskOrchestratorValidateQuality:
 class TestExecuteCompoundTask:
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_unknown_task_type(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         subtasks = [
             {"task_type": "UNKNOWN", "description": "mystery", "input": "x"},
         ]
         mock_resp = Mock()
         mock_resp.text = "20"
-        with patch.object(app, "client") as mc:
+        with patch("web.task_orchestrator_quality.client") as mc:
             mc.models.generate_content.return_value = mock_resp
             result = asyncio.get_event_loop().run_until_complete(
-                app.TaskOrchestrator.execute_compound_task("test", subtasks)
+                orchestrator.execute_compound_task("test", subtasks)
             )
         assert result["success"] is False or any(
             "未知" in e for e in result.get("errors", [])
@@ -751,18 +781,18 @@ class TestExecuteCompoundTask:
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_subtask_exception(self):
-        app = _import_app()
+        orchestrator = _import_task_orchestrator()
         subtasks = [
             {"task_type": "WEB_SEARCH", "description": "search", "input": "x"},
         ]
         mock_resp = Mock()
         mock_resp.text = "10"
         with patch.object(
-            app.TaskOrchestrator, "_execute_web_search", side_effect=Exception("boom")
-        ), patch.object(app, "client") as mc:
+            orchestrator, "_execute_web_search", side_effect=Exception("boom")
+        ), patch("web.task_orchestrator_quality.client") as mc:
             mc.models.generate_content.return_value = mock_resp
             result = asyncio.get_event_loop().run_until_complete(
-                app.TaskOrchestrator.execute_compound_task("test", subtasks)
+                orchestrator.execute_compound_task("test", subtasks)
             )
         assert len(result["errors"]) > 0
 
@@ -779,10 +809,12 @@ class TestLocalDispatcher:
 
     def test_is_ollama_running_connection_error(self):
         app = _import_app()
-        with patch.dict(os.environ, {"KOTO_DEPLOY_MODE": "local"}), patch.object(
-            app, "requests"
-        ) as mock_req:
-            mock_req.get.side_effect = Exception("no conn")
+        fake_requests = Mock()
+        fake_requests.get.side_effect = Exception("no conn")
+
+        with patch.dict(os.environ, {"KOTO_DEPLOY_MODE": "local"}), patch.dict(
+            sys.modules, {"requests": fake_requests}
+        ):
             assert app.LocalDispatcher.is_ollama_running() is False
 
     def test_analyze_delegates(self):
@@ -909,41 +941,49 @@ class TestUtilsMethods:
 class TestGetMemoryManager:
     def test_returns_instance(self):
         app = _import_app()
-        old = app._memory_manager
+        memory_runtime = _import_memory_runtime()
+        old = memory_runtime._memory_manager
         try:
-            app._memory_manager = None
+            memory_runtime._memory_manager = None
             mock_mgr = MagicMock()
-            with patch(
-                "web.app.EnhancedMemoryManager", create=True, return_value=mock_mgr
-            ) as mock_cls, patch.dict(
-                "sys.modules",
-                {"enhanced_memory_manager": MagicMock(EnhancedMemoryManager=mock_cls)},
+            ctx_mod = types.ModuleType("app.core.app_context")
+            ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
+
+            with patch.dict(
+                sys.modules, {"app.core.app_context": ctx_mod}
+            ), patch.object(
+                memory_runtime, "_inject_memory_adapters"
             ):
                 mgr = app.get_memory_manager()
-                assert mgr is not None
+                assert mgr is mock_mgr
                 # Second call returns same instance
                 assert app.get_memory_manager() is mgr
         finally:
-            app._memory_manager = old
+            memory_runtime._memory_manager = old
 
     def test_fallback_to_basic(self):
         app = _import_app()
-        old = app._memory_manager
+        memory_runtime = _import_memory_runtime()
+        old = memory_runtime._memory_manager
         try:
-            app._memory_manager = None
+            memory_runtime._memory_manager = None
             mock_basic = MagicMock()
+            basic_mod = types.ModuleType("memory_manager")
+            basic_mod.MemoryManager = MagicMock(return_value=mock_basic)
+
             with patch.dict(
-                "sys.modules",
+                sys.modules,
                 {
+                    "app.core.app_context": None,
                     "enhanced_memory_manager": None,
                     "web.enhanced_memory_manager": None,
+                    "memory_manager": basic_mod,
                 },
-            ):
-                # Will try to import MemoryManager as fallback
+            ), patch.object(memory_runtime, "_inject_memory_adapters"):
                 mgr = app.get_memory_manager()
-                assert mgr is not None
+                assert mgr is mock_basic
         finally:
-            app._memory_manager = old
+            memory_runtime._memory_manager = old
 
 
 # =====================================================================
@@ -953,10 +993,20 @@ class TestGetMemoryManager:
 class TestGetKnowledgeBase:
     def test_returns_instance(self):
         app = _import_app()
-        app._kb = None
-        kb = app.get_knowledge_base()
-        assert kb is not None
-        assert app.get_knowledge_base() is kb
+        memory_runtime = _import_memory_runtime()
+        old = memory_runtime._kb
+        try:
+            memory_runtime._kb = None
+            mock_kb = MagicMock()
+            kb_mod = types.ModuleType("knowledge_base")
+            kb_mod.KnowledgeBase = MagicMock(return_value=mock_kb)
+
+            with patch.dict(sys.modules, {"knowledge_base": kb_mod}):
+                kb = app.get_knowledge_base()
+                assert kb is mock_kb
+                assert app.get_knowledge_base() is kb
+        finally:
+            memory_runtime._kb = old
 
 
 # =====================================================================
@@ -1280,27 +1330,41 @@ class TestFlaskErrorHandlers:
 
 
 # =====================================================================
-# 30. _LazyModule
+# 30. lazy loader registry
 # =====================================================================
 @pytest.mark.unit
-class TestLazyModule:
-    def test_lazy_module_defers_import(self):
-        app = _import_app()
+class TestLazyLoadRegistry:
+    def teardown_method(self):
+        from web.lazy_loaders.registry import _lazy_cache
+
+        _lazy_cache.pop("unit_dummy", None)
+
+    def test_lazy_load_caches_constructed_service(self):
+        from web.lazy_loaders.registry import _lazy_cache, _lazy_load
+
         calls = []
+        mod = types.ModuleType("web._test_lazy_registry_mod")
 
-        def import_fn():
-            calls.append(1)
-            return Mock(attr="value")
+        class Dummy:
+            def __init__(self):
+                self.attr = "value"
+                calls.append(1)
 
-        lm = app._LazyModule(import_fn)
-        assert len(calls) == 0  # Not yet imported
-        _ = lm.attr
-        assert len(calls) == 1  # Now imported
+        mod.Dummy = Dummy
 
-    def test_lazy_module_repr_before_load(self):
+        with patch.dict(sys.modules, {"web._test_lazy_registry_mod": mod}):
+            assert "unit_dummy" not in _lazy_cache
+            first = _lazy_load("unit_dummy", "_test_lazy_registry_mod", "Dummy")
+            second = _lazy_load("unit_dummy", "_test_lazy_registry_mod", "Dummy")
+
+        assert first is second
+        assert first.attr == "value"
+        assert calls == [1]
+
+    def test_legacy_lazy_module_stays_removed_from_app(self):
         app = _import_app()
-        lm = app._LazyModule(lambda: Mock())
-        assert "not loaded" in repr(lm)
+
+        assert not hasattr(app, "_LazyModule")
 
 
 # =====================================================================

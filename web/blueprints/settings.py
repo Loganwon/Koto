@@ -15,10 +15,14 @@ import time
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from web.auth import require_auth
+from web.config import invalidate_settings_cache
 from web.runtime_context import (
-    get_app_attr,
     get_app_module,
+    get_api_key,
+    get_app_version,
     get_client,
+    get_create_client,
+    get_detected_proxy,
     get_project_root,
     get_settings_manager,
     get_types,
@@ -52,14 +56,11 @@ def _get_types():
 
 
 def _get_create_client():
-    return get_app_attr("create_client")
+    return get_create_client()
 
 
 def _get_detected_proxy():
-    detector = get_app_attr("get_detected_proxy")
-    if callable(detector):
-        return detector()
-    return None
+    return get_detected_proxy()
 
 
 def _augment_models_for_cloud_provider(payload: dict) -> dict:
@@ -146,7 +147,7 @@ def api_info() -> Response:
     """
     return jsonify(
         {
-            "version": get_app_attr("APP_VERSION", ""),
+            "version": get_app_version(""),
             "deploy_mode": os.environ.get("KOTO_DEPLOY_MODE", "local"),
             "auth_enabled": os.environ.get("KOTO_AUTH_ENABLED", "false").lower()
             == "true",
@@ -279,7 +280,7 @@ def local_model_switch() -> Response:
             return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
 
         # 清除缓存，下次 get_client() 调用时重建
-        mod._user_settings_cache.clear()
+        invalidate_settings_cache()
         mod._client = None
         mod._client_mode_key = (None, None)
 
@@ -318,7 +319,7 @@ def local_model_setup() -> Response:
             run_downloader_gui()
             # 安装完成后清除缓存
             mod = _app()
-            mod._user_settings_cache.clear()
+            invalidate_settings_cache()
             mod._client = None
             mod._client_mode_key = (None, None)
         except Exception as e:
@@ -396,7 +397,7 @@ def update_settings() -> Response:
         if not success:
             return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
-        mod._user_settings_cache.clear()
+        invalidate_settings_cache()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
         if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):
             _app_mod = _app()
@@ -426,7 +427,7 @@ def reset_settings() -> Response:
     sm = _get_settings_manager()
     success = sm.reset()
     # 同样清除缓存
-    mod._user_settings_cache.clear()
+    invalidate_settings_cache()
     mod._proxy_checked = False
     mod._detected_proxy = None
     return jsonify({"success": success})
@@ -469,7 +470,7 @@ def get_setup_status() -> Response:
     from app.core.llm.model_selection import get_configured_cloud_provider
 
     provider = get_configured_cloud_provider()
-    API_KEY = get_app_attr("API_KEY", "")
+    API_KEY = get_api_key("")
     PROJECT_ROOT = get_project_root()
     WORKSPACE_DIR = get_workspace_dir()
     config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")

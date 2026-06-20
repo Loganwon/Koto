@@ -54,23 +54,19 @@ $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
 function Test-WorkspaceAssetBundle([string]$StaticRoot) {
-    $indexHtml = Join-Path $StaticRoot "univer-dist\index.html"
-    if (-not (Test-Path $indexHtml)) {
-        Fail "Workspace asset index missing: $indexHtml"
-        return
+    $legacyIndexHtml = Join-Path $StaticRoot "univer-dist\index.html"
+    if (Test-Path $legacyIndexHtml) {
+        Fail "Legacy workspace asset index should not be packaged: $legacyIndexHtml"
+    }
+    else {
+        Pass "Legacy workspace asset index removed"
     }
 
-    $html = Get-Content $indexHtml -Raw -Encoding UTF8
-    $refs = [regex]::Matches($html, '(assets/index-[^"''>]+\.(?:js|css))') |
-        ForEach-Object { $_.Groups[1].Value } |
-        Select-Object -Unique
-    if (-not $refs) {
-        Fail "No hashed workspace assets referenced in $indexHtml"
-        return
-    }
-
-    foreach ($rel in $refs) {
-        $assetPath = Join-Path (Split-Path $indexHtml -Parent) $rel
+    $assetPaths = @(
+        (Join-Path $StaticRoot "univer-dist\assets\sheets-main.js"),
+        (Join-Path $StaticRoot "univer-dist\assets\sheets-main.css")
+    )
+    foreach ($assetPath in $assetPaths) {
         if (Test-Path $assetPath) { Pass "Workspace asset exists: $(Split-Path -Leaf $assetPath)" }
         else                      { Fail "Missing workspace asset: $assetPath" }
     }
@@ -120,7 +116,6 @@ $requiredPaths = @(
     (Join-Path $staticRoot "js\workspace-assistant.js"),
     (Join-Path $staticRoot "jszip.min.js"),
     (Join-Path $staticRoot "docx-preview.min.js"),
-    (Join-Path $staticRoot "univer-dist\index.html"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
     (Join-Path $ExtractDir "Start_Koto.bat")

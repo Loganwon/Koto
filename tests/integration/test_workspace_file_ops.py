@@ -50,15 +50,23 @@ def _app_bundle(tmp_path_factory):
     tmp_root = tmp_path_factory.mktemp("fileops_root")
     tmp_dir = tmp_root / "tmp"
     workspace_dir = tmp_root / "workspace"
+    settings_path = tmp_root / "user_settings.json"
     tmp_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
+        encoding="utf-8",
+    )
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
 
     _orig_tmp_root = _wa._TMP_ROOT
     _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_settings_path = os.environ.get("KOTO_USER_SETTINGS_PATH")
+    os.environ["KOTO_USER_SETTINGS_PATH"] = str(settings_path)
     _wa._TMP_ROOT = tmp_dir
+    _shared.clear_user_settings_cache()
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -73,8 +81,13 @@ def _app_bundle(tmp_path_factory):
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_ROOT = _orig_tmp_root
+    _shared.clear_user_settings_cache()
     if _orig_ws is not None:
         _shared.WORKSPACE_DIR = _orig_ws
+    if _orig_settings_path is None:
+        os.environ.pop("KOTO_USER_SETTINGS_PATH", None)
+    else:
+        os.environ["KOTO_USER_SETTINGS_PATH"] = _orig_settings_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -807,10 +820,7 @@ class TestSetWorkspaceDir:
     ):
         client, _, _ = _app_bundle
 
-        fake_project_root = tmp_path / "project_root"
-        config_dir = fake_project_root / "config"
-        config_dir.mkdir(parents=True)
-        settings_path = config_dir / "user_settings.json"
+        settings_path = tmp_path / "user_settings.json"
         settings_path.write_text("{}", encoding="utf-8")
 
         target_dir = tmp_path / "new_workspace_root"
@@ -819,7 +829,7 @@ class TestSetWorkspaceDir:
 
         cleared = {"called": False}
         original_workspace_dir = _shared.WORKSPACE_DIR
-        monkeypatch.setattr(_shared, "PROJECT_ROOT", str(fake_project_root))
+        monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
         monkeypatch.setattr(_shared, "WORKSPACE_DIR", original_workspace_dir)
         monkeypatch.setattr(
             _shared,

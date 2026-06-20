@@ -1,6 +1,30 @@
 // ================= 应用框架系统 =================
 // 支持多个独立应用窗口
 
+function kotoFrameworkFetch(url, options = {}) {
+    if (typeof window.kotoCsrfFetch === 'function') {
+        return window.kotoCsrfFetch(url, options);
+    }
+    if (window.WA && typeof window.WA._csrfFetch === 'function') {
+        return window.WA._csrfFetch(url, options);
+    }
+
+    const next = Object.assign({}, options || {});
+    if (!next.credentials) next.credentials = 'same-origin';
+    const method = String(next.method || 'GET').toUpperCase();
+    if (!['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(method)) {
+        const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+        if (token) {
+            const headers = new Headers(next.headers || {});
+            if (!headers.has('X-CSRFToken') && !headers.has('X-CSRF-Token')) {
+                headers.set('X-CSRFToken', token);
+            }
+            next.headers = headers;
+        }
+    }
+    return fetch(url, next);
+}
+
 class AppFramework {
     constructor() {
         this.apps = new Map();
@@ -479,7 +503,7 @@ class NotesApp {
         }
 
         try {
-            const response = await fetch('/api/notes/add', {
+            const response = await kotoFrameworkFetch('/api/notes/add', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, content, category, tags })
@@ -502,7 +526,7 @@ class NotesApp {
         if (!confirm('确认删除这条笔记吗？')) return;
 
         try {
-            const response = await fetch(`/api/notes/${noteId}`, { method: 'DELETE' });
+            const response = await kotoFrameworkFetch(`/api/notes/${noteId}`, { method: 'DELETE' });
             if (response.ok) {
                 await this.loadNotes();
                 this.selectedNoteId = null;
@@ -692,7 +716,7 @@ class ScheduleApp {
             if (end) payload.end = this.toIso(end);
             if (remind) payload.remind_before_minutes = parseInt(remind, 10);
 
-            const response = await fetch('/api/calendar/add', {
+            const response = await kotoFrameworkFetch('/api/calendar/add', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
@@ -714,7 +738,7 @@ class ScheduleApp {
     async deleteEvent(id) {
         if (!id) return;
         try {
-            const res = await fetch(`/api/calendar/${id}`, { method: 'DELETE' });
+            const res = await kotoFrameworkFetch(`/api/calendar/${id}`, { method: 'DELETE' });
             const data = await res.json();
             if (data.success) {
                 this.events = this.events.filter(ev => ev.id !== id);

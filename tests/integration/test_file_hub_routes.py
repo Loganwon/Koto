@@ -303,8 +303,15 @@ class TestFilehubHTMLSource:
     @pytest.fixture(scope="class")
     def index_html(self):
         from pathlib import Path
-        html_path = Path(__file__).resolve().parents[2] / "web" / "templates" / "index.html"
-        return html_path.read_text(encoding="utf-8", errors="replace")
+        root = Path(__file__).resolve().parents[2]
+        html_path = root / "web" / "templates" / "index.html"
+        css_path = root / "web" / "static" / "css" / "inline-extracted.css"
+        return "\n".join(
+            [
+                html_path.read_text(encoding="utf-8", errors="replace"),
+                css_path.read_text(encoding="utf-8", errors="replace"),
+            ]
+        )
 
     def test_modal_has_fixed_height(self, index_html):
         """fh-app must use height: to stay consistent between tabs."""

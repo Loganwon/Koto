@@ -48,6 +48,17 @@ class TestListWorkspace:
         assert isinstance(data["files"], list)
 
 
+# ── GET /workspace-assistant ────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+class TestUnifiedWorkspaceEntry:
+    def test_legacy_workspace_assistant_route_redirects_to_unified_app(self, client):
+        resp = client.get("/workspace-assistant?_codex_probe=1", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/?_codex_probe=1")
+
+
 # ── GET /api/workspace/<path:filepath> ───────────────────────────────────────
 
 
@@ -69,11 +80,12 @@ class TestWorkspaceFile:
 
     def test_serve_existing_file(self, client):
         """Create a file in workspace and verify it can be served."""
-        from web.app import WORKSPACE_DIR
+        from web.blueprints.workspace import WORKSPACE_DIR
 
         test_filename = "_test_integration_workspace.txt"
         test_path = os.path.join(WORKSPACE_DIR, test_filename)
         try:
+            os.makedirs(WORKSPACE_DIR, exist_ok=True)
             with open(test_path, "w", encoding="utf-8") as f:
                 f.write("workspace file content")
             resp = client.get(f"/api/workspace/{test_filename}")

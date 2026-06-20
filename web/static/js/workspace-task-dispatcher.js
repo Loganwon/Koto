@@ -114,19 +114,21 @@
     const options = cloned.options && typeof cloned.options === 'object'
       ? Object.assign({}, cloned.options)
       : {};
-    const existingBatchControl = options.batch_control && typeof options.batch_control === 'object'
-      ? Object.assign({}, options.batch_control)
+    const existingWorkflowCheckpoint = options.workflow_checkpoint && typeof options.workflow_checkpoint === 'object'
+      ? Object.assign({}, options.workflow_checkpoint)
       : {};
-    const hasExplicitStepIndex = Object.prototype.hasOwnProperty.call(existingBatchControl, 'step_index')
-      && existingBatchControl.step_index !== ''
-      && existingBatchControl.step_index != null;
-    const currentStep = Math.max(0, Number(existingBatchControl.step_index || 0) || 0);
+    const checkpointSeed = existingWorkflowCheckpoint;
+    const hasExplicitStepIndex = Object.prototype.hasOwnProperty.call(checkpointSeed, 'step_index')
+      && checkpointSeed.step_index !== ''
+      && checkpointSeed.step_index != null;
+    const currentStep = Math.max(0, Number(checkpointSeed.step_index || 0) || 0);
     const resumeStepIndex = hasExplicitStepIndex ? currentStep : currentStep + 1;
-    options.batch_control = Object.assign({}, existingBatchControl, {
-      adapter: String(existingBatchControl.adapter || 'generic_tool_loop').trim() || 'generic_tool_loop',
+    delete options.batch_control;
+    options.workflow_checkpoint = Object.assign({}, existingWorkflowCheckpoint, {
+      adapter: String(checkpointSeed.adapter || 'generic_tool_loop').trim() || 'generic_tool_loop',
       policy: 'confirm_each_step',
       step_index: resumeStepIndex,
-      original_task: String(existingBatchControl.original_task || text || cloned.task || '').trim(),
+      original_task: String(checkpointSeed.original_task || text || cloned.task || '').trim(),
     });
     const followupContext = options.followup_context && typeof options.followup_context === 'object'
       ? Object.assign({}, options.followup_context)
@@ -137,12 +139,12 @@
     followupContext.stepwise = Object.assign({}, followupContext.stepwise || {}, {
       policy: 'confirm_each_step',
       next_step_index: resumeStepIndex,
-      original_task: String(options.batch_control.original_task || '').trim(),
+      original_task: String(options.workflow_checkpoint.original_task || '').trim(),
     });
     options.followup_context = followupContext;
     cloned.options = options;
-    cloned.task = String(cloned.task || text || options.batch_control.original_task || '').trim()
-      || normalizeStepwiseTaskText(options.batch_control.original_task || text || '');
+    cloned.task = String(cloned.task || text || options.workflow_checkpoint.original_task || '').trim()
+      || normalizeStepwiseTaskText(options.workflow_checkpoint.original_task || text || '');
     const files = Array.isArray(cloned.files) ? cloned.files : [];
     const existingContext = cloned.task_context && typeof cloned.task_context === 'object' ? cloned.task_context : {};
     const existingContextFiles = existingContext.files && typeof existingContext.files === 'object'
@@ -156,7 +158,7 @@
       selection: cloned.selection || '',
       selectionSource: cloned.selection_source || '',
       followupContext,
-      batchControl: options.batch_control,
+      workflowCheckpoint: options.workflow_checkpoint,
     });
     return cloned;
   }
@@ -191,14 +193,14 @@
         followup_context: followupContext,
       },
     };
-    const batchControl = payload.batchControl && typeof payload.batchControl === 'object'
-      ? payload.batchControl
+    const workflowCheckpoint = payload.workflowCheckpoint && typeof payload.workflowCheckpoint === 'object'
+      ? payload.workflowCheckpoint
       : null;
-    if (batchControl && String(batchControl.policy || '').trim().toLowerCase() === 'confirm_each_step') {
+    if (workflowCheckpoint && String(workflowCheckpoint.policy || '').trim().toLowerCase() === 'confirm_each_step') {
       context.continuity.stepwise = {
         policy: 'confirm_each_step',
-        step_index: Number(batchControl.step_index || 0) || 0,
-        original_task: previewText(batchControl.original_task || payload.task || '', 2000),
+        step_index: Number(workflowCheckpoint.step_index || 0) || 0,
+        original_task: previewText(workflowCheckpoint.original_task || payload.task || '', 2000),
         resume_label: '继续下一步',
       };
     }
@@ -254,16 +256,16 @@
     const sessionId = String(payload.session_id || '').trim();
     const modelMode = String(payload.model_mode || '').trim();
     const modelId = String(payload.model_id || '').trim();
-    const batchControl = payload.options && typeof payload.options === 'object'
-      && payload.options.batch_control && typeof payload.options.batch_control === 'object'
-      ? Object.assign({}, payload.options.batch_control)
+    const workflowCheckpoint = payload.options && typeof payload.options === 'object'
+      && payload.options.workflow_checkpoint && typeof payload.options.workflow_checkpoint === 'object'
+      ? Object.assign({}, payload.options.workflow_checkpoint)
       : null;
     if (task) compact.task = task;
     if (taskId) compact.task_id = taskId;
     if (sessionId) compact.session_id = sessionId;
     if (modelMode) compact.model_mode = modelMode;
     if (modelId) compact.model_id = modelId;
-    if (batchControl) compact.options = { batch_control: batchControl };
+    if (workflowCheckpoint) compact.options = { workflow_checkpoint: workflowCheckpoint };
     return Object.keys(compact).length ? compact : null;
   }
 
@@ -288,11 +290,11 @@
   function setPendingTaskResumePayload(loadingEl, payload) {
     if (!loadingEl || !loadingEl.dataset) return;
     const compactPayload = compactPendingResumePayload(payload);
-    const batchControl = compactPayload && compactPayload.options && typeof compactPayload.options === 'object'
-      ? compactPayload.options.batch_control
+    const checkpoint = compactPayload && compactPayload.options && typeof compactPayload.options === 'object'
+      ? compactPayload.options.workflow_checkpoint
       : null;
-    const policy = String(batchControl && batchControl.policy || '').trim().toLowerCase();
-    if (!batchControl || policy !== 'confirm_each_step') {
+    const policy = String(checkpoint && checkpoint.policy || '').trim().toLowerCase();
+    if (!checkpoint || policy !== 'confirm_each_step') {
       delete loadingEl.dataset.taskPendingResumePayload;
       return;
     }
@@ -312,7 +314,6 @@
     const state = options.state || {};
     const messageRoutes = [];
     const quickActionHandlers = new Map();
-    const quickActionKeywords = [];
     let defaultQuickActionHandler = null;
 
     function registerMessageRoute(route) {
@@ -333,16 +334,6 @@
       return handler;
     }
 
-    function registerQuickActionKeyword(keyword, action) {
-      const key = String(keyword || '').trim();
-      const target = String(action || '').trim();
-      if (!key || !target) {
-        throw new Error('Invalid task action keyword');
-      }
-      quickActionKeywords.push({ keyword: key, action: target });
-      return target;
-    }
-
     function setDefaultQuickActionHandler(handler) {
       if (typeof handler !== 'function') {
         throw new Error('Invalid default task action handler');
@@ -352,9 +343,8 @@
     }
 
     function matchQuickAction(text) {
-      const source = String(text || '');
-      const matched = quickActionKeywords.find((entry) => source.includes(entry.keyword));
-      return matched ? matched.action : '';
+      const source = String(text || '').trim();
+      return quickActionHandlers.has(source) ? source : '';
     }
 
     function matchesOpenFileIntent(text) {
@@ -575,10 +565,6 @@
       const explicitFiles = Array.isArray(explicitTaskPayload.files)
         ? explicitTaskPayload.files.filter((file) => file && typeof file === 'object')
         : [];
-      const explicitSelectionText = String(explicitTaskPayload.selection || '').trim();
-      if (!explicitSelectionText && Object.prototype.hasOwnProperty.call(explicitTaskPayload, 'current_file')) {
-        delete explicitTaskPayload.current_file;
-      }
       const explicitFollowupContext = explicitTaskPayload.options && typeof explicitTaskPayload.options === 'object'
         ? explicitTaskPayload.options.followup_context
         : null;
@@ -596,7 +582,7 @@
         selection: explicitTaskPayload.selection || '',
         selectionSource: explicitTaskPayload.selection_source || '',
         followupContext: explicitFollowupContext,
-        batchControl: explicitTaskPayload.options && explicitTaskPayload.options.batch_control,
+        workflowCheckpoint: explicitTaskPayload.options && explicitTaskPayload.options.workflow_checkpoint,
       });
       if (requestOverrides.model_mode) explicitTaskPayload.model_mode = requestOverrides.model_mode;
       if (requestOverrides.model_id) explicitTaskPayload.model_id = requestOverrides.model_id;
@@ -634,6 +620,92 @@
 
     function normalizeTaskPath(value) {
       return String(value || '').trim().replace(/\\/g, '/').toLowerCase();
+    }
+
+    function fileTypeFromPath(value) {
+      const text = String(value || '').trim();
+      const match = /\.([A-Za-z0-9]+)(?:$|[?#])/i.exec(text);
+      return match ? match[1].toLowerCase() : '';
+    }
+
+    function baseNameFromPath(value) {
+      const text = String(value || '').trim().replace(/\\/g, '/');
+      return text ? text.split('/').pop() : '';
+    }
+
+    function currentWorkspaceFile() {
+      const path = String(state.wsSourcePath || state.activeTabPath || state.filePath || '').trim();
+      const name = String(state.fileName || baseNameFromPath(path) || '').trim();
+      const type = String(state.fileType || fileTypeFromPath(path) || '').trim();
+      if (!path && !name) return null;
+      return {
+        path,
+        name,
+        type: type || fileTypeFromPath(path),
+      };
+    }
+
+    function mentionsAttachedFileContext(text) {
+      const source = String(text || '').trim();
+      if (!source) return false;
+      return /(?:附件|附加|已添加|添加的|分析文档|拖入|上传|attached|uploaded)/i.test(source);
+    }
+
+    function sameTaskFile(left, right) {
+      const leftKey = normalizeTaskPath(left && (left.path || left.name) || '');
+      const rightKey = normalizeTaskPath(right && (right.path || right.name) || '');
+      return !!leftKey && !!rightKey && leftKey === rightKey;
+    }
+
+    function fileHasType(file, types) {
+      const wanted = Array.isArray(types) ? types : [types];
+      const canonical = canonicalTaskFileType(file);
+      const raw = String(file && (file.type || file.file_type) || '').trim().toLowerCase().replace(/^\./, '');
+      return wanted.includes(canonical) || wanted.includes(raw);
+    }
+
+    function looksLikeCurrentDocxAnnotationTask(text) {
+      const lowered = String(text || '').trim().toLowerCase();
+      if (!lowered || hasReadOnlyHint(lowered)) return false;
+      return ANNOTATION_TASK_HINTS.some((word) => lowered.includes(word));
+    }
+
+    function explicitWriteTargetPathFromText(text) {
+      const source = String(text || '').trim();
+      if (!source) return '';
+      const filePattern = /((?:[A-Za-z]:[\\/])?[^\s"'<>|:：,，。；;、!?！？()[\]【】]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
+      const writePattern = /(继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|continue|improve|modify|edit|update|save|write|append|insert)/i;
+      const protectPattern = /(不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without).{0,24}(修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)/i;
+      const readSourcePattern = /(读取|阅读|查看|分析|基于|来自|原文|原文件|源文件|输入文件|已添加|source|input|read)/i;
+      const explicitOutputBeforePattern = /(保存为|另存为|输出到|写入到|导出到|save as|export to|write to).{0,80}$/i;
+      const sourceBeforePattern = /(读取|阅读|查看|分析|基于|来自|当前打开|当前文件|原文|原文件|源文件|输入文件|已添加|source|input|read).{0,36}$/i;
+      const candidates = [];
+      let match;
+      while ((match = filePattern.exec(source)) !== null) {
+        const rawPath = String(match[1] || '').replace(/[ \t\r\n,，。；;、!?！？()[\]【】"']+$/g, '');
+        const start = match.index;
+        const end = start + rawPath.length;
+        const before = source.slice(Math.max(0, start - 80), start);
+        const near = source.slice(Math.max(0, start - 80), Math.min(source.length, end + 80));
+        if (
+          hasReadOnlyHint(source)
+          && mentionsAttachedFileContext(near)
+          && !explicitOutputBeforePattern.test(before)
+        ) {
+          continue;
+        }
+        let score = 0;
+        if (writePattern.test(near) && !protectPattern.test(near)) score += 5;
+        if (explicitOutputBeforePattern.test(before)) score += 8;
+        if (sourceBeforePattern.test(before)) score -= 8;
+        if (/(同一个|当前|目标|target|same)/i.test(near)) score += 2;
+        if (/(同一个|当前|目标).{0,16}(docx|word|xlsx|excel|pptx|ppt|pdf|文档|表格|幻灯片|文件)/i.test(near)) score += 5;
+        if (readSourcePattern.test(near)) score -= 2;
+        if (protectPattern.test(before)) score -= 8;
+        if (score > 0) candidates.push({ path: rawPath, score, index: start });
+      }
+      candidates.sort((left, right) => (right.score - left.score) || (left.index - right.index));
+      return candidates.length ? candidates[0].path : '';
     }
 
     function canonicalTaskFileType(file) {
@@ -758,12 +830,6 @@
       const roleHintTarget = inferCompareTargetFromRoleHint(text, files);
       if (roleHintTarget) return roleHintTarget;
 
-      const explicitNameMatches = files.filter((file) => {
-        const baseName = String(file && (file.name || file.path) || '').trim().toLowerCase();
-        return !!baseName && lowered.includes(baseName);
-      });
-      if (explicitNameMatches.length === 1) return explicitNameMatches[0];
-
       const compareTarget = inferCompareAnnotatedTargetFile(text, files);
       if (compareTarget) return compareTarget;
 
@@ -800,6 +866,10 @@
       const overrideOptions = requestOverrides.options && typeof requestOverrides.options === 'object'
         ? Object.assign({}, requestOverrides.options)
         : {};
+      if (!Object.prototype.hasOwnProperty.call(overrideOptions, 'enable_ai_intent_adjudicator')) {
+        overrideOptions.enable_ai_intent_adjudicator = true;
+      }
+      overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';
 
       if (explicitTaskPayload) {
         return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides);
@@ -823,8 +893,30 @@
             target: idx === state._aiTargetFileIdx,
           }))
         : [];
+      const currentFile = files.length > 0 && mentionsAttachedFileContext(text)
+        ? null
+        : currentWorkspaceFile();
 
       let targetFile = files.find((file) => file.target) || null;
+      const explicitTextTargetPath = explicitWriteTargetPathFromText(text);
+      if (explicitTextTargetPath) {
+        const explicitTargetKey = normalizeTaskPath(explicitTextTargetPath);
+        files.forEach((file) => {
+          const fileKey = normalizeTaskPath(file.path || file.name || '');
+          file.target = !!fileKey && fileKey === explicitTargetKey;
+        });
+        targetFile = files.find((file) => file.target) || null;
+        if (!targetFile) {
+          targetFile = {
+            path: explicitTextTargetPath,
+            name: baseNameFromPath(explicitTextTargetPath),
+            type: fileTypeFromPath(explicitTextTargetPath),
+            content: '',
+            target: true,
+          };
+          files.push(targetFile);
+        }
+      }
       const inferredAttachedTargetFile = !targetFile ? inferAttachedWriteTargetFile(text, files) : null;
       if (!targetFile && inferredAttachedTargetFile) {
         const inferredTargetKey = normalizeTaskPath(inferredAttachedTargetFile.path || inferredAttachedTargetFile.name || '');
@@ -834,15 +926,25 @@
         });
         targetFile = files.find((file) => file.target) || null;
       }
+      if (!targetFile && currentFile && fileHasType(currentFile, ['docx', 'doc']) && looksLikeCurrentDocxAnnotationTask(text)) {
+        const existingCurrent = files.find((file) => sameTaskFile(file, currentFile));
+        targetFile = existingCurrent || Object.assign({}, currentFile);
+        targetFile.target = true;
+        if (existingCurrent) {
+          existingCurrent.target = true;
+        } else {
+          files.push(targetFile);
+        }
+      }
       const inferredTargetPath = targetFile
         ? (targetFile.path || targetFile.name || '')
-        : '';
+        : explicitTextTargetPath;
       const inferredFileName = targetFile
         ? (targetFile.name || '')
-        : '';
+        : baseNameFromPath(explicitTextTargetPath);
       const inferredFileType = targetFile
         ? (targetFile.type || targetFile.file_type || '')
-        : '';
+        : fileTypeFromPath(explicitTextTargetPath);
       const followupContext = buildTaskFollowupContext(text);
       if (followupContext && !overrideOptions.followup_context) {
         overrideOptions.followup_context = followupContext;
@@ -853,12 +955,12 @@
       const taskContext = buildTaskContextPackage({
         task: text,
         files,
-        currentFile: null,
+        currentFile,
         targetFile,
         selection: pinnedSelText || '',
         selectionSource: pinnedSelSource || '',
         followupContext: overrideOptions.followup_context || null,
-        batchControl: overrideOptions.batch_control || null,
+        workflowCheckpoint: overrideOptions.workflow_checkpoint || null,
       });
 
       const payload = {
@@ -867,7 +969,8 @@
         selection: pinnedSelText || '',
         selection_source: pinnedSelSource || '',
         files,
-        target_path: targetFile ? (targetFile.path || targetFile.name || '') : '',
+        current_file: currentFile,
+        target_path: inferredTargetPath,
         file_name: inferredFileName,
         file_type: inferredFileType,
         task_context: taskContext,
@@ -881,7 +984,7 @@
 
       if (requestOverrides.model_mode) payload.model_mode = requestOverrides.model_mode;
       if (requestOverrides.model_id) payload.model_id = requestOverrides.model_id;
-      if (taskRequestsStepwiseConfirmation(text) && !payload.options.batch_control) {
+      if (taskRequestsStepwiseConfirmation(text) && !payload.options.workflow_checkpoint) {
         const stepwisePayload = ensureStepwiseResumePayload(payload, text);
         if (stepwisePayload) return stepwisePayload;
       }
@@ -919,6 +1022,134 @@
       const last = state.conversation[state.conversation.length - 1];
       if (last && last.role === 'assistant' && String(last.content || '').trim() === content) return;
       state.conversation.push(Object.assign({ role: 'assistant', content }, payload));
+    }
+
+    function persistTaskTurn(userText, assistantText, metadata, attachments) {
+      if (typeof options.persistTaskTurn !== 'function') return;
+      const content = String(assistantText || '').trim();
+      const request = String(userText || '').trim();
+      if (!request || !content) return;
+      Promise.resolve(options.persistTaskTurn({
+        user: request,
+        assistant: content,
+        attachments: Array.isArray(attachments) ? attachments : [],
+        metadata: metadata || {},
+      })).catch(() => {});
+    }
+
+    function csrfJsonFetch(url, payload) {
+      const request = (window.WA && typeof window.WA._csrfFetch === 'function')
+        ? window.WA._csrfFetch
+        : (typeof window.kotoCsrfFetch === 'function' ? window.kotoCsrfFetch : fetch);
+      return request(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify(payload || {}),
+      });
+    }
+
+    function routeLoadingText(route) {
+      const value = String(route && route.route || '').trim();
+      if (value === 'light_chat') return '已识别为普通对话，正在回答…';
+      if (value === 'web_search') return '已识别为联网查询，正在检索…';
+      if (value === 'open_file') return '已识别为打开文件，正在处理…';
+      return '已识别为文件任务，正在启动任务流程…';
+    }
+
+    function routeTaskDisplay(route) {
+      const value = String(route && route.route || '').trim();
+      if (value === 'light_chat') return '普通对话';
+      if (value === 'web_search') return '联网查询';
+      if (value === 'open_file') return '打开文件';
+      return '文件任务';
+    }
+
+    async function resolveWorkspaceRoute(context) {
+      const ctx = context || {};
+      if (ctx.taskPayload && typeof ctx.taskPayload === 'object') return null;
+      const text = String(ctx.text || '').trim();
+      if (!text) return null;
+      if (ctx.loadingEl) ctx.loadingEl.textContent = '正在识别任务…';
+      const files = Array.isArray(state._aiFileContext)
+        ? state._aiFileContext.filter((file) => file && !file.loading && !file.error)
+        : [];
+      const currentFile = currentWorkspaceFile();
+      const payload = {
+        text,
+        message: text,
+        has_selection: !!String(ctx.pinnedSelText || '').trim(),
+        selection_preview: previewText(ctx.pinnedSelText || '', 1000),
+        files: files.map((file, idx) => ({
+          path: file.path || '',
+          name: file.name || '',
+          type: file.type || file.file_type || '',
+          target: idx === state._aiTargetFileIdx,
+          content_preview: previewText(file.content || '', 1200),
+        })),
+        current_file: currentFile,
+        history: typeof options.getConversationHistory === 'function'
+          ? options.getConversationHistory()
+          : (Array.isArray(state.conversation) ? state.conversation.slice(-8) : []),
+        model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'deepseek',
+        model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : '',
+      };
+      try {
+        const response = await csrfJsonFetch('/api/workspace/ai/route-intent', payload);
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || data.ok === false) return null;
+        return data;
+      } catch (error) {
+        console.warn('[WA route] workspace route failed:', error);
+        return null;
+      }
+    }
+
+    async function runDirectWorkspaceResponse(context, route) {
+      const ctx = context || {};
+      const loadingEl = ctx.loadingEl;
+      if (loadingEl) loadingEl.textContent = routeLoadingText(route);
+      const payload = {
+        text: ctx.text || '',
+        message: ctx.text || '',
+        route: route && route.route,
+        task_type: route && route.task_type,
+        hint: route && route.hint,
+        session_id: typeof options.getSessionId === 'function' ? options.getSessionId() : '',
+        model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'deepseek',
+        model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : '',
+        history: typeof options.getConversationHistory === 'function'
+          ? options.getConversationHistory()
+          : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
+      };
+      try {
+        const response = await csrfJsonFetch('/api/workspace/ai/direct-response', payload);
+        const data = await response.json().catch(() => null);
+        if (!response.ok || !data || data.ok === false) {
+          throw new Error(data && (data.error || data.message) || `HTTP ${response.status}`);
+        }
+        const assistantText = String(data.response || data.text || '').trim() || '已完成。';
+        if (loadingEl) {
+          loadingEl.classList.remove('streaming');
+          loadingEl.textContent = assistantText;
+          loadingEl.dataset.rawText = assistantText;
+        }
+        const taskKind = route && route.route === 'web_search' ? 'web_search' : 'message';
+        const metadata = {
+          task_kind: taskKind,
+          task_type: data.task_type || route && route.task_type || (taskKind === 'web_search' ? 'WEB_SEARCH' : 'CHAT'),
+          route: route && route.route,
+          route_reason: route && route.reason,
+          status: 'done',
+          model: data.model || '',
+        };
+        appendAssistantConversationTurn(assistantText, metadata);
+        persistTaskTurn(ctx.text, assistantText, metadata, []);
+        return { routeId: route && route.route || 'direct-response', assistantText, route };
+      } finally {
+        state.isLoading = false;
+        if (typeof options.setStreamButton === 'function') options.setStreamButton(false);
+      }
     }
 
     function taskCardStepTrace(loadingEl, stepId, limit) {
@@ -1048,17 +1279,27 @@
               loadingEl.textContent = assistantText;
               loadingEl.dataset.rawText = assistantText;
             }
-            appendAssistantConversationTurn(assistantText, { task_kind: 'message', status: 'done' });
+            const metadata = { task_kind: 'message', status: 'done', task_request: context.text || fileToOpen };
+            appendAssistantConversationTurn(assistantText, metadata);
+            persistTaskTurn(context.text || fileToOpen, assistantText, metadata, []);
             return { routeId: 'open-file-intent', assistantText };
           })
-          .catch(() => {
-            const assistantText = `未找到文件 ${fileToOpen}`;
+          .catch((err) => {
+            let assistantText;
+            const errMsg = (err && err.message) ? String(err.message) : String(err || '');
+            if (errMsg.includes('not found') || errMsg.includes('404') || errMsg.includes('不存在') || errMsg.includes('ENOENT')) {
+              assistantText = `未找到文件 ${fileToOpen}`;
+            } else {
+              assistantText = `打开 ${fileToOpen} 失败：${errMsg || '未知错误'}`;
+            }
             if (loadingEl) {
               loadingEl.classList.remove('streaming');
               loadingEl.textContent = assistantText;
               loadingEl.dataset.rawText = assistantText;
             }
-            appendAssistantConversationTurn(assistantText, { task_kind: 'message', status: 'done' });
+            const metadata = { task_kind: 'message', status: 'done', task_request: context.text || fileToOpen };
+            appendAssistantConversationTurn(assistantText, metadata);
+            persistTaskTurn(context.text || fileToOpen, assistantText, metadata, []);
             return { routeId: 'open-file-intent', assistantText };
           })
           .finally(() => {
@@ -1069,18 +1310,39 @@
     });
 
     registerMessageRoute({
-      id: 'whitebox-task',
+      id: 'task-flow',
       priority: -100,
       match() {
         return true;
       },
-      run(context) {
+      async run(context) {
         const loadingEl = context.loadingEl;
-        const streamWhiteboxTask = typeof options.streamWhiteboxTask === 'function'
-          ? options.streamWhiteboxTask
-          : (typeof options.streamFileTask === 'function' ? options.streamFileTask : null);
+        const workspaceRoute = await resolveWorkspaceRoute(context);
+        if (workspaceRoute && workspaceRoute.route && workspaceRoute.route !== 'file_task') {
+          return runDirectWorkspaceResponse(context, workspaceRoute);
+        }
+        if (workspaceRoute) {
+          context.options = Object.assign({}, context.options || {}, {
+            workspace_route_intent: workspaceRoute,
+          });
+          if (loadingEl) loadingEl.textContent = routeLoadingText(workspaceRoute);
+          if (typeof options.applyRouteEvent === 'function') {
+            options.applyRouteEvent({
+              task_type: routeTaskDisplay(workspaceRoute),
+              route_method: workspaceRoute.reason || workspaceRoute.route_source || '',
+              model: workspaceRoute.model || '',
+              model_display: workspaceRoute.model_display || '',
+              message: workspaceRoute.reason || '',
+            });
+          }
+        }
+        const streamWhiteboxTask = typeof options.streamTaskFlow === 'function'
+          ? options.streamTaskFlow
+          : (typeof options.streamWhiteboxTask === 'function'
+            ? options.streamWhiteboxTask
+            : (typeof options.streamFileTask === 'function' ? options.streamFileTask : null));
         if (typeof streamWhiteboxTask !== 'function') {
-          const assistantText = '白盒任务渲染器未加载，请刷新后重试。';
+          const assistantText = '任务流程运行时未加载，请刷新后重试。';
           if (loadingEl) {
             loadingEl.classList.remove('streaming');
             loadingEl.textContent = assistantText;
@@ -1088,7 +1350,7 @@
           }
           state.isLoading = false;
           if (typeof options.setStreamButton === 'function') options.setStreamButton(false);
-          return Promise.resolve({ routeId: 'whitebox-task', assistantText });
+          return Promise.resolve({ routeId: 'task-flow', assistantText });
         }
 
         const ctrl = new AbortController();
@@ -1129,7 +1391,8 @@
         }))
           .then((streamResult) => {
             const assistantText = finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, streamResult, 'done', false);
-            return { routeId: 'whitebox-task', assistantText, payload, result: streamResult };
+            persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || []);
+            return { routeId: 'task-flow', assistantText, payload, result: streamResult };
           })
           .catch((error) => {
             const aborted = error && error.name === 'AbortError';
@@ -1145,7 +1408,10 @@
               summary: assistantText,
               status: aborted ? 'cancelled' : 'error',
             }, aborted ? 'cancelled' : 'error', true);
-            return { routeId: 'whitebox-task', assistantText, error };
+            persistTaskTurn(context.text, assistantText, Object.assign({
+              status: aborted ? 'cancelled' : 'error',
+            }, taskTurnMetadataFromLoadingEl(loadingEl)), []);
+            return { routeId: 'task-flow', assistantText, error };
           })
           .finally(() => {
             if (state._streamAbortCtrl === ctrl) state._streamAbortCtrl = null;
@@ -1158,7 +1424,6 @@
     return {
       registerMessageRoute,
       registerQuickActionHandler,
-      registerQuickActionKeyword,
       setDefaultQuickActionHandler,
       dispatchMessage,
       dispatchQuickAction,

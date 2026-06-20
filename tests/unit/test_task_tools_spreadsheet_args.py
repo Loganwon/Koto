@@ -2,6 +2,7 @@ import json
 import os
 import stat
 import base64
+from pathlib import Path
 
 
 def test_read_sheet_data_accepts_string_max_rows(tmp_path):
@@ -116,6 +117,52 @@ def test_insert_excel_as_docx_table_accepts_string_max_rows(tmp_path):
     saved = Document(str(target_path))
     assert len(saved.tables) == 1
     assert saved.tables[0].cell(1, 0).text == "杭州新汇鑫光电有限公司"
+
+
+def test_insert_excel_as_docx_table_sorts_and_selects_columns_for_top_n(tmp_path):
+    import openpyxl
+    from docx import Document
+
+    from app.core.agent.task_tools import insert_excel_as_docx_table
+
+    workbook_path = tmp_path / "sales.xlsx"
+    target_path = tmp_path / "target.docx"
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "Sales"
+    sheet.append(["Customer", "Region", "Revenue", "Margin", "Risk"])
+    sheet.append(["Northwind Labs", "NA", 128000, 0.34, "Security review"])
+    sheet.append(["Aurora Retail", "EU", 96000, 0.28, "Payment terms"])
+    sheet.append(["Blue Harbor", "APAC", 142000, 0.31, "Capacity"])
+    sheet.append(["Delta Foods", "EU", 118000, 0.37, "Upsell"])
+    workbook.save(workbook_path)
+
+    payload = json.loads(insert_excel_as_docx_table(
+        str(workbook_path),
+        str(target_path),
+        sheet_name="Sales",
+        table_title="Top 3 Customers by Revenue",
+        max_rows="3",
+        sort_by="Revenue",
+        sort_order="desc",
+        columns='["Customer", "Region", "Revenue", "Margin"]',
+    ))
+
+    assert payload["success"] is True
+    assert payload["rows_written"] == 3
+    assert payload["columns_written"] == 4
+    assert payload["sort_by"] == "Revenue"
+    assert payload["selected_columns"] == ["Customer", "Region", "Revenue", "Margin"]
+
+    saved = Document(str(target_path))
+    table = saved.tables[0]
+    assert [table.cell(row, 0).text for row in range(1, 4)] == [
+        "Blue Harbor",
+        "Northwind Labs",
+        "Delta Foods",
+    ]
+    assert len(table.columns) == 4
 
 
 def test_insert_excel_as_docx_table_falls_back_from_generic_sheet1_for_single_sheet_workbook(tmp_path):
@@ -418,6 +465,25 @@ def test_insert_image_into_docx_appends_picture_and_caption(tmp_path):
     assert "财务预测图表" in texts
     assert "收入与利润趋势" in texts
     assert len(saved.inline_shapes) == 1
+
+
+def test_run_python_code_materializes_sandbox_image_artifacts():
+    from app.core.agent.task_tools import run_python_in_sandbox
+
+    png_b64 = (
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
+    )
+    result = run_python_in_sandbox(
+        "import base64, pathlib\n"
+        f"pathlib.Path('chart_expense_structure.png').write_bytes(base64.b64decode('{png_b64}'))\n"
+        "print('chart ready')\n"
+    )
+
+    generated_paths = result["generated_file_paths"]
+    assert "chart_expense_structure.png" in generated_paths
+    assert Path(generated_paths["chart_expense_structure.png"]).exists()
+    assert result["generated_files"][0]["path"] == generated_paths["chart_expense_structure.png"]
+    assert "chart_expense_structure.png" in result["files"]
 
 
 def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(tmp_path, monkeypatch):

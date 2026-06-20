@@ -34,6 +34,7 @@ def test_task_agent_call_llm_uses_extended_file_task_timeout(monkeypatch):
 
 def test_task_agent_get_provider_uses_ollama_for_local_mode(monkeypatch):
     from app.core.agent.task_agent import TaskAgent
+    import app.core.llm.ollama_llm_provider as ollama_llm_provider
 
     captured = {}
 
@@ -41,10 +42,7 @@ def test_task_agent_get_provider_uses_ollama_for_local_mode(monkeypatch):
         def __init__(self, model=None):
             captured["model"] = model
 
-    monkeypatch.setattr(
-        "app.core.llm.ollama_llm_provider.OllamaLLMProvider",
-        FakeOllamaProvider,
-    )
+    monkeypatch.setattr(ollama_llm_provider, "OllamaLLMProvider", FakeOllamaProvider)
 
     agent = TaskAgent(model_id="gemini-3-pro-preview")
     provider = agent._get_provider({"model_mode": "local"})

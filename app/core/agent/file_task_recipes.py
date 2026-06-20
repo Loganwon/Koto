@@ -53,9 +53,26 @@ class FileTaskRecipeMatch:
 _CHART_PATTERN = re.compile(r"(?:图表|做成图|绘图|画图|画.{0,4}图|可视化|图片|chart|plot|graph|image)", re.IGNORECASE)
 _PROBLEM_PATTERN = re.compile(r"(?:问题|风险|缺陷|异常|分析|审计|检查|issue|risk|problem|analy[sz]e|audit)", re.IGNORECASE)
 _TABLE_PATTERN = re.compile(r"(?:表格|工作表|数据表|sheet|table|spreadsheet)", re.IGNORECASE)
+_TABLE_PRESERVE_PATTERN = re.compile(
+    r"(?:保留|保持).{0,24}(?:已有|现有|原有|当前).{0,16}(?:表格|工作表|数据表|table).{0,16}(?:不变|不修改|不要改|原样)"
+    r"|(?:preserve|keep).{0,32}(?:existing|current|original).{0,24}(?:table|sheet|spreadsheet)",
+    re.IGNORECASE,
+)
+_TABLE_OUTPUT_PATTERN = re.compile(
+    r"(?:把|将|加入|写入|插入|添加|放入|复制|生成|创建|输出|包含|包括|附上).{0,40}(?:表格|工作表|数据表|sheet|table|spreadsheet)"
+    r"|(?:表格|工作表|数据表|sheet|table|spreadsheet).{0,40}(?:加入|写入|插入|添加|追加|放入|复制|生成|创建|输出|包含|包括|附上)"
+    r"|(?:add|insert|copy|include|write|put|create|generate|output).{0,40}(?:table|sheet|spreadsheet)",
+    re.IGNORECASE,
+)
 _SUMMARY_PATTERN = re.compile(r"(?:总结|摘要|概括|提炼|要点|summary|summari[sz]e|brief)", re.IGNORECASE)
 _TRANSLATION_PATTERN = re.compile(r"(?:翻译|译成|译为|translate|translation)", re.IGNORECASE)
-_POLISH_PATTERN = re.compile(r"(?:润色|改写|重写|优化表达|polish|rewrite|humanise|humanize)", re.IGNORECASE)
+_POLISH_PATTERN = re.compile(
+    r"(?:请|帮我|帮忙|需要|要求|直接|对|把|将|给).{0,20}(?:润色|改写|重写|优化表达)"
+    r"|(?:润色|改写|重写|优化表达).{0,36}(?:文档|文件|文章|内容|段落|文本|表达|语句|译稿|docx|word|写回|保存)"
+    r"|(?:please|help|need|directly|can you).{0,24}(?:polish|rewrite|humanise|humanize)"
+    r"|(?:polish|rewrite|humanise|humanize).{0,36}(?:document|file|content|text|paragraph|draft|translation|write back|save)",
+    re.IGNORECASE,
+)
 _PPT_WRITE_PATTERN = re.compile(r"(?:新增|添加|加入|生成|写入|放入|插入|补充|扩写|更新|修改|编辑|润色|优化|页|幻灯片|add|append|insert|write|update|edit|slide)", re.IGNORECASE)
 _PPT_DESIGN_PATTERN = re.compile(
     r"(?:"
@@ -66,6 +83,52 @@ _PPT_DESIGN_PATTERN = re.compile(
 )
 _REPORT_PATTERN = re.compile(r"(?:报告|结论|清单|analysis|\breport\b(?!\s*\.))", re.IGNORECASE)
 _CONTRACT_PATTERN = re.compile(r"(?:合同|协议|条款|contract|agreement|msa|sow|terms?)", re.IGNORECASE)
+_DOCX_TEMPLATE_FILL_PATTERN = re.compile(
+    r"(?:模板|占位符|字段|表单|套打|填充|填写|填入|template|placeholder|mail merge|form).{0,48}(?:docx|word|文档|合同|模板)"
+    r"|(?:docx|word|文档|合同|模板).{0,48}(?:模板|占位符|字段|表单|套打|填充|填写|填入|template|placeholder|mail merge|form)",
+    re.IGNORECASE,
+)
+_DOCX_PDF_EXPORT_PATTERN = re.compile(
+    r"(?:docx|doc|word|文档).{0,48}(?:转成|转换为|导出为|另存为|保存为|输出为|convert|export|save as).{0,24}(?:pdf)"
+    r"|(?:转成|转换为|导出为|另存为|保存为|输出为|convert|export|save as).{0,48}(?:pdf).{0,32}(?:docx|doc|word|文档)?",
+    re.IGNORECASE,
+)
+_FILE_FORMAT_CONVERT_PATTERN = re.compile(
+    r"(?:转换|转成|转换为|导出为|另存为|保存为|输出为|convert|export|save as).{0,64}"
+    r"(?:pdf|docx?|word|txt|text|md|markdown|html|xlsx?|excel|csv|pptx?|powerpoint|png|jpe?g|webp|bmp|gif)"
+    r"|(?:pdf|docx?|word|txt|text|md|markdown|html|xlsx?|excel|csv|pptx?|powerpoint|png|jpe?g|webp|bmp|gif).{0,64}"
+    r"(?:格式|文件|file|format).{0,24}(?:转换|转成|导出|另存|保存|输出|convert|export|save)",
+    re.IGNORECASE,
+)
+_DOCX_CLEAR_REVIEW_PATTERN = re.compile(
+    r"(?:清除|清空|删除|移除|去掉|接受|accept|remove|clear|delete).{0,32}(?:批注|注释|评论|修订|审阅|comments?|annotations?|tracked changes|revisions?)"
+    r"|(?:批注|注释|评论|修订|审阅|comments?|annotations?|tracked changes|revisions?).{0,32}(?:清除|清空|删除|移除|去掉|接受|accept|remove|clear|delete)",
+    re.IGNORECASE,
+)
+_SPREADSHEET_WRITE_PATTERN = re.compile(
+    r"(?:写入|填入|填充|更新|修改|设置|替换|录入|write|fill|update|set|replace).{0,40}(?:单元格|表格|工作表|sheet|cell|cells|xlsx|excel)"
+    r"|(?:单元格|表格|工作表|sheet|cell|cells|xlsx|excel).{0,40}(?:写入|填入|填充|更新|修改|设置|替换|录入|write|fill|update|set|replace)",
+    re.IGNORECASE,
+)
+_SPREADSHEET_CELL_REF_WRITE_PATTERN = re.compile(
+    r"(?:写入|填入|填充|更新|修改|设置|替换|录入|write|fill|update|set|replace).{0,60}[A-Z]{1,3}\d{1,7}",
+    re.IGNORECASE,
+)
+_TEXT_SELECTION_REPLACE_PATTERN = re.compile(
+    r"(?:选区|选中文本|这一段|这段|selected text|selection).{0,40}(?:替换|改写|润色|翻译|写回|replace|rewrite|polish|translate|write back)"
+    r"|(?:替换|改写|润色|翻译|写回|replace|rewrite|polish|translate|write back).{0,40}(?:选区|选中文本|这一段|这段|selected text|selection)",
+    re.IGNORECASE,
+)
+_FILE_COPY_PATTERN = re.compile(
+    r"(?:复制|拷贝|另存一份|创建副本|copy|duplicate).{0,48}(?:文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv|json|file)"
+    r"|(?:文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv|json|file).{0,48}(?:复制|拷贝|另存一份|创建副本|copy|duplicate)",
+    re.IGNORECASE,
+)
+_CROSS_FILE_EXTRACT_PATTERN = re.compile(
+    r"(?:提取|抽取|摘取|extract).{0,64}(?:到|写入|保存到|输出到|into|to).{0,40}(?:文件|文档|表格|docx?|xlsx?|pptx?|txt|md|csv|json|file)"
+    r"|(?:从|from).{0,48}(?:提取|抽取|摘取|extract).{0,64}(?:到|写入|保存到|输出到|into|to)",
+    re.IGNORECASE,
+)
 _DOCX_WRITE_PATTERN = re.compile(r"(?:加入|写入|插入|添加|放入|append|insert|write).{0,16}(?:docx|word|文档)", re.IGNORECASE)
 _DOCX_CREATE_PATTERN = re.compile(r"(?:创建|新建|生成|产出|输出|记录到|整理成|create|generate|output|record|write).{0,20}(?:docx|word|文档)", re.IGNORECASE)
 _STEPWISE_PATTERN = re.compile(
@@ -73,6 +136,23 @@ _STEPWISE_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _LONG_DOCUMENT_PATTERN = re.compile(r"(?:非常长|很长|大量内容|整篇|全文|长文|long|large)", re.IGNORECASE)
+_META_KEYWORD_CLAUSE_PATTERN = re.compile(
+    r"(?:任务描述|提示词|这句话|本句|文本|需求).{0,24}(?:故意|刻意)?(?:包含|包括|提到|写了).{0,100}(?:这些词|这些字|关键词|词语|字样)"
+    r"|(?:prompt|task|request|sentence).{0,32}(?:intentionally|deliberately)?.{0,24}(?:contains?|mentions?).{0,100}(?:keywords?|words?|phrases?)",
+    re.IGNORECASE,
+)
+_KEYWORD_ROUTE_NEGATION_PATTERN = re.compile(
+    r"(?:不要|别|不得|不应|不能).{0,80}(?:关键词|快捷动作|路由|分流|触发|shortcut|keyword|route)"
+    r"|(?:do not|don't|dont|without|should not|must not).{0,80}(?:keyword|shortcut|route|trigger)",
+    re.IGNORECASE,
+)
+
+
+def _semantic_task_text(task: str) -> str:
+    text = str(task or "")
+    text = _META_KEYWORD_CLAUSE_PATTERN.sub(" ", text)
+    text = _KEYWORD_ROUTE_NEGATION_PATTERN.sub(" ", text)
+    return text
 
 
 def request_file_types(files: Sequence[FileTaskFile]) -> set[str]:
@@ -102,7 +182,7 @@ def request_target_file_type(request: FileTaskRequest, files: Sequence[FileTaskF
 
 
 def semantic_markers(task: str, *, file_types: set[str] | None = None, target_file_type: str = "") -> Dict[str, bool]:
-    text = str(task or "")
+    text = _semantic_task_text(str(task or ""))
     lowered = text.lower()
     known_file_types = set(file_types or set())
     docx_write_phrase = bool(_DOCX_WRITE_PATTERN.search(text))
@@ -110,17 +190,36 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
     mentions_docx = any(marker in lowered for marker in ("docx", "word", "文档"))
     has_docx_target = target_file_type in {"docx", "doc"} or "docx" in known_file_types or docx_write_phrase or docx_create_phrase
     has_ppt = "pptx" in known_file_types or any(marker in lowered for marker in ("ppt", "pptx", "幻灯片", "演示文稿", "slides", "presentation", "deck"))
+    table_mentioned = bool(_TABLE_PATTERN.search(text))
+    table_preserve_only = bool(_TABLE_PRESERVE_PATTERN.search(text)) and not bool(
+        _TABLE_OUTPUT_PATTERN.search(text)
+    )
+    financial_request = bool(
+        re.search(r"(?:财务|财务模型|预测|报表|收入|利润|销售|台账|流水)", text, re.IGNORECASE)
+        or re.search(r"\b(?:financial|finance|sales|revenue|p&l|p/l)\b", lowered)
+    )
     markers = {
         "chart_request": bool(_CHART_PATTERN.search(text)),
         "problem_analysis_request": bool(_PROBLEM_PATTERN.search(text)),
-        "financial_request": any(marker in lowered for marker in ("财务", "预测", "financial", "模型", "报表", "收入", "利润", "销售", "台账", "流水", "sales", "revenue", "p&l", "pl")),
-        "table_request": bool(_TABLE_PATTERN.search(text)),
+        "financial_request": financial_request,
+        "table_request": table_mentioned and not table_preserve_only,
         "summary_request": bool(_SUMMARY_PATTERN.search(text)),
         "translation_request": bool(_TRANSLATION_PATTERN.search(text)),
         "polish_request": bool(_POLISH_PATTERN.search(text)),
         "ppt_request": has_ppt,
         "ppt_slide_write_request": has_ppt and bool(_PPT_WRITE_PATTERN.search(text)),
         "ppt_design_request": has_ppt and bool(_PPT_DESIGN_PATTERN.search(text)),
+        "docx_template_fill_request": bool(_DOCX_TEMPLATE_FILL_PATTERN.search(text)),
+        "docx_pdf_export_request": bool(_DOCX_PDF_EXPORT_PATTERN.search(text)),
+        "file_format_convert_request": bool(_FILE_FORMAT_CONVERT_PATTERN.search(text)),
+        "docx_clear_review_request": bool(_DOCX_CLEAR_REVIEW_PATTERN.search(text)),
+        "spreadsheet_write_request": bool(
+            _SPREADSHEET_WRITE_PATTERN.search(text)
+            or _SPREADSHEET_CELL_REF_WRITE_PATTERN.search(text)
+        ),
+        "text_selection_replace_request": bool(_TEXT_SELECTION_REPLACE_PATTERN.search(text)),
+        "file_copy_request": bool(_FILE_COPY_PATTERN.search(text)),
+        "cross_file_extract_request": bool(_CROSS_FILE_EXTRACT_PATTERN.search(text)),
         "docx_target": has_docx_target,
         "docx_write_phrase": docx_write_phrase,
         "docx_create_phrase": docx_create_phrase,
@@ -278,6 +377,137 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         ),
     ),
     FileTaskRecipe(
+        id="multi_file_compare_readonly",
+        task_family="compare",
+        write_operation_kind="compare",
+        read_operation_kind="compare",
+        priority=78,
+        any_file_types=("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        required_markers=("docx_compare_request",),
+        requires_write=False,
+        matched_capabilities=("compare_files",),
+        plan_steps=(
+            {"id": "compare", "title": "对比文件", "description": "读取多份文件并输出结构化差异、相同点和重点结论。"},
+            {"id": "answer", "title": "返回对比结论", "description": "只在对话中回答，不写回文件，除非用户明确要求产出文件。"},
+        ),
+        success_criteria=("只读对比任务必须调用 compare_files 或读取明确文件上下文", "不得在未请求写入时修改源文件"),
+    ),
+    FileTaskRecipe(
+        id="docx_template_fill",
+        task_family="template_fill",
+        write_operation_kind="fill_template",
+        priority=116,
+        any_file_types=("docx", "doc"),
+        target_file_types=("docx", "doc"),
+        required_markers=("docx_template_fill_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=("read_docx_content", "fill_docx_template"),
+        plan_steps=(
+            {"id": "inspect", "title": "识别模板字段", "description": "读取 DOCX 模板，确认需要替换的占位符和字段来源。"},
+            {"id": "fill", "title": "填充 Word 模板", "description": "调用模板填充工具替换真实 DOCX 占位符，可按用户要求写入新文件或原文件。"},
+            {"id": "check", "title": "核验填充结果", "description": "确认目标 DOCX 产生字段替换差异和真实文件变更。"},
+        ),
+        success_criteria=("必须调用 fill_docx_template 填充真实 Word 模板", "目标 DOCX 必须产生占位符替换差异"),
+        quality_gates=(
+            {
+                "criterion": "docx_template_fill_replaces_placeholders",
+                "operation": "fill_docx_template",
+                "metric": "placeholders_replaced",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "Word 模板填充必须替换至少 1 个占位符；当前替换数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="docx_pdf_export",
+        task_family="convert",
+        write_operation_kind="convert",
+        priority=112,
+        any_file_types=("docx", "doc"),
+        required_markers=("docx_pdf_export_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=("convert_docx_to_pdf",),
+        plan_steps=(
+            {"id": "convert", "title": "转换 Word 为 PDF", "description": "使用本地可用转换器将 DOCX/DOC 导出为 PDF。"},
+            {"id": "check", "title": "核验 PDF 输出", "description": "确认产生 PDF 文件变更或明确报告本地转换器缺失。"},
+        ),
+        success_criteria=("必须调用 convert_docx_to_pdf 生成 PDF 文件", "如果本机缺少转换器，必须返回可恢复的阻塞原因"),
+        quality_gates=(
+            {
+                "criterion": "docx_pdf_export_uses_converter",
+                "operation": "convert_docx_to_pdf",
+                "priority": "critical",
+                "detail": "Word 转 PDF 任务必须调用 DOCX 转 PDF 工具；当前操作：{operations}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="docx_clear_review_marks",
+        task_family="review_cleanup",
+        write_operation_kind="clear_review_marks",
+        priority=110,
+        any_file_types=("docx", "doc"),
+        target_file_types=("docx", "doc"),
+        required_markers=("docx_clear_review_request", "docx_target"),
+        requires_write=True,
+        matched_capabilities=("clear_docx_review_marks",),
+        plan_steps=(
+            {"id": "clear", "title": "清除审阅标记", "description": "按用户要求清除 Word 批注、修订或全部审阅痕迹。"},
+            {"id": "check", "title": "核验清理结果", "description": "确认 DOCX 已执行清理工具并返回清理范围。"},
+        ),
+        success_criteria=("清除批注/修订任务必须使用 clear_docx_review_marks", "不得误调用 annotate_file 生成新批注"),
+        quality_gates=(
+            {
+                "criterion": "docx_clear_review_uses_cleanup_tool",
+                "operation": "clear_docx_review_marks",
+                "priority": "critical",
+                "detail": "清除 Word 审阅标记必须调用清理工具；当前操作：{operations}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="file_format_convert",
+        task_family="convert",
+        write_operation_kind="convert",
+        priority=82,
+        any_file_types=(
+            "docx",
+            "doc",
+            "pdf",
+            "txt",
+            "md",
+            "markdown",
+            "xlsx",
+            "xls",
+            "csv",
+            "pptx",
+            "ppt",
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "bmp",
+            "gif",
+        ),
+        required_markers=("file_format_convert_request",),
+        requires_write=True,
+        matched_capabilities=("convert_file",),
+        plan_steps=(
+            {"id": "convert", "title": "转换文件格式", "description": "按用户指定目标格式调用通用转换工具生成输出文件。"},
+            {"id": "check", "title": "核验转换输出", "description": "确认产生目标格式文件，或明确报告不支持的格式组合/本地依赖缺失。"},
+        ),
+        success_criteria=("必须调用 convert_file 生成目标格式文件", "不支持的格式组合必须返回可恢复的阻塞原因"),
+        quality_gates=(
+            {
+                "criterion": "file_format_convert_uses_converter",
+                "operation": "convert_file",
+                "priority": "critical",
+                "detail": "格式转换任务必须调用通用转换工具；当前操作：{operations}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
         id="pdf_docx_review_bridge",
         task_family="annotate",
         write_operation_kind="annotate",
@@ -365,7 +595,7 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         task_family="financial_report",
         write_operation_kind="analyze_visualize_write",
         read_operation_kind="analyze_visualize",
-        execution_mode="financial_xlsx_docx_report",
+        execution_mode="generic_tool_loop",
         priority=120,
         required_file_types=("xlsx", "docx"),
         target_file_types=("docx", "doc"),
@@ -439,6 +669,67 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
                 "minimum": 1,
                 "priority": "critical",
                 "detail": "用户要求图表/图片进入 Word；当前图片写入数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="spreadsheet_cell_write",
+        task_family="spreadsheet",
+        write_operation_kind="write_cells",
+        priority=76,
+        any_file_types=("xlsx", "xlsm", "csv"),
+        target_file_types=("xlsx", "xlsm", "csv"),
+        required_markers=("spreadsheet_write_request",),
+        forbidden_markers=("chart_request", "docx_report_request"),
+        requires_write=True,
+        matched_capabilities=("read_sheet_data", "write_sheet_data"),
+        success_criteria=("表格修改任务必须写入真实单元格", "目标表格产生 cells_written > 0 的 file.changed"),
+        quality_gates=(
+            {
+                "criterion": "spreadsheet_write_has_cells",
+                "operation": "write_sheet_data",
+                "metric": "cells_written",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "表格写入任务必须更新至少 1 个单元格；当前写入数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="workspace_file_copy",
+        task_family="workspace",
+        write_operation_kind="copy_file",
+        priority=74,
+        any_file_types=("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        required_markers=("file_copy_request",),
+        requires_write=True,
+        matched_capabilities=("copy_file",),
+        success_criteria=("文件复制任务必须调用 copy_file 产生目标副本", "不得把复制任务降级为只读说明"),
+        quality_gates=(
+            {
+                "criterion": "workspace_file_copy_uses_copy_tool",
+                "operation": "copy_file",
+                "priority": "critical",
+                "detail": "文件复制任务必须调用 copy_file；当前操作：{operations}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="cross_file_extract_to_file",
+        task_family="extract",
+        write_operation_kind="extract_to_file",
+        priority=73,
+        any_file_types=("docx", "xlsx", "pptx", "pdf", "txt", "md", "csv", "json"),
+        required_markers=("cross_file_extract_request",),
+        requires_write=True,
+        matched_capabilities=("parse_file_to_text", "extract_to_file"),
+        success_criteria=("跨文件提取任务必须把抽取结果写入目标文件", "不得只在对话中输出而不落盘"),
+        quality_gates=(
+            {
+                "criterion": "cross_file_extract_uses_write_tool",
+                "operation": "extract_to_file",
+                "priority": "critical",
+                "detail": "跨文件提取任务必须调用 extract_to_file；当前操作：{operations}。",
             },
         ),
     ),
@@ -524,6 +815,27 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         ),
     ),
     FileTaskRecipe(
+        id="text_selection_replace",
+        task_family="text_edit",
+        write_operation_kind="replace_selection",
+        priority=68,
+        any_file_types=("txt", "md", "text", "csv", "json", "py", "js", "html", "css"),
+        required_markers=("text_selection_replace_request",),
+        requires_write=True,
+        matched_capabilities=("read_file_range", "replace_file_selection"),
+        success_criteria=("文本选区修改必须精确替换用户选中的原文", "目标文本文件产生 replacements_made > 0 的 file.changed"),
+        quality_gates=(
+            {
+                "criterion": "text_selection_replace_has_replacement",
+                "operation": "replace_file_selection",
+                "metric": "replacements_made",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "文本选区替换必须至少替换 1 处原文；当前替换数：{actual}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
         id="long_docx_stepwise_polish_writeback",
         task_family="polish",
         write_operation_kind="stepwise_polish_write",
@@ -586,6 +898,16 @@ def recipe_matches(
     file_types = request_file_types(files)
     target_type = request_target_file_type(request, files)
     markers = semantic_markers(request.task, file_types=file_types, target_file_type=target_type)
+
+    # Boost stepwise resume: if followup_context signals a stepwise continuation,
+    # force the stepwise markers to be present
+    options = request.options if isinstance(request.options, dict) else {}
+    followup = options.get("followup_context") if isinstance(options.get("followup_context"), dict) else {}
+    if followup.get("kind") == "stepwise_task_resume":
+        markers["stepwise_confirmation_request"] = True
+        markers["long_document_request"] = True
+        markers["summary_request"] = True
+
     matches: List[FileTaskRecipeMatch] = []
     for recipe in TASK_RECIPES:
         if recipe.requires_write and not write_intent:

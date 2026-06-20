@@ -4,10 +4,10 @@
 """
 MCP routes for Koto.
 
-Two purposes:
-- REST diagnostics for Koto's configured outbound MCP servers.
-- A small HTTP JSON-RPC MCP endpoint that external coding agents can use to
-  inspect Koto without needing to know Koto's internal Python modules.
+Supports three transports for external coding agents:
+  - Streamable HTTP (POST JSON-RPC, preferred)
+  - SSE transport   (GET SSE stream + POST JSON-RPC)
+  - REST diagnostics for Koto's configured outbound MCP servers
 """
 
 from __future__ import annotations
@@ -15,10 +15,12 @@ from __future__ import annotations
 import json
 import logging
 import os
+import time
+import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict
 
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.core.agent.koto_supervision import (
     agent_tool_inventory,
@@ -29,12 +31,18 @@ from app.core.agent.koto_supervision import (
     run_tests,
     search_code,
     test_status,
+    project_root,
+    resolve_project_path,
 )
 from app.core.agent.mcp_manager import get_mcp_status, reload_mcp_runtime
 
 logger = logging.getLogger(__name__)
 
 mcp_bp = Blueprint("mcp", __name__, url_prefix="/api/mcp")
+
+# ── SSE session store ──────────────────────────────────────────────────
+_sse_sessions: Dict[str, Dict[str, Any]] = {}
+_SESSION_TTL = 300  # 5 min idle timeout
 
 
 def _project_root() -> Path:
@@ -134,6 +142,90 @@ def _koto_project_overview(**_: Any) -> Dict[str, Any]:
             "tests",
         ],
     }
+
+
+def _koto_write_file(path: str = "", content: str = "", **_: Any) -> Dict[str, Any]:
+    try:
+        resolved = resolve_project_path(path)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    try:
+        resolved.parent.mkdir(parents=True, exist_ok=True)
+        resolved.write_text(content, encoding="utf-8")
+        return {"success": True, "path": str(resolved), "written": len(content)}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def _koto_read_file(path: str = "", max_chars: int = 50000, **_: Any) -> Dict[str, Any]:
+    try:
+        resolved = resolve_project_path(path)
+    except ValueError as exc:
+        return {"success": False, "error": str(exc)}
+    try:
+        text = resolved.read_text(encoding="utf-8", errors="replace")
+        limit = max(200, min(int(max_chars or 50000), 100000))
+        result = text[:limit]
+        return {
+            "success": True,
+            "path": str(resolved),
+            "content": result,
+            "truncated": len(text) > limit,
+            "total_chars": len(text),
+        }
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def _koto_run_shell(
+    command: str = "",
+    timeout: int = 30,
+    workdir: str = "",
+    **_: Any,
+) -> Dict[str, Any]:
+    import subprocess as _sp
+    root = project_root()
+    cwd = root / workdir if workdir else root
+    if not cwd.exists():
+        cwd = root
+    try:
+        proc = _sp.run(
+            command,
+            shell=True,  # nosec B602 — MCP server commands come from vetted configuration
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+            timeout=max(5, min(int(timeout or 30), 120)),
+        )
+        return {
+            "success": proc.returncode == 0,
+            "returncode": proc.returncode,
+            "stdout": (proc.stdout or "")[:20000],
+            "stderr": (proc.stderr or "")[:5000],
+        }
+    except _sp.TimeoutExpired:
+        return {"success": False, "error": f"Command timed out after {timeout}s"}
+    except Exception as exc:
+        return {"success": False, "error": str(exc)}
+
+
+def _koto_task_logs(tail: int = 20, **_: Any) -> Dict[str, Any]:
+    import glob as _glob
+    root = project_root()
+    log_dir = root / "logs"
+    entries = []
+    try:
+        for log_path in sorted(_glob.glob(str(log_dir / "*.log")), reverse=True)[:3]:
+            try:
+                lines = []
+                with open(log_path, encoding="utf-8", errors="replace") as fh:
+                    lines = [line.rstrip("\n") for line in fh][-int(tail):]
+                entries.append({"file": str(Path(log_path).name), "lines": lines})
+            except Exception:
+                pass
+    except Exception:
+        pass
+    return {"success": True, "log_dir": str(log_dir), "entries": entries}
 
 
 _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
@@ -307,58 +399,243 @@ _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
         ),
         test_status,
     ),
+    "koto_write_file": (
+        _tool_schema(
+            "koto_write_file",
+            "Write content to a file inside the Koto project. The path must be relative to the project root.",
+            {
+                "path": {
+                    "type": "string",
+                    "description": "Project-relative file path to write.",
+                },
+                "content": {
+                    "type": "string",
+                    "description": "File content to write (UTF-8).",
+                },
+            },
+            required=["path", "content"],
+            read_only=False,
+        ),
+        _koto_write_file,
+    ),
+    "koto_read_file": (
+        _tool_schema(
+            "koto_read_file",
+            "Read a file inside the Koto project, up to 100000 chars.",
+            {
+                "path": {
+                    "type": "string",
+                    "description": "Project-relative file path to read.",
+                },
+                "max_chars": {
+                    "type": "integer",
+                    "minimum": 200,
+                    "maximum": 100000,
+                    "description": "Maximum characters to return.",
+                },
+            },
+            required=["path"],
+        ),
+        _koto_read_file,
+    ),
+    "koto_run_shell": (
+        _tool_schema(
+            "koto_run_shell",
+            "Run a shell command in the Koto project root. Use this to run tests, lint, build, or git operations.",
+            {
+                "command": {
+                    "type": "string",
+                    "description": "Shell command to execute.",
+                },
+                "timeout": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 120,
+                    "description": "Timeout in seconds.",
+                },
+                "workdir": {
+                    "type": "string",
+                    "description": "Project-relative working directory for the command.",
+                },
+            },
+            required=["command"],
+            read_only=False,
+        ),
+        _koto_run_shell,
+    ),
+    "koto_task_logs": (
+        _tool_schema(
+            "koto_task_logs",
+            "Return recent Koto log tails to inspect agent task execution and errors.",
+            {
+                "tail": {
+                    "type": "integer",
+                    "minimum": 5,
+                    "maximum": 200,
+                    "description": "Number of lines to fetch from the end of each log file.",
+                }
+            },
+        ),
+        _koto_task_logs,
+    ),
 }
 
 
+# ── CORS helpers ────────────────────────────────────────────────────────
+
+
+def _cors_headers(origin: str | None = None) -> Dict[str, str]:
+    origin = origin or request.headers.get("Origin", "")
+    if not origin:
+        return {}
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Mcp-Session-Id, X-Request-ID",
+        "Access-Control-Expose-Headers": "Mcp-Session-Id, X-Request-ID",
+        "Access-Control-Allow-Credentials": "true",
+    }
+
+
+@mcp_bp.route("", methods=["OPTIONS"])
+@mcp_bp.route("/tools", methods=["OPTIONS"])
+@mcp_bp.route("/reload", methods=["OPTIONS"])
+@mcp_bp.route("/status", methods=["OPTIONS"])
+def _mcp_options(**_kw: Any) -> Response:
+    origin = request.headers.get("Origin", "")
+    resp = Response("", 204)
+    for k, v in _cors_headers(origin).items():
+        resp.headers[k] = v
+    return resp
+
+
+# ── SSE endpoint (GET /api/mcp) ────────────────────────────────────────
+
+
 @mcp_bp.route("", methods=["GET"])
+def mcp_sse():
+    """SSE endpoint for MCP transport (opencode SSE fallback)."""
+    session_id = request.headers.get("Mcp-Session-Id") or str(uuid.uuid4())
+    origin = request.headers.get("Origin", "")
+    scheme = request.headers.get("X-Forwarded-Proto", request.scheme)
+    host = request.headers.get("X-Forwarded-Host", request.host)
+    post_url = f"{scheme}://{host}/api/mcp"
+
+    def _sse_event(event: str, data: str) -> str:
+        return f"event: {event}\ndata: {data}\n\n"
+
+    def generate():
+        yield _sse_event("endpoint", post_url)
+        yield _sse_event("session", session_id)
+        last_seen = time.time()
+        while True:
+            elapsed = time.time() - last_seen
+            if elapsed > _SESSION_TTL:
+                break
+            yield f": keepalive\n\n"
+            time.sleep(15)
+
+    headers = {
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+        **_cors_headers(origin),
+    }
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers=headers,
+    )
+
+
+# ── REST status (GET /api/mcp/status) ──────────────────────────────────
+
+
+@mcp_bp.route("/status", methods=["GET"])
 def mcp_status():
     """REST status entry for Koto MCP integration."""
-    return jsonify(
-        {
-            "success": True,
-            "endpoint": "/api/mcp",
-            "json_rpc": True,
-            "tools_endpoint": "/api/mcp/tools",
-            "reload_endpoint": "/api/mcp/reload",
-            "status": get_mcp_status(),
-        }
-    )
+    origin = request.headers.get("Origin", "")
+    data = {
+        "success": True,
+        "endpoint": "/api/mcp",
+        "json_rpc": True,
+        "tools_endpoint": "/api/mcp/tools",
+        "reload_endpoint": "/api/mcp/reload",
+        "status": get_mcp_status(),
+    }
+    headers = _cors_headers(origin)
+    resp = jsonify(data)
+    for k, v in headers.items():
+        resp.headers[k] = v
+    return resp
+
+
+# ── Tool listing (GET /api/mcp/tools) ──────────────────────────────────
 
 
 @mcp_bp.route("/tools", methods=["GET"])
 def mcp_tools():
     """List the read-only tools exposed by Koto's MCP supervision endpoint."""
+    origin = request.headers.get("Origin", "")
     tools = [tool for tool, _handler in _MCP_TOOLS.values()]
-    return jsonify({"success": True, "count": len(tools), "tools": tools})
+    headers = _cors_headers(origin)
+    resp = jsonify({"success": True, "count": len(tools), "tools": tools})
+    for k, v in headers.items():
+        resp.headers[k] = v
+    return resp
+
+
+# ── Reload MCP runtime (POST /api/mcp/reload) ──────────────────────────
 
 
 @mcp_bp.route("/reload", methods=["POST"])
 def mcp_reload():
     """Reload outbound MCP server configuration from user_settings.json."""
+    origin = request.headers.get("Origin", "")
+    headers = _cors_headers(origin)
     try:
-        return jsonify({"success": True, "status": reload_mcp_runtime()})
+        resp = jsonify({"success": True, "status": reload_mcp_runtime()})
     except Exception as exc:
         logger.warning("[MCPRoutes] reload failed: %s", exc, exc_info=True)
-        return jsonify({"success": False, "error": str(exc)}), 500
+        resp = jsonify({"success": False, "error": str(exc)})
+        resp.status_code = 500
+    for k, v in headers.items():
+        resp.headers[k] = v
+    return resp
+
+
+# ── JSON-RPC handler (POST /api/mcp) ───────────────────────────────────
 
 
 @mcp_bp.route("", methods=["POST"])
 def mcp_json_rpc():
-    """Minimal HTTP JSON-RPC MCP endpoint for external coding agents."""
+    """HTTP JSON-RPC MCP endpoint for external coding agents.
+
+    Supports Streamable HTTP and SSE transports.
+    """
+    origin = request.headers.get("Origin", "")
+    session_id = request.headers.get("Mcp-Session-Id")
     payload = request.get_json(silent=True) or {}
     req_id = payload.get("id")
     method = payload.get("method", "")
     params = payload.get("params") or {}
 
+    # ── notifications (no req_id) ──────────────────────────────
     if not req_id and method.startswith("notifications/"):
-        return ("", 204)
+        resp = Response("", 202)
+        for k, v in _cors_headers(origin).items():
+            resp.headers[k] = v
+        return resp
 
     try:
         if method == "initialize":
+            if not session_id:
+                session_id = str(uuid.uuid4())
             result = {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},
                 "serverInfo": {"name": "koto-supervisor", "version": _read_version()},
+                "_meta": {"sessionId": session_id},
             }
         elif method == "tools/list":
             result = {"tools": [tool for tool, _handler in _MCP_TOOLS.values()]}
@@ -366,7 +643,11 @@ def mcp_json_rpc():
             tool_name = params.get("name")
             arguments = params.get("arguments") or {}
             if tool_name not in _MCP_TOOLS:
-                return _rpc_error(req_id, -32602, f"Unknown tool: {tool_name}"), 400
+                resp = _rpc_error(req_id, -32602, f"Unknown tool: {tool_name}")
+                resp.status_code = 400
+                for k, v in _cors_headers(origin).items():
+                    resp.headers[k] = v
+                return resp
             _tool, handler = _MCP_TOOLS[tool_name]
             data = handler(**arguments)
             result = {
@@ -374,15 +655,28 @@ def mcp_json_rpc():
                 "isError": False,
             }
         else:
-            return _rpc_error(req_id, -32601, f"Method not found: {method}"), 404
+            resp = _rpc_error(req_id, -32601, f"Method not found: {method}")
+            resp.status_code = 404
+            for k, v in _cors_headers(origin).items():
+                resp.headers[k] = v
+            return resp
 
-        return jsonify({"jsonrpc": "2.0", "id": req_id, "result": result})
+        resp = jsonify({"jsonrpc": "2.0", "id": req_id, "result": result})
+        if session_id:
+            resp.headers["Mcp-Session-Id"] = session_id
+        for k, v in _cors_headers(origin).items():
+            resp.headers[k] = v
+        return resp
     except Exception as exc:
         logger.warning("[MCPRoutes] JSON-RPC failed: %s", exc, exc_info=True)
-        return _rpc_error(req_id, -32603, str(exc)), 500
+        resp = _rpc_error(req_id, -32603, str(exc))
+        resp.status_code = 500
+        for k, v in _cors_headers(origin).items():
+            resp.headers[k] = v
+        return resp
 
 
-def _rpc_error(req_id: Any, code: int, message: str):
+def _rpc_error(req_id: Any, code: int, message: str) -> Response:
     return jsonify(
         {
             "jsonrpc": "2.0",

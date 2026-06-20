@@ -221,8 +221,9 @@ class CloudSkillRegistry:
             skill_def.author = "cloud"
             skill_def.enabled = True
             sm._def_registry[skill_id] = skill_def  # type: ignore[attr-defined]
-            sm._sync_legacy_entry(  # type: ignore[attr-defined]
-                skill_id,
+            sm._registry[skill_id] = sm._runtime_entry_from_definition(  # type: ignore[attr-defined]
+                skill_def,
+                existing=None,
                 enabled=True,
                 prompt=skill_def.render_prompt(),
             )
@@ -255,7 +256,7 @@ class CloudSkillRegistry:
                 try:
                     # Remove from the definition registry
                     sm._def_registry.pop(sid, None)  # type: ignore[attr-defined]
-                    # Remove from legacy registry if present
+                    # Remove from runtime registry if present
                     if hasattr(sm, "_registry"):
                         sm._registry.pop(sid, None)
                     _ephemeral_skill_ids.discard(sid)

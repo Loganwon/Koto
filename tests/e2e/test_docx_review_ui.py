@@ -44,7 +44,7 @@ def _wait_until_text_includes(
 
 
 def _open_docx_for_review(page, base_url: str, docx_path: str) -> None:
-    page.goto(f"{base_url}/workspace-assistant", timeout=15_000, wait_until="domcontentloaded")
+    page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
     page.locator("#wa-file-input").set_input_files(docx_path)
     _wait_until_visible(page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT)

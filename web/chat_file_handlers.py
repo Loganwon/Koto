@@ -15,29 +15,25 @@ from typing import Any
 from flask import jsonify
 
 from web.file_processor import FileProcessor
-from web.runtime_context import get_app_attr, get_model_map, get_workspace_dir
+from web.runtime_context import get_brain, get_model_map, get_session_manager, get_workspace_dir
+from web.utils.filenames import secure_filename as _secure_filename
 
 
-def _app_attr(app_module: Any, name: str, default: Any = None) -> Any:
-    value = get_app_attr(name, default)
-    if value is not default:
-        return value
+def _module_attr(app_module: Any, name: str, default: Any = None) -> Any:
     if app_module is not None:
         return getattr(app_module, name, default)
     return default
 
 
 def _secure_name(app_module: Any, filename: str) -> str:
-    sanitizer = _app_attr(app_module, "_secure_filename")
+    sanitizer = _module_attr(app_module, "_secure_filename")
     if callable(sanitizer):
         return sanitizer(filename)
-    from werkzeug.utils import secure_filename
-
-    return secure_filename(filename)
+    return _secure_filename(filename)
 
 
 def _uploads_dir(app_module: Any) -> str:
-    workspace = get_workspace_dir() or _app_attr(app_module, "WORKSPACE_DIR") or os.getcwd()
+    workspace = get_workspace_dir() or _module_attr(app_module, "WORKSPACE_DIR") or os.getcwd()
     upload_dir = os.path.join(workspace, "uploads")
     os.makedirs(upload_dir, exist_ok=True)
     return upload_dir
@@ -60,11 +56,17 @@ def _format_context(path: str, user_input: str) -> tuple[str, dict[str, Any]]:
 
 
 def _chat(app_module: Any, session_name: str, user_input: str, prompt: str, file_data: dict[str, Any], locked_model: str):
-    brain = _app_attr(app_module, "brain")
+    try:
+        brain = get_brain()
+    except RuntimeError:
+        brain = _module_attr(app_module, "brain")
     if brain is None:
         return jsonify({"error": "Chat brain is not initialized"}), 500
 
-    session_manager = _app_attr(app_module, "session_manager")
+    try:
+        session_manager = get_session_manager()
+    except RuntimeError:
+        session_manager = _module_attr(app_module, "session_manager")
     history = []
     if session_manager is not None:
         try:
@@ -73,7 +75,7 @@ def _chat(app_module: Any, session_name: str, user_input: str, prompt: str, file
             history = []
 
     model = None
-    model_map = get_model_map() or _app_attr(app_module, "MODEL_MAP", {}) or {}
+    model_map = get_model_map() or _module_attr(app_module, "MODEL_MAP", {}) or {}
     if locked_model and locked_model != "auto":
         model = locked_model
     else:

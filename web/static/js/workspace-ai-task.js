@@ -7,6 +7,87 @@
   const FILE_TASK_IDLE_WARN_MS = 60000;
   const TaskStatus = window.WA.fileTaskStatus || {};
 
+  function csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? String(meta.getAttribute('content') || '') : '';
+  }
+
+  function setCsrfToken(token) {
+    const value = String(token || '').trim();
+    if (!value) return '';
+    let meta = document.querySelector('meta[name="csrf-token"]');
+    if (!meta) {
+      meta = document.createElement('meta');
+      meta.setAttribute('name', 'csrf-token');
+      document.head.appendChild(meta);
+    }
+    meta.setAttribute('content', value);
+    return value;
+  }
+
+  let csrfRefreshPromise = null;
+
+  async function refreshCsrfToken() {
+    if (csrfRefreshPromise) return csrfRefreshPromise;
+    csrfRefreshPromise = fetch('/api/csrf-token', {
+      method: 'GET',
+      cache: 'no-store',
+      credentials: 'same-origin',
+    })
+      .then((resp) => (resp.ok ? resp.json() : null))
+      .then((data) => setCsrfToken(data && data.csrf_token))
+      .catch(() => '')
+      .finally(() => { csrfRefreshPromise = null; });
+    return csrfRefreshPromise;
+  }
+
+  function headersWithCsrf(headers) {
+    const csrf = csrfToken();
+    if (!csrf) return headers || {};
+    if (headers instanceof Headers) {
+      if (!headers.has('X-CSRFToken')) headers.set('X-CSRFToken', csrf);
+      return headers;
+    }
+    const next = Object.assign({}, headers || {});
+    if (!next['X-CSRFToken'] && !next['X-CSRF-Token']) next['X-CSRFToken'] = csrf;
+    return next;
+  }
+
+  function needsCsrf(method) {
+    return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(String(method || 'GET').toUpperCase());
+  }
+
+  async function csrfFetch(url, options = {}) {
+    const fetchOptions = Object.assign({}, options);
+    if (!fetchOptions.credentials) fetchOptions.credentials = 'same-origin';
+    if (needsCsrf(fetchOptions.method)) {
+      fetchOptions.headers = headersWithCsrf(fetchOptions.headers);
+    }
+    let response = await fetch(url, fetchOptions);
+    if (response.status === 400 && needsCsrf(fetchOptions.method)) {
+      const token = await refreshCsrfToken();
+      if (token) {
+        fetchOptions.headers = headersWithCsrf(options.headers);
+        response = await fetch(url, fetchOptions);
+      }
+    }
+    return response;
+  }
+
+  async function describeHttpError(resp) {
+    let detail = '';
+    try {
+      const data = await resp.clone().json();
+      detail = data && (data.error || data.message || data.description || data.detail || '');
+    } catch (_) {
+      try {
+        detail = String(await resp.clone().text() || '').trim();
+      } catch (__) {}
+    }
+    const base = `HTTP ${resp.status}: ${resp.statusText}`;
+    return detail ? `${base} - ${detail}` : base;
+  }
+
   function esc(value) {
     return String(value == null ? '' : value)
       .replace(/&/g, '&amp;')
@@ -37,8 +118,18 @@
     if (data.next_action_artifact && typeof data.next_action_artifact === 'object') {
       normalized.next_action_artifact = data.next_action_artifact;
     }
+    if (data.artifact_result && typeof data.artifact_result === 'object') {
+      normalized.artifact_result = data.artifact_result;
+    }
     if (data.followup_record && typeof data.followup_record === 'object') normalized.followup_record = data.followup_record;
+    if (data.requirements && typeof data.requirements === 'object') normalized.requirements = data.requirements;
+    if (data.plan_check && typeof data.plan_check === 'object') normalized.plan_check = data.plan_check;
+    if (data.constraint_audit && typeof data.constraint_audit === 'object') normalized.constraint_audit = data.constraint_audit;
+    if (data.workflow_state && typeof data.workflow_state === 'object') normalized.workflow_state = data.workflow_state;
+    if (data.supervisor_audit && typeof data.supervisor_audit === 'object') normalized.supervisor_audit = data.supervisor_audit;
     if (data.quick_action_mode) normalized.quick_action_mode = data.quick_action_mode;
+    if (data.task_id) normalized.task_id = data.task_id;
+    if (data.run_id) normalized.run_id = data.run_id;
     if (data.task) normalized.task = data.task;
     if (data.summary) normalized.summary = data.summary;
     if (data.text || data.error) normalized.text = data.text || data.error;
@@ -139,14 +230,20 @@
     return String(value || '').trim().toLowerCase() === 'true';
   }
 
+  function workflowCheckpointFromOptions(options) {
+    const source = options && typeof options === 'object' ? options : {};
+    if (source.workflow_checkpoint && typeof source.workflow_checkpoint === 'object') {
+      return source.workflow_checkpoint;
+    }
+    return null;
+  }
+
   function isConfirmEachStepResumePayload(payload) {
     const options = payload && typeof payload === 'object' && payload.options && typeof payload.options === 'object'
       ? payload.options
       : {};
-    const batchControl = options.batch_control && typeof options.batch_control === 'object'
-      ? options.batch_control
-      : null;
-    return String(batchControl && batchControl.policy || '').trim().toLowerCase() === 'confirm_each_step';
+    const checkpoint = workflowCheckpointFromOptions(options);
+    return String(checkpoint && checkpoint.policy || '').trim().toLowerCase() === 'confirm_each_step';
   }
 
   function setTaskRunContext(card, evt, payload) {
@@ -154,12 +251,15 @@
     const eventData = evt || {};
     const data = normalizedTaskLifecyclePayload(payload);
     const taskContract = data.task_contract && typeof data.task_contract === 'object' ? data.task_contract : null;
-    if (eventData.task_id) card.dataset.taskId = String(eventData.task_id || '').trim();
-    if (eventData.run_id) card.dataset.taskRunId = String(eventData.run_id || '').trim();
+    const artifactResult = data.artifact_result && typeof data.artifact_result === 'object' ? data.artifact_result : null;
+    const taskId = String(eventData.task_id || data.task_id || artifactResult && artifactResult.task_id || '').trim();
+    if (taskId) card.dataset.taskId = taskId;
+    const runId = String(eventData.run_id || data.run_id || '').trim();
+    if (runId) card.dataset.taskRunId = runId;
     if (data.task) card.dataset.taskRequest = String(data.task || '').trim();
     if (data.mode) card.dataset.taskMode = String(data.mode || '').trim();
-    if (data.summary) card.dataset.taskSummary = String(data.summary || '').trim();
-    if (data.text || data.error) card.dataset.taskSummary = String(data.text || data.error || '').trim();
+    if (data.summary) card.dataset.taskSummary = compactFlowSummary(String(data.summary || '').trim(), '任务已完成，完整结果见对话汇报。');
+    if (data.text || data.error) card.dataset.taskSummary = compactFlowSummary(String(data.text || data.error || '').trim(), '任务已完成，完整结果见对话汇报。');
     if (data.quick_action_mode) card.dataset.taskQuickActionMode = String(data.quick_action_mode || '').trim();
     if (Object.prototype.hasOwnProperty.call(data, 'completed_task')) {
       card.dataset.taskCompleted = data.completed_task ? 'true' : 'false';
@@ -333,48 +433,38 @@
     if (pendingResumePayload && terminalStatus === 'awaiting_confirmation' && waitingForContinuation) {
       const actionLabel = pendingResumeLabel || '继续下一步';
       return [
-        '<div class="wa-task-meta">',
-        '  <span class="wa-task-meta-item">已完成当前步骤，确认后继续下一步。</span>',
-        `  <button type="button" class="wa-task-followup-action" data-task-artifact-resume="${esc(pendingResumePayload)}" data-task-artifact-label="${esc(actionLabel)}">${esc(actionLabel)}</button>`,
-        '  <button type="button" class="wa-task-followup-action" data-task-followup-action="question">追问这个计划</button>',
+        '<div class="wa-task-actions">',
+        '  <span class="wa-task-action-hint">当前步骤已暂停，确认后继续。</span>',
+        '  <div class="wa-task-action-buttons">',
+        `    <button type="button" class="wa-task-followup-action primary" data-task-artifact-resume="${esc(pendingResumePayload)}" data-task-artifact-label="${esc(actionLabel)}">${esc(actionLabel)}</button>`,
+        '    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">追问计划</button>',
+        '  </div>',
         '</div>',
       ].join('');
     }
-    let hintText = completed
-      ? '结果已生成，可继续追问或要求优化。'
-      : '任务尚未完成，可继续追问原因或要求继续处理。';
     let improveText = completed ? '继续优化' : '继续修复';
-    if (!completed && terminalStatus === 'no_file_change') {
-      hintText = '任务尚未写入目标文件，需要继续修复执行步骤。';
-    } else if (!completed && terminalStatus === 'quality_gate_failed') {
-      hintText = '文件已有变更，但还没有满足任务质量门禁。';
-    }
     const applyActionHtml = completed && outputMode === 'hybrid' && canApply
-      ? `  <button type="button" class="wa-task-followup-action" data-task-followup-action="apply">${esc(requiresConfirmation ? '应用建议' : '应用到文件')}</button>`
+      ? `    <button type="button" class="wa-task-followup-action primary" data-task-followup-action="apply">${esc(requiresConfirmation ? '应用建议' : '应用到文件')}</button>`
       : '';
     if (completed && outputMode === 'answer') {
-      hintText = '本轮只做分析，未写入文件。';
       improveText = '继续分析';
     } else if (completed && outputMode === 'hybrid') {
-      hintText = canApply
-        ? (requiresConfirmation
-          ? '本轮先完成分析；确认后可写入文件。'
-          : '本轮先完成分析；可继续写入文件。')
-        : '本轮完成分析，未写入文件。';
       improveText = canApply ? '继续细化方案' : '继续细化';
     }
     return [
-      '<div class="wa-task-meta">',
-      `  <span class="wa-task-meta-item">${esc(hintText)}</span>`,
+      '<div class="wa-task-actions">',
+      '  <div class="wa-task-action-buttons">',
       applyActionHtml,
-      '  <button type="button" class="wa-task-followup-action" data-task-followup-action="question">追问结果</button>',
-      `  <button type="button" class="wa-task-followup-action" data-task-followup-action="improve">${esc(improveText)}</button>`,
+      '    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">追问</button>',
+      `    <button type="button" class="wa-task-followup-action" data-task-followup-action="improve">${esc(improveText)}</button>`,
+      '  </div>',
       '</div>',
     ].join('');
   }
 
   function attachRunCardBehavior(card) {
     if (!isTaskCardElement(card) || card._waRunCardBehaviorAttached) return card;
+    card.classList.add('is-compact');
     card._waRunCardBehaviorAttached = true;
     card.addEventListener('click', async (event) => {
       const taskActionButton = event.target && event.target.closest ? event.target.closest('[data-task-followup-action]') : null;
@@ -478,7 +568,7 @@
   window.WA.cancelFileTaskRun = async function cancelFileTaskRun(runId) {
     const id = String(runId || '').trim();
     if (!id) return false;
-    const response = await fetch('/api/editor/ai/task-stream/cancel', {
+    const response = await csrfFetch('/api/editor/ai/task-stream/cancel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ run_id: id }),
@@ -775,6 +865,9 @@
     const preview = String(payload.result_preview || '').trim();
     const summary = String(payload.summary || '').trim();
     if (!preview || preview === summary) return '';
+    if (looksLikeFullAnswerText(preview)) {
+      return `<div class="wa-task-result-text">${esc('完整结果见对话汇报。')}</div>`;
+    }
     if (preview.length > 260) {
       return `<div class="wa-task-result-text">${esc(preview.slice(0, 260))}...</div>${collapsibleBlock('展开完整结果', preview)}`;
     }
@@ -782,7 +875,10 @@
   }
 
   function renderStepResult(payload) {
-    const summary = String(payload.summary || payload.result_preview || payload.title || '步骤结果').trim() || '步骤结果';
+    const summary = compactFlowSummary(
+      String(payload.summary || payload.result_preview || payload.title || '步骤结果').trim(),
+      '步骤已完成，结果见对话汇报。'
+    ) || '步骤结果';
     const tone = stepResultTone(payload);
     const chipText = stepResultChipText(payload);
     const metaHtml = stepResultMetaHtml(payload);
@@ -808,6 +904,22 @@
     if (!text) return '';
     const parts = text.split(/[\\/]+/).filter(Boolean);
     return parts.length ? parts[parts.length - 1] : text;
+  }
+
+  function looksLikeFullAnswerText(value) {
+    const text = String(value || '').trim();
+    if (!text) return false;
+    if (text.length > 260) return true;
+    return /(^|\n)\s*#{1,6}\s|\*\*|```|(^|\n)\s*[-*]\s+\S/u.test(text);
+  }
+
+  function compactFlowSummary(value, fallback) {
+    const text = String(value || '').trim();
+    const defaultText = fallback || '完整结果见对话汇报。';
+    if (!text) return defaultText;
+    if (looksLikeFullAnswerText(text)) return defaultText;
+    const compact = text.replace(/\s+/g, ' ');
+    return compact.length > 160 ? `${compact.slice(0, 160)}...` : compact;
   }
 
   function rowsColsText(payload) {
@@ -916,6 +1028,9 @@
     if (toolName === 'parse_file_to_text' && payload.success !== false) {
       return '';
     }
+    if (looksLikeFullAnswerText(preview)) {
+      return `<div class="wa-task-result-text">${esc('结果已生成，完整内容见对话汇报。')}</div>`;
+    }
     if (preview.length > 260) {
       return `<div class="wa-task-result-text">${esc(preview.slice(0, 260))}...</div>${collapsibleBlock('展开完整结果', preview)}`;
     }
@@ -933,7 +1048,7 @@
 
   function makeRunCard(loadingEl) {
     const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div');
-    card.className = 'wa-msg ai wa-task-run';
+    card.className = 'wa-msg ai wa-task-run is-compact';
     card._fatalErrorText = '';
     card.innerHTML = [
       '<div class="wa-task-header">',
@@ -942,7 +1057,7 @@
       '    <div class="wa-task-progress" data-role="ui-progress" data-status="running">',
       '      <div class="wa-task-progress-meta">',
       '        <span data-role="ui-phase">执行任务</span>',
-      '        <span data-role="ui-progress-value">准备中</span>',
+      '        <span data-role="ui-progress-value">准备识别任务</span>',
       '      </div>',
       '      <div class="wa-task-progress-track"><i data-role="ui-progress-fill"></i></div>',
       '    </div>',
@@ -975,13 +1090,25 @@
       '</div>',
       '<div class="wa-task-live-meta">',
       '  <span data-role="live-phase">执行任务</span>',
-      '  <span data-role="live-plan">按计划 0/0</span>',
-      '  <span data-role="live-progress-value">准备中</span>',
+      '  <span data-role="live-plan" style="display:none"></span>',
+      '  <span data-role="live-progress-value">准备识别任务</span>',
       '</div>',
       '<div class="wa-task-live-track"><i data-role="live-progress-fill"></i></div>',
     ].join('');
     msgs.parentNode.insertBefore(host, msgs.nextSibling);
     return host;
+  }
+
+  function scheduleTaskLiveProgressCollapse(card) {
+    const host = document.getElementById('wa-task-live-progress');
+    if (!host) return;
+    const terminalStatus = String(card && card.dataset && card.dataset.taskTerminalStatus || '').trim().toLowerCase();
+    if (terminalStatus === 'awaiting_confirmation' || terminalStatus === 'needs_attention' || terminalStatus === 'pending') return;
+    if (host._waCollapseTimer) window.clearTimeout(host._waCollapseTimer);
+    host._waCollapseTimer = window.setTimeout(() => {
+      const activeRun = document.querySelector('.wa-task-run.streaming');
+      if (!activeRun) host.hidden = true;
+    }, 1600);
   }
 
   function taskPlanProgress(card) {
@@ -1015,14 +1142,18 @@
     const plan = taskPlanProgress(card);
     const terminal = ['failed', 'succeeded', 'success', 'cancelled', 'waiting', 'awaiting_confirmation'].includes(statusRaw)
       || String(card.dataset.taskTerminalStatus || '').trim() !== '';
+    if (host._waCollapseTimer && !terminal) {
+      window.clearTimeout(host._waCollapseTimer);
+      host._waCollapseTimer = null;
+    }
     let basis = explicit ? 'explicit' : (plan.total ? 'planned' : 'estimated');
     let percent = Number(state.uiProgress || 0);
     let valueText = valueEl ? String(valueEl.textContent || '').trim() : '';
     if (!explicit && plan.total) {
       percent = terminal && !plan.completed ? 100 : Math.round((plan.completed / plan.total) * 100);
-      valueText = `按计划 ${plan.completed}/${plan.total}`;
+      valueText = `步骤 ${plan.completed}/${plan.total}`;
     } else if (!explicit) {
-      valueText = plan.running ? '执行中' : (valueText || '准备中');
+      valueText = plan.running ? '执行中' : (valueText && valueText !== '准备中' ? valueText : '准备识别任务');
     }
     if (terminal && explicit) percent = Math.max(percent, statusRaw === 'failed' ? percent : 100);
     percent = Math.max(0, Math.min(100, Math.round(percent)));
@@ -1047,6 +1178,62 @@
     }
     if (liveValue) liveValue.textContent = explicit ? `${percent}%` : valueText;
     if (liveFill) liveFill.style.width = `${percent}%`;
+  }
+
+  function notifyTaskWorkbenchForCard(card) {
+    if (!isTaskCardElement(card)) return;
+    if (window.WA && typeof window.WA.notifyTaskFlowChanged === 'function') {
+      window.WA.notifyTaskFlowChanged(card.dataset.taskId || '');
+    }
+  }
+
+  function revealTaskWorkbenchForCard(card, options) {
+    if (!isTaskCardElement(card)) return;
+    const WA = window.WA || {};
+    const taskId = String(card.dataset.taskId || '').trim();
+    if (typeof WA.openTaskWorkbenchForCurrentRun === 'function') {
+      WA.openTaskWorkbenchForCurrentRun({ taskId, scroll: options && options.scroll });
+    }
+  }
+
+  function routeLabel(route) {
+    const value = String(route || '').trim();
+    if (value === 'file_task') return '文件任务';
+    if (value === 'web_search') return '联网搜索';
+    if (value === 'light_chat') return '普通对话';
+    if (value === 'open_file') return '打开文件';
+    return value || '自动判断';
+  }
+
+  function modelLabel(mode, modelId) {
+    const normalized = String(mode || '').trim().toLowerCase();
+    const id = String(modelId || '').trim();
+    if (normalized === 'local') return id ? `本地 ${id}` : '本地模型';
+    if (normalized === 'deepseek') return id ? `DeepSeek ${id}` : 'DeepSeek';
+    if (normalized === 'gemini' || normalized === 'cloud') return 'DeepSeek';
+    return id || normalized || '自动';
+  }
+
+  function seedRouteModelContext(card, payload) {
+    if (!isTaskCardElement(card) || !payload || typeof payload !== 'object') return;
+    if (payload.task && !card.dataset.taskRequest) card.dataset.taskRequest = String(payload.task || '').trim();
+    const options = payload.options && typeof payload.options === 'object' ? payload.options : {};
+    const routeIntent = options.workspace_route_intent && typeof options.workspace_route_intent === 'object'
+      ? options.workspace_route_intent
+      : null;
+    const route = String(routeIntent && routeIntent.route || '').trim();
+    const mode = String(payload.model_mode || '').trim();
+    const model = modelLabel(mode, payload.model_id);
+    const step = ensureStep(card, 'run', '任务状态');
+    step.classList.remove('pending', 'failed');
+    if (!step.classList.contains('running')) step.classList.add('running');
+    const routeText = `路由：${routeLabel(route)} · 模型：${model}`;
+    const reason = String(routeIntent && (routeIntent.reason || routeIntent.summary || '') || '').trim();
+    const content = '<span class="wa-task-chip">模型调用</span>' + esc(reason ? `${routeText} · ${reason}` : routeText);
+    const row = upsertStepSingletonRow(step, 'model:route', 'model-summary', content);
+    if (row) ensureTaskUiState(card).modelSummaryRows.set('route', row);
+    syncTaskLiveProgress(card);
+    notifyTaskWorkbenchForCard(card);
   }
 
   window.WA.restoreTaskRunCard = function restoreTaskRunCard(snapshot) {
@@ -1425,7 +1612,7 @@
     if (valueEl) {
       valueEl.textContent = hasExplicitProgress || uiState.terminal
         ? `${progress}%`
-        : (progress > 0 ? '执行中' : '准备中');
+        : (progress > 0 ? '执行中' : '准备识别任务');
       valueEl.dataset.explicit = hasExplicitProgress ? 'true' : 'false';
     }
     const fillEl = card.querySelector('[data-role="ui-progress-fill"]');
@@ -1467,6 +1654,12 @@
     if (Object.prototype.hasOwnProperty.call(settings, 'statusText')) {
       setStatus(card, settings.statusText);
     }
+    const titleEl = card.querySelector('.wa-task-title');
+    if (titleEl) {
+      if (terminalStatus === 'awaiting_confirmation') titleEl.textContent = '等待确认';
+      else if (completed || terminalStatus === 'verified' || terminalStatus === 'completed') titleEl.textContent = '任务完成';
+      else if (terminalStatus) titleEl.textContent = '任务未完成';
+    }
     if (summary) {
       if (Object.prototype.hasOwnProperty.call(settings, 'summaryHtml')) {
         summary.innerHTML = settings.summaryHtml;
@@ -1479,7 +1672,7 @@
       const checkStep = ensureStep(card, 'check', '核验结果');
       checkStep.classList.remove('pending', 'running', 'checking', 'failed');
       checkStep.classList.add('done');
-      const terminalSummary = String(payload && payload.summary || settings.statusText || '任务已完成。').trim();
+      const terminalSummary = conciseCheckSummary(payload, settings.statusText || '任务已完成，完整结果见对话汇报。');
       upsertStepSingletonRow(
         checkStep,
         'check.finished',
@@ -1488,6 +1681,7 @@
       );
     }
     if (cancelBtn) cancelBtn.remove();
+    if (terminalStatus !== 'awaiting_confirmation') scheduleTaskLiveProgressCollapse(card);
   }
 
   function updateFinalSummaryFromTerminalEvent(evt, currentSummary) {
@@ -1534,13 +1728,36 @@
       state.processedEventKeys.add(eventKey);
     }
     handleEvent(card, evt);
+    notifyTaskWorkbenchForCard(card);
+    const payload = eventPayload(evt);
+    if (
+      payload
+      && payload.artifact_result
+      && window.WA
+      && typeof window.WA.renderArtifactResult === 'function'
+    ) {
+      window.WA.renderArtifactResult(payload.artifact_result);
+    }
+    if (window.WA && typeof window.WA.notifyTaskFlowChanged === 'function' && (
+      evt.type === 'run.finished'
+      || evt.type === 'multi_target.finished'
+      || (payload && payload.artifact_result)
+    )) {
+      const workbenchTaskId = String(
+        evt.task_id
+        || payload && payload.task_id
+        || payload && payload.artifact_result && payload.artifact_result.task_id
+        || card && card.dataset && card.dataset.taskId
+        || ''
+      ).trim();
+      if (workbenchTaskId) window.WA.notifyTaskFlowChanged(workbenchTaskId);
+    }
     syncTaskLiveProgress(card);
     if (typeof opts.onTaskCardSnapshot === 'function') {
       try { opts.onTaskCardSnapshot(card); } catch (_) {}
     }
     let nextSummary = currentSummary || '';
     if (evt.type === 'run.finished') {
-      const payload = eventPayload(evt);
       // In a multi-target run each sub-run emits its own run.finished;
       // only the orchestrator's `multi_target.finished` is canonical.
       // Still flush queued file refreshes per sub-run so the user can
@@ -1651,6 +1868,80 @@
     return `${chip}${esc(summary || '')}${details}`;
   }
 
+  function workflowWindowLabel(windowInfo) {
+    if (!windowInfo || typeof windowInfo !== 'object') return '';
+    const unit = String(windowInfo.unit || '').trim();
+    const path = basename(windowInfo.path || '');
+    const current = windowInfo.current && typeof windowInfo.current === 'object' ? windowInfo.current : {};
+    const next = windowInfo.next && typeof windowInfo.next === 'object' ? windowInfo.next : {};
+    let currentText = '';
+    if (Object.prototype.hasOwnProperty.call(current, 'start') || Object.prototype.hasOwnProperty.call(current, 'end')) {
+      currentText = `${current.start || '?'}-${current.end || '?'}`;
+    } else if (Object.prototype.hasOwnProperty.call(current, 'sheet_index')) {
+      currentText = `sheet ${Number(current.sheet_index || 0) + 1}`;
+    }
+    let nextText = '';
+    if (Object.prototype.hasOwnProperty.call(next, 'start') || Object.prototype.hasOwnProperty.call(next, 'end')) {
+      nextText = `下一段 ${next.start || '?'}-${next.end || '?'}`;
+    } else if (Object.prototype.hasOwnProperty.call(next, 'sheet_index')) {
+      nextText = `下一 sheet ${Number(next.sheet_index || 0) + 1}`;
+    }
+    const unitLabel = unit === 'page' ? '页'
+      : (unit === 'paragraph' ? '段落'
+      : (unit === 'slide' ? '页幻灯片'
+      : (unit === 'sheet' ? '工作表' : unit)));
+    const parts = [
+      path,
+      currentText ? `当前${unitLabel ? ` ${unitLabel}` : ''} ${currentText}` : '',
+      nextText,
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }
+
+  function renderWorkflowState(card, payload) {
+    const statePayload = payload && payload.workflow_state && typeof payload.workflow_state === 'object'
+      ? payload.workflow_state
+      : null;
+    if (!statePayload) return;
+    const windows = Array.isArray(statePayload.large_file_windows)
+      ? statePayload.large_file_windows.map(workflowWindowLabel).filter(Boolean).slice(0, 4)
+      : [];
+    const checkpoint = statePayload.checkpoint && typeof statePayload.checkpoint === 'object'
+      ? statePayload.checkpoint
+      : {};
+    const checkpointStatus = String(checkpoint.status || '').trim();
+    const checkpointStep = Object.prototype.hasOwnProperty.call(checkpoint, 'step_index')
+      ? `步骤 ${Number(checkpoint.step_index || 0) + 1}`
+      : '';
+    const mainline = statePayload.mainline && typeof statePayload.mainline === 'object'
+      ? statePayload.mainline
+      : {};
+    const fileInfo = statePayload.files && typeof statePayload.files === 'object'
+      ? statePayload.files
+      : {};
+    const allFiles = Array.isArray(fileInfo.all) ? fileInfo.all : [];
+    const sourceCount = Array.isArray(fileInfo.sources) ? fileInfo.sources.length : 0;
+    const targetCount = Array.isArray(fileInfo.targets) ? fileInfo.targets.length : 0;
+    const mainlineText = taskRecognitionText({
+      task_family: mainline.task_family,
+      operation_kind: mainline.operation_kind,
+      output_mode: mainline.output_mode,
+      write_intent: mainline.write_intent,
+      selected_recipe: mainline.selected_recipe,
+      file_count: allFiles.length,
+      source_count: sourceCount,
+      target_count: targetCount,
+    });
+    if (!windows.length && !checkpointStatus && !checkpointStep && !mainlineText) return;
+    const step = ensureStep(card, 'plan', '规划检查');
+    const details = [];
+    if (mainlineText) details.push(mainlineText);
+    if (checkpointStatus && checkpointStatus !== 'stateless') details.push(`检查点：${checkpointStatus}${checkpointStep ? ` · ${checkpointStep}` : ''}`);
+    if (windows.length) details.push(...windows.map((item) => `窗口：${item}`));
+    const html = `<span class="wa-task-chip ok">识别</span><div class="wa-task-result-text">${esc(details.join('；'))}</div>`;
+    upsertStepSingletonRow(step, 'workflow.state', 'plan', html);
+  }
+
   function renderConfirmedPlan(card, payload) {
     const plan = card.querySelector('[data-role="plan"]');
     if (!plan) return;
@@ -1682,6 +1973,53 @@
       note ? `<div class="wa-task-confirmed-note">${esc(note)}</div>` : '',
     ].join('');
     syncTaskLiveProgress(card);
+  }
+
+  function renderDecisionAudit(payload) {
+    const decision = normalizeUserFacingPlanText(payload.decision || '工具决策') || '工具决策';
+    const why = normalizeUserFacingPlanText(payload.why || '');
+    const evidence = Array.isArray(payload.evidence)
+      ? payload.evidence.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 5)
+      : [];
+    const rejected = Array.isArray(payload.alternatives_rejected)
+      ? payload.alternatives_rejected.map((item) => normalizeUserFacingPlanText(item || '')).filter(Boolean).slice(0, 3)
+      : [];
+    const evidenceHtml = evidence.length
+      ? `<div class="wa-task-meta">${evidence.map((item) => `<span class="wa-task-meta-item">${esc(item)}</span>`).join('')}</div>`
+      : '';
+    const whyHtml = why ? `<div class="wa-task-result-text">${esc(why)}</div>` : '';
+    const rejectedHtml = rejected.length
+      ? `<ul class="wa-task-plan-violations">${rejected.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>`
+      : '';
+    return `<span class="wa-task-chip">决策</span>${esc(decision)}${whyHtml}${evidenceHtml}${rejectedHtml}`;
+  }
+
+  function renderSupervisorIntervention(payload) {
+    const reason = normalizeUserFacingPlanText(payload.reason || '监管介入') || '监管介入';
+    const summary = normalizeUserFacingPlanText(payload.summary || '监管层要求模型回到可验证主线。') || '监管层要求模型回到可验证主线。';
+    const gate = payload.gate && typeof payload.gate === 'object' ? payload.gate : null;
+    const gateHtml = gate ? renderPlanGateIssue(gate) : '';
+    return `<span class="wa-task-chip warn">监管</span>${esc(reason)}<div class="wa-task-result-text">${esc(summary)}</div>${gateHtml ? `<div class="wa-task-result-text">${gateHtml}</div>` : ''}`;
+  }
+
+  function renderSupervisorStatus(payload) {
+    const rawStage = String(payload.stage || 'supervising').trim().toLowerCase();
+    const stage = supervisorStageLabel(rawStage);
+    const audit = supervisorAuditFromPayload(payload);
+    const summary = audit && audit.summary ? normalizeUserFacingPlanText(audit.summary) : supervisorSummaryText(payload);
+    const completion = payload.completion && typeof payload.completion === 'object' ? payload.completion : {};
+    const total = Number(completion.required_total || 0);
+    const done = Number(completion.required_completed || 0);
+    const locked = payload.mainline_locked !== false;
+    const progress = total ? `检查 ${Math.max(0, done)}/${total}` : '';
+    const auditStatus = audit ? supervisorAuditStatusLabel(audit.status) : '';
+    const meta = [
+      locked ? '主线已锁定' : '主线可调整',
+      progress,
+      auditStatus ? `监管${auditStatus}` : '',
+    ].filter(Boolean).map((item) => `<span class="wa-task-meta-item">${esc(item)}</span>`).join('');
+    const auditHtml = audit ? supervisorAuditHtml(payload) : '';
+    return `<span class="wa-task-chip ok">监管</span>${esc(stage)}${summary ? `<div class="wa-task-result-text">${esc(summary)}</div>` : ''}${meta ? `<div class="wa-task-meta">${meta}</div>` : ''}${auditHtml}`;
   }
 
   function queueFileRefresh(card, payload, options) {
@@ -1915,16 +2253,14 @@
     const payload = decodeTaskRequestPayload(dataset.taskPendingResumePayload || '');
     if (!payload || typeof payload !== 'object') return '';
     const options = payload.options && typeof payload.options === 'object' ? payload.options : {};
-    const batchControl = options.batch_control && typeof options.batch_control === 'object'
-      ? options.batch_control
-      : null;
-    const policy = String(batchControl && batchControl.policy || '').trim().toLowerCase();
+    const checkpoint = workflowCheckpointFromOptions(options);
+    const policy = String(checkpoint && checkpoint.policy || '').trim().toLowerCase();
     if (policy !== 'confirm_each_step') return '';
 
     const chips = [];
     const inheritedTask = originalTaskLabelFromResumePayload(payload);
     chips.push(`沿用分步任务：${inheritedTask || '继续下一步'}`);
-    const stepIndex = Number(batchControl && batchControl.step_index);
+    const stepIndex = Number(checkpoint && checkpoint.step_index);
     if (Number.isFinite(stepIndex) && stepIndex > 0) chips.push(`步骤：${stepIndex}`);
     const targetName = basename(payload.target_path || payload.file_name || '');
     if (targetName) chips.push(`目标：${targetName}`);
@@ -1980,6 +2316,127 @@
       return normalized;
     }
     return normalized;
+  }
+
+  function taskRecognitionText(payload) {
+    const data = payload && typeof payload === 'object' ? payload : {};
+    const family = classificationValueLabel('family', data.task_family || data.taskFamily || '');
+    const operation = classificationValueLabel('operation', data.operation_kind || data.operationKind || '');
+    const output = classificationValueLabel('output', data.output_mode || data.outputMode || '');
+    const fileCount = Number(data.file_count || data.fileCount || 0);
+    const sourceCount = Number(data.source_count || data.sourceCount || 0);
+    const targetCount = Number(data.target_count || data.targetCount || 0);
+    const writeIntent = data.write_intent === true || String(data.output_mode || data.outputMode || '').trim().toLowerCase() === 'write';
+    const parts = [];
+    const taskLabel = [family, operation].filter(Boolean).join(' · ');
+    if (taskLabel) parts.push(taskLabel);
+    if (fileCount > 0) parts.push(`${fileCount} 个文件`);
+    if (targetCount > 0 && sourceCount > 0) parts.push(`目标 ${targetCount} 个，来源 ${sourceCount} 个`);
+    if (output) parts.push(output);
+    parts.push(writeIntent ? '允许写入' : '不写入文件');
+    return uniqueTextParts(parts).join(' · ');
+  }
+
+  function uniqueTextParts(items) {
+    const seen = new Set();
+    return (Array.isArray(items) ? items : [])
+      .map((item) => String(item || '').replace(/\s+/g, ' ').trim())
+      .filter((item) => {
+        if (!item || seen.has(item)) return false;
+        seen.add(item);
+        return true;
+      });
+  }
+
+  function workflowMainlineFromPayload(payload) {
+    const state = payload && payload.workflow_state && typeof payload.workflow_state === 'object'
+      ? payload.workflow_state
+      : {};
+    return state.mainline && typeof state.mainline === 'object' ? state.mainline : {};
+  }
+
+  function supervisorStageLabel(stage) {
+    const value = String(stage || '').trim().toLowerCase();
+    if (value === 'planned') return '监管已启动';
+    if (value === 'completed') return '监管完成';
+    if (value === 'repairing') return '监管纠偏中';
+    if (value === 'checking') return '正在核验';
+    return '监管中';
+  }
+
+  function supervisorAuditFromPayload(payload) {
+    const data = payload && typeof payload === 'object' ? payload : {};
+    if (data.supervisor_audit && typeof data.supervisor_audit === 'object') return data.supervisor_audit;
+    const state = data.workflow_state && typeof data.workflow_state === 'object' ? data.workflow_state : {};
+    return state.supervisor_audit && typeof state.supervisor_audit === 'object' ? state.supervisor_audit : null;
+  }
+
+  function supervisorAuditStatusLabel(status) {
+    const value = String(status || '').trim().toLowerCase();
+    if (value === 'blocked') return '已阻止';
+    if (value === 'warning') return '需关注';
+    if (value === 'clear') return '通过';
+    return value || '检查';
+  }
+
+  function supervisorAuditHtml(payload) {
+    const audit = supervisorAuditFromPayload(payload);
+    if (!audit) return '';
+    const status = String(audit.status || '').trim().toLowerCase();
+    const chipClass = status === 'blocked' || status === 'warning' ? 'warn' : 'ok';
+    const summary = normalizeUserFacingPlanText(audit.summary || '');
+    const warnings = Array.isArray(audit.warnings)
+      ? audit.warnings.map((item) => normalizeUserFacingPlanText(item)).filter(Boolean).slice(0, 4)
+      : [];
+    const actions = Array.isArray(audit.required_actions)
+      ? audit.required_actions.map((item) => normalizeUserFacingPlanText(item)).filter(Boolean).slice(0, 3)
+      : [];
+    const confidence = Number(audit.confidence);
+    const meta = [];
+    if (Number.isFinite(confidence) && confidence >= 0 && confidence <= 1) meta.push(`置信度 ${Math.round(confidence * 100)}%`);
+    if (audit.risk_level) meta.push(`风险 ${audit.risk_level}`);
+    const detailItems = uniqueTextParts([...warnings, ...actions.map((item) => `要求：${item}`)]);
+    const details = detailItems.length
+      ? `<ul class="wa-task-plan-violations">${detailItems.map((item) => `<li>${esc(item)}</li>`).join('')}</ul>`
+      : '';
+    const metaHtml = meta.length
+      ? `<div class="wa-task-meta">${meta.map((item) => `<span class="wa-task-meta-item">${esc(item)}</span>`).join('')}</div>`
+      : '';
+    return `<div class="wa-task-evidence-row"><span class="wa-task-chip ${chipClass}">监管${esc(supervisorAuditStatusLabel(status))}</span>${summary ? `<span>${esc(summary)}</span>` : ''}</div>${metaHtml}${details}`;
+  }
+
+  function supervisorSummaryText(payload) {
+    const data = payload && typeof payload === 'object' ? payload : {};
+    const mainline = workflowMainlineFromPayload(data);
+    const plan = data.task_plan && typeof data.task_plan === 'object' ? data.task_plan : {};
+    const writeIntent = data.write_intent === true || mainline.write_intent === true || plan.write_intent === true;
+    const outputMode = String(mainline.output_mode || plan.output_mode || '').trim().toLowerCase();
+    const rawStage = String(data.stage || '').trim().toLowerCase();
+    if (rawStage === 'completed') {
+      return writeIntent || outputMode === 'write'
+        ? '已检查写入结果和任务边界。'
+        : '已检查本轮没有写入要求。';
+    }
+    if (writeIntent || outputMode === 'write') {
+      return '允许写入目标文件，完成后会核验变更。';
+    }
+    if (outputMode === 'hybrid') {
+      return '先完成分析，写入前需要再次确认。';
+    }
+    return '只读任务：不允许修改或写入文件。';
+  }
+
+  function planCheckSummaryText(payload, passed) {
+    const data = payload && typeof payload === 'object' ? payload : {};
+    const requirements = data.requirements && typeof data.requirements === 'object' ? data.requirements : {};
+    const audit = data.constraint_audit && typeof data.constraint_audit === 'object' ? data.constraint_audit : {};
+    const writeRequired = requirements.write_required === true;
+    if (!passed) return normalizedPlanCheckSummary(data.summary, false);
+    if (Array.isArray(audit.conflicts) && audit.conflicts.length) {
+      return '发现任务边界冲突，已阻止继续执行。';
+    }
+    if (writeRequired) return '计划检查通过：本轮允许写入，完成后必须核验文件变更。';
+    return '计划检查通过：本轮只读，不会修改文件。';
   }
 
   function intentStrategyLabel(value, outputMode) {
@@ -2095,13 +2552,16 @@
     const reasonCodes = Array.isArray(payload.reason_codes)
       ? payload.reason_codes.map(classificationReasonLabel).filter(Boolean)
       : [];
+    const recognition = taskRecognitionText(payload);
     const classificationHtml = classificationMetaHtml(card);
     const evidenceHtml = classificationEvidenceHtml(payload);
+    const supervisorHtml = supervisorAuditHtml(payload);
     const reasonHtml = reasonCodes.length
       ? `<div class="wa-task-result-text">${esc(reasonCodes.join('；'))}</div>`
       : '';
-    if (!classificationHtml && !reasonHtml) return '';
-    return `<span class="wa-task-chip ok">识别</span>${classificationHtml}${evidenceHtml}${reasonHtml}`;
+    if (!recognition && !classificationHtml && !reasonHtml && !supervisorHtml) return '';
+    const recognitionHtml = recognition ? `<div class="wa-task-result-text">${esc(recognition)}</div>` : '';
+    return `<span class="wa-task-chip ok">识别</span>${recognitionHtml}${classificationHtml}${evidenceHtml}${supervisorHtml}${reasonHtml}`;
   }
 
   function finalRunStatusText(payload) {
@@ -2192,8 +2652,10 @@
 
   function resolvedRunSummaryText(payload, card, fileChangeSummaries) {
     const explicitSummary = String(payload.summary || (card && card.dataset ? card.dataset.taskSummary || '' : '')).trim();
-    if (explicitSummary && !/^任务已完成[。！!]?$/.test(explicitSummary)) return explicitSummary;
     if (fileChangeSummaries.length) return fileChangeSummaries.join('\n');
+    if (explicitSummary && !/^任务已完成[。！!]?$/.test(explicitSummary)) {
+      return compactFlowSummary(explicitSummary, '任务已完成，完整结果见对话汇报。');
+    }
     return explicitSummary || '任务已完成';
   }
 
@@ -2265,15 +2727,20 @@
     const state = ensureTaskUiState(card);
     const summaries = state.fileChanges.map(fileChangeSummaryText).filter(Boolean);
     const summaryText = esc(resolvedRunSummaryText(payload, card, summaries));
-    const terminalStatus = String(card && card.dataset && card.dataset.taskTerminalStatus || '').trim().toLowerCase();
-    const classificationHtml = String(card && card.dataset && card.dataset.taskQuickActionMode || '').trim().toLowerCase() === 'simple'
-      || String(card && card.dataset && card.dataset.taskQuickActionMode || '').trim().toLowerCase() === 'proposal'
-      ? ''
-      : classificationMetaHtml(card);
     const pendingResumeHtml = inheritedStepwiseResumeMetaHtml(card);
-    const runtimeHtml = terminalStatus === 'awaiting_confirmation' ? '' : runtimeMetaHtml(payload);
     const nextActionArtifact = renderNextActionArtifact(payload.next_action_artifact, payload.followup_record);
-    return `<div class="wa-task-plan-summary wa-task-outcome">${summaryText.replace(/\n/g, '<br>')}</div>${classificationHtml}${pendingResumeHtml}${runtimeHtml}${nextActionArtifact}${taskResultActionsHtml(card)}`;
+    return `<div class="wa-task-plan-summary wa-task-outcome">${summaryText.replace(/\n/g, '<br>')}</div>${pendingResumeHtml}${nextActionArtifact}${taskResultActionsHtml(card)}`;
+  }
+
+  function conciseCheckSummary(payload, fallback) {
+    const data = payload && typeof payload === 'object' ? payload : {};
+    const summary = String(data.summary || '').trim();
+    const status = String(data.status || data.runtime && data.runtime.terminal_status || '').trim().toLowerCase();
+    const ok = data.passed !== false && !['failed', 'blocked', 'write_blocked', 'tool_gap'].includes(status);
+    const defaultText = fallback || (ok ? '核验通过，完整结果见对话汇报。' : '核验需要处理，完整信息见对话汇报。');
+    if (!summary) return defaultText;
+    if (summary.length > 120 || /\n|^#{1,6}\s|---|\*\*/m.test(summary)) return defaultText;
+    return summary;
   }
 
   function renderFileChange(evt) {
@@ -2303,6 +2770,7 @@
       // protect card.dataset.taskRunId and avoid status blips mid-stream.
       if (state.multiTargetActive) return;
       setTaskRunContext(card, evt, payload);
+      renderWorkflowState(card, payload);
       setStatus(card, '处理中');
       return;
     }
@@ -2312,6 +2780,13 @@
       // master classification was already rendered before orchestration.
       if (state.multiTargetActive) return;
       setTaskRunContext(card, evt, payload);
+      const body = renderTaskClassification(evt, card);
+      if (body) {
+        const step = ensureStep(card, 'task.classified', '任务识别');
+        step.classList.remove('pending', 'running', 'failed');
+        step.classList.add('done');
+        upsertStepSingletonRow(step, 'task.classified', 'done', body);
+      }
       return;
     }
     if (type === 'plan.created') {
@@ -2323,14 +2798,13 @@
     }
     if (type === 'plan.checked') {
       const passed = payload.passed !== false && String(payload.status || '').toLowerCase() !== 'replan';
-      if (passed) return;
       const step = ensureStep(card, 'plan', stepTitle('plan', '规划检查'));
-      step.classList.remove('pending', 'running');
+      step.classList.remove('pending', 'running', 'done', 'failed');
       step.classList.add(passed ? 'done' : 'failed');
       const violations = Array.isArray(payload.violations) ? payload.violations : [];
-      const summary = normalizedPlanCheckSummary(payload.summary, passed);
+      const summary = planCheckSummaryText(payload, passed);
       const tone = passed ? 'done' : 'error';
-      const chip = passed ? '<span class="wa-task-chip ok">通过</span>' : '<span class="wa-task-chip error">未通过</span>';
+      const chip = passed ? '<span class="wa-task-chip ok">监管</span>' : '<span class="wa-task-chip error">未通过</span>';
       let body = `${chip}${esc(summary)}`;
       if (violations.length) {
         const items = violations
@@ -2354,6 +2828,31 @@
       step.classList.remove('pending', 'running', 'done');
       step.classList.add('failed');
       upsertStepSingletonRow(step, 'plan.gated', 'warn', renderPlanGateIssue(payload));
+      return;
+    }
+    if (type === 'supervisor.intervention') {
+      const step = ensureStep(card, stepId || 'execute', '监管纠偏');
+      step.classList.remove('pending', 'done');
+      step.classList.add('running');
+      upsertStepSingletonRow(step, `supervisor.intervention:${payload.reason || ''}`, 'warn', renderSupervisorIntervention(payload));
+      setStatus(card, '监管纠偏');
+      return;
+    }
+    if (type === 'supervisor.status') {
+      const step = ensureStep(card, stepId || 'plan', stepTitle(stepId || 'plan', '任务监管'));
+      step.classList.remove('pending');
+      if (payload.stage === 'completed') {
+        step.classList.remove('running', 'failed');
+        step.classList.add('done');
+      } else if (payload.stage === 'repairing') {
+        step.classList.remove('done');
+        step.classList.add('running');
+      } else {
+        step.classList.remove('done', 'failed');
+        step.classList.add('running');
+      }
+      upsertStepSingletonRow(step, `supervisor.status:${payload.stage || ''}`, 'plan', renderSupervisorStatus(payload));
+      if (payload.stage) setStatus(card, payload.stage === 'completed' ? '已核验' : '监管中');
       return;
     }
     if (type === 'plan.briefed') {
@@ -2474,6 +2973,8 @@
       if (auditedTool && !isInternalTool(auditedTool)) {
         setStatus(card, toolLabel(auditedTool));
       }
+      const step = ensureStep(card, stepId || 'execute', auditedTool ? `决策：${toolLabel(auditedTool)}` : '执行决策');
+      upsertStepSingletonRow(step, `decision.made:${auditedTool || payload.decision || ''}`, 'plan', renderDecisionAudit(payload));
       return;
     }
     if (type === 'code.started') {
@@ -2550,7 +3051,8 @@
       }
       const chipClass = ok ? 'ok' : 'warn';
       const chipText = ok ? '通过' : (status === 'awaiting_confirmation' ? '待确认' : '需补齐');
-      upsertStepSingletonRow(step, 'check.finished', ok ? 'check ok' : 'check warn', `<span class="wa-task-chip ${chipClass}">${chipText}</span>${esc(payload.summary || '')}${criteriaHtml}${runtimeHtml}`);
+      const summary = conciseCheckSummary(payload, ok ? '核验通过，完整结果见对话汇报。' : '核验需要处理，完整信息见对话汇报。');
+      upsertStepSingletonRow(step, 'check.finished', ok ? 'check ok' : 'check warn', `<span class="wa-task-chip ${chipClass}">${chipText}</span>${esc(summary)}${criteriaHtml}${runtimeHtml}`);
       return;
     }
     if (type === 'repair.proposed') {
@@ -2712,7 +3214,7 @@
     }
   }
 
-  window.WA.streamWhiteboxTask = async function streamWhiteboxTask(options) {
+  window.WA.streamTaskFlow = async function streamTaskFlow(options) {
     const opts = options || {};
     const msgs = opts.msgs || document.getElementById('wa-ai-messages');
     const card = makeRunCard(opts.loadingEl);
@@ -2724,6 +3226,7 @@
       payload.run_id = randomId;
     }
     card.dataset.taskRunId = String(payload.run_id || '').trim();
+    seedRouteModelContext(card, payload);
     const quickActionMode = opts && opts.payload && opts.payload.options && typeof opts.payload.options === 'object'
       ? String(opts.payload.options.quick_action_mode || '').trim()
       : '';
@@ -2731,18 +3234,19 @@
     if (!opts.loadingEl && msgs) msgs.appendChild(card);
     card.classList.add('streaming');
     startTaskHeartbeat(card);
+    revealTaskWorkbenchForCard(card, { scroll: true });
     if (typeof opts.onTaskCardSnapshot === 'function') {
       try { opts.onTaskCardSnapshot(card); } catch (_) {}
     }
     scrollToBottom(msgs);
 
-    const resp = await fetch('/api/editor/ai/task-stream', {
+    const resp = await csrfFetch('/api/editor/ai/task-stream', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
       signal: opts.signal,
     });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${resp.statusText}`);
+    if (!resp.ok) throw new Error(await describeHttpError(resp));
 
     let reader = resp.body.getReader();
     card._abortFileTaskStream = () => {
@@ -2790,5 +3294,6 @@
     if (card._fatalErrorText) throw makeTaskError(terminalResult.summary);
     return terminalResult;
   };
-  window.WA.streamFileTask = window.WA.streamWhiteboxTask;
+  window.WA.streamWhiteboxTask = window.WA.streamTaskFlow;
+  window.WA.streamFileTask = window.WA.streamTaskFlow;
 })();

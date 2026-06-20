@@ -25,6 +25,7 @@ def client():
     from web.app import app
 
     app.config["TESTING"] = True
+    app.config["WTF_CSRF_ENABLED"] = False
     app.config["PROPAGATE_EXCEPTIONS"] = False
     app.config["TRAP_HTTP_EXCEPTIONS"] = False
     with app.test_client() as c:
@@ -625,14 +626,8 @@ class TestMiniChatRoute:
 # ═══════════════════════════════════════════════════════════════════════════════
 @pytest.mark.unit
 class TestPPTRoutes:
-    def test_ppt_download_missing_session(self, client):
-        resp = _json_post(client, "/api/ppt/download", {})
-        assert resp.status_code == 400
-
     def test_ppt_download_nonexistent(self, client):
-        resp = _json_post(
-            client, "/api/ppt/download", {"session_id": "nonexistent_xyz"}
-        )
+        resp = client.get("/api/ppt/download/nonexistent_xyz")
         assert resp.status_code in (404, 400, 500)
 
     def test_ppt_session_nonexistent(self, client):

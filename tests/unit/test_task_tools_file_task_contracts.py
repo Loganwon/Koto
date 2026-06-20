@@ -1,7 +1,96 @@
 import json
 import zipfile
+from pathlib import Path
 
 import pytest
+
+
+def test_parse_file_to_text_reads_office_windows(tmp_path):
+    import openpyxl
+    from docx import Document
+    from pptx import Presentation
+
+    from app.core.agent.task_tools import parse_file_to_text
+
+    docx_path = tmp_path / "windowed.docx"
+    document = Document()
+    for index in range(1, 6):
+        document.add_paragraph(f"Paragraph {index}")
+    document.save(docx_path)
+
+    xlsx_path = tmp_path / "windowed.xlsx"
+    workbook = openpyxl.Workbook()
+    workbook.active.title = "First"
+    workbook.active.append(["first value"])
+    second = workbook.create_sheet("Second")
+    second.append(["second value"])
+    workbook.save(xlsx_path)
+
+    pptx_path = tmp_path / "windowed.pptx"
+    presentation = Presentation()
+    for index in range(1, 5):
+        slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+        slide.shapes.title.text = f"Slide {index}"
+    presentation.save(pptx_path)
+
+    docx_text = parse_file_to_text(
+        str(docx_path),
+        window_unit="paragraph",
+        start=2,
+        end=3,
+    )
+    xlsx_text = parse_file_to_text(
+        str(xlsx_path),
+        window_unit="sheet",
+        sheet_index=1,
+    )
+    pptx_text = parse_file_to_text(
+        str(pptx_path),
+        window_unit="slide",
+        start=2,
+        end=3,
+    )
+
+    assert "Paragraph 2" in docx_text
+    assert "Paragraph 4" not in docx_text
+    assert "Second" in xlsx_text
+    assert "second value" in xlsx_text
+    assert "first value" not in xlsx_text
+    assert "Slide 2" in pptx_text
+    assert "Slide 4" not in pptx_text
+
+
+def test_file_task_event_schema_exposes_diff_contract():
+    from app.core.agent.file_task_contract import file_task_event_schema
+
+    schema = file_task_event_schema()
+
+    assert schema["title"] == "FileTaskEvent"
+    assert "payload" in schema["properties"]
+    assert schema["properties"]["payload"]["properties"]["diff"]["$ref"].endswith(
+        "FileTaskDiff"
+    )
+    assert schema["$defs"]["FileTaskDiff"]["required"] == [
+        "kind",
+        "items",
+        "changed_count",
+    ]
+
+
+def test_extract_koto_paths_reads_primary_structured_marker_keys():
+    from app.core.agent.file_task_result_markers import (
+        KOTO_CREATED_RESULT_MARKER,
+        KOTO_MODIFIED_RESULT_MARKER,
+    )
+    from app.core.agent.file_task_tool_catalog import extract_koto_paths
+
+    result = {
+        "__koto_created__": ["created.docx"],
+        "__koto_modified__": ["modified.xlsx"],
+    }
+
+    assert extract_koto_paths(result, KOTO_CREATED_RESULT_MARKER) == ["created.docx"]
+    assert extract_koto_paths(result, KOTO_MODIFIED_RESULT_MARKER) == ["modified.xlsx"]
 
 
 def test_create_file_docx_emits_docx_write_metrics_and_valid_package(
@@ -80,6 +169,66 @@ def test_write_docx_content_parses_loose_paragraph_objects_with_inner_quotes(
     assert paragraphs == ["Section 1", '关于"身体"的讨论']
 
 
+def test_write_docx_content_returns_paragraph_diff_in_file_change(
+    tmp_path, monkeypatch
+):
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result_text = task_tools.write_docx_content(
+        "diff-demo.docx",
+        json.dumps([{"text": "第一段"}, {"text": "第二段"}], ensure_ascii=False),
+    )
+    result = json.loads(result_text)
+    change = parse_file_change(
+        "write_docx_content", {"path": "diff-demo.docx"}, result_text
+    )
+
+    assert result["diff"]["kind"] == "docx_paragraphs"
+    assert result["diff"]["changed_count"] == 2
+    assert result["diff"]["items"][0]["before"] == ""
+    assert result["diff"]["items"][0]["after"] == "第一段"
+    assert change["diff"]["kind"] == "docx_paragraphs"
+    assert change["summary_code"] == "CREATE_OK"
+
+
+def test_insert_docx_paragraph_preserves_existing_table(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    from docx import Document
+
+    from app.core.agent import task_tools
+
+    doc = Document()
+    doc.add_heading("Risk Review", level=1)
+    doc.add_paragraph("Existing risk text.")
+    table = doc.add_table(rows=2, cols=2)
+    table.cell(0, 0).text = "Customer"
+    table.cell(0, 1).text = "Revenue"
+    table.cell(1, 0).text = "Blue Harbor"
+    table.cell(1, 1).text = "128000"
+    doc.add_heading("Next Actions", level=1)
+    doc.save("report.docx")
+
+    result = json.loads(
+        task_tools.insert_docx_paragraph(
+            "report.docx",
+            "Overall risk level: Moderate.",
+            before_heading="Next Actions",
+        )
+    )
+    updated = Document("report.docx")
+    texts = [paragraph.text for paragraph in updated.paragraphs]
+
+    assert result["operation"] == "insert_docx_paragraph"
+    assert result["paragraphs_written"] == 1
+    assert "Overall risk level: Moderate." in texts
+    assert texts.index("Overall risk level: Moderate.") < texts.index("Next Actions")
+    assert len(updated.tables) == 1
+    assert updated.tables[0].cell(1, 0).text == "Blue Harbor"
+
+
 def test_create_file_xlsx_emits_sheet_metrics_and_valid_workbook(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
@@ -102,6 +251,196 @@ def test_create_file_xlsx_emits_sheet_metrics_and_valid_workbook(tmp_path, monke
         assert sheet.cell(row=2, column=2).value == "42"
     finally:
         workbook.close()
+
+
+def test_write_sheet_data_returns_cell_diff_in_file_change(tmp_path, monkeypatch):
+    import openpyxl
+
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    workbook_path = tmp_path / "budget.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "预算"
+    sheet["A1"] = "旧值"
+    workbook.save(workbook_path)
+    workbook.close()
+
+    result_text = task_tools.write_sheet_data(
+        "budget.xlsx",
+        sheet_name="预算",
+        updates=json.dumps([{"row": 1, "col": 1, "value": "新值"}], ensure_ascii=False),
+    )
+    result = json.loads(result_text)
+    change = parse_file_change("write_sheet_data", {"path": "budget.xlsx"}, result_text)
+
+    assert result["diff"]["kind"] == "xlsx_cells"
+    assert result["diff"]["changed_count"] == 1
+    assert result["diff"]["items"][0]["cell"] == "A1"
+    assert result["diff"]["items"][0]["before"] == "旧值"
+    assert result["diff"]["items"][0]["after"] == "新值"
+    assert change["diff"]["items"][0]["sheet"] == "预算"
+    assert change["summary_code"] == "WRITE_OK"
+
+
+def test_file_task_change_tracker_mirrors_list_appends_to_coordinator():
+    from app.core.agent.file_task_change_tracker import FileTaskChangeTracker
+
+    tracker = FileTaskChangeTracker()
+    tracker.changes.append(
+        {
+            "path": "report.docx",
+            "operation": "write_docx_content",
+            "change_type": "modify",
+            "diff": {
+                "kind": "docx_paragraphs",
+                "items": [{"before": "old", "after": "new"}],
+                "changed_count": 1,
+            },
+        }
+    )
+
+    assert len(tracker.changes) == 1
+    coordinator_changes = tracker.coordinator_changes()
+    assert len(coordinator_changes) == 1
+    assert coordinator_changes[0]["file_path"] == "report.docx"
+    assert coordinator_changes[0]["original"] == "old"
+    assert coordinator_changes[0]["modified"] == "new"
+
+
+def test_fill_docx_template_replaces_placeholders_and_emits_diff(
+    tmp_path, monkeypatch
+):
+    from docx import Document
+
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source = tmp_path / "template.docx"
+    doc = Document()
+    doc.add_paragraph("甲方：{{party_a}}")
+    doc.add_paragraph("金额：{amount}")
+    doc.save(source)
+
+    result_text = task_tools.fill_docx_template(
+        "template.docx",
+        data=json.dumps({"party_a": "杭州公司", "amount": "100万元"}, ensure_ascii=False),
+        target_path="filled.docx",
+    )
+    result = json.loads(result_text)
+    change = parse_file_change(
+        "fill_docx_template",
+        {"path": "template.docx", "target_path": "filled.docx"},
+        result_text,
+    )
+
+    assert result["success"] is True
+    assert result["operation"] == "fill_docx_template"
+    assert result["diff"]["kind"] == "docx_template_fields"
+    assert result["diff"]["changed_count"] == 2
+    assert result["fields_filled"] == ["amount", "party_a"]
+    assert change["diff"]["items"][0]["before"] == "甲方：{{party_a}}"
+    saved = Document(tmp_path / "filled.docx")
+    assert [paragraph.text for paragraph in saved.paragraphs] == [
+        "甲方：杭州公司",
+        "金额：100万元",
+    ]
+
+
+def test_convert_docx_to_pdf_emits_file_change_with_converter(
+    tmp_path, monkeypatch
+):
+    from docx import Document
+
+    import app.core.agent.task_tools as task_tools
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source = tmp_path / "report.docx"
+    doc = Document()
+    doc.add_paragraph("报告")
+    doc.save(source)
+
+    def fake_converter(source_path, target_path):
+        assert source_path.endswith("report.docx")
+        with open(target_path, "wb") as fh:
+            fh.write(b"%PDF-1.4\n% koto test\n")
+        return "fake_converter"
+
+    monkeypatch.setattr(task_tools, "_convert_docx_to_pdf_with_docx2pdf", fake_converter)
+
+    result_text = task_tools.convert_docx_to_pdf("report.docx", "report.pdf")
+    result = json.loads(result_text)
+    change = parse_file_change(
+        "convert_docx_to_pdf",
+        {"path": "report.docx", "target_path": "report.pdf"},
+        result_text,
+    )
+
+    assert result["success"] is True
+    assert result["operation"] == "convert_docx_to_pdf"
+    assert result["converter"] == "fake_converter"
+    assert result["summary_code"] == "CONVERT_OK"
+    assert change["path"] == "report.pdf"
+    assert change["converter"] == "fake_converter"
+    assert (tmp_path / "report.pdf").exists()
+
+
+def test_convert_file_emits_standard_file_change(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+    import web.file_converter as file_converter
+    from app.core.agent.file_task_tool_catalog import parse_file_change
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source = tmp_path / "notes.txt"
+    source.write_text("hello", encoding="utf-8")
+
+    def fake_convert(source_path, target_format, output_path=None, output_dir=None):
+        assert source_path.endswith("notes.txt")
+        assert target_format == ".md"
+        assert output_path is not None
+        Path(output_path).write_text("# hello", encoding="utf-8")
+        return {
+            "success": True,
+            "output_path": output_path,
+            "from_format": "txt",
+            "to_format": "md",
+            "message": "converted",
+            "warning": "",
+            "error": "",
+        }
+
+    monkeypatch.setattr(file_converter, "convert", fake_convert)
+
+    result_text = task_tools.convert_file("notes.txt", "md", "notes.md")
+    result = json.loads(result_text)
+    change = parse_file_change(
+        "convert_file",
+        {"file_path": "notes.txt", "target_format": "md", "output_path": "notes.md"},
+        result_text,
+    )
+
+    assert result["success"] is True
+    assert result["operation"] == "convert_file"
+    assert result["summary_code"] == "CONVERT_OK"
+    assert result["target_format"] == "md"
+    assert change["path"] == "notes.md"
+    assert change["target_format"] == "md"
+    assert (tmp_path / "notes.md").read_text(encoding="utf-8") == "# hello"
+
+
+def test_list_conversions_returns_structured_matrix():
+    import app.core.agent.task_tools as task_tools
+
+    result = json.loads(task_tools.list_conversions("txt"))
+
+    assert result["success"] is True
+    assert result["source_format"] == "txt"
+    assert "md" in result["targets"]
+    assert result["summary"]
 
 
 def test_create_file_pptx_emits_slide_metrics_and_valid_deck(tmp_path, monkeypatch):
@@ -672,6 +1011,8 @@ def test_task_tools_plugin_exposes_clear_docx_review_marks_tool():
     assert "plan_docx_compare_annotations" in tool_names
     assert "write_docx_comments" in tool_names
     assert "replace_file_selection" in tool_names
+    assert "fill_docx_template" in tool_names
+    assert "convert_docx_to_pdf" in tool_names
 
 
 def test_contract_risk_summary_groups_common_clause_changes():

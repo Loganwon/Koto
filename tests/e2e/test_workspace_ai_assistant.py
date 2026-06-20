@@ -45,6 +45,23 @@ def _goto(page, url: str):
         return None
 
 
+def _open_workspace_ai(page, base_url: str):
+    resp = _goto(page, f"{base_url}/")
+    page.wait_for_timeout(THINK_MEDIUM)
+    if resp and resp.status >= 400:
+        pytest.skip("Workspace editor page not available")
+    page.wait_for_function(
+        """() => window.WA
+            && typeof window.WA.openInMainView === 'function'
+            && typeof window.WA.newAiSession === 'function'""",
+        timeout=PAGE_TIMEOUT,
+    )
+    page.evaluate("""() => window.WA.openInMainView()""")
+    page.evaluate("""() => window.WA.newAiSession({ toast: false, focus: false })""")
+    page.locator("#wa-user-input").wait_for(state="visible", timeout=PAGE_TIMEOUT)
+    return resp
+
+
 def _sse_body(events: list[dict]) -> str:
     return "".join(
         f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
@@ -55,10 +72,7 @@ def _sse_body(events: list[dict]) -> str:
 @pytest.mark.e2e
 class TestWorkspaceAiAssistantSmoke:
     def test_workspace_ai_panel_shell_loads(self, e2e_page, console_errors, e2e_base_url):
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
-        e2e_page.wait_for_timeout(THINK_MEDIUM)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        _open_workspace_ai(e2e_page, e2e_base_url)
 
         e2e_page.locator("#wa-ai").wait_for(timeout=PAGE_TIMEOUT)
         e2e_page.locator("#wa-user-input").wait_for(timeout=PAGE_TIMEOUT)
@@ -91,10 +105,7 @@ class TestWorkspaceAiAssistantSmoke:
 
         e2e_page.route("**/api/editor/ai/task-stream", fulfill_task_stream)
 
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
-        e2e_page.wait_for_timeout(THINK_MEDIUM)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        _open_workspace_ai(e2e_page, e2e_base_url)
 
         e2e_page.locator("#wa-user-input").fill("总结当前文件")
         e2e_page.locator("#wa-send-btn").click()
@@ -125,10 +136,7 @@ class TestWorkspaceAiAssistantSmoke:
             lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
         )
 
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
-        e2e_page.wait_for_timeout(THINK_MEDIUM)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        _open_workspace_ai(e2e_page, e2e_base_url)
 
         e2e_page.locator("#wa-user-input").fill("总结当前文件")
         e2e_page.locator("#wa-send-btn").click()
@@ -143,10 +151,74 @@ class TestWorkspaceAiAssistantSmoke:
             timeout=PAGE_TIMEOUT,
         )
 
-        card_text = task_card.inner_text()
+        card_text = task_card.evaluate("(el) => el.textContent || ''")
         assert "已整理 1 份上下文片段" in card_text
         assert "已完成第 1 轮工具执行" in card_text
         assert "模拟任务已完成" in card_text
+        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+
+    def test_workspace_ai_task_card_renders_supervisor_audit(self, e2e_page, console_errors, e2e_base_url):
+        supervisor_audit = {
+            "version": "file_task_supervisor_audit_v1",
+            "status": "warning",
+            "risk_level": "low",
+            "summary": "监管检查发现需要保守处理的风险，任务可继续但会加强核验。",
+            "confidence": 0.42,
+            "execution_allowed": True,
+            "review_recommended": True,
+            "warnings": ["任务识别置信度偏低，执行时需要保守处理。"],
+            "required_actions": ["优先读取显式上下文，避免把模糊意图升级为写入。"],
+            "reason_codes": ["supervisor_audit:v1", "low_classification_confidence"],
+        }
+        workflow_state = {
+            "mainline": {
+                "task_family": "analyze",
+                "operation_kind": "read",
+                "output_mode": "answer",
+                "write_intent": False,
+            },
+            "supervisor_audit": supervisor_audit,
+            "task_plan": {"mainline_locked": True, "steps": []},
+        }
+        sse_events = [
+            {"type": "run.started", "run_id": "browser_supervisor", "seq": 1, "payload": {"mode": "whitebox_v1", "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
+            {"type": "supervisor.status", "run_id": "browser_supervisor", "seq": 2, "step_id": "plan", "payload": {"stage": "planned", "summary": supervisor_audit["summary"], "mainline_locked": True, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
+            {"type": "task.classified", "run_id": "browser_supervisor", "seq": 3, "step_id": "plan", "payload": {"classification": {"task_family": "analyze", "operation_kind": "read", "output_mode": "answer", "write_intent": False, "confidence": 0.42, "reason_codes": ["low_classification_confidence"]}, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
+            {"type": "run.finished", "run_id": "browser_supervisor", "seq": 4, "payload": {"summary": "模拟监管任务已完成", "completed_task": True, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
+        ]
+
+        e2e_page.route(
+            "**/api/workspace/ai/route-intent",
+            lambda route: route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"ok": True, "route": "file_task", "reason": "mocked file task"}, ensure_ascii=False),
+            ),
+        )
+        e2e_page.route(
+            "**/api/editor/ai/task-stream",
+            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+        )
+
+        _open_workspace_ai(e2e_page, e2e_base_url)
+
+        e2e_page.locator("#wa-user-input").fill("总结当前文件")
+        e2e_page.locator("#wa-send-btn").click()
+
+        task_card = e2e_page.locator(".wa-task-run").first
+        task_card.wait_for(timeout=PAGE_TIMEOUT)
+        e2e_page.wait_for_function(
+            """() => {
+                const card = document.querySelector('.wa-task-run');
+                const text = card && (card.textContent || '');
+                return /监管需关注/.test(text) && /置信度 42%/.test(text) && /避免把模糊意图升级为写入/.test(text);
+            }""",
+            timeout=PAGE_TIMEOUT,
+        )
+
+        card_text = task_card.evaluate("(el) => el.textContent || ''")
+        assert "监管需关注" in card_text
+        assert "置信度 42%" in card_text
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
     def test_workspace_ai_task_card_shows_refresh_state_when_file_changes(self, e2e_page, console_errors, e2e_base_url):
@@ -191,10 +263,7 @@ class TestWorkspaceAiAssistantSmoke:
             lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
         )
 
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
-        e2e_page.wait_for_timeout(THINK_MEDIUM)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        _open_workspace_ai(e2e_page, e2e_base_url)
 
         e2e_page.evaluate("""() => window.WA.openWorkspaceFile('report.txt')""")
         e2e_page.wait_for_function(
@@ -210,15 +279,13 @@ class TestWorkspaceAiAssistantSmoke:
 
         task_card = e2e_page.locator(".wa-task-run").first
         task_card.wait_for(timeout=PAGE_TIMEOUT)
-        e2e_page.wait_for_function(
-            """() => {
-                return /Mock content version 2/.test(document.body.textContent || '');
-            }""",
-            timeout=PAGE_TIMEOUT,
-        )
+        for _ in range(30):
+            if open_counts.get("report.txt", 0) >= 2:
+                break
+            e2e_page.wait_for_timeout(250)
 
         assert open_counts.get("report.txt", 0) >= 2
-        card_text = task_card.inner_text()
+        card_text = task_card.evaluate("(el) => el.textContent || ''")
         assert "report.txt" in card_text
         assert "模拟刷新已完成" in card_text
         assert "已刷新" not in card_text
@@ -274,10 +341,7 @@ class TestWorkspaceAiAssistantSmoke:
         e2e_page.route("**/api/v1/workspace/open_file_by_path", fulfill_open_file)
         e2e_page.route("**/api/editor/ai/task-stream", fulfill_task_stream)
 
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
-        e2e_page.wait_for_timeout(THINK_MEDIUM)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        _open_workspace_ai(e2e_page, e2e_base_url)
 
         e2e_page.evaluate("""() => window.WA.openWorkspaceFile('doc-a.txt')""")
         e2e_page.wait_for_function(

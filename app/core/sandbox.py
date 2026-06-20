@@ -179,6 +179,21 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
     files = {}
 
     env = _build_sandbox_env(cwd)
+
+    # Network isolation: block all outbound socket connections in the sandbox.
+    # This prevents sandbox code from exfiltrating data via HTTP/DNS/TCP.
+    _NET_DISABLE_PREAMBLE = (
+        "import socket as _sandbox_socket\n"
+        "class _block_all:\n"
+        "  def __init__(self,*a,**kw): raise PermissionError('Network access disabled in sandbox')\n"
+        "_sandbox_socket.socket=_block_all\n"
+        "import urllib.request as _ur\n"
+        "_ur.urlopen=_block_all\n"
+        "_ur.OpenerDirector.open=_block_all\n"
+    )
+    if lang == "python":
+        cmd = [sys.executable, "-c", _NET_DISABLE_PREAMBLE + cmd[2]]
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -189,6 +204,7 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
             errors="replace",
             cwd=cwd,
             env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         try:
             out, err = proc.communicate(timeout=timeout)

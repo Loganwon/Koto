@@ -24,6 +24,13 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
+from web.runtime_context import (
+    get_context_awareness,
+    get_notification_manager,
+    get_proactive_dialogue,
+    get_trigger_system,
+)
+
 _logger = logging.getLogger("koto.routes.proactive")
 
 proactive_bp = Blueprint("proactive", __name__)
@@ -35,27 +42,19 @@ proactive_bp = Blueprint("proactive", __name__)
 
 
 def _get_notification_manager():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_notification_manager")
+    return get_notification_manager()
 
 
 def _get_proactive_dialogue():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_proactive_dialogue")
+    return get_proactive_dialogue()
 
 
 def _get_context_awareness():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_context_awareness")
+    return get_context_awareness()
 
 
 def _get_trigger_system():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_trigger_system")
+    return get_trigger_system()
 
 
 # ==================== 通知管理 API ====================

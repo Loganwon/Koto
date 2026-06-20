@@ -169,41 +169,23 @@ class TestTmpDirIsAbsolute:
 
     def test_tmp_path_passed_to_parse_is_absolute(self, wa_client, monkeypatch):
         """
-        When open_file saves the uploaded file, the tmp_path given to
-        parse_pptx_geometry must be absolute.
+        When open_file saves the uploaded file, the persisted tmp file must
+        live under an absolute tmp root. The rich PPTX parser now receives
+        bytes, so there may be no parser path to spy on for uploads.
         """
         client, tmp_dir, _ = wa_client
         pptx_bytes = _make_minimal_pptx()
-
-        captured_paths: list[str] = []
-
-        import app.core.file.file_parser as _fp
-
-        real_fn = _fp.parse_pptx_geometry
-
-        def spy(path, *a, **kw):
-            captured_paths.append(path)
-            return real_fn(path, *a, **kw)
-
-        monkeypatch.setattr(_fp, "parse_pptx_geometry", spy)
-        monkeypatch.setattr(
-            "web.blueprints.workspace_assistant.parse_pptx_geometry",
-            spy,
-            raising=False,
-        )
-
-        client.post(
+        resp = client.post(
             "/api/v1/workspace/open_file",
             data={"file": (io.BytesIO(pptx_bytes), "spy_test.pptx")},
             content_type="multipart/form-data",
         )
 
-        assert captured_paths, "parse_pptx_geometry was never called"
-        for p in captured_paths:
-            assert Path(p).is_absolute(), (
-                f"parse_pptx_geometry received a relative path {p!r}; "
-                "this causes 'Package not found' when CWD != project root"
-            )
+        assert resp.status_code == 200
+        file_id = resp.get_json()["file_id"]
+        matches = list(tmp_dir.rglob(f"{file_id}.pptx"))
+        assert matches, f"Expected {file_id}.pptx under {tmp_dir}"
+        assert all(path.is_absolute() for path in matches)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -263,7 +245,7 @@ class TestOpenFilePptx:
         resp = self._upload(client)
         assert resp.status_code == 200
         file_id = resp.get_json()["file_id"]
-        matches = list(tmp_dir.glob(f"{file_id}.pptx"))
+        matches = list(tmp_dir.rglob(f"{file_id}.pptx"))
         assert (
             matches
         ), f"Expected {file_id}.pptx in {tmp_dir}; found: {list(tmp_dir.iterdir())}"
@@ -433,7 +415,7 @@ class TestOpenFileByPathPptx:
         )
         assert resp.status_code == 200
         file_id = resp.get_json()["file_id"]
-        matches = list(tmp_dir.glob(f"{file_id}.pptx"))
+        matches = list(tmp_dir.rglob(f"{file_id}.pptx"))
         assert matches, (
             f"Expected copy at {tmp_dir / file_id}.pptx; "
             f"tmp contents: {list(tmp_dir.iterdir())}"

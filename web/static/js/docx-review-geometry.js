@@ -49,16 +49,28 @@
    * Convert a screen-space X coordinate to a content-space X coordinate.
    * Content X = viewportScrollLeft + (screenX − viewportRect.left)
    */
-  function _screenToContentX(screenX, viewportRect, scrollLeft) {
-    return Math.round(scrollLeft + (screenX - viewportRect.left));
+  function _screenToContentX(screenX, viewportRect, scrollLeft, scaleX) {
+    const scale = Number.isFinite(scaleX) && scaleX > 0.01 ? scaleX : 1;
+    return Math.round(scrollLeft + ((screenX - viewportRect.left) / scale));
   }
 
   /**
    * Convert a screen-space Y coordinate to a content-space Y coordinate.
    * Content Y = viewportScrollTop + (screenY − viewportRect.top)
    */
-  function _screenToContentY(screenY, viewportRect, scrollTop) {
-    return Math.round(scrollTop + (screenY - viewportRect.top));
+  function _screenToContentY(screenY, viewportRect, scrollTop, scaleY) {
+    const scale = Number.isFinite(scaleY) && scaleY > 0.01 ? scaleY : 1;
+    return Math.round(scrollTop + ((screenY - viewportRect.top) / scale));
+  }
+
+  function _layoutScale(element, rect) {
+    if (!element || !rect) return { x: 1, y: 1 };
+    const width = Number(element.offsetWidth) || Number(element.clientWidth) || 0;
+    const height = Number(element.offsetHeight) || Number(element.clientHeight) || 0;
+    return {
+      x: width > 0 ? Math.max(0.01, rect.width / width) : 1,
+      y: height > 0 ? Math.max(0.01, rect.height / height) : 1,
+    };
   }
 
   /* ─────────────────────────────────────────────────────────────────
@@ -92,11 +104,12 @@
 
     const hostRect = host.getBoundingClientRect();
     const viewportRect = viewport.getBoundingClientRect();
+    const layoutScale = _layoutScale(viewport, viewportRect);
     const scrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
     const scrollTop  = Math.max(0, Math.round(viewport.scrollTop  || 0));
 
-    const toContentX = (sx) => _screenToContentX(sx, viewportRect, scrollLeft);
-    const toContentY = (sy) => _screenToContentY(sy, viewportRect, scrollTop);
+    const toContentX = (sx) => _screenToContentX(sx, viewportRect, scrollLeft, layoutScale.x);
+    const toContentY = (sy) => _screenToContentY(sy, viewportRect, scrollTop, layoutScale.y);
 
     // Page element (ProseMirror) and its zoom wrapper
     const pageEl = host.querySelector('.ProseMirror') || null;
@@ -108,50 +121,58 @@
     const pagePaddingRight = pageEl
       ? Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0)
       : 0;
+    const hostStyles = window.getComputedStyle(host);
+    const viewportWidth = Math.max(1, Math.round(viewportRect.width / layoutScale.x));
 
     // Text-column right edge in content coordinates:
     // = right edge of ProseMirror box − its right padding, converted to content space.
     let textColRight;
     if (pageRect) {
-      textColRight = toContentX(pageRect.right - pagePaddingRight);
+      textColRight = toContentX(pageRect.right) - Math.round(pagePaddingRight * (zoom.x || 1));
     } else {
       // Fallback when page element is not available
-      textColRight = Math.round(scrollLeft + viewportRect.width * 0.68);
+      textColRight = Math.round(scrollLeft + viewportWidth * 0.68);
     }
 
     // Rail sizing: viewport-aware, no persistence
-    const viewportWidth = Math.max(1, viewportRect.width);
-    const minRailWidth  = 140;
-    const maxRailWidth  = 180;
-    const railWidth     = Math.max(minRailWidth, Math.min(maxRailWidth, Math.round(viewportWidth * 0.19)));
+    const minRailWidth  = 132;
+    const cssRailWidth = parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'));
+    const railWidth = Math.max(
+      minRailWidth,
+      Math.round(
+        cssRailWidth ||
+        Math.max(140, Math.min(180, viewportWidth * 0.19))
+      )
+    );
 
     // Fixed gap between text column right edge and card left edge
-    const railGap    = 16;
+    const railGap = Math.max(6, Math.round(parseFloat(hostStyles.getPropertyValue('--wa-review-rail-gap')) || 16));
     const cardColLeft = textColRight + railGap;
 
     // Total content width for the SVG layer (must cover cards fully)
     const contentWidth = Math.max(
       Math.round(viewport.scrollWidth  || 0),
-      Math.round(viewportRect.width    || 0),
+      viewportWidth,
       cardColLeft + railWidth + 12,
     );
 
     // Shell position in host-relative coordinates.
     // Because shell is position:absolute inside host, a card at content-coord X
     // will appear at screen X = hostRect.left + shellLeft + X.
-    // We want that to equal: viewportRect.left + (X − scrollLeft).
-    // ⟹ shellLeft = viewportRect.left − hostRect.left − scrollLeft
-    const shellLeft = Math.round(viewportRect.left - hostRect.left - scrollLeft);
-    const shellTop  = Math.round(viewportRect.top  - hostRect.top  - scrollTop);
+    // We want the shell itself to cover the viewport; listEl's transform handles scroll.
+    // ⟹ shellLeft = viewportRect.left − hostRect.left, converted back through UI zoom.
+    const shellLeft = Math.round((viewportRect.left - hostRect.left) / layoutScale.x);
+    const shellTop  = Math.round((viewportRect.top  - hostRect.top)  / layoutScale.y);
 
     return {
       cardColLeft,
       contentWidth,
       hostRect,
+      layoutScale,
       pageEl,
       pageRect,
       pagePaddingRight,
-      pageContentHeight: pageEl ? pageEl.offsetHeight : 0,
+      pageContentHeight: pageRect ? Math.round(pageRect.height / layoutScale.y) : (pageEl ? pageEl.offsetHeight : 0),
       railGap,
       railWidth,
       scrollLeft,
@@ -160,6 +181,8 @@
       shellTop,
       textColRight,
       viewportRect,
+      viewportRight: Math.round(scrollLeft + viewportWidth),
+      viewportWidth,
       zoom,
       toContentX,
       toContentY,

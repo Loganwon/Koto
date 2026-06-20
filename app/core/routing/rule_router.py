@@ -25,6 +25,43 @@ class RuleRouter:
     _TRIVIAL_IDENTITY = TRIVIAL_IDENTITY
     _TRIVIAL_EXCLUDE = TRIVIAL_EXCLUDE
 
+    _CAPABILITY_PREFIXES = (
+        "你会",
+        "你能",
+        "能不能",
+        "你可以",
+        "能否",
+        "可以吗",
+        "你支持",
+        "支持吗",
+    )
+    _HOWTO_PREFIXES = ("怎么", "如何", "怎样", "怎么样", "什么是", "怎么用")
+    _QUESTION_ENDINGS = ("吗", "么", "?", "？", "嘛", "不")
+    _ACTION_TOOL_KWS = (
+        "ppt",
+        "幻灯片",
+        "演示文稿",
+        "word",
+        "docx",
+        "pdf",
+        "excel",
+        "文档",
+        "文件",
+        "图片",
+        "图表",
+        "折线图",
+        "柱状图",
+        "画图",
+        "绘图",
+        "代码",
+        "程序",
+        "音频",
+        "润色",
+        "改写",
+        "批注",
+        "标注",
+    )
+
     # ─────────────────────────────────────────────────────────────────────────
     # Trivial-input detection
     # ─────────────────────────────────────────────────────────────────────────
@@ -87,6 +124,20 @@ class RuleRouter:
             return "嗯，有什么我可以帮到您？"
         return "有什么需要帮忙的？😊"
 
+    @classmethod
+    def is_capability_or_howto_query(cls, user_input: str) -> bool:
+        """Return True when the user asks about capability/how-to, not execution."""
+        text_lower = str(user_input or "").strip().lower()
+        if not text_lower:
+            return False
+        if any(text_lower.startswith(prefix) for prefix in cls._CAPABILITY_PREFIXES) and any(
+            text_lower.endswith(suffix) for suffix in cls._QUESTION_ENDINGS
+        ):
+            return True
+        return any(text_lower.startswith(prefix) for prefix in cls._HOWTO_PREFIXES) and any(
+            keyword in text_lower for keyword in cls._ACTION_TOOL_KWS
+        )
+
     # ─────────────────────────────────────────────────────────────────────────
     # Quick-task hint (keyword heuristic, no ML)
     # ─────────────────────────────────────────────────────────────────────────
@@ -94,6 +145,8 @@ class RuleRouter:
     def quick_task_hint(cls, user_input: str) -> str:
         """Return a fast keyword-based task-type hint (no ML involved)."""
         text_lower = user_input.lower()
+        if cls.is_capability_or_howto_query(user_input):
+            return "CHAT"
         # Data charts / visualisation — must be checked before the generic "图" check
         # to avoid routing bar/line charts to PAINTER.
         if any(
@@ -200,6 +253,15 @@ class RuleRouter:
             return "FILE_GEN"
         if any(k in text_lower for k in ["研究", "分析", "深入", "介绍"]):
             return "RESEARCH"
+        # MEETING_EXTRACT check
+        meeting_verbs = {"提炼", "提取", "整理", "总结", "记录", "归纳", "纪要"}
+        meeting_nouns = {"会议", "纪要", "转录", "会议记录"}
+        meeting_q_guard = {"什么是", "是什么", "怎么写", "如何做"}
+        _has_mv = any(v in text_lower for v in meeting_verbs)
+        _has_mn = any(v in text_lower for v in meeting_nouns)
+        _has_qg = any(v in text_lower for v in meeting_q_guard)
+        if _has_mv and _has_mn and not _has_qg:
+            return "MEETING_EXTRACT"
         return "CHAT"
 
     # ─────────────────────────────────────────────────────────────────────────

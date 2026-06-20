@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import time
+from typing import Any
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
@@ -550,6 +551,161 @@ def _run_agent_collect(
     }
 
 
+# ── ChatPipeline helper ──────────────────────────────────────────────────
+
+def _build_chat_pipeline():
+    """Assemble a ChatPipeline with the agent and all guard modules."""
+    from app.core.agent.chat_pipeline import ChatPipeline
+
+    return ChatPipeline(
+        agent=get_agent(),
+        pii_filter=_lazy_pii(),
+        output_validator=_lazy_validator(),
+        local_fallback_fn=_local_model_fallback,
+        is_service_unavailable_fn=_is_service_unavailable_error,
+        history_saver=_save_history,
+        state_saver=_save_session_state,
+        session_state_merger=_merge_system_snapshot_from_steps,
+        self_eval_fn=_make_self_eval_fn(),
+        skill_suggester=_lazy_skill_suggester(),
+    )
+
+
+def _lazy_skill_suggester():
+    try:
+        from app.core.skills.skill_suggester import SkillSuggester
+        return SkillSuggester
+    except Exception:
+        return None
+
+
+def _make_self_eval_fn():
+    try:
+        from app.core.learning.rating_store import RatingStore
+        from app.core.learning.response_evaluator import ResponseEvaluator
+
+        def _fn(user_input=None, ai_response=None, task_type="CHAT", session_name=""):
+            ResponseEvaluator.evaluate_async(
+                msg_id=RatingStore.make_msg_id(session_name or "", user_input or ""),
+                user_input=user_input,
+                ai_response=ai_response,
+                task_type=task_type,
+                session_name=session_name,
+                llm_fn=_make_eval_llm_fn(),
+            )
+        return _fn
+    except Exception:
+        return None
+
+
+# ── Context-building helpers ────────────────────────────────────────────
+
+def _build_chat_system_context(
+    message: str,
+    history: list[dict],
+    session_id: str,
+    context_files: list,
+    file_context: dict | None,
+) -> tuple[str, str | None, Any, str, list[dict], list[str] | None]:
+    """Build rewritten message, system_context, tracker, tracker_path, history, auto_skill_ids."""
+    _tracker = None
+    _tracker_path = ""
+
+    try:
+        from app.core.memory.conversation_tracker import ConversationTracker
+        _tracker_path = _get_tracker_path(session_id)
+        _tracker = ConversationTracker.load(_tracker_path)
+    except Exception as e:
+        logger.debug("[chat] ConversationTracker skip: %s", e)
+
+    _rewritten = message
+    try:
+        from app.core.routing.intent_analyzer import IntentAnalyzer
+        if IntentAnalyzer.should_analyze(message):
+            rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
+            if rw and rw != message:
+                logger.info("[chat] Intent rewritten: '%s' -> '%s'", message[:40], rw[:60])
+                _rewritten = rw
+    except Exception as e:
+        logger.debug("[chat] IntentAnalyzer skip: %s", e)
+
+    _cw_paged = ""
+    try:
+        from app.core.memory.context_window_manager import ContextWindowManager
+        out = ContextWindowManager.manage(
+            history=history, query=_rewritten,
+            session_name=(session_id or "").replace(".json", ""),
+            get_memory_fn=lambda: None,
+        )
+        history = out["history"]
+        _cw_paged = out.get("paged_in_context", "")
+    except Exception as e:
+        logger.debug("[chat] ContextWindowManager skip: %s", e)
+
+    parts = []
+    if _tracker:
+        inj = _tracker.get_context_injection()
+        if inj:
+            parts.append(inj)
+    if _cw_paged:
+        parts.append(_cw_paged)
+
+    if context_files:
+        try:
+            from app.core.file.file_registry import get_file_registry
+            reg = get_file_registry()
+            blocks = []
+            for p in context_files[:5]:
+                entry = reg.get_by_path(str(p))
+                if entry and entry.content_preview:
+                    blocks.append(f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}")
+            if blocks:
+                parts.append("用户在对话中引用了以下本地文件，请结合其内容回答：\n\n" + "\n\n---\n\n".join(blocks))
+                logger.info("[chat] Injected %d @file context(s)", len(blocks))
+        except Exception as e:
+            logger.debug("[chat] @file context skip: %s", e)
+
+    sys_ctx = "\n\n".join(parts) if parts else None
+
+    try:
+        ws_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace")
+        boot_parts = []
+        for bf in ("KOTO.md", "TOOLS_GUIDE.md"):
+            bp = os.path.join(ws_root, bf)
+            if os.path.isfile(bp):
+                try:
+                    with open(bp, "r", encoding="utf-8") as f:
+                        bc = f.read(4000)
+                    if bc.strip():
+                        boot_parts.append(f"【{bf}】\n{bc}")
+                        logger.debug("[chat] Bootstrap injected: %s (%d chars)", bf, len(bc))
+                except Exception as be:
+                    logger.debug("[chat] Bootstrap read fail %s: %s", bf, be)
+        if boot_parts:
+            block = "\n\n---\n\n".join(boot_parts)
+            sys_ctx = (block + "\n\n" + sys_ctx) if sys_ctx else block
+    except Exception as e:
+        logger.debug("[chat] Bootstrap skip: %s", e)
+
+    if file_context and isinstance(file_context, dict):
+        fc_parts = []
+        fc_file = file_context.get("file_path") or file_context.get("file_name", "")
+        if fc_file:
+            fc_parts.append(f"当前打开文件: {fc_file} (类型: {file_context.get('file_type', 'unknown')})")
+        tabs = file_context.get("open_tabs") or []
+        if tabs:
+            fc_parts.append(f"工作区打开的标签页: {', '.join(str(t) for t in tabs[:10])}")
+        sel = file_context.get("selection", "")
+        if sel:
+            fc_parts.append(f"用户选中的文本:\n{str(sel)[:2000]}")
+        if fc_parts:
+            fc_block = "【文件助手上下文】\n用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n" + "\n".join(fc_parts)
+            sys_ctx = (sys_ctx + "\n\n" + fc_block) if sys_ctx else fc_block
+            logger.info("[chat] File assistant context injected: %s", fc_file)
+
+    return _rewritten, sys_ctx, _tracker, _tracker_path, history, None
+
+
 @agent_bp.route("/chat", methods=["POST"])
 def chat():
     data = request.json
@@ -557,445 +713,46 @@ def chat():
     session_id = data.get("session_id") or data.get("session", "")
     history = data.get("history") or _load_history(session_id)
     model_id = data.get("model", "gemini-2.5-flash")
-    # 支持前端发送的 locked_model 或 model='local'，用于本地优先模式
     locked_model = data.get("locked_model") or ("local" if model_id == "local" else "auto")
-    _user_chose_local = locked_model == "local"
-    skill_id = data.get("skill_id")  # v2: 关联的 Skill ID
-    task_type = data.get("task_type")  # v2: 任务分类
-    context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
-    file_context = data.get("file_context")  # P0: 文件助手上下文 {file_id, file_type, file_path, open_tabs[]}
+    user_chose_local = locked_model == "local"
+    skill_id = data.get("skill_id")
+    task_type = data.get("task_type")
+    if not task_type and isinstance(data.get("file_context"), dict):
+        task_type = "FILE_ASSISTANT"
+    context_files = data.get("context_files") or []
+    file_context = data.get("file_context")
 
     if not message:
         return jsonify({"error": "Message is required"}), 400
 
-    # ── v4: 载入对话跟踪器 ─────────────────────────────────────────
-    _tracker = None
-    _tracker_path = ""
-    try:
-        from app.core.memory.conversation_tracker import ConversationTracker
+    rewritten_message, system_context, tracker, tracker_path, history, _ = (
+        _build_chat_system_context(message, history, session_id, context_files, file_context)
+    )
 
-        _tracker_path = _get_tracker_path(session_id)
-        _tracker = ConversationTracker.load(_tracker_path)
-    except Exception as _te:
-        logger.debug(f"[chat] ConversationTracker 加载跳过: {_te}")
-
-    # ── v4: 意图分析与重写 (IntentAnalyzer) ────────────────────
-    _rewritten_message = message
-    try:
-        from app.core.routing.intent_analyzer import IntentAnalyzer
-
-        if IntentAnalyzer.should_analyze(message):
-            _rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
-            if _rw and _rw != message:
-                logger.info(f"[chat] 意图重写: '{message[:40]}' -> '{_rw[:60]}'")
-                _rewritten_message = _rw
-    except Exception as _ia_err:
-        logger.debug(f"[chat] IntentAnalyzer 跳过: {_ia_err}")
-
-    # ── v4: ContextWindowManager (MemGPT 历史压缩)──────────────────
-    _cw_paged_context = ""
-    try:
-        from app.core.memory.context_window_manager import ContextWindowManager
-
-        _cw_out = ContextWindowManager.manage(
-            history=history,
-            query=_rewritten_message,
-            session_name=(session_id or "").replace(".json", ""),
-            get_memory_fn=lambda: None,
-        )
-        history = _cw_out["history"]
-        _cw_paged_context = _cw_out.get("paged_in_context", "")
-    except Exception as _cw_err:
-        logger.debug(f"[chat] ContextWindowManager 跳过: {_cw_err}")
-
-    # ── 构建 system_context 注入块 ──────────────────────────────────────────
-    _system_ctx_parts = []
-    if _tracker is not None:
-        _ctx_inj = _tracker.get_context_injection()
-        if _ctx_inj:
-            _system_ctx_parts.append(_ctx_inj)
-    if _cw_paged_context:
-        _system_ctx_parts.append(_cw_paged_context)
-
-    # ── @文件 上下文注入 ─────────────────────────────────────────────────────
-    if context_files:
-        try:
-            from app.core.file.file_registry import get_file_registry
-
-            reg = get_file_registry()
-            file_blocks = []
-            for path in context_files[:5]:  # 最多注入 5 个文件防止 token 爆炸
-                entry = reg.get_by_path(str(path))
-                if entry and entry.content_preview:
-                    file_blocks.append(
-                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
-                    )
-            if file_blocks:
-                _system_ctx_parts.append(
-                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
-                    + "\n\n---\n\n".join(file_blocks)
-                )
-                logger.info(f"[chat] 注入 {len(file_blocks)} 个 @文件 上下文")
-        except Exception as _cf_err:
-            logger.debug(f"[chat] @文件 上下文注入跳过: {_cf_err}")
-
-    _system_context = "\n\n".join(_system_ctx_parts) if _system_ctx_parts else None
-
-    # ── P2/Phase3: Bootstrap 文件注入 (KOTO.md + TOOLS_GUIDE.md) ──────────
-    try:
-        _ws_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace")
-        _bootstrap_max = 4000  # 最大注入字符数（防 token 爆炸）
-        _bootstrap_parts = []
-        for _bfname in ("KOTO.md", "TOOLS_GUIDE.md"):
-            _bfpath = os.path.join(_ws_root, _bfname)
-            if os.path.isfile(_bfpath):
-                try:
-                    with open(_bfpath, "r", encoding="utf-8") as _bf:
-                        _bcontent = _bf.read(_bootstrap_max)
-                    if _bcontent.strip():
-                        _bootstrap_parts.append(f"【{_bfname}】\n{_bcontent}")
-                        logger.debug("[chat] Bootstrap 注入: %s (%d chars)", _bfname, len(_bcontent))
-                except Exception as _be:
-                    logger.debug("[chat] Bootstrap 读取失败 %s: %s", _bfname, _be)
-        if _bootstrap_parts:
-            _bootstrap_block = "\n\n---\n\n".join(_bootstrap_parts)
-            _system_context = (
-                (_bootstrap_block + "\n\n" + _system_context) if _system_context else _bootstrap_block
-            )
-    except Exception as _bs_err:
-        logger.debug("[chat] Bootstrap 注入跳过: %s", _bs_err)
-
-    # ── P0: 文件助手上下文注入 ───────────────────────────────────────────
-    if file_context and isinstance(file_context, dict):
-        _fc_parts = []
-        _fc_file = file_context.get("file_path") or file_context.get("file_name", "")
-        _fc_type = file_context.get("file_type", "unknown")
-        if _fc_file:
-            _fc_parts.append(f"当前打开文件: {_fc_file} (类型: {_fc_type})")
-        _fc_tabs = file_context.get("open_tabs") or []
-        if _fc_tabs:
-            _fc_parts.append(f"工作区打开的标签页: {', '.join(str(t) for t in _fc_tabs[:10])}")
-        _fc_selection = file_context.get("selection", "")
-        if _fc_selection:
-            _fc_parts.append(f"用户选中的文本:\n{str(_fc_selection)[:2000]}")
-        if _fc_parts:
-            _fc_block = (
-                "【文件助手上下文】\n"
-                "用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来"
-                "读取、修改工作区文件，或直接推送变更到编辑器。\n"
-                + "\n".join(_fc_parts)
-            )
-            _system_context = (
-                (_system_context + "\n\n" + _fc_block) if _system_context else _fc_block
-            )
-            if not task_type:
-                task_type = "FILE_ASSISTANT"
-            logger.info("[chat] 注入文件助手上下文: %s", _fc_file)
-
-    # Phase3: load system state snapshot and inject into history
     session_state = _load_session_state(session_id)
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
 
-    skill_id, auto_skill_ids = _resolve_runtime_skill(
-        _rewritten_message, skill_id, task_type
-    )
+    skill_id, auto_skill_ids = _resolve_runtime_skill(rewritten_message, skill_id, task_type)
 
-    agent = get_agent()
-    if agent.model_id != model_id:
-        agent.model_id = model_id
-
-    # ── v2: PII 脱敏 ─────────────────────────────────────────────────────────
-    mask_result = None
-    safe_message = _rewritten_message
-    try:
-        PIIFilter = _lazy_pii()
-        mask_result = PIIFilter.mask(_rewritten_message)
-        if mask_result.has_pii:
-            safe_message = mask_result.masked_text
-            logger.info(f"[chat] 🔒 PII 脱敏 {mask_result.stats}")
-    except Exception as _e:
-        logger.warning(f"[chat] PII 过滤异常（跳过）: {_e}")
+    pipeline = _build_chat_pipeline()
+    pipeline.tracker = tracker
+    pipeline.tracker_path = tracker_path
 
     def generate():
-        collected_steps = []
-        final_answer = ""
-        used_local_fallback = False
-        local_fallback_model = None
-        local_use_reason = None  # "user_choice" | "cloud_fallback"
-        _t_start = time.time()
-        try:
-            # ── 用户主动选择本地模型：直接走本地，不走云端 ─────────────────────────
-            if _user_chose_local:
-                logger.info("[chat] 🏠 用户已选择本地优先，直接使用本地模型")
-                _lc_ans, _lc_mod = _local_model_fallback(safe_message, history)
-                if _lc_ans:
-                    used_local_fallback = True
-                    local_fallback_model = _lc_mod
-                    local_use_reason = "user_choice"
-                    final_answer = _lc_ans
-                else:
-                    final_answer = "❌ 本地模型 (Ollama) 未响应。\n\n请检查：\n1. Ollama 是否正常运行（`ollama serve`）\n2. 所选模型是否已下载（`ollama list`）\n3. 或在设置中切换到云端模式"
-            else:
-                for step in agent.run(
-                    input_text=safe_message,
-                    history=history,
-                    session_id=session_id,
-                    skill_id=skill_id,
-                    task_type=task_type,
-                    system_context=_system_context,
-                ):
-                    step_data = step.to_dict()
-                    collected_steps.append(step_data)
-                    if step.step_type == AgentStepType.ANSWER:
-                        final_answer = step.content or ""
-                    yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
-
-                if not final_answer and collected_steps:
-                    final_answer = collected_steps[-1].get("content", "")
-
-            # ── 503 / 连接故障：本地模型兜底 ────────────────────────────────
-            _error_steps = [s for s in collected_steps if s.get("step_type") == "error"]
-            if _error_steps and _is_service_unavailable_error(
-                _error_steps[-1].get("content", "")
-            ):
-                logger.warning("[chat] 检测到云端连接故障（503），尝试本地模型兜底")
-                _notice = {
-                    "step_type": "thought",
-                    "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
-                    "metadata": {"source": "local_fallback"},
-                }
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
-                _local_ans, _local_mod = _local_model_fallback(safe_message, history)
-                if _local_ans:
-                    final_answer = _local_ans
-                    used_local_fallback = True
-                    local_fallback_model = _local_mod
-                    local_use_reason = "cloud_fallback"
-                    logger.info(
-                        f"[chat] 本地模型兜底成功（{_local_mod}），响应长度: {len(_local_ans)}"
-                    )
-                else:
-                    final_answer = (
-                        "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
-                    )
-
-            # ── v2: 输出质量验收 ──────────────────────────────────────────────
-            validated_answer = final_answer
-            validation_action = "PASS"
-            try:
-                if final_answer:
-                    OutputValidator = _lazy_validator()
-                    # 本地备用模型：只做泄露/有害内容检测，跳过实时数据/格式/LLM质量检测
-                    val = OutputValidator.validate(
-                        text=final_answer,
-                        skill_id=skill_id if not used_local_fallback else None,
-                        original_prompt=message if not used_local_fallback else None,
-                    )
-                    validation_action = val.action
-                    if val.is_blocked:
-                        # Disabled — log only, pass through original text
-                        logger.warning(f"[chat] 🚫 输出检测到问题（已忽略拦截）: {val.reasons}")
-                        validated_answer = final_answer
-                    elif val.needs_retry and not used_local_fallback:
-                        # 本地备用回复不触发重试（本地模型重试无意义）
-                        logger.warning(
-                            f"[chat] ⟳ 输出质量不合格，触发重试: {val.reasons}"
-                        )
-                        _retry_input = (
-                            val.text if val.text != final_answer else safe_message
-                        )
-                        _retry_steps: list = []
-                        _retry_answer = ""
-                        try:
-                            for _rs in agent.run(
-                                input_text=_retry_input,
-                                history=history,
-                                session_id=session_id,
-                                skill_id=skill_id,
-                                task_type=task_type,
-                                system_context=_system_context,
-                            ):
-                                _retry_steps.append(_rs.to_dict())
-                                if _rs.step_type == AgentStepType.ANSWER:
-                                    _retry_answer = _rs.content or ""
-                        except Exception as _re:
-                            logger.warning(f"[chat] 重试执行异常: {_re}")
-                        if not _retry_answer and _retry_steps:
-                            _retry_answer = _retry_steps[-1].get("content", "")
-                        if _retry_answer:
-                            validated_answer = _retry_answer
-                            collected_steps.extend(_retry_steps)
-                            logger.info(
-                                f"[chat] ✓ 重试成功，新响应长度: {len(_retry_answer)}"
-                            )
-                        else:
-                            validated_answer = final_answer  # 重试失败，保留原始响应
-                            logger.warning("[chat] 重试未返回有效响应，保留原始结果")
-                    else:
-                        validated_answer = val.text
-            except Exception as _ve:
-                logger.warning(f"[chat] 输出验收异常（跳过）: {_ve}")
-
-            # ── v2: PII 还原 ──────────────────────────────────────────────────
-            display_answer = validated_answer
-            if mask_result and mask_result.has_pii:
-                try:
-                    display_answer = mask_result.restore(validated_answer)
-                except Exception:
-                    import logging
-
-                    logging.getLogger(__name__).warning(
-                        "Silenced exception caught", exc_info=True
-                    )
-
-            # ── 本地模型兜底提示前缀（仅云端实际故障时显示）────────────────────
-            # 用户主动选择本地模型时，不显示「云端不可用」提示
-            if used_local_fallback and local_use_reason == "cloud_fallback":
-                _lm = local_fallback_model or "本地模型"
-                display_answer = (
-                    f"🔄 **[本地模型回复]** 云端服务暂时不可用，"
-                    f"以下回答由本地 AI（`{_lm}`）提供，能力可能弱于云端：\n\n"
-                    f"{display_answer}"
-                )
-
-            # ── Skill 推荐提示 ────────────────────────────────────────────────
-            # 在回答末尾追加相关但未启用的 Skill 推荐，
-            # 帮助用户发现可以增强本类任务体验的专项技能。
-            if display_answer and not used_local_fallback:
-                try:
-                    from app.core.skills.skill_suggester import SkillSuggester
-
-                    _suggestions = SkillSuggester.suggest(
-                        user_input=message or "",
-                        task_type=task_type or "CHAT",
-                        already_active_ids=auto_skill_ids or [],
-                        answer_text=display_answer,
-                    )
-                    if _suggestions:
-                        display_answer += SkillSuggester.format_hint(_suggestions)
-                    # ── chains_to：基于本轮激活 Skill 推荐下一步 ──────────────
-                    _all_active = list(
-                        set((auto_skill_ids or []) + ([skill_id] if skill_id else []))
-                    )
-                    _already_ids = (
-                        [s["id"] for s in _suggestions] if _suggestions else []
-                    )
-                    _chains = SkillSuggester.suggest_chains(
-                        active_skill_ids=_all_active,
-                        already_suggested_ids=_already_ids,
-                    )
-                    if _chains:
-                        display_answer += SkillSuggester.format_chain_hint(_chains)
-                except Exception as _se:
-                    logger.debug(f"[chat] Skill 推荐注入跳过: {_se}")
-
-            latency_ms = int((time.time() - _t_start) * 1000)
-            task_payload = {
-                "id": f"task_{int(time.time() * 1000)}",
-                "status": "success",
-                "result": display_answer,
-                "steps": collected_steps,
-                # v2 元数据
-                "meta": {
-                    "session_id": session_id,
-                    "skill_id": skill_id,
-                    "auto_skill_ids": auto_skill_ids,
-                    "task_type": task_type,
-                    "validation_action": validation_action,
-                    "pii_masked": mask_result.has_pii if mask_result else False,
-                    "latency_ms": latency_ms,
-                    "model": local_fallback_model if used_local_fallback else model_id,
-                    "local_fallback": used_local_fallback,
-                },
-            }
-            yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
-
-            # Persist turn to disk + phase3 state snapshot
-            _save_history(
-                session_id, message, display_answer or "[Agent task completed]"
-            )
-            merged_state = _merge_system_snapshot_from_steps(
-                session_state, collected_steps
-            )
-            _save_session_state(session_id, merged_state)
-
-            # ── v4: 更新对话跟踪器（异步，非阻塞）─────────────────────────
-            if _tracker is not None and _tracker_path and display_answer:
-                _tracker.update_async(message, display_answer, _tracker_path)
-
-            # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
-            if display_answer and not used_local_fallback:
-                try:
-                    from app.core.learning.rating_store import RatingStore
-                    from app.core.learning.response_evaluator import ResponseEvaluator
-
-                    ResponseEvaluator.evaluate_async(
-                        msg_id=RatingStore.make_msg_id(session_id or "", message or ""),
-                        user_input=message,
-                        ai_response=display_answer,
-                        task_type=task_type or "CHAT",
-                        session_name=session_id or "",
-                        llm_fn=_make_eval_llm_fn(),
-                    )
-                except Exception as _ee:
-                    logger.debug(f"[chat] 自评分启动失败: {_ee}")
-
-        except Exception as e:
-            logger.exception("/chat stream failed")
-            _err_str = str(e)
-            # ── 流异常中检测到 503：仍然尝试本地兜底 ──────────────────────
-            if _is_service_unavailable_error(_err_str):
-                logger.warning("[chat] 流异常中检测到 503，尝试本地模型兜底")
-                _notice = {
-                    "step_type": "thought",
-                    "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
-                    "metadata": {"source": "local_fallback"},
-                }
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
-                _local_ans, _local_mod = _local_model_fallback(safe_message, history)
-                if _local_ans:
-                    # 异常路径：对本地模型回复做 BLOCK 检测
-                    try:
-                        OutputValidator = _lazy_validator()
-                        _lv = OutputValidator.validate(text=_local_ans)
-                        if _lv.is_blocked:
-                            logger.warning(
-                                f"[chat] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}"
-                            )
-                        _local_ans = _lv.text
-                    except Exception as _ov_err:
-                        logger.debug("[chat] 本地模型输出检测跳过: %s", _ov_err)
-                    # PII 还原
-                    if mask_result and mask_result.has_pii:
-                        try:
-                            _local_ans = mask_result.restore(_local_ans)
-                        except Exception as _pr_err:
-                            logger.debug("[chat] PII 还原失败: %s", _pr_err)
-                    _lm = _local_mod or "本地模型"
-                    # Only show "cloud unavailable" prefix for auto-fallback, not user-chosen local
-                    _display = _local_ans if _user_chose_local else (
-                        f"🔄 **[本地模型回复]** 云端服务不可用，"
-                        f"以下由本地 AI（`{_lm}`）提供：\n\n{_local_ans}"
-                    )
-                    _lf_payload = {
-                        "id": f"task_{int(time.time() * 1000)}",
-                        "status": "success",
-                        "result": _display,
-                        "steps": collected_steps,
-                        "meta": {
-                            "session_id": session_id,
-                            "skill_id": skill_id,
-                            "task_type": task_type,
-                            "model": _lm,
-                            "local_fallback": True,
-                        },
-                    }
-                    yield f"data: {json.dumps({'type': 'task_final', 'data': _lf_payload}, ensure_ascii=False)}\n\n"
-                    _save_history(session_id, message, _local_ans)
-                    return
-            yield f"data: {json.dumps({'type': 'error', 'data': {'error': _err_str}}, ensure_ascii=False)}\n\n"
+        yield from pipeline.run(
+            message=rewritten_message,
+            history=history,
+            session_id=session_id,
+            model_id=model_id,
+            skill_id=skill_id,
+            task_type=task_type,
+            system_context=system_context,
+            user_chose_local=user_chose_local,
+            enable_skill_suggestions=True,
+            auto_skill_ids=auto_skill_ids,
+        )
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 
@@ -1079,304 +836,51 @@ def process_compat():
 
 @agent_bp.route("/process-stream", methods=["POST"])
 def process_stream_compat():
-    """Phase2 compatibility SSE endpoint for legacy AdaptiveAgent clients. (v2 PII + validation)"""
+    """Legacy compatibility SSE endpoint. Delegates to ChatPipeline."""
     data = request.json or {}
     user_request = data.get("request", "")
     session_id = data.get("session_id") or data.get("session", "")
     skill_id = data.get("skill_id")
     task_type = data.get("task_type")
     context = data.get("context", {})
-    context_files = data.get("context_files") or []  # @文件 激活的上下文文件路径列表
-    # Prefer explicit history from request, fall back to disk
-    history = (
-        context.get("history", []) if isinstance(context, dict) else []
-    ) or _load_history(session_id)
+    context_files = data.get("context_files") or []
+    history = (context.get("history", []) if isinstance(context, dict) else []) or _load_history(session_id)
 
-    # Phase3: load and inject system state snapshot
     session_state = _load_session_state(session_id)
     snapshot_ctx = _build_snapshot_context_text(session_state)
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
 
-    # ── @文件 上下文注入 ─────────────────────────────────────────────────────
     if context_files:
         try:
             from app.core.file.file_registry import get_file_registry
-
             reg = get_file_registry()
-            file_blocks = []
-            for path in context_files[:5]:
-                entry = reg.get_by_path(str(path))
+            blocks = []
+            for p in context_files[:5]:
+                entry = reg.get_by_path(str(p))
                 if entry and entry.content_preview:
-                    file_blocks.append(
-                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
-                    )
-            if file_blocks:
-                file_ctx = (
-                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
-                    + "\n\n---\n\n".join(file_blocks)
-                )
-                history = (history or []) + [{"role": "model", "content": file_ctx}]
-                logger.info(f"[process-stream] 注入 {len(file_blocks)} 个 @文件 上下文")
-        except Exception as _cf_err:
-            logger.debug(f"[process-stream] @文件 上下文注入跳过: {_cf_err}")
+                    blocks.append(f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}")
+            if blocks:
+                ctx = "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n" + "\n\n---\n\n".join(blocks)
+                history = (history or []) + [{"role": "model", "content": ctx}]
+        except Exception as e:
+            logger.debug("[process-stream] @file context skip: %s", e)
 
     if not user_request:
         return jsonify({"success": False, "error": "缺少请求内容"}), 400
 
     skill_id, auto_skill_ids = _resolve_runtime_skill(user_request, skill_id, task_type)
 
-    # ── PII 屏蔽（在发送给 Agent 前执行）──────────────────────────
-    mask_result = None
-    safe_request = user_request
-    try:
-        PIIFilter = _lazy_pii()
-        mask_result = PIIFilter.mask(user_request)
-        if mask_result.has_pii:
-            safe_request = mask_result.masked_text
-            logger.info(
-                f"[process-stream] PII 屏蔽 session={session_id} "
-                f"types={[e.entity_type for e in mask_result.entities]}"
-            )
-    except Exception as _pe:
-        logger.warning(f"[process-stream] PII 过滤器初始化失败，跳过屏蔽: {_pe}")
-
-    agent = get_agent()
+    pipeline = _build_chat_pipeline()
 
     def generate():
-        collected_steps = []
-        raw_final = ""
-        used_local_fallback = False
-        local_fallback_model = None
-        t0 = time.time()
-        try:
-            for step in agent.run(
-                input_text=safe_request,
-                history=history,
-                session_id=session_id,
-                skill_id=skill_id,
-                task_type=task_type,
-            ):
-                step_data = step.to_dict()
-                collected_steps.append(step_data)
-                if step.step_type == AgentStepType.ANSWER:
-                    raw_final = step.content or ""
-
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': step_data}, ensure_ascii=False)}\n\n"
-
-            if not raw_final and collected_steps:
-                raw_final = collected_steps[-1].get("content", "")
-
-            # ── 503 / 连接故障：本地模型兜底 ────────────────────────────────
-            _error_steps = [s for s in collected_steps if s.get("step_type") == "error"]
-            if _error_steps and _is_service_unavailable_error(
-                _error_steps[-1].get("content", "")
-            ):
-                logger.warning(
-                    "[process-stream] 检测到云端连接故障（503），尝试本地模型兜底"
-                )
-                _notice = {
-                    "step_type": "thought",
-                    "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
-                    "metadata": {"source": "local_fallback"},
-                }
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
-                _local_ans, _local_mod = _local_model_fallback(safe_request, history)
-                if _local_ans:
-                    raw_final = _local_ans
-                    used_local_fallback = True
-                    local_fallback_model = _local_mod
-                    logger.info(f"[process-stream] 本地模型兜底成功（{_local_mod}）")
-                else:
-                    raw_final = (
-                        "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
-                    )
-
-            # ── 输出校验 ─────────────────────────────────────────
-            latency_ms = int((time.time() - t0) * 1000)
-            validation_action = "PASS"
-            try:
-                if raw_final:
-                    OutputValidator = _lazy_validator()
-                    # 本地备用模型：只做泄露/有害内容检测，跳过实时数据/格式/LLM质量检测
-                    val_result = OutputValidator.validate(
-                        raw_final,
-                        skill_id=skill_id if not used_local_fallback else None,
-                        original_prompt=(
-                            user_request if not used_local_fallback else None
-                        ),
-                    )
-                    validation_action = val_result.action
-                    if validation_action == "BLOCK":
-                        # Disabled — log only, pass through original text
-                        logger.warning(f"[process-stream] 🚫 输出检测到问题（已忽略拦截）: {val_result.reasons}")
-                    elif validation_action == "RETRY" and not used_local_fallback:
-                        logger.warning(
-                            f"[process-stream] ⟳ 输出质量不合格，触发重试: {val_result.reasons}"
-                        )
-                        _retry_input = (
-                            val_result.text
-                            if val_result.text != raw_final
-                            else safe_request
-                        )
-                        _retry_steps: list = []
-                        _retry_answer = ""
-                        try:
-                            for _rs in agent.run(
-                                input_text=_retry_input,
-                                history=history,
-                                session_id=session_id,
-                                skill_id=skill_id,
-                                task_type=task_type,
-                            ):
-                                _retry_steps.append(_rs.to_dict())
-                                if _rs.step_type == AgentStepType.ANSWER:
-                                    _retry_answer = _rs.content or ""
-                        except Exception as _re:
-                            logger.warning(f"[process-stream] 重试执行异常: {_re}")
-                        if not _retry_answer and _retry_steps:
-                            _retry_answer = _retry_steps[-1].get("content", "")
-                        if _retry_answer:
-                            raw_final = _retry_answer
-                            collected_steps.extend(_retry_steps)
-                            logger.info(
-                                f"[process-stream] ✓ 重试成功，新响应长度: {len(_retry_answer)}"
-                            )
-                        else:
-                            logger.warning(
-                                "[process-stream] 重试未返回有效响应，保留原始结果"
-                            )
-                    elif validation_action in ("WARN", "REFORMAT"):
-                        raw_final = val_result.text or raw_final
-            except Exception as _ve:
-                logger.warning(f"[process-stream] 输出校验失败: {_ve}")
-
-            # ── PII 还原 ──────────────────────────────────────────
-            final_answer = raw_final
-            if mask_result and mask_result.has_pii:
-                try:
-                    final_answer = mask_result.restore(raw_final)
-                except Exception:
-                    import logging
-
-                    logging.getLogger(__name__).warning(
-                        "Silenced exception caught", exc_info=True
-                    )
-
-            # ── 本地模型兜底提示前缀 ─────────────────────────────────────────
-            if used_local_fallback:
-                _lm = local_fallback_model or "本地模型"
-                final_answer = (
-                    f"🔄 **[本地模型回复]** 云端服务暂时不可用，"
-                    f"以下回答由本地 AI（`{_lm}`）提供，能力可能弱于云端：\n\n"
-                    f"{final_answer}"
-                )
-
-            task_payload = {
-                "id": f"task_{int(time.time() * 1000)}",
-                "status": "success",
-                "result": final_answer,
-                "steps": collected_steps,
-                "meta": {
-                    "session_id": session_id,
-                    "skill_id": skill_id,
-                    "auto_skill_ids": auto_skill_ids,
-                    "task_type": task_type,
-                    "validation_action": validation_action,
-                    "pii_masked": mask_result.has_pii if mask_result else False,
-                    "latency_ms": latency_ms,
-                    "model": local_fallback_model if used_local_fallback else None,
-                    "local_fallback": used_local_fallback,
-                },
-            }
-            yield f"data: {json.dumps({'type': 'task_final', 'data': task_payload}, ensure_ascii=False)}\n\n"
-
-            # Persist turn to disk + phase3 state snapshot
-            _save_history(
-                session_id, user_request, final_answer or "[Agent task completed]"
-            )
-            merged_state = _merge_system_snapshot_from_steps(
-                session_state, collected_steps
-            )
-            _save_session_state(session_id, merged_state)
-
-            # ── 后台自评分（数据飞轮: model_eval 通道）────────────────────────
-            if final_answer and not used_local_fallback:
-                try:
-                    from app.core.learning.rating_store import RatingStore
-                    from app.core.learning.response_evaluator import ResponseEvaluator
-
-                    ResponseEvaluator.evaluate_async(
-                        msg_id=RatingStore.make_msg_id(
-                            session_id or "", user_request or ""
-                        ),
-                        user_input=user_request,
-                        ai_response=final_answer,
-                        task_type=task_type or "CHAT",
-                        session_name=session_id or "",
-                        llm_fn=_make_eval_llm_fn(),
-                    )
-                except Exception as _ee:
-                    logger.debug(f"[process-stream] 自评分启动失败: {_ee}")
-        except Exception as exc:
-            logger.exception("/process-stream failed")
-            _err_str = str(exc)
-            # ── 流异常中检测到 503：仍然尝试本地兜底 ──────────────────────
-            if _is_service_unavailable_error(_err_str):
-                logger.warning("[process-stream] 流异常中检测到 503，尝试本地模型兜底")
-                _notice = {
-                    "step_type": "thought",
-                    "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
-                    "metadata": {"source": "local_fallback"},
-                }
-                yield f"data: {json.dumps({'type': 'agent_step', 'data': _notice}, ensure_ascii=False)}\n\n"
-                _local_ans, _local_mod = _local_model_fallback(safe_request, history)
-                if _local_ans:
-                    # 异常路径：对本地模型回复做 BLOCK 检测 + PII 还原
-                    try:
-                        OutputValidator = _lazy_validator()
-                        _lv = OutputValidator.validate(text=_local_ans)
-                        if _lv.is_blocked:
-                            logger.warning(
-                                f"[process-stream] 🚫 本地模型异常路径输出被拦截: {_lv.reasons}"
-                            )
-                        _local_ans = _lv.text
-                    except Exception:
-                        import logging
-
-                        logging.getLogger(__name__).warning(
-                            "Silenced exception caught", exc_info=True
-                        )
-                    if mask_result and mask_result.has_pii:
-                        try:
-                            _local_ans = mask_result.restore(_local_ans)
-                        except Exception:
-                            import logging
-
-                            logging.getLogger(__name__).warning(
-                                "Silenced exception caught", exc_info=True
-                            )
-                    _lm = _local_mod or "本地模型"
-                    _display = (
-                        f"🔄 **[本地模型回复]** 云端服务不可用，"
-                        f"以下由本地 AI（`{_lm}`）提供：\n\n{_local_ans}"
-                    )
-                    _lf_payload = {
-                        "id": f"task_{int(time.time() * 1000)}",
-                        "status": "success",
-                        "result": _display,
-                        "steps": collected_steps,
-                        "meta": {
-                            "session_id": session_id,
-                            "skill_id": skill_id,
-                            "model": _lm,
-                            "local_fallback": True,
-                        },
-                    }
-                    yield f"data: {json.dumps({'type': 'task_final', 'data': _lf_payload}, ensure_ascii=False)}\n\n"
-                    _save_history(session_id, user_request, _local_ans)
-                    return
-            yield f"data: {json.dumps({'type': 'error', 'data': {'error': _err_str}}, ensure_ascii=False)}\n\n"
+        yield from pipeline.run(
+            message=user_request,
+            history=history,
+            session_id=session_id,
+            skill_id=skill_id,
+            task_type=task_type,
+        )
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream")
 

@@ -96,6 +96,7 @@ def app_client():
             from web.app import app
 
             app.config["TESTING"] = True
+            app.config["WTF_CSRF_ENABLED"] = False
             # Patch the client and types (to avoid google.genai circular import under test)
             import web.app as web_app_module
 
@@ -677,8 +678,9 @@ class TestEditorAIStream:
         event_types = [event.get("type") for event in events]
 
         assert resp.status_code == 200
-        assert event_types[:5] == [
+        assert event_types[:6] == [
             "run.started",
+            "supervisor.status",
             "task.classified",
             "plan.checked",
             "plan.created",
@@ -2910,7 +2912,7 @@ class TestLocalModelMode:
             "runtimeExecutionLabel(artifact.runtime_context)"
             in renderer[tool_gap_start:run_summary_end]
         )
-        assert "runtimeMetaHtml(payload)" in renderer[run_summary_start:run_summary_end]
+        assert "runtimeMetaHtml(payload)" not in renderer[run_summary_start:run_summary_end]
         assert (
             "runtimeMetaHtml(payload)"
             in renderer[check_finished_start:check_finished_end]
@@ -2970,7 +2972,7 @@ class TestLocalModelMode:
         assert "chips.push(`任务：" not in renderer
         assert "chips.push(`操作：" not in renderer
         assert "chips.push(`分类：" not in renderer
-        assert "${classificationHtml}${pendingResumeHtml}${runtimeHtml}" in renderer
+        assert "${pendingResumeHtml}${nextActionArtifact}${taskResultActionsHtml(card)}" in renderer
 
         assert (
             "if (dataset.taskRequestKind) metadata.task_request_kind = String(dataset.taskRequestKind || '').trim();"
@@ -3017,9 +3019,9 @@ class TestLocalModelMode:
         assert "if (normalized === 'answer') return '只给答案';" in renderer
         assert "if (normalized === 'write') return '写入文件';" in renderer
         assert "if (normalized === 'hybrid') return '先分析后决定';" in renderer
-        assert "本轮只做分析，未写入文件。" in renderer
-        assert "本轮先完成分析；确认后可写入文件。" in renderer
-        assert "本轮完成分析，未写入文件。" in renderer
+        assert "只读完成，未修改文件。" in renderer
+        assert "已完成分析，可确认后写入。" in renderer
+        assert "已完成分析，未修改文件。" in renderer
         assert 'data-task-followup-action="apply"' in renderer
         assert "应用建议" in renderer
         assert (
@@ -3123,6 +3125,21 @@ class TestLocalModelMode:
         assert "计划监管" in renderer
         assert "renderPlanGateIssue(payload)" in renderer
 
+    def test_workspace_task_renderer_surfaces_supervision_and_workflow_state(self):
+        renderer = Path("web/static/js/workspace-ai-task.js").read_text(
+            encoding="utf-8"
+        )
+
+        assert "function renderWorkflowState(card, payload) {" in renderer
+        assert "function renderDecisionAudit(payload) {" in renderer
+        assert "function renderSupervisorIntervention(payload) {" in renderer
+        assert "if (type === 'supervisor.intervention') {" in renderer
+        assert "if (type === 'decision.made') {" in renderer
+        assert "renderWorkflowState(card, payload);" in renderer
+        assert "large_file_windows" in renderer
+        assert "workflow.state" in renderer
+        assert "监管纠偏" in renderer
+
     def test_workspace_task_renderer_supports_simple_quick_action_mode(self):
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(
             encoding="utf-8"
@@ -3221,31 +3238,30 @@ class TestLocalModelMode:
         assert quick_start != -1 and quick_end != -1
         quick_section = src[quick_start:quick_end]
         assert "_waTaskDispatcher.matchQuickAction(text)" in quick_section
-        assert (
-            "attachedDispatcher.registerQuickActionKeyword(keyword, action.action);"
-            in quick_actions
-        )
+        assert "attachedDispatcher.registerQuickActionHandler" in quick_actions
         assert "action: '检查'" in quick_actions
         assert "keywords: ['检查']" in quick_actions
         assert "WA.sendQuickAction(matchedAction);" in quick_section
 
-    def test_pdf_ai_annotate_is_explicitly_disabled_during_migration(self):
-        """PDF AI annotate should not call the legacy quick-action path while the feature is offline."""
+    def test_pdf_ai_annotate_uses_whitebox_task_dispatcher(self):
+        """PDF AI annotate should use the whitebox dispatcher, not the legacy quick-action path."""
         src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
         fn_start = src.find("async aiAnnotate() {")
         fn_end = src.find("// ─── AI Watermark removal", fn_start)
         assert fn_start != -1 and fn_end != -1
         ai_annotate = src[fn_start:fn_end]
         assert "/api/v1/workspace/quick-action" not in ai_annotate
-        assert "ai_annotate" not in ai_annotate
-        assert "AI 标注功能正在迁移到新的 AI 流程" in ai_annotate
+        assert "_waTaskDispatcher.dispatchMessage({" in ai_annotate
+        assert "current_file: currentFile" in ai_annotate
+        assert "pdf_ai_annotate: true" in ai_annotate
 
-    def test_pdf_ai_annotate_button_title_marks_temporary_unavailability(self):
-        """The PDF toolbar button should advertise that AI annotate is temporarily unavailable."""
+    def test_pdf_ai_annotate_button_is_enabled_for_whitebox_flow(self):
+        """The PDF toolbar button should launch the whitebox AI annotate flow."""
         html = Path("web/templates/workspace_assistant.html").read_text(
             encoding="utf-8"
         )
-        assert 'title="AI 标注迁移中，暂不可用"' in html
+        assert 'onclick="WA.pdfAIAnnotate()"' in html
+        assert 'title="AI 读取当前 PDF 并生成批注建议"' in html
 
     def test_workspace_templates_use_shared_model_controls_partial(self):
         """Workspace templates should share provider/local model controls without exposing a redundant model picker."""
@@ -4726,12 +4742,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "function buildWhiteboxTaskPayload(text, pinnedSelText, pinnedSelSource, overrides) {"
             in dispatcher
         )
-        assert "current_file:" not in dispatcher
+        assert "current_file: currentFile," in dispatcher
         assert "getCurrentAIContextPath" not in dispatcher
-        assert (
-            "target_path: targetFile ? (targetFile.path || targetFile.name || '') : '',"
-            in dispatcher
-        )
+        assert "const inferredTargetPath = targetFile" in dispatcher
+        assert "target_path: inferredTargetPath," in dispatcher
         assert (
             "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',"
             in dispatcher
@@ -4807,6 +4821,139 @@ console.log(JSON.stringify(cases.map((payload) => ({
         ]
         assert all(item["model_mode"] == "local" for item in payloads)
         assert all(item["targets"][0][1] is True for item in payloads)
+
+    def test_workspace_dispatcher_records_current_open_file_for_chat_and_annotation(
+        self,
+    ):
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node is not available")
+        script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync('web/static/js/workspace-task-dispatcher.js', 'utf8');
+const sandbox = { window: { WA: {} }, console };
+vm.createContext(sandbox);
+vm.runInContext(code, sandbox, { filename: 'workspace-task-dispatcher.js' });
+const state = {
+  _aiTargetFileIdx: -1,
+  _aiFileContext: [],
+  wsSourcePath: 'workspace/interview.docx',
+  activeTabPath: 'workspace/interview.docx',
+  fileName: 'interview.docx',
+  fileType: 'docx',
+  conversation: [],
+};
+const dispatcher = sandbox.window.WA.createTaskDispatcher({
+  state,
+  sampleTaskContext: (text) => text,
+  getSessionId: () => 'sid-test',
+  getModelMode: () => 'local',
+  getSelectedCloudModelId: () => '',
+  getConversationHistory: () => [],
+  streamWhiteboxTask: () => Promise.resolve({ summary: 'ok' }),
+});
+const annotatePayload = dispatcher.buildWhiteboxTaskPayload(
+  '将你觉得写得不好的地方批注出来',
+  '',
+  '',
+  {}
+);
+const summarizePayload = dispatcher.buildWhiteboxTaskPayload(
+  '总结当前文档的要点',
+  '',
+  '',
+  {}
+);
+console.log(JSON.stringify({
+  annotate: {
+    target_path: annotatePayload.target_path,
+    current_file: annotatePayload.current_file,
+    files: annotatePayload.files.map((file) => [file.path, !!file.target]),
+    context_current: annotatePayload.task_context.files.current,
+    context_target: annotatePayload.task_context.files.target,
+  },
+  summarize: {
+    target_path: summarizePayload.target_path,
+    current_file: summarizePayload.current_file,
+    files: summarizePayload.files,
+    context_current: summarizePayload.task_context.files.current,
+    context_target: summarizePayload.task_context.files.target || null,
+  },
+}));
+"""
+        result = subprocess.run(
+            [node, "-e", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+        assert payload["annotate"]["target_path"] == "workspace/interview.docx"
+        assert payload["annotate"]["current_file"]["path"] == "workspace/interview.docx"
+        assert payload["annotate"]["files"] == [["workspace/interview.docx", True]]
+        assert payload["annotate"]["context_current"]["path"] == "workspace/interview.docx"
+        assert payload["annotate"]["context_target"]["path"] == "workspace/interview.docx"
+        assert payload["summarize"]["target_path"] == ""
+        assert payload["summarize"]["current_file"]["path"] == "workspace/interview.docx"
+        assert payload["summarize"]["files"] == []
+        assert payload["summarize"]["context_current"]["path"] == "workspace/interview.docx"
+        assert payload["summarize"]["context_target"] is None
+
+    def test_workspace_dispatcher_does_not_mark_bare_source_reference_as_target(self):
+        node = shutil.which("node")
+        if not node:
+            pytest.skip("node is not available")
+        script = r"""
+const fs = require('fs');
+const vm = require('vm');
+const code = fs.readFileSync('web/static/js/workspace-task-dispatcher.js', 'utf8');
+const sandbox = { window: { WA: {} }, console };
+vm.createContext(sandbox);
+vm.runInContext(code, sandbox, { filename: 'workspace-task-dispatcher.js' });
+const state = {
+  _aiTargetFileIdx: -1,
+  _aiFileContext: [
+    { path: 'workspace/_test_integration_workspace.txt', name: '_test_integration_workspace.txt', type: 'txt', content: 'workspace file content' },
+  ],
+  conversation: [],
+};
+const dispatcher = sandbox.window.WA.createTaskDispatcher({
+  state,
+  sampleTaskContext: (text) => text,
+  getSessionId: () => 'sid-test',
+  getModelMode: () => 'local',
+  getSelectedCloudModelId: () => '',
+  getConversationHistory: () => [],
+  streamWhiteboxTask: () => Promise.resolve({ summary: 'ok' }),
+});
+const payload = dispatcher.buildWhiteboxTaskPayload(
+  '请读取已添加的 _test_integration_workspace.txt，并创建一个新的 Word 文件 workspace/koto_ai_assistant_eval_generated.docx。请不要修改原文件。',
+  '',
+  '',
+  {}
+);
+console.log(JSON.stringify({
+  target_path: payload.target_path,
+  targets: payload.files.map((file) => [file.name, !!file.target]),
+  context_target: payload.task_context.files.target || null,
+  options: payload.options,
+}));
+"""
+        result = subprocess.run(
+            [node, "-e", script],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            check=True,
+        )
+        payload = json.loads(result.stdout)
+        assert payload["target_path"] == ""
+        assert payload["targets"] == [["_test_integration_workspace.txt", False]]
+        assert payload["context_target"] is None
+        assert payload["options"]["enable_ai_intent_adjudicator"] is True
+        assert payload["options"]["router_policy"] == "model_primary_intent"
 
     def test_workspace_dispatcher_marks_short_task_critiques_as_followup_context(self):
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
@@ -4910,10 +5057,10 @@ console.log(JSON.stringify(cases.map((payload) => ({
         conversation = Path("web/static/js/workspace-ai-conversation.js").read_text(
             encoding="utf-8"
         )
-        notebook = Path("web/static/js/workspace-notebook.js").read_text(
+        notebook = Path("web/src/workspace/notebook.ts").read_text(
             encoding="utf-8"
         )
-        find_replace = Path("web/static/js/workspace-find-replace.js").read_text(
+        find_replace = Path("web/src/workspace/find-replace.ts").read_text(
             encoding="utf-8"
         )
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
@@ -4926,16 +5073,21 @@ console.log(JSON.stringify(cases.map((payload) => ({
         asset_scripts = Path("web/templates/_workspace_asset_scripts.html").read_text(
             encoding="utf-8"
         )
+        workspace_bundle_entry = Path("web/src/bundles/workspace.ts").read_text(
+            encoding="utf-8"
+        )
 
         assert "window.WA.streamWhiteboxTask" in renderer
-        assert "fetch('/api/editor/ai/task-stream'" in renderer
+        assert "csrfFetch('/api/editor/ai/task-stream'" in renderer
         assert "window.WA.createWorkspaceAiTransport" in ai_transport
         assert "window.WA.createWorkspaceAiResultsRuntime" in ai_results
         assert "window.WA.createWorkspaceQuickActionRuntime" in quick_actions
         assert "window.WA.createWorkspaceAiConversation" in conversation
         assert "model' || value === 'ai'" in conversation
-        assert "window.WA.installWorkspaceNotebookTools" in notebook
-        assert "window.WA.installWorkspaceFindReplace" in find_replace
+        assert "export function installWorkspaceNotebookTools" in notebook
+        assert "WA.installWorkspaceNotebookTools = installWorkspaceNotebookTools" in notebook
+        assert "export function installWorkspaceFindReplace" in find_replace
+        assert "WA.installWorkspaceFindReplace = installWorkspaceFindReplace" in find_replace
         assert "window.WA.createTaskDispatcher" in dispatcher
         assert (
             "typeof window.WA.createWorkspaceAiResultsRuntime === 'function'"
@@ -4954,14 +5106,24 @@ console.log(JSON.stringify(cases.map((payload) => ({
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
         assert "{% include '_workspace_asset_scripts.html' %}" in standalone
         assert "{% include '_workspace_asset_scripts.html' %}" in main
-        assert "workspace-ai-task.js" in asset_scripts
-        assert "workspace-ai-transport.js" in asset_scripts
-        assert "workspace-ai-results.js" in asset_scripts
-        assert "workspace-ai-quick-actions.js" in asset_scripts
-        assert "workspace-ai-conversation.js" in asset_scripts
-        assert "workspace-notebook.js" in asset_scripts
-        assert "workspace-find-replace.js" in asset_scripts
-        assert "workspace-task-dispatcher.js" in asset_scripts
+        assert "workspace-bundle.js" in asset_scripts
+        assert "workspace-task-workbench.js" in asset_scripts
+        assert asset_scripts.index("workspace-bundle.js") < asset_scripts.index("workspace-task-workbench.js")
+        assert "workspace-assistant.js" not in asset_scripts
+        assert "workspace-ai-task.js" not in asset_scripts
+        assert "workspace-ai-results.js" not in asset_scripts
+        assert "workspace-notebook.js" not in asset_scripts
+        assert "workspace-find-replace.js" not in asset_scripts
+        assert not Path("web/static/js/workspace-notebook.js").exists()
+        assert not Path("web/static/js/workspace-find-replace.js").exists()
+        assert "import '../workspace/task-runner';" in workspace_bundle_entry
+        assert "import '../workspace/transport';" in workspace_bundle_entry
+        assert "import '../workspace/results';" in workspace_bundle_entry
+        assert "import '../workspace/quick-actions';" in workspace_bundle_entry
+        assert "import '../workspace/conversation';" in workspace_bundle_entry
+        assert "import '../workspace/notebook';" in workspace_bundle_entry
+        assert "import '../workspace/find-replace';" in workspace_bundle_entry
+        assert "import '../workspace/task-dispatcher';" in workspace_bundle_entry
         assert "doc-agent-ui.js" not in standalone
         assert "wa-doc-agent-phases" not in standalone
         assert "wa-inline-ai" not in main
@@ -4980,12 +5142,10 @@ console.log(JSON.stringify(cases.map((payload) => ({
 
         assert "registerMessageRoute" in dispatcher
         assert "registerQuickActionHandler" in dispatcher
-        assert "registerQuickActionKeyword" in dispatcher
         assert "registerAction(definition)" in quick_actions
         assert "window.WA.registerTaskQuickAction" in assistant
         assert "window.WA.registerTaskEntryRoute" in assistant
         assert "window.WA.registerTaskActionHandler" in assistant
-        assert "window.WA.registerTaskActionKeyword" in assistant
 
     def test_workspace_dispatcher_records_assistant_turns_for_task_history(self):
         dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
@@ -5100,7 +5260,7 @@ console.log(JSON.stringify(cases.map((payload) => ({
         assert "if (typeof opts.onTaskCardSnapshot === 'function') {" in task_renderer
         assert "return attachRunCardBehavior(card);" in task_renderer
 
-    def test_main_chat_filters_workspace_assistant_sessions(self):
+    def test_unified_ai_history_does_not_filter_workspace_sessions(self):
         app_js = Path("web/static/js/app.js").read_text(encoding="utf-8")
         sessions_bp = Path("web/blueprints/sessions.py").read_text(encoding="utf-8")
 
@@ -5108,10 +5268,9 @@ console.log(JSON.stringify(cases.map((payload) => ({
         assert "_maybeOpenWorkspaceAssistantSession" not in app_js
         assert "_notifyWorkspaceAssistantSessionRenamed" not in app_js
         assert "_notifyWorkspaceAssistantSessionDeleted" not in app_js
-        assert (
-            "def _is_workspace_assistant_session(filename: str) -> bool:" in sessions_bp
-        )
-        assert "if not _is_workspace_assistant_session(session)" in sessions_bp
+        assert "def _is_workspace_assistant_session(filename: str) -> bool:" not in sessions_bp
+        assert "if not _is_workspace_assistant_session(session)" not in sessions_bp
+        assert "session_files = _get_session_manager().list_sessions()" in sessions_bp
 
     def test_workspace_task_renderer_drops_loaded_memory_context_step(self):
         renderer = Path("web/static/js/workspace-ai-task.js").read_text(

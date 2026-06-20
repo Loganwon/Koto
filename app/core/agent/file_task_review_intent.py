@@ -6,6 +6,36 @@ from typing import Any, Iterable
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 
 
+# Hard markers: terms that unequivocally mean "write annotations into the document"
+# Ambiguous terms like "指出"/"有问题的地方" are intentionally excluded —
+# they should be handled by the LLM classifier, not by hard keyword matching.
+DOCX_REVIEW_INTENT_MARKERS = (
+    "批注",
+    "标注",
+    "修订",
+    "批改",
+    "track changes",
+    "annotate the document",
+    "annotate this document",
+    "add comments to",
+    "proofread and mark",
+)
+
+# Hint words: fed into LLM classifier prompt as soft signals, NOT used for hard routing
+DOCX_ANNOTATION_HINT_WORDS = (
+    "批注", "标注", "标出", "指出",
+    "审校", "校对", "审阅", "校阅", "审稿",
+    "修订", "批改", "评注",
+    "修改建议", "修改意见",
+    "写得不好的地方", "有问题的地方",
+    "不通顺", "不自然",
+    "comment on", "comment", "annotate",
+    "proofread", "review comments", "track changes",
+)
+
+
+# ── Backward-compat markers for keyword fallback ──
+
 TRANSLATION_MARKERS = (
     "翻译",
     "译稿",
@@ -39,33 +69,6 @@ REVIEW_MARKERS = (
     "忠实",
     "删减",
     "添加",
-)
-
-DOCX_REVIEW_INTENT_MARKERS = (
-    "批注",
-    "标注",
-    "标出",
-    "指出",
-    "审校",
-    "校对",
-    "审阅",
-    "校阅",
-    "审稿",
-    "修订",
-    "批改",
-    "评注",
-    "修改建议",
-    "修改意见",
-    "写得不好的地方",
-    "有问题的地方",
-    "不通顺",
-    "不自然",
-    "comment on",
-    "comment",
-    "annotate",
-    "proofread",
-    "review comments",
-    "track changes",
 )
 
 COMPARE_MARKERS = (
@@ -132,6 +135,7 @@ def request_has_file_type(request: FileTaskRequest, file_type: str) -> bool:
     )
 
 
+
 def looks_like_pdf_docx_review_request(request: FileTaskRequest) -> bool:
     task_text = str(request.task or "")
     return (
@@ -139,7 +143,6 @@ def looks_like_pdf_docx_review_request(request: FileTaskRequest) -> bool:
         and request_has_file_type(request, "docx")
         and has_any_marker(task_text, REVIEW_MARKERS)
     )
-
 
 def looks_like_multi_docx_compare_request(request: FileTaskRequest) -> bool:
     task_text = str(request.task or "").strip().lower()

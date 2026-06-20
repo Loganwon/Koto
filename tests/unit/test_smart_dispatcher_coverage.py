@@ -150,6 +150,10 @@ class TestQuickTaskHint:
         result = self.SD._quick_task_hint("[FILE_ATTACHED:.docx] 帮我润色一下这篇文档")
         assert result == "DOC_ANNOTATE"
 
+    def test_capability_or_howto_query_stays_chat(self):
+        assert self.SD._quick_task_hint("你能生成word吗？") == "CHAT"
+        assert self.SD._quick_task_hint("如何给 Word 加批注") == "CHAT"
+
 
 # ---------------------------------------------------------------------------
 # 9. _extract_ngrams
@@ -343,28 +347,7 @@ class TestAnalyze:
 
     def _patch_lazy_imports(self):
         """Return patch context managers for lazy-imported modules."""
-        mock_local_planner_cls = MagicMock()
-        mock_local_planner_cls.should_preempt.return_value = False
-        mock_local_planner_cls.can_plan.return_value = False
-
-        mock_task_decomposer_cls = MagicMock()
-        mock_task_decomposer_cls.detect_compound_task.return_value = {
-            "is_compound": False
-        }
-
         patches = [
-            patch(
-                "app.core.routing.smart_dispatcher._get_local_planner",
-                return_value=mock_local_planner_cls,
-            ),
-            patch(
-                "app.core.routing.smart_dispatcher._get_task_decomposer",
-                return_value=mock_task_decomposer_cls,
-            ),
-            patch(
-                "app.core.routing.smart_dispatcher._get_ai_router",
-                return_value=MagicMock(),
-            ),
             patch(
                 "app.core.routing.smart_dispatcher._get_local_model_router",
                 return_value=MagicMock(),
@@ -498,8 +481,83 @@ class TestAnalyze:
             for p in patches:
                 p.stop()
 
-    def test_file_context_md_edit_routes_multi_step(self):
-        """With .md file and edit keyword → MULTI_STEP doc workflow."""
+    def test_file_context_capability_query_stays_chat(self):
+        """Capability questions should not become document edit tasks."""
+        patches = self._patch_lazy_imports()
+        for p in patches:
+            p.start()
+        try:
+            file_ctx = {"has_file": True, "file_type": ".docx"}
+            task, confidence, ctx = self.SD.analyze(
+                "你能润色这个文档吗？", file_context=file_ctx
+            )
+            assert task == "CHAT"
+            assert "Capability" in confidence
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_file_context_rule_preempts_model_primary_route(self):
+        """File context should stay on deterministic rules before model routing."""
+        patches = self._patch_lazy_imports()
+        mock_classifier = MagicMock()
+        mock_classifier.is_available.return_value = True
+        mock_classifier.classify.return_value = ("CHAT", 0.91)
+        patches.append(
+            patch(
+                "app.core.routing.smart_dispatcher._get_task_classifier",
+                return_value=mock_classifier,
+            )
+        )
+        for p in patches:
+            p.start()
+        try:
+            file_ctx = {"has_file": True, "file_type": ".docx"}
+            task, confidence, ctx = self.SD.analyze(
+                "帮我润色一下", file_context=file_ctx
+            )
+            assert task == "DOC_ANNOTATE"
+            assert "Doc-Annotate" in confidence
+            mock_classifier.classify.assert_not_called()
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_low_confidence_model_falls_back_to_file_context_rule(self):
+        """Rule fallbacks still protect behavior when models are unsure."""
+        patches = self._patch_lazy_imports()
+        mock_classifier = MagicMock()
+        mock_classifier.is_available.return_value = True
+        mock_classifier.classify.return_value = ("CHAT", 0.41)
+        mock_local_model = MagicMock()
+        mock_local_model.is_ollama_available.return_value = False
+        patches.extend(
+            [
+                patch(
+                    "app.core.routing.smart_dispatcher._get_task_classifier",
+                    return_value=mock_classifier,
+                ),
+                patch(
+                    "app.core.routing.smart_dispatcher._get_local_model_router",
+                    return_value=mock_local_model,
+                ),
+            ]
+        )
+        for p in patches:
+            p.start()
+        try:
+            file_ctx = {"has_file": True, "file_type": ".docx"}
+            task, confidence, ctx = self.SD.analyze(
+                "帮我润色一下", file_context=file_ctx
+            )
+            assert task == "DOC_ANNOTATE"
+            assert "Doc-Annotate" in confidence
+        finally:
+            for p in patches:
+                p.stop()
+
+    def test_file_context_md_edit_routes_file_gen(self):
+        """With .md file and edit keyword → FILE_GEN edit path."""
         patches = self._patch_lazy_imports()
         for p in patches:
             p.start()
@@ -508,7 +566,7 @@ class TestAnalyze:
             task, confidence, ctx = self.SD.analyze(
                 "修改这个文件", file_context=file_ctx
             )
-            assert task == "MULTI_STEP"
+            assert task == "FILE_GEN"
         finally:
             for p in patches:
                 p.stop()
@@ -599,21 +657,29 @@ class TestResolveWorkflow:
         assert result == "langgraph_react"
 
     @patch("app.core.workflow.langgraph_workflow.WorkflowEngine")
-    def test_legacy_fallback(self, mock_wf_engine):
+    def test_standard_fallback(self, mock_wf_engine):
         mock_wf_engine.detect_workflow.return_value = "none"
         result = self.SD.resolve_workflow("CHAT", "你好")
-        assert result == "legacy"
+        assert result == "standard"
 
-    def test_import_error_returns_legacy(self):
+    def test_normalize_workflow_route_maps_legacy_to_standard(self):
+        assert self.SD.normalize_workflow_route("legacy") == "standard"
+        assert self.SD.normalize_workflow_route("") == "standard"
+        assert (
+            self.SD.normalize_workflow_route("langgraph_react")
+            == "langgraph_react"
+        )
+
+    def test_import_error_returns_standard(self):
         with patch.dict("sys.modules", {"app.core.workflow.langgraph_workflow": None}):
             # Force ImportError by patching the import
             with patch(
                 "app.core.routing.smart_dispatcher.SmartDispatcher.resolve_workflow",
                 wraps=self.SD.resolve_workflow,
             ):
-                # Directly test: if WorkflowEngine import fails → "legacy"
+                # Directly test: if WorkflowEngine import fails → "standard"
                 result = self.SD.resolve_workflow("CHAT", "hi")
-                assert result == "legacy"
+                assert result == "standard"
 
 
 # ---------------------------------------------------------------------------
@@ -666,28 +732,7 @@ class TestAnalyzeCaching:
         self.SD = _fresh_dispatcher()
 
     def _patch_lazy_imports(self):
-        mock_local_planner_cls = MagicMock()
-        mock_local_planner_cls.should_preempt.return_value = False
-        mock_local_planner_cls.can_plan.return_value = False
-
-        mock_task_decomposer_cls = MagicMock()
-        mock_task_decomposer_cls.detect_compound_task.return_value = {
-            "is_compound": False
-        }
-
         patches = [
-            patch(
-                "app.core.routing.smart_dispatcher._get_local_planner",
-                return_value=mock_local_planner_cls,
-            ),
-            patch(
-                "app.core.routing.smart_dispatcher._get_task_decomposer",
-                return_value=mock_task_decomposer_cls,
-            ),
-            patch(
-                "app.core.routing.smart_dispatcher._get_ai_router",
-                return_value=MagicMock(),
-            ),
             patch(
                 "app.core.routing.smart_dispatcher._get_local_model_router",
                 return_value=MagicMock(),

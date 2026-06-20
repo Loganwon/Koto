@@ -36,13 +36,16 @@ def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_
     assert "早上好，有什么需要帮忙？☀️" in app_js
 
 
-def test_setup_wizard_supports_gemini_and_deepseek_api_keys():
+def test_setup_wizard_uses_deepseek_api_key_only():
     html = _read("web/templates/index.html")
-    app_js = _read("web/static/js/app.js")
+    app_js = _read("web/static/js/build/app-bundle.js")
 
     assert "设置云端模型 API Key" in html
-    assert 'id="setupProviderGemini"' in html
     assert 'id="setupProviderDeepSeek"' in html
+    assert 'id="setupProviderGemini"' not in html
+    assert "Gemini" not in html
+    assert "Google AI Studio" not in html
     assert "platform.deepseek.com/api_keys" in app_js
     assert "function selectSetupProvider(provider)" in app_js
-    assert "body: JSON.stringify({ api_key: apiKey, provider })" in app_js
+    assert "DeepSeek API Key" in app_js
+    assert "Gemini" not in app_js

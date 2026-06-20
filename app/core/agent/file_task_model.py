@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskRequest
@@ -13,8 +14,46 @@ from app.core.llm.model_selection import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_FILE_TASK_MODEL = "gemini-3-flash-preview"
+_DEFAULT_FILE_TASK_MODEL = "deepseek-v4-pro"
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
+
+
+def _runtime_model_map() -> Dict[str, Any]:
+    candidates = []
+    web_pkg = sys.modules.get("web")
+    package_runtime = getattr(web_pkg, "runtime_context", None) if web_pkg is not None else None
+    if package_runtime is not None:
+        candidates.append(package_runtime)
+    runtime_module = sys.modules.get("web.runtime_context")
+    if runtime_module is not None and runtime_module is not package_runtime:
+        candidates.append(runtime_module)
+    try:
+        from web import runtime_context as imported_runtime
+
+        if imported_runtime not in candidates:
+            candidates.append(imported_runtime)
+    except Exception:
+        pass
+    try:
+        from web import app as web_app_module
+
+        if web_app_module not in candidates:
+            candidates.append(web_app_module)
+    except Exception:
+        pass
+    for module in candidates:
+        getter = getattr(module, "get_model_map", None)
+        if callable(getter):
+            try:
+                model_map = getter()
+            except Exception:
+                continue
+            if isinstance(model_map, dict) and model_map:
+                return model_map
+        model_map = getattr(module, "MODEL_MAP", None)
+        if isinstance(model_map, dict) and model_map:
+            return model_map
+    return {}
 
 
 class FileTaskModelClient:
@@ -47,7 +86,7 @@ class FileTaskModelClient:
         system: str,
         tools: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        mode = normalize_model_mode(request.model_mode, default="cloud")
+        mode = normalize_model_mode(request.model_mode, default="deepseek")
         if mode == "local":
             return self._call_local(request=request, messages=messages, system=system, tools=tools)
 
@@ -155,37 +194,22 @@ class FileTaskModelClient:
 
     def _cloud_model_id(self, request: FileTaskRequest) -> str:
         requested = str(request.model_id or "").strip()
-        mode = normalize_model_mode(request.model_mode, default="cloud")
+        mode = normalize_model_mode(request.model_mode, default="deepseek")
         provider = get_provider_for_model_mode(mode)
         ignored = {"auto", "cloud", "local", "gemini", "deepseek", "openai", "anthropic", "ollama"}
         if requested and requested.lower() not in ignored:
             return requested
+        model_map = _runtime_model_map()
+        for task_key in ("FILE_TASK", "CHAT"):
+            model_from_app = str(model_map.get(task_key) or "").strip()
+            if model_from_app:
+                return model_from_app
         if provider != "gemini":
             return get_configured_cloud_model(
                 task_type="FILE_TASK",
                 fallback_model=self._default_model,
                 provider=provider,
             )
-        try:
-            from web.runtime_context import get_model_map
-
-            model_map = get_model_map()
-            for task_key in ("FILE_TASK", "CHAT"):
-                model_from_app = str(model_map.get(task_key) or "").strip()
-                if model_from_app:
-                    return model_from_app
-        except Exception:
-            pass
-        try:
-            from web.app import MODEL_MAP
-
-            if isinstance(MODEL_MAP, dict):
-                for task_key in ("FILE_TASK", "CHAT"):
-                    model_from_app = str(MODEL_MAP.get(task_key) or "").strip()
-                    if model_from_app:
-                        return model_from_app
-        except Exception:
-            pass
         return self._default_model
 
     def _local_model_id(self, request: FileTaskRequest) -> str:

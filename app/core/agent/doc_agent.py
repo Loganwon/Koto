@@ -29,6 +29,8 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Set
 
+from app.core.agent.file_task_result_markers import KOTO_CREATED_RESULT_MARKER
+
 logger = logging.getLogger(__name__)
 
 
@@ -608,7 +610,7 @@ class DocAgent:
 
         # run_python_code: detect files via __koto_created__ markers
         if tool_name == "run_python_code":
-            _marker = "__koto_created__:"
+            _marker = KOTO_CREATED_RESULT_MARKER
             idx = result.rfind(_marker)
             if idx != -1:
                 try:

@@ -45,15 +45,23 @@ def _bundle(tmp_path_factory):
     tmp_root = tmp_path_factory.mktemp("serveabs_root")
     tmp_dir = tmp_root / "tmp"
     workspace_dir = tmp_root / "workspace"
+    settings_path = tmp_root / "user_settings.json"
     tmp_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
+        encoding="utf-8",
+    )
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
 
     _orig_tmp = _wa._TMP_DIR
     _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_settings_path = os.environ.get("KOTO_USER_SETTINGS_PATH")
+    os.environ["KOTO_USER_SETTINGS_PATH"] = str(settings_path)
     _wa._TMP_DIR = tmp_dir
+    _shared.clear_user_settings_cache()
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -67,8 +75,13 @@ def _bundle(tmp_path_factory):
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_DIR = _orig_tmp
+    _shared.clear_user_settings_cache()
     if _orig_ws is not None:
         _shared.WORKSPACE_DIR = _orig_ws
+    if _orig_settings_path is None:
+        os.environ.pop("KOTO_USER_SETTINGS_PATH", None)
+    else:
+        os.environ["KOTO_USER_SETTINGS_PATH"] = _orig_settings_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -260,7 +273,7 @@ class TestSetWorkspaceDir:
         new_dir = tmp_path / "settings_json_ws"
         new_dir.mkdir()
 
-        settings_path = _Path(_shared.PROJECT_ROOT) / "config" / "user_settings.json"
+        settings_path = _Path(_shared.get_user_settings_path())
         client.post(
             "/api/v1/workspace/set_workspace_dir",
             json={"path": str(new_dir)},
@@ -444,14 +457,20 @@ class TestRenameFileBranch:
 
 
 @pytest.fixture()
-def _ws_client(tmp_path):
+def _ws_client(monkeypatch, tmp_path):
     """Function-scoped bundle for set_workspace_dir edge-case tests."""
     os.environ.setdefault("KOTO_AUTH_ENABLED", "false")
 
     tmp_dir = tmp_path / "tmp"
     workspace_dir = tmp_path / "workspace"
+    settings_path = tmp_path / "user_settings.json"
     tmp_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
@@ -459,6 +478,7 @@ def _ws_client(tmp_path):
     _orig_tmp = _wa._TMP_DIR
     _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
     _wa._TMP_DIR = tmp_dir
+    _shared.clear_user_settings_cache()
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -472,6 +492,7 @@ def _ws_client(tmp_path):
         yield client, workspace_dir
 
     _wa._TMP_DIR = _orig_tmp
+    _shared.clear_user_settings_cache()
     if _orig_ws is not None:
         _shared.WORKSPACE_DIR = _orig_ws
 

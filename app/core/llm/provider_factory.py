@@ -6,7 +6,7 @@ Koto LLM Provider Factory
 ==========================
 Single entry point to get the appropriate LLMProvider based on:
   1. Explicit `provider` argument ("gemini" | "openai" | "anthropic" | "ollama")
-  2. `model` prefix  (gpt-* → openai, claude-* → anthropic, gemini-* / default → gemini)
+  2. `model` prefix  (deepseek-* → deepseek, gpt-* → openai, claude-* → anthropic, gemini-* → gemini)
   3. Available API keys in environment
 
 Usage:
@@ -109,7 +109,7 @@ def get_llm_provider(
     1. `provider` argument (explicit override)
     2. `model` string prefix
     3. Per-request API key in flask.g (set by auth middleware)
-    4. Available cloud API keys: GEMINI_API_KEY → OPENAI_API_KEY → ANTHROPIC_API_KEY
+  4. Available cloud API keys: DEEPSEEK_API_KEY → OPENAI_API_KEY → GEMINI_API_KEY → ANTHROPIC_API_KEY
     5. Local fallback only when explicitly allowed
     """
     # Collect per-request key from Flask g (if inside a request context)
@@ -181,15 +181,17 @@ def get_llm_provider(
                     )
                 return _LOADERS[pname]()
 
-    # 3. Per-request key takes priority over global env var
-    if request_api_key:
-        return _load_gemini(api_key=request_api_key)
-
-    # 4. Auto-detect from available cloud keys
-    if has_gemini_api_key():
-        return _load_gemini()
+    # 3/4. Auto-detect from available cloud keys.
+    # Runtime DeepSeek keys keep priority, while config-file discovery stays
+    # side-effect free so Gemini config fallback is not masked by stale env.
+    if has_deepseek_api_key(ensure_loaded=False):
+        return _load_deepseek()
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         return _load_openai()
+    if request_api_key:
+        return _load_gemini(api_key=request_api_key)
+    if has_gemini_api_key():
+        return _load_gemini()
     if has_deepseek_api_key():
         return _load_deepseek()
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
@@ -206,12 +208,12 @@ def get_llm_provider(
 def list_available_providers() -> list[str]:
     """Return names of providers whose API keys are present in the environment."""
     available = []
-    if get_gemini_api_key():
-        available.append("gemini")
-    if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
-        available.append("openai")
     if get_deepseek_api_key():
         available.append("deepseek")
+    if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
+        available.append("openai")
+    if get_gemini_api_key():
+        available.append("gemini")
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
         available.append("anthropic")
     # Ollama is always potentially available (check runtime)

@@ -110,7 +110,7 @@ class WorkflowRuntime:
 
             # 推断最佳 LangGraph 工作流
             detected = WorkflowEngine.detect_workflow(workflow_id, user_input)
-            if detected == "sequential_chat":
+            if detected in {"sequential_chat", "standard"}:
                 # 标准对话无需 LangGraph，直接降级
                 return None
 
@@ -320,10 +320,10 @@ class WorkflowRuntime:
                 return
 
             detected = WorkflowEngine.detect_workflow(workflow_id, user_input)
-            if detected == "sequential_chat":
+            if detected in {"sequential_chat", "standard"}:
                 yield {
                     "node": "error",
-                    "content": "sequential_chat 不支持工作流流式执行",
+                    "content": f"{detected} 不支持工作流流式执行",
                     "done": True,
                 }
                 return

@@ -1,15 +1,20 @@
 <!-- Split.js served locally so a CDN failure cannot crash the workspace runtime -->
 <script src="/static/vendor/split.min.js"></script>
-<script src="{{ url_for('static', filename='js/workspace-ai-task-refresh.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-ai-transport.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-ai-task.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-ai-results.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-ai-quick-actions.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-ai-conversation.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-task-dispatcher.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/docx-review-geometry.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/docx-review-layout.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/docx-review-state.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-notebook.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-find-replace.js') }}?v={{ range(100000,999999)|random }}"></script>
-<script src="{{ url_for('static', filename='js/workspace-assistant.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script>
+  var $, WA, state, Router, showToast, autoResize, lastSelectionText;
+  var _csrfFetch, _escHtml, _fileIcon, _normalizeWorkspaceModelMode;
+  var _DEFAULT_FILE_SVG, _DOC_SVG, _FOLDER_SVG, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG;
+  var _PIN_SVG, _PENCIL_SVG, _SEARCH_SVG, _CLIPBOARD_SVG, _CHART_SVG, _LIGHTBULB_SVG;
+  var _TRASH_SVG, _PAUSE_SVG, _SEND_SVG, _DOWNLOAD_SVG, _CHAT_SVG, _SLIDES_SVG;
+  var _SUN_SVG, _MOON_SVG, _WORD_FILE_SVG, _EXCEL_FILE_SVG, _POWERPOINT_FILE_SVG, _PDF_SVG, _TEXT_SVG, _CODE_SVG, _IMAGE_SVG, _EXT_ICON;
+  var _fsHandleMap, _MIME, _autoSaveEnabled, _autoSaveTimer, _isSaving;
+  var _waAiResultsRuntime, _waQuickActionRuntime, _waConversationRuntime, _waTaskDispatcher, _waQuickActionDispatcherAttached;
+  var _hostSessionId, _WA_RUNTIME_SESSION_ID, _initWorkspaceAiRuntimes, _hydrateAiConversation, _waSession, _waRenderMarkdown, _waQuickActionModelMode, _waSampleTaskContext, _persistWorkspaceConversationTurn;
+  var _sanitizeRenderedHtml, _getPinnedSelectionSourceMeta, _selectionContextText, _selectionContextSourceLabel, _createPinnedSelectionContext, _setStreamBtn;
+</script>
+<!-- Bundled TS → IIFE: workspace + editors + ui -->
+<script src="{{ url_for('static', filename='js/build/workspace-bundle.js') }}?v={{ range(100000,999999)|random }}"></script>
+<!-- Bundled TS → IIFE: docx review modules -->
+<script src="{{ url_for('static', filename='js/build/review-bundle.js') }}?v={{ range(100000,999999)|random }}"></script>
+<!-- Still plain JS: workspace task workbench -->
+<script src="{{ url_for('static', filename='js/workspace-task-workbench.js') }}?v={{ range(100000,999999)|random }}"></script>

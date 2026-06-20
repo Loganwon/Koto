@@ -63,6 +63,9 @@
     const renderMarkdown = typeof options.renderMarkdown === 'function'
       ? options.renderMarkdown
       : (text) => escapeHtml(text).replace(/\n/g, '<br>');
+    const loadSessionHistory = typeof options.loadSessionHistory === 'function'
+      ? options.loadSessionHistory
+      : null;
 
     const sessionStore = new Map();
     let activeSessionId = '';
@@ -268,6 +271,16 @@
       if (!opts.force && hydratedSessionId === sessionId) return ensureConversation();
 
       hydratedSessionId = sessionId;
+      let turns = sessionTurns(sessionId);
+      if (loadSessionHistory) {
+        try {
+          const loaded = await loadSessionHistory(sessionId);
+          if (Array.isArray(loaded)) {
+            turns = loaded.map((turn) => normalizeTurn(turn, { session_id: sessionId })).filter(Boolean);
+            sessionStore.set(sessionId, turns);
+          }
+        } catch (_) {}
+      }
       renderHistory(sessionTurns(sessionId));
       return ensureConversation(sessionId);
     }

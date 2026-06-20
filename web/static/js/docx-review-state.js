@@ -72,12 +72,12 @@
       const serverData = tab.serverData && typeof tab.serverData === 'object'
         ? tab.serverData
         : {};
-      const rawComments = Array.isArray(existing.comments)
-        ? existing.comments
-        : (Array.isArray(serverData.comments) ? serverData.comments : []);
-      const rawProposals = Array.isArray(existing.proposals)
-        ? existing.proposals
-        : (Array.isArray(serverData.proposals) ? serverData.proposals : []);
+      const existingComments = Array.isArray(existing.comments) ? existing.comments : [];
+      const serverComments = Array.isArray(serverData.comments) ? serverData.comments : [];
+      const existingProposals = Array.isArray(existing.proposals) ? existing.proposals : [];
+      const serverProposals = Array.isArray(serverData.proposals) ? serverData.proposals : [];
+      const rawComments = existingComments.length ? existingComments : serverComments;
+      const rawProposals = existingProposals.length ? existingProposals : serverProposals;
       existing.comments = rawComments.map(normalizeReviewComment);
       existing.proposals = mergeReviewProposals([], rawProposals);
       existing.focusedId = cleanString(existing.focusedId);

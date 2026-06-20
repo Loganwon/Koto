@@ -5,7 +5,7 @@ Playwright E2E tests for DOCX rendering fidelity in the Koto file assistant.
 
 These tests:
   1. Open the test document via the API
-  2. Navigate to /workspace-assistant
+  2. Navigate to the unified Koto app entry /
   3. Inject the HTML into the TipTap editor via JS
   4. Take screenshots to compare with Word visually
   5. Assert DOM-measurable properties (page count, header visibility, etc.)
@@ -170,7 +170,7 @@ def _docx_render_opts(data: dict | None) -> dict:
 
 def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> None:
     """
-    Navigate to /workspace-assistant (which loads workspace.css and the TipTap
+    Navigate to the unified Koto app entry (which loads workspace.css and the TipTap
     bundle), then inject the DOCX HTML into TipTap via JS.
 
     workspace.css scopes the TipTap styles to ``#wa-docx-editor .ProseMirror``
@@ -182,11 +182,11 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
     * We create a FRESH ``#wa-docx-editor`` container at ``document.body`` level
       and give it inline ``display:flex`` so no CSS specificity rule can hide it.
     * We add ``class="active"`` as belt-and-suspenders (workspace.css rule).
-    * workspace-assistant.js can call ``.classList.remove('active')`` via
+    * The workspace runtime can call ``.classList.remove('active')`` via
       ``destroy()``, but inline-style ``display:flex`` always wins the cascade.
     * We wait explicitly for page-boundary markers to appear before returning.
     """
-    page.goto(f"{base_url}/workspace-assistant", timeout=15_000, wait_until="domcontentloaded")
+    page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
 
     # Ensure the TipTap bundle is available (workspace-assistant.js lazy-loads it)
@@ -250,8 +250,8 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
 
 
 def _open_docx_via_file_input(page, base_url: str, docx_path: str) -> None:
-    """Open a DOCX through the real workspace-assistant file input flow."""
-    page.goto(f"{base_url}/workspace-assistant", timeout=15_000, wait_until="domcontentloaded")
+    """Open a DOCX through the real unified workspace file input flow."""
+    page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
     page.locator("#wa-file-input").set_input_files(docx_path)
     page.wait_for_selector("#wa-docx-editor .ProseMirror", state="visible", timeout=60_000)

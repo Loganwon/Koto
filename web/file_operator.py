@@ -12,7 +12,6 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
-from typing import Any, Callable
 
 
 def _workspace_dir() -> str:
@@ -21,13 +20,13 @@ def _workspace_dir() -> str:
     return get_workspace_dir()
 
 
-def _call_app_factory(name: str, fallback: Callable[[], Any] | None = None) -> Any:
+def _default_wechat_files_dir() -> str:
     try:
-        from web.runtime_context import call_app_factory
+        from web.config import get_default_wechat_files_dir
 
-        return call_app_factory(name)
+        return str(get_default_wechat_files_dir() or "")
     except Exception:
-        return fallback() if fallback is not None else None
+        return ""
 
 
 class FileOperator:
@@ -133,7 +132,7 @@ class FileOperator:
     def _execute_folder_organize(cls, user_input: str, result: dict) -> dict:
         folder_path = cls._extract_path_from_text(user_input)
         if not folder_path:
-            folder_path = str(_call_app_factory("get_default_wechat_files_dir", lambda: "") or "")
+            folder_path = _default_wechat_files_dir()
 
         if not folder_path:
             result["message"] = (
@@ -152,10 +151,15 @@ class FileOperator:
 
         try:
             from web.folder_catalog_organizer import FolderCatalogOrganizer
+            from web.runtime_context import (
+                get_file_analyzer,
+                get_file_organizer,
+                get_organize_root,
+            )
 
-            analyzer = _call_app_factory("get_file_analyzer")
-            organizer = _call_app_factory("get_file_organizer")
-            organize_root = str(_call_app_factory("get_organize_root", lambda: workspace_dir) or workspace_dir)
+            analyzer = get_file_analyzer()
+            organizer = get_file_organizer()
+            organize_root = str(get_organize_root() or workspace_dir)
             summary = FolderCatalogOrganizer(organize_root, analyzer, organizer).organize_folder(folder_path)
             if not summary.get("success"):
                 result["message"] = f"自动归纳失败: {summary.get('error', '未知错误')}"

@@ -34,6 +34,13 @@ import os
 
 from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
+from web.runtime_context import (
+    get_batch_ops_manager,
+    get_file_analyzer,
+    get_file_organizer,
+    get_organize_root,
+)
+
 _logger = logging.getLogger("koto.routes.file_organize")
 
 file_organize_bp = Blueprint("file_organize", __name__)
@@ -45,27 +52,19 @@ file_organize_bp = Blueprint("file_organize", __name__)
 
 
 def _get_file_organizer():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_file_organizer")
+    return get_file_organizer()
 
 
 def _get_file_analyzer():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_file_analyzer")
+    return get_file_analyzer()
 
 
 def _get_batch_ops_manager():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_batch_ops_manager")
+    return get_batch_ops_manager()
 
 
 def _get_organize_root():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_organize_root")
+    return get_organize_root()
 
 
 # ---------------------------------------------------------------------------

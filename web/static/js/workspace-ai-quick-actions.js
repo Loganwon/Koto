@@ -9,7 +9,7 @@
       keywords: ['润色'],
       label: '润色优化',
       route: 'editor',
-      whiteboxMode: 'proposal',
+      taskFlowMode: 'proposal',
     },
     {
       action: '翻译',
@@ -17,7 +17,7 @@
       label: '翻译（中英互译）',
       route: 'editor',
       readOnly: true,
-      whiteboxMode: 'simple',
+      taskFlowMode: 'simple',
     },
     {
       action: '总结',
@@ -26,7 +26,7 @@
       route: 'editor',
       readOnly: true,
       fullDocument: true,
-      whiteboxMode: 'simple',
+      taskFlowMode: 'simple',
     },
     {
       action: '续写',
@@ -34,14 +34,14 @@
       label: '续写补全',
       route: 'editor',
       fullDocument: true,
-      whiteboxMode: 'proposal',
+      taskFlowMode: 'proposal',
     },
     {
       action: '改写',
       keywords: ['改写'],
       label: '改写',
       route: 'editor',
-      whiteboxMode: 'proposal',
+      taskFlowMode: 'proposal',
     },
     {
       action: '解释',
@@ -49,7 +49,7 @@
       label: '解释分析',
       route: 'editor',
       readOnly: true,
-      whiteboxMode: 'simple',
+      taskFlowMode: 'simple',
     },
     {
       action: '检查',
@@ -58,7 +58,7 @@
       route: 'editor',
       readOnly: true,
       fullDocument: true,
-      whiteboxMode: 'simple',
+      taskFlowMode: 'simple',
     },
     {
       action: '可视化',
@@ -137,9 +137,8 @@
     }
 
     function matchAction(text) {
-      const source = String(text || '');
-      const matched = listActions().find((action) => action.keywords.some((keyword) => source.includes(keyword)));
-      return matched ? matched.action : '';
+      const source = String(text || '').trim();
+      return actions.has(source) ? source : '';
     }
 
     function canUseFullDocument(actionId, fileType) {
@@ -151,12 +150,12 @@
       return !!action.fullDocument;
     }
 
-    function usesSimpleWhitebox(action) {
-      return !!(action && action.whiteboxMode === 'simple');
+    function usesSimpleTaskFlow(action) {
+      return !!(action && action.taskFlowMode === 'simple');
     }
 
-    function usesProposalWhitebox(action) {
-      return !!(action && action.whiteboxMode === 'proposal');
+    function usesProposalTaskFlow(action) {
+      return !!(action && action.taskFlowMode === 'proposal');
     }
 
     function toolResultProgressText(parsed) {
@@ -203,7 +202,7 @@
       return false;
     }
 
-    function buildSimpleWhiteboxTask(payload, action) {
+    function buildSimpleTaskFlowTask(payload, action) {
       const hasSelection = !!String(payload && payload.selectionText || '').trim();
       const scopeText = hasSelection ? '当前选区' : '已提供内容';
       const readonlySuffix = '这是只读 quick action，不要修改文件，也不要调用任何写入工具。';
@@ -223,7 +222,7 @@
       return '';
     }
 
-    function buildProposalWhiteboxTask(payload, action) {
+    function buildProposalTaskFlowTask(payload, action) {
       const hasSelection = !!String(payload && payload.selectionText || '').trim();
       const scopeText = hasSelection ? '当前选区' : '已提供内容';
       const sharedSuffix = '必要时只参考本次任务中显式提供的选区或分析文件。不要调用任何写入工具，不要直接修改文件，只返回最终文本结果。';
@@ -256,11 +255,6 @@
       if (typeof attachedDispatcher.registerQuickActionHandler === 'function') {
         attachedDispatcher.registerQuickActionHandler(action.action, (context) => sendAction(action.action, context));
       }
-      if (typeof attachedDispatcher.registerQuickActionKeyword === 'function') {
-        action.keywords.forEach((keyword) => {
-          attachedDispatcher.registerQuickActionKeyword(keyword, action.action);
-        });
-      }
       return action;
     }
 
@@ -279,24 +273,24 @@
       if (action.route === 'chart') {
         return sendChartAction(Object.assign({ action: actionId }, context), action);
       }
-      if (usesProposalWhitebox(action)) {
-        return sendProposalWhiteboxAction(Object.assign({ action: actionId }, context), action);
+      if (usesProposalTaskFlow(action)) {
+        return sendProposalTaskFlowAction(Object.assign({ action: actionId }, context), action);
       }
-      if (usesSimpleWhitebox(action)) {
-        return sendSimpleWhiteboxAction(Object.assign({ action: actionId }, context), action);
+      if (usesSimpleTaskFlow(action)) {
+        return sendSimpleTaskFlowAction(Object.assign({ action: actionId }, context), action);
       }
       return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));
     }
 
-    function sendSimpleWhiteboxAction(payload, providedAction) {
+    function sendSimpleTaskFlowAction(payload, providedAction) {
       const action = providedAction || getAction(payload.action);
       const msgs = getMessagesElement(payload);
       if (!msgs) throw new Error('AI message container unavailable');
       if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
-        throw new Error('快捷动作白盒运行时未加载，请刷新后重试。');
+        throw new Error('快捷动作任务流程运行时未加载，请刷新后重试。');
       }
 
-      const taskText = buildSimpleWhiteboxTask(payload, action);
+      const taskText = buildSimpleTaskFlowTask(payload, action);
       if (!taskText) {
         throw new Error(`快捷动作 ${payload.action || ''} 未生成可执行任务`);
       }
@@ -317,15 +311,15 @@
       });
     }
 
-    function sendProposalWhiteboxAction(payload, providedAction) {
+    function sendProposalTaskFlowAction(payload, providedAction) {
       const action = providedAction || getAction(payload.action);
       const msgs = getMessagesElement(payload);
       if (!msgs) throw new Error('AI message container unavailable');
       if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
-        throw new Error('快捷动作白盒运行时未加载，请刷新后重试。');
+        throw new Error('快捷动作任务流程运行时未加载，请刷新后重试。');
       }
 
-      const taskText = buildProposalWhiteboxTask(payload, action);
+      const taskText = buildProposalTaskFlowTask(payload, action);
       if (!taskText) {
         throw new Error(`快捷动作 ${payload.action || ''} 未生成可执行任务`);
       }
@@ -374,10 +368,10 @@
       const modelMode = payload.model_mode || getModelMode();
       const modelId = payload.model_id || getSelectedCloudModelId();
       if (language !== 'python') {
-        throw new Error('Only Python chart actions can use the whitebox task-stream');
+        throw new Error('只有 Python 图表动作可以进入任务流程。');
       }
       if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
-        throw new Error('Whitebox task dispatcher unavailable');
+        throw new Error('任务流程调度器未加载，请刷新后重试。');
       }
 
       const instruction = String(payload.prompt || (action && action.prompt) || '').trim();

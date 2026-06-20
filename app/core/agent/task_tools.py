@@ -8,8 +8,9 @@
 # ══════════════════════════════════════════════════════════════
 from __future__ import annotations
 
+import base64
+import importlib
 import io
-import ast
 import json
 import logging
 import os
@@ -17,9 +18,12 @@ import filecmp
 import hashlib
 import re
 import shutil
+import subprocess
+import sys
 import tempfile
 import stat
 import time
+import types
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -29,7 +33,38 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamChunk,
     FileTaskToolStreamResult,
 )
+from app.core.agent.file_task_result_markers import (
+    KOTO_CREATED_FALLBACK_KEY,
+    KOTO_CREATED_RESULT_KEY,
+    KOTO_CREATED_RESULT_MARKER,
+    KOTO_MODIFIED_FALLBACK_KEY,
+    KOTO_MODIFIED_RESULT_KEY,
+    KOTO_MODIFIED_RESULT_MARKER,
+)
 from app.core.agent.path_utils import default_search_roots, resolve_existing_path
+from app.core.agent.task_tools_docx_minimal import (
+    _coerce_docx_paragraphs_for_write,
+    _minimal_docx_package_bytes,
+    _normalize_docx_paragraphs,
+    _plain_text_to_docx_paragraphs,
+)
+from app.core.agent.task_tools_pptx_theme import (
+    _hex_to_rgb_color,
+    _pptx_density_settings,
+    _select_pptx_theme,
+)
+from app.core.agent.task_tools_pptx_layout import (
+    _add_theme_accent_shapes,
+    _add_theme_background_shape,
+    _apply_text_style,
+    _is_body_placeholder,
+    _is_title_shape,
+    _parse_jsonish_list,
+    _pptx_first_text,
+    _pptx_text_lines,
+    _remove_koto_theme_shapes,
+    _set_slide_background,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,9 +90,19 @@ def _get_workspace_root() -> str:
     return _WORKSPACE_ROOT
 
 
+def _get_project_root() -> str:
+    """Return the project root (parent of workspace)."""
+    return os.path.dirname(_get_workspace_root())
+
+
 def _safe_resolve(relative_path: str) -> Optional[str]:
-    """Resolve a user path inside workspace root. Returns None on traversal."""
+    """Resolve a user path inside workspace root or project root.
+
+    Tries workspace root first, then project root as fallback.
+    Returns None on traversal or if neither resolves.
+    """
     root = _get_workspace_root()
+    project_root = _get_project_root()
     # Strip leading "workspace/" prefix — the model sometimes includes it even
     # though paths are already relative to the workspace root.
     stripped = relative_path.replace("\\", "/")
@@ -66,24 +111,71 @@ def _safe_resolve(relative_path: str) -> Optional[str]:
     try:
         resolved = os.path.normpath(os.path.join(root, stripped))
         if not resolved.startswith(os.path.normpath(root)):
+            try:
+                project_resolved = os.path.normpath(os.path.join(project_root, stripped))
+                if project_resolved.startswith(os.path.normpath(project_root)):
+                    return project_resolved
+            except (ValueError, TypeError):
+                pass
             return None
+        if not os.path.exists(resolved):
+            try:
+                project_resolved = os.path.normpath(os.path.join(project_root, stripped))
+                if (project_resolved.startswith(os.path.normpath(project_root))
+                        and os.path.exists(project_resolved)):
+                    return project_resolved
+            except (ValueError, TypeError):
+                pass
         return resolved
     except (ValueError, TypeError):
         return None
 
 
-def _resolve_path(path: str) -> Optional[str]:
-    """Accept both absolute and relative-to-workspace paths."""
+def _resolve_path(path: str, *, must_exist: bool = True) -> Optional[str]:
+    """Accept both absolute and relative-to-workspace paths.
+
+    Args:
+        path: File path, absolute or relative.
+        must_exist: If True (default), returns None for non-existent files.
+                    If False, returns the resolved path even if the file does not exist yet.
+    """
     if os.path.isabs(path):
-        return path if os.path.exists(path) else None
+        normalized = os.path.normpath(path)
+        if must_exist and not os.path.exists(normalized):
+            return None
+        return normalized
 
     # Keep workspace-relative priority for backward compatibility.
     ws_candidate = _safe_resolve(path)
     if ws_candidate and os.path.exists(ws_candidate):
         return ws_candidate
 
+    # Try project root as well
+    project_root = _get_project_root()
+    try:
+        project_candidate = os.path.normpath(os.path.join(project_root, path.replace("\\", "/")))
+        if (project_candidate.startswith(os.path.normpath(project_root))
+                and os.path.exists(project_candidate)):
+            return project_candidate
+    except (ValueError, TypeError):
+        pass
+
+    # For write targets, return the workspace candidate even if it does not exist
+    if not must_exist and ws_candidate:
+        return ws_candidate
+
     roots = [_get_workspace_root(), *default_search_roots()]
     resolved, _ = resolve_existing_path(path, roots=roots)
+    if resolved:
+        return resolved
+    # For write targets, try project root as a last resort
+    if not must_exist:
+        try:
+            fallback = os.path.normpath(os.path.join(project_root, path.replace("\\", "/")))
+            if fallback.startswith(os.path.normpath(project_root)):
+                return fallback
+        except (ValueError, TypeError):
+            pass
     return resolved
 
 
@@ -818,18 +910,41 @@ def _success_result(
     focus: bool = False,
     **extra: Any,
 ) -> str:
+    summary_code = str(
+        extra.pop(
+            "summary_code",
+            "CREATE_OK" if str(change_type or "").lower() == "create" else "WRITE_OK",
+        )
+        or ""
+    )
     payload: Dict[str, Any] = {
         "success": True,
         "path": path,
         "file_type": file_type or Path(str(path)).suffix.lstrip(".").lower(),
         "change_type": change_type,
         "operation": operation,
+        "summary_code": summary_code,
         "summary": summary,
         "preview": preview[:400],
         "focus": focus,
     }
     payload.update(extra)
     return json.dumps(payload, ensure_ascii=False, default=str)
+
+
+def _file_task_diff(
+    kind: str,
+    items: List[Dict[str, Any]],
+    *,
+    limit: int = 80,
+) -> Dict[str, Any]:
+    normalized = [dict(item) for item in items if isinstance(item, dict)]
+    return {
+        "kind": kind,
+        "items": normalized[:limit],
+        "changed_count": len(normalized),
+        "truncated": len(normalized) > limit,
+    }
 
 
 def _blocked_write_result(
@@ -843,6 +958,7 @@ def _blocked_write_result(
         "success": False,
         "path": path,
         "status": "write_blocked",
+        "summary_code": "WRITE_BLOCKED",
         "summary": summary,
         "error": summary,
     }
@@ -850,217 +966,6 @@ def _blocked_write_result(
         payload["suggested_next_step"] = suggested_next_step
     payload.update(extra)
     return json.dumps(payload, ensure_ascii=False, default=str)
-
-
-_PPTX_THEME_PRESETS: Dict[str, Dict[str, Any]] = {
-    "executive": {
-        "name": "executive",
-        "display_name": "商务简报",
-        "font_family": "Microsoft YaHei",
-        "background": "F7F3EA",
-        "primary": "17324D",
-        "body_text": "25313B",
-        "inverse_text": "FFFFFF",
-        "accent": "0F766E",
-        "accent2": "D97706",
-        "muted": "E6DED2",
-    },
-    "tech": {
-        "name": "tech",
-        "display_name": "科技深色",
-        "font_family": "Microsoft YaHei",
-        "background": "0F172A",
-        "primary": "38BDF8",
-        "body_text": "E5E7EB",
-        "inverse_text": "F8FAFC",
-        "accent": "14B8A6",
-        "accent2": "F59E0B",
-        "muted": "1E293B",
-    },
-    "minimal": {
-        "name": "minimal",
-        "display_name": "清爽简约",
-        "font_family": "Microsoft YaHei",
-        "background": "F8FAFC",
-        "primary": "0F3B57",
-        "body_text": "1F2937",
-        "inverse_text": "FFFFFF",
-        "accent": "14B8A6",
-        "accent2": "C2410C",
-        "muted": "E2E8F0",
-    },
-}
-
-
-def _coerce_jsonish(value: Any) -> Any:
-    if isinstance(value, str):
-        text = value.strip()
-        if not text:
-            return ""
-        if text[0] in "[{":
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError:
-                return value
-    return value
-
-
-def _normalize_hex_color(value: Any, fallback: str) -> str:
-    text = str(value or "").strip().lstrip("#")
-    if len(text) == 3:
-        text = "".join(ch * 2 for ch in text)
-    if len(text) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in text):
-        return text.upper()
-    return fallback.upper()
-
-
-def _hex_to_rgb_color(value: Any, fallback: str):
-    from pptx.dml.color import RGBColor
-
-    color = _normalize_hex_color(value, fallback)
-    return RGBColor(int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16))
-
-
-def _color_luminance(hex_color: str) -> float:
-    color = _normalize_hex_color(hex_color, "FFFFFF")
-    red = int(color[0:2], 16)
-    green = int(color[2:4], 16)
-    blue = int(color[4:6], 16)
-    return 0.299 * red + 0.587 * green + 0.114 * blue
-
-
-def _select_pptx_theme(
-    style_brief: Any = "",
-    theme: Any = "",
-    palette: Any = "",
-    typography: Any = "",
-) -> Dict[str, Any]:
-    brief_text = f"{style_brief or ''} {theme or ''}".lower()
-    light_theme_tokens = (
-        "minimal",
-        "简约",
-        "清爽",
-        "浅色",
-        "浅色系",
-        "明亮",
-        "clean",
-        "light",
-        "white",
-    )
-    wants_light_theme = any(token in brief_text for token in light_theme_tokens)
-    if wants_light_theme:
-        preset_key = "minimal"
-    elif any(
-        token in brief_text
-        for token in ("tech", "科技", "ai", "agent", "互联网", "dark", "深色")
-    ):
-        preset_key = "tech"
-    else:
-        preset_key = "executive"
-
-    result = dict(_PPTX_THEME_PRESETS[preset_key])
-    theme_value = _coerce_jsonish(theme)
-    if isinstance(theme_value, dict):
-        for key in (
-            "name",
-            "display_name",
-            "font_family",
-            "background",
-            "primary",
-            "body_text",
-            "inverse_text",
-            "accent",
-            "accent2",
-            "muted",
-        ):
-            if theme_value.get(key) not in (None, ""):
-                result[key] = theme_value.get(key)
-
-    typography_value = _coerce_jsonish(typography)
-    if isinstance(typography_value, dict):
-        font_family = (
-            typography_value.get("font_family")
-            or typography_value.get("font")
-            or typography_value.get("body")
-        )
-        if font_family:
-            result["font_family"] = str(font_family)
-    elif typography_value:
-        result["font_family"] = str(typography_value)
-
-    palette_value = _coerce_jsonish(palette)
-    if isinstance(palette_value, dict):
-        aliases = {
-            "background": ("background", "bg"),
-            "primary": ("primary", "brand", "main"),
-            "accent": ("accent", "secondary"),
-            "accent2": ("accent2", "highlight"),
-            "body_text": ("body_text", "text"),
-        }
-        for target_key, keys in aliases.items():
-            for key in keys:
-                if palette_value.get(key):
-                    result[target_key] = palette_value.get(key)
-                    break
-    elif isinstance(palette_value, list):
-        keys = ["primary", "accent", "accent2", "background", "body_text"]
-        for key, value in zip(keys, palette_value):
-            if value:
-                result[key] = value
-
-    for key in (
-        "background",
-        "primary",
-        "body_text",
-        "inverse_text",
-        "accent",
-        "accent2",
-        "muted",
-    ):
-        result[key] = _normalize_hex_color(
-            result.get(key), _PPTX_THEME_PRESETS[preset_key][key]
-        )
-    if wants_light_theme and _color_luminance(str(result["background"])) < 200:
-        minimal = _PPTX_THEME_PRESETS["minimal"]
-        for key in ("background", "body_text", "inverse_text", "muted"):
-            result[key] = minimal[key]
-        result["display_name"] = minimal["display_name"]
-    if str(result.get("font_family") or "").strip().lower() in {
-        "serif",
-        "sans-serif",
-        "sans serif",
-        "monospace",
-    }:
-        result["font_family"] = _PPTX_THEME_PRESETS[preset_key]["font_family"]
-    result["is_dark"] = _color_luminance(str(result["background"])) < 120
-    return result
-
-
-def _pptx_density_settings(density: Any) -> Dict[str, float]:
-    value = str(density or "balanced").strip().lower()
-    if value in {"compact", "dense", "紧凑", "高密度"}:
-        return {
-            "margin_x": 0.55,
-            "title_top": 0.32,
-            "title_size": 29,
-            "body_size": 15,
-            "body_top": 1.22,
-        }
-    if value in {"spacious", "loose", "舒展", "留白"}:
-        return {
-            "margin_x": 0.82,
-            "title_top": 0.42,
-            "title_size": 34,
-            "body_size": 18,
-            "body_top": 1.55,
-        }
-    return {
-        "margin_x": 0.68,
-        "title_top": 0.38,
-        "title_size": 32,
-        "body_size": 16,
-        "body_top": 1.38,
-    }
 
 
 # ══════════════════════════════════════════════════════════════
@@ -1280,9 +1185,11 @@ def write_sheet_data(path: str, sheet_name: str = "", updates: str = "[]") -> st
 
     wb = None
     count = 0
+    diff_items: List[Dict[str, Any]] = []
     target_sheet = str(sheet_name or "").strip()
     try:
         import openpyxl
+        from openpyxl.utils import get_column_letter
 
         backup_warning = _best_effort_backup(resolved)
         write_warning = _ensure_existing_file_writable(resolved)
@@ -1303,12 +1210,24 @@ def write_sheet_data(path: str, sheet_name: str = "", updates: str = "[]") -> st
             if row < 1 or col < 1:
                 continue
             cell = ws.cell(row=row, column=col)
+            before_value = cell.value
             # Detect Excel formulas — write as formula, not literal string
             if isinstance(value, str) and value.startswith("="):
                 cell.value = value
             else:
                 cell.value = value
             count += 1
+            cell_ref = f"{get_column_letter(col)}{row}"
+            diff_items.append(
+                {
+                    "sheet": target,
+                    "cell": cell_ref,
+                    "row": row,
+                    "col": col,
+                    "before": before_value,
+                    "after": cell.value,
+                }
+            )
 
         _save_workbook_via_temp_file(wb, resolved)
         wb.close()
@@ -1319,6 +1238,8 @@ def write_sheet_data(path: str, sheet_name: str = "", updates: str = "[]") -> st
             summary=f"已写入 {count} 个单元格到工作表“{target_sheet}”",
             file_type="xlsx",
             change_type="modify",
+            summary_code="WRITE_OK",
+            diff=_file_task_diff("xlsx_cells", diff_items),
             cells_written=count,
             sheet=target_sheet,
             warning=_merge_warnings(backup_warning, write_warning),
@@ -1410,11 +1331,110 @@ def read_docx_content(path: str, max_chars: int = _TEXT_LIMIT_DOCX_DEFAULT) -> s
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
+def _read_docx_paragraph_window(
+    path: str,
+    *,
+    max_chars: int,
+    start: int,
+    end: int,
+) -> str:
+    from docx import Document as DocxDocument
+
+    doc = DocxDocument(path)
+    start = max(1, int(start or 1))
+    end = max(start, int(end or start))
+    parts: list[str] = []
+    total = 0
+    for index, paragraph in enumerate(doc.paragraphs, start=1):
+        if index < start:
+            continue
+        if index > end:
+            break
+        text = str(paragraph.text or "").strip()
+        if not text:
+            continue
+        block = f"[Paragraph {index}]\n{text}"
+        parts.append(block)
+        total += len(block)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)
+
+
+def _read_pptx_slide_window(
+    path: str,
+    *,
+    max_chars: int,
+    start: int,
+    end: int,
+) -> str:
+    from pptx import Presentation
+
+    presentation = Presentation(path)
+    start = max(1, int(start or 1))
+    end = max(start, int(end or start))
+    parts: list[str] = []
+    total = 0
+    for index, slide in enumerate(presentation.slides, start=1):
+        if index < start:
+            continue
+        if index > end:
+            break
+        lines: list[str] = []
+        for shape in slide.shapes:
+            text = str(getattr(shape, "text", "") or "").strip()
+            if text:
+                lines.append(text)
+        if not lines:
+            continue
+        block = f"[Slide {index}]\n" + "\n".join(lines)
+        parts.append(block)
+        total += len(block)
+        if total >= max_chars:
+            break
+    return "\n\n".join(parts)
+
+
+def _read_xlsx_sheet_window(
+    path: str,
+    *,
+    max_chars: int,
+    sheet_index: int,
+) -> str:
+    import openpyxl
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        sheet_names = list(wb.sheetnames or [])
+        if not sheet_names:
+            return ""
+        safe_index = max(0, min(int(sheet_index or 0), len(sheet_names) - 1))
+        ws = wb[sheet_names[safe_index]]
+        parts = [f"[Sheet {safe_index + 1}: {ws.title}]"]
+        total = len(parts[0])
+        for row_index, row in enumerate(ws.iter_rows(values_only=True), start=1):
+            values = ["" if value is None else str(value) for value in row]
+            if not any(value.strip() for value in values):
+                continue
+            line = f"R{row_index}: " + " | ".join(values)
+            parts.append(line)
+            total += len(line)
+            if total >= max_chars:
+                break
+        return "\n".join(parts)
+    finally:
+        wb.close()
+
+
 def parse_file_to_text(
     path: str,
     max_chars: int = _TEXT_LIMIT_DEFAULT,
     start_page: int = 1,
     end_page: int = 0,
+    window_unit: str = "",
+    start: int = 0,
+    end: int = 0,
+    sheet_index: int = -1,
 ) -> str:
     """Parse any supported file to plain text (DOCX/XLSX/PPTX/PDF/TXT/CSV)."""
     resolved = _resolve_path(path)
@@ -1431,6 +1451,26 @@ def parse_file_to_text(
                 max_chars=max_chars,
                 start_page=start_page,
                 end_page=end_page,
+            )
+        elif suffix in {".doc", ".docx"} and window_unit == "paragraph":
+            text = _read_docx_paragraph_window(
+                resolved,
+                max_chars=max_chars,
+                start=start or 1,
+                end=end or start or 1,
+            )
+        elif suffix in {".ppt", ".pptx"} and window_unit == "slide":
+            text = _read_pptx_slide_window(
+                resolved,
+                max_chars=max_chars,
+                start=start or 1,
+                end=end or start or 1,
+            )
+        elif suffix in {".xls", ".xlsx", ".xlsm", ".csv"} and window_unit == "sheet":
+            text = _read_xlsx_sheet_window(
+                resolved,
+                max_chars=max_chars,
+                sheet_index=sheet_index,
             )
         else:
             text = parse_source_file(resolved)
@@ -1478,7 +1518,7 @@ def _fingerprint_file(path: str) -> Dict[str, Any]:
     """Capture a stable fingerprint for later change detection."""
     try:
         stat = os.stat(path)
-        digest = hashlib.sha1()
+        digest = hashlib.sha1(usedforsecurity=False)
         with open(path, "rb") as handle:
             while True:
                 chunk = handle.read(1024 * 1024)
@@ -1734,46 +1774,66 @@ def _format_sandbox_result(result: Dict[str, Any]) -> str:
     return "\n".join(parts) if parts else "(no output)"
 
 
-_LEGACY_KOTO_CREATED_MARKER = "__koto_created__:"
-_LEGACY_KOTO_MODIFIED_MARKER = "__koto_modified__:"
+def _load_sandbox_run_python():
+    module_name = "app.core.sandbox"
+    module = sys.modules.get(module_name)
+    if module is not None and not isinstance(module, types.ModuleType):
+        sys.modules.pop(module_name, None)
+
+    module = importlib.import_module(module_name)
+    run_python = getattr(module, "run_python", None)
+    if not callable(run_python) or getattr(run_python, "__module__", module_name) != module_name:
+        sys.modules.pop(module_name, None)
+        module = importlib.import_module(module_name)
+        run_python = getattr(module, "run_python", None)
+
+    if not callable(run_python):
+        raise RuntimeError("app.core.sandbox.run_python is unavailable")
+    return run_python
 
 
 class SandboxRunResult(dict):
-    """Structured sandbox result that still behaves like the legacy marker text contract."""
+    """Structured sandbox result with a marker-text compatibility view."""
 
-    def _legacy_marker_text(self) -> str:
+    def _marker_text(self) -> str:
         parts: List[str] = []
-        created = self.get("__koto_created__") or self.get("_koto_created") or []
-        modified = self.get("__koto_modified__") or self.get("_koto_modified") or []
+        created = self.get(KOTO_CREATED_RESULT_KEY) or self.get(KOTO_CREATED_FALLBACK_KEY) or []
+        modified = self.get(KOTO_MODIFIED_RESULT_KEY) or self.get(KOTO_MODIFIED_FALLBACK_KEY) or []
 
         if isinstance(created, list) and created:
             parts.append(
-                _LEGACY_KOTO_CREATED_MARKER + json.dumps(created, ensure_ascii=False)
+                KOTO_CREATED_RESULT_MARKER + json.dumps(created, ensure_ascii=False)
             )
         if isinstance(modified, list) and modified:
             parts.append(
-                _LEGACY_KOTO_MODIFIED_MARKER + json.dumps(modified, ensure_ascii=False)
+                KOTO_MODIFIED_RESULT_MARKER + json.dumps(modified, ensure_ascii=False)
             )
         return "\n".join(parts)
 
-    def as_legacy_text(self) -> str:
+    def as_text(self) -> str:
         text = str(self.get("summary") or "")
-        marker_text = self._legacy_marker_text()
+        marker_text = self._marker_text()
         if marker_text:
             if text and not text.endswith("\n"):
                 text += "\n"
             text += marker_text
         return text
 
+    def _legacy_marker_text(self) -> str:
+        return self._marker_text()
+
+    def as_legacy_text(self) -> str:
+        return self.as_text()
+
     def __contains__(self, item: object) -> bool:
         if dict.__contains__(self, item):
             return True
         if isinstance(item, str):
-            return item in self.as_legacy_text()
+            return item in self.as_text()
         return False
 
     def __str__(self) -> str:
-        return self.as_legacy_text()
+        return self.as_text()
 
 
 def run_python_in_sandbox(
@@ -1788,8 +1848,7 @@ def run_python_in_sandbox(
     tmpdir: str | None = None
     normalized_timeout = _normalize_positive_int(timeout, default=30, upper=120)
     try:
-        from app.core.sandbox import run_python
-
+        run_python = _load_sandbox_run_python()
         resolved_task_files = _resolve_task_file_entries(task_files)
         if resolved_task_files:
             tmpdir = tempfile.mkdtemp(prefix="koto-task-")
@@ -1862,6 +1921,7 @@ def _wrap_sandbox_result(result: Dict[str, Any]) -> Dict[str, Any]:
     generated_files = result.get("files") or result.get("images") or {}
     if not isinstance(generated_files, dict):
         generated_files = {}
+    materialized_files = _materialize_sandbox_files(generated_files)
     return SandboxRunResult(
         {
             "summary": text,
@@ -1869,12 +1929,60 @@ def _wrap_sandbox_result(result: Dict[str, Any]) -> Dict[str, Any]:
             "stderr": str(result.get("stderr") or ""),
             "error": str(result.get("error") or ""),
             "files": dict(generated_files),
+            "generated_file_paths": materialized_files,
+            "generated_files": [
+                {
+                    "name": name,
+                    "path": path,
+                    "file_type": Path(path).suffix.lstrip(".").lower(),
+                }
+                for name, path in materialized_files.items()
+            ],
             "_koto_created": created,
             "_koto_modified": modified,
             "__koto_created__": created,
             "__koto_modified__": modified,
         }
     )
+
+
+def _materialize_sandbox_files(files: Dict[str, Any]) -> Dict[str, str]:
+    """Persist sandbox-captured files so later tools can consume real paths."""
+    materialized: Dict[str, str] = {}
+    if not files:
+        return materialized
+    artifact_dir = tempfile.mkdtemp(prefix="koto-task-artifacts-")
+    for raw_name, raw_data in files.items():
+        filename = _safe_artifact_filename(str(raw_name or "artifact").strip())
+        if not filename:
+            filename = "artifact.bin"
+        try:
+            data = base64.b64decode(str(raw_data or ""), validate=False)
+        except Exception:
+            continue
+        if not data:
+            continue
+        target = os.path.join(artifact_dir, filename)
+        try:
+            with open(target, "wb") as fh:
+                fh.write(data)
+        except OSError:
+            continue
+        materialized[str(raw_name)] = target
+    if not materialized:
+        try:
+            shutil.rmtree(artifact_dir)
+        except OSError:
+            pass
+    return materialized
+
+
+def _safe_artifact_filename(filename: str) -> str:
+    name = os.path.basename(filename.replace("\\", "/")).strip()
+    if not name or name in {".", ".."}:
+        return ""
+    stem = re.sub(r"[^A-Za-z0-9._ \-\u4e00-\u9fff]", "_", name)
+    return stem[:120] or "artifact.bin"
 
 
 def list_workspace_files(path: str = "", recursive: bool = False) -> str:
@@ -1979,218 +2087,6 @@ def copy_file(source: str, destination: str) -> str:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
 
 
-def _plain_text_to_docx_paragraphs(content: str) -> List[Dict[str, str]]:
-    paragraphs: List[Dict[str, str]] = []
-    for raw_line in str(content or "").splitlines():
-        line = raw_line.strip()
-        if not line or re.fullmatch(r"[-*_]{3,}", line):
-            continue
-        style = "Normal"
-        text = line
-        heading_match = re.match(r"^(#{1,6})\s+(.+)$", line)
-        if heading_match:
-            level = min(len(heading_match.group(1)), 3)
-            style = f"Heading {level}"
-            text = heading_match.group(2).strip()
-        else:
-            bullet_match = re.match(r"^[-*•]\s+(.+)$", line)
-            if bullet_match:
-                style = "List Bullet"
-                text = bullet_match.group(1).strip()
-        text = re.sub(r"\*\*([^*\n]+)\*\*", r"\1", text)
-        text = re.sub(r"__([^_\n]+)__", r"\1", text)
-        if text:
-            paragraphs.append({"text": text, "style": style})
-    if not paragraphs and str(content or "").strip():
-        paragraphs.append({"text": str(content).strip(), "style": "Normal"})
-    return paragraphs
-
-
-def _docx_xml_escape(value: Any) -> str:
-    return (
-        str(value or "")
-        .replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
-
-
-def _normalize_docx_paragraphs(paragraphs: Any) -> List[Dict[str, str]]:
-    normalized: List[Dict[str, str]] = []
-    raw_items = paragraphs if isinstance(paragraphs, list) else []
-    for item in raw_items:
-        if isinstance(item, dict):
-            text = str(item.get("text") or "")
-            style = str(item.get("style") or "").strip()
-        else:
-            text = str(item or "")
-            style = ""
-        normalized.append({"text": text, "style": style})
-    return normalized
-
-
-def _parse_loose_docx_paragraph_items(text: str) -> List[Dict[str, str]]:
-    normalized: List[Dict[str, str]] = []
-    pattern = re.compile(
-        r"\{\s*['\"]text['\"]\s*:\s*['\"](?P<text>.*?)['\"]\s*,\s*"
-        r"['\"]style['\"]\s*:\s*['\"](?P<style>[^'\"]*)['\"]\s*\}",
-        re.DOTALL,
-    )
-    for match in pattern.finditer(str(text or "")):
-        value = match.group("text")
-        style = match.group("style")
-        value = value.replace('\\"', '"').replace("\\'", "'")
-        value = value.replace("\\n", "\n").replace("\\t", "\t")
-        normalized.append({"text": value, "style": style})
-    return normalized
-
-
-def _coerce_docx_paragraphs_for_write(paragraphs: Any) -> List[Dict[str, str]]:
-    if isinstance(paragraphs, str):
-        text = paragraphs.strip()
-        if not text:
-            return []
-        try:
-            parsed = json.loads(text)
-            return _normalize_docx_paragraphs(parsed)
-        except json.JSONDecodeError:
-            pass
-        try:
-            parsed = ast.literal_eval(text)
-            return _normalize_docx_paragraphs(parsed)
-        except Exception:
-            loose_items = _parse_loose_docx_paragraph_items(text)
-            if loose_items:
-                return loose_items
-            return _plain_text_to_docx_paragraphs(text)
-    if isinstance(paragraphs, list):
-        return _normalize_docx_paragraphs(paragraphs)
-    if paragraphs is None:
-        return []
-    return _plain_text_to_docx_paragraphs(str(paragraphs))
-
-
-def _minimal_docx_style_id(style: str) -> str:
-    normalized = str(style or "").strip().lower().replace("_", " ")
-    if normalized in {"heading 1", "title"}:
-        return "Heading1"
-    if normalized == "heading 2":
-        return "Heading2"
-    if normalized == "heading 3":
-        return "Heading3"
-    if normalized in {"list bullet", "bullet"}:
-        return "ListBullet"
-    return ""
-
-
-def _minimal_docx_paragraph_xml(item: Dict[str, str]) -> str:
-    text = _docx_xml_escape(item.get("text") or "")
-    style_id = _minimal_docx_style_id(item.get("style") or "")
-    style_xml = f'<w:pPr><w:pStyle w:val="{style_id}"/></w:pPr>' if style_id else ""
-    return f'<w:p>{style_xml}<w:r><w:t xml:space="preserve">{text}</w:t></w:r></w:p>'
-
-
-def _minimal_docx_styles_xml() -> str:
-    return """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
-  <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:basedOn w:val="Normal"/><w:pPr><w:outlineLvl w:val="0"/></w:pPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading2"><w:name w:val="heading 2"/><w:basedOn w:val="Normal"/><w:pPr><w:outlineLvl w:val="1"/></w:pPr></w:style>
-  <w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/><w:basedOn w:val="Normal"/><w:pPr><w:outlineLvl w:val="2"/></w:pPr></w:style>
-  <w:style w:type="paragraph" w:styleId="ListBullet"><w:name w:val="List Bullet"/><w:basedOn w:val="Normal"/></w:style>
-</w:styles>"""
-
-
-def _minimal_docx_document_xml(paragraphs: List[Dict[str, str]]) -> str:
-    body = "".join(_minimal_docx_paragraph_xml(item) for item in paragraphs)
-    return (
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
-        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        f'<w:body>{body}<w:sectPr><w:pgSz w:w="12240" w:h="15840"/>'
-        '<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr></w:body>'
-        "</w:document>"
-    )
-
-
-def _minimal_docx_package_bytes(
-    paragraphs: List[Dict[str, str]], existing_path: str = ""
-) -> bytes:
-    document_xml = _minimal_docx_document_xml(paragraphs)
-    existing_entries: Dict[str, bytes] = {}
-    if existing_path and os.path.exists(existing_path):
-        try:
-            with zipfile.ZipFile(existing_path, "r") as existing_docx:
-                for name in existing_docx.namelist():
-                    existing_entries[name] = existing_docx.read(name)
-                current_document = existing_entries.get(
-                    "word/document.xml", b""
-                ).decode("utf-8", errors="replace")
-                insert_xml = "".join(
-                    _minimal_docx_paragraph_xml(item) for item in paragraphs
-                )
-                body_end = current_document.rfind("</w:body>")
-                sect_start = current_document.rfind("<w:sectPr")
-                insert_at = (
-                    sect_start if sect_start > 0 and sect_start < body_end else body_end
-                )
-                if insert_at > 0:
-                    document_xml = (
-                        current_document[:insert_at]
-                        + insert_xml
-                        + current_document[insert_at:]
-                    )
-        except Exception:
-            existing_entries = {}
-
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as docx_zip:
-
-        def write_default(name: str, data: str | bytes) -> None:
-            raw = data.encode("utf-8") if isinstance(data, str) else data
-            docx_zip.writestr(name, raw)
-
-        if existing_entries:
-            overwritten_entries = {
-                "[Content_Types].xml",
-                "_rels/.rels",
-                "word/_rels/document.xml.rels",
-                "word/document.xml",
-                "word/styles.xml",
-            }
-            for name, raw in existing_entries.items():
-                if name in overwritten_entries:
-                    continue
-                docx_zip.writestr(name, raw)
-        write_default(
-            "[Content_Types].xml",
-            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-  <Default Extension="xml" ContentType="application/xml"/>
-  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
-  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
-</Types>""",
-        )
-        write_default(
-            "_rels/.rels",
-            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
-</Relationships>""",
-        )
-        write_default(
-            "word/_rels/document.xml.rels",
-            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-</Relationships>""",
-        )
-        write_default("word/document.xml", document_xml)
-        write_default("word/styles.xml", _minimal_docx_styles_xml())
-    return buffer.getvalue()
-
-
 def _write_docx_content_without_python_docx(
     path: str, resolved: str, para_list: Any
 ) -> str:
@@ -2206,6 +2102,15 @@ def _write_docx_content_without_python_docx(
     )
     _write_bytes_via_temp_file(docx_bytes, resolved, suffix=".docx")
     preview = "\n".join(str(p.get("text", "")) for p in paragraphs[:3])
+    diff_items = [
+        {
+            "paragraph_index": index,
+            "before": "",
+            "after": str(item.get("text") or ""),
+            "style": str(item.get("style") or ""),
+        }
+        for index, item in enumerate(paragraphs, start=1)
+    ]
     return _success_result(
         _result_path(path, resolved),
         operation="write_docx_content",
@@ -2214,6 +2119,8 @@ def _write_docx_content_without_python_docx(
         change_type="modify" if file_exists else "create",
         preview=preview,
         focus=True,
+        summary_code="WRITE_OK" if file_exists else "CREATE_OK",
+        diff=_file_task_diff("docx_paragraphs", diff_items),
         paragraphs_written=len(paragraphs),
         warning=_merge_warnings(
             backup_warning,
@@ -2242,6 +2149,15 @@ def _create_docx_file(path: str, resolved: str, content: str) -> str:
                     pass
         _save_docx_via_temp_file(doc, resolved)
         preview = "\n".join(str(item.get("text") or "") for item in paragraphs[:3])
+        diff_items = [
+            {
+                "paragraph_index": index,
+                "before": "",
+                "after": str(item.get("text") or ""),
+                "style": str(item.get("style") or ""),
+            }
+            for index, item in enumerate(paragraphs, start=1)
+        ]
         return _success_result(
             _result_path(path, resolved),
             operation="write_docx_content",
@@ -2250,6 +2166,8 @@ def _create_docx_file(path: str, resolved: str, content: str) -> str:
             change_type="create",
             preview=preview,
             focus=True,
+            summary_code="CREATE_OK",
+            diff=_file_task_diff("docx_paragraphs", diff_items),
             paragraphs_written=len(paragraphs),
         )
     except ImportError:
@@ -2270,10 +2188,21 @@ def _create_xlsx_file(path: str, resolved: str, content: str) -> str:
         rows = list(csv.reader(io.StringIO(text))) if text else []
         if not rows:
             rows = [[""]]
+        diff_items: List[Dict[str, Any]] = []
         for row_index, row in enumerate(rows, start=1):
             columns_written = max(columns_written, len(row))
             for col_index, value in enumerate(row, start=1):
                 ws.cell(row=row_index, column=col_index, value=value)
+                diff_items.append(
+                    {
+                        "sheet": ws.title,
+                        "cell": f"{ws.cell(row=row_index, column=col_index).coordinate}",
+                        "row": row_index,
+                        "col": col_index,
+                        "before": None,
+                        "after": value,
+                    }
+                )
             rows_written += 1
         os.makedirs(os.path.dirname(resolved), exist_ok=True)
         _save_workbook_via_temp_file(wb, resolved)
@@ -2287,6 +2216,8 @@ def _create_xlsx_file(path: str, resolved: str, content: str) -> str:
             change_type="create",
             preview=text,
             focus=True,
+            summary_code="CREATE_OK",
+            diff=_file_task_diff("xlsx_cells", diff_items),
             rows_written=rows_written,
             columns_written=columns_written,
             cells_written=cells_written,
@@ -3256,7 +3187,7 @@ def _build_docx_annotation_request(
         task=task_text,
         files=files,
         target_path=target_path,
-        model_mode=str(context.get("model_mode") or "cloud").strip() or "cloud",
+        model_mode=str(context.get("model_mode") or "deepseek").strip() or "deepseek",
         model_id=str(model_id or context.get("model_id") or "").strip(),
         options=options,
     )
@@ -3754,15 +3685,75 @@ def clear_docx_review_marks(path: str, scope: str = "comments") -> str:
     )
 
 
+def _normalize_table_columns(columns: Any) -> List[str]:
+    if not columns:
+        return []
+    value = columns
+    if isinstance(columns, str):
+        text = columns.strip()
+        if not text:
+            return []
+        try:
+            value = json.loads(text)
+        except Exception:
+            value = re.split(r"[,，、|]", text)
+    if not isinstance(value, list):
+        return []
+    normalized: List[str] = []
+    for item in value:
+        text = str(item or "").strip()
+        if text and text not in normalized:
+            normalized.append(text)
+    return normalized
+
+
+def _match_header_index(headers: List[str], wanted: str) -> Optional[int]:
+    wanted_text = str(wanted or "").strip().casefold()
+    if not wanted_text:
+        return None
+    normalized_headers = [str(header or "").strip().casefold() for header in headers]
+    for index, header in enumerate(normalized_headers):
+        if header == wanted_text:
+            return index
+    for index, header in enumerate(normalized_headers):
+        if wanted_text in header or header in wanted_text:
+            return index
+    return None
+
+
+def _table_sort_value(value: Any) -> tuple[int, Any]:
+    text = str(value or "").strip()
+    if not text:
+        return (0, 0)
+    numeric_text = re.sub(r"[,$%￥¥\s]", "", text)
+    try:
+        return (1, float(numeric_text))
+    except ValueError:
+        return (1, text.casefold())
+
+
 def insert_excel_as_docx_table(
     source_path: str,
     target_path: str,
     sheet_name: str = "",
     table_title: str = "",
     max_rows: int = 200,
+    sort_by: str = "",
+    sort_order: str = "desc",
+    columns: Any = "",
 ) -> str:
     """Insert spreadsheet data into a DOCX file as a real Word table."""
     max_rows = _normalize_positive_int(max_rows, default=200, upper=5_000)
+    sort_by_text = str(sort_by or "").strip()
+    sort_descending = str(sort_order or "desc").strip().lower() not in {
+        "asc",
+        "ascending",
+        "smallest",
+        "lowest",
+        "正序",
+        "升序",
+    }
+    selected_columns = _normalize_table_columns(columns)
     source_resolved = _resolve_path(source_path)
     if not source_resolved:
         return json.dumps(
@@ -3799,8 +3790,9 @@ def insert_excel_as_docx_table(
 
         worksheet = workbook[target_sheet]
         raw_rows: List[List[str]] = []
+        read_row_limit = 5_000 if sort_by_text else max_rows + 1
         for row in worksheet.iter_rows(values_only=True):
-            if len(raw_rows) >= max_rows + 1:
+            if len(raw_rows) >= read_row_limit + 1:
                 break
             values = ["" if value is None else str(value) for value in row]
             if any(value.strip() for value in values):
@@ -3816,6 +3808,48 @@ def insert_excel_as_docx_table(
         normalized_rows = [row + [""] * (column_count - len(row)) for row in raw_rows]
         headers = normalized_rows[0]
         data_rows = normalized_rows[1:]
+        sort_warning = ""
+        selected_warning = ""
+
+        if sort_by_text:
+            sort_index = _match_header_index(headers, sort_by_text)
+            if sort_index is None:
+                sort_warning = f"未找到排序列“{sort_by_text}”，已保留原始行顺序。"
+            else:
+                data_rows = sorted(
+                    data_rows,
+                    key=lambda row_values: _table_sort_value(
+                        row_values[sort_index] if sort_index < len(row_values) else ""
+                    ),
+                    reverse=sort_descending,
+                )
+
+        data_rows = data_rows[:max_rows]
+
+        if selected_columns:
+            selected_indexes: List[int] = []
+            missing_columns: List[str] = []
+            for column_name in selected_columns:
+                matched_index = _match_header_index(headers, column_name)
+                if matched_index is None:
+                    missing_columns.append(column_name)
+                    continue
+                if matched_index not in selected_indexes:
+                    selected_indexes.append(matched_index)
+            if selected_indexes:
+                headers = [headers[index] for index in selected_indexes]
+                data_rows = [
+                    [
+                        row_values[index] if index < len(row_values) else ""
+                        for index in selected_indexes
+                    ]
+                    for row_values in data_rows
+                ]
+                column_count = len(headers)
+            if missing_columns:
+                selected_warning = "未找到列：" + "、".join(missing_columns[:6])
+
+        normalized_rows = [headers, *data_rows]
 
         os.makedirs(os.path.dirname(target_resolved), exist_ok=True)
         target_exists = os.path.exists(target_resolved)
@@ -3914,16 +3948,23 @@ def insert_excel_as_docx_table(
                 columns_written=column_count,
                 table_title=table_title,
                 table_count=1,
+                sort_by=sort_by_text,
+                sort_order="desc" if sort_descending else "asc",
+                selected_columns=selected_columns,
                 original_target_path=_result_path(target_path, target_resolved),
                 blocked_target=True,
                 blocked_reason=locked_message,
                 fallback_copy=True,
             )
 
-        result_warning = sheet_warning
+        result_warning = "；".join(
+            part
+            for part in (sheet_warning, sort_warning, selected_warning)
+            if part
+        )
         if backup_warning:
             result_warning = "；".join(
-                part for part in (sheet_warning, backup_warning) if part
+                part for part in (result_warning, backup_warning) if part
             )
 
         return _success_result(
@@ -3942,6 +3983,9 @@ def insert_excel_as_docx_table(
             columns_written=column_count,
             table_title=table_title,
             table_count=1,
+            sort_by=sort_by_text,
+            sort_order="desc" if sort_descending else "asc",
+            selected_columns=selected_columns,
         )
     except ImportError as exc:
         return json.dumps({"error": f"Missing dependency: {exc}"}, ensure_ascii=False)
@@ -4139,7 +4183,18 @@ def _normalize_compare_path(path: Any) -> str:
         elif workspace_resolved:
             text = workspace_resolved
         else:
-            text = cwd_resolved
+            # Try project root as fallback before defaulting to cwd
+            try:
+                project_root = _get_project_root()
+                project_resolved = os.path.normpath(
+                    os.path.join(project_root, text.replace("\\", "/"))
+                )
+                if os.path.exists(project_resolved):
+                    text = project_resolved
+                else:
+                    text = cwd_resolved
+            except (ValueError, TypeError):
+                text = cwd_resolved
     try:
         return os.path.normcase(os.path.normpath(text))
     except Exception:
@@ -4559,6 +4614,23 @@ def verify_task_completion(
     )
 
 
+def _coerce_read_line_number(value: Any, default: int) -> int:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return default
+    try:
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                return default
+            value = float(stripped) if "." in stripped else int(stripped)
+        coerced = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, coerced)
+
+
 def read_file_range(path: str, start_line: int = 1, end_line: int = 100) -> str:
     """Read a specific range of lines from a file.
 
@@ -4574,6 +4646,11 @@ def read_file_range(path: str, start_line: int = 1, end_line: int = 100) -> str:
         return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
 
     try:
+        start_line = _coerce_read_line_number(start_line, 1)
+        end_line = _coerce_read_line_number(end_line, 100)
+        if end_line < start_line:
+            end_line = start_line
+
         with open(resolved, "r", encoding="utf-8", errors="replace") as f:
             lines = f.readlines()
 
@@ -4725,7 +4802,7 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
 
     Returns: JSON with operation result.
     """
-    resolved = path if os.path.isabs(path) else _safe_resolve(path)
+    resolved = _resolve_path(path, must_exist=False)
     if not resolved:
         return json.dumps({"error": f"无效路径: {path}"}, ensure_ascii=False)
 
@@ -4740,11 +4817,13 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
         write_warning = ""
         if file_exists:
             doc = Document(resolved)
+            original_paragraph_count = len(doc.paragraphs)
             # Backup
             backup_warning = _best_effort_backup(resolved)
             write_warning = _ensure_existing_file_writable(resolved)
         else:
             doc = Document()
+            original_paragraph_count = 0
             os.makedirs(os.path.dirname(resolved), exist_ok=True)
 
         if not para_list:
@@ -4762,6 +4841,15 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
 
         _save_docx_via_temp_file(doc, resolved)
         preview = "\n".join(str(p.get("text", "")) for p in para_list[:3])
+        diff_items = [
+            {
+                "paragraph_index": original_paragraph_count + index,
+                "before": "",
+                "after": str(item.get("text", "")),
+                "style": str(item.get("style") or ""),
+            }
+            for index, item in enumerate(para_list, start=1)
+        ]
         return _success_result(
             _result_path(path, resolved),
             operation="write_docx_content",
@@ -4770,6 +4858,8 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
             change_type="modify" if file_exists else "create",
             preview=preview,
             focus=True,
+            summary_code="WRITE_OK" if file_exists else "CREATE_OK",
+            diff=_file_task_diff("docx_paragraphs", diff_items),
             paragraphs_written=len(para_list),
             warning=_merge_warnings(backup_warning, write_warning),
         )
@@ -4805,6 +4895,499 @@ def write_docx_content(path: str, paragraphs: str = "[]") -> str:
         )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+def insert_docx_paragraph(
+    path: str,
+    text: str,
+    after_heading: str = "",
+    before_heading: str = "",
+    style: str = "Normal",
+) -> str:
+    """Insert a single paragraph into an existing DOCX without rewriting the document."""
+    resolved = _resolve_path(path)
+    if not resolved:
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+    clean_text = str(text or "").strip()
+    if not clean_text:
+        return json.dumps({"error": "text is required"}, ensure_ascii=False)
+
+    try:
+        from docx import Document
+        from docx.oxml import OxmlElement
+        from docx.text.paragraph import Paragraph
+
+        doc = Document(resolved)
+        backup_warning = _best_effort_backup(resolved)
+        write_warning = _ensure_existing_file_writable(resolved)
+        after = str(after_heading or "").strip().casefold()
+        before = str(before_heading or "").strip().casefold()
+        insertion_index = len(doc.paragraphs)
+
+        if before:
+            for index, paragraph in enumerate(doc.paragraphs):
+                if str(paragraph.text or "").strip().casefold() == before:
+                    insertion_index = index
+                    break
+        elif after:
+            for index, paragraph in enumerate(doc.paragraphs):
+                if str(paragraph.text or "").strip().casefold() == after:
+                    insertion_index = index + 1
+                    break
+
+        if insertion_index >= len(doc.paragraphs):
+            paragraph = doc.add_paragraph(clean_text)
+        else:
+            anchor = doc.paragraphs[insertion_index]
+            new_p = OxmlElement("w:p")
+            anchor._p.addprevious(new_p)
+            paragraph = Paragraph(new_p, anchor._parent)
+            paragraph.add_run(clean_text)
+
+        if style:
+            try:
+                paragraph.style = style
+            except Exception:
+                pass
+
+        _save_docx_via_temp_file(doc, resolved)
+        return _success_result(
+            _result_path(path, resolved),
+            operation="insert_docx_paragraph",
+            summary="已向 Word 文档插入 1 个段落",
+            file_type="docx",
+            change_type="modify",
+            preview=clean_text,
+            paragraphs_written=1,
+            focus=True,
+            inserted_text=clean_text,
+            after_heading=after_heading,
+            before_heading=before_heading,
+            warning=_merge_warnings(backup_warning, write_warning),
+            diff=_file_task_diff(
+                "docx_paragraphs",
+                [
+                    {
+                        "paragraph_index": insertion_index + 1,
+                        "before": "",
+                        "after": clean_text,
+                        "style": style or "",
+                    }
+                ],
+            ),
+        )
+    except ImportError:
+        return json.dumps({"error": "python-docx not installed"}, ensure_ascii=False)
+    except PermissionError as exc:
+        return _blocked_write_result(
+            _result_path(path, resolved),
+            summary=str(exc).strip() or _nonwritable_target_message(resolved),
+            suggested_next_step=_nonwritable_target_next_step(resolved),
+            operation="insert_docx_paragraph",
+            file_type="docx",
+            preview=clean_text,
+        )
+    except Exception as e:
+        return json.dumps({"error": str(e)}, ensure_ascii=False)
+
+
+def _resolve_output_path(
+    source_path: str,
+    source_resolved: str,
+    target_path: str,
+    suffix: str,
+) -> Optional[str]:
+    requested = str(target_path or "").strip()
+    if requested:
+        if os.path.isabs(requested):
+            return os.path.normpath(requested)
+        resolved = _safe_resolve(requested)
+        if not resolved:
+            return None
+        return resolved
+    base = Path(source_resolved or source_path).with_suffix(suffix)
+    return str(base)
+
+
+def _convert_docx_to_pdf_with_docx2pdf(source: str, target: str) -> str:
+    from docx2pdf import convert
+
+    convert(source, target)
+    return "docx2pdf"
+
+
+def _convert_docx_to_pdf_with_word(source: str, target: str) -> str:
+    import win32com.client  # type: ignore
+
+    word = win32com.client.DispatchEx("Word.Application")
+    word.Visible = False
+    doc = None
+    try:
+        doc = word.Documents.Open(source)
+        doc.SaveAs(target, FileFormat=17)
+    finally:
+        if doc is not None:
+            doc.Close(False)
+        word.Quit()
+    return "word_com"
+
+
+def _convert_docx_to_pdf_with_libreoffice(source: str, target: str) -> str:
+    executable = (
+        shutil.which("soffice")
+        or shutil.which("libreoffice")
+        or shutil.which("soffice.exe")
+    )
+    if not executable:
+        raise RuntimeError("LibreOffice/soffice not found")
+    out_dir = os.path.dirname(target) or os.getcwd()
+    os.makedirs(out_dir, exist_ok=True)
+    completed = subprocess.run(
+        [
+            executable,
+            "--headless",
+            "--convert-to",
+            "pdf",
+            "--outdir",
+            out_dir,
+            source,
+        ],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=False,
+    )
+    if completed.returncode != 0:
+        message = (completed.stderr or completed.stdout or "").strip()
+        raise RuntimeError(message or "LibreOffice conversion failed")
+    generated = str(Path(out_dir) / (Path(source).stem + ".pdf"))
+    if os.path.normcase(os.path.abspath(generated)) != os.path.normcase(
+        os.path.abspath(target)
+    ):
+        if os.path.exists(target):
+            os.remove(target)
+        shutil.move(generated, target)
+    return "libreoffice"
+
+
+def convert_docx_to_pdf(path: str, target_path: str = "") -> str:
+    """Convert a DOCX file to PDF using the best available local converter."""
+    resolved = _resolve_path(path)
+    if not resolved:
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+    if Path(resolved).suffix.lower() not in {".docx", ".doc"}:
+        return json.dumps({"error": "Only DOCX/DOC inputs are supported"}, ensure_ascii=False)
+    target = _resolve_output_path(path, resolved, target_path, ".pdf")
+    if not target:
+        return json.dumps({"error": f"Invalid target path: {target_path}"}, ensure_ascii=False)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    target_exists_before = os.path.exists(target)
+
+    errors: List[str] = []
+    for converter in (
+        _convert_docx_to_pdf_with_docx2pdf,
+        _convert_docx_to_pdf_with_word,
+        _convert_docx_to_pdf_with_libreoffice,
+    ):
+        try:
+            engine = converter(resolved, target)
+            if not os.path.exists(target):
+                raise RuntimeError("converter reported success but PDF was not created")
+            return _success_result(
+                _result_path(target_path or str(Path(path).with_suffix(".pdf")), target),
+                operation="convert_docx_to_pdf",
+                summary=f"已将 Word 文档转换为 PDF：{Path(target).name}",
+                file_type="pdf",
+                change_type="modify" if target_exists_before else "create",
+                summary_code="CONVERT_OK",
+                source_path=_result_path(path, resolved),
+                converter=engine,
+                focus=True,
+            )
+        except Exception as exc:
+            errors.append(f"{converter.__name__}: {str(exc).strip()}")
+
+    return _blocked_write_result(
+        _result_path(target_path or str(Path(path).with_suffix(".pdf")), target),
+        summary="当前环境没有可用的 DOCX 转 PDF 引擎。",
+        suggested_next_step="安装 Microsoft Word、LibreOffice/soffice 或 docx2pdf 后重试。",
+        operation="convert_docx_to_pdf",
+        file_type="pdf",
+        source_path=_result_path(path, resolved),
+        converter_errors=errors,
+    )
+
+
+def _normalize_conversion_extension(target_format: str) -> str:
+    clean = str(target_format or "").strip().lower().lstrip(".")
+    if not clean:
+        return ""
+    try:
+        from web.file_converter import FORMAT_ALIASES
+
+        ext = str(FORMAT_ALIASES.get(clean, f".{clean}") or "").strip().lower()
+    except Exception:
+        ext = f".{clean}"
+    if ext and not ext.startswith("."):
+        ext = f".{ext}"
+    return ext
+
+
+def convert_file(file_path: str, target_format: str, output_path: str = "") -> str:
+    """Convert a workspace file to another supported format."""
+    resolved = _resolve_path(file_path)
+    if not resolved:
+        return json.dumps({"error": f"File not found: {file_path}"}, ensure_ascii=False)
+    target_ext = _normalize_conversion_extension(target_format)
+    if not target_ext:
+        return json.dumps({"error": "target_format is required"}, ensure_ascii=False)
+
+    target = _resolve_output_path(file_path, resolved, output_path, target_ext)
+    if not target:
+        return json.dumps({"error": f"Invalid output path: {output_path}"}, ensure_ascii=False)
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    target_exists_before = os.path.exists(target)
+
+    try:
+        from web.file_converter import convert
+
+        result = convert(
+            source_path=resolved,
+            target_format=target_ext,
+            output_path=target,
+        )
+    except Exception as exc:
+        return _blocked_write_result(
+            _result_path(output_path or str(Path(str(file_path)).with_suffix(target_ext)), target),
+            summary=f"转换失败：{str(exc).strip()}",
+            suggested_next_step="确认源文件格式受支持，并安装本地转换依赖后重试。",
+            operation="convert_file",
+            file_type=target_ext.lstrip("."),
+            source_path=_result_path(file_path, resolved),
+            target_format=target_ext.lstrip("."),
+            converter_errors=[str(exc).strip()],
+        )
+
+    if not isinstance(result, dict):
+        return _blocked_write_result(
+            _result_path(output_path or str(Path(str(file_path)).with_suffix(target_ext)), target),
+            summary="转换器没有返回结构化结果。",
+            suggested_next_step="请重试或改用专门的格式转换工具。",
+            operation="convert_file",
+            file_type=target_ext.lstrip("."),
+            source_path=_result_path(file_path, resolved),
+            target_format=target_ext.lstrip("."),
+            converter_errors=[str(result)],
+        )
+
+    output = os.path.normpath(str(result.get("output_path") or target))
+    to_format = str(result.get("to_format") or target_ext.lstrip(".")).strip().lower()
+    from_format = str(result.get("from_format") or Path(resolved).suffix.lstrip(".")).strip().lower()
+    display_path = output_path or str(Path(str(file_path)).with_suffix(f".{to_format or target_ext.lstrip('.')}"))
+    warning = str(result.get("warning") or "").strip()
+    if result.get("success") and os.path.exists(output):
+        return _success_result(
+            _result_path(display_path, output),
+            operation="convert_file",
+            summary=str(result.get("message") or f"已转换为 {to_format.upper()}：{Path(output).name}"),
+            file_type=to_format or target_ext.lstrip("."),
+            change_type="modify" if target_exists_before else "create",
+            summary_code="CONVERT_OK",
+            source_path=_result_path(file_path, resolved),
+            target_format=to_format or target_ext.lstrip("."),
+            from_format=from_format,
+            to_format=to_format or target_ext.lstrip("."),
+            converter="web.file_converter",
+            warning=warning,
+            focus=True,
+        )
+
+    error = str(result.get("error") or result.get("message") or "转换失败").strip()
+    return _blocked_write_result(
+        _result_path(display_path, output),
+        summary=error,
+        suggested_next_step="确认该来源格式与目标格式组合受支持，并安装本地转换依赖后重试。",
+        operation="convert_file",
+        file_type=to_format or target_ext.lstrip("."),
+        source_path=_result_path(file_path, resolved),
+        target_format=to_format or target_ext.lstrip("."),
+        from_format=from_format,
+        to_format=to_format or target_ext.lstrip("."),
+        converter_errors=[error],
+    )
+
+
+def list_conversions(file_ext: str = "") -> str:
+    """List supported file format conversions."""
+    try:
+        from web.file_converter import get_supported_conversions
+
+        matrix = get_supported_conversions()
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
+
+    if file_ext:
+        source_ext = _normalize_conversion_extension(file_ext)
+        targets = [item.lstrip(".") for item in matrix.get(source_ext, [])]
+        summary = (
+            f"{source_ext.lstrip('.')} 可转换为：{', '.join(targets)}"
+            if targets
+            else f"暂不支持从 {source_ext.lstrip('.')} 转换"
+        )
+        return json.dumps(
+            {
+                "success": True,
+                "source_format": source_ext.lstrip("."),
+                "targets": targets,
+                "summary": summary,
+            },
+            ensure_ascii=False,
+        )
+
+    return json.dumps(
+        {
+            "success": True,
+            "conversions": {
+                key.lstrip("."): [item.lstrip(".") for item in values]
+                for key, values in matrix.items()
+            },
+            "summary": "已返回全部支持的格式转换矩阵",
+        },
+        ensure_ascii=False,
+    )
+
+
+def _replace_docx_placeholders_in_paragraph(
+    paragraph: Any, replacements: Dict[str, str]
+) -> tuple[bool, str, str]:
+    before = paragraph.text
+    after = before
+    for key, value in replacements.items():
+        after = after.replace(key, value)
+    if after == before:
+        return False, before, after
+    for run in paragraph.runs:
+        run_text = run.text
+        for key, value in replacements.items():
+            run_text = run_text.replace(key, value)
+        run.text = run_text
+    if paragraph.text != after:
+        paragraph.text = after
+    return True, before, after
+
+
+def fill_docx_template(
+    path: str,
+    data: str = "{}",
+    target_path: str = "",
+    placeholder_style: str = "braces",
+) -> str:
+    """Fill simple placeholders in a DOCX template.
+
+    `data` is a JSON object. With placeholder_style=braces, field `name`
+    replaces both `{{name}}` and `{name}`.
+    """
+    resolved = _resolve_path(path)
+    if not resolved:
+        return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
+    try:
+        values = json.loads(data) if isinstance(data, str) else data
+    except json.JSONDecodeError as exc:
+        return json.dumps({"error": f"Invalid data JSON: {exc}"}, ensure_ascii=False)
+    if not isinstance(values, dict):
+        return json.dumps({"error": "Template data must be a JSON object"}, ensure_ascii=False)
+
+    try:
+        from docx import Document
+
+        target = _resolve_output_path(path, resolved, target_path, ".docx")
+        if not target:
+            return json.dumps({"error": f"Invalid target path: {target_path}"}, ensure_ascii=False)
+        file_exists = os.path.exists(target)
+        if target != resolved:
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            shutil.copy2(resolved, target)
+
+        backup_warning = _best_effort_backup(target) if file_exists else ""
+        write_warning = _ensure_existing_file_writable(target) if file_exists else ""
+        doc = Document(target)
+        replacements: Dict[str, str] = {}
+        for raw_key, raw_value in values.items():
+            key = str(raw_key)
+            value = "" if raw_value is None else str(raw_value)
+            replacements[f"{{{{{key}}}}}"] = value
+            if str(placeholder_style or "").strip().lower() in {"braces", "single"}:
+                replacements[f"{{{key}}}"] = value
+
+        diff_items: List[Dict[str, Any]] = []
+        fields_seen: set[str] = set()
+        for index, paragraph in enumerate(doc.paragraphs, start=1):
+            changed, before, after = _replace_docx_placeholders_in_paragraph(
+                paragraph, replacements
+            )
+            if changed:
+                diff_items.append(
+                    {
+                        "location": "paragraph",
+                        "paragraph_index": index,
+                        "before": before,
+                        "after": after,
+                    }
+                )
+        for table_index, table in enumerate(doc.tables, start=1):
+            for row_index, row in enumerate(table.rows, start=1):
+                for col_index, cell in enumerate(row.cells, start=1):
+                    for paragraph_index, paragraph in enumerate(cell.paragraphs, start=1):
+                        changed, before, after = _replace_docx_placeholders_in_paragraph(
+                            paragraph, replacements
+                        )
+                        if changed:
+                            diff_items.append(
+                                {
+                                    "location": "table_cell",
+                                    "table_index": table_index,
+                                    "row": row_index,
+                                    "col": col_index,
+                                    "paragraph_index": paragraph_index,
+                                    "before": before,
+                                    "after": after,
+                                }
+                            )
+        for item in diff_items:
+            before = str(item.get("before") or "")
+            for raw_key in values:
+                key = str(raw_key)
+                if f"{{{{{key}}}}}" in before or f"{{{key}}}" in before:
+                    fields_seen.add(key)
+
+        _save_docx_via_temp_file(doc, target)
+        return _success_result(
+            _result_path(target_path or path, target),
+            operation="fill_docx_template",
+            summary=f"已填充 Word 模板中的 {len(fields_seen)} 个字段",
+            file_type="docx",
+            change_type="modify" if file_exists else "create",
+            summary_code="WRITE_OK",
+            diff=_file_task_diff("docx_template_fields", diff_items),
+            source_path=_result_path(path, resolved),
+            fields_filled=sorted(fields_seen),
+            placeholders_replaced=len(diff_items),
+            warning=_merge_warnings(backup_warning, write_warning),
+            focus=True,
+        )
+    except ImportError:
+        return json.dumps({"error": "python-docx not installed"}, ensure_ascii=False)
+    except PermissionError as exc:
+        target = _resolve_output_path(path, resolved, target_path, ".docx") or resolved
+        return _blocked_write_result(
+            _result_path(target_path or path, target),
+            summary=str(exc).strip() or _nonwritable_target_message(target),
+            suggested_next_step=_nonwritable_target_next_step(target),
+            operation="fill_docx_template",
+            file_type="docx",
+        )
+    except Exception as exc:
+        return json.dumps({"error": str(exc)}, ensure_ascii=False)
 
 
 def write_pptx_slides(path: str, updates: str = "[]") -> str:
@@ -4895,191 +5478,6 @@ def write_pptx_slides(path: str, updates: str = "[]") -> str:
         )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-
-def _parse_jsonish_list(value: Any, field_name: str) -> tuple[List[Any], Optional[str]]:
-    if isinstance(value, str):
-        try:
-            parsed = json.loads(value)
-        except json.JSONDecodeError as exc:
-            return [], f"Invalid {field_name} JSON: {exc}"
-    else:
-        parsed = value
-    if parsed is None or parsed == "":
-        return [], None
-    if isinstance(parsed, list):
-        return parsed, None
-    if isinstance(parsed, dict):
-        return [parsed], None
-    return [{"content": str(parsed)}], None
-
-
-def _pptx_text_lines(value: Any) -> List[str]:
-    if value is None:
-        return []
-    if isinstance(value, str):
-        return [line.strip() for line in value.splitlines() if line.strip()]
-    if isinstance(value, list):
-        lines: List[str] = []
-        for item in value:
-            lines.extend(_pptx_text_lines(item))
-        return lines
-    if isinstance(value, dict):
-        for key in ("text", "content", "body", "bullet", "point", "summary"):
-            if key in value:
-                return _pptx_text_lines(value.get(key))
-        for key in ("bullets", "bullet_points", "points", "items", "lines"):
-            if key in value:
-                return _pptx_text_lines(value.get(key))
-        return [
-            "：".join(str(part).strip() for part in (key, val) if str(part).strip())
-            for key, val in value.items()
-        ]
-    return [str(value).strip()] if str(value).strip() else []
-
-
-def _pptx_first_text(value: Any) -> str:
-    lines = _pptx_text_lines(value)
-    return lines[0] if lines else ""
-
-
-def _remove_koto_theme_shapes(slide: Any) -> None:
-    for shape in list(slide.shapes):
-        if str(getattr(shape, "name", "") or "").startswith("KOTO_THEME_"):
-            element = shape._element
-            element.getparent().remove(element)
-
-
-def _is_title_shape(slide: Any, shape: Any) -> bool:
-    if getattr(slide.shapes, "title", None) is shape:
-        return True
-    if not getattr(shape, "is_placeholder", False):
-        return False
-    try:
-        from pptx.enum.shapes import PP_PLACEHOLDER
-
-        return shape.placeholder_format.type in {
-            PP_PLACEHOLDER.TITLE,
-            PP_PLACEHOLDER.CENTER_TITLE,
-        }
-    except Exception:
-        return False
-
-
-def _is_body_placeholder(shape: Any) -> bool:
-    if not getattr(shape, "is_placeholder", False):
-        return False
-    try:
-        from pptx.enum.shapes import PP_PLACEHOLDER
-
-        return shape.placeholder_format.type in {
-            PP_PLACEHOLDER.BODY,
-            PP_PLACEHOLDER.OBJECT,
-            PP_PLACEHOLDER.SUBTITLE,
-        }
-    except Exception:
-        return False
-
-
-def _apply_text_style(
-    text_frame: Any, *, font_family: str, size_pt: float, color: Any, bold: bool = False
-) -> None:
-    from pptx.util import Pt
-
-    for paragraph in text_frame.paragraphs:
-        paragraph.font.name = font_family
-        paragraph.font.size = Pt(size_pt)
-        paragraph.font.bold = bold
-        paragraph.font.color.rgb = color
-        for run in paragraph.runs:
-            run.font.name = font_family
-            run.font.size = Pt(size_pt)
-            run.font.bold = bold
-            run.font.color.rgb = color
-
-
-def _set_slide_background(slide: Any, color: Any) -> None:
-    fill = slide.background.fill
-    fill.solid()
-    fill.fore_color.rgb = color
-
-
-def _add_theme_background_shape(
-    slide: Any, slide_width: int, slide_height: int, color: Any
-) -> None:
-    from pptx.enum.shapes import MSO_SHAPE
-
-    background = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, 0, 0, slide_width, slide_height
-    )
-    background.name = "KOTO_THEME_BACKGROUND"
-    background.fill.solid()
-    background.fill.fore_color.rgb = color
-    background.line.fill.background()
-    element = background._element
-    tree = element.getparent()
-    tree.remove(element)
-    tree.insert(2, element)
-
-
-def _add_theme_accent_shapes(
-    slide: Any,
-    slide_width: int,
-    slide_height: int,
-    theme: Dict[str, Any],
-    slide_number: int,
-) -> None:
-    from pptx.enum.shapes import MSO_SHAPE
-    from pptx.enum.text import PP_ALIGN
-    from pptx.util import Inches, Pt
-
-    accent = _hex_to_rgb_color(theme["accent"], "0F766E")
-    accent2 = _hex_to_rgb_color(theme["accent2"], "D97706")
-    muted = _hex_to_rgb_color(theme["muted"], "E6DED2")
-    footer_text = _hex_to_rgb_color(
-        theme["body_text"] if not theme.get("is_dark") else theme["inverse_text"],
-        "25313B",
-    )
-
-    top_bar = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, 0, 0, slide_width, Inches(0.08)
-    )
-    top_bar.name = "KOTO_THEME_ACCENT_BAR"
-    top_bar.fill.solid()
-    top_bar.fill.fore_color.rgb = accent
-    top_bar.line.fill.background()
-
-    corner = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, 0, slide_height - Inches(0.09), slide_width, Inches(0.09)
-    )
-    corner.name = "KOTO_THEME_FOOTER_BAR"
-    corner.fill.solid()
-    corner.fill.fore_color.rgb = muted
-    corner.line.fill.background()
-
-    marker = slide.shapes.add_shape(
-        MSO_SHAPE.RECTANGLE, Inches(0.65), Inches(0.94), Inches(0.46), Inches(0.06)
-    )
-    marker.name = "KOTO_THEME_TITLE_MARKER"
-    marker.fill.solid()
-    marker.fill.fore_color.rgb = accent2
-    marker.line.fill.background()
-
-    footer = slide.shapes.add_textbox(
-        slide_width - Inches(1.2),
-        slide_height - Inches(0.36),
-        Inches(0.72),
-        Inches(0.18),
-    )
-    footer.name = "KOTO_THEME_SLIDE_NUMBER"
-    footer.text_frame.clear()
-    footer.text_frame.paragraphs[0].text = f"{slide_number:02d}"
-    footer.text_frame.paragraphs[0].alignment = PP_ALIGN.RIGHT
-    footer.text_frame.paragraphs[0].font.name = str(
-        theme.get("font_family") or "Microsoft YaHei"
-    )
-    footer.text_frame.paragraphs[0].font.size = Pt(8)
-    footer.text_frame.paragraphs[0].font.color.rgb = footer_text
 
 
 def design_pptx_theme_layout(
@@ -5527,8 +5925,11 @@ class TaskToolsPlugin(AgentPlugin):
                 "description": (
                     "Parse any supported file (DOCX/XLSX/PPTX/PDF/TXT/CSV) to plain text. "
                     "Use this for a quick overview or staged reading of file contents. "
-                    "For PDFs, you can pass start_page/end_page to read only a page window. "
-                    "Args: path (str), max_chars (int, default 60000), start_page (int, optional), end_page (int, optional). "
+                    "For PDFs, pass start_page/end_page to read a page window. "
+                    "For large DOCX/PPTX/XLSX, pass window_unit='paragraph'|'slide'|'sheet' "
+                    "with start/end or sheet_index to read one workflow window. "
+                    "Args: path (str), max_chars (int, default 60000), start_page/end_page, "
+                    "window_unit, start, end, sheet_index. "
                     "Returns: plain text string."
                 ),
                 "parameters": {
@@ -5538,6 +5939,10 @@ class TaskToolsPlugin(AgentPlugin):
                         "max_chars": {"type": "INTEGER"},
                         "start_page": {"type": "INTEGER"},
                         "end_page": {"type": "INTEGER"},
+                        "window_unit": {"type": "STRING"},
+                        "start": {"type": "INTEGER"},
+                        "end": {"type": "INTEGER"},
+                        "sheet_index": {"type": "INTEGER"},
                     },
                     "required": ["path"],
                 },
@@ -5903,6 +6308,102 @@ class TaskToolsPlugin(AgentPlugin):
                 },
             },
             {
+                "name": "insert_docx_paragraph",
+                "func": insert_docx_paragraph,
+                "description": (
+                    "Insert one paragraph into an existing DOCX without rewriting existing content or tables. "
+                    "Use for local edits like appending one sentence to a section while preserving existing tables. "
+                    "Args: path (str), text (str), after_heading (optional), before_heading (optional), style (optional). "
+                    "When adding to the end of a section, set before_heading to the next section heading."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {"type": "STRING"},
+                        "text": {"type": "STRING"},
+                        "after_heading": {"type": "STRING"},
+                        "before_heading": {"type": "STRING"},
+                        "style": {"type": "STRING"},
+                    },
+                    "required": ["path", "text"],
+                },
+            },
+            {
+                "name": "fill_docx_template",
+                "func": fill_docx_template,
+                "description": (
+                    "Fill placeholders in a DOCX template using structured JSON data. "
+                    "Use for mail merge, contract templates, offer letters, forms, and report templates. "
+                    "Replaces {{field}} and {field}; can write in place or to target_path. "
+                    "Args: path (str), data (JSON object string), target_path (optional), placeholder_style (optional). "
+                    "Returns a standard file-change payload with docx_template_fields diff."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {"type": "STRING"},
+                        "data": {"type": "STRING"},
+                        "target_path": {"type": "STRING"},
+                        "placeholder_style": {"type": "STRING"},
+                    },
+                    "required": ["path", "data"],
+                },
+            },
+            {
+                "name": "convert_docx_to_pdf",
+                "func": convert_docx_to_pdf,
+                "description": (
+                    "Convert a DOCX/DOC file to PDF using the best available local converter "
+                    "(docx2pdf, Microsoft Word COM, or LibreOffice/soffice). "
+                    "Use when the user asks to export, save, or send a Word document as PDF. "
+                    "Args: path (str), target_path (optional .pdf). "
+                    "Returns a standard file-change payload when conversion succeeds, or a clear blocked result when no converter is installed."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "path": {"type": "STRING"},
+                        "target_path": {"type": "STRING"},
+                    },
+                    "required": ["path"],
+                },
+            },
+            {
+                "name": "convert_file",
+                "func": convert_file,
+                "description": (
+                    "Convert a workspace file to another supported format using Koto's general converter. "
+                    "Use for TXT/MD/DOCX/PDF/XLSX/CSV/PPTX/image format conversion when no more specific tool applies. "
+                    "Args: file_path (str), target_format (str like pdf, docx, md, csv, png), output_path (optional). "
+                    "Returns a standard file-change payload when conversion succeeds, or a clear blocked result if unsupported."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "file_path": {"type": "STRING"},
+                        "target_format": {"type": "STRING"},
+                        "output_path": {"type": "STRING"},
+                    },
+                    "required": ["file_path", "target_format"],
+                },
+            },
+            {
+                "name": "list_conversions",
+                "func": list_conversions,
+                "description": (
+                    "List supported source and target format conversions. "
+                    "Use before convert_file when the user asks what formats are supported or the conversion path is uncertain. "
+                    "Args: file_ext (optional source extension or alias like pdf, docx, csv)."
+                ),
+                "parameters": {
+                    "type": "OBJECT",
+                    "properties": {
+                        "file_ext": {"type": "STRING"},
+                    },
+                    "required": [],
+                },
+            },
+            {
                 "name": "insert_image_into_docx",
                 "func": insert_image_into_docx,
                 "description": (
@@ -5930,7 +6431,10 @@ class TaskToolsPlugin(AgentPlugin):
                     "Read an Excel sheet and append it to a DOCX file as a real Word table. "
                     "Use this when the task is '把 Excel 数据加入 Word / 新建表格'. "
                     "Args: source_path (xlsx), target_path (docx), sheet_name (optional), "
-                    "table_title (optional), max_rows (optional, default 200). "
+                    "table_title (optional), max_rows (optional, default 200), "
+                    "sort_by (optional column name), sort_order ('desc' or 'asc'), "
+                    "columns (optional JSON array or comma-separated column names). "
+                    "For requests like top 3 by Revenue, set sort_by='Revenue', sort_order='desc', max_rows=3. "
                     "If the sheet name is unknown, omit sheet_name instead of guessing Sheet1."
                 ),
                 "parameters": {
@@ -5941,6 +6445,9 @@ class TaskToolsPlugin(AgentPlugin):
                         "sheet_name": {"type": "STRING"},
                         "table_title": {"type": "STRING"},
                         "max_rows": {"type": "INTEGER"},
+                        "sort_by": {"type": "STRING"},
+                        "sort_order": {"type": "STRING"},
+                        "columns": {"type": "STRING"},
                     },
                     "required": ["source_path", "target_path"],
                 },

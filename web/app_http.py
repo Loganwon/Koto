@@ -49,6 +49,29 @@ def configure_http_wiring(app: Flask, logger: Logger):
     def _handle_413(exc):
         return error_response("文件过大，请压缩后重试", 413)
 
+    @app.route("/api/csrf-token", methods=["GET"])
+    def _csrf_token():
+        try:
+            from flask_wtf.csrf import generate_csrf
+
+            token = generate_csrf()
+        except Exception:
+            token = ""
+        return jsonify({"csrf_token": token})
+
+    try:
+        from flask_wtf.csrf import CSRFError as _CSRFError
+
+        @app.errorhandler(_CSRFError)
+        def _handle_csrf_error(exc):
+            return error_response(
+                exc.description or "CSRF validation failed",
+                400,
+                {"code": "CSRF_FAILED"},
+            )
+    except Exception:  # pragma: no cover
+        pass
+
     try:
         from werkzeug.exceptions import HTTPException as _WerkzeugHTTPException
 

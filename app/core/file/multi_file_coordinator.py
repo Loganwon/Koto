@@ -95,7 +95,7 @@ class FileSnapshot:
         """Create snapshot from file on disk."""
         content = ""
         if not os.path.exists(path):
-            content_hash = hashlib.md5(content.encode()).hexdigest()
+            content_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
             return cls(path=path, content=content, content_hash=content_hash)
         try:
             if path.endswith((".xlsx", ".xls")):
@@ -112,7 +112,7 @@ class FileSnapshot:
         except Exception as e:
             logger.warning("[FileSnapshot] Failed to read %s: %s", path, e)
 
-        content_hash = hashlib.md5(content.encode()).hexdigest()
+        content_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
         return cls(path=path, content=content, content_hash=content_hash)
 
 

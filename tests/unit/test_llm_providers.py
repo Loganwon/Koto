@@ -198,6 +198,32 @@ class TestDeepSeekProvider:
             == "gemini-3-flash-preview"
         )
 
+    def test_cloud_provider_defaults_to_deepseek_for_text_tasks(self, monkeypatch):
+        monkeypatch.delenv("KOTO_CLOUD_PROVIDER", raising=False)
+        monkeypatch.delenv("KOTO_LLM_PROVIDER", raising=False)
+        import web.settings as web_settings
+
+        class FakeSettings:
+            def get(self, *_args, **_kwargs):
+                return ""
+
+        monkeypatch.setattr(web_settings, "SettingsManager", lambda: FakeSettings())
+        from app.core.llm.model_selection import (
+            get_configured_cloud_model,
+            get_provider_for_model_mode,
+        )
+
+        assert get_provider_for_model_mode("cloud") == "deepseek"
+        assert get_provider_for_model_mode("") == "deepseek"
+        assert (
+            get_configured_cloud_model("FILE_TASK", fallback_model="gemini-3.1-pro-preview")
+            == "deepseek-v4-pro"
+        )
+        assert (
+            get_configured_cloud_model("PAINTER", fallback_model="gemini-3.1-flash-image-preview")
+            == "gemini-3.1-flash-image-preview"
+        )
+
     def test_deepseek_fallback_chain_does_not_mix_gemini(self):
         from app.core.llm.model_fallback import ModelFallbackExecutor
 
@@ -208,6 +234,15 @@ class TestDeepSeekProvider:
         assert "deepseek-v4-flash" in candidates
         assert "deepseek-chat" not in candidates
         assert "deepseek-reasoner" not in candidates
+        assert all(not model.startswith("gemini-") for model in candidates)
+
+    def test_empty_fallback_chain_uses_deepseek_primary(self):
+        from app.core.llm.model_fallback import ModelFallbackExecutor
+
+        executor = ModelFallbackExecutor()
+        candidates = executor._build_candidate_list("", "FILE_TASK")
+
+        assert candidates[:2] == ["deepseek-v4-pro", "deepseek-v4-flash"]
         assert all(not model.startswith("gemini-") for model in candidates)
 
 
@@ -414,6 +449,43 @@ class TestOpenAIProviderMessageFormatting:
         assert assistant_calls == ["call_first", "call_second"]
         assert tool_ids == ["call_first", "call_second"]
         assert messages[0]["reasoning_content"] == "thinking"
+
+    def test_incomplete_tool_call_history_is_downgraded_to_text(self):
+        prov = self._provider()
+        messages = prov._build_messages(
+            [
+                {"role": "user", "content": "run it"},
+                {
+                    "role": "assistant",
+                    "content": "",
+                    "tool_calls": [
+                        {"id": "call_missing", "name": "read", "args": {"path": "a"}}
+                    ],
+                },
+                {"role": "user", "content": "continue"},
+            ],
+            system_instruction=None,
+        )
+
+        assert [msg["role"] for msg in messages] == ["user", "assistant", "user"]
+        assert not any(msg.get("tool_calls") for msg in messages)
+        assert messages[1]["content"] == "工具调用记录已省略：read"
+
+    def test_orphan_tool_message_is_folded_into_context_text(self):
+        prov = self._provider()
+        messages = prov._build_messages(
+            [
+                {
+                    "role": "function",
+                    "name": "read",
+                    "tool_call_id": "call_orphan",
+                    "content": "file text",
+                }
+            ],
+            system_instruction=None,
+        )
+
+        assert messages == [{"role": "user", "content": "工具结果（read）：file text"}]
 
 
 # ---------------------------------------------------------------------------

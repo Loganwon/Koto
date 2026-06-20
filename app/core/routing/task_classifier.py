@@ -24,7 +24,10 @@ TaskClassifier — 内置任务分类器
 
 import logging
 import os
+import threading
 import time
+
+from sklearn.metrics.pairwise import cosine_similarity
 
 # Suppress transformers' background safetensors-conversion network chatter
 os.environ.setdefault("TRANSFORMERS_SAFETENSORS_DISABLE_AUTO_CONVERSION", "1")
@@ -51,95 +54,98 @@ class TaskClassifier:
     _config: dict = {}
     _available: bool | None = None  # None = 尚未检测
     _load_error: str = ""
+    _load_lock = threading.Lock()
 
     # ── 加载 ─────────────────────────────────────────────────────────────────
 
     @classmethod
     def _load(cls) -> bool:
-        """懒加载所有模型工件，返回是否成功。"""
+        """懒加载所有模型工件，返回是否成功。线程安全。"""
         if cls._available is not None:
             return cls._available
 
-        clf_path = os.path.join(_MODEL_DIR, "clf.pkl")
-        le_path = os.path.join(_MODEL_DIR, "label_encoder.pkl")
-        config_path = os.path.join(_MODEL_DIR, "config.json")
+        with cls._load_lock:
+            if cls._available is not None:
+                return cls._available
 
-        # 工件存在性检查
-        if not (os.path.exists(clf_path) and os.path.exists(le_path)):
-            cls._available = False
-            cls._load_error = "工件文件不存在，请先运行 train_task_classifier.py"
-            logger.info(f"[TaskClassifier] {cls._load_error}")
-            return False
+            clf_path = os.path.join(_MODEL_DIR, "clf.pkl")
+            le_path = os.path.join(_MODEL_DIR, "label_encoder.pkl")
+            config_path = os.path.join(_MODEL_DIR, "config.json")
 
-        # 加载 sklearn 工件
-        try:
-            import pickle
+            # 工件存在性检查
+            if not (os.path.exists(clf_path) and os.path.exists(le_path)):
+                cls._available = False
+                cls._load_error = "工件文件不存在，请先运行 train_task_classifier.py"
+                logger.info(f"[TaskClassifier] {cls._load_error}")
+                return False
 
-            with open(clf_path, "rb") as f:
-                cls._clf = pickle.load(f)
-            with open(le_path, "rb") as f:
-                cls._le = pickle.load(f)
-            if os.path.exists(config_path):
-                import json as _json
+            # 加载 sklearn 工件
+            try:
+                import pickle
 
-                with open(config_path, encoding="utf-8") as f:
-                    cls._config = _json.load(f)
-        except Exception as e:
-            cls._available = False
-            cls._load_error = f"pickle 加载失败: {e}"
-            logger.warning(f"[TaskClassifier] {cls._load_error}")
-            return False
+                with open(clf_path, "rb") as f:
+                    cls._clf = pickle.load(f)
+                with open(le_path, "rb") as f:
+                    cls._le = pickle.load(f)
+                if os.path.exists(config_path):
+                    import json as _json
 
-        # 加载编码器（支持两种后端）
-        backend = cls._config.get("backend", "sentence_transformers")
-        model_name = cls._config.get(
-            "model_name", "paraphrase-multilingual-MiniLM-L12-v2"
-        )
+                    with open(config_path, encoding="utf-8") as f:
+                        cls._config = _json.load(f)
+            except Exception as e:
+                cls._available = False
+                cls._load_error = f"pickle 加载失败: {e}"
+                logger.warning(f"[TaskClassifier] {cls._load_error}")
+                return False
 
-        try:
-            t0 = time.time()
-            if backend == "transformers_mean_pool":
-                # 新版：使用 transformers 直接加载，均值池化，无需 sentence-transformers
-                from transformers import AutoModel, AutoTokenizer
-
-                cls._st_model = {
-                    "tokenizer": AutoTokenizer.from_pretrained(model_name),
-                    "model": AutoModel.from_pretrained(model_name),
-                    "backend": "transformers_mean_pool",
-                }
-            else:
-                # 旧版：sentence-transformers 后端
-                from sentence_transformers import SentenceTransformer
-
-                st_cache_dir = cls._config.get("st_cache_dir", "st_model")
-                if st_cache_dir:
-                    st_cache = os.path.join(_MODEL_DIR, st_cache_dir)
-                    cls._st_model = SentenceTransformer(
-                        model_name, cache_folder=st_cache
-                    )
-                else:
-                    cls._st_model = SentenceTransformer(model_name)
-            elapsed = time.time() - t0
-
-            classes_str = ", ".join(cls._config.get("classes", []))
-            logger.info(
-                f"[TaskClassifier] 已加载 (backend={backend})，耗时 {elapsed:.2f}s  "
-                f"类别: [{classes_str}]  "
-                f"训练准确率: {cls._config.get('train_accuracy', '?')}"
+            # 加载编码器（支持两种后端）
+            backend = cls._config.get("backend", "sentence_transformers")
+            model_name = cls._config.get(
+                "model_name", "paraphrase-multilingual-MiniLM-L12-v2"
             )
-        except ImportError as e:
-            cls._available = False
-            cls._load_error = f"缺少依赖: {e}"
-            logger.warning(f"[TaskClassifier] {cls._load_error}")
-            return False
-        except Exception as e:
-            cls._available = False
-            cls._load_error = f"模型加载失败: {e}"
-            logger.warning(f"[TaskClassifier] {cls._load_error}")
-            return False
 
-        cls._available = True
-        return True
+            try:
+                t0 = time.time()
+                if backend == "transformers_mean_pool":
+                    from transformers import AutoModel, AutoTokenizer
+
+                    cls._st_model = {
+                        "tokenizer": AutoTokenizer.from_pretrained(model_name),
+                        "model": AutoModel.from_pretrained(model_name),
+                        "backend": "transformers_mean_pool",
+                    }
+                else:
+                    from sentence_transformers import SentenceTransformer
+
+                    st_cache_dir = cls._config.get("st_cache_dir", "st_model")
+                    if st_cache_dir:
+                        st_cache = os.path.join(_MODEL_DIR, st_cache_dir)
+                        cls._st_model = SentenceTransformer(
+                            model_name, cache_folder=st_cache
+                        )
+                    else:
+                        cls._st_model = SentenceTransformer(model_name)
+                elapsed = time.time() - t0
+
+                classes_str = ", ".join(cls._config.get("classes", []))
+                logger.info(
+                    f"[TaskClassifier] 已加载 (backend={backend})，耗时 {elapsed:.2f}s  "
+                    f"类别: [{classes_str}]  "
+                    f"训练准确率: {cls._config.get('train_accuracy', '?')}"
+                )
+            except ImportError as e:
+                cls._available = False
+                cls._load_error = f"缺少依赖: {e}"
+                logger.warning(f"[TaskClassifier] {cls._load_error}")
+                return False
+            except Exception as e:
+                cls._available = False
+                cls._load_error = f"模型加载失败: {e}"
+                logger.warning(f"[TaskClassifier] {cls._load_error}")
+                return False
+
+            cls._available = True
+            return True
 
     # ── 公开接口 ──────────────────────────────────────────────────────────────
 
@@ -283,3 +289,58 @@ class TaskClassifier:
         cls._available = None
         cls._load_error = ""
         return cls._load()
+
+    @classmethod
+    def compute_similarities(cls, text: str) -> dict:
+        """Return {task_type: similarity_score, ...} using embedding cosine similarity."""
+        if not cls.is_available():
+            return {}
+        if not cls._clf or not cls._le:
+            cls._load()
+        try:
+            embedding = cls._embed_text(text)
+            similarities = {}
+            for label in cls._le.classes_:
+                example = cls._get_label_example(label)
+                ref_embedding = cls._embed_text(example)
+                sim = float(cosine_similarity([embedding], [ref_embedding])[0][0])
+                similarities[label] = sim
+            return similarities
+        except Exception:
+            return {}
+
+    @classmethod
+    def _embed_text(cls, text: str):
+        """Internal: compute embedding for text using loaded sentence-transformer."""
+        if isinstance(cls._st_model, dict) and cls._st_model.get("backend") == "transformers_mean_pool":
+            import torch
+            import torch.nn.functional as F
+
+            tokenizer = cls._st_model["tokenizer"]
+            model = cls._st_model["model"]
+            model.eval()
+            encoded = tokenizer([text], padding=True, truncation=True, max_length=128, return_tensors="pt")
+            with torch.no_grad():
+                out = model(**encoded)
+            mask_expanded = (
+                encoded["attention_mask"]
+                .unsqueeze(-1)
+                .expand(out.last_hidden_state.size())
+                .float()
+            )
+            sum_emb = torch.sum(out.last_hidden_state * mask_expanded, 1)
+            sum_mask = torch.clamp(mask_expanded.sum(1), min=1e-9)
+            emb = sum_emb / sum_mask
+            emb = F.normalize(emb, p=2, dim=1)
+            return emb.cpu().numpy()[0]
+        elif cls._st_model is not None:
+            return cls._st_model.encode([text], normalize_embeddings=True)[0]
+        return None
+
+    @classmethod
+    def _get_label_example(cls, label: str) -> str:
+        """Return a canonical example phrase for a task type label."""
+        from app.core.routing.routing_config import TASK_CORPUS
+
+        examples = TASK_CORPUS.get(label, [])
+        return " ".join(examples) if examples else label

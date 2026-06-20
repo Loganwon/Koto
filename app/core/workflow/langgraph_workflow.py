@@ -13,7 +13,7 @@ Koto LangGraph Workflow Engine
   - multi_agent_ppt       : 多Agent协作生成PPT (Researcher + Writer + Critic)
   - sequential_chat       : 标准单轮/多轮对话（默认）
 
-架构特点（对比原 TaskDecomposer）：
+架构特点：
   ✅ 并行子任务执行（Send API fanout）
   ✅ 条件分支（根据中间结果决定下一步）
   ✅ 检查点 → 人工确认 (interrupt_before)
@@ -413,7 +413,7 @@ class WorkflowEngine:
         "multi_agent_ppt"       - 多 Agent 协作 PPT
         "sequential_chat"       - 标准对话（回退到 LangGraphAgent）
 
-    对比原 TaskDecomposer：
+    相比旧串行规划器：
         ✅ 明确的 DAG 拓扑（不是字符串匹配 → 分支）
         ✅ 并行执行（LangGraph Send API）
         ✅ Critic/Review 循环
@@ -583,18 +583,18 @@ class WorkflowEngine:
     ) -> str:
         """
         根据 SmartDispatcher 返回的 task_type 推断最佳工作流。
-        与现有 TaskDecomposer.TASK_PATTERNS 映射兼容。
+        根据 SmartDispatcher 的稳定任务类型推断最佳 LangGraph 工作流。
 
         Args:
-            has_file: 当前请求是否附带了已上传文件。为 True 时直接返回 "legacy"，
+            has_file: 当前请求是否附带了已上传文件。为 True 时直接返回 "standard"，
                       因为文件分析不应触发 LangGraph 工作流（工作流没有文件字节上下文）。
         """
-        # 有文件附件时，默认走 legacy（文件内容由文件分析流处理，LangGraph 无法访问文件字节）。
+        # 有文件附件时，默认走标准文件分析流（LangGraph 无法访问文件字节）。
         # TODO: 当 LangGraph 文件感知工作流就绪后，将此环境变量设为 "1" 以解除限制。
         #       export KOTO_LANGGRAPH_FILE_ENABLED=1
         import os as _os
         if has_file and not _os.environ.get("KOTO_LANGGRAPH_FILE_ENABLED"):
-            return "legacy"
+            return "standard"
 
         text = user_input.lower()
 

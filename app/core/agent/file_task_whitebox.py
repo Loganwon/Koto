@@ -245,12 +245,41 @@ def validate_whitebox_plan(
             warnings.append("execution_plan_goal_missing")
         if not plan.steps:
             warnings.append("execution_plan_steps_missing")
+        plan_tools = {
+            str(step.get("tool") or step.get("tool_name") or "").strip()
+            for step in plan.steps
+            if isinstance(step, dict)
+            and str(step.get("tool") or step.get("tool_name") or "").strip()
+        }
+        plan_stage_text = " ".join(
+            str(step.get("stage") or step.get("title") or step.get("id") or "")
+            for step in plan.steps
+            if isinstance(step, dict)
+        ).lower()
         for index, step in enumerate(plan.steps, start=1):
             tool = str(step.get("tool") or "").strip()
             if tool and allowed and tool not in allowed:
                 violations.append(f"plan_step_{index}_tool_not_allowed:{tool}")
             if not str(step.get("why") or "").strip():
                 warnings.append(f"plan_step_{index}_why_missing")
+        for index, required_step in enumerate(
+            skeleton.get("required_steps") or [], start=1
+        ):
+            if not isinstance(required_step, dict):
+                continue
+            if required_step.get("required") is False:
+                continue
+            required_tool = str(
+                required_step.get("tool") or required_step.get("tool_name") or ""
+            ).strip()
+            required_stage = str(required_step.get("stage") or "").strip().lower()
+            required_id = str(required_step.get("id") or "").strip()
+            if required_tool and required_tool not in plan_tools:
+                warnings.append(f"required_step_{index}_tool_missing:{required_tool}")
+            elif required_stage and required_stage not in plan_stage_text:
+                warnings.append(f"required_step_{index}_stage_missing:{required_stage}")
+            elif required_id and required_id.lower() not in plan_stage_text:
+                warnings.append(f"required_step_{index}_id_not_visible:{required_id}")
 
     calls = list(tool_calls or [])
     for index, call in enumerate(calls, start=1):

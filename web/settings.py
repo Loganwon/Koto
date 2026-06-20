@@ -41,7 +41,7 @@ DEFAULT_SETTINGS = {
     },
     "ai": {
         "default_model": "auto",
-        "cloud_provider": "gemini",
+        "cloud_provider": "deepseek",
         "deepseek_model": "deepseek-v4-pro",
         "auto_execute_scripts": True,
         "stream_response": True,
@@ -58,7 +58,7 @@ DEFAULT_SETTINGS = {
         "auto_detect": True,
         "manual_proxy": "",
     },
-    "model_mode": "cloud",
+    "model_mode": "deepseek",
     "local_model": "",
     "user": {
         "name": "",

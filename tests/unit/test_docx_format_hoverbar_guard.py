@@ -7,17 +7,17 @@ def _repo_root() -> Path:
 
 
 def test_docx_tooltip_buttons_keep_editor_focus():
-    html = (_repo_root() / "web" / "templates" / "workspace_assistant.html").read_text(
+    shell_html = (_repo_root() / "web" / "templates" / "workspace_assistant.html").read_text(
         encoding="utf-8"
     )
-    start_match = re.search(r'<div id="wa-pdf-tooltip" class="[^"]*">', html)
-    end_marker = "<!-- Chart Generation Dialog -->"
-    assert start_match is not None, "wa-pdf-tooltip block not found"
-    start = start_match.start()
-    end = html.find(end_marker, start)
-    assert end != -1, "wa-pdf-tooltip block end marker not found"
-    tooltip_block = html[start:end]
-    assert tooltip_block.count('onmousedown="event.preventDefault()"') >= 6
+    tooltip_html = (
+        _repo_root() / "web" / "templates" / "_workspace_selection_toolbar.html"
+    ).read_text(
+        encoding="utf-8"
+    )
+    assert "{% include '_workspace_selection_toolbar.html' %}" in shell_html
+    assert re.search(r'<div\s+id="wa-pdf-tooltip"', tooltip_html)
+    assert tooltip_html.count('onmousedown="event.preventDefault()"') >= 6
 
 
 def test_docx_hoverbar_has_font_controls():

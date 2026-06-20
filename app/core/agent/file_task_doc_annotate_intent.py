@@ -9,6 +9,7 @@ from app.core.agent.file_task_review_intent import (
     REVIEW_MARKERS,
     SOURCE_MARKERS,
     TRANSLATION_MARKERS,
+    has_any_marker,
     has_explicit_docx_review_intent,
     looks_like_multi_docx_compare_request,
     looks_like_pdf_docx_review_request,
@@ -141,9 +142,13 @@ def _should_continue_same_bridge(
     ).strip().lower()
     if followup_action != "improve" or previous_mode != "doc_annotate_bridge":
         return False
-    return has_explicit_docx_review_intent(
-        task_text,
-        followup_context.get("previous_task_request"),
+    previous_request = str(followup_context.get("previous_task_request") or "")
+    if has_explicit_docx_review_intent(task_text, previous_request):
+        return True
+    return (
+        has_any_marker(previous_request, TRANSLATION_MARKERS)
+        and has_any_marker(previous_request, SOURCE_MARKERS)
+        and has_any_marker(previous_request, REVIEW_MARKERS)
     )
 
 

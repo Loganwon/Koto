@@ -1,4 +1,30 @@
-﻿// ================= State =================
+// ── Event listener lifecycle ──
+var _appDocListeners = [];
+var _appOrigAdd = document.addEventListener.bind(document);
+var _appOrigRemove = document.removeEventListener.bind(document);
+document.addEventListener = function(type, listener, options) {
+  _appDocListeners.push({ type: type, listener: listener, options: options });
+  return _appOrigAdd(type, listener, options);
+};
+document.removeEventListener = function(type, listener, options) {
+  _appDocListeners = _appDocListeners.filter(function(e) { return !(e.type === type && e.listener === listener); });
+  return _appOrigRemove(type, listener, options);
+};
+window._cleanupAppListeners = function() {
+  var c = 0;
+  while (_appDocListeners.length) { var e = _appDocListeners.pop(); try { _appOrigRemove(e.type, e.listener, e.options); c++; } catch(_){} }
+  document.addEventListener = function(type, listener, options) { _appDocListeners.push({ type: type, listener: listener, options: options }); return _appOrigAdd(type, listener, options); };
+  if (c) console.log('[App] Cleaned up ' + c + ' listeners');
+};
+
+// ── Safe DOM helper ──
+function $appEl(id) {
+  var el = typeof id === 'string' ? document.getElementById(id) : id;
+  if (!el && typeof id === 'string' && id.length > 0) console.warn('[App] Missing element: #' + id);
+  return el;
+}
+
+// ================= State =================
 // 🔥 VERSION: 2026-02-14-03 - 多文件累加上传修复版
 let currentSession = null;
 let selectedFiles = [];
@@ -6,6 +32,21 @@ let setupComplete = false;
 let lockedTaskType = null;  // 用户手动选择的任务类型
 let selectedModel = 'auto'; // 用户选择的模型 (auto = 自动选择)
 let enableMiniGame = true; // 是否启用等待小游戏
+window.KotoSessionBridge = {
+    getSession() {
+        return currentSession || '';
+    },
+    setSession(sessionName) {
+        currentSession = sessionName || null;
+        if (currentSession) _syncSessionSelectionUi(currentSession);
+        if (window.WA && typeof window.WA.useHostSession === 'function') {
+            window.WA.useHostSession(currentSession || '', { force: true });
+        }
+    },
+    refreshSessions() {
+        return typeof loadSessions === 'function' ? loadSessions() : Promise.resolve();
+    },
+};
 const _SIDEBAR_OVERLAY_QUERY = '(max-width: 1200px)';
 const MAX_UPLOAD_FILES = 10;
 const _DEFAULT_PROJECT_OPTIONS = [
@@ -318,6 +359,53 @@ const TASK_MODELS = {
     'FILE_GEN': 'gemini-3-pro-preview'
 };
 
+// ================= KotoDialog — custom modal replacing alert/confirm/prompt =================
+function KotoDialog(options) {
+    // options: { title, message, type:'info'|'warn'|'error', input:bool, confirmText, cancelText, onConfirm, onCancel }
+    const existing = document.querySelector('.koto-dialog-overlay');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'koto-dialog-overlay';
+    const dlg = document.createElement('div');
+    dlg.className = 'koto-dialog';
+    const iconMap = { info: '💬', warn: '⚠️', error: '❌' };
+    const icon = iconMap[options.type] || '💬';
+    let inputHTML = '';
+    if (options.input) {
+        inputHTML = `<input class="koto-dialog-input" placeholder="${escapeHtml(options.inputPlaceholder || '')}" value="${escapeHtml(options.inputValue || '')}">`;
+    }
+    dlg.innerHTML = `<div class="koto-dialog-icon">${icon}</div>
+        <div class="koto-dialog-title">${escapeHtml(options.title || '提示')}</div>
+        <div class="koto-dialog-msg">${escapeHtml(options.message || '')}</div>${inputHTML}
+        <div class="koto-dialog-btns">
+            ${options.cancelText !== null ? `<button class="koto-dialog-cancel">${escapeHtml(options.cancelText || '取消')}</button>` : ''}
+            <button class="koto-dialog-confirm">${escapeHtml(options.confirmText || '确定')}</button>
+        </div>`;
+    overlay.appendChild(dlg);
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add('koto-dialog-visible'));
+
+    const inputEl = dlg.querySelector('.koto-dialog-input');
+    const close = (confirmed) => {
+        overlay.classList.remove('koto-dialog-visible');
+        setTimeout(() => overlay.remove(), 250);
+        if (confirmed && options.onConfirm) options.onConfirm(inputEl ? inputEl.value : true);
+        if (!confirmed && options.onCancel) options.onCancel();
+    };
+    dlg.querySelector('.koto-dialog-confirm').onclick = () => close(true);
+    const cancelBtn = dlg.querySelector('.koto-dialog-cancel');
+    if (cancelBtn) cancelBtn.onclick = () => close(false);
+    overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+    if (inputEl) { inputEl.focus(); inputEl.onkeydown = (e) => { if (e.key === 'Enter') close(true); if (e.key === 'Escape') close(false); }; }
+    document.addEventListener('keydown', function _kd(e) { if (e.key === 'Escape') { close(false); document.removeEventListener('keydown', _kd); } });
+}
+
+// Shortcut functions replacing alert/confirm/prompt
+function kotoAlert(msg, title) { return new Promise(r => KotoDialog({ title: title || '提示', message: msg, type: 'info', cancelText: null, onConfirm: r })); }
+function kotoConfirm(msg, title) { return new Promise(r => KotoDialog({ title: title || '确认', message: msg, type: 'warn', onConfirm: () => r(true), onCancel: () => r(false) })); }
+function kotoPrompt(msg, defaultValue) { return new Promise(r => KotoDialog({ title: '输入', message: msg, input: true, inputValue: defaultValue || '', onConfirm: (v) => r(v), onCancel: () => r(null) })); }
+
 // ================= Notification =================
 function showNotification(message, type = 'info', duration = 3000) {
     // 获取或懒创建通知堆叠容器（垂直排列，避免重叠）
@@ -461,28 +549,20 @@ function hideSetupWizard() {
     document.getElementById('setupWizard').classList.remove('active');
 }
 
-let setupCloudProvider = 'gemini';
+let setupCloudProvider = 'deepseek';
 
 function selectSetupProvider(provider) {
-    const normalized = provider === 'deepseek' ? 'deepseek' : 'gemini';
+    const normalized = 'deepseek';
     setupCloudProvider = normalized;
 
-    const geminiBtn = document.getElementById('setupProviderGemini');
     const deepseekBtn = document.getElementById('setupProviderDeepSeek');
     const desc = document.getElementById('setupApiProviderDesc');
     const input = document.getElementById('setupApiKey');
     const status = document.getElementById('step1Status');
 
-    if (geminiBtn) geminiBtn.classList.toggle('active', normalized === 'gemini');
-    if (deepseekBtn) deepseekBtn.classList.toggle('active', normalized === 'deepseek');
-
-    if (normalized === 'deepseek') {
-        if (desc) desc.innerHTML = '从 <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek 开放平台</a> 获取 API Key';
-        if (input) input.placeholder = '粘贴 DeepSeek API Key...';
-    } else {
-        if (desc) desc.innerHTML = '从 <a href="https://aistudio.google.com/apikey" target="_blank">Google AI Studio</a> 获取 Gemini API Key';
-        if (input) input.placeholder = '粘贴 Gemini API Key...';
-    }
+    if (deepseekBtn) deepseekBtn.classList.add('active');
+    if (desc) desc.innerHTML = '从 <a href="https://platform.deepseek.com/api_keys" target="_blank">DeepSeek 开放平台</a> 获取 API Key';
+    if (input) input.placeholder = '粘贴 DeepSeek API Key...';
 
     if (status) {
         status.textContent = '';
@@ -493,7 +573,7 @@ function selectSetupProvider(provider) {
 async function saveApiKey() {
     const apiKey = document.getElementById('setupApiKey').value.trim();
     const status = document.getElementById('step1Status');
-    const provider = setupCloudProvider === 'deepseek' ? 'deepseek' : 'gemini';
+    const provider = 'deepseek';
     
     if (!apiKey || apiKey.length < 10) {
         status.textContent = '❌ 请输入有效的 API Key';
@@ -513,7 +593,7 @@ async function saveApiKey() {
         const data = await response.json();
         
         if (data.success) {
-            status.textContent = `✅ ${provider === 'deepseek' ? 'DeepSeek' : 'Gemini'} API Key 已保存`;
+            status.textContent = '✅ DeepSeek API Key 已保存';
             status.className = 'step-status success';
             document.getElementById('setupStep1').classList.remove('active');
             document.getElementById('setupStep1').classList.add('completed');
@@ -746,7 +826,7 @@ function initProjectSelector() {
     };
 }
 
-// ================= Gemini-style Sidebar =================
+// ================= Assistant Sidebar =================
 
 function _isSidebarOverlayMode() {
     try {
@@ -1366,13 +1446,17 @@ async function selectSession(sessionName) {
         console.log(`[SWITCH] DOM 已缓存 session: ${currentSession}`);
     }
 
-    // Switch back to chat view if we're in editor view
-    if (typeof window.switchToChatView === 'function') window.switchToChatView();
+    const workspaceView = document.getElementById('workspaceView');
+    const workspaceOpen = !!(workspaceView && workspaceView.style.display !== 'none');
+    if (!workspaceOpen && typeof window.switchToChatView === 'function') window.switchToChatView();
 
     console.log(`[SWITCH] 从 ${currentSession} 切换到 ${sessionName}（保持后台任务运行）`);
     
     currentSession = sessionName;
     _syncSessionSelectionUi(sessionName);
+    if (workspaceOpen && window.WA && typeof window.WA.useHostSession === 'function') {
+        window.WA.useHostSession(sessionName, { force: true });
+    }
 
     // 同步发送按钮状态：切换后立即反映新 session 的生成状态
     const _sb = document.getElementById('sendBtn');
@@ -1724,11 +1808,11 @@ async function renameSession(sessionName, event) {
                     document.getElementById('chatTitle').textContent = toSessionDisplayName(newSession);
                 }
             } else {
-                alert('重命名失败: ' + (data.error || '未知错误'));
+                showNotification('重命名失败: ' + (data.error || '未知错误'), 'error');
                 restore();
             }
         } catch (e) {
-            alert('重命名失败: ' + e.message);
+            showNotification('重命名失败: ' + e.message, 'error');
             restore();
         }
     }
@@ -1796,7 +1880,8 @@ function renderChatHistory(history) {
 
         if (userMsg) {
             container.insertAdjacentHTML('beforeend', renderMessage('user', userMsg.parts[0], {
-                timestamp: userMsg.timestamp
+                timestamp: userMsg.timestamp,
+                attachments: userMsg.attachments || []
             }));
         }
         if (assistantMsg) {
@@ -1837,13 +1922,8 @@ function renderChatHistory(history) {
 // 🎯 PPT 相关函数（P0 新增）
 function downloadPPT(sessionId) {
     console.log(`[PPT] 下载 PPT 会话: ${sessionId}`);
-    
-    // 调用后端生成下载链接
-    fetch('/api/ppt/download', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session_id: sessionId })
-    })
+
+    fetch(`/api/ppt/download/${encodeURIComponent(sessionId)}`)
     .then(response => {
         if (response.ok) return response.blob();
         throw new Error('下载失败');
@@ -1882,13 +1962,12 @@ function renderMessage(role, content, meta = {}) {
     
     // 模型名称简化显示 (2026-01)
     const modelDisplayName = {
-        // Gemini 3 系列 (最新)
-        'gemini-3-flash-preview': 'Gemini 3 Flash ⚡',
-        'gemini-3-pro-preview': 'Gemini 3 Pro 🚀',
-        'gemini-3-pro-image-preview': 'Gemini 3 Vision 👁️',
-        // Gemini 2.5 系列
-        'gemini-2.5-flash': 'Gemini 2.5 Flash ⚡',
-        'gemini-2.5-pro': 'Gemini 2.5 Pro 🚀',
+        'gemini-3-flash-preview': 'DeepSeek',
+        'gemini-3-pro-preview': 'DeepSeek',
+        'gemini-3-pro-image-preview': 'DeepSeek',
+        'gemini-2.5-flash': 'DeepSeek',
+        'gemini-2.5-pro': 'DeepSeek',
+        'deepseek-v4-pro': 'DeepSeek V4 Pro',
         // 图像生成
         'nano-banana-pro-preview': 'Nano Banana Pro 🎨',
         'imagen-4.0-generate-001': 'Imagen 4 🖼️',
@@ -4204,12 +4283,6 @@ function updateFilePreview() {
     console.log('[UPDATE PREVIEW] HTML content:', html);
 }
 
-function formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-}
-
 function removeSingleFile(index) {
     selectedFiles.splice(index, 1);
     updateFilePreview();
@@ -4459,6 +4532,77 @@ function openPath(path) {
 }
 
 // ================= Status =================
+function getLatencyClass(latencyMs) {
+    if (latencyMs == null) return '';
+    if (latencyMs < 500) return 'good';
+    if (latencyMs < 1500) return 'ok';
+    return 'slow';
+}
+
+function formatLatency(providerData) {
+    if (!providerData) return '--';
+    if (providerData.error === 'checking') return '检查中';
+    if (providerData.reachable && providerData.latency_ms != null) return `${providerData.latency_ms}ms`;
+    if (providerData.error === 'timeout') return '超时';
+    return '不可达';
+}
+
+function updateLatencyProvider(provider, providerData) {
+    const id = 'Deepseek';
+    const row = document.getElementById(`latency${id}`);
+    const value = document.getElementById(`latency${id}Val`);
+    const bar = document.getElementById(`latency${id}Bar`);
+    const latencyMs = providerData && providerData.reachable ? providerData.latency_ms : null;
+    const latencyClass = getLatencyClass(latencyMs);
+
+    if (value) value.textContent = formatLatency(providerData);
+    if (bar) {
+        bar.className = `latency-bar-fill ${latencyClass}`.trim();
+        bar.style.width = latencyMs == null ? '0%' : `${Math.max(8, Math.min(100, latencyMs / 20))}%`;
+    }
+    if (row) {
+        row.classList.toggle('offline', !(providerData && providerData.reachable));
+        row.title = providerData && providerData.target
+            ? `${providerData.target}${providerData.error ? ` - ${providerData.error}` : ''}`
+            : '';
+    }
+}
+
+function updateLatencyDetail(results) {
+    updateLatencyProvider('deepseek', results && results.deepseek);
+}
+
+function setLatencyDetailOpen(open) {
+    const detail = document.getElementById('latencyDetail');
+    const arrow = document.querySelector('.status-expand-arrow');
+    const indicator = document.getElementById('statusIndicator');
+    if (!detail) return;
+    const leftSlot = document.getElementById('wa-left-latency-slot');
+    if (leftSlot && detail.parentElement !== leftSlot) {
+        leftSlot.appendChild(detail);
+    }
+
+    detail.style.display = open ? 'block' : 'none';
+    detail.classList.toggle('open', open);
+    if (arrow) arrow.classList.toggle('open', open);
+    if (indicator) indicator.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function toggleLatencyDetail(event) {
+    if (event) event.stopPropagation();
+    const detail = document.getElementById('latencyDetail');
+    if (!detail) return;
+    const willOpen = !detail.classList.contains('open');
+    if (willOpen) {
+        updateLatencyDetail(window._lastCloudLatency || {
+            gemini: { reachable: false, error: 'checking' },
+            deepseek: { reachable: false, error: 'checking' },
+        });
+        checkStatus();
+    }
+    setLatencyDetailOpen(willOpen);
+}
+
 async function checkStatus() {
     const dot = document.querySelector('.status-dot');
     const text = document.querySelector('.status-text');
@@ -4482,15 +4626,25 @@ async function checkStatus() {
         text.textContent = 'Error';
     }
 
-    // 2. Cloud latency — measured server-side (Gemini API endpoint)
+    // 2. Cloud latency - measured server-side for each configured provider
     const noticeBar = document.getElementById('wechat-notice-bar');
     try {
-        const cResp = await fetch('/api/ping/cloud', { signal: AbortSignal.timeout(6000) });
+        const cResp = await fetch('/api/ping/cloud/all', { signal: AbortSignal.timeout(12000) });
         if (cResp.ok) {
-            const c = await cResp.json();
+            const cloud = await cResp.json();
+            window._lastCloudLatency = cloud;
+            updateLatencyDetail(cloud);
+
+            const providerOrder = ['gemini', 'deepseek'];
+            const reachable = providerOrder
+                .map(provider => cloud && cloud[provider])
+                .filter(item => item && item.reachable && item.latency_ms != null);
             const ollamaHint = text.textContent.startsWith('🦙') ? ' | 🦙' : '';
-            if (c.reachable && c.latency_ms != null) {
-                text.textContent = `☁ ${c.latency_ms}ms${ollamaHint}`;
+            if (reachable.length) {
+                const fastest = reachable.reduce((best, item) => (
+                    item.latency_ms < best.latency_ms ? item : best
+                ));
+                text.textContent = `☁ ${fastest.latency_ms}ms${ollamaHint}`;
                 if (noticeBar) noticeBar.style.display = 'none';
             } else {
                 text.textContent = `☁ 超时${ollamaHint}`;
@@ -4501,6 +4655,7 @@ async function checkStatus() {
         }
     } catch (_) {
         // cloud ping optional — silently ignore
+        updateLatencyDetail(window._lastCloudLatency || {});
         if (noticeBar) noticeBar.style.display = 'block';
     }
 
@@ -4996,12 +5151,6 @@ async function showAgentChoiceDialog(question, options) {
     });
 }
 
-function escapeHtml(text) {
-    const div = document.createElement('div');
-    div.textContent = text;
-    return div.innerHTML;
-}
-
 function parseMarkdown(text) {
     if (!text) return '';
     try {
@@ -5477,23 +5626,17 @@ async function saveSettingsApiKey() {
 }
 
 function syncCloudProviderUi(provider) {
-    const normalized = provider === 'deepseek' ? 'deepseek' : 'gemini';
+    const normalized = 'deepseek';
     const desc = document.getElementById('settingsApiKeyDesc');
     const hint = document.getElementById('settingCloudProviderHint');
     const input = document.getElementById('settingsApiKeyInput');
-    if (normalized === 'deepseek') {
-        if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek V4 Pro。';
-        if (hint) hint.textContent = '云端模式下使用 DeepSeek V4 Pro，支持文字对话、代码和文件任务规划。';
-        if (input) input.placeholder = '粘贴 DeepSeek API Key…';
-    } else {
-        if (desc) desc.innerHTML = '更新 Gemini API 密钥。从 <a href="https://aistudio.google.com/apikey" target="_blank" style="color:var(--accent-primary)">Google AI Studio</a> 获取。';
-        if (hint) hint.textContent = '云端模式下使用 Gemini。';
-        if (input) input.placeholder = '粘贴 Gemini API Key…';
-    }
+    if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek V4 Pro。';
+    if (hint) hint.textContent = '云端模式下使用 DeepSeek V4 Pro，支持文字对话、代码和文件任务规划。';
+    if (input) input.placeholder = '粘贴 DeepSeek API Key…';
 }
 
 async function onCloudProviderChange(provider) {
-    const normalized = provider === 'deepseek' ? 'deepseek' : 'gemini';
+    const normalized = 'deepseek';
     syncCloudProviderUi(normalized);
     await updateSetting('ai', 'cloud_provider', normalized);
     if (normalized === 'deepseek') {
@@ -5623,7 +5766,7 @@ async function toggleSkill(skillId, enabled) {
         // Revert on failure
         if (card) card.classList.toggle('active', !enabled);
         if (skill) skill.enabled = !enabled;
-        alert('切换失败: ' + e.message);
+        showNotification('切换失败: ' + e.message, 'error');
     }
 }
 
@@ -5674,7 +5817,7 @@ function skeUpdateCount() {
 
 async function skeGeneratePrompt() {
     const desc = (document.getElementById('skeAiDesc').value || '').trim();
-    if (!desc) { alert('请先描述你的需求'); return; }
+    if (!desc) { showNotification('请先描述你的需求', 'warn'); return; }
     const previewEl = document.getElementById('skeAiPreview');
     const previewContent = document.getElementById('skeAiPreviewContent');
     previewEl.style.display = 'block';
@@ -5824,7 +5967,7 @@ async function saveSkillPromptEdit() {
         // Refresh skill UI in case this skill is active
         if (typeof window.SkillUI === 'object') window.SkillUI.refresh();
     } catch (e) {
-        alert('保存失败: ' + e.message);
+        showNotification('保存失败: ' + e.message, 'error');
     }
 }
 
@@ -5848,7 +5991,7 @@ async function resetSkillPromptEdit() {
         }
         renderSkills(_currentSkillFilter);
     } catch (e) {
-        alert('恢复失败: ' + e.message);
+        showNotification('恢复失败: ' + e.message, 'error');
     }
 }
 
@@ -6101,11 +6244,11 @@ async function addNewMemory() {
             loadMemories();
         } else {
             const text = await response.text();
-            alert(`添加失败 (${response.status})\n${text || '请稍后重试'}`);
+            showNotification(`添加失败 (${response.status}) — ${text || '请稍后重试'}`, 'error');
         }
     } catch (e) {
         console.error('Failed to add memory:', e);
-        alert(`添加失败: ${e.message}`);
+        showNotification(`添加失败: ${e.message}`, 'error');
     }
 }
 
@@ -6118,11 +6261,11 @@ async function deleteMemory(id) {
             loadMemories();
         } else {
             const text = await response.text();
-            alert(`删除失败 (${response.status})\n${text || '请稍后重试'}`);
+            showNotification(`删除失败 (${response.status})\n${text || '请稍后重试'}`, 'error');
         }
     } catch (e) {
         console.error('Failed to delete memory:', e);
-        alert(`删除失败: ${e.message}`);
+        showNotification(`删除失败: ${e.message}`, 'error');
     }
 }
 
@@ -6139,11 +6282,11 @@ async function importProfileMemories() {
             if (btn) { btn.textContent = `✅ 导入了 ${result.added} 条`; }
             setTimeout(() => { if (btn) { btn.disabled = false; btn.textContent = origText; } }, 3000);
         } else {
-            alert(`导入失败: ${result.error || '未知错误'}`);
+            showNotification(`导入失败: ${result.error || '未知错误'}`, 'error');
             if (btn) { btn.disabled = false; btn.textContent = origText; }
         }
     } catch (e) {
-        alert(`导入失败: ${e.message}`);
+        showNotification(`导入失败: ${e.message}`, 'error');
         if (btn) { btn.disabled = false; btn.textContent = origText; }
     }
 }
@@ -6170,11 +6313,11 @@ async function batchExtractMemories() {
                 listEl.innerHTML = `<div class="memory-empty" style="color:var(--text-muted)">⏳ 正在从历史对话提取记忆，稍后自动刷新...</div>`;
             }
         } else {
-            alert(`提取失败: ${result.error || '未知错误'}`);
+            showNotification(`提取失败: ${result.error || '未知错误'}`, 'error');
             if (btn) { btn.disabled = false; btn.textContent = origText; }
         }
     } catch (e) {
-        alert(`提取失败: ${e.message}`);
+        showNotification(`提取失败: ${e.message}`, 'error');
         if (btn) { btn.disabled = false; btn.textContent = origText; }
     }
 }
@@ -6237,7 +6380,7 @@ async function addShadowMemory() {
         if (input) input.value = '';
         loadShadowMemories();
     } catch (e) {
-        alert('添加失败: ' + e.message);
+        showNotification('添加失败: ' + e.message, 'error');
     }
 }
 
@@ -6249,7 +6392,7 @@ async function deleteShadowMemory(id) {
         if (!data.ok) throw new Error(data.error || '删除失败');
         loadShadowMemories();
     } catch (e) {
-        alert('删除失败: ' + e.message);
+        showNotification('删除失败: ' + e.message, 'error');
     }
 }
 
@@ -7525,7 +7668,7 @@ function renderTriggerList(triggers) {
                 <div class="meta">${escapeHtml(t.description || '')}</div>
                 <div class="controls">
                     <label class="trigger-toggle">
-                        <input type="checkbox" ${t.enabled ? 'checked' : ''} onchange="toggleTrigger('${escapeHtml(t.trigger_id)}', this.checked)">
+                        <input type="checkbox" ${t.enabled ? 'checked' : ''} onchange="toggleTriggerDraft('${escapeHtml(t.trigger_id)}', this.checked)">
                         启用
                     </label>
                     <label class="trigger-toggle">优先级
@@ -7557,7 +7700,7 @@ function toggleTriggerParams(triggerId) {
     }
 }
 
-function toggleTrigger(triggerId, enabled) {
+function toggleTriggerDraft(triggerId, enabled) {
     if (!triggerDrafts[triggerId]) triggerDrafts[triggerId] = {};
     triggerDrafts[triggerId].enabled = enabled;
 }
@@ -7860,7 +8003,7 @@ async function toggleBinding(bindingId, enabled) {
     } catch(e) {
         if (row) row.classList.toggle('enabled', !enabled);
         if (b) b.enabled = !enabled;
-        alert('切换失败: ' + e.message);
+        showNotification('切换失败: ' + e.message, 'error');
     }
 }
 
@@ -7873,7 +8016,7 @@ async function deleteBinding(bindingId) {
         _allBindings = _allBindings.filter(x => x.binding_id !== bindingId);
         renderSkillBindings();
     } catch(e) {
-        alert('删除失败: ' + e.message);
+        showNotification('删除失败: ' + e.message, 'error');
     }
 }
 
@@ -7893,7 +8036,7 @@ async function bootstrapBindings(force = false) {
         console.log(`[Bindings] ${label}: 创建 ${c}, 跳过 ${s}`);
         await loadSkillBindings();
     } catch(e) {
-        alert(`${label}失败: ` + e.message);
+        showNotification(`${label}失败: ` + e.message, 'error');
     }
 }
 
@@ -7969,7 +8112,7 @@ async function toggleTrigger(triggerId, enabled) {
     } catch(e) {
         if (row) row.classList.toggle('enabled', !enabled);
         if (t) t.enabled = !enabled;
-        alert('切换失败: ' + e.message);
+        showNotification('切换失败: ' + e.message, 'error');
     }
 }
 
@@ -7989,7 +8132,7 @@ async function bootstrapTriggers(force = false) {
         console.log(`[Triggers] ${label}: 创建 ${c}, 跳过 ${s}`);
         await loadTriggers();
     } catch(e) {
-        alert(`${label}失败: ` + e.message);
+        showNotification(`${label}失败: ` + e.message, 'error');
     }
 }
 
@@ -8014,11 +8157,11 @@ function closeCreateBindingModal() {
 
 async function saveCreateBinding() {
     const skillId = document.getElementById('cbSkillId').value;
-    if (!skillId) { alert('请选择一个 Skill'); return; }
+    if (!skillId) { showNotification('请选择一个 Skill', 'warn'); return; }
     const rawPatterns = document.getElementById('cbPatterns').value;
     const turns = parseInt(document.getElementById('cbTurns').value) || 1;
     const patterns = rawPatterns.split(/[,，]+/).map(s => s.trim()).filter(Boolean);
-    if (!patterns.length) { alert('请至少输入一个关键词'); return; }
+    if (!patterns.length) { showNotification('请至少输入一个关键词', 'warn'); return; }
 
     try {
         const resp = await fetch(`/api/skills/${encodeURIComponent(skillId)}/bindings/intent`, {
@@ -8031,7 +8174,7 @@ async function saveCreateBinding() {
         closeCreateBindingModal();
         await loadSkillBindings();
     } catch(e) {
-        alert('创建失败: ' + e.message);
+        showNotification('创建失败: ' + e.message, 'error');
     }
 }
 
@@ -8060,7 +8203,7 @@ function onCreateTriggerTypeChange() {
 
 async function saveCreateTrigger() {
     const name = (document.getElementById('ctName').value || '').trim();
-    if (!name) { alert('请输入名称'); return; }
+    if (!name) { showNotification('请输入名称', 'warn'); return; }
     const type    = document.getElementById('ctType').value;
     const jobType = document.getElementById('ctJobType').value;
     const query   = (document.getElementById('ctQuery').value || '').trim();
@@ -8092,7 +8235,7 @@ async function saveCreateTrigger() {
         closeCreateTriggerModal();
         await loadTriggers();
     } catch(e) {
-        alert('创建失败: ' + e.message);
+        showNotification('创建失败: ' + e.message, 'error');
     }
 }
 
@@ -8113,7 +8256,7 @@ function closeCreateSkillModal() {
 
 async function saveCreateSkill() {
     const name = (document.getElementById('csName').value || '').trim();
-    if (!name) { alert('请输入技能名称'); return; }
+    if (!name) { showNotification('请输入技能名称', 'warn'); return; }
     const icon     = (document.getElementById('csIcon').value || '').trim() || '🤖';
     const category = document.getElementById('csCategory').value;
     const desc     = (document.getElementById('csDesc').value || '').trim();
@@ -8136,7 +8279,7 @@ async function saveCreateSkill() {
         await loadSkills();     // refresh skills list
         filterSkills(_currentSkillFilter);
     } catch(e) {
-        alert('创建失败: ' + e.message);
+        showNotification('创建失败: ' + e.message, 'error');
     }
 }
 
@@ -8986,7 +9129,7 @@ async function fhPickFolder() {
 async function fhDoBrowse() {
     const path      = document.getElementById('fhBrowsePath')?.value?.trim();
     const recursive = document.getElementById('fhRecursive')?.checked || false;
-    if (!path) { alert('请输入目录路径'); return; }
+    if (!path) { showNotification('请输入目录路径', 'warn'); return; }
     const list = document.getElementById('fhFileList');
     if (!list) return;
     list.innerHTML = fhShowLoading('正在加载目录，请稍候...');
@@ -9025,7 +9168,7 @@ function fhFilterBrowseResults(q) {
 
 async function fhRegisterBrowsed() {
     const path = document.getElementById('fhBrowsePath')?.value?.trim();
-    if (!path) { alert('请先浏览一个目录'); return; }
+    if (!path) { showNotification('请先浏览一个目录', 'warn'); return; }
     if (!confirm(`将目录「${path}」注册到我的文件中，继续？`)) return;
     try {
         const r = await fetch('/api/files/scan-dir', {
@@ -9038,10 +9181,10 @@ async function fhRegisterBrowsed() {
         const msg = d.registered !== undefined
             ? `✅ 注册完成：新增 ${d.registered} 个，更新 ${d.updated || 0} 个`
             : (d.message || '✅ 注册完成');
-        alert(msg);
+        showNotification(msg, 'error');
         fileHubLoadStats();
     } catch(e) {
-        alert('注册失败: ' + e.message);
+        showNotification('注册失败: ' + e.message, 'error');
     }
 }
 
@@ -9396,7 +9539,7 @@ function closeCatalogScheduleWizard() {
 async function saveCatalogScheduleWizard() {
     const sourceDir = document.getElementById('cwSourceDir')?.value?.trim();
     const hours = parseInt(document.getElementById('cwIntervalHours')?.value || '6', 10);
-    if (!sourceDir) { alert('请填写目录路径'); return; }
+    if (!sourceDir) { showNotification('请填写目录路径', 'warn'); return; }
     const intervalSecs = Math.max(60, hours * 3600);
     try {
         let triggerId = window._cwTriggerId;
@@ -9409,7 +9552,7 @@ async function saveCatalogScheduleWizard() {
             const preset = list.find(t => (t.job_payload?.preset_key === 'downloads_auto_catalog') || t.name === '下载目录自动整理');
             triggerId = preset?.trigger_id || preset?.id;
         }
-        if (!triggerId) { alert('未找到系统预设触发器，请先在「定时触发器」区域点击「初始化推荐」'); return; }
+        if (!triggerId) { showNotification('未找到系统预设触发器，请先在「定时触发器」区域点击「初始化推荐」', 'warn'); return; }
         // Update trigger config + payload + enable
         const patchResp = await fetch(`/api/jobs/triggers/${triggerId}`, {
             method: 'PATCH',
@@ -9424,9 +9567,9 @@ async function saveCatalogScheduleWizard() {
         if (!patchData.ok) throw new Error(patchData.error || '更新失败');
         closeCatalogScheduleWizard();
         await loadTriggers();  // refresh trigger list
-        alert(`✅ 定时整理已启用！每 ${hours} 小时自动整理：${sourceDir}`);
+        showNotification(`✅ 定时整理已启用！每 ${hours} 小时自动整理：${sourceDir}`, 'success');
     } catch(e) {
-        alert('保存失败: ' + e.message);
+        showNotification('保存失败: ' + e.message, 'error');
     }
 }
 
@@ -9820,7 +9963,7 @@ async function toggleShadowWatcher(enabled) {
         if (!data.ok) throw new Error(data.error || '操作失败');
         if (label) label.textContent = enabled ? '影子追踪已开启' : '影子追踪已关闭';
     } catch(e) {
-        alert('切换失败: ' + e.message);
+        showNotification('切换失败: ' + e.message, 'error');
         // revert
         const toggle = document.getElementById('shadowWatcherToggle');
         if (toggle) toggle.checked = !enabled;
@@ -9839,13 +9982,13 @@ async function shadowForceTick() {
         const count = (data.data?.messages || []).length;
         if (count > 0) {
             await shadowPollPending();
-            alert(`✅ 检查完成，生成 ${count} 条主动消息。`);
+            showNotification(`✅ 检查完成，生成 ${count} 条主动消息。`, 'success');
         } else {
-            alert('✅ 检查完成，当前暂无需要主动推送的内容。');
+            showNotification('✅ 检查完成，当前暂无需要主动推送的内容。', 'info');
         }
         await loadShadowStatus();
     } catch(e) {
-        alert('检查失败: ' + e.message);
+        showNotification('检查失败: ' + e.message, 'error');
     }
 }
 
@@ -9866,9 +10009,9 @@ async function shadowOpenObservations() {
             `📌 开放任务: ${(obs.open_tasks||[]).filter(t=>!t.done).length} 项待处理`,
             `⏱️ 最后活跃: ${obs.last_seen || '无'}`,
         ].join('\n');
-        alert(detail);
+        showNotification(detail, 'info');
     } catch(e) {
-        alert('获取失败: ' + e.message);
+        showNotification('获取失败: ' + e.message, 'error');
     }
 }
 

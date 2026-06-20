@@ -2,9 +2,9 @@
 
 ## Purpose
 
-`web/univer-editor/` no longer contains a standalone file-assistant app.
+`web/univer-editor/` does not contain a standalone file-assistant app.
 This directory is retained only to build the fixed-name Sheets runtime bundles
-consumed by the current `workspace-assistant`.
+consumed by the unified Koto workspace shell.
 
 ## Prerequisites
 
@@ -21,8 +21,9 @@ npm run build
 
 ## Important Notes
 
-1. **Runtime page**: the only supported file-assistant page is `/workspace-assistant`
+1. **Runtime page**: the only supported app entry is `/`
    - The legacy `/editor` entry has been removed
+   - `/workspace-assistant` is a compatibility redirect to `/`
    - `web/static/univer-dist/` is retained only for supporting sheet assets
    - `web/static/univer-dist/` intentionally no longer has a standalone homepage
 

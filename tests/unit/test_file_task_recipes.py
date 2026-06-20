@@ -55,6 +55,224 @@ def test_recipe_selects_excel_table_transfer_when_no_analysis_or_chart_requested
     assert match.recipe.quality_gates[0]["criterion"] == "docx_table_request_has_table"
 
 
+def test_recipe_selects_docx_template_fill():
+    request = FileTaskRequest(
+        task="把客户信息填入这个 Word 合同模板里的占位符，另存为 filled.docx",
+        target_path="filled.docx",
+        files=[
+            FileTaskFile(path="template.docx", name="template.docx", type="docx"),
+        ],
+    )
+
+    markers = semantic_markers(request.task, file_types={"docx"}, target_file_type="docx")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["docx_template_fill_request"] is True
+    assert match is not None
+    assert match.recipe.id == "docx_template_fill"
+    assert "fill_docx_template" in match.recipe.matched_capabilities
+
+
+def test_recipe_selects_readonly_multi_file_compare():
+    request = FileTaskRequest(
+        task="Compare these two files and summarize the differences.",
+        files=[
+            FileTaskFile(path="old.pdf", name="old.pdf", type="pdf"),
+            FileTaskFile(path="new.pdf", name="new.pdf", type="pdf"),
+        ],
+    )
+
+    match = select_task_recipe(request, request.files, write_intent=False)
+
+    assert match is not None
+    assert match.recipe.id == "multi_file_compare_readonly"
+    assert match.recipe.requires_write is False
+    assert "compare_files" in match.recipe.matched_capabilities
+
+
+def test_recipe_selects_docx_pdf_export_even_when_source_docx_is_current_target():
+    request = FileTaskRequest(
+        task="把当前 Word 文档导出为 PDF",
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+        ],
+    )
+
+    markers = semantic_markers(request.task, file_types={"docx"}, target_file_type="docx")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["docx_pdf_export_request"] is True
+    assert match is not None
+    assert match.recipe.id == "docx_pdf_export"
+    assert match.recipe.matched_capabilities == ("convert_docx_to_pdf",)
+
+
+def test_recipe_selects_generic_file_format_convert():
+    request = FileTaskRequest(
+        task="Convert notes.txt to markdown and save it as notes.md.",
+        target_path="notes.md",
+        files=[
+            FileTaskFile(path="notes.txt", name="notes.txt", type="txt"),
+        ],
+    )
+
+    markers = semantic_markers(request.task, file_types={"txt"}, target_file_type="md")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["file_format_convert_request"] is True
+    assert match is not None
+    assert match.recipe.id == "file_format_convert"
+    assert match.recipe.matched_capabilities == ("convert_file",)
+
+
+def test_recipe_selects_docx_clear_review_marks_without_annotation_bridge():
+    request = FileTaskRequest(
+        task="清除这个 Word 文档里的所有批注和修订",
+        target_path="reviewed.docx",
+        files=[
+            FileTaskFile(path="reviewed.docx", name="reviewed.docx", type="docx", target=True),
+        ],
+    )
+
+    markers = semantic_markers(request.task, file_types={"docx"}, target_file_type="docx")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["docx_clear_review_request"] is True
+    assert match is not None
+    assert match.recipe.id == "docx_clear_review_marks"
+    assert "annotate_file" not in match.recipe.matched_capabilities
+
+
+def test_recipe_selects_spreadsheet_cell_write():
+    request = FileTaskRequest(
+        task="Update cell B2 in the Excel worksheet with the sales amount.",
+        target_path="sales.xlsx",
+        files=[
+            FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx", target=True),
+        ],
+    )
+
+    markers = semantic_markers(request.task, file_types={"xlsx"}, target_file_type="xlsx")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["spreadsheet_write_request"] is True
+    assert match is not None
+    assert match.recipe.id == "spreadsheet_cell_write"
+    assert "write_sheet_data" in match.recipe.matched_capabilities
+
+
+def test_recipe_selects_text_selection_replace():
+    request = FileTaskRequest(
+        task="把选中文本润色后写回这个 Markdown 文件",
+        target_path="notes.md",
+        files=[
+            FileTaskFile(path="notes.md", name="notes.md", type="md", target=True),
+        ],
+    )
+
+    markers = semantic_markers(request.task, file_types={"md"}, target_file_type="md")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["text_selection_replace_request"] is True
+    assert match is not None
+    assert match.recipe.id == "text_selection_replace"
+    assert "replace_file_selection" in match.recipe.matched_capabilities
+
+
+def test_recipe_selects_workspace_file_copy():
+    request = FileTaskRequest(
+        task="Copy this PDF file to archive.pdf.",
+        files=[
+            FileTaskFile(path="source.pdf", name="source.pdf", type="pdf"),
+        ],
+        target_path="archive.pdf",
+    )
+
+    markers = semantic_markers(request.task, file_types={"pdf"}, target_file_type="pdf")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["file_copy_request"] is True
+    assert match is not None
+    assert match.recipe.id == "workspace_file_copy"
+    assert match.recipe.matched_capabilities == ("copy_file",)
+
+
+def test_recipe_selects_cross_file_extract_to_file():
+    request = FileTaskRequest(
+        task="Extract the action items from notes.pdf into action_items.md.",
+        files=[
+            FileTaskFile(path="notes.pdf", name="notes.pdf", type="pdf"),
+        ],
+        target_path="action_items.md",
+    )
+
+    markers = semantic_markers(request.task, file_types={"pdf", "md"}, target_file_type="md")
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["cross_file_extract_request"] is True
+    assert match is not None
+    assert match.recipe.id == "cross_file_extract_to_file"
+    assert "extract_to_file" in match.recipe.matched_capabilities
+
+
+def test_preserve_existing_table_does_not_route_to_excel_table_transfer():
+    request = FileTaskRequest(
+        task="请继续优化 report.docx：只追加一句风险声明，保留已有表格不变，保存同一个 DOCX。",
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
+            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+        ],
+    )
+
+    markers = semantic_markers(
+        request.task,
+        file_types={"xlsx", "docx"},
+        target_file_type="docx",
+    )
+    ids = [
+        match.recipe.id
+        for match in recipe_matches(request, request.files, write_intent=True)
+    ]
+
+    assert markers["table_request"] is False
+    assert "xlsx_table_to_docx" not in ids
+
+
+def test_meta_keyword_mentions_do_not_route_to_polish_or_report_recipe():
+    request = FileTaskRequest(
+        task=(
+            "请做一轮连续任务清理验证：分步处理 report.docx，但这一步只追加一句到目标 DOCX 末尾，"
+            "保留已有表格不变。任务描述里故意包含总结、检查、润色、继续下一步这些词，"
+            "但不要触发快捷动作关键词路由；保存同一个 DOCX。"
+        ),
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
+            FileTaskFile(path="notes.docx", name="notes.docx", type="docx"),
+            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+        ],
+    )
+
+    markers = semantic_markers(
+        request.task,
+        file_types={"xlsx", "docx"},
+        target_file_type="docx",
+    )
+    ids = [
+        match.recipe.id
+        for match in recipe_matches(request, request.files, write_intent=True)
+    ]
+
+    assert markers["polish_request"] is False
+    assert markers["summary_request"] is False
+    assert markers["problem_analysis_request"] is False
+    assert "long_docx_stepwise_polish_writeback" not in ids
+    assert "docx_polish_writeback" not in ids
+    assert "docx_report_write" not in ids
+
+
 def test_excel_table_transfer_does_not_pick_generic_docx_report_gate():
     request = FileTaskRequest(
         task="Create a DOCX report from this Excel table. Keep the real table in Word and write a short summary before the table.",
@@ -182,10 +400,17 @@ def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
         "long_pdf_stepwise_docx_summary": {"stepwise_docx_has_step_notes"},
         "financial_xlsx_docx_report": {"financial_report_has_narrative", "financial_report_has_real_chart_image"},
         "xlsx_table_to_docx": {"docx_table_request_has_table"},
+        "docx_template_fill": {"docx_template_fill_replaces_placeholders"},
+        "docx_pdf_export": {"docx_pdf_export_uses_converter"},
+        "docx_clear_review_marks": {"docx_clear_review_uses_cleanup_tool"},
         "docx_chart_report": {"docx_chart_request_has_image"},
         "docx_report_write": {"docx_report_has_narrative"},
+        "spreadsheet_cell_write": {"spreadsheet_write_has_cells"},
+        "workspace_file_copy": {"workspace_file_copy_uses_copy_tool"},
+        "cross_file_extract_to_file": {"cross_file_extract_uses_write_tool"},
         "pptx_design_edit_high_quality": {"pptx_design_has_real_design_pass", "pptx_design_styles_text_shapes"},
         "ppt_slide_write": {"ppt_request_has_slide_write"},
+        "text_selection_replace": {"text_selection_replace_has_replacement"},
     }
 
     for recipe_id, criteria in expected_gates.items():

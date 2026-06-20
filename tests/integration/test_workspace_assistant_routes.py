@@ -234,7 +234,7 @@ class TestOpenFile:
         target = workspace_dir / "retry.docx"
         target.write_bytes(docx_bytes)
 
-        import app.core.file.file_parser as parser_mod
+        import app.core.file.parsers.docx_parser as parser_mod
 
         real_parse_docx = parser_mod.parse_docx
         call_count = {"value": 0}
@@ -1586,10 +1586,17 @@ class TestEmbeddedModeRenderGuards:
     JS_PATH = (
         Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
     )
+    PPTX_EDITOR_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "editors" / "pptx-editor.ts"
+    )
 
     @property
     def src(self) -> str:
         return self.JS_PATH.read_text(encoding="utf-8")
+
+    @property
+    def pptx_src(self) -> str:
+        return self.PPTX_EDITOR_PATH.read_text(encoding="utf-8")
 
     # ── Layout guard helper ────────────────────────────────────────────────
 
@@ -1757,9 +1764,9 @@ class TestEmbeddedModeRenderGuards:
 
     def test_pptx_editor_polls_for_slide_area_width(self):
         """KotoPptxEditor.render must poll clientWidth before calling _renderSlide(0)."""
-        src = self.src
-        pptx_start = src.find("class KotoPptxEditor {")
-        pptx_end   = src.find("\n  class Koto", pptx_start)
+        src = self.pptx_src
+        pptx_start = src.find("class KotoPptxEditor")
+        pptx_end   = len(src)
         pptx_body  = src[pptx_start:pptx_end]
         assert "_tryPptxRender" in pptx_body or "_pptxMountDeadline" in pptx_body, (
             "KotoPptxEditor must use a polling strategy for first-slide render"
@@ -1767,9 +1774,9 @@ class TestEmbeddedModeRenderGuards:
 
     def test_pptx_editor_has_mount_deadline(self):
         """KotoPptxEditor must have a deadline to prevent infinite polling."""
-        src = self.src
-        pptx_start = src.find("class KotoPptxEditor {")
-        pptx_end   = src.find("\n  class Koto", pptx_start)
+        src = self.pptx_src
+        pptx_start = src.find("class KotoPptxEditor")
+        pptx_end   = len(src)
         pptx_body  = src[pptx_start:pptx_end]
         assert "_pptxMountDeadline" in pptx_body or "Date.now()" in pptx_body, (
             "KotoPptxEditor mount polling must have a bounded deadline"

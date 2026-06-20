@@ -5,6 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
+from app.core.agent.file_task_result_markers import (
+    fallback_key_for_marker,
+    result_key_for_marker,
+)
+
 
 @dataclass(frozen=True)
 class FileTaskToolSpec:
@@ -24,6 +29,58 @@ _ALLOWLIST: tuple[FileTaskToolSpec, ...] = (
     ),
     FileTaskToolSpec("read_docx_content", "docx", ("docx",), True),
     FileTaskToolSpec("write_docx_content", "docx", ("docx",), False, True),
+    FileTaskToolSpec("insert_docx_paragraph", "docx", ("docx",), False, True),
+    FileTaskToolSpec("fill_docx_template", "docx", ("docx",), False, True),
+    FileTaskToolSpec("convert_docx_to_pdf", "docx_pdf", ("docx", "doc"), False, True),
+    FileTaskToolSpec(
+        "convert_file",
+        "file_convert",
+        (
+            "docx",
+            "doc",
+            "pdf",
+            "txt",
+            "md",
+            "markdown",
+            "xlsx",
+            "xls",
+            "csv",
+            "pptx",
+            "ppt",
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "bmp",
+            "gif",
+        ),
+        False,
+        True,
+    ),
+    FileTaskToolSpec(
+        "list_conversions",
+        "file_convert",
+        (
+            "docx",
+            "doc",
+            "pdf",
+            "txt",
+            "md",
+            "markdown",
+            "xlsx",
+            "xls",
+            "csv",
+            "pptx",
+            "ppt",
+            "jpg",
+            "jpeg",
+            "png",
+            "webp",
+            "bmp",
+            "gif",
+        ),
+        True,
+    ),
     FileTaskToolSpec("clear_docx_review_marks", "docx", ("docx",), False, True),
     FileTaskToolSpec("insert_image_into_docx", "docx", ("docx",), False, True),
     FileTaskToolSpec(
@@ -102,7 +159,10 @@ def supported_file_workflows() -> Dict[str, List[str]]:
         "docx": [
             "read paragraphs/tables",
             "write paragraphs",
+            "insert a single paragraph into an existing section without rewriting tables",
+            "fill template placeholders",
             "clear review comments/tracked changes",
+            "convert DOCX to PDF when a local converter is available",
             "append images/charts as real Word pictures",
             "append Excel data as a real Word table",
             "compare two DOCX files, let AI draft comments, and write Word comments in place",
@@ -124,6 +184,7 @@ def supported_file_workflows() -> Dict[str, List[str]]:
         ],
         "pdf": [
             "extract text by page window",
+            "convert to supported editable/text formats when a local converter is available",
             "compare/extract",
             "annotation is best-effort when supported by the tool layer",
         ],
@@ -131,6 +192,7 @@ def supported_file_workflows() -> Dict[str, List[str]]:
             "read ranges",
             "replace exact selections in TXT/MD/CSV/JSON/code files",
             "create/update derived TXT/MD/CSV/JSON files",
+            "convert TXT/MD to supported document formats",
             "sandbox processing",
         ],
         "sandbox": [
@@ -169,26 +231,8 @@ def write_target_for_tool(tool_name: str, tool_args: Dict[str, Any]) -> str:
     ).strip()
 
 
-class FileTaskToolCatalog:
-    def __init__(self, *, task_files: Optional[List[Dict[str, str]]] = None):
-        from app.core.agent.file_task_tool_gateway import (
-            FileTaskToolContext,
-            FileTaskToolGateway,
-        )
-
-        self._gateway = FileTaskToolGateway(
-            context=FileTaskToolContext(task_files=task_files or [])
-        )
-
-    def definitions(self) -> List[Dict[str, Any]]:
-        return self._gateway.definitions()
-
-    def allowed_names(self) -> set[str]:
-        return self._gateway.allowed_names()
-
-    def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
-        return self._gateway.execute(tool_name, tool_args)
-
+# (FileTaskToolCatalog removed — was an unused wrapper around FileTaskToolGateway.
+#  The runtime instantiates its own gateway directly.)
 
 def tool_result_preview(tool_name: str, result: Any, limit: int = 900) -> str:
     result_text = stringify_result(result)
@@ -315,6 +359,10 @@ def parse_file_change(
         "change_type": str(change_type or "modify"),
         "focus": bool(payload.get("focus")),
     }
+    if payload.get("summary_code"):
+        event_payload["summary_code"] = str(payload.get("summary_code") or "")
+    if isinstance(payload.get("diff"), dict):
+        event_payload["diff"] = dict(payload["diff"])
     for key in (
         "source_path",
         "original_target_path",
@@ -356,6 +404,13 @@ def parse_file_change(
         "comment_markup_removed",
         "revisions_accepted",
         "replacements_made",
+        "fields_filled",
+        "placeholders_replaced",
+        "converter",
+        "converter_errors",
+        "target_format",
+        "from_format",
+        "to_format",
         "matches_found",
         "occurrence",
         "original_selection",
@@ -367,8 +422,9 @@ def parse_file_change(
 
 def extract_koto_paths(result: Any, marker: str) -> List[str]:
     if isinstance(result, dict):
-        key = "_koto_created" if marker == "__koto_created__:" else "_koto_modified"
-        values = result.get(key)
+        values = result.get(result_key_for_marker(marker))
+        if not isinstance(values, list):
+            values = result.get(fallback_key_for_marker(marker))
         if isinstance(values, list):
             return [str(item) for item in values if str(item or "").strip()]
     result_text = stringify_result(result)
@@ -389,20 +445,25 @@ def extract_sandbox_artifacts(result: Any) -> List[Dict[str, Any]]:
     files = payload.get("files") or payload.get("images") or {}
     if not isinstance(files, dict):
         return []
+    generated_paths = payload.get("generated_file_paths")
+    if not isinstance(generated_paths, dict):
+        generated_paths = {}
 
     artifacts: List[Dict[str, Any]] = []
     for name, data in files.items():
         filename = str(name or "artifact").strip() or "artifact"
         ext = Path(filename).suffix.lstrip(".").lower()
         mime = "image/svg+xml" if ext == "svg" else f"image/{ext or 'png'}"
-        artifacts.append(
-            {
-                "kind": "image",
-                "name": filename,
-                "mime_type": mime,
-                "data": str(data or ""),
-            }
-        )
+        artifact = {
+            "kind": "image",
+            "name": filename,
+            "mime_type": mime,
+            "data": str(data or ""),
+        }
+        path = str(generated_paths.get(name) or generated_paths.get(filename) or "").strip()
+        if path:
+            artifact["path"] = path
+        artifacts.append(artifact)
     return artifacts
 
 

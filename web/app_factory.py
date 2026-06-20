@@ -6,6 +6,16 @@ from pathlib import Path
 
 from flask import Flask
 from flask_cors import CORS
+try:
+    from flask_wtf.csrf import CSRFProtect
+except ImportError:
+    class CSRFProtect:  # type: ignore[no-redef]
+        def init_app(self, app):
+            logging.getLogger("koto.app").warning(
+                "flask-wtf is not installed; CSRF protection is disabled"
+            )
+
+_csrf = CSRFProtect()
 
 
 def _read_app_version() -> str:
@@ -58,4 +68,8 @@ def create_flask_app(import_name: str):
 
     cors_origins = _resolve_cors_origins()
     CORS(app, origins=cors_origins)
+
+    _csrf.init_app(app)
+    app.extensions["csrf"] = _csrf
+
     return app, _read_app_version(), cors_origins

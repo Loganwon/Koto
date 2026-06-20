@@ -307,6 +307,7 @@ class GeminiProvider(LLMProvider):
         """Run callable in a daemon thread and fail fast on timeout.
 
         Daemon thread ensures timed-out SDK calls never block process shutdown.
+        A brief join after timeout prevents orphaned thread accumulation.
         """
         _q: queue.Queue = queue.Queue(maxsize=1)
 
@@ -322,6 +323,7 @@ class GeminiProvider(LLMProvider):
         try:
             status, payload = _q.get(timeout=timeout_seconds)
         except queue.Empty as exc:
+            _t.join(timeout=1.0)
             raise TimeoutError(timeout_message) from exc
 
         if status == "err":

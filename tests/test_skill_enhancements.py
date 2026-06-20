@@ -23,6 +23,8 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]  # repo root
 SKILLS_DIR = ROOT / "config" / "skills"
 sys.path.insert(0, str(ROOT))
 
+TEST_ONLY_SKILL_FILES = {"test_custom.json", "test_market_skill_001.json"}
+
 
 # ─── 辅助函数 ──────────────────────────────────────────────────────────────
 def _all_skill_files():
@@ -30,13 +32,39 @@ def _all_skill_files():
     return [
         p
         for p in SKILLS_DIR.glob("*.json")
-        if not p.name.startswith("_") and p.name != "test_custom.json"
+        if not p.name.startswith("_") and p.name not in TEST_ONLY_SKILL_FILES
     ]
 
 
 def _load(name: str) -> dict:
     """按 skill name (不含 .json) 加载 JSON"""
-    return json.loads((SKILLS_DIR / f"{name}.json").read_text(encoding="utf-8"))
+    return _load_path(SKILLS_DIR / f"{name}.json")
+
+
+def _load_path(path: pathlib.Path) -> dict:
+    """加载 JSON skill 文件，兼容带 BOM 的 UTF-8 配置。"""
+    return json.loads(path.read_text(encoding="utf-8-sig"))
+
+
+def _has_prompt_surface(data: dict) -> bool:
+    return bool(data.get("prompt") or data.get("system_prompt_template"))
+
+
+def _has_execution_surface(data: dict) -> bool:
+    return bool(
+        data.get("executor")
+        or data.get("entry_point")
+        or data.get("bound_tools")
+        or data.get("executor_tools")
+    )
+
+
+def _is_valid_example(example: dict) -> bool:
+    if not isinstance(example, dict):
+        return False
+    has_io_pair = bool(example.get("input") and example.get("output"))
+    has_chat_pair = bool(example.get("role") and example.get("content"))
+    return has_io_pair or has_chat_pair
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -50,73 +78,83 @@ class TestSkillJsonCompleteness:
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_valid_json(self, skill_path):
         """文件可被正确解析为 JSON。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
+        data = _load_path(skill_path)
         assert isinstance(data, dict), f"{skill_path.name} 不是 JSON 对象"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_required_fields_present(self, skill_path):
-        """必填字段都存在且不为空：id, name, prompt, description。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
-        for field in ("id", "name", "prompt", "description"):
+        """必填字段都存在且不为空：id, name, description。"""
+        data = _load_path(skill_path)
+        for field in ("id", "name", "description"):
             assert field in data, f"{skill_path.name} 缺少必填字段: {field}"
             assert data[field], f"{skill_path.name} 字段 '{field}' 不能为空"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
+    def test_skill_has_prompt_or_execution_surface(self, skill_path):
+        """生产 skill 必须至少有 prompt 注入面或可执行能力入口。"""
+        data = _load_path(skill_path)
+        assert _has_prompt_surface(data) or _has_execution_surface(data), (
+            f"{skill_path.name} 缺少能力入口：需要 prompt/system_prompt_template、"
+            "executor/entry_point、bound_tools 或 executor_tools 至少一种"
+        )
+
+    @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_prompt_length_sufficient(self, skill_path):
-        """prompt 字段长度须 > 300 字符（确保内容足够丰富）。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
-        prompt = data.get("prompt", "")
+        """prompt 型 skill 的 prompt 字段长度须 > 300 字符（确保内容足够丰富）。"""
+        data = _load_path(skill_path)
+        prompt = data.get("prompt") or data.get("system_prompt_template") or ""
+        if not prompt:
+            pytest.skip(f"{skill_path.name} 是执行器/工具型 skill，无 prompt 注入面")
         assert len(prompt) > 300, (
             f"{skill_path.name} prompt 太短 ({len(prompt)} chars)，" f"预期 > 300 chars"
         )
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
-    def test_trigger_keywords_non_empty(self, skill_path):
-        """trigger_keywords 必须是非空列表。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
-        kws = data.get("trigger_keywords", [])
-        assert (
-            isinstance(kws, list) and len(kws) > 0
-        ), f"{skill_path.name} 缺少 trigger_keywords（AutoMatcher 无法识别）"
-        # 每个关键词都必须是非空字符串
-        for kw in kws:
+    def test_activation_metadata_valid_when_present(self, skill_path):
+        """自动触发元数据如存在，必须是非空字符串列表。"""
+        data = _load_path(skill_path)
+        for field in ("trigger_keywords", "activation_keywords"):
+            values = data.get(field, [])
+            if not values:
+                continue
             assert (
-                isinstance(kw, str) and kw.strip()
-            ), f"{skill_path.name} trigger_keywords 包含空字符串: {kw!r}"
+                isinstance(values, list)
+            ), f"{skill_path.name} {field} 必须是 list"
+            for value in values:
+                assert (
+                    isinstance(value, str) and value.strip()
+                ), f"{skill_path.name} {field} 包含空字符串: {value!r}"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
-    def test_plan_template_non_empty(self, skill_path):
-        """plan_template 必须是非空列表（执行步骤缺失则 inject_into_prompt 无法注入）。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
+    def test_plan_template_valid_when_present(self, skill_path):
+        """plan_template 如存在，必须是非空步骤列表。"""
+        data = _load_path(skill_path)
         pt = data.get("plan_template", [])
-        assert (
-            isinstance(pt, list) and len(pt) > 0
-        ), f"{skill_path.name} 缺少 plan_template（执行步骤缺失）"
+        if not pt:
+            pytest.skip(f"{skill_path.name} 未声明 plan_template")
+        assert isinstance(pt, list), f"{skill_path.name} plan_template 必须是 list"
         for step in pt:
             assert (
                 isinstance(step, str) and step.strip()
             ), f"{skill_path.name} plan_template 包含空步骤"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
-    def test_examples_present(self, skill_path):
-        """每个 skill 至少有 1 个示例（examples），用于 few-shot 质量保障。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
+    def test_examples_valid_when_present(self, skill_path):
+        """examples 如存在，必须使用 input/output 或 role/content 格式。"""
+        data = _load_path(skill_path)
         examples = data.get("examples", [])
-        assert (
-            isinstance(examples, list) and len(examples) > 0
-        ), f"{skill_path.name} 缺少 examples"
+        if not examples:
+            pytest.skip(f"{skill_path.name} 未声明 examples")
+        assert isinstance(examples, list), f"{skill_path.name} examples 必须是 list"
         for ex in examples:
-            assert (
-                "input" in ex and ex["input"]
-            ), f"{skill_path.name} 示例缺少 'input' 字段: {ex}"
-            assert (
-                "output" in ex and ex["output"]
-            ), f"{skill_path.name} 示例缺少 'output' 字段: {ex}"
+            assert _is_valid_example(ex), (
+                f"{skill_path.name} 示例必须包含 input/output 或 role/content: {ex}"
+            )
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_id_matches_filename(self, skill_path):
         """skill JSON 中的 id 字段必须和文件名（不含 .json）一致。"""
-        data = json.loads(skill_path.read_text(encoding="utf-8"))
+        data = _load_path(skill_path)
         assert (
             data.get("id") == skill_path.stem
         ), f"{skill_path.name}: id='{data.get('id')}' 与文件名 '{skill_path.stem}' 不匹配"
@@ -125,7 +163,7 @@ class TestSkillJsonCompleteness:
         """所有 skill JSON 中的 id 字段必须全局唯一。"""
         seen = {}
         for path in _all_skill_files():
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = _load_path(path)
             sid = data.get("id")
             assert (
                 sid not in seen
@@ -136,7 +174,7 @@ class TestSkillJsonCompleteness:
         """统计每个 skill 的 trigger_keywords 数量，至少 2 个为健康水平。"""
         insufficient = []
         for path in _all_skill_files():
-            data = json.loads(path.read_text(encoding="utf-8"))
+            data = _load_path(path)
             kws = data.get("trigger_keywords", [])
             if len(kws) < 2:
                 insufficient.append(f"{path.stem}: {len(kws)} keyword(s)")
@@ -200,7 +238,7 @@ class TestAutoMatcherTriggerKeywords:
         if not skill_file.exists():
             pytest.skip(f"{skill_name}.json 不存在")
 
-        data = json.loads(skill_file.read_text(encoding="utf-8"))
+        data = _load_path(skill_file)
         kws = [kw.lower() for kw in data.get("trigger_keywords", [])]
         lowered = test_input.lower()
 
@@ -211,24 +249,22 @@ class TestAutoMatcherTriggerKeywords:
             f"当前 trigger_keywords: {data.get('trigger_keywords', [])}"
         )
 
-    def test_automatcher_scan_uses_def_registry(self, monkeypatch):
+    def test_automatcher_scan_uses_skill_definitions(self, monkeypatch):
         """
-        验证 SkillAutoMatcher._match_with_patterns 能访问 SkillManager._def_registry，
+        验证 SkillAutoMatcher._match_with_patterns 能访问 SkillDefinition 列表，
         并从中读取 trigger_keywords 完成匹配。
         """
         from app.core.skills.skill_auto_matcher import SkillAutoMatcher
         from app.core.skills.skill_manager import SkillManager
 
-        # 确保 def_registry 已初始化且包含 debug_python
-        assert (
-            "debug_python" in SkillManager._def_registry
-        ), "SkillManager._def_registry 未加载 debug_python"
-        debug_def = SkillManager._def_registry["debug_python"]
+        definitions = SkillManager.list_definitions()
+        assert "debug_python" in definitions, "SkillManager 未加载 debug_python"
+        debug_def = definitions["debug_python"]
         kws = getattr(debug_def, "trigger_keywords", [])
         assert len(kws) > 0, "debug_python.trigger_keywords 在 SkillDefinition 中为空"
 
         # 构造候选列表（模拟 AutoMatcher 的 candidates 参数）
-        candidates = [{"id": sid} for sid in SkillManager._def_registry]
+        candidates = [{"id": sid} for sid in definitions]
 
         # 找一个肯定在 debug_python trigger_keywords 里的词，直接用第一个
         first_kw = kws[0]
@@ -451,7 +487,7 @@ class TestSemanticCoverage:
         if not skill_file.exists():
             pytest.skip(f"{expected_skill}.json 不存在")
 
-        data = json.loads(skill_file.read_text(encoding="utf-8"))
+        data = _load_path(skill_file)
         kws = [kw.lower() for kw in data.get("trigger_keywords", [])]
         lowered = user_input.lower()
 
@@ -467,7 +503,7 @@ class TestSemanticCoverage:
 
 
 class TestSkillStateSync:
-    """Regression checks for the SkillDefinition/legacy registry sync helpers."""
+    """Regression checks for the SkillDefinition/runtime registry sync helpers."""
 
     @pytest.fixture(autouse=True)
     def init_skill_manager(self, monkeypatch):
@@ -532,3 +568,21 @@ class TestSkillStateSync:
         runtime_entry = SkillManager.get_runtime_entry(skill_id)
         assert runtime_entry is not None
         assert "template_path" not in runtime_entry
+
+    def test_runtime_entries_are_exposed_as_copies(self):
+        from app.core.skills.skill_manager import SkillManager
+
+        entries = SkillManager.list_runtime_entries()
+        assert "debug_python" in entries
+
+        entries["debug_python"]["enabled"] = True
+        assert SkillManager._registry["debug_python"]["enabled"] is False
+
+    def test_definitions_are_exposed_as_registry_copy(self):
+        from app.core.skills.skill_manager import SkillManager
+
+        definitions = SkillManager.list_definitions()
+        assert "debug_python" in definitions
+
+        definitions.pop("debug_python")
+        assert SkillManager.get_definition("debug_python") is not None

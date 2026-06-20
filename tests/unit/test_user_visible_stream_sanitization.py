@@ -24,11 +24,11 @@ def _parse_sse_payload(frame: str) -> dict:
 
 
 @pytest.mark.unit
-def test_legacy_safe_sse_hides_sensitive_error_message():
-    from web.app import _legacy_safe_sse
+def test_safe_sse_hides_sensitive_error_message():
+    from web.sse.sanitizer import safe_sse as _safe_sse
 
     payload = _parse_sse_payload(
-        _legacy_safe_sse(
+        _safe_sse(
             {
                 "type": "error",
                 "message": (
@@ -45,11 +45,11 @@ def test_legacy_safe_sse_hides_sensitive_error_message():
 
 
 @pytest.mark.unit
-def test_legacy_safe_sse_hides_sensitive_detail_when_marked_error_like():
-    from web.app import _legacy_safe_sse
+def test_safe_sse_hides_sensitive_detail_when_marked_error_like():
+    from web.sse.sanitizer import safe_sse as _safe_sse
 
     payload = _parse_sse_payload(
-        _legacy_safe_sse(
+        _safe_sse(
             {
                 "type": "progress",
                 "message": "正在回退到标准模式",
@@ -68,11 +68,11 @@ def test_legacy_safe_sse_hides_sensitive_detail_when_marked_error_like():
 
 
 @pytest.mark.unit
-def test_legacy_safe_sse_uses_custom_message_fallback_for_progress_errors():
-    from web.app import _legacy_safe_sse
+def test_safe_sse_uses_custom_message_fallback_for_progress_errors():
+    from web.sse.sanitizer import safe_sse as _safe_sse
 
     payload = _parse_sse_payload(
-        _legacy_safe_sse(
+        _safe_sse(
             {
                 "type": "progress",
                 "message": "System Prompt:\nYou are a hidden assistant.",

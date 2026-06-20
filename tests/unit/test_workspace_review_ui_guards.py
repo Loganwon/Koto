@@ -24,16 +24,24 @@ def test_review_shell_entry_is_present_without_ai_comment_entrypoints():
         assert "onclick=\"WA.addSelectionComment()\"" not in html
         assert '>AI 批注<' not in html
 
-    assert "docx-review-layout.js" in asset_partial
+    assert "review-bundle.js" in asset_partial
+    assert "docx-review-layout.js" not in asset_partial
 
 
 def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_entry():
     js = _read("web/static/js/workspace-assistant.js")
     layout_js = _read("web/static/js/docx-review-layout.js")
+    geometry_js = _read("web/static/js/docx-review-geometry.js")
     css = _read("web/static/css/workspace.css")
 
     assert "function _syncReviewStateForActiveFile" in js
     assert "function _syncDocCommentStateForActiveFile" in js
+    assert "function _buildReviewStateFromServerData(serverData, existingReviewState = null)" in js
+    assert "comments: Array.isArray(existing.comments) && existing.comments.length ? existing.comments : serverComments" in js
+    assert "proposals: Array.isArray(existing.proposals) && existing.proposals.length ? existing.proposals : serverProposals" in js
+    assert "reviewState: _buildReviewStateFromServerData(json.data, existingTab && existingTab.reviewState)" in js
+    assert "tab.reviewState = _buildReviewStateFromServerData(fullData, tab.reviewState);" in js
+    assert "const reviewState = await _syncReviewStateForActiveFile().catch(() => null);" in js
     assert "function _isImportedDocxRevisionProposal" in js
     assert "raw.source = String(raw.source || '').trim() || 'ai';" in js
     assert "tab.serverData.proposals = reviewState.proposals.map((proposal) => _serializeReviewProposal(proposal));" in js
@@ -45,6 +53,9 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "function _getDocxSelectionPayload({ includeOverlay = true, allowStaleFallback = true, includeAnchorMeta = false } = {})" in js
     assert "function _buildReviewNavItems" in js
     assert "function _renderReviewNavMenuItems" in js
+    assert "function _filterReviewNavItems" in js
+    assert "function _captureReviewToolbarSelection" in js
+    assert "function _runDocxReviewToolbarAction" in js
     assert "function _closeDocxReviewNavMenu" in js
     assert "function _setDocxReviewRailWidth" in js
     assert "window.KotoDocxReviewLayout" in layout_js
@@ -54,19 +65,32 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "shell.style.display = showRail ? '' : 'none';" in js
     assert "shell.dataset.commentUi = state.fileType === 'docx' ? 'wps' : '';" in js
     assert "function _getDocxReviewRailMetrics" in js
-    assert "const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 200;" in layout_js
+    assert "const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;" in layout_js
     assert "function _shiftReviewRailLeft(value, host)" in layout_js
+    assert "const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;" in layout_js
+    assert "function _reviewRailRightShift(host)" in layout_js
+    assert "function _positionReviewRail(value, host)" in layout_js
+    assert "function _reviewLayoutScale(element, rect)" in layout_js
+    assert "function _screenDeltaToLayout(delta, scale)" in layout_js
     assert "const minRailWidth  = 132;" in layout_js
     assert "parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'))" in layout_js
     assert "host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);" not in layout_js
     assert "_setDocxReviewRailWidth(host, railWidth);" in layout_js
     assert "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);" in layout_js
+    assert "const textColRight     = Math.round(pageContentRight - (pagePaddingRight * (transformScale.x || 1)));" in layout_js
     assert "const laneLeft         = Math.round(textColRight + anchorGap);" in layout_js
     assert "railWidth," in layout_js
     assert "laneLeft," in layout_js
-    assert "const shiftedCardColLeft = Math.max(12, _shiftReviewRailLeft(rawCardColLeft, host));" in layout_js
-    assert "const maxCardColLeft = Math.max(" in layout_js
-    assert "const cardColLeft = Math.max(12, Math.min(shiftedCardColLeft, maxCardColLeft));" in layout_js
+    assert "const desiredCardColLeft = Math.max(12, _positionReviewRail(rawCardColLeft, host));" in layout_js
+    assert "const maxVisibleCardColLeft = Math.round(viewportRight - cardColWidth - 12);" in layout_js
+    assert "minCardColFromText," in layout_js
+    assert "Math.min(desiredCardColLeft, maxVisibleCardColLeft)" in layout_js
+    assert "shell.style.width = Math.max(0, viewportWidth) + 'px';" in layout_js
+    assert "shell.style.overflow = 'hidden';" in layout_js
+    assert "function _layoutScale(element, rect)" in geometry_js
+    assert "const layoutScale = _layoutScale(viewport, viewportRect);" in geometry_js
+    assert "textColRight = toContentX(pageRect.right) - Math.round(pagePaddingRight * (zoom.x || 1));" in geometry_js
+    assert "viewportRight: Math.round(scrollLeft + viewportWidth)" in geometry_js
     assert "function _resolveReviewPageBoundsForScreenY" in layout_js
     assert "function _collectReviewVisualPageBounds" in layout_js
     assert "pageRoot.querySelectorAll('.koto-page-break')" in layout_js
@@ -110,6 +134,10 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "window.WA.toggleReviewNavMenu" in js
     assert "window.WA.toggleReviewOverview" in js
     assert "window.WA.createReviewComment" in js
+    assert 'data-review-toolbar-action="comment"' in js
+    assert 'data-review-toolbar-action="revision"' in js
+    assert 'data-review-nav-search="1"' in js
+    assert "preserveReviewNavSearchFocus" in js
     assert "window.WA.relayoutDocxReviewRail" in js
     assert "window.WA.deleteReviewComment" in js
     assert "window.WA.editReviewComment" in js
@@ -178,7 +206,8 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert "[data-comment-ui=\"wps\"] .koto-docx-comment-badge" in css
     assert "--wa-review-rail-gap" in css
     assert "--wa-review-rail-width: clamp(156px, 18vw, 248px);" in css
-    assert "--wa-review-rail-left-shift: 200px;" in css
+    assert "--wa-review-rail-left-shift: 0px;" in css
+    assert "--wa-review-rail-right-shift: 0px;" in css
     assert ".wa-review-composer-card" in css
     assert ".wa-review-selection-box" in css
     assert ".wa-review-selection-kicker" in css
@@ -200,6 +229,9 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert ".wa-docx-review-summary" in css
     assert ".wa-docx-review-nav" in css
     assert ".wa-docx-review-nav-menu" in css
+    assert ".wa-docx-review-nav-search" in css
+    assert ".wa-docx-review-nav-search-input" in css
+    assert ".wa-docx-review-nav-clear" in css
     assert ".is-page-bounded" in css
     assert "--wa-review-card-page-max-height" in css
     assert "overflow: auto !important;" in css

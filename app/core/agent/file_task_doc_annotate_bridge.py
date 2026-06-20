@@ -6,6 +6,7 @@ import os
 import uuid
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterable, List, Optional, Sequence
 
 from app.core.agent.file_task_contract import (
@@ -16,6 +17,7 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamChunk,
     FileTaskToolStreamResult,
 )
+from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
 from app.core.agent.file_task_doc_annotate_intent import (
     looks_like_direct_docx_rewrite_request,
     looks_like_docx_review_clear_request,
@@ -41,11 +43,91 @@ def _request_options(request: FileTaskRequest) -> dict[str, Any]:
     return dict(request.options) if isinstance(request.options, dict) else {}
 
 
+class _ProviderModelsAdapter:
+    def __init__(self, provider: Any):
+        self._provider = provider
+
+    def generate_content(
+        self,
+        *,
+        model: str = "",
+        contents: Any = "",
+        config: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        call_kwargs: dict[str, Any] = dict(kwargs)
+        if config is not None:
+            temperature = getattr(config, "temperature", None)
+            max_output_tokens = getattr(config, "max_output_tokens", None)
+            system_instruction = getattr(config, "system_instruction", None)
+            tools = getattr(config, "tools", None)
+            if temperature is not None:
+                call_kwargs.setdefault("temperature", temperature)
+            if max_output_tokens is not None:
+                call_kwargs.setdefault("max_tokens", max_output_tokens)
+            if system_instruction is not None:
+                call_kwargs.setdefault("system_instruction", system_instruction)
+            if tools is not None:
+                call_kwargs.setdefault("tools", tools)
+        if (
+            not call_kwargs.get("tools")
+            and "extra_body" not in call_kwargs
+            and str(model or "").lower().startswith("deepseek")
+        ):
+            call_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+
+        system_instruction = call_kwargs.pop("system_instruction", None)
+        tools = call_kwargs.pop("tools", None)
+        response = self._provider.generate_content(
+            prompt=contents,
+            model=model,
+            system_instruction=system_instruction,
+            tools=tools,
+            stream=False,
+            **call_kwargs,
+        )
+        if isinstance(response, dict):
+            return SimpleNamespace(
+                text=str(response.get("content") or response.get("text") or ""),
+                candidates=[],
+                raw=response,
+            )
+        return SimpleNamespace(text=str(response or ""), candidates=[], raw=response)
+
+
+class _ProviderClientAdapter:
+    def __init__(self, provider: Any, *, provider_name: str = ""):
+        self.models = _ProviderModelsAdapter(provider)
+        self._koto_provider_name = provider_name
+
+
 def _resolve_review_model_id(request: FileTaskRequest, *, gemini_client: Any = None) -> str:
     requested_model = str(request.model_id or "").strip()
-    normalized_mode = normalize_model_mode(request.model_mode, default="cloud")
+    normalized_mode = normalize_model_mode(request.model_mode, default="deepseek")
     if normalized_mode != "local":
-        return requested_model
+        ignored = {"auto", "cloud", "gemini", "deepseek", "openai", "anthropic", "ollama"}
+        if requested_model and requested_model.lower() not in ignored:
+            return requested_model
+        try:
+            from app.core.llm.model_selection import (
+                get_configured_cloud_model,
+                get_provider_for_model_mode,
+            )
+
+            provider_name = get_provider_for_model_mode(normalized_mode)
+            fallback_model = "gemini-3.1-pro-preview"
+            if provider_name == "deepseek":
+                from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL
+
+                fallback_model = DEEPSEEK_DEFAULT_MODEL
+            return get_configured_cloud_model(
+                task_type="DOC_ANNOTATE",
+                fallback_model=fallback_model,
+                provider=provider_name,
+            )
+        except Exception as exc:
+            logger.debug("[doc_annotate_bridge] cloud model resolution failed: %s", exc)
+            return requested_model
 
     lowered_requested = requested_model.lower()
     if lowered_requested and lowered_requested not in {"auto", "cloud", "local"} and not lowered_requested.startswith("gemini"):
@@ -63,10 +145,49 @@ def _resolve_review_model_id(request: FileTaskRequest, *, gemini_client: Any = N
     return "local"
 
 
+def _build_feedback_client(request: FileTaskRequest, *, gemini_client: Any = None):
+    normalized_mode = normalize_model_mode(request.model_mode, default="deepseek")
+    if normalized_mode == "local":
+        model_id = _resolve_review_model_id(request, gemini_client=gemini_client)
+        try:
+            from app.core.llm.ollama_provider import OllamaClientProxy
+
+            return OllamaClientProxy(model_tag=None if model_id == "local" else model_id)
+        except Exception as exc:
+            logger.warning("[doc_annotate_bridge] Ollama client unavailable: %s", exc)
+            return gemini_client
+
+    try:
+        from app.core.llm.model_selection import get_provider_for_model_mode
+
+        provider_name = get_provider_for_model_mode(normalized_mode)
+    except Exception as exc:
+        logger.debug("[doc_annotate_bridge] provider resolution failed: %s", exc)
+        provider_name = "deepseek"
+
+    if provider_name != "deepseek":
+        return gemini_client
+
+    model_id = _resolve_review_model_id(request, gemini_client=gemini_client)
+    try:
+        from app.core.llm.provider_factory import get_llm_provider
+
+        provider = get_llm_provider(
+            provider="deepseek",
+            model=model_id,
+            allow_local_fallback=False,
+        )
+        return _ProviderClientAdapter(provider, provider_name="deepseek")
+    except Exception as exc:
+        logger.warning("[doc_annotate_bridge] DeepSeek provider unavailable: %s", exc)
+        return gemini_client
+
+
 def _build_feedback_system(request: FileTaskRequest, *, gemini_client: Any = None):
     from web.document_feedback import DocumentFeedbackSystem
 
     default_model_id = _resolve_review_model_id(request, gemini_client=gemini_client)
+    feedback_client = _build_feedback_client(request, gemini_client=gemini_client)
     try:
         signature = inspect.signature(DocumentFeedbackSystem)
     except (TypeError, ValueError):
@@ -74,20 +195,20 @@ def _build_feedback_system(request: FileTaskRequest, *, gemini_client: Any = Non
 
     if default_model_id and signature and "default_model_id" in signature.parameters:
         return DocumentFeedbackSystem(
-            gemini_client=gemini_client,
+            gemini_client=feedback_client,
             default_model_id=default_model_id,
         )
 
-    return DocumentFeedbackSystem(gemini_client=gemini_client)
+    return DocumentFeedbackSystem(gemini_client=feedback_client)
 
 
-def _extract_batch_control(request: FileTaskRequest) -> dict[str, Any]:
-    batch_control = _request_options(request).get("batch_control")
-    if not isinstance(batch_control, dict):
+def _extract_workflow_checkpoint(request: FileTaskRequest) -> dict[str, Any]:
+    checkpoint = workflow_checkpoint_from_options(_request_options(request))
+    if not checkpoint:
         return {}
-    if str(batch_control.get("adapter") or "doc_annotate_bridge").strip() != "doc_annotate_bridge":
+    if str(checkpoint.get("adapter") or "doc_annotate_bridge").strip() != "doc_annotate_bridge":
         return {}
-    return dict(batch_control)
+    return dict(checkpoint)
 
 
 def _build_resume_files(request: FileTaskRequest, *, source_pdf: str, target_docx: str) -> list[dict[str, Any]]:
@@ -137,11 +258,15 @@ def _build_batch_resume_request(
     total_batches: int,
 ) -> dict[str, Any]:
     options = _request_options(request)
-    options["batch_control"] = {
+    options.pop("batch_control", None)
+    options["workflow_checkpoint"] = {
         "adapter": "doc_annotate_bridge",
         "policy": "confirm_each_batch",
         "batch_index": batch_index,
         "total_batches": total_batches,
+        "source_path": source_pdf,
+        "target_path": target_docx,
+        "original_task": request.task,
     }
 
     payload: dict[str, Any] = {
@@ -204,9 +329,9 @@ def _batch_state_from_plan(request: FileTaskRequest, large_file_plan: Optional[d
     if total_batches <= 0:
         return {}
 
-    control = _extract_batch_control(request)
+    checkpoint = _extract_workflow_checkpoint(request)
     try:
-        batch_index = int(control.get("batch_index") or 0)
+        batch_index = int(checkpoint.get("batch_index") or 0)
     except (TypeError, ValueError):
         batch_index = 0
 
@@ -1222,7 +1347,7 @@ def _positive_int_env(name: str, default: int) -> int:
 
 
 def _doc_review_batch_budget(model_mode: str, *, chunk_size: int = 0) -> dict[str, int | str]:
-    normalized_model_mode = str(model_mode or "cloud").strip().lower() or "cloud"
+    normalized_model_mode = str(model_mode or "deepseek").strip().lower() or "deepseek"
     is_local_mode = normalized_model_mode == "local"
 
     if is_local_mode:
@@ -1346,14 +1471,14 @@ def _build_large_file_plan(
     reference_meta: dict[str, int],
     review_stats: dict[str, Any],
     *,
-    model_mode: str = "cloud",
+    model_mode: str = "deepseek",
 ) -> Optional[dict[str, Any]]:
     chunk_count = int(review_stats.get("chunk_count") or 0)
     window_count = int(reference_meta.get("window_count") or 0)
     page_count = int(reference_meta.get("page_count") or 0)
     pages_with_text = int(reference_meta.get("pages_with_text") or page_count)
     content_chars = int(review_stats.get("content_chars") or 0)
-    normalized_model_mode = str(model_mode or "cloud").strip().lower() or "cloud"
+    normalized_model_mode = str(model_mode or "deepseek").strip().lower() or "deepseek"
     is_local_mode = normalized_model_mode == "local"
     chunk_size = int(review_stats.get("chunk_size") or 0)
 

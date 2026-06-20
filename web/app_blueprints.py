@@ -49,7 +49,6 @@ _WEB_BLUEPRINT_CONFIGS = [
         None,
         "WorkspaceAssistant",
     ),
-    ("web.blueprints.ppt_legacy", "ppt_legacy_bp", None, "PptLegacy"),
     ("web.blueprints.pptx_editor", "pptx_editor_bp", None, "PptxEditor"),
 ]
 
@@ -64,6 +63,14 @@ def _safe_preload(mod_name: str) -> None:
             "Silenced exception caught",
             exc_info=True,
         )
+
+
+def _exempt_csrf_endpoint(app: Flask, endpoint: str) -> None:
+    csrf = getattr(app, "extensions", {}).get("csrf")
+    exempt = getattr(csrf, "exempt", None)
+    view_func = app.view_functions.get(endpoint)
+    if callable(exempt) and view_func is not None:
+        exempt(view_func)
 
 
 def register_blueprints_deferred(app: Flask, logger: Logger):
@@ -270,6 +277,17 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
     except Exception as exc:
         logger.error(f"[WorkflowAPI] ❌ 工作流 API 注册失败: {exc}")
 
+    try:
+        from web.memory_api_routes import register_memory_routes
+        from web.runtime_context import get_memory_manager
+
+        register_memory_routes(app, get_memory_manager)
+        logger.info("[MemoryAPI] ✅ 增强记忆系统 API 已注册")
+    except ImportError as exc:
+        logger.warning(f"[MemoryAPI] ⚠️ 增强记忆系统 API 未找到: {exc}")
+    except Exception as exc:
+        logger.error(f"[MemoryAPI] ❌ 增强记忆系统 API 注册失败: {exc}")
+
     for mod_name, attr_name, prefix, tag in _WEB_BLUEPRINT_CONFIGS:
         try:
             module = importlib.import_module(mod_name)
@@ -278,6 +296,8 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
                 app.register_blueprint(blueprint, url_prefix=prefix)
             else:
                 app.register_blueprint(blueprint)
+            if tag == "Chat":
+                _exempt_csrf_endpoint(app, "chat.chat")
             logger.info(f"[{tag}] ✅ 蓝图已注册")
         except ImportError as exc:
             logger.warning(f"[{tag}] ⚠️ 蓝图导入失败: {exc}")

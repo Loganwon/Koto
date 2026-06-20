@@ -402,6 +402,266 @@
       state.lastPinnedSel = null;
     }
 
+    function normalizeArtifactResult(raw) {
+      const source = raw && raw.data && raw.data.artifact_result ? raw.data.artifact_result
+        : (raw && raw.artifact_result ? raw.artifact_result : raw);
+      if (!source || typeof source !== 'object') return null;
+      return {
+        task_id: String(source.task_id || '').trim(),
+        title: String(source.title || '任务结果').trim(),
+        status: String(source.status || 'running').trim(),
+        summary: String(source.summary || '').trim(),
+        artifacts: Array.isArray(source.artifacts) ? source.artifacts : [],
+        changes: Array.isArray(source.changes) ? source.changes : [],
+        sources: Array.isArray(source.sources) ? source.sources : [],
+        logs: Array.isArray(source.logs) ? source.logs : [],
+        actions: Array.isArray(source.actions) ? source.actions : [],
+      };
+    }
+
+    function statusLabel(status) {
+      const value = String(status || '').toLowerCase();
+      if (value === 'completed') return '已完成';
+      if (value === 'needs_review') return '待确认';
+      if (value === 'failed') return '失败';
+      return '进行中';
+    }
+
+    function artifactTypeLabel(type) {
+      const value = String(type || '').toLowerCase();
+      const labels = {
+        docx: 'Word',
+        pptx: 'PPT',
+        xlsx: '表格',
+        pdf: 'PDF',
+        image: '图片',
+        markdown: 'Markdown',
+        text: '文本',
+        data: '数据',
+        diff: '变更',
+      };
+      return labels[value] || '文件';
+    }
+
+    function basename(path) {
+      const parts = String(path || '').replace(/\\/g, '/').split('/');
+      return parts[parts.length - 1] || '';
+    }
+
+    function ensureArtifactPanel() {
+      let panel = document.getElementById('wa-artifact-panel');
+      const ai = document.getElementById('wa-ai');
+      const progress = document.getElementById('wa-task-live-progress');
+      const inputArea = document.getElementById('wa-ai-input-area');
+      const messages = document.getElementById('wa-ai-messages');
+      const parent = (progress && progress.parentElement) || (inputArea && inputArea.parentElement) || (messages && messages.parentElement) || ai;
+      const anchor = progress || inputArea || (messages && messages.nextSibling) || null;
+      if (panel) {
+        if (parent && panel.parentElement !== parent) {
+          parent.insertBefore(panel, anchor);
+        } else if (parent && anchor && panel.nextSibling !== anchor && panel !== anchor) {
+          parent.insertBefore(panel, anchor);
+        }
+        return panel;
+      }
+      panel = document.createElement('section');
+      panel.id = 'wa-artifact-panel';
+      panel.className = 'wa-artifact-panel';
+      panel.hidden = true;
+      if (parent) {
+        parent.insertBefore(panel, anchor);
+      }
+      return panel;
+    }
+
+    function tabButton(label, key, count, active) {
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = active ? 'is-active' : '';
+      btn.dataset.artifactTab = key;
+      btn.textContent = count > 0 ? `${label} ${count}` : label;
+      return btn;
+    }
+
+    function renderArtifactFile(item) {
+      const artifact = item && typeof item === 'object' ? item : {};
+      const row = document.createElement('div');
+      row.className = 'wa-artifact-row';
+
+      const main = document.createElement('div');
+      main.className = 'wa-artifact-row-main';
+      const title = artifact.title || basename(artifact.path) || '任务产物';
+      main.innerHTML = `
+        <div class="wa-artifact-row-title">${escHtml(title)}</div>
+        <div class="wa-artifact-row-meta">${escHtml(artifactTypeLabel(artifact.type))}${artifact.path ? ' · ' + escHtml(artifact.path) : ''}</div>
+      `;
+
+      const actions = document.createElement('div');
+      actions.className = 'wa-artifact-row-actions';
+      if (artifact.path) {
+        const openBtn = document.createElement('button');
+        openBtn.type = 'button';
+        openBtn.title = '在工作区打开';
+        openBtn.textContent = '打开';
+        openBtn.addEventListener('click', () => {
+          if (window.WA && typeof window.WA.openRecentFile === 'function') {
+            window.WA.openRecentFile(artifact.path);
+          } else if (window.WA && typeof window.WA.openWorkspaceFile === 'function') {
+            window.WA.openWorkspaceFile(artifact.path.replace(/^workspace[\\/]/i, ''));
+          }
+        });
+        actions.appendChild(openBtn);
+      }
+      if (artifact.preview_url) {
+        const link = document.createElement('a');
+        link.href = artifact.preview_url;
+        link.target = '_blank';
+        link.rel = 'noopener';
+        link.textContent = '预览';
+        actions.appendChild(link);
+      }
+
+      row.appendChild(main);
+      if (actions.childNodes.length) row.appendChild(actions);
+      return row;
+    }
+
+    function renderChangeRow(item) {
+      const change = item && typeof item === 'object' ? item : {};
+      const row = document.createElement('div');
+      row.className = 'wa-artifact-row';
+      const kind = change.kind || 'update';
+      row.innerHTML = `
+        <div class="wa-artifact-row-main">
+          <div class="wa-artifact-row-title">${escHtml(change.summary || '文件变更')}</div>
+          <div class="wa-artifact-row-meta">${escHtml(kind)}${change.file ? ' · ' + escHtml(change.file) : ''}${change.status ? ' · ' + escHtml(change.status) : ''}</div>
+          ${change.after_preview ? '<div class="wa-artifact-preview">' + escHtml(change.after_preview) + '</div>' : ''}
+        </div>
+      `;
+      return row;
+    }
+
+    function renderSourceRow(item) {
+      const source = item && typeof item === 'object' ? item : {};
+      const row = document.createElement('div');
+      row.className = 'wa-artifact-row';
+      const locator = source.locator ? ` · ${source.locator}` : '';
+      row.innerHTML = `
+        <div class="wa-artifact-row-main">
+          <div class="wa-artifact-row-title">${escHtml(source.title || source.file || source.url || '来源')}</div>
+          <div class="wa-artifact-row-meta">${escHtml((source.file || source.url || '') + locator)}</div>
+          ${source.snippet ? '<div class="wa-artifact-preview">' + escHtml(source.snippet) + '</div>' : ''}
+        </div>
+      `;
+      return row;
+    }
+
+    function renderLogRow(item) {
+      const log = item && typeof item === 'object' ? item : {};
+      const row = document.createElement('div');
+      row.className = 'wa-artifact-log-row';
+      row.dataset.level = log.level || 'info';
+      row.textContent = log.message || '';
+      return row;
+    }
+
+    function renderArtifactTabBody(result, activeTab) {
+      const body = document.createElement('div');
+      body.className = 'wa-artifact-body';
+      const lists = {
+        artifacts: result.artifacts,
+        changes: result.changes,
+        sources: result.sources,
+        logs: result.logs,
+      };
+      const items = lists[activeTab] || [];
+      if (!items.length) {
+        const empty = document.createElement('div');
+        empty.className = 'wa-artifact-empty';
+        empty.textContent = '暂无内容';
+        body.appendChild(empty);
+        return body;
+      }
+      items.forEach((item) => {
+        if (activeTab === 'artifacts') body.appendChild(renderArtifactFile(item));
+        else if (activeTab === 'changes') body.appendChild(renderChangeRow(item));
+        else if (activeTab === 'sources') body.appendChild(renderSourceRow(item));
+        else body.appendChild(renderLogRow(item));
+      });
+      return body;
+    }
+
+    function renderArtifactResult(raw, renderOptions) {
+      const result = normalizeArtifactResult(raw);
+      if (!result) return null;
+      const panel = ensureArtifactPanel();
+      if (!panel) return null;
+      const options = renderOptions && typeof renderOptions === 'object' ? renderOptions : {};
+      const tabItems = [
+        ['artifacts', '文件', result.artifacts.length],
+        ['changes', '变更', result.changes.length],
+        ['sources', '来源', result.sources.length],
+        ['logs', '日志', result.logs.length],
+      ];
+      const availableTabs = tabItems.filter((item) => item[2] > 0);
+      const tabKeys = tabItems.map((item) => item[0]);
+      const requestedTab = String(options.activeTab || panel.dataset.activeTab || (availableTabs[0] && availableTabs[0][0]) || 'artifacts').trim();
+      const activeTab = tabKeys.includes(requestedTab) && (!availableTabs.length || availableTabs.some((item) => item[0] === requestedTab))
+        ? requestedTab
+        : ((availableTabs[0] && availableTabs[0][0]) || 'artifacts');
+      panel.hidden = false;
+      const welcome = document.getElementById('wa-ai-welcome');
+      if (welcome) welcome.style.display = 'none';
+      panel.dataset.status = result.status || 'running';
+      panel.dataset.activeTab = activeTab;
+      panel.innerHTML = '';
+
+      const header = document.createElement('div');
+      header.className = 'wa-artifact-header';
+      header.innerHTML = `
+        <div class="wa-artifact-title-group">
+          <span class="wa-artifact-kicker">结果</span>
+          <strong>${escHtml(result.title)}</strong>
+          ${result.summary ? '<span class="wa-artifact-summary">' + escHtml(result.summary) + '</span>' : ''}
+        </div>
+        <div class="wa-artifact-head-actions">
+          <span class="wa-artifact-status">${escHtml(statusLabel(result.status))}</span>
+          <button type="button" class="wa-artifact-close" title="收起结果面板">收起</button>
+        </div>
+      `;
+      const closeBtn = header.querySelector('.wa-artifact-close');
+      if (closeBtn) closeBtn.addEventListener('click', () => {
+        panel.hidden = true;
+      });
+      panel.appendChild(header);
+
+      if (availableTabs.length > 1) {
+        const tabs = document.createElement('div');
+        tabs.className = 'wa-artifact-tabs';
+        availableTabs.forEach(([key, label, count]) => {
+          const btn = tabButton(label, key, count, key === activeTab);
+          btn.addEventListener('click', () => renderArtifactResult(result, { activeTab: key }));
+          tabs.appendChild(btn);
+        });
+        panel.appendChild(tabs);
+      }
+      panel.appendChild(renderArtifactTabBody(result, activeTab));
+      return panel;
+    }
+
+    async function loadBackgroundArtifactResult(taskId) {
+      const id = String(taskId || '').trim();
+      if (!id) return null;
+      const res = await fetch(`/api/bg-agent/${encodeURIComponent(id)}/artifact`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      const result = data && data.data ? data.data : data;
+      return renderArtifactResult(result);
+    }
+
+    window.WA.renderArtifactResult = renderArtifactResult;
+    window.WA.loadBackgroundArtifactResult = loadBackgroundArtifactResult;
+
     return {
       getProposalRationaleText,
       proposalCanApply,
@@ -418,6 +678,8 @@
       makeAIActionBar,
       execWriteToDoc,
       applyAIResponse,
+      renderArtifactResult,
+      loadBackgroundArtifactResult,
     };
   };
 })();

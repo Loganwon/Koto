@@ -361,6 +361,13 @@ def optional_auth(f):
     return decorated
 
 
+def _exempt_csrf_if_available(app, view_func) -> None:
+    csrf = getattr(app, "extensions", {}).get("csrf")
+    exempt = getattr(csrf, "exempt", None)
+    if callable(exempt):
+        exempt(view_func)
+
+
 # ── Auth API 路由注册 ──
 
 
@@ -434,6 +441,7 @@ def register_auth_routes(app):
                 },
             }
         )
+    _exempt_csrf_if_available(app, auth_register)
 
     @app.route("/api/auth/login", methods=["POST"])
     def auth_login():
@@ -522,6 +530,7 @@ def register_auth_routes(app):
                 },
             }
         )
+    _exempt_csrf_if_available(app, auth_login)
 
     @app.route("/api/auth/me", methods=["GET"])
     @require_auth
@@ -674,6 +683,7 @@ def register_auth_routes(app):
     def auth_logout():
         """登出（客户端清除 token 即可）"""
         return jsonify({"success": True})
+    _exempt_csrf_if_available(app, auth_logout)
 
     @app.route("/api/auth/status", methods=["GET"])
     def auth_status():

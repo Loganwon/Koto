@@ -1615,8 +1615,7 @@ class SkillAutoMatcher:
         try:
             from app.core.skills.skill_manager import SkillManager
 
-            SkillManager._ensure_init()
-            for sid, skill_def in SkillManager._def_registry.items():
+            for sid, skill_def in SkillManager.list_definitions().items():
                 if sid not in candidate_ids or sid in matched_set:
                     continue
                 kws = getattr(skill_def, "trigger_keywords", None) or []
@@ -1956,7 +1955,7 @@ class SkillAutoMatcher:
         for sid in list(matched_ids):
             if len(result) >= _MAX_AUTO_SKILLS:
                 break
-            s_def = SkillManager._def_registry.get(sid)
+            s_def = SkillManager.get_definition(sid)
             if not s_def:
                 continue
             partners = getattr(s_def, "synergizes_with", []) or []
@@ -1968,7 +1967,7 @@ class SkillAutoMatcher:
                 if partner_id not in candidate_ids:
                     continue
                 # 快速相关性检查：intent_description 或 trigger_keywords 有命中
-                p_def = SkillManager._def_registry.get(partner_id)
+                p_def = SkillManager.get_definition(partner_id)
                 if p_def:
                     kws = list(getattr(p_def, "trigger_keywords", []) or [])
                     intent = (getattr(p_def, "intent_description", "") or "").lower()

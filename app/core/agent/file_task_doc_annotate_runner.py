@@ -1,19 +1,16 @@
+# -*- coding: utf-8 -*-
+# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
-from app.core.agent.file_task_contract import (
-    FileTaskEvent,
-    FileTaskLedger,
-    FileTaskRequest,
-)
+from app.core.agent.file_task_contract import FileTaskEvent, FileTaskLedger, FileTaskRequest
 
 
 class FileTaskDocAnnotateRunner:
-    """Adapter that exposes the legacy DOCX annotation bridge as whitebox events."""
-
-    def __init__(self, runtime_host: Any) -> None:
-        self._host = runtime_host
+    def __init__(self, runtime: Any) -> None:
+        self._runtime = runtime
 
     def stream_bridge_execution(
         self,
@@ -25,6 +22,8 @@ class FileTaskDocAnnotateRunner:
         requirements_payload: Dict[str, Any],
         plan_check_payload: Dict[str, Any],
         recipe_skeleton: Dict[str, Any],
+        completion_contract_payload: Dict[str, Any],
+        workflow_state: Dict[str, Any],
         constraint_audit: Dict[str, Any],
         quick_action_mode: str,
     ) -> Iterable[FileTaskEvent]:
@@ -33,11 +32,11 @@ class FileTaskDocAnnotateRunner:
         terminal_event: Optional[FileTaskEvent] = None
         for bridge_event in file_task_doc_annotate_boundary.stream_bridge_request(
             request,
-            workspace_root=self._host._workspace_root,
-            gemini_client=self._host._gemini_client,
+            workspace_root=self._runtime._workspace_root,
+            gemini_client=self._runtime._gemini_client,
         ):
-            if self._host._is_cancelled(request):
-                yield self._host._cancelled_event(ledger, request)
+            if self._runtime._is_cancelled(request):
+                yield self._runtime._cancelled_event(ledger, request)
                 return
 
             payload = (
@@ -58,6 +57,8 @@ class FileTaskDocAnnotateRunner:
                         "requirements": requirements_payload,
                         "plan_check": plan_check_payload,
                         "recipe_skeleton": recipe_skeleton,
+                        "completion_contract": completion_contract_payload,
+                        "workflow_state": workflow_state,
                         "constraint_audit": constraint_audit,
                         **classification_payload,
                     }
@@ -84,3 +85,6 @@ class FileTaskDocAnnotateRunner:
 
         if terminal_event is not None:
             yield terminal_event
+
+
+__all__ = ["FileTaskDocAnnotateRunner"]

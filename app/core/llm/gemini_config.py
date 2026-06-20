@@ -74,6 +74,29 @@ def load_gemini_config_env(override: bool = False) -> Optional[Path]:
     return config_path
 
 
+def _read_key_from_env_file(path: Path) -> Optional[str]:
+    try:
+        lines = path.read_text(encoding="utf-8-sig").splitlines()
+    except OSError:
+        return None
+
+    for line in lines:
+        text = line.strip()
+        if not text or text.startswith("#"):
+            continue
+        if text.startswith("export "):
+            text = text[len("export ") :].strip()
+        if "=" not in text:
+            continue
+        name, value = text.split("=", 1)
+        if name.strip() not in GEMINI_KEY_ENV_NAMES:
+            continue
+        key = normalize_gemini_api_key(value)
+        if key:
+            return key
+    return None
+
+
 def get_gemini_api_key(
     explicit_key: Optional[str] = None,
     *,
@@ -83,13 +106,17 @@ def get_gemini_api_key(
     if key:
         return key
 
-    if ensure_loaded:
-        load_gemini_config_env(override=False)
-
     for env_name in GEMINI_KEY_ENV_NAMES:
         key = normalize_gemini_api_key(os.getenv(env_name))
         if key:
             return key
+
+    if ensure_loaded:
+        config_path = find_gemini_config_path()
+        if config_path:
+            key = _read_key_from_env_file(config_path)
+            if key:
+                return key
     return None
 
 

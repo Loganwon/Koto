@@ -66,7 +66,7 @@ class FileTaskRequest:
     selection: str = ""
     selection_source: str = ""
     target_path: str = ""
-    model_mode: str = "cloud"
+    model_mode: str = "deepseek"
     model_id: str = ""
     history: List[Dict[str, Any]] = field(default_factory=list)
     options: Dict[str, Any] = field(default_factory=dict)
@@ -101,7 +101,7 @@ class FileTaskRequest:
             selection=_clean_str(data.get("selection"), 12_000),
             selection_source=_clean_str(data.get("selection_source"), 240),
             target_path=_clean_str(data.get("target_path") or data.get("target"), 1_000),
-            model_mode=_clean_str(data.get("model_mode") or "cloud", 32) or "cloud",
+            model_mode=_clean_str(data.get("model_mode") or "deepseek", 32) or "deepseek",
             model_id=_clean_str(data.get("model_id"), 160),
             history=history[-20:],
             options=options,
@@ -205,6 +205,7 @@ class FileTaskClassification:
     reason_codes: List[str] = field(default_factory=list)
     selected_recipe: str = ""
     recipe_candidates: List[Dict[str, Any]] = field(default_factory=list)
+    decision_trace: List[Dict[str, Any]] = field(default_factory=list)
     confidence: float = 1.0
 
     def public_dict(self) -> Dict[str, Any]:
@@ -213,6 +214,7 @@ class FileTaskClassification:
         data["matched_capabilities"] = [item for item in self.matched_capabilities if item]
         data["reason_codes"] = [item for item in self.reason_codes if item]
         data["recipe_candidates"] = [dict(item) for item in self.recipe_candidates if isinstance(item, dict)]
+        data["decision_trace"] = [dict(item) for item in self.decision_trace if isinstance(item, dict)]
         return data
 
 
@@ -270,6 +272,90 @@ class FileTaskPlanCheck:
 
 
 @dataclass
+class FileTaskSupervisorAudit:
+    version: str = "file_task_supervisor_audit_v1"
+    status: str = "clear"
+    risk_level: str = "low"
+    summary: str = "任务识别和监管检查通过。"
+    confidence: float = 1.0
+    execution_allowed: bool = True
+    review_recommended: bool = False
+    warnings: List[str] = field(default_factory=list)
+    required_actions: List[str] = field(default_factory=list)
+    reason_codes: List[str] = field(default_factory=list)
+
+    def public_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["warnings"] = [item for item in self.warnings if item]
+        data["required_actions"] = [item for item in self.required_actions if item]
+        data["reason_codes"] = [item for item in self.reason_codes if item]
+        return data
+
+
+@dataclass
+class FileTaskCompletionContract:
+    version: str = "file_task_completion_contract_v1"
+    contract_id: str = "generic_file_task"
+    objective: str = ""
+    decomposition_strategy: str = "single_pass"
+    complexity: str = "simple"
+    write_required: bool = False
+    output_mode: str = "answer"
+    target_path: str = ""
+    target_file_type: str = ""
+    required_operations: List[str] = field(default_factory=list)
+    required_capabilities: List[str] = field(default_factory=list)
+    forbidden_capabilities: List[str] = field(default_factory=list)
+    acceptance_criteria: List[str] = field(default_factory=list)
+    quality_gates: List[Dict[str, Any]] = field(default_factory=list)
+    checkpoints: List[Dict[str, Any]] = field(default_factory=list)
+    repair_policy: str = "repair_until_budget_exhausted"
+    reason_codes: List[str] = field(default_factory=list)
+
+    def public_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        data["required_operations"] = [
+            item for item in self.required_operations if item
+        ]
+        data["required_capabilities"] = [
+            item for item in self.required_capabilities if item
+        ]
+        data["forbidden_capabilities"] = [
+            item for item in self.forbidden_capabilities if item
+        ]
+        data["acceptance_criteria"] = [
+            item for item in self.acceptance_criteria if item
+        ]
+        data["quality_gates"] = [
+            dict(item) for item in self.quality_gates if isinstance(item, dict)
+        ]
+        data["checkpoints"] = [
+            dict(item) for item in self.checkpoints if isinstance(item, dict)
+        ]
+        data["reason_codes"] = [item for item in self.reason_codes if item]
+        return data
+
+    def success_criteria(self) -> List[str]:
+        criteria: List[str] = []
+        for item in self.acceptance_criteria:
+            text = _clean_str(item, 320)
+            if text and text not in criteria:
+                criteria.append(text)
+        if self.write_required:
+            if "写入工具必须产生 file.changed 事件" not in criteria:
+                criteria.append("写入工具必须产生 file.changed 事件")
+            if self.required_operations:
+                operations = "、".join(self.required_operations[:6])
+                criteria.append(f"必须完成这些可核验操作：{operations}")
+        else:
+            if "不应误触发写入工具" not in criteria:
+                criteria.append("不应误触发写入工具")
+        if self.quality_gates:
+            criteria.append("最终质量门必须全部通过")
+        return criteria
+
+
+@dataclass
 class FileTaskExecutionContext:
     classification: FileTaskClassification = field(default_factory=FileTaskClassification)
     intent_plan: FileTaskIntentPlan = field(default_factory=FileTaskIntentPlan)
@@ -323,6 +409,57 @@ class FileTaskEvent:
         data = asdict(self)
         data["ts"] = round(self.ts, 3)
         return data
+
+    @staticmethod
+    def schema() -> Dict[str, Any]:
+        return file_task_event_schema()
+
+
+def file_task_event_schema() -> Dict[str, Any]:
+    """Return the public JSON schema used by the workspace assistant event stream."""
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "title": "FileTaskEvent",
+        "type": "object",
+        "required": ["type", "run_id", "seq", "payload", "step_id", "ts"],
+        "properties": {
+            "type": {"type": "string"},
+            "run_id": {"type": "string"},
+            "seq": {"type": "integer", "minimum": 1},
+            "step_id": {"type": "string"},
+            "ts": {"type": "number"},
+            "payload": {
+                "type": "object",
+                "additionalProperties": True,
+                "properties": {
+                    "path": {"type": "string"},
+                    "file_type": {"type": "string"},
+                    "operation": {"type": "string"},
+                    "summary": {"type": "string"},
+                    "summary_code": {"type": "string"},
+                    "change_type": {"type": "string"},
+                    "preview": {"type": "string"},
+                    "diff": {"$ref": "#/$defs/FileTaskDiff"},
+                },
+            },
+        },
+        "$defs": {
+            "FileTaskDiff": {
+                "type": "object",
+                "required": ["kind", "items", "changed_count"],
+                "properties": {
+                    "kind": {"type": "string"},
+                    "items": {
+                        "type": "array",
+                        "items": {"type": "object", "additionalProperties": True},
+                    },
+                    "changed_count": {"type": "integer", "minimum": 0},
+                    "truncated": {"type": "boolean"},
+                },
+                "additionalProperties": True,
+            }
+        },
+    }
 
 
 @dataclass

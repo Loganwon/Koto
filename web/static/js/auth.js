@@ -7,6 +7,12 @@ const KotoAuth = {
     TOKEN_KEY: 'koto_token',
     USER_KEY: 'koto_user',
 
+    /** Get CSRF token from meta tag */
+    getCsrfToken() {
+        const meta = document.querySelector('meta[name="csrf-token"]');
+        return meta ? meta.getAttribute('content') : '';
+    },
+
     /** 获取存储的 token */
     getToken() {
         return localStorage.getItem(this.TOKEN_KEY);
@@ -48,18 +54,23 @@ const KotoAuth = {
         const headers = { 'Content-Type': 'application/json', ...extra };
         const token = this.getToken();
         if (token) headers['Authorization'] = 'Bearer ' + token;
+        const csrf = this.getCsrfToken();
+        if (csrf) headers['X-CSRFToken'] = csrf;
         return headers;
     },
 
     /** 带认证的 fetch 封装 */
     async authFetch(url, options = {}) {
         const token = this.getToken();
+        const csrf = this.getCsrfToken();
+        options.headers = options.headers || {};
         if (token) {
-            options.headers = options.headers || {};
             if (typeof options.headers.set === 'function') {
                 options.headers.set('Authorization', 'Bearer ' + token);
+                if (csrf) options.headers.set('X-CSRFToken', csrf);
             } else {
                 options.headers['Authorization'] = 'Bearer ' + token;
+                if (csrf) options.headers['X-CSRFToken'] = csrf;
             }
         }
         const res = await fetch(url, options);

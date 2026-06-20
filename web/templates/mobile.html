@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Koto (言)</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/koto_icon.svg') }}">
+<meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
 <meta name="theme-color" content="#0b111d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -465,7 +466,7 @@ a{color:var(--accent);}
   <!-- ── Generating bar ── -->
   <div id="genBar">
     <div class="gSpin"></div>
-    <span id="genTxt">Koto 正在思考...</span>
+    <span id="genTxt">准备就绪</span>
     <button id="stopBtn" onclick="stopGen()">⏹ 停止</button>
   </div>
 
@@ -549,10 +550,8 @@ a{color:var(--accent);}
         <span>默认模型</span>
         <select id="spModel" onchange="saveSp('ai','default_model',this.value)">
           <option value="auto">🤖 Auto</option>
-          <option value="gemini-3-flash-preview">⚡ Gemini 3 Flash</option>
-          <option value="gemini-3-pro-preview">🚀 Gemini 3 Pro</option>
-          <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash</option>
-          <option value="gemini-2.5-pro">🚀 Gemini 2.5 Pro</option>
+          <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+          <option value="local">本地模型</option>
         </select>
       </div>
       <div class="spRow">
@@ -632,6 +631,58 @@ function ls(k, v) {
   localStorage.setItem(k, v);
 }
 
+let csrfRefreshPromise = null;
+function csrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? (meta.getAttribute('content') || '') : '';
+}
+function setCsrfToken(token) {
+  let meta = document.querySelector('meta[name="csrf-token"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', 'csrf-token');
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', token || '');
+  return token || '';
+}
+async function refreshCsrfToken() {
+  if (csrfRefreshPromise) return csrfRefreshPromise;
+  csrfRefreshPromise = fetch('/api/csrf-token', { credentials: 'same-origin', cache: 'no-store' })
+    .then(async r => {
+      if (!r.ok) return csrfToken();
+      const d = await r.json().catch(() => ({}));
+      return d.csrf_token || d.token ? setCsrfToken(d.csrf_token || d.token) : csrfToken();
+    })
+    .catch(() => csrfToken())
+    .finally(() => { csrfRefreshPromise = null; });
+  return csrfRefreshPromise;
+}
+function methodNeedsCsrf(method) {
+  return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(String(method || 'GET').toUpperCase());
+}
+function withCsrfHeaders(headers, token) {
+  const h = new Headers(headers || {});
+  const t = token || csrfToken();
+  if (t && !h.has('X-CSRFToken') && !h.has('X-CSRF-Token')) h.set('X-CSRFToken', t);
+  return h;
+}
+async function csrfFetch(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const needsCsrf = methodNeedsCsrf(method);
+  const makeInit = (token) => {
+    const init = Object.assign({}, options, { credentials: options.credentials || 'same-origin' });
+    if (needsCsrf) init.headers = withCsrfHeaders(options.headers, token);
+    return init;
+  };
+  let response = await fetch(url, makeInit());
+  if (response.status === 400 && needsCsrf) {
+    const token = await refreshCsrfToken();
+    if (token) response = await fetch(url, makeInit(token));
+  }
+  return response;
+}
+
 /* ────────────────── Theme ── */
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
@@ -660,7 +711,7 @@ async function loadSettings() {
 async function saveSp(cat, key, val) {
   // /api/settings POST expects {category, key, value}
   try {
-    await fetch('/api/settings', {
+    await csrfFetch('/api/settings', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ category: cat, key: key, value: val })
@@ -727,7 +778,7 @@ async function delSess(name, ev) {
   ev.stopPropagation();
   if (!confirm(`删除对话「${name}」？`)) return;
   try {
-    await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await csrfFetch(`/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
     if (curSess === name) { curSess = null; document.getElementById('hdrTitle').textContent = 'Koto'; clearMsgs(); document.getElementById('welcome').style.display = ''; }
     await loadSessions();
     toast('对话已删除');
@@ -749,7 +800,7 @@ async function shConfirm() {
   }
   shHide();
   try {
-    const r = await fetch('/api/sessions', {
+    const r = await csrfFetch('/api/sessions', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ name })
     });
@@ -851,7 +902,7 @@ async function sendMsg() {
     const d = new Date();
     const name = `对话 ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     try {
-      await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+      await csrfFetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
       curSess = name;
       document.getElementById('hdrTitle').textContent = name;
       document.getElementById('welcome').style.display = 'none';
@@ -887,7 +938,7 @@ async function streamChat(text) {
   let started = false;
 
   try {
-    const resp = await fetch('/api/chat/stream', {
+    const resp = await csrfFetch('/api/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -1025,7 +1076,7 @@ async function sendWithFiles(text) {
   let aiRow = null; let aiBbl = null;
 
   try {
-    const resp = await fetch('/api/chat/file', { method:'POST', body:form, signal:abortCtrl.signal });
+    const resp = await csrfFetch('/api/chat/file', { method:'POST', body:form, signal:abortCtrl.signal });
 
     if (!resp.ok) {
       removeTyping();
@@ -1083,6 +1134,7 @@ async function sendWithFiles(text) {
 function startGen() {
   generating = true;
   document.getElementById('genBar').classList.add('on');
+  document.getElementById('genTxt').textContent = 'Koto 正在思考…';
   document.getElementById('sendBtn').disabled = true;
   document.getElementById('sendBtn').classList.add('stop');
   document.getElementById('sendBtn').onclick = stopGen;
@@ -1091,7 +1143,7 @@ function startGen() {
 function stopGen() {
   generating = false;
   document.getElementById('genBar').classList.remove('on');
-  document.getElementById('genTxt').textContent = 'Koto 正在思考…';
+  document.getElementById('genTxt').textContent = '准备就绪';
   document.getElementById('sendBtn').disabled = false;
   document.getElementById('sendBtn').classList.remove('stop');
   document.getElementById('sendBtn').onclick = sendMsg;
@@ -1100,7 +1152,7 @@ function stopGen() {
 async function stopGen_withInterrupt() {
   if (abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
   try {
-    if (curSess) await fetch('/api/chat/interrupt', {
+    if (curSess) await csrfFetch('/api/chat/interrupt', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ session: curSess })  // API expects 'session' key
     });

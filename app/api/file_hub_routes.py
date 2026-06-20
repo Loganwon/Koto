@@ -485,6 +485,11 @@ def archive_files():
     )
 
 
+@file_hub_bp.route("/open", methods=["POST"])
+def removed_native_open_file():
+    return jsonify({"error": "该文件原生打开接口已移除，请使用工作区文件助手打开文件"}), 404
+
+
 @file_hub_bp.route("/<file_id>", methods=["GET"])
 def get_file(file_id: str):
     """查询单个文件记录（含 content_preview）。"""

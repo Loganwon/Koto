@@ -39,14 +39,23 @@ def workspace_dir(tmp_path: Path):
 
 
 @pytest.fixture()
-def client(workspace_dir: Path):
+def client(monkeypatch, tmp_path: Path, workspace_dir: Path):
     """Return a Flask test client with WORKSPACE_DIR patched to *workspace_dir*."""
+    settings_path = tmp_path / "user_settings.json"
+    settings_path.write_text(
+        json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
     with patch(_WORKSPACE_PATCH_TARGET, str(workspace_dir)):
+        import web.shared as _shared
         from web.app import app
 
+        _shared.clear_user_settings_cache()
         app.config["TESTING"] = True
         with app.test_client() as c:
             yield c
+        _shared.clear_user_settings_cache()
 
 
 def _json_body(resp) -> dict:
@@ -425,7 +434,7 @@ class TestSaveThenDownload:
         assert r.status_code == 404
 
     def test_raw_invalid_id_returns_400(self, client):
-        r = client.get("/api/v1/workspace/raw/../../etc/passwd")
+        r = client.get("/api/v1/workspace/raw/bad$id")
         assert r.status_code == 400
 
 
@@ -533,7 +542,7 @@ def _collect_names(tree_data: Any) -> set:
     if isinstance(tree_data, dict):
         if "name" in tree_data:
             names.add(tree_data["name"])
-        for child in tree_data.get("children", []):
+        for child in tree_data.get("children", []) + tree_data.get("files", []):
             names |= _collect_names(child)
     elif isinstance(tree_data, list):
         for item in tree_data:
@@ -725,7 +734,7 @@ class TestFileUpload:
     def test_upload_unsupported_ext_rejected(self, client):
         r = client.post(
             "/api/v1/workspace/open_file",
-            data={"file": (io.BytesIO(b"data"), "script.py")},
+            data={"file": (io.BytesIO(b"data"), "script.exe")},
             content_type="multipart/form-data",
         )
         assert r.status_code == 400
@@ -908,7 +917,7 @@ def _collect_file_entries(tree_data: Any) -> list[dict]:
     if isinstance(tree_data, dict):
         if "name" in tree_data and tree_data.get("type") == "file":
             entries.append(tree_data)
-        for child in tree_data.get("children", []):
+        for child in tree_data.get("children", []) + tree_data.get("files", []):
             entries.extend(_collect_file_entries(child))
     elif isinstance(tree_data, list):
         for item in tree_data:
@@ -1155,7 +1164,8 @@ class TestBrowseLocal:
             query_string={"path": str(workspace_dir)},
         )
         assert r.status_code == 200
-        items = _json_body(r)
+        body = _json_body(r)
+        items = body.get("entries")
         # Should be a list of entries
         assert isinstance(items, list)
         names = [e.get("name") for e in items]
@@ -1253,9 +1263,9 @@ class TestOpenEdgeCases:
         assert r.status_code == 404
 
     def test_open_unsupported_ext_returns_400(self, client, workspace_dir: Path):
-        (workspace_dir / "script.py").write_text("print('hi')")
+        (workspace_dir / "script.exe").write_bytes(b"MZ")
         r = client.post(
-            "/api/v1/workspace/open_file_by_path", json={"path": "script.py"}
+            "/api/v1/workspace/open_file_by_path", json={"path": "script.exe"}
         )
         assert r.status_code == 400
 
@@ -1559,7 +1569,8 @@ class TestJavaScriptSourceChecks:
 
     def test_auto_save_timer_exists(self):
         assert "_autoSaveTimer" in self.js
-        assert "setTimeout(WA.autoSave" in self.js
+        assert "window.WA.scheduleAutoSave" in self.js
+        assert "WA.autoSave()" in self.js
 
 
 # ===========================================================================

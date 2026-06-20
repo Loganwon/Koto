@@ -47,11 +47,11 @@ def test_pptx_initial_render_uses_short_retry_window_without_timeout_poll():
 
 
 def test_xlsx_formula_warning_uses_fast_zip_scan_instead_of_second_workbook_load():
-    py = (_repo_root() / "app" / "core" / "file" / "file_parser.py").read_text(
-        encoding="utf-8"
-    )
+    py = (
+        _repo_root() / "app" / "core" / "file" / "parsers" / "xlsx_parser.py"
+    ).read_text(encoding="utf-8")
 
-    assert "def _xlsx_contains_formula_fast(path: str) -> bool:" in py
+    assert "def xlsx_contains_formula_fast(path: str) -> bool:" in py
     assert 'zipfile.ZipFile(path, "r") as zf' in py
     assert "_wb_check = openpyxl.load_workbook(file_path, data_only=False, read_only=True)" not in py
 

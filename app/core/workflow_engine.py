@@ -190,12 +190,12 @@ def parse_source_file(file_path: str) -> str:
 
     try:
         if ext == ".pdf":
-            from app.core.file.file_parser import parse_pdf
+            from app.core.file.parsers.pdf_parser import parse_pdf
             result = parse_pdf(str(p), str(uuid.uuid4()))
             return result.get("text", "")
 
         if ext in (".docx", ".doc"):
-            from app.core.file.file_parser import parse_docx
+            from app.core.file.parsers.docx_parser import parse_docx
             result = parse_docx(str(p))
             # 提取纯文本（去除 HTML 标签）
             import re
@@ -203,7 +203,7 @@ def parse_source_file(file_path: str) -> str:
             return re.sub(r"<[^>]+>", " ", html).strip()
 
         if ext in (".xlsx", ".xls"):
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
             result = parse_xlsx(str(p), p.name)
             # 组装为 CSV-like 文本
             lines = []
@@ -222,7 +222,7 @@ def parse_source_file(file_path: str) -> str:
             return "\n".join(lines)
 
         if ext in (".pptx", ".ppt"):
-            from app.core.file.file_parser import parse_pptx
+            from app.core.file.parsers.pptx_parser import parse_pptx
             slides = parse_pptx(str(p))
             lines = []
             for slide in slides:

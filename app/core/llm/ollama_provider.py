@@ -554,6 +554,39 @@ def create_ollama_client(
     return OllamaClientProxy(model_tag=model_tag, base_url=base_url)
 
 
+def _list_installed_models(base_url: str = _OLLAMA_BASE_URL) -> List[str]:
+    """Return installed Ollama model tags, preferring an empty list on failure."""
+    try:
+        if not _start_ollama_if_needed(base_url):
+            return []
+        req = urllib.request.Request(
+            f"{base_url.rstrip('/')}/api/tags",
+            method="GET",
+            headers={"Accept": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        return [
+            str(model.get("name") or "").strip()
+            for model in data.get("models", [])
+            if str(model.get("name") or "").strip()
+        ]
+    except Exception as exc:
+        logger.warning("[OllamaProvider] 读取已安装模型失败: %s", exc)
+        return []
+
+
+def _choose_installed_model(models: List[str]) -> Optional[str]:
+    if not models:
+        return None
+    normalized = [(model, model.lower()) for model in models]
+    for preferred in ("qwen3.5", "qwen3", "qwen2.5", "qwen", "llama3.2", "llama3.1", "llama"):
+        for original, lowered in normalized:
+            if lowered.startswith(preferred) or preferred in lowered:
+                return original
+    return models[0]
+
+
 def _resolve_model_from_settings() -> Optional[str]:
     """从 user_settings.json 读取 local_model 字段"""
     try:
@@ -569,10 +602,12 @@ def _resolve_model_from_settings() -> Optional[str]:
         if settings_path.exists():
             with open(settings_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            return data.get("local_model") or data.get("ai", {}).get("local_model")
+            configured = data.get("local_model") or data.get("ai", {}).get("local_model")
+            if configured:
+                return str(configured).strip()
     except Exception as e:
         logger.warning(f"[OllamaProvider] 读取 user_settings.json 失败: {e}")
-    return None
+    return _choose_installed_model(_list_installed_models())
 
 
 def get_local_model_info() -> Dict[str, Any]:

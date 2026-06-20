@@ -35,6 +35,11 @@ import time
 from flask import Blueprint, Response, jsonify, request
 
 from app.core.llm.gemini_config import get_gemini_api_key
+from web.runtime_context import (
+    get_concept_extractor,
+    get_file_editor,
+    get_file_indexer,
+)
 
 _logger = logging.getLogger("koto.routes.file_editor")
 
@@ -45,21 +50,15 @@ file_editor_bp = Blueprint("file_editor", __name__)
 
 
 def _get_file_editor():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_file_editor")
+    return get_file_editor()
 
 
 def _get_file_indexer():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_file_indexer")
+    return get_file_indexer()
 
 
 def _get_concept_extractor():
-    from web.runtime_context import call_app_factory
-
-    return call_app_factory("get_concept_extractor")
+    return get_concept_extractor()
 
 
 def _get_settings_manager():

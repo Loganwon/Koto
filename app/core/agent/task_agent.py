@@ -29,6 +29,12 @@ from typing import Any, Dict, Generator, List, Optional
 
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.llm.model_selection import get_configured_cloud_model, get_provider_for_model_mode
+from app.core.agent.file_task_result_markers import (
+    KOTO_CREATED_RESULT_MARKER,
+    KOTO_MODIFIED_RESULT_MARKER,
+    fallback_key_for_marker,
+    result_key_for_marker,
+)
 from app.core.shared.tool_parser import parse_task_tool_calls, stringify_tool_result
 
 logger = logging.getLogger(__name__)
@@ -38,8 +44,6 @@ _HISTORY_MESSAGE_CONTEXT_LIMIT = 2_000
 _TOOL_RESULT_CONTEXT_LIMIT = 24_000
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
 _REPEATED_TOOL_BATCH_MESSAGE = "检测到模型重复请求同一组工具，已自动停止以避免重复处理。"
-_KOTO_CREATED_MARKER = "__koto_created__:"
-_KOTO_MODIFIED_MARKER = "__koto_modified__:"
 
 
 def _extract_koto_paths(result_str: Any, marker: str) -> List[str]:
@@ -51,11 +55,9 @@ def _extract_koto_paths(result_str: Any, marker: str) -> List[str]:
         payload = None
 
     if isinstance(payload, dict):
-        key = "__koto_created__" if marker == _KOTO_CREATED_MARKER else "__koto_modified__"
-        values = payload.get(key)
+        values = payload.get(result_key_for_marker(marker))
         if not isinstance(values, list):
-            fallback_key = "_koto_created" if marker == _KOTO_CREATED_MARKER else "_koto_modified"
-            values = payload.get(fallback_key)
+            values = payload.get(fallback_key_for_marker(marker))
         if isinstance(values, list):
             return [str(item) for item in values if str(item or "").strip()]
 
@@ -70,12 +72,12 @@ def _extract_koto_paths(result_str: Any, marker: str) -> List[str]:
 
 def _extract_koto_created_paths(result_str: str) -> List[str]:
     """Parse __koto_created__:[...] marker appended by run_python_in_sandbox."""
-    return _extract_koto_paths(result_str, _KOTO_CREATED_MARKER)
+    return _extract_koto_paths(result_str, KOTO_CREATED_RESULT_MARKER)
 
 
 def _extract_koto_modified_paths(result_str: str) -> List[str]:
     """Parse __koto_modified__:[...] marker appended by run_python_in_sandbox."""
-    return _extract_koto_paths(result_str, _KOTO_MODIFIED_MARKER)
+    return _extract_koto_paths(result_str, KOTO_MODIFIED_RESULT_MARKER)
 
 
 def _sample_context_text(text: Any, limit: int) -> str:
@@ -1146,7 +1148,7 @@ class TaskAgent:
             return ""
 
         payload = json.dumps(normalized_calls, ensure_ascii=False, sort_keys=True, default=str)
-        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     @staticmethod
     def _tool_call_signature(tool_name: str, tool_args: Dict[str, Any]) -> str:
@@ -1158,7 +1160,7 @@ class TaskAgent:
             sort_keys=True,
             default=str,
         )
-        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     @staticmethod
     def _merge_file_states(

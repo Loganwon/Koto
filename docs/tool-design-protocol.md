@@ -51,5 +51,5 @@ Koto 在文件任务里遇到缺失能力时，不让模型伪造成功，也不
 
 - 协议实现集中在 `app/core/agent/tool_design_protocol.py`。
 - `file_task_runtime.py` 负责把 `tool_gap` 转成 `tool.missing` 和 `next_action_artifact`。
-- `file_task_planner.py` 只做 planner 输出归一化，不再维护独立的旧版 `tool_gap` schema。
+- `file_task_runtime.py` 负责保持 native-only 执行边界，不再通过独立 planner 文件维护旧版 `tool_gap` schema。
 - `file_task_capability.py` 用同一协议生成已知 native capability gap。

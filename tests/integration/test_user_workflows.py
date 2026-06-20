@@ -715,7 +715,7 @@ class TestDocxWorkflow:
         f.write_bytes(_make_docx_bytes("Dear Alice"))
 
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(f)},
         )
         assert resp.status_code == 200
@@ -733,7 +733,7 @@ class TestDocxWorkflow:
         )
 
         resp2 = client.post(
-            "/api/v1/workspace/open_file_by_path",
+            "/api/v1/workspace/open_abs_file",
             json={"path": str(f)},
         )
         html = resp2.get_json()["data"].get("html", "")
@@ -788,12 +788,12 @@ class TestXlsxWorkflow:
 
 class TestFsBrowserWorkflow:
 
-    def test_absolute_fs_create_route_is_retired(self, env):
-        """The local browser no longer creates files by arbitrary absolute path."""
+    def test_absolute_fs_create_route_validates_payload(self, env):
+        """The local browser create route exists but validates its JSON payload."""
         client, _, _, _ = env
 
         resp = client.post("/api/v1/fs/" + "create_" + "file", json={})
-        assert resp.status_code == 404
+        assert resp.status_code == 400
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

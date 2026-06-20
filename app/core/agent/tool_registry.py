@@ -161,14 +161,19 @@ class ToolRegistry:
         try:
             normalized_args = _normalize_tool_args(func, tool_args)
             timeout_seconds = _TOOL_TIMEOUT_OVERRIDES.get(tool_name, _TOOL_TIMEOUT)
-            with ThreadPoolExecutor(max_workers=1) as _pool:
-                _future = _pool.submit(func, **normalized_args)
-                try:
-                    return _future.result(timeout=timeout_seconds)
-                except _FuturesTimeout:
-                    raise RuntimeError(
-                        f"Tool '{tool_name}' timed out after {timeout_seconds}s"
-                    )
+            _pool = ThreadPoolExecutor(max_workers=1)
+            _future = _pool.submit(func, **normalized_args)
+            try:
+                return _future.result(timeout=timeout_seconds)
+            except _FuturesTimeout:
+                _future.cancel()
+                _pool.shutdown(wait=False, cancel_futures=True)
+                raise RuntimeError(
+                    f"Tool '{tool_name}' timed out after {timeout_seconds}s"
+                )
+            finally:
+                if _future.done():
+                    _pool.shutdown(wait=True)
         except (ValueError, RuntimeError):
             raise
         except TypeError as e:
