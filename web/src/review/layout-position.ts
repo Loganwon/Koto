@@ -219,14 +219,14 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     const pageEl   = host.querySelector('.ProseMirror') as HTMLElement | null;
     const pageRect = pageEl ? pageEl.getBoundingClientRect() : null;
     const hostStyles    = window.getComputedStyle(host);
-    const minRailWidth  = 132;
+    const minRailWidth  = 220;
     const railGap       = Math.max(6, Math.round(parseFloat(hostStyles.getPropertyValue('--wa-review-rail-gap')) || 6));
     const safeInset     = 8;
     const railWidth = Math.max(
       minRailWidth,
       Math.round(
         parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width')) ||
-        Math.max(140, Math.min(172, viewportRect.width * 0.19))
+        Math.max(220, Math.min(300, viewportRect.width * 0.24))
       )
     );
     if (!pageRect) {
@@ -384,9 +384,15 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     const layoutCache: LayoutCache = {
       markerIndex: svg._buildReviewMarkerIndex(contentRoot as HTMLElement),
       getTextIndex() {
+        if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot as HTMLElement);
         return textIndex;
       },
     };
+    const highlightLayer = svg._ensureReviewAnchorHighlightLayer(listEl);
+    if (highlightLayer) {
+      highlightLayer.innerHTML = '';
+      highlightLayer.setAttribute('width', String(Math.max(160, Math.round(railMetrics && (railMetrics as any).contentWidth || viewport.scrollWidth || viewportRect.width || 0))));
+    }
     const connectorLayer = svg._ensureReviewConnectorLayer(listEl);
     if (connectorLayer) {
       connectorLayer.innerHTML = '';
@@ -455,13 +461,15 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         ? Math.max(28, Math.round(pageBounds.maxTop - pageBounds.minTop))
         : Infinity;
       if (anchorHeight > 0) {
-        const baseMinHeight = card.classList.contains('koto-docx-comment-card') ? 42 : 20;
+        const isCommentCard = card.classList.contains('koto-docx-comment-card');
+        const baseMinHeight = isCommentCard ? 72 : 54;
         const cs = window.getComputedStyle(card as HTMLElement);
         const padV = Math.round((parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0));
         const anchorMinHeight = Number.isFinite(pageAvailableHeight)
           ? Math.min(Math.max(0, anchorHeight - padV), pageAvailableHeight)
           : Math.max(0, anchorHeight - padV);
-        (card as HTMLElement).style.setProperty('--wa-review-card-anchor-min-height', `${Math.max(baseMinHeight, anchorMinHeight)}px`);
+        const anchorHeightCap = isCommentCard ? 104 : 78;
+        (card as HTMLElement).style.setProperty('--wa-review-card-anchor-min-height', `${Math.max(baseMinHeight, Math.min(anchorMinHeight, anchorHeightCap))}px`);
       }
       let cardHeight = (card as HTMLElement).offsetHeight || 32;
       if (pageBounds && Number.isFinite(pageAvailableHeight)) {
@@ -530,6 +538,13 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         top,
         width: item.cardWidth,
       });
+      if (highlightLayer && item.anchorGeometry) {
+        svg._drawReviewAnchorHighlight(highlightLayer, {
+          rects: item.anchorGeometry.highlightRects || [],
+          isFocused: item.card.classList.contains('focused') || item.card.classList.contains('is-focused'),
+          isProposal: item.card.classList.contains('wa-proposal-card'),
+        });
+      }
       if (connectorLayer && item.anchorGeometry) {
         svg._drawReviewConnector(connectorLayer, {
           startX: connectorOriginX,
@@ -550,6 +565,10 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
       160,
     );
     listEl.style.minHeight = contentHeight + 'px';
+    if (highlightLayer) {
+      highlightLayer.setAttribute('height', String(contentHeight));
+      highlightLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(shellCoverWidth))} ${contentHeight}`);
+    }
     if (connectorLayer) {
       connectorLayer.setAttribute('height', String(contentHeight));
       connectorLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(shellCoverWidth))} ${contentHeight}`);

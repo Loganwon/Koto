@@ -27,6 +27,14 @@ export interface AnchorGeometry {
   bottom: number;
   pageTop: number | null;
   pageBottom: number | null;
+  highlightRects: AnchorHighlightRect[];
+}
+
+export interface AnchorHighlightRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
 }
 
 export interface AnchorTarget {
@@ -40,6 +48,12 @@ export interface ConnectorSpec {
   startY: number;
   endX: number;
   endY: number;
+  isFocused: boolean;
+  isProposal: boolean;
+}
+
+export interface AnchorHighlightSpec {
+  rects: AnchorHighlightRect[];
   isFocused: boolean;
   isProposal: boolean;
 }
@@ -116,10 +130,13 @@ export interface ReviewLayoutDeps {
 export interface ReviewSvgApi {
   scrollReviewAnchorIntoView: (item: any) => { found: boolean; element: HTMLElement | null; rect?: DOMRect };
   _ensureReviewConnectorLayer: (listEl: HTMLElement) => SVGElement | null;
+  _ensureReviewAnchorHighlightLayer: (listEl: HTMLElement) => SVGElement | null;
   _drawReviewConnector: (layer: SVGElement, connector: ConnectorSpec) => void;
+  _drawReviewAnchorHighlight: (layer: SVGElement, highlight: AnchorHighlightSpec) => void;
   _resolveReviewAnchorTarget: (item: any) => AnchorTarget | null;
   _resolveReviewAnchorGeometry: (root: HTMLElement, item: any, layoutState: LayoutState, layoutCache: LayoutCache) => AnchorGeometry | null;
   _buildReviewMarkerIndex: (root: HTMLElement) => Map<string, HTMLElement[]>;
+  _buildReviewTextIndex: (root: HTMLElement) => TextIndex | null;
   _getReviewContentRoot: () => HTMLElement | null;
 }
 
@@ -342,6 +359,22 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
     return Array.from(range.getClientRects()).filter((rect) => rect && (rect.width > 0.5 || rect.height > 0.5));
   }
 
+  function _reviewHighlightRectsFromClientRects(rangeRects: DOMRect[], layoutState: LayoutState | null): AnchorHighlightRect[] {
+    if (!layoutState || !Array.isArray(rangeRects)) return [];
+    return rangeRects.map((rect) => {
+      const left = _screenXToReviewContentX(rect.left, layoutState);
+      const right = _screenXToReviewContentX(rect.right, layoutState);
+      const top = _screenYToReviewContentY(rect.top, layoutState);
+      const bottom = _screenYToReviewContentY(rect.bottom, layoutState);
+      return {
+        left,
+        top,
+        width: Math.max(1, right - left),
+        height: Math.max(2, bottom - top),
+      };
+    }).filter((rect) => rect.width > 0 && rect.height > 0);
+  }
+
   function _screenXToReviewContentX(screenX: number, layoutState: LayoutState | null): number {
     if (!layoutState || !layoutState.viewportRect) return Math.round(screenX || 0);
     const scale = layoutState.layoutScale && Number.isFinite(layoutState.layoutScale.x)
@@ -478,6 +511,7 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
         bottom: _screenYToReviewContentY(lastRect.bottom, layoutState),
         pageTop: pageBounds ? pageBounds.top : null,
         pageBottom: pageBounds ? pageBounds.bottom : null,
+        highlightRects: _reviewHighlightRectsFromClientRects(rangeRects, layoutState),
       };
     }
     const anchorEl = _findDocxReviewAnchorElement(item);
@@ -495,6 +529,7 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
       bottom: _screenYToReviewContentY(anchorRect.bottom, layoutState),
       pageTop: pageBounds ? pageBounds.top : null,
       pageBottom: pageBounds ? pageBounds.bottom : null,
+      highlightRects: _reviewHighlightRectsFromClientRects([anchorRect], layoutState),
     };
   }
 
@@ -598,6 +633,18 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
     return layer as SVGElement;
   }
 
+  function _ensureReviewAnchorHighlightLayer(listEl: HTMLElement): SVGElement | null {
+    if (!listEl) return null;
+    let layer = listEl.querySelector('.wa-review-anchor-highlight-layer');
+    if (!layer) {
+      layer = document.createElementNS(SVG_NS, 'svg');
+      layer.classList.add('wa-review-anchor-highlight-layer');
+      layer.setAttribute('aria-hidden', 'true');
+      listEl.insertBefore(layer, listEl.firstChild);
+    }
+    return layer as SVGElement;
+  }
+
   function _drawReviewConnector(layer: SVGElement, connector: ConnectorSpec): void {
     if (!layer || !connector) return;
     const path = document.createElementNS(SVG_NS, 'path');
@@ -610,13 +657,31 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
     layer.appendChild(path);
   }
 
+  function _drawReviewAnchorHighlight(layer: SVGElement, highlight: AnchorHighlightSpec): void {
+    if (!layer || !highlight || !Array.isArray(highlight.rects)) return;
+    highlight.rects.forEach((rect) => {
+      if (!rect || rect.width <= 0 || rect.height <= 0) return;
+      const node = document.createElementNS(SVG_NS, 'rect');
+      node.setAttribute('x', String(Math.round(rect.left)));
+      node.setAttribute('y', String(Math.round(rect.top)));
+      node.setAttribute('width', String(Math.max(1, Math.round(rect.width))));
+      node.setAttribute('height', String(Math.max(2, Math.round(rect.height))));
+      node.setAttribute('rx', '3');
+      node.setAttribute('class', `wa-review-anchor-highlight-rect${highlight.isProposal ? ' is-proposal' : ' is-comment'}${highlight.isFocused ? ' is-focused' : ''}`);
+      layer.appendChild(node);
+    });
+  }
+
   return {
     scrollReviewAnchorIntoView,
     _ensureReviewConnectorLayer,
+    _ensureReviewAnchorHighlightLayer,
     _drawReviewConnector,
+    _drawReviewAnchorHighlight,
     _resolveReviewAnchorTarget,
     _resolveReviewAnchorGeometry,
     _buildReviewMarkerIndex,
+    _buildReviewTextIndex,
     _getReviewContentRoot,
   };
 }

@@ -264,6 +264,22 @@
       return Array.from(range.getClientRects()).filter((rect) => rect && (rect.width > 0.5 || rect.height > 0.5));
     }
 
+    function _reviewHighlightRectsFromClientRects(rangeRects, layoutState) {
+      if (!layoutState || !Array.isArray(rangeRects)) return [];
+      return rangeRects.map((rect) => {
+        const left = _screenXToReviewContentX(rect.left, layoutState);
+        const right = _screenXToReviewContentX(rect.right, layoutState);
+        const top = _screenYToReviewContentY(rect.top, layoutState);
+        const bottom = _screenYToReviewContentY(rect.bottom, layoutState);
+        return {
+          left,
+          top,
+          width: Math.max(1, right - left),
+          height: Math.max(2, bottom - top),
+        };
+      }).filter((rect) => rect.width > 0 && rect.height > 0);
+    }
+
     function _screenXToReviewContentX(screenX, layoutState) {
       if (!layoutState || !layoutState.viewportRect) return Math.round(screenX || 0);
       const scale = layoutState.layoutScale && Number.isFinite(layoutState.layoutScale.x)
@@ -400,6 +416,7 @@
           bottom: _screenYToReviewContentY(lastRect.bottom, layoutState),
           pageTop: pageBounds ? pageBounds.top : null,
           pageBottom: pageBounds ? pageBounds.bottom : null,
+          highlightRects: _reviewHighlightRectsFromClientRects(rangeRects, layoutState),
         };
       }
       const anchorEl = _findDocxReviewAnchorElement(item);
@@ -417,6 +434,7 @@
         bottom: _screenYToReviewContentY(anchorRect.bottom, layoutState),
         pageTop: pageBounds ? pageBounds.top : null,
         pageBottom: pageBounds ? pageBounds.bottom : null,
+        highlightRects: _reviewHighlightRectsFromClientRects([anchorRect], layoutState),
       };
     }
 
@@ -530,6 +548,33 @@
       path.setAttribute('d', `M ${startX} ${startY} L ${endX} ${endY}`);
       path.setAttribute('class', `wa-review-connector-path${connector.isProposal ? ' is-proposal' : ' is-comment'}${connector.isFocused ? ' is-focused' : ''}`);
       layer.appendChild(path);
+    }
+
+    function _ensureReviewAnchorHighlightLayer(listEl) {
+      if (!listEl) return null;
+      let layer = listEl.querySelector('.wa-review-anchor-highlight-layer');
+      if (!layer) {
+        layer = document.createElementNS(SVG_NS, 'svg');
+        layer.classList.add('wa-review-anchor-highlight-layer');
+        layer.setAttribute('aria-hidden', 'true');
+        listEl.insertBefore(layer, listEl.firstChild);
+      }
+      return layer;
+    }
+
+    function _drawReviewAnchorHighlight(layer, highlight) {
+      if (!layer || !highlight || !Array.isArray(highlight.rects)) return;
+      highlight.rects.forEach((rect) => {
+        if (!rect || rect.width <= 0 || rect.height <= 0) return;
+        const node = document.createElementNS(SVG_NS, 'rect');
+        node.setAttribute('x', String(Math.round(rect.left)));
+        node.setAttribute('y', String(Math.round(rect.top)));
+        node.setAttribute('width', String(Math.max(1, Math.round(rect.width))));
+        node.setAttribute('height', String(Math.max(2, Math.round(rect.height))));
+        node.setAttribute('rx', '3');
+        node.setAttribute('class', `wa-review-anchor-highlight-rect${highlight.isProposal ? ' is-proposal' : ' is-comment'}${highlight.isFocused ? ' is-focused' : ''}`);
+        layer.appendChild(node);
+      });
     }
 
     function _reviewAnchorHeight(anchorGeometry) {
@@ -648,7 +693,7 @@
       const pageEl   = host.querySelector('.ProseMirror');
       const pageRect = pageEl ? pageEl.getBoundingClientRect() : null;
       const hostStyles    = window.getComputedStyle(host);
-      const minRailWidth  = 132;
+      const minRailWidth  = 220;
       const railGap       = Math.max(6, Math.round(parseFloat(hostStyles.getPropertyValue('--wa-review-rail-gap')) || 6));
       const safeInset     = 8;
       // Rail width: read from CSS variable only (no stale dataset.noteWidth persistence).
@@ -656,7 +701,7 @@
         minRailWidth,
         Math.round(
           parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width')) ||
-          Math.max(140, Math.min(172, viewportRect.width * 0.19))
+          Math.max(220, Math.min(300, viewportRect.width * 0.24))
         )
       );
       if (!pageRect) {
@@ -801,6 +846,11 @@
           return textIndex;
         },
       };
+      const highlightLayer = _ensureReviewAnchorHighlightLayer(listEl);
+      if (highlightLayer) {
+        highlightLayer.innerHTML = '';
+        highlightLayer.setAttribute('width', String(Math.max(160, Math.round(railMetrics && railMetrics.contentWidth || viewport.scrollWidth || viewportRect.width || 0))));
+      }
       const connectorLayer = _ensureReviewConnectorLayer(listEl);
       if (connectorLayer) {
         connectorLayer.innerHTML = '';
@@ -878,13 +928,15 @@
           ? Math.max(28, Math.round(pageBounds.maxTop - pageBounds.minTop))
           : Infinity;
         if (anchorHeight > 0) {
-          const baseMinHeight = card.classList.contains('koto-docx-comment-card') ? 42 : 20;
+          const isCommentCard = card.classList.contains('koto-docx-comment-card');
+          const baseMinHeight = isCommentCard ? 72 : 54;
           const cs = window.getComputedStyle(card);
           const padV = Math.round((parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0));
           const anchorMinHeight = Number.isFinite(pageAvailableHeight)
             ? Math.min(Math.max(0, anchorHeight - padV), pageAvailableHeight)
             : Math.max(0, anchorHeight - padV);
-          card.style.setProperty('--wa-review-card-anchor-min-height', `${Math.max(baseMinHeight, anchorMinHeight)}px`);
+          const anchorHeightCap = isCommentCard ? 104 : 78;
+          card.style.setProperty('--wa-review-card-anchor-min-height', `${Math.max(baseMinHeight, Math.min(anchorMinHeight, anchorHeightCap))}px`);
         }
         let cardHeight = card.offsetHeight || 32;
         if (pageBounds && Number.isFinite(pageAvailableHeight)) {
@@ -953,6 +1005,13 @@
           top,
           width: item.cardWidth,
         });
+        if (highlightLayer && item.anchorGeometry) {
+          _drawReviewAnchorHighlight(highlightLayer, {
+            rects: item.anchorGeometry.highlightRects || [],
+            isFocused: item.card.classList.contains('focused') || item.card.classList.contains('is-focused'),
+            isProposal: item.card.classList.contains('wa-proposal-card'),
+          });
+        }
         if (connectorLayer && item.anchorGeometry) {
           // Connector always starts from the fixed text-column right edge (connectorOriginX),
           // never from the annotated word's X. This prevents the line from spanning across
@@ -976,6 +1035,10 @@
         160,
       );
       listEl.style.minHeight = contentHeight + 'px';
+      if (highlightLayer) {
+        highlightLayer.setAttribute('height', String(contentHeight));
+        highlightLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(shellCoverWidth))} ${contentHeight}`);
+      }
       if (connectorLayer) {
         connectorLayer.setAttribute('height', String(contentHeight));
         connectorLayer.setAttribute('viewBox', `0 0 ${Math.max(160, Math.round(shellCoverWidth))} ${contentHeight}`);

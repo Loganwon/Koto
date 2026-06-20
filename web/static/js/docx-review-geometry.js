@@ -135,13 +135,13 @@
     }
 
     // Rail sizing: viewport-aware, no persistence
-    const minRailWidth  = 132;
+    const minRailWidth  = 220;
     const cssRailWidth = parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'));
     const railWidth = Math.max(
       minRailWidth,
       Math.round(
         cssRailWidth ||
-        Math.max(140, Math.min(180, viewportWidth * 0.19))
+        Math.max(220, Math.min(300, viewportWidth * 0.24))
       )
     );
 

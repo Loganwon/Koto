@@ -32,6 +32,7 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     js = _read("web/static/js/workspace-assistant.js")
     layout_js = _read("web/static/js/docx-review-layout.js")
     geometry_js = _read("web/static/js/docx-review-geometry.js")
+    review_bundle = _read("web/static/js/build/review-bundle.js")
     css = _read("web/static/css/workspace.css")
 
     assert "function _syncReviewStateForActiveFile" in js
@@ -72,10 +73,17 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "function _positionReviewRail(value, host)" in layout_js
     assert "function _reviewLayoutScale(element, rect)" in layout_js
     assert "function _screenDeltaToLayout(delta, scale)" in layout_js
-    assert "const minRailWidth  = 132;" in layout_js
+    assert "const minRailWidth  = 220;" in layout_js
+    assert "const minRailWidth  = 220;" in geometry_js
     assert "parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'))" in layout_js
     assert "host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);" not in layout_js
     assert "_setDocxReviewRailWidth(host, railWidth);" in layout_js
+    assert "if (!textIndex) textIndex = _buildReviewTextIndex(contentRoot);" in layout_js
+    assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot);" in review_bundle
+    assert "function _ensureReviewAnchorHighlightLayer" in layout_js
+    assert "function _drawReviewAnchorHighlight" in layout_js
+    assert "wa-review-anchor-highlight-layer" in review_bundle
+    assert "wa-review-anchor-highlight-rect" in review_bundle
     assert "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);" in layout_js
     assert "const textColRight     = Math.round(pageContentRight - (pagePaddingRight * (transformScale.x || 1)));" in layout_js
     assert "const laneLeft         = Math.round(textColRight + anchorGap);" in layout_js
@@ -121,8 +129,8 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "Math.max(...layoutEntries.map((entry) => _reviewLayoutEntryBottom(entry))) + 24" in layout_js
     assert "card.classList.add('is-page-bounded');" in layout_js
     assert "card.style.setProperty('--wa-review-card-page-max-height'" in layout_js
-    assert "min-height: var(--wa-review-card-anchor-min-height, 20px);" in css
-    assert "min-height: var(--wa-review-card-anchor-min-height, 42px);" in css
+    assert "min-height: var(--wa-review-card-anchor-min-height, 54px);" in css
+    assert "min-height: var(--wa-review-card-anchor-min-height, 72px);" in css
     assert "function _layoutReviewShellInDocx" in js
     assert "function _ensureReviewSelectionLauncher" in js
     assert "const selectionRight = Number.isFinite(cursorRight)" in layout_js
@@ -205,7 +213,9 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert "[data-comment-ui=\"wps\"] .koto-docx-comment-card" in css
     assert "[data-comment-ui=\"wps\"] .koto-docx-comment-badge" in css
     assert "--wa-review-rail-gap" in css
-    assert "--wa-review-rail-width: clamp(156px, 18vw, 248px);" in css
+    assert "--wa-review-rail-width: clamp(220px, 22vw, 300px);" in css
+    assert ".wa-review-anchor-highlight-layer" in css
+    assert ".wa-review-anchor-highlight-rect" in css
     assert "--wa-review-rail-left-shift: 0px;" in css
     assert "--wa-review-rail-right-shift: 0px;" in css
     assert ".wa-review-composer-card" in css

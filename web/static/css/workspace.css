@@ -2403,7 +2403,7 @@
        !important overrides the inline style set by the TipTap DOCX page-setup JS. */
     #wa-docx-editor {
       --wa-review-rail-gap: 10px;
-      --wa-review-rail-width: clamp(156px, 18vw, 248px);
+      --wa-review-rail-width: clamp(220px, 22vw, 300px);
       --wa-review-rail-left-shift: 0px;
       --wa-review-rail-right-shift: 0px;
     }
@@ -7144,6 +7144,26 @@
       pointer-events: none;
       display: none;
     }
+    #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-layer {
+      position: absolute;
+      inset: 0;
+      overflow: visible;
+      pointer-events: none;
+      display: block;
+    }
+    #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-rect {
+      fill: rgba(0, 122, 255, 0.16);
+      stroke: rgba(0, 122, 255, 0.26);
+      stroke-width: 1;
+    }
+    #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-rect.is-focused {
+      fill: rgba(0, 122, 255, 0.26);
+      stroke: rgba(0, 122, 255, 0.42);
+    }
+    #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-rect.is-proposal {
+      fill: rgba(15, 118, 110, 0.16);
+      stroke: rgba(15, 118, 110, 0.28);
+    }
     #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-connector-path {
       fill: none;
       stroke: rgba(148, 163, 184, 0.64);
@@ -7173,7 +7193,7 @@
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card,
     #wa-review-shell.wa-review-shell-docx .wa-proposal-card {
-      min-height: var(--wa-review-card-anchor-min-height, 20px);
+      min-height: var(--wa-review-card-anchor-min-height, 54px);
       padding: 4px 6px;
       gap: 3px;
       border-radius: 8px;
@@ -7190,9 +7210,9 @@
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card {
       position: absolute;
-      min-height: var(--wa-review-card-anchor-min-height, 42px);
-      padding: 8px 9px;
-      gap: 5px;
+      min-height: var(--wa-review-card-anchor-min-height, 72px);
+      padding: 10px 11px;
+      gap: 7px;
       border-radius: 8px;
       display: flex;
       flex-direction: column;
@@ -7258,8 +7278,8 @@
       overflow: hidden;
       text-overflow: ellipsis;
       -webkit-box-orient: vertical;
-      -webkit-line-clamp: 2;
-      line-clamp: 2;
+      -webkit-line-clamp: 3;
+      line-clamp: 3;
     }
     #wa-review-shell.wa-review-shell-docx .koto-docx-comment-draft-hint {
       display: none;
@@ -8399,8 +8419,8 @@
       font-family: inherit;
       resize: none;
       line-height: 1.6;
-      min-height: 92px;
-      max-height: 220px;
+      min-height: 144px;
+      max-height: 480px;
       overflow-y: hidden;
       outline: none;
       box-sizing: border-box;
@@ -9842,8 +9862,8 @@
   width: 100%;
   font-size: 14px;
   line-height: 1.6;
-  min-height: 120px;
-  max-height: 260px;
+  min-height: 144px;
+  max-height: 480px;
   overflow-y: hidden;
   font-family: inherit;
   padding: 12px 14px;
@@ -11413,7 +11433,8 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   }
 }
 #wa-user-input {
-  min-height: 96px;
+  min-height: 144px;
+  max-height: 480px;
 }
 
 .wa-local-folder-picker {
