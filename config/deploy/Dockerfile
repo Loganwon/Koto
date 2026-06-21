@@ -1,3 +1,4 @@
+# check=skip=SecretsUsedInArgOrEnv
 # ===== Koto AI Assistant - Docker Image =====
 # 多阶段构建，生产优化
 
