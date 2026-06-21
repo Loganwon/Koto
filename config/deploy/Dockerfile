@@ -16,7 +16,7 @@ WORKDIR /app
 
 # 先复制依赖文件（利用 Docker 缓存）
 COPY config/requirements.lock .
-RUN pip install --no-cache-dir -r requirements.lock
+RUN PIP_ROOT_USER_ACTION=ignore pip install --no-cache-dir -r requirements.lock
 
 # 复制应用代码
 COPY web/ web/
