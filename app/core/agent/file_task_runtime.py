@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import datetime as _dt
 import json
@@ -40,6 +40,7 @@ from app.core.agent.file_task_capability import (
     native_tool_gap_for_request,
 )
 from app.core.agent.file_task_completion_contract import build_completion_contract
+from app.core.agent.file_task_guard_emission import build_tool_guard_emission
 from app.core.agent.file_task_model import FileTaskModelClient
 from app.core.agent.file_task_review_intent import (
     has_explicit_docx_review_intent,
@@ -130,6 +131,7 @@ from app.core.agent.file_task_quality_gate import (
 from app.core.agent.file_task_verification import (
     verification_precheck as _verification_precheck,
 )
+from app.core.agent.task_supervisor import TaskSupervisor, SupervisionResult
 from app.core.agent.file_task_supervisor_prompts import (
     blocked_run_python_message as _supervisor_blocked_run_python_message,
     duplicate_supervisor_retry_message as _supervisor_duplicate_retry_message,
@@ -165,6 +167,11 @@ from app.core.agent.file_task_followup_context import (
 from app.core.agent.file_task_system_prompt import (
     build_file_task_system_prompt as _build_file_task_system_prompt,
 )
+from app.core.agent.file_task_terminal_report import (
+    apply_terminal_check_overrides,
+    build_terminal_run_summary,
+    terminal_completed_task,
+)
 from app.core.agent.file_task_execution_brief import (
     execution_brief_schema as _brief_execution_brief_schema,
     extract_execution_brief as _brief_extract_execution_brief,
@@ -185,6 +192,9 @@ from app.core.agent.file_task_step_payload import (
     public_context_snippets as _step_payload_public_context_snippets,
     step_result_file_changes as _step_payload_step_result_file_changes,
     with_runtime_context as _step_payload_with_runtime_context,
+)
+from app.core.agent.file_task_step_verification import (
+    build_supervisor_step_verification_payload as _build_supervisor_step_verification_payload,
 )
 from app.core.agent.file_task_docx_stepwise import (
     docx_polish_wait_artifact as _docx_stepwise_docx_polish_wait_artifact,
@@ -305,6 +315,7 @@ class FileTaskRuntime:
         intent_planner: Optional[FileTaskIntentPlanner] = None,
         gemini_client: Any = None,
         workspace_root: str = "",
+        task_supervisor: Optional[TaskSupervisor] = None,
         max_rounds: int = _MAX_MODEL_ROUNDS,
     ):
         self._tool_executor = tool_executor
@@ -315,7 +326,12 @@ class FileTaskRuntime:
         self._gemini_client = gemini_client
         self._workspace_root = workspace_root
         self._max_rounds = max(1, int(max_rounds or _MAX_MODEL_ROUNDS))
+        self._task_supervisor = task_supervisor
 
+
+# ═══════════════════════════════════════════════════════════════
+    # Main Entry Point
+    # ═══════════════════════════════════════════════════════════════
     def run(self, request: FileTaskRequest) -> Iterable[FileTaskEvent]:
         request = request_with_workflow_checkpoint(request)
         request = self._request_with_inferred_target_path(request)
@@ -1729,29 +1745,36 @@ class FileTaskRuntime:
                     error_text = (
                         f"工具 {tool_name or '<empty>'} 不在 Koto 文件任务 allowlist 中。"
                     )
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=error_text,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name or "invalid_tool",
+                            tool_args,
+                            {"error": error_text},
+                            success=False,
+                            invalid=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                        message_tool_name=tool_name or "invalid_tool",
+                        include_blocked_in_finished=False,
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": tool_name,
-                            "success": False,
-                            "result_preview": error_text,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name or "invalid_tool",
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name or "invalid_tool",
-                                tool_args,
-                                {"error": error_text},
-                                success=False,
-                                invalid=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 exposed_tool_names = {
@@ -1765,30 +1788,34 @@ class FileTaskRuntime:
                         classification,
                         exposed_tool_names,
                     )
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=error_text,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name,
+                            tool_args,
+                            {"error": error_text},
+                            success=False,
+                            blocked=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": tool_name,
-                            "success": False,
-                            "blocked": True,
-                            "result_preview": error_text,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name,
-                                tool_args,
-                                {"error": error_text},
-                                success=False,
-                                blocked=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 if (
@@ -1801,30 +1828,34 @@ class FileTaskRuntime:
                         request,
                         classification.output_mode,
                     )
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=block_text,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name,
+                            tool_args,
+                            {"error": block_text},
+                            success=False,
+                            blocked=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": tool_name,
-                            "success": False,
-                            "blocked": True,
-                            "result_preview": block_text,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name,
-                                tool_args,
-                                {"error": block_text},
-                                success=False,
-                                blocked=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 if tool_name == "run_python_code" and (
@@ -1836,30 +1867,34 @@ class FileTaskRuntime:
                         classification.output_mode,
                     )
                     if block_text:
+                        guard = build_tool_guard_emission(
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            tool_call_id=tool_call_id,
+                            result_preview=block_text,
+                            feedback_content=self._tool_feedback_for_model(
+                                tool_name,
+                                tool_args,
+                                {"error": block_text},
+                                success=False,
+                                blocked=True,
+                            ),
+                            round_index=round_index,
+                            tool_index=tool_index,
+                            success=False,
+                            blocked=True,
+                        )
                         yield ledger.event(
                             "tool.finished",
-                            {
-                                "tool_name": tool_name,
-                                "success": False,
-                                "blocked": True,
-                                "result_preview": block_text,
-                            },
+                            guard.tool_finished_payload,
                             step_id=current_step_id,
                         )
-                        messages.append(
-                            {
-                                "role": "function",
-                                "name": tool_name,
-                                "tool_call_id": tool_call_id,
-                                "content": self._tool_feedback_for_model(
-                                    tool_name,
-                                    tool_args,
-                                    {"error": block_text},
-                                    success=False,
-                                    blocked=True,
-                                ),
-                            }
+                        yield ledger.event(
+                            "supervisor.step_verified",
+                            guard.step_verified_payload,
+                            step_id=current_step_id,
                         )
+                        messages.append(guard.function_message)
                         continue
 
                 source_write_block = self._protected_source_write_block_message(
@@ -1869,30 +1904,34 @@ class FileTaskRuntime:
                     context_files,
                 )
                 if source_write_block:
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=source_write_block,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name,
+                            tool_args,
+                            {"error": source_write_block},
+                            success=False,
+                            blocked=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": tool_name,
-                            "success": False,
-                            "blocked": True,
-                            "result_preview": source_write_block,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name,
-                                tool_args,
-                                {"error": source_write_block},
-                                success=False,
-                                blocked=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 local_docx_edit_block = self._local_docx_edit_block_message(
@@ -1901,30 +1940,35 @@ class FileTaskRuntime:
                     tool_args,
                 )
                 if local_docx_edit_block:
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=local_docx_edit_block,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name,
+                            tool_args,
+                            {"error": local_docx_edit_block},
+                            success=False,
+                            blocked=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                        event_tool_name="supervisor_guard",
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": "supervisor_guard",
-                            "success": False,
-                            "blocked": True,
-                            "result_preview": local_docx_edit_block,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name,
-                                tool_args,
-                                {"error": local_docx_edit_block},
-                                success=False,
-                                blocked=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 if is_write_tool(tool_name) and tool_name != "run_python_code":
@@ -1934,30 +1978,35 @@ class FileTaskRuntime:
                         skip_text = (
                             f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
                         )
+                        guard = build_tool_guard_emission(
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            tool_call_id=tool_call_id,
+                            result_preview=skip_text,
+                            feedback_content=self._tool_feedback_for_model(
+                                tool_name,
+                                tool_args,
+                                {"summary": skip_text},
+                                success=True,
+                                skipped=True,
+                            ),
+                            round_index=round_index,
+                            tool_index=tool_index,
+                            success=True,
+                            blocked=False,
+                            skipped=True,
+                        )
                         yield ledger.event(
                             "tool.finished",
-                            {
-                                "tool_name": tool_name,
-                                "success": True,
-                                "skipped": True,
-                                "result_preview": skip_text,
-                            },
+                            guard.tool_finished_payload,
                             step_id=current_step_id,
                         )
-                        messages.append(
-                            {
-                                "role": "function",
-                                "name": tool_name,
-                                "tool_call_id": tool_call_id,
-                                "content": self._tool_feedback_for_model(
-                                    tool_name,
-                                    tool_args,
-                                    {"summary": skip_text},
-                                    success=True,
-                                    skipped=True,
-                                ),
-                            }
+                        yield ledger.event(
+                            "supervisor.step_verified",
+                            guard.step_verified_payload,
+                            step_id=current_step_id,
                         )
+                        messages.append(guard.function_message)
                         continue
 
                 stepwise_write_block = self._stepwise_docx_write_block_message(
@@ -1968,30 +2017,35 @@ class FileTaskRuntime:
                     tool_args,
                 )
                 if stepwise_write_block:
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=stepwise_write_block,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name,
+                            tool_args,
+                            {"error": stepwise_write_block},
+                            success=False,
+                            blocked=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                        event_tool_name="supervisor_guard",
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": "supervisor_guard",
-                            "success": False,
-                            "blocked": True,
-                            "result_preview": stepwise_write_block,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name,
-                                tool_args,
-                                {"error": stepwise_write_block},
-                                success=False,
-                                blocked=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 yield ledger.event(
@@ -2008,30 +2062,34 @@ class FileTaskRuntime:
                     tool_name, tool_args, request, context_files
                 )
                 if blocked_message:
+                    guard = build_tool_guard_emission(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        tool_call_id=tool_call_id,
+                        result_preview=blocked_message,
+                        feedback_content=self._tool_feedback_for_model(
+                            tool_name,
+                            tool_args,
+                            {"error": blocked_message},
+                            success=False,
+                            blocked=True,
+                        ),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        success=False,
+                        blocked=True,
+                    )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": tool_name,
-                            "success": False,
-                            "blocked": True,
-                            "result_preview": blocked_message,
-                        },
+                        guard.tool_finished_payload,
                         step_id=current_step_id,
                     )
-                    messages.append(
-                        {
-                            "role": "function",
-                            "name": tool_name,
-                            "tool_call_id": tool_call_id,
-                            "content": self._tool_feedback_for_model(
-                                tool_name,
-                                tool_args,
-                                {"error": blocked_message},
-                                success=False,
-                                blocked=True,
-                            ),
-                        }
+                    yield ledger.event(
+                        "supervisor.step_verified",
+                        guard.step_verified_payload,
+                        step_id=current_step_id,
                     )
+                    messages.append(guard.function_message)
                     continue
 
                 if tool_name == "run_python_code":
@@ -2160,6 +2218,21 @@ class FileTaskRuntime:
                 for change in extracted_changes:
                     file_changes.append(change)
                     yield ledger.event("file.changed", change, step_id=current_step_id)
+                yield ledger.event(
+                    "supervisor.step_verified",
+                    _build_supervisor_step_verification_payload(
+                        tool_name=tool_name,
+                        tool_args=tool_args,
+                        success=success,
+                        blocked=runtime_blocked,
+                        summary=tool_finished_payload.get("result_preview"),
+                        round_index=round_index,
+                        tool_index=tool_index,
+                        file_changes=extracted_changes,
+                        artifacts=artifacts,
+                    ),
+                    step_id=current_step_id,
+                )
 
             execute_round_summary = self._execute_step_summary(
                 round_index=round_index,
@@ -2401,56 +2474,23 @@ class FileTaskRuntime:
                 next_action_artifact,
             )
         )
-        if (
-            not write_intent
-            and not file_changes
-            and bool(check_payload.get("passed"))
-            and not snippets
-            and not readonly_tool_outputs
-            and self._readonly_task_requires_file_context(request, context_files)
-        ):
-            check_payload = dict(check_payload)
-            check_payload["passed"] = False
-            check_payload["status"] = "needs_attention"
-            check_payload["summary"] = "任务明确要求读取文件，但没有成功读取任何显式文件上下文。"
-            check_payload["remaining"] = [
-                "确认文件位于工作区内，或将目标文件加入临时工作区后重试。"
-            ]
-            check_payload["criteria_results"] = [
-                {
-                    "criterion": "explicit_file_context_read",
-                    "passed": False,
-                    "detail": "任务包含明确文件引用，但运行时没有可用于分析的读取片段。",
-                    "priority": "critical",
-                }
-            ]
         missing_read_refs = self._unsatisfied_explicit_read_file_references(
             request, snippets, readonly_tool_outputs
         )
-        if (
-            not write_intent
-            and not file_changes
-            and bool(check_payload.get("passed"))
-            and missing_read_refs
-        ):
-            refs_text = "、".join(missing_read_refs[:3])
-            check_payload = dict(check_payload)
-            check_payload["passed"] = False
-            check_payload["status"] = "needs_attention"
-            check_payload["summary"] = (
-                f"任务明确要求读取文件，但没有成功读取目标文件：{refs_text}。"
-            )
-            check_payload["remaining"] = [
-                "确认文件名和路径是否正确，或将目标文件加入临时工作区后重试。"
-            ]
-            check_payload["criteria_results"] = [
-                {
-                    "criterion": "explicit_file_reference_read",
-                    "passed": False,
-                    "detail": "任务包含明确文件引用，但读取结果没有覆盖该目标文件。",
-                    "priority": "critical",
-                }
-            ]
+        check_payload = apply_terminal_check_overrides(
+            check_payload=check_payload,
+            write_intent=write_intent,
+            file_changes=file_changes,
+            final_summary=final_summary,
+            output_mode=classification.output_mode,
+            tool_gap=tool_gap,
+            snippets=snippets,
+            readonly_tool_outputs=readonly_tool_outputs,
+            requires_file_context=self._readonly_task_requires_file_context(
+                request, context_files
+            ),
+            missing_read_refs=missing_read_refs,
+        )
         stepwise_artifact = self._stepwise_docx_wait_artifact(
             request,
             context_files,
@@ -2510,29 +2550,50 @@ class FileTaskRuntime:
             ),
             step_id=check_step_id,
         )
-        run_summary = check_payload.get("summary") or final_summary or "任务执行结束。"
-        if not write_intent and final_summary and not tool_gap:
-            run_summary = final_summary
-        if classification_payload.get("selected_recipe") == "docx_contract_compare_review":
-            contract_risks = None
-            for change in file_changes:
-                risks = change.get("contract_risk_summary") if isinstance(change, dict) else None
-                if isinstance(risks, list) and risks:
-                    contract_risks = risks
-                    break
-            if (
-                isinstance(contract_risks, list)
-                and contract_risks
-                and "风险关注点" not in str(run_summary)
-            ):
-                risk_lines = "\n".join(f"- {item}" for item in contract_risks[:5])
-                run_summary = f"{run_summary}\n风险关注点：\n{risk_lines}"
+        run_summary = build_terminal_run_summary(
+            check_payload=check_payload,
+            final_summary=final_summary,
+            write_intent=write_intent,
+            tool_gap=tool_gap,
+            selected_recipe=str(classification_payload.get("selected_recipe") or ""),
+            file_changes=file_changes,
+        )
+        # === v2: AI supervisor verification ===
+        supervisor_result = None
+        if self._task_supervisor is not None:
+            try:
+                supervisor_result = self._task_supervisor.verify(
+                    plan=recipe_skeleton,
+                    step_results=file_changes + readonly_tool_outputs,
+                    completion_criteria=completion_criteria,
+                    output_text=final_summary or str(check_payload.get("summary") or ""),
+                )
+                if supervisor_result is not None:
+                    yield ledger.event(
+                        "supervisor.verified",
+                        {
+                            "passed": supervisor_result.passed,
+                            "stage": supervisor_result.stage,
+                            "score": supervisor_result.score,
+                            "report": supervisor_result.report,
+                            "issues": supervisor_result.issues,
+                            "fix_suggestions": supervisor_result.fix_suggestions,
+                        },
+                        step_id=check_step_id,
+                    )
+            except Exception as exc:
+                logger.warning("[FileTaskRuntime] supervisor verification failed: %s", exc)
+
         run_payload = {
             "task": request.task,
             "mode": "whitebox_v1",
             "summary": run_summary,
-            "completed_task": bool(check_payload.get("passed"))
-            and (completed_task or not write_intent or bool(file_changes)),
+            "completed_task": terminal_completed_task(
+                check_payload=check_payload,
+                completed_task=completed_task,
+                write_intent=write_intent,
+                file_changes=file_changes,
+            ),
             "context": self._public_context_snippets(snippets[:8]),
             "file_changes": file_changes,
             "runtime": terminal_runtime,
@@ -2789,6 +2850,10 @@ class FileTaskRuntime:
             resolve_task_file_path=self._resolve_task_file_path,
         )
 
+
+# ═══════════════════════════════════════════════════════════════
+    # File Context & Targeting
+    # ═══════════════════════════════════════════════════════════════
     def _context_files(self, request: FileTaskRequest) -> List[FileTaskFile]:
         return _targeting_context_files(
             request,
@@ -3355,6 +3420,10 @@ class FileTaskRuntime:
                 final_result = chunk.payload
         return final_result
 
+
+# ═══════════════════════════════════════════════════════════════
+    # Intent Predicates (delegated to file_task_intent_predicates)
+    # ═══════════════════════════════════════════════════════════════
     def _has_write_intent(self, task: str) -> bool:
         return _intent_has_write_intent(task)
 
@@ -6496,7 +6565,7 @@ class FileTaskRuntime:
             verify_args = {
                 "task_description": request.task,
                 "file_states": json.dumps(
-                    file_states_for_changes(file_changes), ensure_ascii=False
+                    file_states_for_changes(file_changes, workspace_root=self._workspace_root), ensure_ascii=False
                 ),
                 "file_changes": json.dumps(file_changes, ensure_ascii=False),
                 "target_path": verify_target_path,
@@ -6551,10 +6620,13 @@ class FileTaskRuntime:
                         for item in payload.get("remaining_steps") or []
                         if str(item or "").strip()
                     )
+                summary = "文件已有变更，但未满足本任务的关键质量门禁。"
+                if remaining:
+                    summary = f"{summary}还需处理：{remaining[0]}"
                 return {
                     "passed": False,
                     "status": "quality_gate_failed",
-                    "summary": "文件已有变更，但未满足本任务的关键质量门禁。",
+                    "summary": summary,
                     "confidence": payload.get("confidence"),
                     "remaining": remaining or ["补齐任务要求的关键产物后重新核验"],
                     "criteria_results": combined_criteria,

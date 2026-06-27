@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
@@ -467,19 +468,28 @@ def extract_sandbox_artifacts(result: Any) -> List[Dict[str, Any]]:
     return artifacts
 
 
-def file_states_for_changes(changes: Iterable[Dict[str, Any]]) -> List[Dict[str, Any]]:
+def file_states_for_changes(
+    changes: Iterable[Dict[str, Any]],
+    *,
+    workspace_root: str = "",
+) -> List[Dict[str, Any]]:
     states: List[Dict[str, Any]] = []
     seen: set[str] = set()
+    root = Path(workspace_root).resolve() if workspace_root else None
     for change in changes:
-        path = str(change.get("path") or "").strip()
-        if not path or path in seen:
+        raw_path = str(change.get("path") or "").strip()
+        if not raw_path or raw_path in seen:
             continue
-        seen.add(path)
+        seen.add(raw_path)
+        resolved = raw_path
+        if root and not os.path.isabs(raw_path):
+            resolved = str(root / raw_path)
+        file_exists = os.path.exists(resolved)
         states.append(
             {
-                "path": path,
-                "exists": True,
-                "modified": True,
+                "path": resolved,
+                "exists": bool(file_exists),
+                "modified": bool(file_exists),
                 "preview": str(change.get("preview") or change.get("summary") or "")[
                     :1000
                 ],

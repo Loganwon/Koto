@@ -547,6 +547,61 @@ def test_verify_task_completion_uses_structured_docx_image_metadata():
     assert "chart.png" in result["summary"]
 
 
+def test_verify_task_completion_ignores_intermediate_chart_artifacts_for_docx_target():
+    from app.core.agent.task_tools import verify_task_completion
+
+    result = json.loads(
+        verify_task_completion(
+            task_description="分析这个xlsx财务预测，找出其中的问题并将数据做成图，将数据和图都加入docx",
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "chart1_revenue_profit_trend.png",
+                        "exists": False,
+                        "modified": False,
+                        "preview": "生成收入利润趋势图。",
+                    },
+                    {
+                        "path": "report.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "财务预测问题分析。",
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "chart1_revenue_profit_trend.png",
+                        "operation": "run_python_code",
+                        "file_type": "png",
+                        "summary": "生成收入利润趋势图。",
+                    },
+                    {
+                        "path": "report.docx",
+                        "operation": "write_docx_content",
+                        "file_type": "docx",
+                        "paragraphs_written": 12,
+                    },
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_image_into_docx",
+                        "image_name": "chart1_revenue_profit_trend.png",
+                        "images_inserted": 1,
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            target_path="report.docx",
+        )
+    )
+
+    assert result["completed"] is True
+    assert "文件已成功修改：report.docx" in result["summary"]
+    assert "以下文件尚未修改" not in result["summary"]
+
+
 def test_verify_task_completion_rejects_table_only_result_when_task_requires_summary_text():
     from app.core.agent.task_tools import verify_task_completion
 

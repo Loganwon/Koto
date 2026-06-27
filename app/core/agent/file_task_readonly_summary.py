@@ -3,6 +3,8 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
+import html
+import re
 from typing import Any, Callable, Dict, List
 
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
@@ -23,6 +25,16 @@ def fallback_readonly_summary(
 ) -> str:
     if not snippets:
         return ""
+
+    article_summary = _build_readonly_content_summary(
+        request=request,
+        snippets=snippets,
+        readonly_tool_outputs=[],
+        display_path=display_path,
+        note=f"说明：模型暂不可用，本摘要由 Koto 基于已读取文本生成。模型错误：{_compact_line(exc, 160)}",
+    )
+    if article_summary:
+        return article_summary
 
     lines = [
         "模型暂不可用，Koto 已先基于显式上下文整理可见内容（非模型推理）：",
@@ -126,6 +138,15 @@ def readonly_context_summary(
     readonly_tool_outputs: List[Dict[str, Any]],
     display_path: DisplayPath,
 ) -> str:
+    summary = _build_readonly_content_summary(
+        request=request,
+        snippets=snippets,
+        readonly_tool_outputs=readonly_tool_outputs,
+        display_path=display_path,
+        note="说明：本轮为只读总结，没有写入或修改文件；由于模型未返回完整自然语言答案，Koto 使用已读取文本生成这份摘要。",
+    )
+    if summary:
+        return summary
     source_lines = readonly_context_source_lines(
         snippets=snippets,
         readonly_tool_outputs=readonly_tool_outputs,
@@ -134,14 +155,300 @@ def readonly_context_summary(
     )
     if not source_lines:
         return ""
-    lines = [
-        "已完成文件读取，但模型没有返回进一步自然语言分析。以下是 Koto 基于已读取内容整理的可见结果：",
-        f"任务：{request.task}",
-        "已读取内容：",
-        *source_lines,
-        "结论：本轮为只读分析，没有写入或修改文件。可以继续追问，让模型基于上述内容做更深入的总结、风险识别或访谈提纲整理。",
-    ]
+    return "\n".join(
+        [
+            "## 文件内容总结",
+            "",
+            "已读取文件，但可用于归纳的正文较少。以下是可见内容：",
+            *source_lines,
+            "",
+            "说明：本轮为只读总结，没有写入或修改文件。",
+        ]
+    )
+
+
+def _build_readonly_content_summary(
+    *,
+    request: FileTaskRequest,
+    snippets: List[Dict[str, Any]],
+    readonly_tool_outputs: List[Dict[str, Any]],
+    display_path: DisplayPath,
+    note: str,
+) -> str:
+    sources = _readonly_source_names(
+        snippets=snippets,
+        readonly_tool_outputs=readonly_tool_outputs,
+        display_path=display_path,
+    )
+    paragraphs = _readonly_content_paragraphs(
+        snippets=snippets,
+        readonly_tool_outputs=readonly_tool_outputs,
+    )
+    if not paragraphs:
+        return ""
+    title = "文章总结" if _looks_like_summary_task(request.task) else "文件内容总结"
+    overview = _compact_line(_first_substantial_sentence(paragraphs), 220)
+    thesis = _compact_line(_extract_thesis(paragraphs) or overview, 260)
+    structure_points = _select_structure_points(paragraphs, limit=5)
+    overall = _compose_overall_summary(overview, thesis, structure_points)
+    key_points = _select_key_points(
+        paragraphs,
+        limit=4,
+        exclude=[overview, thesis, *structure_points],
+    )
+
+    lines = [f"## {title}", ""]
+    if sources:
+        lines.append(f"已读取：{', '.join(sources[:3])}")
+        lines.append("")
+    lines.extend(
+        [
+            "总体概括：",
+            overall,
+            "",
+            "核心观点：",
+            f"- {_clean_claim_text(thesis)}",
+            "",
+            "论证脉络：",
+        ]
+    )
+    for index, point in enumerate(structure_points, start=1):
+        lines.append(f"{index}. {point}")
+    if key_points:
+        lines.extend(["", "补充要点："])
+        for point in key_points:
+            lines.append(f"- {point}")
+    lines.extend(["", note])
     return "\n".join(lines)
+
+
+def _looks_like_summary_task(task: Any) -> bool:
+    text = str(task or "").lower()
+    return any(token in text for token in ("总结", "摘要", "概括", "summar", "article", "文章", "文档"))
+
+
+def _readonly_source_names(
+    *,
+    snippets: List[Dict[str, Any]],
+    readonly_tool_outputs: List[Dict[str, Any]],
+    display_path: DisplayPath,
+) -> List[str]:
+    names: List[str] = []
+    seen: set[str] = set()
+    for item in readonly_tool_outputs:
+        if not isinstance(item, dict):
+            continue
+        label = readonly_tool_source_label(item, display_path=display_path)
+        if label and label not in seen:
+            seen.add(label)
+            names.append(label)
+    for index, snippet in enumerate(snippets, start=1):
+        if not isinstance(snippet, dict):
+            continue
+        source = str(snippet.get("source") or snippet.get("path") or f"上下文 {index}").strip()
+        label = display_path(source) or source
+        if label and label not in seen:
+            seen.add(label)
+            names.append(label)
+    return names
+
+
+def _readonly_content_paragraphs(
+    *,
+    snippets: List[Dict[str, Any]],
+    readonly_tool_outputs: List[Dict[str, Any]],
+) -> List[str]:
+    paragraphs: List[str] = []
+    seen: set[str] = set()
+
+    def add_text(value: Any) -> None:
+        for part in _split_candidate_paragraphs(value):
+            normalized = _normalize_article_text(part)
+            if not _is_substantial_article_text(normalized):
+                continue
+            key = normalized[:180]
+            if key in seen:
+                continue
+            seen.add(key)
+            paragraphs.append(normalized)
+
+    for item in readonly_tool_outputs:
+        if not isinstance(item, dict):
+            continue
+        result = item.get("result")
+        payload = result if isinstance(result, dict) else _json_payload(result)
+        if isinstance(payload, dict):
+            raw_paragraphs = payload.get("paragraphs") if isinstance(payload.get("paragraphs"), list) else []
+            for paragraph in raw_paragraphs:
+                if isinstance(paragraph, dict):
+                    add_text(paragraph.get("text"))
+                else:
+                    add_text(paragraph)
+            add_text(payload.get("text"))
+        else:
+            for point in readonly_tool_points(item):
+                add_text(point)
+    for snippet in snippets:
+        if not isinstance(snippet, dict):
+            continue
+        add_text(snippet.get("_raw_text") or snippet.get("preview"))
+    return paragraphs[:18]
+
+
+def _split_candidate_paragraphs(value: Any) -> List[str]:
+    text = str(value or "").strip()
+    if not text:
+        return []
+    text = html.unescape(text)
+    pieces = re.split(r"(?:\r?\n)+|(?<=。)\s+(?=[\u4e00-\u9fff])", text)
+    return [piece.strip() for piece in pieces if piece and piece.strip()]
+
+
+def _normalize_article_text(value: Any) -> str:
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip()
+    text = re.sub(r"^[-•\d.、\s]+", "", text)
+    return text
+
+
+def _is_substantial_article_text(text: str) -> bool:
+    if len(text) < 24:
+        return False
+    lowered = text.lower()
+    if lowered.startswith("word 内容包含") or "word 内容包含" in lowered:
+        return False
+    if re.fullmatch(r"section\s+\d+.*", lowered):
+        return False
+    if text.startswith("Section "):
+        return False
+    return True
+
+
+def _sentence_candidates(paragraphs: List[str]) -> List[str]:
+    sentences: List[str] = []
+    seen: set[str] = set()
+    for paragraph in paragraphs:
+        for sentence in re.split(r"(?<=[。！？!?])\s*", paragraph):
+            sentence = _normalize_article_text(sentence)
+            if len(sentence) < 18:
+                continue
+            key = sentence[:120]
+            if key in seen:
+                continue
+            seen.add(key)
+            sentences.append(sentence)
+    return sentences
+
+
+def _first_substantial_sentence(paragraphs: List[str]) -> str:
+    sentences = _sentence_candidates(paragraphs)
+    if sentences:
+        return sentences[0]
+    return paragraphs[0]
+
+
+def _extract_thesis(paragraphs: List[str]) -> str:
+    text = " ".join(paragraphs[:6])
+    for pattern in (
+        r"(我的论点是[^。！？!?]+[。！？!?]?)",
+        r"(本文的论点是[^。！？!?]+[。！？!?]?)",
+        r"(核心观点是[^。！？!?]+[。！？!?]?)",
+        r"(其论点是[^。！？!?]+[。！？!?]?)",
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return match.group(1)
+    for sentence in _sentence_candidates(paragraphs):
+        if any(token in sentence for token in ("论点", "主张", "核心", "认为", "不是", "而是")):
+            return sentence
+    return ""
+
+
+def _select_structure_points(paragraphs: List[str], *, limit: int) -> List[str]:
+    points: List[str] = []
+    for paragraph in paragraphs:
+        sentence = _first_sentence_from_paragraph(paragraph)
+        compact = _compact_line(sentence, 180)
+        if compact and not _near_duplicate(compact, points):
+            points.append(compact)
+        if len(points) >= limit:
+            break
+    return points
+
+
+def _select_key_points(paragraphs: List[str], *, limit: int, exclude: List[str] | None = None) -> List[str]:
+    keywords = ("论点", "关系", "身体", "技术", "艺术", "游戏", "电影", "观众", "主体", "框架", "失败", "条件")
+    points: List[str] = []
+    excluded = [item for item in (exclude or []) if item]
+    for sentence in _sentence_candidates(paragraphs):
+        if not any(keyword in sentence for keyword in keywords):
+            continue
+        compact = _compact_line(sentence, 190)
+        if compact and not _near_duplicate(compact, points) and not _near_duplicate(compact, excluded):
+            points.append(compact)
+        if len(points) >= limit:
+            break
+    return points
+
+
+def _compose_overall_summary(overview: str, thesis: str, structure_points: List[str]) -> str:
+    lead = _strip_sentence_end(overview)
+    claim = _clean_claim_text(_strip_sentence_end(thesis))
+    if claim and claim != lead and claim not in lead:
+        base = f"文章首先提出：{_without_leading_topic_marker(lead)}。核心主张是：{claim}。"
+    else:
+        base = f"文章首先提出：{_without_leading_topic_marker(lead)}。"
+    if len(structure_points) >= 3:
+        second = _strip_sentence_end(structure_points[1])
+        third = _strip_sentence_end(structure_points[2])
+        if second and third:
+            base += f"随后转向{_without_leading_topic_marker(second)}，并借助 {_without_leading_topic_marker(third)}这一理论背景展开论证。"
+    return _compact_line(base, 360)
+
+
+def _strip_sentence_end(text: str) -> str:
+    return str(text or "").strip().rstrip("。！？!?；; ")
+
+
+def _without_leading_topic_marker(text: str) -> str:
+    value = str(text or "").strip()
+    value = re.sub(r"^(这篇内容主要讨论|本文主要讨论|文章主要讨论)[：:，,]?", "", value)
+    return value
+
+
+def _clean_claim_text(text: str) -> str:
+    value = str(text or "").strip()
+    value = re.sub(r"^(我的论点是|本文的论点是|核心观点是|其论点是)[：:，,]?", "", value)
+    return value.strip()
+
+
+def _near_duplicate(candidate: str, existing: List[str]) -> bool:
+    normalized = _dedupe_key(candidate)
+    if not normalized:
+        return False
+    for item in existing:
+        other = _dedupe_key(item)
+        if not other:
+            continue
+        if normalized == other or normalized in other or other in normalized:
+            return True
+        overlap = len(set(normalized) & set(other)) / max(len(set(normalized)), 1)
+        if overlap >= 0.82 and abs(len(normalized) - len(other)) <= 24:
+            return True
+    return False
+
+
+def _dedupe_key(text: str) -> str:
+    return re.sub(r"[\s，。！？；：:,.!?;、\"“”'‘’（）()\[\]《》<>]+", "", str(text or "").lower())
+
+
+def _first_sentence_from_paragraph(paragraph: str) -> str:
+    candidates = re.split(r"(?<=[。！？!?])\s*", paragraph)
+    for candidate in candidates:
+        text = _normalize_article_text(candidate)
+        if len(text) >= 18:
+            return text
+    return _normalize_article_text(paragraph)
 
 
 def readonly_tool_source_label(
