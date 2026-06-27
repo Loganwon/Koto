@@ -48,12 +48,13 @@ Koto_Start.vbs / Koto_Start.bat
 | `app/core/skills/` | Skills 注册与执行 |
 | `web/blueprints/workspace_assistant.py` | 文件工作台 BFF 和文件 API |
 | `web/templates/index.html` | 统一前端页面 |
-| `web/static/js/workspace-assistant.js` | 文件工作台运行时和兼容桥接 |
 | `web/src/` | TypeScript 前端模块源码 |
+| `web/static/js/build/workspace-bundle.js` | 当前前端构建产物 |
 
-## 旧命名保留清单
+## 旧前端入口
 
-有些仍带 `workspace_assistant` 或 `workspace-assistant` 名字的文件不是独立旧入口，而是当前迁移期必须保留的运行时合同或测试夹具。保留原因、迁移条件和守护测试见 `docs/WORKSPACE_RETAINED_LEGACY.md`。
+旧的 `web/static/js/workspace-*.js` 前端入口和 `web/templates/workspace_assistant.html`
+已经移除。`web/blueprints/workspace_assistant.py` 只是 BFF 模块名暂未重命名，不是第二套页面体系。移除清单和守护测试见 `docs/WORKSPACE_RETAINED_LEGACY.md`。
 
 ## 测试建议
 

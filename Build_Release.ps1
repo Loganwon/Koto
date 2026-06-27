@@ -120,7 +120,7 @@ function Test-WorkspaceStaticAssets {
     )
 
     $required = @(
-        (Join-Path $StaticRoot "js\workspace-assistant.js"),
+        (Join-Path $StaticRoot "js\build\workspace-bundle.js"),
         (Join-Path $StaticRoot "jszip.min.js"),
         (Join-Path $StaticRoot "docx-preview.min.js"),
         (Join-Path $StaticRoot "univer-dist\index.html"),

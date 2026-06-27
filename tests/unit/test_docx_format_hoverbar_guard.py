@@ -6,8 +6,20 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+def _workspace_runtime_sources() -> str:
+    root = _repo_root()
+    parts = [
+        "web/src/workspace/file-open.ts",
+        "web/src/editors/docx-outline.ts",
+        "web/src/ui/selection-toolbar.ts",
+        "web/src/ui/docx-pptx-toolbar.ts",
+        "web/src/workspace/docx-review-runtime.ts",
+    ]
+    return "\n".join((root / path).read_text(encoding="utf-8") for path in parts)
+
+
 def test_docx_tooltip_buttons_keep_editor_focus():
-    shell_html = (_repo_root() / "web" / "templates" / "workspace_assistant.html").read_text(
+    shell_html = (_repo_root() / "web" / "templates" / "index.html").read_text(
         encoding="utf-8"
     )
     tooltip_html = (
@@ -21,9 +33,7 @@ def test_docx_tooltip_buttons_keep_editor_focus():
 
 
 def test_docx_hoverbar_has_font_controls():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    js = (_repo_root() / "web" / "src" / "ui" / "docx-pptx-toolbar.ts").read_text(encoding="utf-8")
     assert "fontFamily" in js
     assert "fontSize" in js
 
@@ -187,35 +197,31 @@ def test_docx_toggle_bold_and_italic_can_clear_block_level_text_styles():
 
 
 def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fallback():
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    shell_js = _workspace_runtime_sources()
 
-    assert "async function _mountDocxEditor(tab, html, docxData, headings)" in shell_js
-    assert shell_js.count("new KotoDocxEditorLib.KotoTipTapEditor();") == 1
-    assert shell_js.count("await _mountDocxEditor(") >= 2
+    assert "async function _mountDocx(tab: TabInfo, data: any): Promise<void>" in shell_js
+    assert "new (window as any).KotoDocxEditorLib.KotoTipTapEditor();" in shell_js
+    assert "await _mountDocx(tab, data);" in shell_js
     assert "state.activeEditor.editor.selection" not in shell_js
     assert "Legacy Slate fallback (unused — kept for safety)" not in shell_js
 
 
 def test_docx_outline_prefers_manifest_but_has_structural_dom_fallback():
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    shell_js = _workspace_runtime_sources()
 
-    assert "function _isValidDocxHeadingEntry(heading)" in shell_js
+    assert "function _isValidDocxHeadingEntry(heading:" in shell_js
     assert ".filter(_isValidDocxHeadingEntry)" in shell_js
-    assert "function _resolveDocxOutlineTarget(pm, heading)" in shell_js
-    assert "function _collectDocxOutlineHeadingsFromDom(pm)" in shell_js
-    assert "function _resolveDocxOutlineHeadings(headings)" in shell_js
+    assert "function _resolveDocxOutlineTarget(pm:" in shell_js
+    assert "function _collectDocxOutlineHeadingsFromDom(pm:" in shell_js
+    assert "function _resolveDocxOutlineHeadings(headings:" in shell_js
     assert 'data-koto-role="structural_heading"' in shell_js
     assert 'h1#${escapedId}[data-koto-role="structural_heading"]' in shell_js
-    assert "function _filterDocxOutlineHeadingsByDomTargets(headings)" in shell_js
+    assert "function _filterDocxOutlineHeadingsByDomTargets(headings:" in shell_js
     assert "headings = _resolveDocxOutlineHeadings(headings);" in shell_js
     assert "if (_resolveDocxOutlineTarget(pm, heading)) resolved.push(heading);" in shell_js
     assert "DOCX outline manifest underfilled; falling back to DOM structural headings" in shell_js
-    assert "function _bindDocxOutlineScrollSync(outline, headings)" in shell_js
-    assert "_syncDocxOutlineAfterMount(fullData.headings || []);" in shell_js
+    assert "function _bindDocxOutlineScrollSync(outline:" in shell_js
+    assert "setTimeout(() => _setupDocOutline((data && data.headings) || []), 0);" in shell_js
     assert "p[class^=\"koto-toc-\"]" not in shell_js
     assert "textContent.trim().startsWith(heading.text)" not in shell_js
     assert "setTimeout(() => _setupDocOutline([]), 300);" not in shell_js
@@ -223,20 +229,18 @@ def test_docx_outline_prefers_manifest_but_has_structural_dom_fallback():
 
 
 def test_docx_outline_click_and_scroll_sync_share_measured_offset_helpers():
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    shell_js = _workspace_runtime_sources()
     editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
         encoding="utf-8"
     )
 
-    assert "function _getDocxNavigationAnchorOffset(editorScroll, pm)" in shell_js
-    assert "function _getDocxTargetScrollTop(editorScroll, target)" in shell_js
+    assert "function _getDocxNavigationAnchorOffset(editorScroll:" in shell_js
+    assert "function _getDocxTargetScrollTop(editorScroll:" in shell_js
     assert "state.activeEditor" in shell_js
     assert "editorHost.getDocxNavigationAnchorOffset" in shell_js
     assert "editorHost.getDocxTargetScrollTop" in shell_js
     assert "editorScroll.scrollTop + _getDocxNavigationAnchorOffset(editorScroll, pm)" in shell_js
-    assert "const targetTop = _getDocxTargetScrollTop(editorScroll, entry.target);" in shell_js
+    assert "const targetTop = _getDocxTargetScrollTop(editorScroll, entry.target!);" in shell_js
     assert "const targetTop = _getDocxTargetScrollTop(editorScroll, target);" in shell_js
     assert "const offset = _getDocxNavigationAnchorOffset(editorScroll, pm);" in shell_js
     assert "getBoundingClientRect().top + 120" not in shell_js
@@ -252,9 +256,7 @@ def test_docx_font_size_toolbars_use_point_units_and_numeric_sync():
     editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
         encoding="utf-8"
     )
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    shell_js = _workspace_runtime_sources()
 
     assert '<option value="10pt">10</option>' in editor_js
     assert '<option value="72pt">72</option>' in editor_js
@@ -266,56 +268,48 @@ def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
     editor_js = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
         encoding="utf-8"
     )
-    shell_js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    shell_js = _workspace_runtime_sources()
     index_html = (_repo_root() / "web" / "templates" / "index.html").read_text(
         encoding="utf-8"
     )
 
-    assert '<option value="SimSun">宋体</option>' in editor_js
-    assert '<option value="DengXian">等线</option>' in editor_js
-    assert '<option value="STZhongsong">华文中宋</option>' in editor_js
+    assert "value: 'SimSun'" in editor_js
+    assert "value: 'DengXian'" in editor_js
+    assert "value: 'STZhongsong'" in editor_js
     assert "function _getDocxBlockTextStyleValue(ed, attrName)" in editor_js
     assert "_getDocxFontFamilyOptionValue(ff, fontFamilySel.options)" in editor_js
     assert "const nextValue = cmd === 'setFontFamily' ? _resolveDocxFontFamily(value)" in shell_js
-    assert "const fontName  = attrs.fontFamily || _getDocxBlockTextStyleValue(ed, 'fontFamily') || '';" in shell_js
+    assert "declare function _getDocxBlockTextStyleValue(ed: any, prop: string): string;" in shell_js
     assert "_getDocxFontDisplayName(fontNameValue)" in shell_js
-    assert '<option value="SimSun">宋体</option>' in index_html
-    assert '<option value="STKaiti">华文楷体</option>' in index_html
+    assert '<option value="SimSun">' in index_html
+    assert '<option value="STKaiti">' in index_html
 
 
 def test_docx_hoverbar_reuses_ribbon_for_header_footer_overlay():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
-    assert "_getActiveDocxHdrFtrOverlay" in js
+    js = _workspace_runtime_sources()
+    assert "_safeGetDocxHdrFtrSelectionInfo" in js
     assert "_syncDocxHoverBarFromRibbon" in js
     assert "_dispatchDocxRibbonClick" in js
-    assert "window._ttPickColor" in js
+    assert "(window as any)._ttPickColor" in js
 
 
 def test_docx_body_selection_prefers_live_native_selection_rects():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    js = _workspace_runtime_sources()
     assert "function _getDocxNativeSelectionBounds" in js
     assert "range.getClientRects ? range.getClientRects() : []" in js
-    assert "const nativeBounds = _getDocxNativeSelectionBounds(pm, pmR.left);" in js
+    assert "const nativeBounds = _getDocxNativeSelectionBounds(pm, pmRect ? pmRect.left : 0);" in js
     assert "const anchorY = bounds.bottom > 0" in js
 
 
 def test_docx_ai_selection_prefers_editor_table_payloads_over_native_last_cell_text():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
-        encoding="utf-8"
-    )
+    js = _workspace_runtime_sources()
 
     assert "function _getDocxSelectionPayload" in js
     assert "editorHost.getWholeTableSelectionInfo" in js
     assert "editorHost.getCellSelectionInfo" in js
     assert "editorHost.getSelectionTextForAI" in js
-    assert "aiText: `[当前选中表格数据]:\\n${wholeTableText}\\n`," in js
-    assert "_pinSelectionChip({ text: docxSelection.aiText, previewText: docxSelection.previewText });" in js
+    assert "aiText: `[" in js and "${wholeTableText}\\n`," in js
+    assert "? { text: docxSelection.aiText, previewText: docxSelection.previewText }" in js
     assert "_updateContextBar({ table: docxSelection.previewText });" in js
 
 

@@ -117,7 +117,7 @@ $requiredPaths = @(
     (Join-Path $internalDir "app"),
     (Join-Path $internalDir "web"),
     (Join-Path $internalDir "config"),
-    (Join-Path $staticRoot "js\workspace-assistant.js"),
+    (Join-Path $staticRoot "js\build\workspace-bundle.js"),
     (Join-Path $staticRoot "jszip.min.js"),
     (Join-Path $staticRoot "docx-preview.min.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),

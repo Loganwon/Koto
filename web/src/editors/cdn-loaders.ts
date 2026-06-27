@@ -1,6 +1,6 @@
 /**
  * CDN loaders for editing libraries (TipTap, Univer Sheets, PDF.js)
- * Converted from workspace-assistant.js
+ * Workspace editor dependency loaders.
  */
 
 declare global {

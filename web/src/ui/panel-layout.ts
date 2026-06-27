@@ -1,6 +1,6 @@
 /**
  * Panel Layout & Selection — selectionchange handler, Split.js init, panel auto-reset.
- * Converted from workspace-assistant.js lines 7012-7361.
+ * Workspace panel layout.
  */
 
 declare function $(id: string): HTMLElement | null;

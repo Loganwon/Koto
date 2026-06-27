@@ -1,7 +1,7 @@
 /**
  * Selection Toolbar — AI context bar, selection tooltip, PPTX table extract,
  * HTML table extract, toolbar positioning engine.
- * Converted from workspace-assistant.js lines 6149-7011.
+ * Workspace selection toolbar.
  */
 
 // ── External dependencies (provided by workspace-assistant IIFE scope) ──

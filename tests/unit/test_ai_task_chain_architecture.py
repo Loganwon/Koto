@@ -53,8 +53,10 @@ def test_workspace_page_routes_are_registered_without_legacy_page_shell() -> Non
     blueprints = _read("web/app_blueprints.py")
 
     assert '@pages_bp.route("/")' in pages
-    assert '@pages_bp.route("/workspace")' in pages
-    assert 'render_template("index.html", initial_theme="light")' in pages
+    assert '@pages_bp.route("/app")' in pages
+    assert '@pages_bp.route("/workspace-assistant")' in pages
+    assert "redirect(target, code=302)" in pages
+    assert 'render_template("index.html", initial_theme=_get_initial_theme())' in pages
     assert '("web.blueprints.pages", "pages_bp", None, "Pages")' in blueprints
     assert "workspace-assistant.js" not in pages
 
@@ -194,12 +196,7 @@ def test_history_records_show_structured_task_chain_verification() -> None:
 
 
 def test_compact_task_card_keeps_process_steps_visible_before_summary() -> None:
-    css = "\n".join(
-        [
-            _read("web/static/css/workspace.css"),
-            _read("web/static/css/workspace-task-flow.css"),
-        ]
-    )
+    css = _read("web/static/css/workspace.css")
 
     hidden_blocks = re.findall(r"\{[^{}]*display\s*:\s*none\s*!important[^{}]*\}", css)
     assert not any('[data-role="plan"]' in block for block in hidden_blocks)

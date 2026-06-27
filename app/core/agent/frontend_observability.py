@@ -20,7 +20,8 @@ _MAX_FIELD_CHARS = 4000
 _MAX_ACTIONS = 200
 _EVENTS: deque[Dict[str, Any]] = deque(maxlen=_MAX_EVENTS)
 _ACTIONS: deque[Dict[str, Any]] = deque(maxlen=_MAX_ACTIONS)
-_LOCK = threading.Lock()
+_LOCK = threading.RLock()
+_ACTION_CONDITION = threading.Condition(_LOCK)
 _SENSITIVE_KEY_RE = re.compile(
     r"(password|passwd|pwd|token|secret|api[_-]?key|authorization|credential|cookie|session)",
     re.IGNORECASE,
@@ -187,6 +188,7 @@ def clear_frontend_events(**_: Any) -> Dict[str, Any]:
         count = len(_EVENTS)
         _EVENTS.clear()
         _ACTIONS.clear()
+        _ACTION_CONDITION.notify_all()
     try:
         path = _event_log_path()
         if path.exists():
@@ -301,25 +303,31 @@ def enqueue_frontend_action(
     }
     with _LOCK:
         _ACTIONS.append(item)
+        _ACTION_CONDITION.notify_all()
     return {"success": True, "action": item}
 
 
-def next_frontend_action(session_id: str = "", **_: Any) -> Dict[str, Any]:
+def next_frontend_action(session_id: str = "", timeout_ms: int = 0, **_: Any) -> Dict[str, Any]:
     session_id = str(session_id or "").strip()
-    now = time.time()
-    with _LOCK:
-        for item in _ACTIONS:
-            if item.get("status") != "queued":
-                continue
-            target_session_id = str(item.get("target_session_id") or "").strip()
-            if target_session_id and session_id and target_session_id != session_id:
-                continue
-            if session_id and not target_session_id:
-                item["target_session_id"] = session_id[:200]
-            item["status"] = "delivered"
-            item["updated_ts"] = now
-            return {"success": True, "action": dict(item)}
-    return {"success": True, "action": None}
+    deadline = time.time() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
+    with _ACTION_CONDITION:
+        while True:
+            now = time.time()
+            for item in _ACTIONS:
+                if item.get("status") != "queued":
+                    continue
+                target_session_id = str(item.get("target_session_id") or "").strip()
+                if target_session_id and session_id and target_session_id != session_id:
+                    continue
+                if session_id and not target_session_id:
+                    item["target_session_id"] = session_id[:200]
+                item["status"] = "delivered"
+                item["updated_ts"] = now
+                return {"success": True, "action": dict(item)}
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return {"success": True, "action": None}
+            _ACTION_CONDITION.wait(timeout=min(remaining, 5.0))
 
 
 def complete_frontend_action(

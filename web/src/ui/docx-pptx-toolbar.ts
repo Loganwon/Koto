@@ -1,6 +1,5 @@
 /**
- * DOCX/PPTX Toolbar Bridges — hoverbar formatting, slide operations, shape operations.
- * Converted from workspace-assistant.js lines 13160-14439.
+ * DOCX/PPTX toolbar bridges - hoverbar formatting, slide operations, shape operations.
  */
 
 declare function $(id: string): HTMLElement | null;
@@ -22,7 +21,6 @@ declare function _resetDocxSelection(): void;
 declare function _syncDocxHoverBar(): void;
 declare function _getDocxSelectionPayload(opts?: any): any;
 declare function _getDocxHdrFtrSelectionInfo(): any;
-declare function _getDocxSelBounds(ed: any): any;
 declare function _updateContextBar(opts?: any): void;
 declare function _showTableTooltipNear(el: HTMLElement): void;
 declare function _updateDocxZoomUI(zoom: number): void;
@@ -72,6 +70,77 @@ export interface ToolbarState {
   top: number;
   width: number;
   height: number;
+}
+
+function _boundsFromRects(rects: ArrayLike<DOMRect | ClientRect>, editorLeft = 0): any {
+  const items = Array.from(rects || []).filter((rect: any) => {
+    return rect && Number.isFinite(rect.top) && Number.isFinite(rect.bottom)
+      && (rect.width > 0 || rect.height > 0);
+  });
+  if (!items.length) return null;
+  const top = Math.min(...items.map((rect: any) => rect.top));
+  const bottom = Math.max(...items.map((rect: any) => rect.bottom));
+  const left = Math.min(...items.map((rect: any) => rect.left));
+  const right = Math.max(...items.map((rect: any) => rect.right));
+  return {
+    top,
+    bottom,
+    left,
+    right,
+    centerX: left + ((right - left) / 2),
+    editorLeft,
+  };
+}
+
+export function _getDocxNativeSelectionBounds(pm?: HTMLElement | null, editorLeft = 0): any {
+  const selection = window.getSelection && window.getSelection();
+  if (!selection || selection.rangeCount <= 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!range || range.collapsed) return null;
+  if (pm) {
+    const start = range.startContainer && (range.startContainer.nodeType === Node.ELEMENT_NODE
+      ? range.startContainer as Element
+      : range.startContainer.parentElement);
+    const end = range.endContainer && (range.endContainer.nodeType === Node.ELEMENT_NODE
+      ? range.endContainer as Element
+      : range.endContainer.parentElement);
+    if ((start && !pm.contains(start)) || (end && !pm.contains(end))) return null;
+  }
+  const rects = range.getClientRects ? range.getClientRects() : [];
+  const bounds = _boundsFromRects(rects, editorLeft);
+  if (bounds) {
+    (window as any)._docxNativeSelBottom = bounds.bottom;
+  }
+  return bounds;
+}
+
+export function _getDocxSelBounds(ed: any): any {
+  const view = ed && ed.view;
+  const pm = view && view.dom ? view.dom as HTMLElement : document.querySelector('#wa-docx-editor .ProseMirror') as HTMLElement | null;
+  const pmRect = pm && pm.getBoundingClientRect ? pm.getBoundingClientRect() : null;
+  const nativeBounds = _getDocxNativeSelectionBounds(pm, pmRect ? pmRect.left : 0);
+  if (nativeBounds) return nativeBounds;
+
+  const selection = ed && ed.state && ed.state.selection;
+  if (!view || !selection || selection.from >= selection.to || typeof view.coordsAtPos !== 'function') return null;
+  try {
+    const start = view.coordsAtPos(selection.from);
+    const end = view.coordsAtPos(selection.to);
+    const left = Math.min(start.left, end.left);
+    const right = Math.max(start.right || start.left, end.right || end.left);
+    const top = Math.min(start.top, end.top);
+    const bottom = Math.max(start.bottom || start.top, end.bottom || end.top);
+    return {
+      top,
+      bottom,
+      left,
+      right,
+      centerX: left + ((right - left) / 2),
+      editorLeft: pmRect ? pmRect.left : 0,
+    };
+  } catch (_) {
+    return null;
+  }
 }
 
 // ── Ribbon dispatch ──────────────────────────────────────────────
@@ -1086,5 +1155,9 @@ if (typeof window !== 'undefined') {
   (window as any).WA.pptxRedo = pptxRedo;
   (window as any).WA.pptxDownload = pptxDownload;
   (window as any).WA._sendImageToAI = _sendImageToAI;
+  (window as any).WA._getDocxSelBounds = _getDocxSelBounds;
+  (window as any).WA._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
+  (window as any)._getDocxSelBounds = _getDocxSelBounds;
+  (window as any)._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
   (window as any)._kotoDocxSelectionChanged = _kotoDocxSelectionChanged;
 }

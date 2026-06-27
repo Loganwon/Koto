@@ -1,6 +1,5 @@
 /**
- * KotoImageViewer — Simple image viewer with zoom/pan
- * Converted from workspace-assistant.js
+ * KotoImageViewer - simple image viewer with zoom/pan
  */
 
 import type { WorkspaceEditor } from './types';

@@ -1513,30 +1513,29 @@ class TestCompleteWorkflow:
 
 
 class TestJavaScriptSourceChecks:
-    """Static analysis of workspace-assistant.js for critical patterns."""
+    """Static analysis of the current workspace save runtime."""
 
     @pytest.fixture(autouse=True)
     def _load_js(self):
-        js_path = (
-            Path(__file__).resolve().parents[2]
-            / "web"
-            / "static"
-            / "js"
-            / "workspace-assistant.js"
+        root = Path(__file__).resolve().parents[2]
+        self.js = "\n".join(
+            [
+                (root / "web" / "src" / "workspace" / "save.ts").read_text(encoding="utf-8"),
+                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(encoding="utf-8"),
+            ]
         )
-        self.js = js_path.read_text(encoding="utf-8")
 
     def test_ctrl_s_handler_exists(self):
-        assert "e.key === 's'" in self.js
-        assert "e.preventDefault()" in self.js
-        assert "WA.saveFile()" in self.js
+        assert "String(event.key || '').toLowerCase() === 's'" in self.js
+        assert "event.preventDefault()" in self.js
+        assert "saveFile();" in self.js
 
     def test_ctrl_s_uses_capture(self):
-        """The keydown handler must use capture:true to beat WangEditor."""
+        """The keydown handler must use capture:true to beat editor internals."""
         # Find the keydown listener that contains the Ctrl+S handler
         import re
 
-        pattern = r"addEventListener\('keydown'.*?e\.key\s*===\s*'s'.*?\},\s*true\)"
+        pattern = r"addEventListener\('keydown'.*?toLowerCase\(\)\s*===\s*'s'.*?\},\s*true\)"
         assert re.search(
             pattern, self.js, re.DOTALL
         ), "Ctrl+S handler should use capture: true"
@@ -1549,7 +1548,7 @@ class TestJavaScriptSourceChecks:
 
     def test_do_save_sends_explicit_true(self):
         """Both saveFile and autoSave should send explicit: true."""
-        assert "explicit: true" in self.js
+        assert "await _postAutoSave(tab, true);" in self.js
 
     def test_open_workspace_file_uses_open_file_by_path(self):
         assert "open_file_by_path" in self.js
@@ -1569,8 +1568,8 @@ class TestJavaScriptSourceChecks:
 
     def test_auto_save_timer_exists(self):
         assert "_autoSaveTimer" in self.js
-        assert "window.WA.scheduleAutoSave" in self.js
-        assert "WA.autoSave()" in self.js
+        assert "(window as any).WA.scheduleAutoSave = scheduleAutoSave" in self.js
+        assert "autoSave().catch(() => {});" in self.js
 
 
 # ===========================================================================

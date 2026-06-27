@@ -5,12 +5,16 @@
   const ACTION_RESULT_ENDPOINT = "/api/mcp/frontend-action-result";
   const MAX_QUEUE = 100;
   const SNAPSHOT_INTERVAL_MS = 6e4;
-  const ACTION_POLL_MS = 700;
+  const ACTION_LONG_POLL_MS = 25e3;
+  const ACTION_POLL_ACTIVE_DELAY_MS = 250;
+  const ACTION_POLL_IDLE_MIN_MS = 1e3;
+  const ACTION_POLL_IDLE_MAX_MS = 1e4;
   let _installed = false;
   let _queue = [];
   let _flushTimer = null;
   let _actionPollTimer = null;
   let _actionPollActive = false;
+  let _actionIdleDelayMs = ACTION_POLL_IDLE_MIN_MS;
   let _sessionId = "";
   let _originalFetch = null;
   function _now() {
@@ -1001,6 +1005,12 @@
     if (_flushTimer !== null) return;
     _flushTimer = window.setTimeout(_flush, 250);
   }
+  function _csrfHeaders() {
+    const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute("content") || "";
+    const headers = { "Content-Type": "application/json" };
+    if (token) headers["X-CSRFToken"] = token;
+    return headers;
+  }
   function _flush() {
     if (_flushTimer !== null) {
       window.clearTimeout(_flushTimer);
@@ -1011,7 +1021,7 @@
     const fetchImpl = _originalFetch || window.fetch.bind(window);
     fetchImpl(ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: _csrfHeaders(),
       body: JSON.stringify({ events }),
       keepalive: JSON.stringify({ events }).length < 6e4
     }).catch(() => {
@@ -1240,7 +1250,7 @@
     const fetchImpl = _originalFetch || window.fetch.bind(window);
     await fetchImpl(ACTION_RESULT_ENDPOINT, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: _csrfHeaders(),
       body: JSON.stringify({ id, ok, result, error }),
       keepalive: JSON.stringify({ id, ok, result, error }).length < 6e4
     });
@@ -1248,13 +1258,18 @@
   async function _pollFrontendAction() {
     if (_actionPollActive) return;
     _actionPollActive = true;
+    let nextDelay = _actionIdleDelayMs;
     try {
       const fetchImpl = _originalFetch || window.fetch.bind(window);
-      const response = await fetchImpl(`${ACTION_ENDPOINT}?session_id=${encodeURIComponent(_getSessionId())}`);
+      const response = await fetchImpl(
+        `${ACTION_ENDPOINT}?session_id=${encodeURIComponent(_getSessionId())}&timeout_ms=${ACTION_LONG_POLL_MS}`
+      );
       if (response.ok) {
         const payload = await response.json();
         const action = payload?.action;
         if (action?.id) {
+          _actionIdleDelayMs = ACTION_POLL_IDLE_MIN_MS;
+          nextDelay = ACTION_POLL_ACTIVE_DELAY_MS;
           try {
             const result = await _executeFrontendAction(action);
             await _postActionResult(action.id, true, result);
@@ -1273,17 +1288,25 @@
               details: { actionId: action.id, action: action.action, error: _errorDetails(error) }
             });
           }
+        } else {
+          nextDelay = _actionIdleDelayMs;
+          _actionIdleDelayMs = Math.min(_actionIdleDelayMs * 2, ACTION_POLL_IDLE_MAX_MS);
         }
+      } else {
+        nextDelay = _actionIdleDelayMs;
+        _actionIdleDelayMs = Math.min(_actionIdleDelayMs * 2, ACTION_POLL_IDLE_MAX_MS);
       }
     } catch (_) {
+      nextDelay = _actionIdleDelayMs;
+      _actionIdleDelayMs = Math.min(_actionIdleDelayMs * 2, ACTION_POLL_IDLE_MAX_MS);
     } finally {
       _actionPollActive = false;
-      _actionPollTimer = window.setTimeout(_pollFrontendAction, ACTION_POLL_MS);
+      _actionPollTimer = window.setTimeout(_pollFrontendAction, nextDelay);
     }
   }
   function _installFrontendActions() {
     if (_actionPollTimer !== null) return;
-    _actionPollTimer = window.setTimeout(_pollFrontendAction, ACTION_POLL_MS);
+    _actionPollTimer = window.setTimeout(_pollFrontendAction, ACTION_POLL_ACTIVE_DELAY_MS);
   }
   function installFrontendObserver() {
     if (_installed || typeof window === "undefined") return;
@@ -9947,6 +9970,21 @@ ${defaultPrompt}`;
         content_preview: previewText2(typeof options.sampleTaskContext === "function" ? options.sampleTaskContext(file.content || "") : String(file.content || ""), 700)
       }));
     }
+    function currentOpenTaskFile() {
+      const name = String(state2.fileName || "").trim();
+      const path = String(state2.filePath || state2.wsSourcePath || "").trim();
+      const type = String(state2.fileType || "").trim();
+      const id = String(state2.fileId || "").trim();
+      if (!name && !path && !type && !id) return null;
+      const content = typeof options.getActiveEditorContent === "function" ? previewText2(options.getActiveEditorContent() || "", 6e3) : "";
+      return {
+        path: path || id || name,
+        name: name || baseNameFromPath(path || id),
+        type,
+        content,
+        target: false
+      };
+    }
     function mentionsAttachedFileContext(text) {
       const source = String(text || "").trim();
       if (!source) return false;
@@ -10031,7 +10069,7 @@ ${defaultPrompt}`;
         session_id: typeof options.getSessionId === "function" ? options.getSessionId() : "",
         history: typeof options.getConversationHistory === "function" ? options.getConversationHistory() : [],
         files: workspaceRouteFiles(),
-        current_file: null,
+        current_file: compactFollowupTaskFile(currentOpenTaskFile()),
         has_selection: !!String(context.pinnedSelText || "").trim(),
         selection_preview: previewText2(context.pinnedSelText || "", 800),
         model_mode: typeof options.getModelMode === "function" ? options.getModelMode() : "",
@@ -10497,7 +10535,7 @@ ${defaultPrompt}`;
         content: typeof options.sampleTaskContext === "function" ? options.sampleTaskContext(file.content || "") : String(file.content || ""),
         target: idx === state2._aiTargetFileIdx
       })) : [];
-      const currentFile = null;
+      const currentFile = currentOpenTaskFile();
       let targetFile = rawFiles.find((f) => f.target) || null;
       const explicitTextTargetPath = explicitWriteTargetPathFromText(text);
       if (explicitTextTargetPath) {
@@ -13470,6 +13508,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   const DEFAULT_OPTIONS = {
     $: (id) => document.getElementById(id),
     getFiles: () => [],
+    getSessionId: () => null,
     escHtml: (value) => String(value ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;"),
     sanitizeRenderedHtml: (html) => html,
     fileIcon: () => ""
@@ -13502,6 +13541,131 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       file.text,
       file.content
     ].filter(Boolean).join("\n");
+  }
+  function _artifactFiles(files) {
+    return files.map((file) => ({
+      name: _fileLabel(file),
+      content: String(file.content || file.text || file.summary || file.snippet || "").trim()
+    })).filter((file) => file.content);
+  }
+  function _renderTextBlock(value) {
+    const html = _opt("escHtml")(String(value || "")).replace(/\n/g, "<br>");
+    return _opt("sanitizeRenderedHtml")(html);
+  }
+  async function notebookPost(url, files = _opt("getFiles")(), extra = {}) {
+    const payload = Object.assign({ files: _artifactFiles(files) }, extra || {});
+    const response = await _csrfFetch$6(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) {
+      let message = `请求失败 (${response.status})`;
+      try {
+        const data = await response.json();
+        message = String(data?.error || data?.message || message);
+      } catch (_) {
+        try {
+          message = (await response.text()).trim() || message;
+        } catch (_2) {
+        }
+      }
+      throw new Error(message);
+    }
+    return response;
+  }
+  async function _readNotebookEvents(response, onEvent) {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      const text = await response.text();
+      text.split(/\n\n+/).forEach((block) => {
+        const line = block.split(/\n/).find((item) => item.startsWith("data:"));
+        if (!line) return;
+        let event = null;
+        try {
+          event = JSON.parse(line.slice(5).trim());
+        } catch (_) {
+          return;
+        }
+        onEvent(event);
+      });
+      return;
+    }
+    const decoder = new TextDecoder();
+    let buffer = "";
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parts = buffer.split(/\n\n/);
+      buffer = parts.pop() || "";
+      for (const part of parts) {
+        const line = part.split(/\n/).find((item) => item.startsWith("data:"));
+        if (!line) continue;
+        let event = null;
+        try {
+          event = JSON.parse(line.slice(5).trim());
+        } catch (_) {
+          continue;
+        }
+        onEvent(event);
+      }
+    }
+  }
+  function _requireArtifactFiles() {
+    const files = _opt("getFiles")() || [];
+    if (_artifactFiles(files).length) return files;
+    _options.showToast?.("请先附加包含文本内容的文件", "info");
+    throw new Error("缺少可生成内容的文件");
+  }
+  async function openNotebookGuide() {
+    const panel = _el("wa-notebook-guide");
+    const body = _el("wa-notebook-body");
+    _setVisible(panel, true);
+    if (body) body.innerHTML = '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div>';
+    try {
+      const response = await notebookPost("/api/v1/workspace/notebook_guide", _requireArtifactFiles());
+      const sections = [];
+      await _readNotebookEvents(response, (event) => {
+        if (event?.section === "done") return;
+        if (event?.section === "error") throw new Error(String(event.content || "学习包生成失败"));
+        const title = _opt("escHtml")(event?.label || event?.section || "学习包");
+        sections.push(`<section class="wa-notebook-section"><h4>${title}</h4><div>${_renderTextBlock(event?.content)}</div></section>`);
+        if (body) body.innerHTML = _opt("sanitizeRenderedHtml")(sections.join(""));
+      });
+    } catch (error) {
+      if (body) body.innerHTML = `<div class="wa-source-search-empty">${_opt("escHtml")(error?.message || "学习包生成失败")}</div>`;
+      _options.showToast?.(error?.message || "学习包生成失败", "error");
+    }
+  }
+  async function openAudioOverview() {
+    const modal = _el("wa-audio-modal");
+    const body = _el("wa-audio-modal-body");
+    _setVisible(modal, true);
+    if (body) body.innerHTML = '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>';
+    try {
+      const sessionId = _opt("getSessionId")() || void 0;
+      const response = await notebookPost("/api/v1/workspace/audio_overview", _requireArtifactFiles(), { session_id: sessionId });
+      let scriptHtml = "";
+      let audioHtml = "";
+      await _readNotebookEvents(response, (event) => {
+        if (event?.event === "error") throw new Error(String(event.data || "有声概览生成失败"));
+        if (event?.event === "script" && Array.isArray(event.data)) {
+          scriptHtml = event.data.map((line) => {
+            const speaker = _opt("escHtml")(line?.speaker || "Host");
+            return `<p><strong>${speaker}</strong>：${_renderTextBlock(line?.text)}</p>`;
+          }).join("");
+        }
+        if (event?.event === "audio_url" && event.data) {
+          const url = _opt("escHtml")(event.data);
+          audioHtml = `<audio controls src="${url}" style="width:100%"></audio>`;
+        }
+        if (body) body.innerHTML = _opt("sanitizeRenderedHtml")(`${audioHtml}<div class="wa-audio-script">${scriptHtml || '<div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>'}</div>`);
+      });
+    } catch (error) {
+      if (body) body.innerHTML = `<div class="wa-source-search-empty">${_opt("escHtml")(error?.message || "有声概览生成失败")}</div>`;
+      _options.showToast?.(error?.message || "有声概览生成失败", "error");
+    }
   }
   function _renderSearchRows(files, query) {
     const escHtml2 = _opt("escHtml");
@@ -13565,6 +13729,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     WA2.closeSourcePreview = closeSourcePreview;
     WA2.closeAudioModal = closeAudioModal;
     WA2.closeNotebookGuide = closeNotebookGuide;
+    WA2.openNotebookGuide = openNotebookGuide;
+    WA2.openAudioOverview = openAudioOverview;
     WA2.doSourceSearch = doSourceSearch;
     WA2.clearSourceSearch = clearSourceSearch;
   }
@@ -13841,8 +14007,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     _selChangeTimer = setTimeout(() => {
       const _ae = document.activeElement;
       if (_ae && (_ae.closest("#wa-pdf-tooltip") || _ae.closest("#wa-docx-hoverbar") || _ae.closest("#wa-docx-cp") || _ae.closest("#wa-review-shell") || _ae.closest("#wa-review-selection-launcher"))) return;
-      const docxMouseIsDown = Boolean(state._docxMouseIsDown || window._docxMouseIsDown);
-      if (docxMouseIsDown && document.querySelector("#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover")) return;
+      if (_docxMouseIsDown && document.querySelector("#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover")) return;
       const _ws = window.getSelection();
       if (!_ws || _ws.isCollapsed || !_ws.rangeCount) {
         _resetDocxSelection();
@@ -13885,8 +14050,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const left = $("wa-left"), canvas = $("wa-canvas"), ai = $("wa-ai");
     const embedded = !!document.getElementById("workspaceView");
     if (!canvas || !ai || !embedded && !left) return;
-    const EMBEDDED_SPLIT_STORAGE_KEY = "wa_split_sizes_embedded_v3";
-    const splitKey = embedded ? EMBEDDED_SPLIT_STORAGE_KEY : "wa_split_sizes";
+    const splitKey = embedded ? "wa_split_sizes_embedded" : "wa_split_sizes";
     let savedSizes = null;
     try {
       const raw = localStorage.getItem(splitKey);
@@ -13991,7 +14155,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     return !!listView && !listView.hidden;
   }
   function _focusVisibleAIComposer() {
-    const input = document.getElementById("wa-user-input");
+    const inputId = _isAiSessionListVisible() ? "wa-session-list-input" : "wa-user-input";
+    const input = document.getElementById(inputId);
     if (!input) return;
     window.setTimeout(() => {
       try {
@@ -14058,7 +14223,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const aiInputBox = aiInputArea ? aiInputArea.querySelector(".wa-input-box") : null;
     const aiInput = document.getElementById("wa-user-input");
     const sessionListComposer = document.getElementById("wa-ai-session-list-composer");
-    [aiInputArea, aiInputBox, aiInput, sessionListComposer].forEach((dropTarget) => {
+    const sessionListInput = document.getElementById("wa-session-list-input");
+    [aiInputArea, aiInputBox, aiInput, sessionListComposer, sessionListInput].forEach((dropTarget) => {
       if (!dropTarget) return;
       dropTarget.addEventListener("dragenter", (event) => {
         if (!_isAIAttachmentDrag(event)) return;
@@ -14181,7 +14347,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         if (window._waSplit) {
           let sizes = [68, 32];
           try {
-            const raw = localStorage.getItem("wa_split_sizes_embedded_v3");
+            const raw = localStorage.getItem("wa_split_sizes_embedded");
             const parsed = raw ? JSON.parse(raw) : null;
             if (Array.isArray(parsed) && parsed.length === 2) sizes = parsed;
           } catch {
@@ -15113,59 +15279,64 @@ ${cellSelectionText}
     const getter = window._getDocxHdrFtrSelectionInfo;
     return typeof getter === "function" ? getter() : null;
   }
-  function _boundsFromRects(rects) {
-    const visibleRects = rects.filter((rect) => rect && rect.width > 0 && rect.height > 0);
-    if (!visibleRects.length) return null;
-    const left = Math.min(...visibleRects.map((rect) => rect.left));
-    const right = Math.max(...visibleRects.map((rect) => rect.right));
-    const top = Math.min(...visibleRects.map((rect) => rect.top));
-    const bottom = Math.max(...visibleRects.map((rect) => rect.bottom));
+  function _boundsFromRects(rects, editorLeft = 0) {
+    const items = Array.from(rects || []).filter((rect) => {
+      return rect && Number.isFinite(rect.top) && Number.isFinite(rect.bottom) && (rect.width > 0 || rect.height > 0);
+    });
+    if (!items.length) return null;
+    const top = Math.min(...items.map((rect) => rect.top));
+    const bottom = Math.max(...items.map((rect) => rect.bottom));
+    const left = Math.min(...items.map((rect) => rect.left));
+    const right = Math.max(...items.map((rect) => rect.right));
     return {
-      visible: true,
-      left,
       top,
-      width: Math.max(0, right - left),
-      height: Math.max(0, bottom - top),
       bottom,
-      centerX: left + (right - left) / 2
+      left,
+      right,
+      centerX: left + (right - left) / 2,
+      editorLeft
     };
   }
-  function _getDocxNativeSelectionBounds(pm) {
-    if (!pm || !window.getSelection) return null;
-    const selection = window.getSelection();
-    if (!selection || selection.isCollapsed || selection.rangeCount <= 0) return null;
-    let range;
-    try {
-      range = selection.getRangeAt(0);
-    } catch (_) {
-      return null;
+  function _getDocxNativeSelectionBounds(pm, editorLeft = 0) {
+    const selection = window.getSelection && window.getSelection();
+    if (!selection || selection.rangeCount <= 0) return null;
+    const range = selection.getRangeAt(0);
+    if (!range || range.collapsed) return null;
+    if (pm) {
+      const start = range.startContainer && (range.startContainer.nodeType === Node.ELEMENT_NODE ? range.startContainer : range.startContainer.parentElement);
+      const end = range.endContainer && (range.endContainer.nodeType === Node.ELEMENT_NODE ? range.endContainer : range.endContainer.parentElement);
+      if (start && !pm.contains(start) || end && !pm.contains(end)) return null;
     }
-    const anchorNode = selection.anchorNode;
-    const focusNode = selection.focusNode;
-    const containsAnchor = !!anchorNode && (anchorNode === pm || pm.contains(anchorNode));
-    const containsFocus = !!focusNode && (focusNode === pm || pm.contains(focusNode));
-    if (!containsAnchor && !containsFocus) return null;
-    const rects = Array.from(range.getClientRects ? range.getClientRects() : []);
-    const rectBounds = _boundsFromRects(rects);
-    if (rectBounds) return rectBounds;
-    const fallbackRect = range.getBoundingClientRect();
-    return _boundsFromRects([fallbackRect]);
+    const rects = range.getClientRects ? range.getClientRects() : [];
+    const bounds = _boundsFromRects(rects, editorLeft);
+    if (bounds) {
+      window._docxNativeSelBottom = bounds.bottom;
+    }
+    return bounds;
   }
   function _getDocxSelBounds(ed) {
-    const pm = ed && ed.view && ed.view.dom ? ed.view.dom : document.querySelector("#wa-docx-editor .ProseMirror");
-    const nativeBounds = pm ? _getDocxNativeSelectionBounds(pm) : null;
+    const view = ed && ed.view;
+    const pm = view && view.dom ? view.dom : document.querySelector("#wa-docx-editor .ProseMirror");
+    const pmRect = pm && pm.getBoundingClientRect ? pm.getBoundingClientRect() : null;
+    const nativeBounds = _getDocxNativeSelectionBounds(pm, pmRect ? pmRect.left : 0);
     if (nativeBounds) return nativeBounds;
     const selection = ed && ed.state && ed.state.selection;
-    const view = ed && ed.view;
-    if (!selection || !view || typeof view.coordsAtPos !== "function") return null;
-    if (!(selection.from < selection.to)) return null;
+    if (!view || !selection || selection.from >= selection.to || typeof view.coordsAtPos !== "function") return null;
     try {
       const start = view.coordsAtPos(selection.from);
       const end = view.coordsAtPos(selection.to);
-      return _boundsFromRects([
-        new DOMRect(start.left, start.top, Math.max(1, start.right - start.left), Math.max(1, start.bottom - start.top)),
-        new DOMRect(end.left, end.top, Math.max(1, end.right - end.left), Math.max(1, end.bottom - end.top))
-      ]);
+      const left = Math.min(start.left, end.left);
+      const right = Math.max(start.right || start.left, end.right || end.left);
+      const top = Math.min(start.top, end.top);
+      const bottom = Math.max(start.bottom || start.top, end.bottom || end.top);
+      return {
+        top,
+        bottom,
+        left,
+        right,
+        centerX: left + (right - left) / 2,
+        editorLeft: pmRect ? pmRect.left : 0
+      };
     } catch (_) {
       return null;
     }
@@ -16072,8 +16243,6 @@ ${cellSelectionText}
     window.WA.docxHoverAI = docxHoverAI;
     window.WA.docxColorPicker = docxColorPicker;
     window.WA._docxPickColor = _docxPickColor;
-    window.WA._getDocxSelBounds = _getDocxSelBounds;
-    window.WA._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
     window.WA.closeDocxHoverBar = closeDocxHoverBar;
     window.WA.closeSelectionToolbar = closeSelectionToolbar;
     window.WA.pptxShapeFill = pptxShapeFill;
@@ -16122,6 +16291,10 @@ ${cellSelectionText}
     window.WA.pptxRedo = pptxRedo;
     window.WA.pptxDownload = pptxDownload;
     window.WA._sendImageToAI = _sendImageToAI;
+    window.WA._getDocxSelBounds = _getDocxSelBounds;
+    window.WA._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
+    window._getDocxSelBounds = _getDocxSelBounds;
+    window._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
     window._kotoDocxSelectionChanged = _kotoDocxSelectionChanged;
   }
   const _libsLoaded = { tiptap: false, sheets: false, pdfjs: false };

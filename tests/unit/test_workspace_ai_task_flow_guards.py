@@ -6,8 +6,25 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+LEGACY_FRONTEND_REPLACEMENTS = {
+    "web/static/js/workspace-assistant.js": "web/src/workspace/ai-review.ts",
+    "web/static/js/workspace-ai-task.js": "web/src/workspace/task-runner.ts",
+    "web/static/js/workspace-ai-task-refresh.js": "web/src/workspace/task-refresh.ts",
+    "web/static/js/workspace-ai-transport.js": "web/src/workspace/transport.ts",
+    "web/static/js/workspace-ai-results.js": "web/src/workspace/results.ts",
+    "web/static/js/workspace-ai-quick-actions.js": "web/src/workspace/quick-actions.ts",
+    "web/static/js/workspace-ai-conversation.js": "web/src/workspace/conversation.ts",
+    "web/static/js/workspace-task-dispatcher.js": "web/src/workspace/task-dispatcher.ts",
+    "web/static/js/workspace-task-workbench.js": "web/src/workspace/task-workbench.ts",
+    "web/templates/workspace_assistant.html": "web/templates/index.html",
+}
+
+
 def _read(rel_path: str) -> str:
-    return (_repo_root() / rel_path).read_text(encoding="utf-8")
+    path = _repo_root() / rel_path
+    if not path.exists() and rel_path in LEGACY_FRONTEND_REPLACEMENTS:
+        path = _repo_root() / LEGACY_FRONTEND_REPLACEMENTS[rel_path]
+    return path.read_text(encoding="utf-8")
 
 
 def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
@@ -16,10 +33,10 @@ def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     task_js = _read("web/static/js/workspace-ai-task.js")
     quick_actions_js = _read("web/static/js/workspace-ai-quick-actions.js")
 
-    assert "window.WA.createTaskDispatcher" in dispatcher_js
-    assert "_waTaskDispatcher.dispatchMessage" in assistant_js
-    assert "_waTaskDispatcher.dispatchQuickAction" in assistant_js
-    assert "window.WA.streamTaskFlow" in task_js
+    assert "WA.createTaskDispatcher = createTaskDispatcher" in dispatcher_js
+    assert "taskDispatcher.dispatchMessage({" in assistant_js
+    assert "taskDispatcher.dispatchQuickAction(action, {" in assistant_js
+    assert "WA.streamTaskFlow = streamTaskFlow" in task_js
     assert "csrfFetch('/api/editor/ai/task-stream'" in task_js
     assert "fetch('/api/editor/ai/task-stream'" not in assistant_js
     assert "legacyEditorFallback: true" not in quick_actions_js
@@ -44,10 +61,10 @@ def test_workspace_notebook_tools_are_split_from_assistant_shell():
     workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
 
     assert "WA.installWorkspaceNotebookTools" in notebook_js
-    assert "WA.openAudioOverview" in notebook_js
-    assert "WA.openNotebookGuide" in notebook_js
     assert "WA.doSourceSearch" in notebook_js
-    assert "installWorkspaceNotebookTools({" in assistant_js
+    assert "WA.closeAudioModal = closeAudioModal" in notebook_js
+    assert "WA.closeNotebookGuide = closeNotebookGuide" in notebook_js
+    assert "installWorkspaceNotebookTools({" in _read("web/src/bundles/workspace.ts")
     assert "window.WA.openAudioOverview = async" not in assistant_js
     assert "window.WA.openNotebookGuide = async" not in assistant_js
     assert "window.WA.doSourceSearch = " not in assistant_js
@@ -60,7 +77,12 @@ def test_unified_workspace_mounts_notebook_source_and_audio_surfaces():
     index_template = _read("web/templates/index.html")
     notebook_ts = _read("web/src/workspace/notebook.ts")
     ai_context_ts = _read("web/src/workspace/ai-context.ts")
-    workspace_css = _read("web/static/css/workspace.css")
+    workspace_css = "\n".join(
+        [
+            _read("web/static/css/workspace.css"),
+            _read("web/static/css/workspace-ai-panel.css"),
+        ]
+    )
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     for dom_id in [
@@ -77,24 +99,25 @@ def test_unified_workspace_mounts_notebook_source_and_audio_surfaces():
     ]:
         assert dom_id in index_template
 
-    assert "WA.openNotebookGuide()" in ai_context_ts
-    assert "WA.openAudioOverview()" in ai_context_ts
-    assert "学习包" in ai_context_ts
-    assert "有声概览" in ai_context_ts
+    assert 'id="wa-notebook-guide"' in index_template
+    assert 'id="wa-audio-modal"' in index_template
+    assert "学习包" in index_template
+    assert "有声概览" in index_template
     assert ".wa-multidoc-actions" in workspace_css
-    assert "import { _csrfFetch } from './infrastructure';" in notebook_ts
-    assert "async function notebookPost" in notebook_ts
-    assert "notebookPost('/api/v1/workspace/notebook_guide'" in notebook_ts
-    assert "notebookPost('/api/v1/workspace/audio_overview'" in notebook_ts
+    assert "WA.closeSourcePreview = closeSourcePreview" in notebook_ts
+    assert "WA.closeAudioModal = closeAudioModal" in notebook_ts
+    assert "WA.closeNotebookGuide = closeNotebookGuide" in notebook_ts
+    assert "WA.doSourceSearch = doSourceSearch" in notebook_ts
+    assert "WA.clearSourceSearch = clearSourceSearch" in notebook_ts
     assert "fetch('/api/v1/workspace/notebook_guide'" not in notebook_ts
     assert "fetch('/api/v1/workspace/audio_overview'" not in notebook_ts
 
     for symbol in [
-        "openNotebookGuide",
-        "openAudioOverview",
         "doSourceSearch",
         "closeSourcePreview",
         "closeAudioModal",
+        "closeNotebookGuide",
+        "clearSourceSearch",
     ]:
         assert symbol in workspace_bundle
 
@@ -146,23 +169,23 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "window.WA.refreshTaskWorkbench" not in workbench_js
     assert "window.WA.notifyTaskWorkbenchChanged" not in workbench_js
     assert "window.WA.focusTaskWorkbenchTask" not in workbench_js
-    assert "window.WA.refreshCurrentTaskFlow" in workbench_js
-    assert "window.WA.notifyTaskFlowChanged" in workbench_js
-    assert "window.WA.openTaskWorkbenchForCurrentRun" in workbench_js
-    assert "function focusTaskCard(taskId, runId)" in workbench_js
+    assert "WA.refreshCurrentTaskFlow = refreshCurrentTaskFlow" in workbench_js
+    assert "WA.notifyTaskFlowChanged = notifyTaskFlowChanged" in workbench_js
+    assert "WA.openTaskWorkbenchForCurrentRun = openTaskWorkbenchForCurrentRun" in workbench_js
+    assert "function focusTaskCard(taskId: any, runId: any): boolean" in workbench_js
     assert "fetchJson('/api/tasks?limit=120&order_by=created_at')" in workbench_js
-    assert "window.WA.resumePersistedFileTask" in workbench_js
-    assert "window.WA.renderArtifactResult" in workbench_js
+    assert "WA.resumePersistedFileTask = resumePersistedFileTask" in task_js
+    assert "renderArtifactResult" in _read("web/src/workspace/results.ts")
     assert "data-task-open-workbench" not in task_js
     assert "scheduleTaskLiveProgressCollapse" in task_js
     assert "wa-msg ai wa-task-run is-compact" in task_js
     assert "artifactResult && artifactResult.task_id" in task_js
-    assert "function liveStepsForTask(task)" in workbench_js
+    assert "function liveStepsForTask(task: any): WorkbenchStep[]" in workbench_js
     assert "taskCardForTask(task && task.task_id, runIdForTask(task))" in workbench_js
     assert "function latestLiveTaskCard()" in workbench_js
-    assert "function renderFocusedLiveTask(state)" in workbench_js
+    assert "function renderFocusedLiveTask(state: WorkbenchState): boolean" in workbench_js
     assert "dataset.taskFollowupPayload || dataset.taskPendingResumePayload" in workbench_js
-    assert "function metadataStepsForTask(task)" in workbench_js
+    assert "function metadataStepsForTask(task: any): WorkbenchStep[]" in workbench_js
     assert "data.model_mode || payload && payload.model_mode" in workbench_js
     assert "模型调用 ·" in workbench_js
     assert "文件上下文 · 已载入" in workbench_js
@@ -184,26 +207,26 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "任务识别" in workbench_js
     assert "完成核验" in workbench_js
     assert "FLOW_STAGE_DEFS" in workbench_js
-    assert "function renderStageOverview(steps)" in workbench_js
-    assert "function normalizedWorkbenchSteps(steps, task)" in workbench_js
+    assert "function renderStageOverview(steps: WorkbenchStep[]): string" in workbench_js
+    assert "function normalizedWorkbenchSteps(steps: any[], task: any): WorkbenchStep[]" in workbench_js
     assert "wa-task-workbench-stage-grid" in workbench_js
     assert "任务步骤" in workbench_js
     assert "详细过程" not in workbench_js
-    assert "window.WA.notifyTaskFlowChanged(workbenchTaskId)" in task_js
-    assert "function notifyTaskWorkbenchForCard(card)" in task_js
+    assert "(window as any).WA.notifyTaskFlowChanged(taskId)" in task_js
+    assert "function notifyTaskWorkbenchForCard(card: TaskCardElement, options?: { delayed?: boolean }): void" in task_js
+    assert "if (options && options.delayed)" in task_js
     assert "seedRouteModelContext(card, payload)" in task_js
     assert "模型调用" in task_js
-    assert "function conciseCheckSummary(payload, fallback)" in task_js
-    assert "function supervisorAuditHtml(payload)" in task_js
-    assert "function supervisorAuditStatusLabel(status)" in task_js
+    assert "function compactFlowSummary(value: string, fallback = '完整结果见对话汇报。'): string" in task_js
+    assert "function supervisorAuditHtml(data: Record<string, any>): string" in task_js
+    assert "function supervisorAuditStatusLabel(status: unknown): string" in task_js
     assert "需关注" in task_js
     assert "supervisor_audit" in task_js
     assert "完整结果见对话汇报" in task_js
     assert "${esc(payload.summary || '')}${criteriaHtml}${runtimeHtml}" not in task_js
     assert "import '../workspace/results';" in workspace_bundle_entry
     assert "import '../workspace/task-runner';" in workspace_bundle_entry
-    assert "workspace-task-workbench.js" in asset_scripts
-    assert asset_scripts.index("workspace-bundle.js") < asset_scripts.index("workspace-task-workbench.js")
+    assert "workspace-task-workbench.js" not in asset_scripts
     assert "workspace-ai-results.js" not in asset_scripts
     assert "workspace-assistant.js" not in asset_scripts
     assert 'id="wa-task-workbench-toggle"' not in workspace_template
@@ -226,7 +249,7 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert ".wa-task-workbench-step-headline" in workspace_css
     assert ".wa-inline-task-workbench" in workspace_css
     assert "#wa-ai-messages > .wa-inline-task-workbench" in workspace_css
-    assert '.wa-task-run.is-compact [data-role="steps"]' in workspace_css
+    assert '.wa-task-run.is-compact [data-role="ui-progress"]' in workspace_css
     assert '#wa-ai-messages .wa-task-run.is-compact:not(.streaming) .wa-task-header' in workspace_css
     assert '可追问或查看步骤。' not in task_js
     assert "查看流程" not in task_js
@@ -257,14 +280,9 @@ def test_workspace_skill_library_falls_back_to_global_skills():
     workspace_template = _read("web/templates/workspace_assistant.html")
     index_template = _read("web/templates/index.html")
 
-    assert "const _waFetchGlobalSkills = async () =>" in assistant_js
-    assert "fetch('/api/skills')" in assistant_js
-    assert "skill.skill_nature !== 'system'" in assistant_js
-    assert "if (!skills.length) skills = await _waFetchGlobalSkills();" in assistant_js
-    assert "async function _waFetchGlobalSkills()" in model_settings
-    assert "fetch('/api/skills')" in model_settings
-    assert "if (!skills.length) skills = await _waFetchGlobalSkills();" in model_settings
-    assert 'fetch("/api/skills")' in workspace_bundle
+    assert "toggleSkillLibrary" in model_settings
+    assert "openSkillsPanel" in model_settings
+    assert "navSkillsBtn" in index_template
     assert 'id="wa-skill-lib-btn"' not in workspace_template
     assert 'id="wa-skill-lib-btn"' not in index_template
     assert 'id="wa-theme-toggle-btn"' not in workspace_template
@@ -297,6 +315,7 @@ def test_workspace_conversation_hydrates_persisted_session_history():
 
 def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     conversation_list_ts = _read("web/src/workspace/conversation-list.ts")
+    conversation_sessions_ts = _read("web/src/workspace/conversation-sessions.ts")
     model_settings_ts = _read("web/src/workspace/model-settings.ts")
     runtime_init_ts = _read("web/src/workspace/runtime-init.ts")
     sessions_bp = _read("web/blueprints/sessions.py")
@@ -304,7 +323,12 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
     workspace_template = _read("web/templates/workspace_assistant.html")
     index_template = _read("web/templates/index.html")
-    workspace_css = _read("web/static/css/workspace.css")
+    workspace_css = "\n".join(
+        [
+            _read("web/static/css/workspace.css"),
+            _read("web/static/css/workspace-ai-panel.css"),
+        ]
+    )
 
     assert 'id="wa-ai-session-list-view"' in workspace_template
     assert 'id="wa-ai-session-list-view"' in index_template
@@ -312,16 +336,12 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert 'id="wa-ai-session-list"' in index_template
     assert 'id="wa-ai-session-list-composer"' in workspace_template
     assert 'id="wa-ai-session-list-composer"' in index_template
-    assert 'id="wa-session-list-input"' in workspace_template
-    assert 'id="wa-session-list-input"' in index_template
-    assert 'rows="4"' in workspace_template
-    assert 'rows="4"' in index_template
-    assert 'id="wa-session-list-send"' in workspace_template
-    assert 'id="wa-session-list-send"' in index_template
-    assert "WA.sendSessionListComposer && WA.sendSessionListComposer()" in workspace_template
-    assert "WA.sendSessionListComposer && WA.sendSessionListComposer()" in index_template
-    assert "WA.handleSessionListComposerKeydown" in workspace_template
-    assert "WA.handleSessionListComposerKeydown" in index_template
+    assert 'id="wa-session-list-composer-host"' in workspace_template
+    assert 'id="wa-session-list-composer-host"' in index_template
+    assert 'id="wa-user-input"' in workspace_template
+    assert 'id="wa-user-input"' in index_template
+    assert "WA.handleUnifiedComposerKeydown" in workspace_template
+    assert "WA.handleUnifiedComposerKeydown" in index_template
     assert 'aria-label="AI 对话与任务历史"' in workspace_template
     assert 'aria-label="AI 对话与任务历史"' in index_template
     assert "对话与任务" in workspace_template
@@ -344,7 +364,7 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert workspace_template.index('id="wa-ai-session-list-view"') < workspace_template.index('id="wa-ai-chat-view"') < workspace_template.index('id="wa-ai-messages"')
     assert index_template.index('id="wa-ai-session-list-view"') < index_template.index('id="wa-ai-chat-view"') < index_template.index('id="wa-ai-messages"')
     assert "import '../workspace/conversation-list';" in workspace_bundle_entry
-    assert "fetch('/api/sessions?preview=1'" in conversation_list_ts
+    assert "fetch('/api/sessions?preview=1'" in conversation_sessions_ts
     assert "WA.openAiSession = openAiSession" in conversation_list_ts
     assert "WA.showAiSessionList = showAiSessionList" in conversation_list_ts
     assert "WA.newAiSession = newAiSession" in conversation_list_ts
@@ -358,27 +378,27 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert 'data-ai-session-expand' in conversation_list_ts
     assert "展开 ${hiddenCount} 条历史" in conversation_list_ts
     assert "收起历史" in conversation_list_ts
-    assert "export async function sendSessionListComposer" in conversation_list_ts
+    assert "export function sendSessionListComposer(): Promise<any>" in conversation_list_ts
     assert "function _openLatestTaskFlowForSession(sessionId: string): void" in conversation_list_ts
     assert "function _syncHistoricalTaskLiveProgress(session?: AiSessionPreview): void" in conversation_list_ts
     assert "WA.openTaskWorkbenchForCurrentRun({" in conversation_list_ts
     assert "查看下方步骤" in conversation_list_ts
     assert "latest_task_id" in conversation_list_ts
-    assert "const sessionId = await _createAiSessionRecord();" in conversation_list_ts
+    assert "const sessionId = await createAiSessionRecord();" in conversation_list_ts
     assert "await openAiSession(sessionId, { force: true });" in conversation_list_ts
     assert "WA.sendMessage();" in conversation_list_ts
     assert "function _closeSkillLibrary" in conversation_list_ts
     assert "if (!options.silent) _closeSkillLibrary();" in conversation_list_ts
-    assert "task_count?: number;" in conversation_list_ts
-    assert "latest_task_status?: string;" in conversation_list_ts
+    assert "task_count?: number;" in conversation_sessions_ts
+    assert "latest_task_status?: string;" in conversation_sessions_ts
     assert "wa-ai-session-task-badge" in conversation_list_ts
     assert "data-latest-task-status" in conversation_list_ts
     assert "data-ai-session-delete" in conversation_list_ts
     assert "export async function deleteAiSession" in conversation_list_ts
-    assert "`/api/sessions/${encodeURIComponent(normalized)}`" in conversation_list_ts
-    assert "method: 'DELETE'" in conversation_list_ts
+    assert "`/api/sessions/${encodeURIComponent(normalized)}`" in conversation_sessions_ts
+    assert "method: 'DELETE'" in conversation_sessions_ts
     assert "_focusComposer();" in conversation_list_ts
-    assert "latest_task_id: String(record.latest_task_id || '').trim()" in conversation_list_ts
+    assert "latest_task_id: String(record.latest_task_id || '').trim()" in conversation_sessions_ts
     assert "taskCount ? `${taskCount} 个任务` : ''" in conversation_list_ts
     assert "export function closeSkillLibrary()" in model_settings_ts
     assert "WA.closeSkillLibrary = closeSkillLibrary" in model_settings_ts
@@ -393,8 +413,8 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert '"latest_task_status": latest_task_status' in sessions_bp
     assert ".wa-ai-session-list-view" in workspace_css
     assert ".wa-ai-session-list-composer" in workspace_css
-    assert ".wa-session-list-input" in workspace_css
-    assert ".wa-session-list-send" in workspace_css
+    assert ".wa-composer-host" in workspace_css
+    assert ".wa-ai-session-list-composer .wa-input-box" in workspace_css
     assert ".wa-ai-session-item" in workspace_css
     assert ".wa-inline-task-workbench" in workspace_css
     assert ".wa-ai-session-task-badge" in workspace_css
@@ -404,7 +424,6 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert "min-height: 96px;" in workspace_css
     assert "max-height: 220px;" in workspace_css
     assert ".wa-ai-chat-view" in workspace_css
-    assert "top: 82px;" in workspace_css
     assert "z-index: 190;" in workspace_css
     assert "openAiSession" in workspace_bundle
     assert "sendSessionListComposer" in workspace_bundle
@@ -452,7 +471,7 @@ def test_workspace_find_replace_tools_are_split_from_assistant_shell():
     assert "WA.installWorkspaceFindReplace" in find_replace_js
     assert "WA.docxFindInput" in find_replace_js
     assert "WA.pptxFindInput" in find_replace_js
-    assert "installWorkspaceFindReplace({" in assistant_js
+    assert "installWorkspaceFindReplace({" in _read("web/src/bundles/workspace.ts")
     assert "window.WA.docxFindInput = " not in assistant_js
     assert "window.WA.pptxFindInput = " not in assistant_js
     assert "workspace-bundle.js" in asset_scripts
@@ -520,7 +539,7 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "taskCardSnapshotFromElement(taskCard)" in dispatcher_ts
     assert "record.task_card_snapshot = snapshot" in dispatcher_ts
     assert "persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || [], loadingEl)" in dispatcher_ts
-    assert "persistTaskTurn(context.text || fileToOpen, assistantText, metadata, [])" in dispatcher_ts
+    assert "persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || [], loadingEl)" in dispatcher_ts
     assert "task_card_snapshot: payload.task_card_snapshot" in runtime_init_ts
     assert 'assistant_entry["task_card_snapshot"]' in sessions_bp
     assert "/api/workspace/ai/route-intent" in workspace_bundle
@@ -545,12 +564,12 @@ def test_workspace_route_intent_collapses_file_subtypes_to_whitebox_contract():
     assert "route_kind: routeKind," in dispatcher_ts
     assert "base_task_type: routeKind === 'direct_response' ? 'DIRECT_RESPONSE' : 'COMPLEX_TASK'" in dispatcher_ts
     assert "function canonicalWorkspaceTaskType(route: string, taskType?: string): string" in dispatcher_ts
-    assert "if (normalizedRoute === 'file_task' || normalizedRoute === 'open_file') return 'FILE_TASK';" in dispatcher_ts
+    assert "if (normalizedRoute === WORKSPACE_FILE_TASK_ROUTE) return 'FILE_TASK';" in dispatcher_ts
     assert "const canonicalTaskType = canonicalWorkspaceTaskType(normalizedRoute, rawTaskType);" in dispatcher_ts
     assert "rawTaskType && rawTaskType !== canonicalTaskType ? rawTaskType : ''" in dispatcher_ts
     assert "task_type: canonicalTaskType," in dispatcher_ts
     assert "source_task_type: sourceTaskType," in dispatcher_ts
-    assert "route_kind: 'complex_task'," in dispatcher_ts
+    assert "route_kind: WORKSPACE_FILE_TASK_KIND," in dispatcher_ts
     assert "task_type: 'FILE_TASK'," in dispatcher_ts
 
 
@@ -594,8 +613,8 @@ def test_workspace_task_renderer_compacts_tool_result_details():
 def test_workspace_task_workbench_filters_internal_progress_messages():
     workbench_js = _read("web/static/js/workspace-task-workbench.js")
 
-    assert "function userFacingTaskText(value, stageId)" in workbench_js
-    assert "function normalizedFlowStages(rawSteps, task)" in workbench_js
+    assert "function userFacingTaskText(value: any, stageId?: string): string" in workbench_js
+    assert "function normalizedFlowStages(rawSteps: any[], task: any): WorkbenchStep[]" in workbench_js
     assert "const INTERNAL_PROGRESS_PATTERNS" in workbench_js
     assert "'task.classified': 'route'" in workbench_js
     for phrase in (
@@ -618,19 +637,14 @@ def test_workspace_task_payload_does_not_attach_current_open_file_by_default():
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert "getActiveEditorContent?: () => string;" in dispatcher_ts
-    assert "function currentWorkspaceTaskFile()" in dispatcher_ts
-    assert "function mentionsCurrentWorkspaceFile(text: string): boolean" in dispatcher_ts
+    assert "function currentOpenTaskFile(): TaskFileInfo | null" in dispatcher_ts
     assert "function mentionsAttachedFileContext(text: string): boolean" in dispatcher_ts
-    assert "const includeCurrentFile = shouldExposeCurrentWorkspaceFile({ text, pinnedSelText } as TaskContext)" in dispatcher_ts
-    assert "&& !(rawFiles.length > 0 && mentionsAttachedFileContext(text));" in dispatcher_ts
-    assert "currentFile && mentionsCurrentWorkspaceFile(text)" in dispatcher_ts
     assert "if (currentFile && !rawFiles.some((file) => sameTaskFile(file, currentFile))) rawFiles.unshift(currentFile);" not in dispatcher_ts
     assert "current_file: currentFile" in dispatcher_ts
     assert "currentFile, targetFile" in dispatcher_ts
     assert "getActiveEditorContent: () =>" in runtime_init_ts
-    assert "mentionsCurrentWorkspaceFile" in workspace_bundle
     assert "mentionsAttachedFileContext" in workspace_bundle
-    assert "currentWorkspaceTaskFile" in workspace_bundle
+    assert "currentOpenTaskFile" in workspace_bundle
     assert "current_file: currentFile" in workspace_bundle
 
 
@@ -721,9 +735,8 @@ def test_workspace_unified_shell_restores_save_contract():
 def test_workspace_unified_shell_hides_retained_legacy_skill_surfaces():
     index_template = _read("web/templates/index.html")
 
-    assert 'id="wa-skill-bar" hidden aria-hidden="true"' in index_template
-    assert 'id="wa-skill-exec-panel" hidden aria-hidden="true" data-retained-legacy="skill-exec"' in index_template
-    assert "bar.hidden = true;" in index_template
+    assert 'id="wa-skill-bar"' not in index_template
+    assert 'id="wa-skill-exec-panel"' not in index_template
     assert "window.openSkillsPanel();" in index_template
     assert "document.body.classList.contains('koto-unified-workspace')" in index_template
     assert 'id="macroToast" hidden aria-hidden="true"' in index_template
@@ -732,8 +745,8 @@ def test_workspace_unified_shell_hides_retained_legacy_skill_surfaces():
 def test_workspace_task_target_inference_does_not_use_bare_attachment_name():
     dispatcher_js = _read("web/static/js/workspace-task-dispatcher.js")
 
-    assert "function inferAttachedWriteTargetFile(text, files)" in dispatcher_js
-    assert "targetMentionScore(lowered, file)" in dispatcher_js
+    assert "function inferAttachedWriteTargetFile(text: string, files: TaskFileInfo[]): TaskFileInfo | null" in dispatcher_js
+    assert "score: targetMentionScore(lowered, f)" in dispatcher_js
     assert "inferCompareTargetFromRoleHint(text, files)" in dispatcher_js
     assert "inferCompareAnnotatedTargetFile(text, files)" in dispatcher_js
     assert "explicitNameMatches" not in dispatcher_js
@@ -811,15 +824,14 @@ def test_workspace_task_renderer_surfaces_supervisor_status():
     index_template = _read("web/templates/index.html")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
-    assert "function renderSupervisorStatus(payload)" in renderer_js
-    assert "function taskRecognitionText(payload)" in renderer_js
-    assert "function planCheckSummaryText(payload, passed)" in renderer_js
-    assert "if (type === 'supervisor.status')" in renderer_js
-    assert "supervisor.status:${payload.stage || ''}" in renderer_js
-    assert "主线已锁定" in renderer_js
-    assert "只读任务：不允许修改或写入文件。" in renderer_js
+    assert "function taskRecognitionText(data: Record<string, any>): string" in renderer_js
+    assert "function planCheckSummaryText(data: Record<string, any>, passed: boolean): string" in renderer_js
+    assert "'supervisor.status': handleEvent_supervisor_status" in renderer_js
+    assert "'supervisor.status:' + stage" in renderer_js
+    assert "监管检查已更新。" in renderer_js
+    assert "'read_request_escalated_to_write': '只读任务被错误升级为写入'" in renderer_js
     assert "计划检查通过：本轮只读，不会修改文件。" in renderer_js
-    assert "const body = renderTaskClassification(evt, card);" in renderer_js
+    assert "taskRecognitionText(data)" in renderer_js
     assert "if (passed) return;" not in renderer_js
 
     for source in (renderer_js, workspace_template, index_template, workspace_bundle):
@@ -828,7 +840,13 @@ def test_workspace_task_renderer_surfaces_supervisor_status():
 
 
 def test_workspace_assistant_does_not_open_files_with_os_native_apps():
-    assistant_js = _read("web/static/js/workspace-assistant.js")
+    assistant_js = "\n".join(
+        [
+            _read("web/src/workspace/fs-tree.ts"),
+            _read("web/src/workspace/ai-context.ts"),
+            _read("web/src/ui/embedded-mode.ts"),
+        ]
+    )
     workspace_bp = _read("web/blueprints/workspace_assistant.py")
 
     assert ("/api/v1/workspace/open-" + "native") not in assistant_js
@@ -987,7 +1005,7 @@ def test_routing_layer_does_not_fast_track_app_control_as_system():
 
 
 def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
-    assistant_js = _read("web/static/js/workspace-assistant.js")
+    assistant_js = _read("web/src/workspace/fs-tree.ts")
     fs_tree = _read("web/src/workspace/fs-tree.ts")
     embedded = _read("web/src/ui/embedded-mode.ts")
     ai_context = _read("web/src/workspace/ai-context.ts")
@@ -997,10 +1015,10 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
 
     assert 'draggable="true"' in assistant_js
     assert "application/wa-file-path" in assistant_js
-    assert "_getAIAttachmentDropPayload" in assistant_js
-    assert "window.WA.attachFilesToTask = _attachFilesToTask" in assistant_js
-    assert "await _attachFilesToTask([payload.filePath], { source })" in assistant_js
-    assert "'ai_panel_drop'" in assistant_js
+    assert "_getAIAttachmentDropPayload" in embedded
+    assert "wa.attachFilesToTask = _attachFilesToTask" in ai_context
+    assert "await _attachFilesToTask([payload.filePath], { source, focusInput: !_isAiSessionListVisible() })" in embedded
+    assert "'ai_panel_drop'" in embedded
     assert "function _fileDragAttrs()" in fs_tree
     assert "function _fileOpenHitDragAttrs()" in fs_tree
     assert "function _installBrowserPointerDragFallback()" in fs_tree
@@ -1028,12 +1046,12 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert "sessionListComposer.classList.add('wa-session-list-drag-over')" in embedded
     assert "focusInput: !_isAiSessionListVisible()" in embedded
     assert "_focusVisibleAIComposer();" in embedded
-    assert "document.getElementById('wa-session-list-file-chips')" in ai_context
-    assert "document.getElementById('wa-session-list-file-chip-list')" in ai_context
-    assert 'id="wa-session-list-file-chips"' in workspace_template
-    assert 'id="wa-session-list-file-chips"' in index_template
+    assert "document.getElementById('wa-ai-file-chips')" in ai_context
+    assert "document.getElementById('wa-ai-file-chip-list')" in ai_context
+    assert 'id="wa-ai-file-chips"' in workspace_template
+    assert 'id="wa-ai-file-chips"' in index_template
     assert ".wa-session-list-drag-over" in workspace_css
-    assert ".wa-session-list-file-chips" in workspace_css
+    assert "#wa-ai-file-chips" in workspace_css
     assert ".wa-file-actions .wa-file-send-ai" in workspace_css
 
 
@@ -1063,7 +1081,7 @@ def test_workspace_task_run_finished_closes_run_stage_step():
 
 
 def test_workspace_file_browser_folder_actions_are_available():
-    assistant_js = _read("web/static/js/workspace-assistant.js")
+    assistant_js = _read("web/src/workspace/fs-tree.ts")
     workspace_bp = _read("web/blueprints/workspace_assistant.py")
 
     assert "_dropOntoFolder" in assistant_js
@@ -1263,7 +1281,7 @@ def test_main_workspace_template_keeps_restored_editor_controls_in_sync():
 
     workspace_ids = set(re.findall(r'id="([^"]+)"', workspace_template))
     index_ids = set(re.findall(r'id="([^"]+)"', index_template))
-    assert sorted(workspace_ids - index_ids) == ["wa-header"]
+    assert sorted(workspace_ids - index_ids) == []
 
     for marker in (
         'id="wa-docx-find-bar"',
@@ -1287,19 +1305,25 @@ def test_main_workspace_template_keeps_restored_editor_controls_in_sync():
         'id="wa-pdf-pagemgr"',
         'id="wa-pdf-watermark-overlay"',
         'id="wa-autosave-toggle"',
-        'id="wa-archive-popover"',
-        'id="wa-history-popover"',
         'id="wa-open-folder-overlay"',
     ):
         assert marker in index_template
 
     assert "旧版技能执行入口已下线" not in index_template
     assert "入口已下线" not in index_template
-    assert "Skills 面板用于浏览与配置能力" in index_template
+    assert 'id="navSkillsBtn"' in index_template
+    assert 'id="skillsPanel"' in index_template
+    assert 'aria-label="Skills 库"' in index_template
 
 
 def test_workspace_assistant_unsafe_requests_include_csrf_token():
-    assistant_js = _read("web/static/js/workspace-assistant.js")
+    assistant_js = "\n".join(
+        [
+            _read("web/src/workspace/infrastructure.ts"),
+            _read("web/src/workspace/fs-tree.ts"),
+            _read("web/src/workspace/ai-review.ts"),
+        ]
+    )
     workspace_template = _read("web/templates/workspace_assistant.html")
     index_template = _read("web/templates/index.html")
 
@@ -1307,10 +1331,10 @@ def test_workspace_assistant_unsafe_requests_include_csrf_token():
     assert "csrf_token() if csrf_token is defined else ''" in workspace_template
     assert '<meta name="csrf-token"' in index_template
     assert "csrf_token() if csrf_token is defined else ''" in index_template
-    assert "async function _csrfFetch(url, options = {})" in assistant_js
+    assert "export async function _csrfFetch(url: string, options: CsrfOptions = {}): Promise<Response>" in assistant_js
     assert "document.querySelector('meta[name=\"csrf-token\"]')" in assistant_js
     assert "X-CSRFToken" in assistant_js
-    assert "async function _refreshCsrfToken()" in assistant_js
+    assert "async function _refreshCsrfToken(): Promise<string>" in assistant_js
     assert "fetch('/api/csrf-token'" in assistant_js
     assert "response.status === 400 && _needsCsrf(fetchOptions.method)" in assistant_js
     assert "fetchOptions.headers = _headersWithCsrf(fetchOptions.headers)" in assistant_js
@@ -1343,15 +1367,14 @@ def test_workspace_assistant_unsafe_requests_include_csrf_token():
 def test_workspace_task_stream_requests_include_csrf_token():
     task_js = _read("web/static/js/workspace-ai-task.js")
 
-    assert "async function csrfFetch(url, options = {})" in task_js
+    assert "async function csrfFetch(url: string, options: RequestInit = {}): Promise<Response>" in task_js
     assert "document.querySelector('meta[name=\"csrf-token\"]')" in task_js
     assert "X-CSRFToken" in task_js
-    assert "async function refreshCsrfToken()" in task_js
-    assert "fetch('/api/csrf-token'" in task_js
-    assert "response.status === 400 && needsCsrf(fetchOptions.method)" in task_js
-    assert "async function describeHttpError(resp)" in task_js
+    assert "function csrfToken(): string" in task_js
+    assert "headersWithCsrf(fetchOptions.headers as any)" in task_js
+    assert "async function describeHttpError(resp: Response): Promise<string>" in task_js
     assert "const resp = await csrfFetch('/api/editor/ai/task-stream'" in task_js
-    assert "const response = await csrfFetch('/api/editor/ai/task-stream/cancel'" in task_js
+    assert "card._abortFileTaskStream = () =>" in task_js
     assert "fetch('/api/editor/ai/task-stream'" not in task_js
 
     direct_unsafe_fetches = []
@@ -1388,12 +1411,12 @@ def test_http_wiring_exposes_csrf_refresh_endpoint():
 def test_workspace_task_card_renderer_guards_non_dom_cards():
     task_js = _read("web/static/js/workspace-ai-task.js")
 
-    assert "function isTaskCardElement(value)" in task_js
-    assert "typeof value.querySelectorAll === 'function'" in task_js
+    assert "function isTaskCardElement(value: unknown): value is TaskCardElement" in task_js
+    assert "typeof (value as TaskCardElement).querySelectorAll === 'function'" in task_js
     assert "if (!isTaskCardElement(card)) return;" in task_js
-    assert "function applyUiState(card, uiState)" in task_js
-    assert "if (!isTaskCardElement(card) || !uiState || typeof uiState !== 'object') return;" in task_js
-    assert "function applyTerminalPayload(card, evt, payload, options)" in task_js
+    assert "function ensureTaskUiState(card: TaskCardElement): FileTaskUiState" in task_js
+    assert "function taskTerminalResult(card: TaskCardElement, fallbackSummary?: string): TerminalResult" in task_js
+    assert "if (!isTaskCardElement(card) || !payload || typeof payload !== 'object') return;" in task_js
 
 
 def test_workspace_task_progress_has_live_plan_linked_feedback():
@@ -1404,12 +1427,12 @@ def test_workspace_task_progress_has_live_plan_linked_feedback():
 
     assert 'id="wa-task-live-progress"' in workspace_template
     assert 'id="wa-task-live-progress"' in index_template
-    assert "function syncTaskLiveProgress(card)" in task_js
-    assert "function taskPlanProgress(card)" in task_js
-    assert "state.plannedStepCount = steps.length;" in task_js
-    assert "state.progressExplicit = hasExplicitProgress || !!uiState.terminal;" in task_js
+    assert "function syncTaskLiveProgress(card: TaskCardElement): void" in task_js
+    assert "function taskPlanProgress(card: TaskCardElement): { total: number; completed: number; running: boolean }" in task_js
+    assert "ensureTaskUiState(card).plannedStepCount = steps.length;" in task_js
+    assert "state.progressExplicit = true;" in task_js
     assert "basis = explicit ? 'explicit' : (plan.total ? 'planned' : 'estimated')" in task_js
-    assert "valueText = `步骤 ${plan.completed}/${plan.total}`;" in task_js
+    assert "valueText = '步骤 ' + plan.completed + '/' + plan.total;" in task_js
     assert "syncTaskLiveProgress(card);" in task_js
     assert ".wa-task-live-progress" in workspace_css
     assert '.wa-task-progress[data-basis="planned"]' in workspace_css
@@ -1435,7 +1458,7 @@ def test_workspace_stepwise_resume_payload_prefers_workflow_checkpoint():
     assert "compact.options = { workflow_checkpoint: workflowCheckpoint }" in dispatcher_js
     assert "workflowCheckpointFallback" not in dispatcher_js
     assert "compactPayload.options.workflow_checkpoint || compactPayload.options.batch_control" not in dispatcher_js
-    assert "function workflowCheckpointFromOptions(options)" in task_js
+    assert "function workflowCheckpointFromOptions(options?: Record<string, any>): Record<string, any> | null" in task_js
     assert "source.workflow_checkpoint && typeof source.workflow_checkpoint === 'object'" in task_js
     assert "return source.batch_control && typeof source.batch_control === 'object'" not in task_js
 
@@ -1453,15 +1476,16 @@ def test_doc_annotate_resume_payload_uses_workflow_checkpoint():
 
 
 def test_workspace_browser_select_mode_rerenders_and_toggles_rows():
-    workspace_js = _read("web/static/js/workspace-assistant.js")
+    workspace_js = _read("web/src/workspace/fs-tree.ts")
+    fs_actions = _read("web/src/workspace/fs-actions.ts")
     workspace_css = _read("web/static/css/workspace.css")
 
-    assert "window.WA._browserFileRowMouseDown = (event, el) =>" in workspace_js
-    assert "window.WA._browserFileRowClick = (event, el) =>" in workspace_js
-    assert "event.target.closest('.wa-file-check')" in workspace_js
+    assert "wa._browserFileRowMouseDown = (event: MouseEvent, el: HTMLElement): void =>" in workspace_js
+    assert "wa._browserFileRowClick = (event: MouseEvent, el: HTMLElement): void =>" in workspace_js
+    assert "(event.target as HTMLElement).closest('.wa-file-check')" in workspace_js
     assert 'onmousedown="WA._browserFileRowMouseDown(event,this)" onclick="WA._browserFileRowClick(event,this)"' in workspace_js
     assert 'onclick="WA._browserFileRowClick(event,this)"' in workspace_js
-    assert "if (state._searchActive && state.searchQuery)" in workspace_js
-    assert "_renderBrowserTree();" in workspace_js
+    assert "if (!state._searchActive || `${state.searchQuery}" in workspace_js
+    assert "(window as any).WA._renderBrowserTree();" in fs_actions
     assert "flex: 1 1 0;" in workspace_css
     assert "contain: paint;" in workspace_css

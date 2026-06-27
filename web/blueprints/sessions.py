@@ -47,6 +47,7 @@ def _compact_metadata(raw: object) -> dict:
         "task_request",
         "task_mode",
         "task_terminal_status",
+        "test_structure",
         "saved_files",
         "source",
     }

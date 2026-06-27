@@ -1,6 +1,5 @@
 /**
- * KotoTextEditor — Plain text/code editor
- * Converted from workspace-assistant.js
+ * KotoTextEditor - plain text/code editor
  */
 
 import type { WorkspaceEditor } from './types';

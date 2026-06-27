@@ -709,6 +709,8 @@ def mcp_status():
 @mcp_bp.route("/frontend-event", methods=["POST"])
 def mcp_frontend_event():
     payload = request.get_json(silent=True) or {}
+    if isinstance(payload, dict) and isinstance(payload.get("events"), list):
+        payload = payload.get("events") or []
     if isinstance(payload, list):
         accepted = 0
         last = None
@@ -735,7 +737,10 @@ def mcp_frontend_events():
 
 @mcp_bp.route("/frontend-action", methods=["GET"])
 def mcp_frontend_action_next():
-    data = next_frontend_action(session_id=request.args.get("session_id", ""))
+    data = next_frontend_action(
+        session_id=request.args.get("session_id", ""),
+        timeout_ms=request.args.get("timeout_ms", 0),
+    )
     return jsonify(data)
 
 

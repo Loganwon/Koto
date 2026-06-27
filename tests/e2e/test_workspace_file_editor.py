@@ -733,17 +733,19 @@ class TestWorkspaceTabManagement:
 @pytest.mark.e2e
 class TestWorkspaceAssistantJsSource:
     """
-    Static analysis of the JS source to verify the critical code fixes are present.
+    Static analysis of the workspace file-open source to verify critical fixes are present.
     These tests run without a browser and don't require the Flask server.
     """
 
-    _JS_PATH = (
-        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
-    )
-
     @property
     def src(self) -> str:
-        return self._JS_PATH.read_text(encoding="utf-8")
+        root = Path(__file__).parents[2]
+        return "\n".join(
+            [
+                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(encoding="utf-8"),
+                (root / "web" / "src" / "workspace" / "infrastructure.ts").read_text(encoding="utf-8"),
+            ]
+        )
 
     def test_open_workspace_file_uses_open_file_by_path(self):
         """
@@ -759,7 +761,7 @@ class TestWorkspaceAssistantJsSource:
         The old raw-byte re-upload path must be absent from openWorkspaceFile.
         """
         # Find the function and check that it does NOT contain the blob pattern
-        fn_start = self.src.find("openWorkspaceFile = async")
+        fn_start = self.src.find("async function openWorkspaceFile")
         assert fn_start >= 0, "openWorkspaceFile function not found"
         # Read ~60 lines of the function body (safe upper bound)
         fn_body = self.src[fn_start : fn_start + 2000]

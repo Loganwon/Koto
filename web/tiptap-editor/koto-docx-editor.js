@@ -3023,7 +3023,7 @@ export class KotoTipTapEditor {
   }
 
   // ── _saveSelection ────────────────────────────────────────────────────────
-  // Called by workspace-assistant.js _saveEditorRange() before focus leaves.
+  // Called by the workspace selection toolbar before focus leaves.
   saveSelection() {
     if (!this.editor) return;
     const { selection } = this.editor.state;

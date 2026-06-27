@@ -4692,30 +4692,44 @@ class TestWorkspaceAssistantTaskRemovalRegression:
     """Source-level regressions for removing file-assistant AI task/chat flows."""
 
     def test_workspace_assistant_removes_old_task_stream_senders(self):
-        src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        assert not Path("web/static/js/workspace-assistant.js").exists()
+        assert not Path("web/static/js/workspace-task-dispatcher.js").exists()
+        src = Path("web/src/workspace/ai-review.ts").read_text(encoding="utf-8")
+        dispatcher = Path("web/src/workspace/task-dispatcher.ts").read_text(
+            encoding="utf-8"
+        )
+        bundle_entry = Path("web/src/bundles/workspace.ts").read_text(encoding="utf-8")
+        asset_scripts = Path("web/templates/_workspace_asset_scripts.html").read_text(
+            encoding="utf-8"
+        )
         retired_external_name = "Open" + "Claw"
-        assert f"async function _waSendTo{retired_external_name}Task" not in src
-        assert f"function _waBuild{retired_external_name}TaskMessage" not in src
-        assert "async function _waSendToAgent" not in src
-        assert "async function _waSendToChat" not in src
-        assert "async function _waSendToInline" not in src
-        assert "window.WA.applyAIResponse = (mode, btn) =>" not in src
-        assert "window.WA.setOutputMode = () =>" not in src
-        assert "function _refreshWorkflowChips() {}" not in src
-        assert "async function _appendWorkflowChips() {}" not in src
-        assert "async function _suggestWorkflows() {}" not in src
-        assert "fetch('/api/chat/stream'" not in src
-        assert "fetch('/api/agent/chat'" not in src
-        assert "action: 'ai_task'" not in src
+        combined = "\n".join([src, dispatcher])
+        assert f"_waSendTo{retired_external_name}Task" not in combined
+        assert f"_waBuild{retired_external_name}TaskMessage" not in combined
+        assert "_waSendToAgent" not in combined
+        assert "_waSendToChat" not in combined
+        assert "_waSendToInline" not in combined
+        assert "window.WA.applyAIResponse = (mode, btn) =>" not in combined
+        assert "window.WA.setOutputMode = () =>" not in combined
+        assert "function _refreshWorkflowChips() {}" not in combined
+        assert "async function _appendWorkflowChips() {}" not in combined
+        assert "async function _suggestWorkflows() {}" not in combined
+        assert "fetch('/api/agent/chat'" not in combined
+        assert "action: 'ai_task'" not in combined
+        assert "workspace-bundle.js" in asset_scripts
+        assert "workspace-assistant.js" not in asset_scripts
+        assert "import '../workspace/ai-review';" in bundle_entry
+        assert "import '../workspace/task-dispatcher';" in bundle_entry
+        assert "import '../workspace/task-runner';" in bundle_entry
 
     def test_workspace_send_message_keeps_open_file_and_uses_whitebox_stream(self):
-        src = Path("web/static/js/workspace-assistant.js").read_text(encoding="utf-8")
+        src = Path("web/src/workspace/ai-review.ts").read_text(encoding="utf-8")
         retired_external_name = "Open" + "Claw"
-        send_start = src.index("window.WA.sendMessage = () => {")
-        send_end = src.index("// ── Auto-save", send_start)
+        send_start = src.index("export function sendMessage(): void {")
+        send_end = src.index("// ── Quick action dispatcher ──", send_start)
         send_block = src[send_start:send_end]
         assert "appendUserMessageWithLoading" in send_block
-        assert "_waTaskDispatcher.dispatchMessage({" in send_block
+        assert "taskDispatcher.dispatchMessage({" in send_block
         assert "/api/editor/ai/task-stream" not in send_block
         assert f"_waSendTo{retired_external_name}Task(" not in send_block
         assert "_waSendToAgent(" not in send_block
@@ -4724,22 +4738,20 @@ class TestWorkspaceAssistantTaskRemovalRegression:
     def test_workspace_send_message_builds_whitebox_payload_with_target_path_history_and_model_state(
         self,
     ):
-        assistant = Path("web/static/js/workspace-assistant.js").read_text(
-            encoding="utf-8"
-        )
-        dispatcher = Path("web/static/js/workspace-task-dispatcher.js").read_text(
+        assistant = Path("web/src/workspace/ai-review.ts").read_text(encoding="utf-8")
+        dispatcher = Path("web/src/workspace/task-dispatcher.ts").read_text(
             encoding="utf-8"
         )
 
-        send_start = assistant.index("window.WA.sendMessage = () => {")
-        send_end = assistant.index("// ── Auto-save", send_start)
+        send_start = assistant.index("export function sendMessage(): void {")
+        send_end = assistant.index("// ── Quick action dispatcher ──", send_start)
         send_block = assistant[send_start:send_end]
 
         assert "pinnedSelText," in send_block
         assert "pinnedSelSource," in send_block
-        assert "_waTaskDispatcher.dispatchMessage({" in send_block
+        assert "taskDispatcher.dispatchMessage({" in send_block
         assert (
-            "function buildWhiteboxTaskPayload(text, pinnedSelText, pinnedSelSource, overrides) {"
+            "function buildWhiteboxTaskPayload(text: string, pinnedSelText?: string, pinnedSelSource?: string, overrides?: any): Record<string, any> {"
             in dispatcher
         )
         assert "current_file: currentFile," in dispatcher
@@ -4760,10 +4772,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in dispatcher
         )
         assert (
-            "const payload = buildWhiteboxTaskPayload(context.text, context.pinnedSelText, context.pinnedSelSource, context);"
+            "const payload = buildWhiteboxTaskPayload(context.text, context.pinnedSelText, context.pinnedSelSource, routedContext);"
             in dispatcher
         )
-        assert "return Promise.resolve(streamWhiteboxTask({" in dispatcher
+        assert "return Promise.resolve(streamTaskFlow!({" in dispatcher
         assert "payload," in dispatcher
         assert "taskTurnMetadataFromLoadingEl(loadingEl)" in dispatcher
 

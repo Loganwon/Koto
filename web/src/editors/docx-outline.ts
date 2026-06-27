@@ -1,6 +1,6 @@
 /**
  * DOCX Outline / Navigation Panel
- * Converted from workspace-assistant.js
+ * DOCX outline panel helpers.
  */
 
 import type { DocxHeadingEntry } from './types';

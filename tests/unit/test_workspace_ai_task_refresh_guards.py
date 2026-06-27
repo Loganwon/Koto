@@ -10,9 +10,10 @@ def _read(rel_path: str) -> str:
 
 
 def test_file_task_refresh_controller_treats_no_pending_refresh_as_noop():
-    refresh_js = _read("web/static/js/workspace-ai-task-refresh.js")
+    refresh_js = _read("web/src/workspace/task-refresh.ts")
 
     assert "return { ok: true, refreshed: false };" in refresh_js
-    assert "const didRefresh = refreshResult && typeof refreshResult === 'object'" in refresh_js
+    assert "const didRefresh = refreshResult ? refreshResult.refreshed : false;" in refresh_js
     assert "finalizeOptions.showRefreshingStatus && didRefresh" in refresh_js
     assert "options.setStatus(card, refreshOk ? '已刷新文件' : '文件刷新失败');" in refresh_js
+    assert "WA.createFileTaskRefreshController = createFileTaskRefreshController;" in refresh_js

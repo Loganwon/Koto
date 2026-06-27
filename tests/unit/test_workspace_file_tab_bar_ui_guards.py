@@ -11,17 +11,15 @@ def _read(rel_path: str) -> str:
 
 def test_workspace_templates_keep_file_tab_bar_before_canvas_body():
     embedded_html = _read("web/templates/index.html")
-    standalone_html = _read("web/templates/workspace_assistant.html")
 
-    for html in (embedded_html, standalone_html):
-      assert '<div id="wa-tab-bar"></div>' in html
-      assert html.index('<div id="wa-tab-bar"></div>') < html.index('<div id="wa-canvas-body">')
+    assert '<div id="wa-tab-bar"></div>' in embedded_html
+    assert embedded_html.index('<div id="wa-tab-bar"></div>') < embedded_html.index('<div id="wa-canvas-body">')
 
 
 def test_workspace_tab_bar_js_renders_file_labels_without_capability_badges():
-    js = _read("web/static/js/workspace-assistant.js")
+    js = _read("web/src/workspace/state.ts")
 
-    assert "function _tabDisplayInfo(tab)" in js
+    assert "function _tabDisplayInfo(tab:" in js
     assert "bar.classList.toggle('single-tab', state.openTabs.length <= 1);" in js
     assert 'data-ext="${extAttr}"' in js
     assert '<span class="tab-main">' in js
@@ -31,9 +29,16 @@ def test_workspace_tab_bar_js_renders_file_labels_without_capability_badges():
 
 
 def test_workspace_frontend_tracks_capability_profile_in_tab_state_without_visible_badges():
-    js = _read("web/static/js/workspace-assistant.js")
+    js = "\n".join(
+        [
+            _read("web/src/workspace/file-open.ts"),
+            _read("web/src/workspace/state.ts"),
+            _read("web/templates/index.html"),
+            _read("web/static/css/workspace.css"),
+        ]
+    )
 
-    assert "capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, json.file_type, json.file_name)" in js
+    assert "capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, fileType, fileName)" in js
     assert "state.capabilityProfile = tab.capabilityProfile || null;" in js
     assert "function _ensureSubjectBar()" not in js
     assert "_capabilityPrimaryBadge" not in js
@@ -43,7 +48,14 @@ def test_workspace_frontend_tracks_capability_profile_in_tab_state_without_visib
 
 
 def test_workspace_tab_capability_display_does_not_auto_attach_current_file_to_ai_flow():
-    js = _read("web/static/js/workspace-assistant.js")
+    js = "\n".join(
+        [
+            _read("web/src/workspace/quick-actions.ts"),
+            _read("web/src/workspace/ai-context.ts"),
+            _read("web/src/workspace/task-dispatcher.ts"),
+            _read("web/templates/index.html"),
+        ]
+    )
 
     assert "function _subjectQuickActions(profile)" not in js
     assert "async function _ensureCurrentFileAttachedForQuickAction()" not in js

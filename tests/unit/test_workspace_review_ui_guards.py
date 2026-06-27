@@ -11,25 +11,31 @@ def _read(rel_path: str) -> str:
 
 def test_review_shell_entry_is_present_without_ai_comment_entrypoints():
     embedded_html = _read("web/templates/index.html")
-    standalone_html = _read("web/templates/workspace_assistant.html")
     asset_partial = _read("web/templates/_workspace_asset_scripts.html")
 
-    for html in (embedded_html, standalone_html):
-        assert "{% include '_workspace_asset_scripts.html' %}" in html
-        assert 'id="wa-review-shell"' in html
-        assert 'id="wa-review-mode-group"' in html
-        assert '>批注模式<' in html
-        assert 'id="wa-review-toggle-btn"' not in html
-        assert "onclick=\"WA.sendQuickAction('批注')\"" not in html
-        assert "onclick=\"WA.addSelectionComment()\"" not in html
-        assert '>AI 批注<' not in html
+    assert "{% include '_workspace_asset_scripts.html' %}" in embedded_html
+    assert 'id="wa-review-shell"' in embedded_html
+    assert 'id="wa-review-mode-group"' in embedded_html
+    assert '>批注模式<' in embedded_html
+    assert 'id="wa-review-toggle-btn"' not in embedded_html
+    assert "onclick=\"WA.sendQuickAction('批注')\"" not in embedded_html
+    assert "onclick=\"WA.addSelectionComment()\"" not in embedded_html
+    assert '>AI 批注<' not in embedded_html
 
     assert "review-bundle.js" in asset_partial
     assert "docx-review-layout.js" not in asset_partial
 
 
 def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_entry():
-    js = _read("web/static/js/workspace-assistant.js")
+    js = "\n".join(
+        [
+            _read("web/src/workspace/docx-review-runtime.ts"),
+            _read("web/src/workspace/file-open.ts"),
+            _read("web/src/workspace/ai-review.ts"),
+            _read("web/src/ui/selection-toolbar.ts"),
+            _read("web/src/ui/docx-pptx-toolbar.ts"),
+        ]
+    )
     layout_js = _read("web/static/js/docx-review-layout.js")
     geometry_js = _read("web/static/js/docx-review-geometry.js")
     review_bundle = _read("web/static/js/build/review-bundle.js")
@@ -37,35 +43,31 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
 
     assert "function _syncReviewStateForActiveFile" in js
     assert "function _syncDocCommentStateForActiveFile" in js
-    assert "function _buildReviewStateFromServerData(serverData, existingReviewState = null)" in js
-    assert "comments: Array.isArray(existing.comments) && existing.comments.length ? existing.comments : serverComments" in js
-    assert "proposals: Array.isArray(existing.proposals) && existing.proposals.length ? existing.proposals : serverProposals" in js
-    assert "reviewState: _buildReviewStateFromServerData(json.data, existingTab && existingTab.reviewState)" in js
-    assert "tab.reviewState = _buildReviewStateFromServerData(fullData, tab.reviewState);" in js
-    assert "const reviewState = await _syncReviewStateForActiveFile().catch(() => null);" in js
+    assert "function _ensureTabReviewState(tab: any = _activeReviewTab()): any" in js
+    assert "function _normalizeReviewComment(comment: any, index = 0): any" in js
+    assert "function _mergeReviewProposals(existing: any[], incoming: any[]): any[]" in js
+    assert "reviewState: existingTab && existingTab.reviewState" in js
+    assert "return Promise.resolve(reviewState);" in js
+    assert "_syncReviewStateForActiveFile().catch(() => {});" in js
     assert "function _isImportedDocxRevisionProposal" in js
-    assert "raw.source = String(raw.source || '').trim() || 'ai';" in js
-    assert "tab.serverData.proposals = reviewState.proposals.map((proposal) => _serializeReviewProposal(proposal));" in js
+    assert "source: _clean(raw.source) || 'ai_proposal'," in js
+    assert "tab.serverData.proposals = reviewState.proposals.map((proposal: any) => _clone(proposal, {}) || {});" in js
     assert "function _isReviewCommentModeEnabled" in js
-    assert "function _focusFirstReviewEntry" in js
+    assert "function _findReviewEntry" in js
+    assert "(window as any).WA.focusReviewThread" in js
     assert "function _coerceReviewModeForVisibleContent" in js
-    assert "function _getReviewCommentSelectionState(options = {})" in js
-    assert "includeAnchorMeta = !!(options && options.includeAnchorMeta);" in js
-    assert "function _getDocxSelectionPayload({ includeOverlay = true, allowStaleFallback = true, includeAnchorMeta = false } = {})" in js
-    assert "function _buildReviewNavItems" in js
-    assert "function _renderReviewNavMenuItems" in js
-    assert "function _filterReviewNavItems" in js
-    assert "function _captureReviewToolbarSelection" in js
-    assert "function _runDocxReviewToolbarAction" in js
-    assert "function _closeDocxReviewNavMenu" in js
+    assert "function _getReviewCommentSelectionState(): any" in js
+    assert "const includeAnchorMeta = !!opts.includeAnchorMeta;" in js
+    assert "function _getDocxSelectionPayload(options?:" in js
+    assert "function _renderReviewNavMenu(): void" in js
+    assert "function _scrollReviewCardIntoView(reviewId: string): void" in js
+    assert "function _createReviewComment(): void" in js
     assert "function _setDocxReviewRailWidth" in js
     assert "window.KotoDocxReviewLayout" in layout_js
-    assert "window.KotoDocxReviewLayout.create" in js
+    assert "factory.create({ state })" in js
     assert "function _ensureReviewShellHost" in js
-    assert "const showRail = !!state._reviewCenterOpen;" in js
-    assert "shell.style.display = showRail ? '' : 'none';" in js
-    assert "shell.dataset.commentUi = state.fileType === 'docx' ? 'wps' : '';" in js
-    assert "function _getDocxReviewRailMetrics" in js
+    assert "shell.style.display = state._reviewCenterOpen === false ? 'none' : 'flex';" in js
+    assert "ensureReviewShellHost" in js
     assert "const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;" in layout_js
     assert "function _shiftReviewRailLeft(value, host)" in layout_js
     assert "const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;" in layout_js
@@ -131,61 +133,59 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "card.style.setProperty('--wa-review-card-page-max-height'" in layout_js
     assert "min-height: var(--wa-review-card-anchor-min-height, 54px);" in css
     assert "min-height: var(--wa-review-card-anchor-min-height, 72px);" in css
-    assert "function _layoutReviewShellInDocx" in js
-    assert "function _ensureReviewSelectionLauncher" in js
+    assert "scheduleReviewShellLayout" in js
+    assert "function ensureReviewSelectionLauncher()" in layout_js
     assert "const selectionRight = Number.isFinite(cursorRight)" in layout_js
     assert "const launcherLeft = Math.min(selectionRight, maxLauncherLeft);" in layout_js
-    assert "function _bindReviewShellInteractions" in js
-    assert "if (tab.serverData && Array.isArray(tab.serverData.proposals)) {" in js
-    assert "window.WA.openReviewCenter" in js
-    assert "window.WA.toggleReviewCommentMode" in js
-    assert "window.WA.toggleReviewNavMenu" in js
-    assert "window.WA.toggleReviewOverview" in js
-    assert "window.WA.createReviewComment" in js
+    assert "function _handleReviewShellClick(event: Event): void" in js
+    assert "document.addEventListener('click', (event) =>" in js
+    assert "if (!tab || !reviewState || !Array.isArray(reviewState.proposals)) return;" in js
+    assert "tab.serverData = tab.serverData && typeof tab.serverData === 'object' ? tab.serverData : {};" in js
+    assert "(window as any).WA.openReviewCenter" in js
+    assert "(window as any).WA.toggleReviewCommentMode" in js
+    assert "(window as any).WA.createReviewComment" in js
+    assert "(window as any).WA.createReviewRevision" in js
+    assert "(window as any).WA.captureReviewSelection" in js
+    assert "(window as any).WA.openRevisionReviewCenter" in js
     assert 'data-review-toolbar-action="comment"' in js
     assert 'data-review-toolbar-action="revision"' in js
-    assert 'data-review-nav-search="1"' in js
-    assert "preserveReviewNavSearchFocus" in js
-    assert "window.WA.relayoutDocxReviewRail" in js
-    assert "window.WA.deleteReviewComment" in js
-    assert "window.WA.editReviewComment" in js
-    assert "window.WA.handleReviewCommentCardActivate" in js
-    assert "window.WA.handleReviewProposalCardActivate" in js
-    assert "window.WA.focusReviewThread" in js
-    assert "window.WA.onReviewCommentInput" in js
-    assert "window.WA.applyStructuredDocToolCall" in js
-    assert "window.WA.applyStructuredReviewChangePayload" in js
+    assert 'data-review-toolbar-action="summary"' in js
+    assert "const navItem = target?.closest('.wa-docx-review-nav-item')" in js
+    assert "const actionEl = target?.closest('[data-review-action]')" in js
+    assert "action === 'edit'" in js
+    assert "action === 'delete'" in js
+    assert "action === 'save'" in js
+    assert "(window as any).WA.focusReviewThread" in js
+    assert "(window as any).WA.applyStructuredDocToolCall" in js
+    assert "(window as any).WA.applyStructuredReviewChangePayload" in js
     assert "function _isReviewEditorFocused" in js
     assert "let minLeft = Infinity, maxRight = -Infinity;" in js
     assert "right: maxRight !== -Infinity ? maxRight : centerX," in js
     assert "state._editingReviewCommentId" in layout_js
     assert "if (!shell || !host || !viewport || !listEl || shell.style.display === 'none')" in layout_js
     assert "|| !_isReviewCommentModeEnabled()" in layout_js
-    assert "_syncReviewSelectionSnapshot({ preserveExisting: true });" in js
-    assert "_getDocxSelectionPayload({ includeOverlay: true, allowStaleFallback: false, includeAnchorMeta: true });" in js
-    assert "_getReviewCommentSelectionState({ includeAnchorMeta: true })" in js
-    assert "_coerceReviewModeForVisibleContent(nextReviewState, 'comment')" in js
-    assert "_coerceReviewModeForVisibleContent(reviewState);" in js
-    assert "const hasAnyVisibleReviewEntries = _reviewModeHasVisibleEntries(reviewState, 'all');" in js
-    assert "const preserveCommentModeEmptyState = _isReviewCommentModeEnabled() && !hasAnyVisibleReviewEntries;" in js
-    assert "if (!preserveCommentModeEmptyState) {" in js
+    assert "(window as any)._syncReviewSelectionSnapshot = _captureReviewSelection;" in js
+    assert "function _getReviewCommentSelectionState(): any" in js
+    assert "_getReviewCommentSelectionState()" in layout_js
+    assert "_coerceReviewModeForVisibleContent(reviewState, 'comment')" in js
+    assert "_coerceReviewModeForVisibleContent(reviewState, 'proposal')" in js
     assert "const shell = $('wa-review-shell');" in js
-    assert "shell && shell.style.display !== 'none'" in js
     assert "return source === 'docx_revision' && ['replace', 'delete', 'insert'].includes(actionType);" in js
-    assert "data-koto-review-id" in js
+    assert "data-review-id" in js
     assert "_syncReviewStateForActiveFile().catch" in js
-    assert "window.WA.onDocxCommentsChanged" in js
-    assert "wa-review-anchor-link" in js
+    assert "(window as any).WA.onDocxCommentsChanged" in js
+    assert "wa-review-anchor-inline" in js
     assert "launcher.id = 'wa-review-selection-launcher';" in layout_js
-    assert "_el.closest('#wa-review-selection-launcher')" in js
-    assert "#wa-review-selection-launcher:hover" in js
+    assert 'data-review-create="comment"' in layout_js
+    assert 'data-review-create="revision"' in layout_js
+    assert "#wa-review-selection-launcher {" in css
+    assert "#wa-review-selection-launcher.is-visible" in css
     assert 'data-review-nav-id="' in js
-    assert 'data-review-nav-overview="1"' in js
-    assert 'data-review-action="edit"' in js
-    assert 'data-review-action="delete"' in js
-    assert 'data-review-action="save"' in js
-    assert "proposal.original_text || proposal.anchor_text || proposal.proposed_text" in js
-    assert "_resizeReviewCommentEditor" in js
+    assert "_reviewActionButton('edit', '编辑批注'" in js
+    assert "_reviewActionButton('delete', '删除批注'" in js
+    assert "_reviewActionButton('save', '保存批注'" in js
+    assert "item?.anchor_text || item?.original_text || item?.text" in js
+    assert "koto-docx-comment-edit" in js
     assert "原文定位：" not in js
     assert "window.WA.addSelectionComment" not in js
     assert "'批注': 'comment'" not in js
@@ -198,7 +198,7 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert ">添加批注或修订<" in layout_js
     assert "wa-review-selection-kicker" in layout_js
     assert "wa-review-selection-copy" in layout_js
-    assert "wa-review-btn-icon" in js
+    assert "wa-review-btn-icon" in css
 
 
 def test_workspace_review_css_keeps_native_comment_surfaces():

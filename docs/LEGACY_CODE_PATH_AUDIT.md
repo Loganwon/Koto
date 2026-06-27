@@ -34,11 +34,24 @@ assistant overlap.
 | `app/api/agent_routes.py::process_compat` | Phase 2 compatibility endpoint for old AdaptiveAgent clients. | Remove only after frontend and external callers no longer use `/api/adaptive-agent/process`. |
 | `app/api/agent_routes.py::process_stream_compat` | SSE compatibility endpoint delegated to `ChatPipeline`. | Remove with the non-streaming AdaptiveAgent compatibility endpoint. |
 | `web/blueprints/pages.py:/workspace-assistant` | Redirect-only legacy URL alias to `/`. | Remove after installer/tests/docs and old bookmarks no longer require the alias. |
-| `web/static/js/workspace-assistant.js` | Legacy-named but still active workspace runtime contract. | Remove or rename only after `web/src/` owns the full runtime and contract tests stop reading this file. |
-| `web/templates/workspace_assistant.html` | Standalone compatibility fixture for layout/editor tests. | Remove after tests use the unified `index.html` shell. |
 | `web/file_operator.py` | Small helper retained for the chat `FILE_OP` branch. | Remove after chat file operations fully route through FileTaskRuntime or file-assistant services. |
 | `web.memory_runtime` compatibility exports through `web.app` | Runtime implementation has moved out, but old import names still exist on `web.app`. | Remove after chat stream handlers, tests, and external imports target `web.memory_runtime` or `web.runtime_context` directly. |
 | `web/app.py` chat wrappers (`chat`, `chat_stream`, `chat_with_file`) | Non-route compatibility wrappers after blueprint migration. | Remove after tests and import callers stop importing these names from `web.app`. |
+
+## Removed Workspace Frontend Paths
+
+The old standalone workspace frontend has now been removed. Do not restore these
+files as compatibility shims:
+
+| Removed path | Current owner |
+| --- | --- |
+| `web/static/js/workspace-assistant.js` | `web/src/` modules bundled into `web/static/js/build/workspace-bundle.js` |
+| `web/static/js/workspace-ai-*.js` | `web/src/workspace/*` TypeScript modules |
+| `web/static/js/workspace-task-*.js` | `web/src/workspace/*` TypeScript modules |
+| `web/templates/workspace_assistant.html` | `web/templates/index.html` |
+
+Boundary tests should read `web/src/`, `web/templates/index.html`, and the
+built bundle references instead of these removed paths.
 
 ## Retired Or Suspicious Paths To Re-check
 

@@ -313,6 +313,24 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     }));
   }
 
+  function currentOpenTaskFile(): TaskFileInfo | null {
+    const name = String(state.fileName || '').trim();
+    const path = String(state.filePath || state.wsSourcePath || '').trim();
+    const type = String(state.fileType || '').trim();
+    const id = String(state.fileId || '').trim();
+    if (!name && !path && !type && !id) return null;
+    const content = typeof options.getActiveEditorContent === 'function'
+      ? previewText(options.getActiveEditorContent() || '', 6000)
+      : '';
+    return {
+      path: path || id || name,
+      name: name || baseNameFromPath(path || id),
+      type,
+      content,
+      target: false,
+    };
+  }
+
   function mentionsAttachedFileContext(text: string): boolean {
     const source = String(text || '').trim();
     if (!source) return false;
@@ -412,7 +430,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       session_id: typeof options.getSessionId === 'function' ? options.getSessionId() : '',
       history: typeof options.getConversationHistory === 'function' ? options.getConversationHistory() : [],
       files: workspaceRouteFiles(),
-      current_file: null,
+      current_file: compactFollowupTaskFile(currentOpenTaskFile()),
       has_selection: !!String(context.pinnedSelText || '').trim(),
       selection_preview: previewText(context.pinnedSelText || '', 800),
       model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : '',
@@ -883,7 +901,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
           target: idx === state._aiTargetFileIdx,
         }))
       : [];
-    const currentFile = null;
+    const currentFile = currentOpenTaskFile();
 
     let targetFile = rawFiles.find((f) => f.target) || null;
     const explicitTextTargetPath = explicitWriteTargetPathFromText(text);

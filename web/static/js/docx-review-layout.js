@@ -664,7 +664,7 @@
       if (window.KotoDocxReviewGeometry) {
         const geo = window.KotoDocxReviewGeometry.computeReviewGeometry(host, viewport);
         if (geo) {
-          // Expose legacy field names that workspace-assistant.js may read.
+          // Expose compatibility field names used by the workspace review runtime.
           return Object.assign(geo, {
             edgeInset:          8,
             laneLeft:           geo.cardColLeft,

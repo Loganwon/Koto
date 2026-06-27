@@ -189,7 +189,7 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
     page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
 
-    # Ensure the TipTap bundle is available (workspace-assistant.js lazy-loads it)
+    # Ensure the TipTap bundle is available for the workspace DOCX runtime.
     page.wait_for_function(
         "() => typeof window.KotoDocxEditorLib !== 'undefined' || "
         "document.querySelector('#wa-docx-editor') !== null",
@@ -219,7 +219,7 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
             container.id = 'wa-docx-editor';
             container.classList.add('active');
             // Inline style trumps ALL CSS selector rules (highest cascade priority).
-            // Even if workspace-assistant.js removes the .active class, display:flex
+            // Even if the workspace runtime removes the .active class, display:flex
             // in the inline style keeps the element visible.
             container.style.cssText =
                 'position:fixed;inset:0;z-index:9999;' +

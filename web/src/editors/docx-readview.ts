@@ -1,6 +1,5 @@
 /**
- * DocxReadView — High-fidelity OOXML read-only DOCX renderer
- * Converted from workspace-assistant.js
+ * DocxReadView - high-fidelity OOXML DOCX fallback renderer.
  */
 
 import type { WorkspaceEditor } from './types';

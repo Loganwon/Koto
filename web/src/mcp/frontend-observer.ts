@@ -51,13 +51,17 @@ const ACTION_ENDPOINT = '/api/mcp/frontend-action';
 const ACTION_RESULT_ENDPOINT = '/api/mcp/frontend-action-result';
 const MAX_QUEUE = 100;
 const SNAPSHOT_INTERVAL_MS = 60000;
-const ACTION_POLL_MS = 700;
+const ACTION_LONG_POLL_MS = 25000;
+const ACTION_POLL_ACTIVE_DELAY_MS = 250;
+const ACTION_POLL_IDLE_MIN_MS = 1000;
+const ACTION_POLL_IDLE_MAX_MS = 10000;
 
 let _installed = false;
 let _queue: FrontendEvent[] = [];
 let _flushTimer: number | null = null;
 let _actionPollTimer: number | null = null;
 let _actionPollActive = false;
+let _actionIdleDelayMs = ACTION_POLL_IDLE_MIN_MS;
 let _sessionId = '';
 let _originalFetch: typeof window.fetch | null = null;
 
@@ -1278,6 +1282,13 @@ function _enqueue(event: FrontendEvent): void {
   _flushTimer = window.setTimeout(_flush, 250);
 }
 
+function _csrfHeaders(): Record<string, string> {
+  const token = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (token) headers['X-CSRFToken'] = token;
+  return headers;
+}
+
 function _flush(): void {
   if (_flushTimer !== null) {
     window.clearTimeout(_flushTimer);
@@ -1288,7 +1299,7 @@ function _flush(): void {
   const fetchImpl = _originalFetch || window.fetch.bind(window);
   fetchImpl(ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: _csrfHeaders(),
     body: JSON.stringify({ events }),
     keepalive: JSON.stringify({ events }).length < 60000,
   }).catch(() => {});
@@ -1532,7 +1543,7 @@ async function _postActionResult(id: string, ok: boolean, result: Record<string,
   const fetchImpl = _originalFetch || window.fetch.bind(window);
   await fetchImpl(ACTION_RESULT_ENDPOINT, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: _csrfHeaders(),
     body: JSON.stringify({ id, ok, result, error }),
     keepalive: JSON.stringify({ id, ok, result, error }).length < 60000,
   });
@@ -1541,13 +1552,18 @@ async function _postActionResult(id: string, ok: boolean, result: Record<string,
 async function _pollFrontendAction(): Promise<void> {
   if (_actionPollActive) return;
   _actionPollActive = true;
+  let nextDelay = _actionIdleDelayMs;
   try {
     const fetchImpl = _originalFetch || window.fetch.bind(window);
-    const response = await fetchImpl(`${ACTION_ENDPOINT}?session_id=${encodeURIComponent(_getSessionId())}`);
+    const response = await fetchImpl(
+      `${ACTION_ENDPOINT}?session_id=${encodeURIComponent(_getSessionId())}&timeout_ms=${ACTION_LONG_POLL_MS}`,
+    );
     if (response.ok) {
       const payload = await response.json();
       const action = payload?.action as FrontendAction | null;
       if (action?.id) {
+        _actionIdleDelayMs = ACTION_POLL_IDLE_MIN_MS;
+        nextDelay = ACTION_POLL_ACTIVE_DELAY_MS;
         try {
           const result = await _executeFrontendAction(action);
           await _postActionResult(action.id, true, result);
@@ -1566,19 +1582,27 @@ async function _pollFrontendAction(): Promise<void> {
             details: { actionId: action.id, action: action.action, error: _errorDetails(error) },
           });
         }
+      } else {
+        nextDelay = _actionIdleDelayMs;
+        _actionIdleDelayMs = Math.min(_actionIdleDelayMs * 2, ACTION_POLL_IDLE_MAX_MS);
       }
+    } else {
+      nextDelay = _actionIdleDelayMs;
+      _actionIdleDelayMs = Math.min(_actionIdleDelayMs * 2, ACTION_POLL_IDLE_MAX_MS);
     }
   } catch (_) {
+    nextDelay = _actionIdleDelayMs;
+    _actionIdleDelayMs = Math.min(_actionIdleDelayMs * 2, ACTION_POLL_IDLE_MAX_MS);
     // Keep polling lightweight; normal network instrumentation covers real failures.
   } finally {
     _actionPollActive = false;
-    _actionPollTimer = window.setTimeout(_pollFrontendAction, ACTION_POLL_MS);
+    _actionPollTimer = window.setTimeout(_pollFrontendAction, nextDelay);
   }
 }
 
 function _installFrontendActions(): void {
   if (_actionPollTimer !== null) return;
-  _actionPollTimer = window.setTimeout(_pollFrontendAction, ACTION_POLL_MS);
+  _actionPollTimer = window.setTimeout(_pollFrontendAction, ACTION_POLL_ACTIVE_DELAY_MS);
 }
 
 export function installFrontendObserver(): void {

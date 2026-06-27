@@ -768,6 +768,40 @@ def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypat
     assert frontend_observability.next_frontend_action(session_id="second-visible")["action"] is None
 
 
+def test_mcp_frontend_action_long_poll_waits_until_action(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from app.core.agent import frontend_observability
+
+    monkeypatch.setattr(
+        frontend_observability,
+        "_event_log_path",
+        lambda: tmp_path / "frontend_observability.jsonl",
+    )
+    frontend_observability.clear_frontend_events()
+
+    def enqueue_later():
+        time.sleep(0.05)
+        frontend_observability.enqueue_frontend_action(
+            action="snapshot",
+            target_session_id="long-poll-session",
+        )
+
+    thread = threading.Thread(target=enqueue_later)
+    thread.start()
+    started = time.monotonic()
+    delivered = frontend_observability.next_frontend_action(
+        session_id="long-poll-session",
+        timeout_ms=1000,
+    )
+    thread.join(timeout=1)
+
+    assert delivered["action"]["action"] == "snapshot"
+    assert delivered["action"]["status"] == "delivered"
+    assert time.monotonic() - started < 0.8
+
+
 def test_websocket_mcp_exposes_koto_supervision_tools():
     from web.mcp_ws import MCPWebSocketSession
 

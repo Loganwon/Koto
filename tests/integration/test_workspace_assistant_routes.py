@@ -1043,16 +1043,14 @@ class TestRawFileNoCacheHeaders:
 
 class TestSaveFlowJsFixes:
     """
-    Validates workspace-assistant.js contains all three save-flow fixes:
-      (a) State (tab, fsHandle, fileId, etc.) captured before any await
+    Validates the current workspace save runtime contains the save-flow fixes:
+      (a) Active tab and write handle are resolved before save writes
       (b) showSaveFilePicker called when no fsHandle exists (first save)
       (c) Cache-buster ?_=Date.now() on the /raw/ fetch URL
       (d) _isSaving guard with finally-block reset
     """
 
-    JS_PATH = (
-        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
-    )
+    JS_PATH = Path(__file__).parents[2] / "web" / "src" / "workspace" / "save.ts"
 
     @property
     def src(self) -> str:
@@ -1061,27 +1059,27 @@ class TestSaveFlowJsFixes:
     # (a) pre-await state capture -----------------------------------------
 
     def test_save_tab_captured_before_await(self):
-        assert "_saveTab" in self.src, "saveFile must capture _saveTab before any await"
+        assert "const tab = _activeTab();" in self.src, "saveFile must resolve the active tab before saving"
 
     def test_save_fshandle_captured_before_await(self):
         assert (
-            "_saveFsHandle" in self.src
-        ), "saveFile must capture _saveFsHandle before any await"
+            "const fsHandle = (tab && tab.fsHandle) || _fsHandleMap.get(state.wsSourcePath || '') || null;" in self.src
+        ), "saveFile must resolve the File System Access handle before writing"
 
     def test_save_file_id_captured_before_await(self):
         assert (
-            "_saveFileId" in self.src
-        ), "saveFile must capture _saveFileId before any await"
+            "if (!_ensureCanSave(tab, true)) return;" in self.src
+        ), "saveFile must validate the current file before any write"
 
     def test_save_file_type_captured_before_await(self):
         assert (
-            "_saveFileType" in self.src
-        ), "saveFile must capture _saveFileType before any await"
+            "file_type: state.fileType" in self.src
+        ), "auto-save payload must include the current file type"
 
     def test_save_ws_path_captured_before_await(self):
         assert (
-            "_saveWsPath" in self.src
-        ), "saveFile must capture _saveWsPath before any await"
+            "ws_source_path: state.wsSourcePath || null" in self.src
+        ), "auto-save payload must include the workspace source path"
 
     # (b) showSaveFilePicker on first save ---------------------------------
 
@@ -1102,7 +1100,7 @@ class TestSaveFlowJsFixes:
 
     def test_handle_stored_on_tab_after_picker(self):
         assert (
-            "_saveTab.fsHandle = _saveFsHandle" in self.src
+            "if (tab) tab.fsHandle = fsHandle;" in self.src
         ), "Acquired fsHandle must be stored on the tab object for the next save"
 
     # (c) cache-buster on raw fetch ----------------------------------------
@@ -1574,7 +1572,7 @@ class TestPptxOpenFile:
 
 class TestEmbeddedModeRenderGuards:
     """
-    Validates that workspace-assistant.js contains all guards required for
+    Validates that the current workspace modules contain all guards required for
     reliable XLSX/PPTX rendering in embedded mode (#workspaceView starts
     hidden and transitions from display:none → flex before files are opened).
 
@@ -1583,8 +1581,9 @@ class TestEmbeddedModeRenderGuards:
     and should catch regressions introduced by future refactors.
     """
 
-    JS_PATH = (
-        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
+    STATE_PATH = Path(__file__).parents[2] / "web" / "src" / "workspace" / "state.ts"
+    FILE_OPEN_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "workspace" / "file-open.ts"
     )
     PPTX_EDITOR_PATH = (
         Path(__file__).parents[2] / "web" / "src" / "editors" / "pptx-editor.ts"
@@ -1592,7 +1591,12 @@ class TestEmbeddedModeRenderGuards:
 
     @property
     def src(self) -> str:
-        return self.JS_PATH.read_text(encoding="utf-8")
+        return "\n".join(
+            [
+                self.STATE_PATH.read_text(encoding="utf-8"),
+                self.FILE_OPEN_PATH.read_text(encoding="utf-8"),
+            ]
+        )
 
     @property
     def pptx_src(self) -> str:
@@ -1603,7 +1607,7 @@ class TestEmbeddedModeRenderGuards:
     def test_wait_for_editor_layout_function_exists(self):
         """_waitForEditorLayout must be defined — it is the central visibility guard."""
         assert "_waitForEditorLayout" in self.src, (
-            "_waitForEditorLayout() is missing from workspace-assistant.js"
+            "_waitForEditorLayout() is missing from the workspace runtime"
         )
 
     def test_wait_for_editor_layout_handles_xlsx(self):
@@ -1620,15 +1624,15 @@ class TestEmbeddedModeRenderGuards:
 
     def test_prime_editor_layout_helper_exists(self):
         """xlsx/pptx shells must be pre-activated before waiting for layout."""
-        assert "function _primeEditorLayout" in self.src, (
-            "workspace-assistant.js must define _primeEditorLayout()"
+        assert "export function _primeEditorLayout" in self.src, (
+            "workspace state runtime must define _primeEditorLayout()"
         )
 
     def test_prime_editor_layout_activates_hidden_shells(self):
         """The priming helper must add the active class so hidden shells can size."""
         src = self.src
-        helper_start = src.find("function _primeEditorLayout")
-        helper_end = src.find("function _waitForEditorLayout", helper_start)
+        helper_start = src.find("export function _primeEditorLayout")
+        helper_end = src.find("export function _waitForEditorLayout", helper_start)
         helper_body = src[helper_start:helper_end]
         assert "classList.add('active')" in helper_body, (
             "_primeEditorLayout must activate the editor shell before waiting"

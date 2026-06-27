@@ -27,9 +27,9 @@ SUITES = OrderedDict(
         (
             "contracts",
             {
-                "description": "Source-level workspace assistant and dispatcher contract guards.",
+                "description": "Source-level guards for the bundled TS workspace assistant task chain.",
                 "nodes": [
-                    "tests/test_ai_stream.py::TestWorkspaceAssistantTaskRemovalRegression",
+                    "tests/unit/test_ai_task_chain_architecture.py",
                 ],
             },
         ),
@@ -72,6 +72,16 @@ SUITES = OrderedDict(
                 "description": "Playwright browser smoke for the workspace AI assistant shell and mocked task-card rendering.",
                 "nodes": [
                     "tests/e2e/test_workspace_ai_assistant.py",
+                ],
+            },
+        ),
+        (
+            "evaluation",
+            {
+                "description": "Real-LLM intent accuracy and execution quality checks; auto-skips without GOOGLE_API_KEY/GEMINI_API_KEY.",
+                "nodes": [
+                    "tests/evaluation/test_intent_accuracy.py",
+                    "tests/evaluation/test_execution_quality.py",
                 ],
             },
         ),

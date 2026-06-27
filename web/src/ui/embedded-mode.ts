@@ -1,7 +1,7 @@
 /**
  * Drag-and-Drop & Embedded Mode — AI panel drag-drop, openInMainView, closeInMainView,
  * Ctrl+K focus, file-browser keyboard shortcuts, save caret sync, auto-restore.
- * Converted from workspace-assistant.js lines 16601-17197.
+ * Embedded workspace layout helpers.
  */
 
 import { _initSplit } from './panel-layout';

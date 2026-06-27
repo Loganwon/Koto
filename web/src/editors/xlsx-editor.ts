@@ -1,6 +1,5 @@
 ﻿/**
- * KotoXlsxEditor — Univer spreadsheet editor wrapper
- * Converted from workspace-assistant.js
+ * KotoXlsxEditor - Univer spreadsheet editor wrapper
  */
 
 import type { WorkspaceEditor } from './types';
