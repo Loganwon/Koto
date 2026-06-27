@@ -1,6 +1,10 @@
 // Workspace bundle entry — imports all workspace, editors, and ui modules
 // Order: infrastructure → state → everything else (depends on WA namespace)
 
+import { installFrontendObserver } from '../mcp/frontend-observer';
+
+installFrontendObserver();
+
 // Core infrastructure (must load first)
 import { $, showToast, _escHtml, _fileIcon, _CHAT_SVG, _PIN_SVG, _CLIPBOARD_SVG } from '../workspace/infrastructure';
 import { state } from '../workspace/state';
@@ -15,6 +19,7 @@ import '../workspace/ai-context';
 import '../workspace/ai-review';
 import '../workspace/model-settings';
 import '../workspace/task-runner';
+import '../workspace/task-workbench';
 import '../workspace/task-dispatcher';
 import '../workspace/task-refresh';
 import '../workspace/conversation';
@@ -38,7 +43,6 @@ import '../ui/docx-pptx-toolbar';
 // Editors
 import '../editors/types';
 import '../editors/cdn-loaders';
-import '../editors/docx-readview';
 import '../editors/docx-outline';
 import '../editors/xlsx-editor';
 import '../editors/pptx-editor';
@@ -50,15 +54,13 @@ import '../editors/text-editor';
 import '../workspace/file-open';
 import '../workspace/save';
 
-// Review runtime must load after legacy WA namespace assignments so its public
-// methods are not overwritten by older modules.
+// Review runtime must load after the base WA namespace assignments so its
+// public methods remain authoritative.
 import '../workspace/docx-review-runtime';
 
 // ── Embedded-mode auto-init ───────────────────────────────────────────────────
-// In embedded mode (when loaded inside index.html), workspace-assistant.js is NOT
-// loaded, so WA.installWorkspaceFindReplace() and WA.installWorkspaceNotebookTools()
-// are never called (they were triggered by inline code in workspace-assistant.js).
-// This block replaces that triggering logic exclusively for embedded mode.
+// In embedded mode, initialize optional workspace tools after the bundle has
+// published their WA entry points.
 function _autoInitEmbedded(): void {
   if (!document.getElementById('workspaceView')) return;
   const WA = (window as any).WA;

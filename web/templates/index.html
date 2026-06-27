@@ -8,33 +8,48 @@
     <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/koto_icon.png') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-assistant.css') }}?v=20260521a">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260625">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-ai-panel.css') }}?v=20260626">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
         var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
+        document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/z)+'px');
         if(z!==1){
             document.documentElement.style.zoom=z;
-            document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/z)+'px');
+            var ai=document.getElementById('wa-ai');if(ai)ai.style.minWidth=Math.round(250/z)+'px';
+            var left=document.getElementById('wa-left');if(left)left.style.minWidth=Math.round(150/z)+'px';
+            var canvas=document.getElementById('wa-canvas');if(canvas)canvas.style.minWidth=Math.round(400/z)+'px';
+            window._waZoomMinSize=[Math.round(150/z),Math.round(400/z),Math.round(250/z)];
         }
         window.addEventListener('resize',function(){
             var cz=parseFloat(document.documentElement.style.zoom||'1');
             document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/cz)+'px');
         });
     })()</script>
-<link rel="stylesheet" href="/static/css/inline-extracted.css">
-    <link rel="preload" as="style" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
+<link rel="preload" as="style" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
     <noscript>
         <link rel="stylesheet" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}">
     </noscript>
-    <script defer src="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}"></script>
     <script defer src="{{ url_for('static', filename='vendor/marked/12.0.0/marked.min.js') }}"></script>
-    <!-- KaTeX 数学公式渲染 -->
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.css') }}">
-    <script defer src="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}"></script>
+    <!-- highlight.js & KaTeX: lazy-load on idle to avoid blocking initial render -->
+    <script>(function(){var h="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}",k="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}",l=function(u){var s=document.createElement("script");s.src=u;s.defer=true;document.head.appendChild(s)};if(window.requestIdleCallback){requestIdleCallback(function(){l(h);l(k)},{timeout:2000})}else{setTimeout(function(){l(h);l(k)},300)}})();</script>
     <!-- ── Token 使用监测嵌入式样式 ── -->
     <!-- Mermaid 图表渲染：按需懒加载（3.2MB，不在启动时阻塞 DOMContentLoaded） -->
 </head>
 <body class="loading">
+    <script>
+    (function(){
+        var shell = new URLSearchParams(window.location.search).get('shell') || '';
+        if (!shell) return;
+        document.documentElement.dataset.kotoShell = shell;
+        document.documentElement.classList.add('koto-shell-' + shell);
+        if (document.body) {
+            document.body.dataset.kotoShell = shell;
+            document.body.classList.add('koto-shell-' + shell);
+        }
+    })();
+    </script>
     <div id="startupSplash">
         <div class="spinner"></div>
         <div>正在启动 Koto...</div>
@@ -51,16 +66,16 @@
                     <span>K</span>
                 </button>
 
-                <button class="activity-btn" id="navSkillsBtn" data-label="技能" onclick="toggleSkillsPanel && toggleSkillsPanel()" title="Skills 库" aria-label="Skills 库" aria-expanded="false" aria-controls="skillsPanel">
+                <button class="activity-btn" id="navSkillsBtn" data-label="技能" onclick="window.toggleSkillsPanel && window.toggleSkillsPanel()" title="Skills 库" aria-label="Skills 库" aria-expanded="false" aria-controls="skillsPanel">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
                 </button>
             </div>
 
             <div class="activity-bar-bottom">
-                <button class="activity-btn" id="navSettingsBtn" data-label="设置" onclick="toggleSettings ? toggleSettings() : openSettings()" title="设置" aria-label="设置" aria-expanded="false" aria-controls="settingsPanel">
+                <button class="activity-btn" id="navSettingsBtn" data-label="设置" onclick="if(window.toggleSettings)window.toggleSettings();else if(window.openSettings)window.openSettings()" title="设置" aria-label="设置" aria-expanded="false" aria-controls="settingsPanel">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.05a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.28.6.86 1 1.55 1H21a2 2 0 1 1 0 4h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>
                 </button>
-                <div class="status-indicator activity-status" id="statusIndicator" onclick="toggleLatencyDetail(event)" role="button" aria-expanded="false" title="服务状态">
+                <div class="status-indicator activity-status" id="statusIndicator" onclick="window.toggleLatencyDetail&&window.toggleLatencyDetail(event)" role="button" aria-expanded="false" title="服务状态">
                     <span class="status-dot"></span>
                     <div class="status-info sidebar-text">
                         <span class="status-text" title="点击展开查看各服务商延迟详情">检查中...</span>
@@ -141,33 +156,12 @@
                         </div>
                     </div>
 
-                    <!-- 影子追踪主动交互按鈕 -->
-                    <button class="ghost-btn" id="shadowToggleBtn" onclick="openShadowPanel()" title="影子追踪 · 主动交互" style="position:relative;display:none!important;">
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:4px;"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg> 影子
-                        <span class="badge" id="shadowBadge" style="display:none;">0</span>
-                    </button>
-                </div>
             </header>
 
 
 
             <div class="main-grid single-column">
                 <section class="chat-pane">
-                <!-- 影子追踪：主动消息条带（紧凑单行，不挤压欢迎屏幕） -->
-                <div id="shadowBanner">
-                    <div style="display:flex;align-items:center;gap:8px;">
-                        <span style="font-size:14px;flex-shrink:0;">&#x1F441;&#xFE0F;</span>
-                        <div style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="shadowBannerText">应用正在呀话中...</div>
-                        <div style="display:flex;gap:4px;flex-shrink:0;align-items:center;">
-                            <span id="shadowBannerCount"></span>
-                            <button class="btn-secondary btn-sm" onclick="shadowPrevMsg()">&#8249;</button>
-                            <button class="btn-secondary btn-sm" onclick="shadowNextMsg()">&#8250;</button>
-                            <button class="btn-secondary btn-sm" onclick="shadowDismissAll()">全部关闭</button>
-                            <button class="btn-secondary btn-sm" onclick="shadowReply()">回复</button>
-                            <button class="btn-secondary btn-sm" onclick="shadowDismissCurrent()">&times; 关闭</button>
-                        </div>
-                    </div>
-                </div>
                 <!-- 聊天内搜索栏 (Ctrl+F) -->
                 <div id="chatSearchBar">
                     <input type="text" id="chatSearchInput" placeholder="在对话中搜索…" autocomplete="off"
@@ -224,8 +218,8 @@
                 <div class="resize-handle-row" id="inputResizeHandle"></div>
                 <!-- Active Skills Pill Bar -->
                 <div id="chat-skill-bar" style="display:flex;">
-                  <button class="csb-label" id="csbToggleBtn" onclick="toggleSkillsPanel()" title="打开 / 关闭 Skills 库" aria-expanded="false" aria-controls="skillsPanel"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Skills <span class="csb-toggle-arrow">▾</span></button>
-                  <div class="csb-pills" id="csb-pills"><span class="csb-hint">暂无激活 — <a href="javascript:void(0)" onclick="openSkillsPanel()">打开 Skills 库</a></span></div>
+                  <button class="csb-label" id="csbToggleBtn" onclick="window.toggleSkillsPanel && window.toggleSkillsPanel()" title="打开 / 关闭 Skills 库" aria-expanded="false" aria-controls="skillsPanel"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Skills <span class="csb-toggle-arrow">▾</span></button>
+                  <div class="csb-pills" id="csb-pills"><span class="csb-hint">暂无激活 — <a href="javascript:void(0)" onclick="window.openSkillsPanel && window.openSkillsPanel()">打开 Skills 库</a></span></div>
                   <button class="csb-dismiss-all" id="csbDismissAllBtn" onclick="csbDismissAllSkills()" title="关闭所有激活的 Skills" style="display:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 全关</button>
                 </div>
 
@@ -272,8 +266,13 @@
                         </svg>
                     </button>
                 </form>
-                <div class="input-meta-bar"></div>
-                <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
+                <div class="chat-input-footer">
+                    <div class="chat-model-row">
+                        {% include '_workspace_model_controls.html' %}
+                    </div>
+                    <div class="input-meta-bar"></div>
+                    <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
+                </div>
             </div>
                         </div><!-- /chatView -->
 
@@ -289,40 +288,6 @@
                   <div id="wa-left-header">
                     <span class="wa-panel-title">本地文件助手</span>
                     <div class="wa-header-actions">
-                      <button class="wa-icon-btn" id="wa-autosave-toggle" onclick="WA.toggleAutoSave()" title="自动保存">
-                        <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-                          <circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/>
-                        </svg>
-                      </button>
-                      <div style="position:relative;display:inline-block">
-                        <button class="wa-icon-btn" id="wa-archive-btn" disabled onclick="WA.toggleArchivePopover()" title="将当前文件归档到分类文件夹">
-                          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-                            <polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/>
-                          </svg>
-                        </button>
-                        <div id="wa-archive-popover" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9000;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px;min-width:200px;box-shadow:0 8px 24px rgba(0,0,0,0.15);font-size:13px;">
-                          <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">归档到分类文件夹</div>
-                          <div id="wa-archive-cats" style="display:flex;flex-direction:column;gap:4px;">
-                            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('文档')">文档</button>
-                            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('表格')">表格</button>
-                            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('演示文稿')">演示文稿</button>
-                            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('报告')">报告</button>
-                            <button class="wa-archive-cat-btn" onclick="WA.archiveCurrent('合同')">合同</button>
-                          </div>
-                        </div>
-                      </div>
-                      <div style="position:relative;display:inline-block">
-                        <button class="wa-icon-btn" id="wa-history-btn" disabled onclick="WA.toggleHistoryPopover()" title="查看历史版本快照">
-                          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24">
-                            <circle cx="12" cy="12" r="10"/><polyline points="12 8 12 12 14 14"/>
-                          </svg>
-                        </button>
-                        <div id="wa-history-popover" style="display:none;position:absolute;top:calc(100% + 6px);right:0;z-index:9000;background:var(--bg-elevated);border:1px solid var(--border-color);border-radius:10px;padding:12px;min-width:260px;max-height:320px;overflow-y:auto;box-shadow:0 8px 24px rgba(0,0,0,0.15);font-size:13px;">
-                          <div style="font-weight:600;margin-bottom:8px;color:var(--text-primary);">历史版本</div>
-                          <div id="wa-history-list"><span style="color:var(--text-muted);">加载中...</span></div>
-                        </div>
-                      </div>
-                      <span id="wa-autosave-status"></span>
                       <button type="button" class="wa-left-action-btn" onclick="WA.openSystemFileList && WA.openSystemFileList()" title="添加文件到工作区">添加文件</button>
                       <button type="button" class="wa-left-action-btn primary" onclick="WA._openLocalFile && WA._openLocalFile()" title="打开本地文件">打开</button>
                       <button class="wa-icon-btn" onclick="WA.refreshFiles()" title="刷新">
@@ -402,52 +367,37 @@
                 </div>
 
                 <div id="wa-ctx-menu"></div>
-                <!-- Archive/Organize panel overlay -->
-                <div id="wa-archive-overlay" class="wa-dlg-overlay" style="display:none" onclick="if(event.target===this)WA.hideArchivePanel()">
-                  <div class="wa-dlg-box" style="width:480px;max-width:95vw">
-                    <div class="wa-dlg-title">
-                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" stroke-width="2"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-                      文件归档整理
-                      <button class="wa-dlg-close" onclick="WA.hideArchivePanel()">×</button>
-                    </div>
-                    <p class="wa-dlg-hint">将源文件夹里的文件按类型分类整理到子文件夹。原文件不会被删除。</p>
-                    <label style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:block">源文件夹路径</label>
-                    <div class="wa-dlg-input-row" style="margin-bottom:12px">
-                      <input id="wa-archive-src" class="wa-dlg-input" placeholder="输入或粘贴文件夹绝对路径...">
-                      <button class="wa-btn" onclick="WA._archivePickFolder('wa-archive-src')">浏览</button>
-                    </div>
-                    <label style="font-size:12px;color:var(--text-muted);margin-bottom:6px;display:block">归档方式</label>
-                    <div style="display:flex;gap:6px;margin-bottom:14px">
-                      <button id="wa-archive-mode-auto" class="wa-btn primary" onclick="WA._setArchiveMode('auto')">AI 自动分类</button>
-                      <button id="wa-archive-mode-custom" class="wa-btn" onclick="WA._setArchiveMode('custom')">按类型预设</button>
-                    </div>
-                    <div id="wa-archive-result"></div>
-                    <div class="wa-dlg-footer">
-                      <button class="wa-btn" onclick="WA.hideArchivePanel()">取消</button>
-                      <button id="wa-archive-start-btn" class="wa-btn primary" onclick="WA._doArchive()">开始归档</button>
-                    </div>
-                  </div>
-                </div>
+
                 <div id="wa-canvas">
                   <div class="wa-unified-toolbar">
+                    <button type="button" class="wa-mobile-files-toggle" id="wa-mobile-files-toggle" onclick="WA.toggleMobileFiles && WA.toggleMobileFiles()" title="打开文件列表" aria-label="打开文件列表" aria-expanded="false" aria-controls="wa-left">
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h7l2 3h9v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M3 8h18"/></svg>
+                    </button>
                     <div class="wa-unified-title" hidden>
                       <strong id="wa-file-name"></strong>
                     </div>
+                    <div id="wa-tab-bar"></div>
                     <div class="wa-unified-actions">
-                      <button type="button" class="wa-unified-btn primary" id="wa-save-btn" hidden disabled onclick="WA.saveFile && WA.saveFile()" title="保存当前文件">保存</button>
+                      <button class="wa-autosave-toggle-btn" id="wa-autosave-toggle" onclick="WA.toggleAutoSave()" title="自动保存：关">
+                        <svg width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                        <span id="wa-autosave-status">自动保存</span>
+                      </button>
+                      <button type="button" class="wa-unified-btn primary" id="wa-save-btn" hidden disabled onclick="var b=this;if(WA.saveFile){WA.saveFile();b.classList.add('saved-flash');b.style.transform='scale(0.92)';var t=setTimeout(function(){b.style.transform='';b.classList.remove('saved-flash')},220);if(window.showToast)showToast('文件已保存','success',1800)}" title="保存当前文件">保存</button>
                       <button type="button" class="wa-unified-btn" id="wa-saveas-btn" hidden disabled onclick="WA.saveAs && WA.saveAs()" title="另存为">另存为</button>
                     </div>
-                  </div>
-                  <div id="wa-tab-bar"></div>
-                  <div id="wa-canvas-body">
+                  </div><div id="wa-canvas-body">
                     <div id="wa-drag-canvas-shield"></div>
                     <div id="wa-ai-img-drop-hint"><span>释放即可插入图片</span></div>
                     <div id="wa-canvas-loading"><div class="wa-loading-spinner"></div><div class="wa-loading-text">加载中...</div></div>
                     <div id="wa-drop-zone">
                       <div class="wa-drop-inner" id="wa-drop-inner">
                         <div class="wa-drop-icon">&#128194;</div>
-                        <div class="wa-drop-title">拖拽文件到此处，或点击左侧"打开"</div>
-                        <div class="wa-drop-sub">支持所有常见办公文档格式</div>
+                        <div class="wa-drop-title">打开或拖入文件开始</div>
+                        <div class="wa-drop-sub">支持 DOCX、XLSX、PPTX、PDF 和文本。打开后可让 Koto 总结、编辑或生成新版本。</div>
+                        <div class="wa-drop-actions">
+                          <button type="button" class="wa-drop-action primary" onclick="event.stopPropagation(); WA._openLocalFile && WA._openLocalFile()">打开文件</button>
+                          <button type="button" class="wa-drop-action" onclick="event.stopPropagation(); WA.openSystemFileList && WA.openSystemFileList()">添加到工作区</button>
+                        </div>
                         <div id="upload-progress"></div>
                       </div>
                       <div class="wa-format-chips">
@@ -1085,12 +1035,6 @@
                                         </div>
                                         <div id="wa-review-list" class="koto-docx-comment-layer"></div>
                                     </div>
-                  <!-- Workflow panel -->
-                  <div id="wa-workflow-panel" class="wa-workflow-panel" style="display:none"></div>
-
-                  <!-- Legacy skill quick bar retained only as an API anchor; Skills now open from the left activity bar. -->
-                  <div id="wa-skill-bar" hidden aria-hidden="true" style="display:none;flex-shrink:0;padding:5px 10px 4px;border-bottom:1px solid var(--border);background:var(--bg-secondary);flex-wrap:wrap;gap:4px;min-height:34px;align-items:center;"></div>
-
                   <div id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史">
                     <div class="wa-ai-session-list-head">
                       <div class="wa-ai-session-title-group">
@@ -1109,16 +1053,7 @@
                     </div>
                     <div id="wa-ai-session-list" class="wa-ai-session-list"></div>
                     <div id="wa-ai-session-list-composer" class="wa-ai-session-list-composer">
-                      <div id="wa-session-list-file-chips" class="wa-ai-file-chips wa-session-list-file-chips" style="display:none">
-                        <div class="wa-ai-file-chips-header"></div>
-                        <div id="wa-session-list-file-chip-list" class="wa-ctx-file-list"></div>
-                      </div>
-                      <textarea id="wa-session-list-input" class="wa-session-list-input" placeholder="输入问题，新建对话" rows="4" onkeydown="WA.handleSessionListComposerKeydown && WA.handleSessionListComposerKeydown(event)"></textarea>
-                      <div class="wa-session-list-composer-foot">
-                        <button type="button" class="wa-session-list-attach" onclick="window.WA && WA.pickAIContextFiles ? WA.pickAIContextFiles() : document.getElementById('wa-ai-context-file-input').click()" title="附加文件" aria-label="附加文件"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48"/></svg></button>
-                        {% include '_workspace_model_controls_compact.html' %}
-                        <button id="wa-session-list-send" type="button" class="wa-session-list-send" onclick="WA.sendSessionListComposer && WA.sendSessionListComposer()" title="发送并新建对话" aria-label="发送并新建对话" disabled><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
-                      </div>
+                      <div id="wa-session-list-composer-host" class="wa-composer-host"></div>
                     </div>
                   </div>
 
@@ -1171,6 +1106,7 @@
                     </div>
                   </div>
 
+                                    <div id="wa-chat-composer-host" class="wa-composer-host">
                                     <div id="wa-ai-input-area">
                                         <div id="wa-context-bar" style="display:none"></div>
                                         <div id="wa-ai-file-chips" style="display:none">
@@ -1182,7 +1118,7 @@
                                             </div>
                                         </div>
                     <div class="wa-input-box">
-                                            <div id="wa-input-row"><textarea id="wa-user-input" placeholder="输入问题，或让 Koto 处理当前文件" onkeydown="WA.handleInputKeydown(event)" rows="3"></textarea></div>
+                                            <div id="wa-input-row" class="wa-input-row"><textarea id="wa-user-input" class="wa-ai-composer-input" placeholder="输入问题，或让 Koto 处理当前文件" onkeydown="WA.handleUnifiedComposerKeydown ? WA.handleUnifiedComposerKeydown(event) : WA.handleInputKeydown(event)" rows="3"></textarea></div>
                       <div class="wa-input-box-footer">
                         <div class="wa-footer-meta">
                                                     {% include '_workspace_model_controls.html' %}
@@ -1194,27 +1130,16 @@
                         <div class="wa-footer-actions">
                           <button id="wa-attach-file-btn" type="button" class="wa-attach-file-btn" onclick="window.WA && WA.pickAIContextFiles ? WA.pickAIContextFiles() : document.getElementById('wa-ai-context-file-input').click()" title="附加文件" aria-label="附加文件"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48"/></svg></button>
                           <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
-                          <button id="wa-send-btn" type="button" onclick="WA.sendMessage()" title="发送" aria-label="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+                          <button id="wa-send-btn" type="button" onclick="WA.submitUnifiedAiComposer ? WA.submitUnifiedAiComposer() : WA.sendMessage()" title="发送" aria-label="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
                         </div>
                       </div>
                     </div>
+                  </div>
                   </div>
 
                   </div>
                 </div>
               </div><!-- /wa-workspace -->
-
-              <!-- 技能执行面板 (底部滑出，定位在 #workspaceView 内) -->
-              <div id="wa-skill-exec-panel" hidden aria-hidden="true" data-retained-legacy="skill-exec" style="position:absolute;bottom:0;left:0;right:0;max-height:55%;min-height:260px;background:var(--bg-primary);border-top:2px solid var(--accent,#4a90e2);border-radius:8px 8px 0 0;display:none;flex-direction:column;box-shadow:0 -4px 24px rgba(0,0,0,0.18);z-index:200;transform:translateY(100%);opacity:0;pointer-events:none;transition:transform 0.22s ease,opacity 0.22s ease;">
-                <div style="display:flex;align-items:center;justify-content:space-between;padding:7px 12px;border-bottom:1px solid var(--border);background:var(--bg-secondary);border-radius:8px 8px 0 0;flex-shrink:0;">
-                  <span id="wa-skill-exec-title" style="font-size:13px;font-weight:600;color:var(--text-primary)">技能与文件任务</span>
-                  <div style="display:flex;gap:4px;">
-                    <button onclick="WaSkills.minimizePanel()" style="background:transparent;border:none;color:var(--text-muted);font-size:13px;width:22px;height:22px;cursor:pointer;border-radius:4px;" title="最小化">▼</button>
-                    <button onclick="WaSkills.hidePanel()" style="background:transparent;border:none;color:var(--text-muted);font-size:13px;width:22px;height:22px;cursor:pointer;border-radius:4px;" title="关闭">✕</button>
-                  </div>
-                </div>
-                <div id="wa-skill-exec-body" style="flex:1;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:10px;min-height:0;"></div>
-              </div>
 
                             <!-- Close-warning dialog: shown when closing Koto with unsaved WA files -->
                             {% include '_workspace_close_warn_dialog.html' %}
@@ -1685,113 +1610,7 @@
             </div>
         </div>
 
-        <!-- ==================== Cowork 自动化任务面板 ==================== -->
-        <aside class="cowork-panel" id="coworkPanel">
-            <div class="cw-header">
-                <div class="cw-title">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>
-                    自动化任务
-                    <span class="cw-phase-badge" id="cwPhaseBadge" style="display:none;"></span>
-                </div>
-                <button class="close-panel" onclick="CoworkPanel.close()" title="关闭">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-                </button>
-            </div>
-            <div class="cw-tabs">
-                <button class="cw-tab active" id="cwTabNew"    onclick="CoworkPanel.switchTab('new')">✦ 新任务</button>
-                <button class="cw-tab"        id="cwTabStatus" onclick="CoworkPanel.switchTab('status')" style="display:none;">⚡ 执行中</button>
-                <button class="cw-tab"        id="cwTabHistory" onclick="CoworkPanel.switchTab('history')">📋 历史</button>
-            </div>
-
-            <!-- 新任务 Tab -->
-            <div class="cw-body" id="cwTabNewBody">
-                <div>
-                    <div class="cw-label">任务目标</div>
-                    <textarea class="cw-textarea" id="cwGoalInput" placeholder="描述你想让 AI 完成的任务，例如：&#10;• 分析 workspace 目录下所有 CSV 文件，生成数据质量报告&#10;• 整理工作区文件夹，删除重复内容&#10;• 每周五汇总本周工作进展"></textarea>
-                </div>
-                <div>
-                    <div class="cw-label">背景信息（可选）</div>
-                    <input class="cw-input" id="cwContextInput" type="text" placeholder="例如：/workspace/data/ 目录，或相关文件名">
-                </div>
-                <div class="cw-toggle-row">
-                    <label class="cw-toggle">
-                        <input type="checkbox" id="cwHumanReviewToggle" checked>
-                        <span class="cw-toggle-slider"></span>
-                    </label>
-                    <span style="font-size:12px;color:var(--text-secondary);">执行前展示计划，待我确认</span>
-                </div>
-                <button class="cw-submit-btn" id="cwSubmitBtn" onclick="CoworkPanel.submit()">
-                    ▶ 开始执行任务
-                </button>
-            </div>
-
-            <!-- 执行状态 Tab -->
-            <div class="cw-body" id="cwTabStatusBody" style="display:none;">
-                <!-- 进度条 -->
-                <div>
-                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-                        <span class="cw-label" style="margin:0;">进度</span>
-                        <span style="font-size:11px;color:var(--text-secondary);" id="cwProgressText">0 / 0</span>
-                    </div>
-                    <div class="cw-progress-bar-wrap">
-                        <div class="cw-progress-bar" id="cwProgressBar" style="width:0%"></div>
-                    </div>
-                </div>
-                <!-- 当前目标 -->
-                <div style="font-size:12px;color:var(--text-secondary);" id="cwCurrentGoal"></div>
-
-                <!-- 计划审批区块（phase=review 时显示） -->
-                <div id="cwReviewBlock" style="display:none;">
-                    <div class="cw-label">📋 AI 生成的计划</div>
-                    <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;" id="cwPlanReasoning"></div>
-                    <div style="font-size:11px;color:var(--text-secondary);margin-bottom:8px;" id="cwPlanMeta"></div>
-                    <div class="cw-plan-steps" id="cwPlanSteps"></div>
-                    <div style="margin-top:10px;">
-                        <div class="cw-review-actions">
-                            <button class="cw-approve-btn" onclick="CoworkPanel.approve()">✓ 批准计划</button>
-                            <button class="cw-reject-btn" onclick="CoworkPanel.showRejectInput()">✕ 拒绝</button>
-                        </div>
-                        <div class="cw-feedback-row" id="cwRejectRow" style="display:none;">
-                            <input class="cw-feedback-input" id="cwRejectFeedback" placeholder="可选：告诉 AI 哪里需要调整…">
-                            <button class="cw-reject-btn" style="flex-shrink:0;padding:7px 14px;" onclick="CoworkPanel.reject()">确认拒绝</button>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- 执行步骤列表（phase=executing 时显示） -->
-                <div id="cwStepsBlock" style="display:none;">
-                    <div class="cw-label">执行步骤</div>
-                    <div class="cw-plan-steps" id="cwExecSteps"></div>
-                </div>
-
-                <!-- 最终报告（phase=done 时显示） -->
-                <div id="cwReportBlock" style="display:none;">
-                    <div class="cw-label">✅ 任务完成 — 最终报告</div>
-                    <div class="cw-report" id="cwReportContent"></div>
-                    <div style="display:flex;gap:8px;margin-top:10px;">
-                        <button class="cw-submit-btn" style="background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);" onclick="CoworkPanel.newTask()">+ 新任务</button>
-                    </div>
-                </div>
-
-                <!-- 错误块（phase=failed） -->
-                <div id="cwErrorBlock" style="display:none;">
-                    <div class="cw-label" style="color:#f87171;">⚠ 任务失败</div>
-                    <div style="font-size:12px;color:#f87171;padding:10px;background:rgba(239,68,68,.08);border-radius:8px;" id="cwErrorMsg"></div>
-                    <button class="cw-submit-btn" style="margin-top:10px;background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border-color);" onclick="CoworkPanel.newTask()">↩ 返回新任务</button>
-                </div>
-
-                <div style="text-align:right;margin-top:4px;">
-                    <button class="cw-reject-btn" style="font-size:11px;padding:5px 12px;" onclick="CoworkPanel.cancel()">取消任务</button>
-                </div>
-            </div>
-
-            <!-- 历史 Tab -->
-            <div class="cw-body" id="cwTabHistoryBody" style="display:none;">
-                <div id="cwHistoryList"><div class="cw-empty">暂无历史任务</div></div>
-            </div>
-        </aside>
-
-        <!-- ==================== Skills Panel (VS Code Extension 风格) ==================== -->        <aside class="skills-panel" id="skillsPanel" role="dialog" aria-label="Skills 库" aria-modal="false" aria-hidden="true" tabindex="-1">
+        <!-- ==================== Skills Panel (VS Code Extension 风格) ==================== -->        <aside class="skills-panel" id="skillsPanel" role="dialog" aria-label="Skills 库" aria-modal="false" aria-hidden="true" tabindex="-1" inert>
             <div class="resize-handle resize-handle-skills" id="skillsResizeHandle"></div>
             <div class="sp-header">
                 <div style="display:flex;align-items:center;gap:8px;">
@@ -1800,7 +1619,7 @@
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;">
                     <a href="/skill-marketplace" target="_blank" class="sp-ext-link" title="完整管理视图">⤢ 完整视图</a>
-                    <button class="close-panel" onclick="closeSkillsPanel()" title="关闭"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                    <button class="close-panel" onclick="window.closeSkillsPanel && window.closeSkillsPanel()" title="关闭 Skills 库" aria-label="关闭 Skills 库"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                 </div>
             </div>
             <div class="sp-search-wrap">
@@ -1969,7 +1788,7 @@
         </aside>
 
         <!-- ==================== Artifacts 面板 ==================== -->
-        <aside class="artifacts-panel" id="artifactsPanel">
+        <aside class="artifacts-panel" id="artifactsPanel" aria-hidden="true" inert>
             <div class="artifacts-header">
                 <div class="artifacts-title-row">
                     <h3 id="artifactsTitle">Artifact</h3>
@@ -1978,7 +1797,7 @@
                         <button class="artifact-tab-btn" data-tab="code" onclick="switchArtifactTab('code')" title="代码">⟨/⟩ 代码</button>
                         <button class="ghost-btn artifact-copy-all" onclick="copyArtifactContent()" title="复制全部">📋</button>
                         <button class="ghost-btn artifact-download" onclick="downloadArtifact()" title="下载">⬇</button>
-                        <button class="close-panel" onclick="closeArtifacts()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+                        <button class="close-panel" onclick="closeArtifacts()" title="关闭 Artifact" aria-label="关闭 Artifact"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
                     </div>
                 </div>
                 <div class="artifacts-meta">
@@ -2175,30 +1994,6 @@
         </div>
     </div>
 
-    <!-- ==================== 触发器配置 ==================== -->
-    <div class="trigger-panel-modal" id="triggerPanelModal" style="display: none;">
-        <div class="trigger-panel">
-            <div class="panel-header">
-                <h3>🧭 主动触发器</h3>
-                <div class="panel-header-actions">
-                    <button class="ghost-btn btn-xs" onclick="runTriggerEvaluation()">⚡ 立即评估</button>
-                </div>
-                <button class="close-panel" onclick="closeTriggerPanel()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
-            </div>
-            <div class="trigger-panel-body">
-                <div class="trigger-actions">
-                    <button class="btn-sm" onclick="startTriggerMonitoring()">▶ 启动监控</button>
-                    <button class="btn-sm" onclick="stopTriggerMonitoring()">⏸ 停止监控</button>
-                    <div class="trigger-interval">
-                        <span>间隔(秒)</span>
-                        <input type="number" id="triggerIntervalInput" value="300" min="30" max="3600">
-                    </div>
-                </div>
-                <div class="trigger-decision" id="triggerDecision">暂无评估结果</div>
-                <div class="trigger-list" id="triggerList"></div>
-            </div>
-        </div>
-    </div>
 
     <!-- ==================== 应用框架系统 ==================== -->
     <!-- 应用容器 -->
@@ -2270,12 +2065,56 @@
     })();
     </script>
 
-    <script src="{{ url_for('static', filename='js/build/auth-bundle.js') }}?v=20260616"></script>
-    <script defer src="{{ url_for('static', filename='js/build/app-bundle.js') }}?v=20260616"></script>
-    <script src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260315"></script>
-    <script defer src="{{ url_for('static', filename='js/tarot-picker.js') }}?v=20260320-v2"></script>
-    <script defer src="{{ url_for('static', filename='js/build/skills-ui-bundle.js') }}?v=20260616"></script>
-
+    <script defer src="{{ url_for('static', filename='js/build/auth-bundle.js') }}?v=20260616"></script>
+    <script defer src="{{ url_for('static', filename='js/build/app-bundle.js') }}?v=20260626-settings"></script>
+    <script defer src="{{ url_for('static', filename='js/app-framework.js') }}?v=20260315"></script>
+    <!-- Skills bundles: lazy-load on first panel open -->
+    <script>
+      (function(){
+        var loaded=false, loading=null;
+        var s1="{{ url_for('static', filename='js/build/skills-ui-bundle.js') }}?v=20260616";
+        var s2="{{ url_for('static', filename='js/build/skills-panel-bundle.js') }}?v=20260616";
+        var stubs={};
+        function inject(src){
+          return new Promise(function(resolve,reject){
+            var base=src.split('?')[0];
+            var existing=Array.prototype.find.call(document.scripts,function(script){ return (script.src||'').indexOf(base)>=0; });
+            if(existing){ resolve(); return; }
+            var script=document.createElement('script');
+            script.src=src; script.defer=true;
+            script.onload=function(){ resolve(); };
+            script.onerror=function(){ reject(new Error('Failed to load '+src)); };
+            document.head.appendChild(script);
+          });
+        }
+        function load(){
+          if(loaded) return Promise.resolve();
+          if(loading) return loading;
+          loading=Promise.all([inject(s1),inject(s2)]).then(function(){ loaded=true; });
+          return loading;
+        }
+        function callAfterLoad(name,args){
+          return load().then(function(){
+            var fn=window[name];
+            if(typeof fn==='function' && fn!==stubs[name]) return fn.apply(window,args||[]);
+          }).catch(function(error){ console.warn('[Koto] Skills bundle lazy load failed', error); });
+        }
+        ['openSkillsPanel','closeSkillsPanel','toggleSkillsPanel'].forEach(function(name){
+          if(typeof window[name]!=='function'){
+            stubs[name]=function(){ return callAfterLoad(name, arguments); };
+            window[name]=stubs[name];
+          }
+        });
+        document.addEventListener('click',function(e){
+          var target=e.target;
+          if(!target || !target.closest) return;
+          if(target.closest('#navSkillsBtn,#csbToggleBtn,#skillsPanel .close-panel,[data-action="open-skills"],[data-action="toggle-skills"],[data-action="close-skills"]')){
+            load();
+          }
+        },true);
+        window.KotoSkillsLoader={load:load};
+      })();
+    </script>
     <!-- Token 监测移至顶栏 top-actions，此处保留空白占位 -->
 
     <script>
@@ -2453,7 +2292,7 @@
                 const dismissAllBtn = document.getElementById('csbDismissAllBtn');
                 if (!skills.length) {
                     bar.style.display = 'flex';
-                    pills.innerHTML = '<span class="csb-hint">\u6682\u65e0\u6fc0\u6d3b \u2014 <a href="javascript:void(0)" onclick="openSkillsPanel()">\u6253\u5f00 Skills \u5e93</a></span>';
+                    pills.innerHTML = '<span class="csb-hint">\u6682\u65e0\u6fc0\u6d3b \u2014 <a href="javascript:void(0)" onclick="window.openSkillsPanel && window.openSkillsPanel()">\u6253\u5f00 Skills \u5e93</a></span>';
                     if (dismissAllBtn) dismissAllBtn.style.display = 'none';
                     return;
                 }
@@ -2560,7 +2399,7 @@
     <!-- ══ /Active Skills Pill Bar ══════════════════════════════════════════ -->
 
     <!-- ══ Skills Panel JS (VS Code Extension 风格) ═════════════════════════ -->
-    <script src="{{ url_for('static', filename='js/build/skills-panel-bundle.js') }}?v=20260616" defer></script>
+
 
     <!-- ══ Template Upload JS ═══════════════════════════════════════════════ -->
     <script>
@@ -2956,172 +2795,6 @@
     <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
     {% include '_workspace_asset_scripts.html' %}
 
-    <!-- ===== WaSkills: 工作流技能芯片系统 ===== -->
-    <script>
-    window.WaSkills = (() => {
-      const _bar   = () => document.getElementById('wa-skill-bar');
-      const _panel = () => document.getElementById('wa-skill-exec-panel');
-      const _body  = () => document.getElementById('wa-skill-exec-body');
-      const _titleEl = () => document.getElementById('wa-skill-exec-title');
-
-      async function load() {
-        const bar = _bar();
-        if (!bar) return;
-        bar.hidden = true;
-        bar.setAttribute('aria-hidden', 'true');
-        bar.style.display = 'none';
-      }
-
-      function showPanel() {
-        const p = _panel(); if (!p) return;
-        p.hidden = true;
-        p.setAttribute('aria-hidden', 'true');
-        p.style.display = 'none';
-        p.style.transform = 'translateY(100%)';
-        p.style.opacity = '0';
-        p.style.pointerEvents = 'none';
-      }
-
-      function hidePanel() {
-        const p = _panel(); if (!p) return;
-        p.hidden = true;
-        p.setAttribute('aria-hidden', 'true');
-        p.style.display = 'none';
-        p.style.transform = 'translateY(100%)';
-        p.style.opacity   = '0';
-        p.style.pointerEvents = 'none';
-      }
-
-      function minimizePanel() {
-        const p = _panel(); if (!p) return;
-        if (p.dataset.minimized === '1') {
-          p.style.maxHeight = '55%'; p.dataset.minimized = '0';
-        } else {
-          p.style.maxHeight = '40px'; p.dataset.minimized = '1';
-        }
-      }
-
-      function activate(skill) {
-        if (typeof window.openSkillsPanel === 'function') {
-          window.openSkillsPanel();
-        }
-        return;
-        const body = _body(); const titleEl = _titleEl();
-        if (!body || !titleEl) return;
-        titleEl.textContent = (skill.icon || '🔧') + '\u00a0' + skill.name;
-        body.innerHTML = '';
-        if (skill.description) {
-          const d = document.createElement('p');
-          d.style.cssText = 'font-size:12px;color:var(--text-muted);margin:0;line-height:1.5';
-          d.textContent = skill.description; body.appendChild(d);
-        }
-        const form = document.createElement('form');
-        form.style.cssText = 'display:flex;flex-direction:column;gap:8px;';
-        const schema = skill.params_schema || {};
-        Object.entries(schema).forEach(([key, field]) => {
-          if (key === 'current_file') return;
-          const lbl = document.createElement('label');
-          lbl.style.cssText = 'display:flex;flex-direction:column;gap:3px;';
-          const span = document.createElement('span');
-          span.style.cssText = 'font-size:11.5px;font-weight:500;color:var(--text-muted);';
-          span.textContent = (field.label || key) + (field.required ? ' *' : '');
-          lbl.appendChild(span);
-          let input;
-          if (field.type === 'file' || field.type === 'file_list') {
-            input = document.createElement('input'); input.type = 'file';
-            if (field.type === 'file_list') input.multiple = true;
-            if (field.accept) input.accept = field.accept;
-            input.style.cssText = 'font-size:11px;color:var(--text-primary);padding:4px 0;';
-          } else if (field.type === 'textarea') {
-            input = document.createElement('textarea'); input.rows = 3;
-            input.placeholder = field.placeholder || '';
-            input.style.cssText = 'padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:var(--bg-secondary);color:var(--text-primary);resize:vertical;min-height:30px;width:100%;box-sizing:border-box;';
-          } else {
-            input = document.createElement('input'); input.type = 'text';
-            input.placeholder = field.placeholder || '';
-            input.style.cssText = 'padding:6px 8px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:var(--bg-secondary);color:var(--text-primary);width:100%;box-sizing:border-box;';
-          }
-          input.name = key; if (field.required) input.required = true;
-          lbl.appendChild(input); form.appendChild(lbl);
-        });
-        const runBtn = document.createElement('button');
-        runBtn.type = 'submit'; runBtn.textContent = '▶ 开始执行';
-        runBtn.style.cssText = 'margin-top:4px;padding:7px 18px;font-size:12.5px;font-weight:600;color:#fff;background:var(--accent,#4a90e2);border:none;border-radius:6px;cursor:pointer;align-self:flex-start;';
-        form.appendChild(runBtn);
-        form.addEventListener('submit', async (e) => { e.preventDefault(); await execute(skill, form); });
-        body.appendChild(form);
-        showPanel();
-      }
-
-      async function execute(skill, form) {
-        const body = _body();
-        const runBtn = form.querySelector('button[type="submit"]');
-        if (runBtn) { runBtn.disabled = true; runBtn.textContent = '⏳ 执行中…'; }
-        const progressWrap = document.createElement('div');
-        progressWrap.style.cssText = 'display:flex;flex-direction:column;gap:3px;max-height:140px;overflow-y:auto;padding:6px 10px;background:var(--bg-secondary);border-radius:5px;font-size:11.5px;';
-        body.appendChild(progressWrap);
-        const resultWrap = document.createElement('div'); resultWrap.style.display = 'none';
-        body.appendChild(resultWrap);
-        const addStep = (text, color='var(--text-muted)') => {
-          const s = document.createElement('div'); s.style.color = color; s.textContent = text;
-          progressWrap.appendChild(s); progressWrap.scrollTop = progressWrap.scrollHeight; return s;
-        };
-        try {
-                    const hasInput = Array.from(form.elements).some((el) => {
-                        if (!el || !el.name || el.type === 'submit') return false;
-                        if (el.type === 'file') return el.files && el.files.length > 0;
-                        return Boolean(el.value && String(el.value).trim());
-                    });
-                    if (hasInput) {
-                        addStep('已切换到当前文件助手任务流，请在主输入框描述要处理的文件任务。', 'var(--text-primary)');
-                    }
-                    if (typeof window.openSkillsPanel === 'function') {
-                        window.openSkillsPanel();
-                    }
-                    addStep('Skills 面板用于浏览与配置能力；文件处理请从当前文件助手输入框发起。', 'var(--text-primary)');
-                    if (runBtn) { runBtn.disabled = false; runBtn.textContent = '打开 Skills 面板'; }
-        } catch(err) {
-          addStep('❌ ' + err.message, '#e74c3c');
-          if (runBtn) { runBtn.disabled = false; runBtn.textContent = '▶ 重新执行'; }
-        }
-      }
-
-      function _renderOutput(ev, resultWrap) {
-        const { output_type, data } = ev;
-        if (output_type === 'html') {
-          const d = document.createElement('div');
-          d.style.cssText = 'font-size:12px;line-height:1.6;overflow-x:auto;max-height:320px;overflow-y:auto;border:1px solid var(--border);border-radius:4px;padding:8px;';
-          d.innerHTML = (typeof data === 'string') ? data : '';
-          resultWrap.appendChild(d);
-        } else {
-          const pre = document.createElement('pre');
-          pre.style.cssText = 'font-size:12px;white-space:pre-wrap;line-height:1.6;max-height:280px;overflow-y:auto;background:var(--bg-secondary);border-radius:4px;padding:6px 8px;';
-          pre.textContent = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
-          resultWrap.appendChild(pre);
-        }
-        const btnRow = document.createElement('div');
-        btnRow.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;';
-        const insertBtn = document.createElement('button');
-        insertBtn.textContent = '✍️ 发送到AI对话';
-        insertBtn.style.cssText = 'padding:5px 12px;font-size:12px;color:var(--accent,#4a90e2);background:transparent;border:1px solid var(--accent,#4a90e2);border-radius:5px;cursor:pointer;';
-        insertBtn.addEventListener('click', () => {
-          const text = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
-          const inp = document.getElementById('wa-user-input');
-          if (inp) { inp.value = text.slice(0, 500); if (window.WA) WA.sendMessage(); }
-          insertBtn.textContent = '✅ 已发送'; insertBtn.disabled = true;
-        });
-        btnRow.appendChild(insertBtn);
-        resultWrap.appendChild(btnRow);
-      }
-
-      // 初始化：DOMContentLoaded + 延迟加载确保 WA 就绪
-      document.addEventListener('DOMContentLoaded', () => {
-        setTimeout(() => { const b = document.getElementById('wa-skill-bar'); if (b) load(); }, 900);
-      });
-
-      return { load, activate, showPanel, hidePanel, minimizePanel };
-    })();
-    </script>
-
+<!-- Koto main app logic (real sendMessage + chat + settings) -->
 </body>
 </html>

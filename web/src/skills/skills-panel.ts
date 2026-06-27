@@ -57,6 +57,24 @@ export interface PresetItem {
   created?: number;
 }
 
+declare global {
+  interface Window {
+    spAskKoto: () => Promise<void>;
+    spBuildSkill: () => Promise<void>;
+    spCommunityFilterCards: (q: string) => void;
+    spCyclePresetIcon: () => void;
+    spExtractFromSession: () => Promise<void>;
+    spSaveCurrentPreset: () => void;
+    spSearchSkills: (q: string) => void;
+    spSetCat: (cat: string) => void;
+    spSetSort: (sort: string) => void;
+    spSwitchTab: (tab: string) => void;
+    spToggleSortMenu: (e: MouseEvent) => void;
+    spWizardBack: () => void;
+    spWizardReset: () => void;
+  }
+}
+
 let _spSkills: SkillManifest[] = [];
 let _spSuppressedIds = new Set<string>();
 let _spConflictWinner: Record<string, string> = {};
@@ -727,7 +745,7 @@ function spRenderCommunityCards(): void {
   content.innerHTML = skills.map(renderCard).join('');
 }
 
-(window as any).spCommunityFilterCards = function (q: string) {
+window.spCommunityFilterCards = function (q: string) {
   _spCommunitySearch = q || '';
   spRenderCommunityCards();
 };
@@ -867,7 +885,7 @@ function spRenderCommunityCards(): void {
   }
 };
 
-(window as any).spSwitchTab = function (tab: string) {
+window.spSwitchTab = function (tab: string) {
   _spCurrentTab = tab;
   document.querySelectorAll('.sp-tab').forEach(btn => {
     btn.classList.toggle('active', (btn as HTMLElement).dataset.tab === tab);
@@ -905,7 +923,7 @@ function spRenderCommunityCards(): void {
   }
 };
 
-(window as any).spSetCat = function (cat: string) {
+window.spSetCat = function (cat: string) {
   _spCurrentCat = cat;
   document.querySelectorAll('.sp-chip').forEach(c => {
     c.classList.toggle('active', (c as HTMLElement).dataset.cat === cat);
@@ -913,7 +931,7 @@ function spRenderCommunityCards(): void {
   spRenderCards();
 };
 
-(window as any).spSetSort = function (sort: string) {
+window.spSetSort = function (sort: string) {
   _spCurrentSort = sort;
   document.querySelectorAll('.sp-sort-option').forEach(c => {
     c.classList.toggle('active', (c as HTMLElement).dataset.sort === sort);
@@ -928,7 +946,7 @@ function spRenderCommunityCards(): void {
   spRenderCards();
 };
 
-(window as any).spToggleSortMenu = function (e: MouseEvent) {
+window.spToggleSortMenu = function (e: MouseEvent) {
   e.stopPropagation();
   const dd = document.getElementById('spSortDropdown');
   const btn = document.getElementById('spSortBtn');
@@ -943,7 +961,7 @@ document.addEventListener('click', function () {
   if (btn) btn.classList.remove('open');
 });
 
-(window as any).spSearchSkills = function (q: string) {
+window.spSearchSkills = function (q: string) {
   _spCurrentSearch = q;
   if (_spCurrentTab === 'community') {
     spRenderCommunityCards();
@@ -968,7 +986,7 @@ document.addEventListener('click', function () {
 };
 
 // ── Studio ──────────────────────────────────────────────────
-(window as any).spBuildSkill = async function () {
+window.spBuildSkill = async function () {
   const desc = ((document.getElementById('spBuildDesc') as HTMLInputElement)?.value || '').trim();
   const name = ((document.getElementById('spBuildName') as HTMLInputElement)?.value || '').trim();
   const resultEl = document.getElementById('spBuildResult') as HTMLElement;
@@ -1041,14 +1059,14 @@ function spWizardGoToStep(n: number): void {
   }
 }
 
-(window as any).spWizardBack = function () { spWizardGoToStep(1); };
-(window as any).spWizardReset = function () {
+window.spWizardBack = function () { spWizardGoToStep(1); };
+window.spWizardReset = function () {
   _spSelectedSessionId = null;
   document.querySelectorAll('.sp-session-item').forEach(i => i.classList.remove('selected'));
   spWizardGoToStep(1);
 };
 
-(window as any).spExtractFromSession = async function () {
+window.spExtractFromSession = async function () {
   const sessionId = _spSelectedSessionId;
   const name = ((document.getElementById('spSessionName') as HTMLInputElement)?.value || '').trim() || '提取风格';
   const icon = ((document.getElementById('spSessionIcon') as HTMLInputElement)?.value || '').trim() || '💬';
@@ -1117,13 +1135,13 @@ function spGetActivePresetId(): string | null {
   return match ? match.id : null;
 }
 
-(window as any).spCyclePresetIcon = function () {
+window.spCyclePresetIcon = function () {
   _spPresetIconIdx = (_spPresetIconIdx + 1) % PRESET_ICONS.length;
   const el = document.getElementById('spPresetIconPick');
   if (el) el.textContent = PRESET_ICONS[_spPresetIconIdx];
 };
 
-(window as any).spSaveCurrentPreset = function () {
+window.spSaveCurrentPreset = function () {
   const nameEl = document.getElementById('spPresetNameInput') as HTMLInputElement;
   const name = (nameEl ? nameEl.value : '').trim();
   if (!name) { nameEl && nameEl.focus(); return; }
@@ -1272,7 +1290,7 @@ async function spLoadRecStrip(): Promise<void> {
   } catch (_) { }
 }
 
-(window as any).spAskKoto = async function () {
+window.spAskKoto = async function () {
   const taskInput = document.getElementById('spAkTaskInput') as HTMLInputElement;
   const btn = document.getElementById('spAkAskBtn') as HTMLButtonElement;
   const resultEl = document.getElementById('spAkResult') as HTMLElement;
