@@ -499,6 +499,20 @@ class TaskLedger:
         self._update_fields(task_id, priority=int(priority))
         logger.info(f"[TaskLedger] 优先级更新 task={task_id[:8]} → {priority}")
 
+    def update_metadata(self, task_id: str, metadata: Dict[str, Any]):
+        """Merge metadata keys into an existing task record."""
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT metadata FROM koto_tasks WHERE task_id = ?", (task_id,)
+            ).fetchone()
+            current = json.loads(row["metadata"]) if row and row["metadata"] else {}
+            current.update(metadata or {})
+            self._conn.execute(
+                "UPDATE koto_tasks SET metadata = ? WHERE task_id = ?",
+                (json.dumps(current, ensure_ascii=False), task_id),
+            )
+            self._conn.commit()
+
     # ── 中断 / 取消控制 ───────────────────────────────────────────────────────
 
     def request_interrupt(self, task_id: str):

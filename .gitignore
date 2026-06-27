@@ -122,6 +122,8 @@ node_modules/
 # Test runtime artifacts (SQLite DBs created during tests)
 config/test_*.db
 config/skill_ratings.json
+config/token_usage.json
+app/core/config/token_usage.json
 
 # Backup files
 *.bak

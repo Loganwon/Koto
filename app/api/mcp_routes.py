@@ -24,15 +24,28 @@ from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from app.core.agent.koto_supervision import (
     agent_tool_inventory,
+    recent_tasks,
     read_file_snippet,
     recent_events,
     recent_file_changes,
     route_map,
     run_tests,
     search_code,
+    task_progress_history,
+    task_status,
     test_status,
     project_root,
     resolve_project_path,
+)
+from app.core.agent.frontend_observability import (
+    complete_frontend_action,
+    enqueue_frontend_action,
+    frontend_action_status,
+    frontend_events,
+    frontend_snapshot,
+    frontend_surface_inventory,
+    next_frontend_action,
+    record_frontend_event,
 )
 from app.core.agent.mcp_manager import get_mcp_status, reload_mcp_runtime
 
@@ -94,7 +107,9 @@ def _koto_health(**_: Any) -> Dict[str, Any]:
 
 
 def _koto_mcp_status(**_: Any) -> Dict[str, Any]:
-    return get_mcp_status()
+    data = dict(get_mcp_status() or {})
+    data["exposed_tool_count"] = len(_MCP_TOOLS)
+    return data
 
 
 def _koto_skill_inventory(limit: int = 50, **_: Any) -> Dict[str, Any]:
@@ -399,6 +414,118 @@ _MCP_TOOLS: Dict[str, tuple[Dict[str, Any], Callable[..., Any]]] = {
         ),
         test_status,
     ),
+    "koto_recent_tasks": (
+        _tool_schema(
+            "koto_recent_tasks",
+            "Return recent persistent Koto tasks from the task ledger.",
+            {
+                "session_id": {"type": "string"},
+                "source": {"type": "string"},
+                "status": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+                "include_steps": {"type": "boolean"},
+            },
+        ),
+        recent_tasks,
+    ),
+    "koto_task_status": (
+        _tool_schema(
+            "koto_task_status",
+            "Return one task's ledger status, steps, and latest progress event.",
+            {
+                "task_id": {"type": "string"},
+                "include_steps": {"type": "boolean"},
+            },
+            required=["task_id"],
+        ),
+        task_status,
+    ),
+    "koto_task_progress_history": (
+        _tool_schema(
+            "koto_task_progress_history",
+            "Return recent ProgressBus events for one Koto task.",
+            {"task_id": {"type": "string"}},
+            required=["task_id"],
+        ),
+        task_progress_history,
+    ),
+    "koto_frontend_events": (
+        _tool_schema(
+            "koto_frontend_events",
+            "Return recent frontend observer events from the Koto browser UI.",
+            {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "type": {"type": "string"},
+                "session_id": {"type": "string"},
+            },
+        ),
+        frontend_events,
+    ),
+    "koto_frontend_snapshot": (
+        _tool_schema(
+            "koto_frontend_snapshot",
+            "Return frontend snapshot, recent events, and recent UI problems.",
+            {
+                "limit": {"type": "integer", "minimum": 1, "maximum": 200},
+                "session_id": {"type": "string"},
+            },
+        ),
+        frontend_snapshot,
+    ),
+    "koto_frontend_surface_inventory": (
+        _tool_schema(
+            "koto_frontend_surface_inventory",
+            "Return known frontend browser sessions and user-visible surfaces.",
+            {
+                "session_id": {"type": "string"},
+                "limit": {"type": "integer", "minimum": 1, "maximum": 100},
+            },
+        ),
+        frontend_surface_inventory,
+    ),
+    "koto_frontend_action": (
+        _tool_schema(
+            "koto_frontend_action",
+            "Queue an action for the Koto frontend observer to execute.",
+            {
+                "action": {"type": "string"},
+                "session_id": {"type": "string"},
+                "selector": {"type": "string"},
+                "value": {},
+                "path": {"type": "string"},
+                "panel": {"type": "string"},
+                "options": {"type": "object"},
+                "wait_ms": {"type": "integer", "minimum": 0, "maximum": 60000},
+            },
+            required=["action"],
+            read_only=False,
+        ),
+        enqueue_frontend_action,
+    ),
+    "koto_frontend_action_status": (
+        _tool_schema(
+            "koto_frontend_action_status",
+            "Return queued/dispatched/completed status for a frontend action.",
+            {"action_id": {"type": "string"}},
+            required=["action_id"],
+        ),
+        frontend_action_status,
+    ),
+    "koto_frontend_action_result": (
+        _tool_schema(
+            "koto_frontend_action_result",
+            "Complete a frontend action with a result payload.",
+            {
+                "action_id": {"type": "string"},
+                "ok": {"type": "boolean"},
+                "result": {"type": "object"},
+                "error": {"type": "string"},
+            },
+            required=["action_id"],
+            read_only=False,
+        ),
+        complete_frontend_action,
+    ),
     "koto_write_file": (
         _tool_schema(
             "koto_write_file",
@@ -555,12 +682,21 @@ def mcp_sse():
 def mcp_status():
     """REST status entry for Koto MCP integration."""
     origin = request.headers.get("Origin", "")
+    try:
+        from web.mcp_ws import get_mcp_ws_status
+
+        websocket = get_mcp_ws_status()
+    except Exception as exc:
+        websocket = {"success": False, "error": str(exc)}
     data = {
         "success": True,
         "endpoint": "/api/mcp",
         "json_rpc": True,
         "tools_endpoint": "/api/mcp/tools",
         "reload_endpoint": "/api/mcp/reload",
+        "websocket_endpoint": "/ws/mcp",
+        "exposed_tool_count": len(_MCP_TOOLS),
+        "websocket": websocket,
         "status": get_mcp_status(),
     }
     headers = _cors_headers(origin)
@@ -568,6 +704,47 @@ def mcp_status():
     for k, v in headers.items():
         resp.headers[k] = v
     return resp
+
+
+@mcp_bp.route("/frontend-event", methods=["POST"])
+def mcp_frontend_event():
+    payload = request.get_json(silent=True) or {}
+    if isinstance(payload, list):
+        accepted = 0
+        last = None
+        for item in payload:
+            if isinstance(item, dict):
+                last = record_frontend_event(item)
+                accepted += 1
+        resp = jsonify({"success": True, "accepted": accepted, "last": last})
+    else:
+        data = record_frontend_event(payload)
+        resp = jsonify({"success": True, "accepted": 1, "event": data})
+    return resp
+
+
+@mcp_bp.route("/frontend-events", methods=["GET"])
+def mcp_frontend_events():
+    data = frontend_events(
+        limit=request.args.get("limit", 50),
+        type=request.args.get("type", ""),
+        session_id=request.args.get("session_id", ""),
+    )
+    return jsonify(data)
+
+
+@mcp_bp.route("/frontend-action", methods=["GET"])
+def mcp_frontend_action_next():
+    data = next_frontend_action(session_id=request.args.get("session_id", ""))
+    return jsonify(data)
+
+
+@mcp_bp.route("/frontend-action-result", methods=["POST"])
+def mcp_frontend_action_result():
+    payload = request.get_json(silent=True) or {}
+    data = complete_frontend_action(**payload)
+    status = 200 if data.get("success") else 404
+    return jsonify(data), status
 
 
 # ── Tool listing (GET /api/mcp/tools) ──────────────────────────────────

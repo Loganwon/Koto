@@ -12,6 +12,7 @@ pytest targets inside the repository.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import threading
@@ -236,6 +237,100 @@ def agent_tool_inventory(full: bool = False, limit: int = 300, **_: Any) -> Dict
         for item in tools[:limit]
     ]
     return {"count": len(tools), "returned": len(compact), "tools": compact}
+
+
+def _task_ledger():
+    from app.core.tasks.task_ledger import get_ledger
+
+    return get_ledger()
+
+
+def _progress_bus():
+    from app.core.tasks.progress_bus import get_progress_bus
+
+    return get_progress_bus()
+
+
+def _parse_json_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    try:
+        return json.loads(value)
+    except Exception:
+        return value
+
+
+def _step_to_dict(step: Any) -> Dict[str, Any]:
+    data = step.to_dict() if hasattr(step, "to_dict") else dict(step)
+    data["tool_args"] = _parse_json_text(data.get("tool_args"))
+    return data
+
+
+def _task_to_dict(task: Any, include_steps: bool = False) -> Dict[str, Any]:
+    data = task.to_dict() if hasattr(task, "to_dict") else dict(task)
+    data["metadata"] = _parse_json_text(data.get("metadata"))
+    if include_steps:
+        data["steps"] = [_step_to_dict(step) for step in getattr(task, "steps", [])]
+    return data
+
+
+def recent_tasks(
+    session_id: str = "",
+    source: str = "",
+    status: str = "",
+    limit: int = 20,
+    include_steps: bool = False,
+    **_: Any,
+) -> Dict[str, Any]:
+    """Return recent tasks from the persistent task ledger."""
+
+    from app.core.tasks.task_ledger import TaskStatus
+
+    limit = _coerce_limit(limit, 20, 1, 100)
+    status_value = TaskStatus(status) if status else None
+    tasks = _task_ledger().list_tasks(
+        session_id=session_id or None,
+        source=source or None,
+        status=status_value,
+        limit=limit,
+    )
+    if include_steps:
+        ledger = _task_ledger()
+        for task in tasks:
+            task.steps = ledger.get_steps(task.task_id)
+    return {
+        "success": True,
+        "count": len(tasks),
+        "tasks": [_task_to_dict(task, include_steps=include_steps) for task in tasks],
+    }
+
+
+def task_progress_history(task_id: str, **_: Any) -> Dict[str, Any]:
+    """Return in-memory progress events for a task."""
+
+    events = [event.to_dict() for event in _progress_bus().get_history(task_id)]
+    return {"success": True, "task_id": task_id, "count": len(events), "events": events}
+
+
+def task_status(task_id: str, include_steps: bool = True, **_: Any) -> Dict[str, Any]:
+    """Return task ledger status plus recent progress events."""
+
+    ledger = _task_ledger()
+    task = ledger.get(task_id, include_steps=include_steps)
+    if not task:
+        return {"success": False, "error": f"task not found: {task_id}"}
+    progress = task_progress_history(task_id)
+    latest = progress["events"][-1] if progress["events"] else {}
+    data = _task_to_dict(task, include_steps=include_steps)
+    if latest:
+        data.update(
+            {
+                "progress": latest.get("progress"),
+                "step_type": latest.get("step_type"),
+                "latest_event": latest,
+            }
+        )
+    return {"success": True, "task": data}
 
 
 def _normalize_test_targets(targets: Any) -> List[str]:
