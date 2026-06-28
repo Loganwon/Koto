@@ -777,6 +777,51 @@ def test_verify_task_completion_matches_workspace_relative_target_to_absolute_ch
     assert "文件已成功修改：notes.txt" in result["summary"]
 
 
+def test_verify_task_completion_rejects_same_basename_in_wrong_directory(tmp_path):
+    from app.core.agent.task_tools import verify_task_completion
+
+    expected_dir = tmp_path / "expected"
+    actual_dir = tmp_path / "actual"
+    expected_dir.mkdir()
+    actual_dir.mkdir()
+    expected_target = expected_dir / "report.docx"
+    actual_target = actual_dir / "report.docx"
+    expected_target.write_text("original", encoding="utf-8")
+    actual_target.write_text("updated", encoding="utf-8")
+
+    result = json.loads(
+        verify_task_completion(
+            task_description="修改指定目录里的目标报告",
+            file_states=json.dumps(
+                [
+                    {
+                        "path": str(actual_target),
+                        "exists": True,
+                        "modified": True,
+                        "preview": "updated",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": str(actual_target),
+                        "operation": "write_docx_content",
+                        "paragraphs_written": 2,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            target_path=str(expected_target),
+        )
+    )
+
+    assert result["completed"] is False
+    assert f"未命中目标文件：{expected_target.name}" in result["summary"]
+    assert result["remaining_steps"] == [f"把结果写入 {expected_target.name}"]
+
+
 def test_task_file_sandbox_staging_sanitizes_invalid_display_names(tmp_path):
     from app.core.agent.task_tools import (
         _prepend_task_file_context,
