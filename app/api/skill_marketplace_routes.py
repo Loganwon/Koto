@@ -132,6 +132,26 @@ def _enrich_skill(skill_dict: Dict, is_builtin: bool = False) -> Dict:
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@marketplace_bp.route("", methods=["GET"])
+@marketplace_bp.route("/", methods=["GET"])
+def skillmarket_index():
+    """Return a stable module index for probes and lazy frontend checks."""
+    return jsonify(
+        {
+            "success": True,
+            "service": "skillmarket",
+            "routes": {
+                "catalog": "/api/skillmarket/catalog",
+                "library": "/api/skillmarket/library",
+                "featured": "/api/skillmarket/featured",
+                "search": "/api/skillmarket/search",
+                "status": "/api/skillmarket/status",
+                "community_catalog": "/api/skillmarket/community/catalog",
+            },
+        }
+    )
+
+
 @marketplace_bp.route("/catalog", methods=["GET"])
 def get_catalog():
     """

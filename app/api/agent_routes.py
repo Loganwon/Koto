@@ -17,6 +17,26 @@ logger = logging.getLogger(__name__)
 agent_bp = Blueprint("agent", __name__)
 
 
+@agent_bp.route("", methods=["GET"])
+@agent_bp.route("/", methods=["GET"])
+def agent_index():
+    """Return a compact index for agent API health probes."""
+    return jsonify(
+        {
+            "success": True,
+            "service": "agent",
+            "routes": {
+                "chat": "/api/agent/chat",
+                "tools": "/api/agent/tools",
+                "process": "/api/agent/process",
+                "process_stream": "/api/agent/process-stream",
+                "monitor_status": "/api/agent/monitor/status",
+                "feedback_stats": "/api/agent/feedback/stats",
+            },
+        }
+    )
+
+
 # ── v2 护栏模块（懒加载）──────────────────────────────────────────────────────
 def _lazy_pii():
     from app.core.security.pii_filter import PIIFilter

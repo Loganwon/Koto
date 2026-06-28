@@ -16,6 +16,7 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
+  GET /workspace               — unified_workspace_redirect
   GET /workspace-assistant     — unified_workspace_redirect
 """
 
@@ -127,9 +128,10 @@ def notebook_ui() -> str:
     return render_template("notebook_lm.html")
 
 
+@pages_bp.route("/workspace")
 @pages_bp.route("/workspace-assistant")
 def workspace_assistant_page() -> Response:
-    """Legacy workspace URL kept as a compatibility alias for the unified app."""
+    """Legacy workspace URLs kept as compatibility aliases for the unified app."""
     target = url_for("pages.index")
     if request.query_string:
         target = f"{target}?{request.query_string.decode('utf-8', errors='ignore')}"

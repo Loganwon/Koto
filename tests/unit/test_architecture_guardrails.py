@@ -25,6 +25,8 @@ SESSIONS_BP = ROOT / "web" / "blueprints" / "sessions.py"
 PPT_API_ROUTES = ROOT / "web" / "ppt_api_routes.py"
 SETTINGS_BP = ROOT / "web" / "blueprints" / "settings.py"
 PAGES_BP = ROOT / "web" / "blueprints" / "pages.py"
+AUTH_ROUTES = ROOT / "web" / "auth.py"
+MEMORY_API_ROUTES = ROOT / "web" / "memory_api_routes.py"
 ANALYTICS_BP = ROOT / "web" / "blueprints" / "analytics.py"
 PROACTIVE_BP = ROOT / "web" / "blueprints" / "proactive.py"
 EXECUTION_BP = ROOT / "web" / "blueprints" / "execution.py"
@@ -32,6 +34,8 @@ KNOWLEDGE_BP = ROOT / "web" / "blueprints" / "knowledge.py"
 FILE_EDITOR_BP = ROOT / "web" / "blueprints" / "file_editor.py"
 FILE_ORGANIZE_BP = ROOT / "web" / "blueprints" / "file_organize.py"
 FILE_HUB_ROUTES = ROOT / "app" / "api" / "file_hub_routes.py"
+TRAINING_DATA_BUILDER = ROOT / "app" / "core" / "learning" / "training_data_builder.py"
+TRAINING_ROUTES = ROOT / "app" / "api" / "training_routes.py"
 TEST_WEB_APP_COVERAGE = ROOT / "tests" / "unit" / "test_web_app_coverage.py"
 TEST_WEB_APP_UTILS = ROOT / "tests" / "unit" / "test_web_app.py"
 
@@ -71,6 +75,18 @@ def _app_route_paths() -> set[str]:
 def test_web_app_keeps_legacy_route_surface_small():
     """All Flask routes should be registered through blueprints, not web/app.py."""
     assert _app_route_paths() == EXPECTED_WEB_APP_ROUTES
+
+
+def test_training_api_routes_live_outside_training_data_builder():
+    """TrainingDataBuilder should remain core logic; Flask routes belong in app.api."""
+    builder_source = _read(TRAINING_DATA_BUILDER)
+    routes_source = _read(TRAINING_ROUTES)
+    app_blueprints = _read(APP_BLUEPRINTS)
+
+    assert "@app.route" not in builder_source
+    assert "register_training_routes" not in builder_source
+    assert "training_bp = Blueprint" in routes_source
+    assert "from app.api.training_routes import training_bp" in app_blueprints
 
 
 def test_web_app_line_budget_does_not_regress():
@@ -161,6 +177,17 @@ def test_blueprint_registry_is_the_primary_route_extension_point():
     assert "web.blueprints.editor_ai" in source
     assert "web.blueprints.voice" in source
     assert "register_memory_routes(app, get_memory_manager)" in source
+
+
+def test_compat_route_registrars_use_blueprints_internally():
+    """Compatibility registrars may remain, but business routes should be blueprint-owned."""
+    auth_source = _read(AUTH_ROUTES)
+    memory_source = _read(MEMORY_API_ROUTES)
+
+    for source in [auth_source, memory_source]:
+        assert "@app.route" not in source
+        assert ".register_blueprint(" in source
+        assert "Blueprint(" in source
 
 
 def test_editor_ai_blueprint_uses_runtime_context_not_web_app_imports():

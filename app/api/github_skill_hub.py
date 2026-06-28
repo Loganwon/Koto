@@ -1776,6 +1776,12 @@ def community_catalog():
 # ── GET /api/skillmarket/community/skill/<id>  ─────────────────────────────
 
 
+@marketplace_bp.route("/community/skill/", methods=["GET"])
+def community_skill_detail_missing_id():
+    """Return a clear error when no community skill id is provided."""
+    return jsonify({"success": False, "error": "skill_id 不能为空"}), 400
+
+
 @marketplace_bp.route("/community/skill/<skill_id>", methods=["GET"])
 def community_skill_detail(skill_id: str):
     """返回单个社区 Skill 完整信息（含 prompt）。"""
@@ -1815,6 +1821,12 @@ def community_skill_detail(skill_id: str):
 
 
 # ── POST /api/skillmarket/community/install/<id>  ──────────────────────────
+
+
+@marketplace_bp.route("/community/install/", methods=["POST"])
+def community_install_missing_id():
+    """Return a clear error when no community skill id is provided."""
+    return jsonify({"success": False, "error": "skill_id 不能为空"}), 400
 
 
 @marketplace_bp.route("/community/install/<skill_id>", methods=["POST"])

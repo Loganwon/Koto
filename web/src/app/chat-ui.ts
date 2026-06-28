@@ -1,6 +1,5 @@
 /**
  * Koto Chat UI Module — chat interface, messages, input, streaming, markdown
- * Converted from app.js
  */
 
 import { csrfFetch } from '../shared/csrf';
@@ -1025,7 +1024,7 @@ function _ensureMermaid(): Promise<void> {
   if (_mermaidLoading) return _mermaidLoading;
   _mermaidLoading = new Promise<void>((resolve) => {
     const script = document.createElement('script');
-    script.src = '/static/js/mermaid.min.js';
+    script.src = '/static/vendor/mermaid/10.9.0/mermaid.min.js';
     script.onload = () => { _mermaidLoaded = true; resolve(); };
     script.onerror = () => resolve();
     document.head.appendChild(script);

@@ -58,4 +58,8 @@ def __getattr__(name):
         from .mcp_routes import mcp_bp
 
         return mcp_bp
+    if name == "training_bp":
+        from .training_routes import training_bp
+
+        return training_bp
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

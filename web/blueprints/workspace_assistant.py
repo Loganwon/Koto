@@ -2271,6 +2271,14 @@ def pdf_save_annotations():
 
 
 @workspace_assistant_bp.route(
+    "/api/v1/workspace/pdf/load_annotations/", methods=["GET"]
+)
+def pdf_load_annotations_missing_file_id():
+    """Return a clear error when no cached PDF file id is provided."""
+    return jsonify({"error": "file_id 不能为空"}), 400
+
+
+@workspace_assistant_bp.route(
     "/api/v1/workspace/pdf/load_annotations/<file_id>", methods=["GET"]
 )
 def pdf_load_annotations(file_id: str):

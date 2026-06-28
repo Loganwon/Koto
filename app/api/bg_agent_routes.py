@@ -120,6 +120,24 @@ def _serialize_status(status) -> dict:
 # ============================================================================
 
 
+@bg_agent_bp.get("")
+@bg_agent_bp.get("/")
+def bg_agent_index():
+    """Return a compact status document for module root probes."""
+    return _ok(
+        {
+            "service": "background-agent",
+            "routes": {
+                "submit": "/api/bg-agent/submit",
+                "list": "/api/bg-agent/list",
+                "task": "/api/bg-agent/<task_id>",
+                "stream": "/api/bg-agent/<task_id>/stream",
+            },
+        },
+        sessions=len(_agents),
+    )
+
+
 @bg_agent_bp.post("/submit")
 def submit_task():
     """

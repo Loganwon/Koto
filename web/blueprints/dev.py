@@ -13,14 +13,11 @@ Routes:
   POST   /api/rag/query                                  — Retrieve relevant chunks (optionally with LLM answer)
   GET    /api/rag/stats                                  — RAG index statistics
   DELETE /api/rag/clear                                  — Clear the entire RAG vector store
-  POST   /api/response/rate                              — User star-rating for AI responses
   GET    /api/auto-catalog/status                        — Auto-catalog scheduler status
   POST   /api/auto-catalog/enable                        — Enable auto-catalog
   POST   /api/auto-catalog/disable                       — Disable auto-catalog
   POST   /api/auto-catalog/run-now                       — Trigger a manual catalog run
   GET    /api/auto-catalog/backup-manifest/<filename>    — Download a backup manifest file
-  GET    /api/token-stats                                — Token usage statistics
-  POST   /api/token-stats/reset                          — Reset token statistics
 """
 
 import logging
@@ -59,7 +56,6 @@ def auto_catalog_status() -> Response:
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @dev_bp.route("/api/auto-catalog/enable", methods=["POST"])
 @require_auth
 def auto_catalog_enable() -> Response:
@@ -85,8 +81,6 @@ def auto_catalog_enable() -> Response:
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
 @dev_bp.route("/api/auto-catalog/disable", methods=["POST"])
 @require_auth
 def auto_catalog_disable() -> Response:
@@ -141,33 +135,6 @@ def get_backup_manifest(filename: str) -> Response:
         return send_from_directory(backup_dir, filename, as_attachment=False)
     except Exception as e:
         return jsonify({"error": str(e)}), 404
-
-
-# ── Token usage statistics ────────────────────────────────────────────────────
-
-
-@dev_bp.route("/api/token-stats", methods=["GET"])
-def api_token_stats() -> Response:
-    """返回 Token 用量统计（今日 / 本月 / 按模型 / 近 7 天）"""
-    try:
-        from web.token_tracker import get_stats
-
-        return jsonify(get_stats())
-    except Exception as e:
-        logger.error(f"[token_stats] {e}")
-        return jsonify({"error": str(e)}), 500
-
-
-@dev_bp.route("/api/token-stats/reset", methods=["POST"])
-def api_token_stats_reset() -> Response:
-    """重置统计数据。Body: {"period": "today" | "month" | "all"}"""
-    try:
-        from web.token_tracker import reset_stats
-
-        period = (request.json or {}).get("period", "all")
-        return jsonify(reset_stats(period))
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 # ── LangGraph workflow visualization & dev tools ──────────────────────────────
@@ -405,81 +372,3 @@ def api_rag_clear() -> Response:
         return jsonify({"success": ok, "message": "向量库已清空"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-
-
-# ── User rating API ──────────────────────────────────────────────────────────
-
-
-@dev_bp.route("/api/response/rate", methods=["POST"])
-@require_auth
-def api_response_rate() -> Response:
-    """
-    接收用户对 AI 回复的星级评分。
-
-    请求体:
-      msg_id       str   — MD5 消息指纹（由后端 done 事件下发）
-      stars        int   — 1~5 星
-      comment      str   — 可选文字反馈
-      session_name str   — 会话名
-      user_input   str   — 用户原始输入（前 500 字）
-      ai_response  str   — AI 回复文本（前 500 字）
-      task_type    str   — 任务类型，默认 CHAT
-    """
-    data = request.json or {}
-    msg_id = data.get("msg_id", "")
-    stars = int(data.get("stars", 0))
-    comment = (data.get("comment") or "").strip()
-    session_name = data.get("session_name", "default")
-    user_input = data.get("user_input", "")
-    ai_response = data.get("ai_response", "")
-    task_type = data.get("task_type", "CHAT")
-
-    if not (1 <= stars <= 5):
-        return jsonify({"success": False, "error": "stars 必须在 1~5 之间"}), 400
-
-    # ── 1. 存入 RatingStore ────────────────────────────────────────────────
-    try:
-        from app.core.learning.rating_store import RatingStore
-
-        rs = RatingStore()
-        rs.save_user_rating(
-            msg_id=msg_id,
-            stars=stars,
-            comment=comment,
-            session_name=session_name,
-            user_input=user_input,
-            ai_response=ai_response,
-        )
-    except Exception as e:
-        _logger.warning(f"[ResponseRate] ⚠️ RatingStore 保存失败: {e}")
-
-    # ── 2. 高评分（≥4 星）→ ShadowTracer 记录优质样本，推进飞轮 ──────────
-    trace_id = None
-    if stars >= 4 and user_input and ai_response:
-        try:
-            from app.core.learning.shadow_tracer import ShadowTracer
-
-            trace_id = ShadowTracer.record_approved(
-                session_id=session_name,
-                user_input=user_input,
-                ai_response=ai_response,
-                skill_id=None,
-                task_type=task_type,
-                model_used="",
-                metadata={"stars": stars, "comment": comment, "source": "user_rating"},
-            )
-            _logger.debug(
-                f"[ResponseRate] ⭐ {stars}星 → ShadowTracer 记录 trace_id={trace_id}"
-            )
-        except Exception as e:
-            _logger.warning(f"[ResponseRate] ⚠️ ShadowTracer 记录失败: {e}")
-
-    return jsonify(
-        {
-            "success": True,
-            "msg_id": msg_id,
-            "stars": stars,
-            "trace_id": trace_id,
-            "flywheel": trace_id is not None,
-        }
-    )

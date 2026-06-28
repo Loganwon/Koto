@@ -40,6 +40,7 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.execution", "execution_bp", None, "Execution"),
     ("web.blueprints.file_editor", "file_editor_bp", None, "FileEditor"),
     ("web.blueprints.file_organize", "file_organize_bp", None, "FileOrganize"),
+    ("web.blueprints.token_stats", "token_stats_bp", None, "TokenStats"),
     ("web.blueprints.dev", "dev_bp", None, "Dev"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
@@ -91,6 +92,24 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
     agent_blueprint = None
 
     try:
+        from web.app_http import configure_http_wiring
+
+        configure_http_wiring(app, logger)
+        logger.info("[HTTP] ✅ HTTP 基础中间件已注册")
+    except Exception as exc:
+        logger.error(f"[HTTP] ❌ HTTP 基础中间件注册失败: {exc}")
+
+    try:
+        from web.auth import register_auth_routes
+
+        register_auth_routes(app)
+        logger.info("[Auth] ✅ 认证 API 已注册")
+    except ImportError as exc:
+        logger.warning(f"[Auth] ⚠️ 未能导入认证 API: {exc}")
+    except Exception as exc:
+        logger.warning(f"[Auth] ⚠️ 认证 API 注册失败: {exc}")
+
+    try:
         from app.api.task_routes import task_bp as _task_bp
 
         app.register_blueprint(_task_bp, url_prefix="/api/tasks")
@@ -133,11 +152,10 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
 
     if os.environ.get("KOTO_DEV_TRAINING") == "1":
         try:
-            from app.core.learning.training_data_builder import (
-                register_training_routes as _reg_training,
-            )
+            from app.api.training_routes import training_bp as _training_bp
 
-            _reg_training(app)
+            app.register_blueprint(_training_bp)
+            logger.info("[TrainingAPI] ✅ 训练数据 API 已注册: /api/training/*")
         except ImportError as exc:
             logger.warning(f"[TrainingAPI] ⚠️ 未能导入训练数据模块: {exc}")
         except Exception as exc:
@@ -246,6 +264,16 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         logger.warning(f"[MacroAPI] ⚠️ 未能导入宏录制蓝图: {exc}")
     except Exception as exc:
         logger.error(f"[MacroAPI] ❌ 宏录制 API 注册失败: {exc}")
+
+    try:
+        from app.api.response_routes import response_bp
+
+        app.register_blueprint(response_bp)
+        logger.info("[ResponseAPI] ✅ AI 回复评分 API 已注册: /api/response")
+    except ImportError as exc:
+        logger.warning(f"[ResponseAPI] ⚠️ 未能导入 AI 回复评分蓝图: {exc}")
+    except Exception as exc:
+        logger.error(f"[ResponseAPI] ❌ AI 回复评分 API 注册失败: {exc}")
 
     try:
         from web.routes.health import health_bp as _health_bp

@@ -8,6 +8,9 @@ from flask import Flask, g, jsonify, request
 
 def configure_http_wiring(app: Flask, logger: Logger):
     """Register request correlation and JSON error handlers."""
+    existing = app.extensions.get("koto_http_wiring")
+    if existing:
+        return existing["error_response"]
 
     @app.before_request
     def _assign_request_id():
@@ -82,4 +85,5 @@ def configure_http_wiring(app: Flask, logger: Logger):
     except Exception:  # pragma: no cover
         pass
 
+    app.extensions["koto_http_wiring"] = {"error_response": error_response}
     return error_response

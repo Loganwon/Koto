@@ -1095,14 +1095,6 @@ configure_observability(
 )
 
 
-# ================= 用户认证系统 =================
-try:
-    from auth import register_auth_routes
-
-    register_auth_routes(app)
-except Exception as e:
-    _app_logger.warning(f"[Auth] ⚠️ 认证模块加载失败: {e}")
-
 # ================= 并行执行系统初始化 =================
 if PARALLEL_SYSTEM_ENABLED:
     _app_logger.debug("[PARALLEL] 🚀 Initializing parallel execution system...")
