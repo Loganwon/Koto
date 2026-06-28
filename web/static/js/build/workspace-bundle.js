@@ -143,6 +143,98 @@
       };
     });
   }
+  function _visiblePanelSummaries(limit = 30) {
+    const selectors = [
+      '[id$="Panel"]',
+      "#fileWorkspace",
+      "#wa-left-panel",
+      "#wa-editor-panel",
+      "#wa-chat-panel",
+      "#workspaceView",
+      ".wa-panel",
+      ".artifacts-panel"
+    ].join(",");
+    return Array.from(document.querySelectorAll(selectors)).filter(_isVisible).slice(0, limit).map((item) => {
+      const rect = item.getBoundingClientRect();
+      return {
+        id: item.id || "",
+        selector: _bestSelector(item),
+        className: typeof item.className === "string" ? item.className.slice(0, 240) : "",
+        role: item.getAttribute("role") || "",
+        text: _visibleText(item, 240),
+        rect: {
+          x: Math.round(rect.x),
+          y: Math.round(rect.y),
+          width: Math.round(rect.width),
+          height: Math.round(rect.height)
+        }
+      };
+    });
+  }
+  function _activeEditorControlSummaries(limit = 80) {
+    const roots = [
+      "#wa-editor-header",
+      "#wa-file-toolbar",
+      "#wa-docx-editor.active",
+      "#wa-pptx-editor.active",
+      "#wa-xlsx-editor.active",
+      "#wa-pdf-viewer.active",
+      "#wa-text-editor.active",
+      "#wa-image-viewer.active"
+    ];
+    const seen = /* @__PURE__ */ new Set();
+    const controls = [];
+    for (const rootSelector of roots) {
+      const root = document.querySelector(rootSelector);
+      if (!root || !_isVisible(root)) continue;
+      const rootControls = Array.from(root.querySelectorAll('button,a,input,select,textarea,[role="button"],[data-action],[contenteditable="true"]'));
+      for (const item of rootControls) {
+        if (seen.has(item) || !_isVisible(item)) continue;
+        seen.add(item);
+        controls.push({
+          root: rootSelector,
+          ..._targetSummary(item),
+          selector: _bestSelector(item)
+        });
+        if (controls.length >= limit) return controls;
+      }
+    }
+    return controls;
+  }
+  function _surfaceInventoryDetails(action) {
+    const limit = Number(action?.options?.limit || 80);
+    const wa2 = window.WA || {};
+    const waMethods = Object.keys(wa2).filter((key) => typeof wa2[key] === "function").sort().slice(0, 240);
+    const globalNames = [
+      "KotoFrontendObserver",
+      "KotoCsrf",
+      "KotoDocxEditorLib",
+      "KotoSheetsAPI",
+      "pdfjsLib",
+      "toggleSettings",
+      "toggleSkillsPanel",
+      "openSkillsPanel",
+      "switchArtifactTab",
+      "copyArtifactContent",
+      "downloadArtifact"
+    ];
+    return {
+      snapshot: _snapshotDetails(),
+      visiblePanels: _visiblePanelSummaries(Math.min(limit, 80)),
+      visibleControls: _visibleControls(Math.min(limit, 120)),
+      activeEditorControls: _activeEditorControlSummaries(Math.min(limit, 160)),
+      loadedScripts: Array.from(document.scripts).map((script) => script.src || "inline").filter(Boolean).slice(0, 120),
+      loadedStylesheets: Array.from(document.styleSheets).map((sheet) => sheet.href || "inline").filter(Boolean).slice(0, 120),
+      wa: {
+        methodCount: Object.keys(wa2).filter((key) => typeof wa2[key] === "function").length,
+        methods: waMethods
+      },
+      globals: globalNames.reduce((acc, name) => {
+        acc[name] = typeof window[name];
+        return acc;
+      }, {})
+    };
+  }
   function _bestSelector(el) {
     if (el.id) return `#${CSS.escape(el.id)}`;
     const testId = el.getAttribute("data-testid");
@@ -1176,6 +1268,7 @@
   }
   async function _executeFrontendAction(action) {
     if (action.action === "snapshot") return _snapshotDetails();
+    if (action.action === "surface_inventory") return _surfaceInventoryDetails(action);
     if (action.action === "read_dom") {
       return {
         snapshot: _snapshotDetails(),
@@ -6512,6 +6605,12 @@ ${defaultPrompt}`;
     if (PLAN_VIOLATION_LABELS[value]) return PLAN_VIOLATION_LABELS[value];
     return value.replace(/_/g, " ");
   }
+  function planGateVisibleIssues(data) {
+    const violations = Array.isArray(data.violations) ? data.violations : [];
+    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const passed = data.passed !== false && String(data.status || "").trim().toLowerCase() !== "failed";
+    return uniqueTextParts([...violations, ...warnings]).filter((item) => !(passed && item === "model_execution_plan_missing"));
+  }
   function csrfToken() {
     const meta = document.querySelector('meta[name="csrf-token"]');
     return meta ? String(meta.getAttribute("content") || "") : "";
@@ -7546,9 +7645,7 @@ ${defaultPrompt}`;
     syncTaskLiveProgress(card);
   }
   function planGateIssueHtml(data) {
-    const violations = Array.isArray(data.violations) ? data.violations : [];
-    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
-    const details = uniqueTextParts([...violations, ...warnings]).slice(0, 5).map((item) => planViolationLabel(item));
+    const details = planGateVisibleIssues(data).slice(0, 5).map((item) => planViolationLabel(item));
     return details.length ? '<ul class="wa-task-plan-violations">' + details.map((item) => "<li>" + esc$1(item) + "</li>").join("") + "</ul>" : "";
   }
   function handleEvent_plan_gated(card, evt, payload) {
@@ -7753,7 +7850,8 @@ ${defaultPrompt}`;
     if (summaryContainer) {
       const finalReport = String(data.summary || data.text || data.error || result.summary || "").trim();
       const visibleSummary = finalReport || terminalStepSummary(result);
-      summaryContainer.innerHTML = taskResultActionsHtml(card) + '<div class="wa-task-final-report">' + renderTaskFinalReport(visibleSummary) + "</div>";
+      const auditHtml = supervisorAuditHtml(data);
+      summaryContainer.innerHTML = taskResultActionsHtml(card) + auditHtml + '<div class="wa-task-final-report">' + renderTaskFinalReport(visibleSummary) + "</div>";
       summaryContainer.hidden = false;
     }
     const process = card.querySelector('[data-role="process"]');
@@ -12781,22 +12879,6 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     window._persistWorkspaceConversationTurn = _persistWorkspaceConversationTurn;
     _syncRuntimeGlobals();
   }
-  setTimeout(() => {
-    try {
-      if (window.WA && window.WA.initMCPPanel) {
-        const statusBar = document.querySelector(".activity-bar-bottom");
-        if (statusBar) {
-          const mcpEl = window.WA.initMCPPanel();
-          if (mcpEl) {
-            mcpEl.style.position = "relative";
-            statusBar.appendChild(mcpEl);
-            console.log("[MCP] Panel mounted in activity bar");
-          }
-        }
-      }
-    } catch (_) {
-    }
-  }, 2e3);
   function normalizeSessionId(value) {
     return String(value || "").trim().replace(/\.json$/i, "");
   }

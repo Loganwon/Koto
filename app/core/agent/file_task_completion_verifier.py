@@ -66,6 +66,28 @@ def _normalize_compare_path(path: Any) -> str:
         return text.lower()
 
 
+def _is_bare_filename(path: Any) -> bool:
+    text = str(path or "").strip().replace("\\", "/")
+    if not text:
+        return False
+    return "/" not in text and os.path.basename(text) == text
+
+
+def _path_matches_expected_target(path: Any, expected_target: str) -> bool:
+    expected = str(expected_target or "").strip()
+    if not expected:
+        return False
+    normalized_expected = _normalize_compare_path(expected)
+    normalized_path = _normalize_compare_path(path)
+    if normalized_path and normalized_path == normalized_expected:
+        return True
+    if not _is_bare_filename(expected):
+        return False
+    expected_basename = os.path.basename(expected).lower()
+    actual_basename = os.path.basename(str(path or "")).lower()
+    return bool(expected_basename and actual_basename == expected_basename)
+
+
 def _verification_summary_from_changes(
     changes: List[Dict[str, Any]], target_path: str = ""
 ) -> str:
@@ -267,30 +289,17 @@ def verify_task_completion(
 
     expected_target = str(target_path or "").strip()
     normalized_target = _normalize_compare_path(expected_target)
-    expected_basename = (
-        os.path.basename(expected_target).lower() if expected_target else ""
-    )
     relevant_states = states
     if normalized_target:
         matching_states = [
             state
             for state in states
-            if _normalize_compare_path(state.get("path")) == normalized_target
-            or (
-                expected_basename
-                and os.path.basename(str(state.get("path") or "")).lower()
-                == expected_basename
-            )
+            if _path_matches_expected_target(state.get("path"), expected_target)
         ]
         matching_changes = [
             change
             for change in changes
-            if _normalize_compare_path(change.get("path")) == normalized_target
-            or (
-                expected_basename
-                and os.path.basename(str(change.get("path") or "")).lower()
-                == expected_basename
-            )
+            if _path_matches_expected_target(change.get("path"), expected_target)
         ]
         fallback_changes = [
             change
@@ -353,7 +362,7 @@ def verify_task_completion(
                 },
                 ensure_ascii=False,
             )
-        if matching_states and not all(
+        if matching_states and not matching_changes and not all(
             state.get("modified") for state in matching_states
         ):
             expected_name = os.path.basename(expected_target) or expected_target
@@ -374,16 +383,34 @@ def verify_task_completion(
                 },
                 ensure_ascii=False,
             )
-        relevant_states = matching_states or [
-            {
-                "path": expected_target,
-                "exists": True,
-                "modified": True,
-                "preview": "",
-            }
-        ]
         if matching_changes:
             changes = matching_changes
+            relevant_states = [
+                state
+                for state in matching_states
+                if isinstance(state, dict) and state.get("modified")
+            ] or [
+                {
+                    "path": expected_target
+                    or str(matching_changes[0].get("path") or ""),
+                    "exists": True,
+                    "modified": True,
+                    "preview": str(
+                        matching_changes[0].get("preview")
+                        or matching_changes[0].get("summary")
+                        or ""
+                    ),
+                }
+            ]
+        else:
+            relevant_states = matching_states or [
+                {
+                    "path": expected_target,
+                    "exists": True,
+                    "modified": True,
+                    "preview": "",
+                }
+            ]
 
     all_modified = all(
         state.get("modified") for state in relevant_states if isinstance(state, dict)

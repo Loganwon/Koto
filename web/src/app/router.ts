@@ -1,6 +1,5 @@
 /**
  * Koto Router Module — navigation, view switching, welcome screen, workspace, projects
- * Converted from app.js
  */
 
 export function goToWelcome(): void {

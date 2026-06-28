@@ -1468,6 +1468,7 @@ async function _waitForTarget(action: FrontendAction): Promise<Element> {
 
 async function _executeFrontendAction(action: FrontendAction): Promise<Record<string, unknown>> {
   if (action.action === 'snapshot') return _snapshotDetails();
+  if (action.action === 'surface_inventory') return _surfaceInventoryDetails(action);
   if (action.action === 'read_dom') {
     return {
       snapshot: _snapshotDetails(),

@@ -78,7 +78,7 @@ SUITES = OrderedDict(
         (
             "evaluation",
             {
-                "description": "Real-LLM intent accuracy and execution quality checks; auto-skips without GOOGLE_API_KEY/GEMINI_API_KEY.",
+                "description": "Offline deterministic intent accuracy and execution-quality checks; set KOTO_LIVE_EVALUATION=1 for real LLM calls.",
                 "nodes": [
                     "tests/evaluation/test_intent_accuracy.py",
                     "tests/evaluation/test_execution_quality.py",

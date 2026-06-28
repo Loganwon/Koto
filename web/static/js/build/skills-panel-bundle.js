@@ -89,8 +89,6 @@
   function _setPanelA11y(panel, isOpen) {
     panel.setAttribute("aria-hidden", isOpen ? "false" : "true");
     panel.setAttribute("aria-modal", isOpen ? "true" : "false");
-    panel.inert = !isOpen;
-    panel.toggleAttribute("inert", !isOpen);
     if (!panel.hasAttribute("tabindex")) panel.setAttribute("tabindex", "-1");
   }
   function _setPanelTriggerA11y(panelId, isOpen) {
@@ -161,18 +159,14 @@
       scrim.addEventListener("click", () => closeActiveSidePanel());
     }
   }
-  function _initSidePanelA11y() {
+  document.addEventListener("DOMContentLoaded", () => {
     Object.keys(PANEL_TRIGGER_IDS).forEach((panelId) => {
       const isOpen = !!_panel(panelId)?.classList.contains("active");
-      const panel = _panel(panelId);
-      if (panel) _setPanelA11y(panel, isOpen);
       _setPanelTriggerA11y(panelId, isOpen);
     });
     initSidePanelInteractions();
     refreshSidePanelScrim();
-  }
-  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", _initSidePanelA11y);
-  else _initSidePanelA11y();
+  });
   window.closeActiveSidePanel = closeActiveSidePanel;
   let _spSkills = [];
   let _spSuppressedIds = /* @__PURE__ */ new Set();

@@ -802,6 +802,47 @@ def test_mcp_frontend_action_long_poll_waits_until_action(tmp_path, monkeypatch)
     assert time.monotonic() - started < 0.8
 
 
+def test_mcp_frontend_action_wait_ms_returns_completed_action(tmp_path, monkeypatch):
+    import threading
+
+    from app.core.agent import frontend_observability
+
+    monkeypatch.setattr(
+        frontend_observability,
+        "_event_log_path",
+        lambda: tmp_path / "frontend_observability.jsonl",
+    )
+    frontend_observability.clear_frontend_events()
+
+    def frontend_worker():
+        delivered = frontend_observability.next_frontend_action(
+            session_id="wait-session",
+            timeout_ms=1000,
+        )
+        action = delivered.get("action") or {}
+        if action.get("id"):
+            frontend_observability.complete_frontend_action(
+                action_id=action["id"],
+                ok=True,
+                result={"title": "Koto", "readyState": "complete"},
+            )
+
+    thread = threading.Thread(target=frontend_worker)
+    thread.start()
+    waited = frontend_observability.enqueue_frontend_action(
+        action="snapshot",
+        target_session_id="wait-session",
+        wait_ms=1000,
+    )
+    thread.join(timeout=1)
+
+    assert waited["success"] is True
+    assert waited["action"]["status"] == "completed"
+    assert waited["action"]["ok"] is True
+    assert waited["action"]["result"]["readyState"] == "complete"
+    assert waited["queued_action"]["id"] == waited["action"]["id"]
+
+
 def test_websocket_mcp_exposes_koto_supervision_tools():
     from web.mcp_ws import MCPWebSocketSession
 

@@ -7,3 +7,4 @@ import '../app/settings';
 import '../app/session-bridge';
 import '../app/router';
 import '../app/theme';
+import '../app/framework';

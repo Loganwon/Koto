@@ -37,6 +37,19 @@ def _check(resp, ok_status=(200,)):
     return resp.get_json()
 
 
+def _csrf_headers(client):
+    data = _check(client.get("/api/csrf-token"))
+    token = data.get("csrf_token") or data.get("token")
+    assert token
+    return {"X-CSRFToken": token}
+
+
+def _post(client, path, **kwargs):
+    headers = dict(kwargs.pop("headers", {}) or {})
+    headers.update(_csrf_headers(client))
+    return client.post(path, headers=headers, **kwargs)
+
+
 # ── GET /api/settings ────────────────────────────────────────────────────────
 
 
@@ -67,7 +80,8 @@ class TestGetSettings:
 @pytest.mark.integration
 class TestUpdateSettings:
     def test_update_valid_setting(self, client):
-        resp = client.post(
+        resp = _post(
+            client,
             "/api/settings",
             json={"category": "appearance", "key": "theme", "value": "dark"},
         )
@@ -75,19 +89,23 @@ class TestUpdateSettings:
         assert data["success"] is True
 
     def test_missing_category_returns_error(self, client):
-        resp = client.post("/api/settings", json={"key": "theme", "value": "dark"})
+        resp = _post(
+            client, "/api/settings", json={"key": "theme", "value": "dark"}
+        )
         data = resp.get_json()
         assert data["success"] is False
 
     def test_missing_key_returns_error(self, client):
-        resp = client.post(
+        resp = _post(
+            client,
             "/api/settings", json={"category": "appearance", "value": "dark"}
         )
         data = resp.get_json()
         assert data["success"] is False
 
     def test_update_ai_setting(self, client):
-        resp = client.post(
+        resp = _post(
+            client,
             "/api/settings",
             json={"category": "ai", "key": "show_thinking", "value": True},
         )
@@ -96,7 +114,8 @@ class TestUpdateSettings:
 
     def test_setting_persists_in_get(self, client):
         """After updating a setting, GET should reflect the change."""
-        client.post(
+        _post(
+            client,
             "/api/settings",
             json={"category": "appearance", "key": "theme", "value": "light"},
         )
@@ -105,14 +124,16 @@ class TestUpdateSettings:
         assert appearance.get("theme") == "light"
 
         # Restore default
-        client.post(
+        _post(
+            client,
             "/api/settings",
             json={"category": "appearance", "key": "theme", "value": "dark"},
         )
 
     def test_empty_storage_path_falls_back_to_default(self, client):
         # 如果用户将 workspace_dir 置空，系统应当回退到默认路径而不是保留空字符串
-        response = client.post(
+        response = _post(
+            client,
             "/api/settings",
             json={"category": "storage", "key": "workspace_dir", "value": ""},
         )
@@ -132,12 +153,12 @@ class TestUpdateSettings:
 @pytest.mark.integration
 class TestResetSettings:
     def test_reset_returns_success(self, client):
-        data = _check(client.post("/api/settings/reset"))
+        data = _check(_post(client, "/api/settings/reset"))
         assert data["success"] is True
 
     def test_reset_restores_defaults(self, client):
         """After reset, settings should contain default values."""
-        client.post("/api/settings/reset")
+        _post(client, "/api/settings/reset")
         data = _check(client.get("/api/settings"))
         appearance = data.get("appearance", {})
         assert appearance.get("theme") == "light"

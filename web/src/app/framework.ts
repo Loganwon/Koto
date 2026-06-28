@@ -1,6 +1,5 @@
 /**
  * Application Framework — multi-window app shell
- * Converted from app-framework.js
  */
 
 import { csrfFetch } from '../shared/csrf';

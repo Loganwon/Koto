@@ -3,7 +3,7 @@ Unit tests for:
   1. fix: reset _client cache when API key is updated (settings.py)
   2. fix: reconfigure stdout encoding on Windows (app.py __main__)
   3. feat: API key section in settings panel (index.html)
-  4. fix: validate Ollama before enabling local-only mode (app.js)
+  4. fix: validate Ollama before enabling local-only mode (settings.ts)
 """
 
 import importlib
@@ -318,10 +318,10 @@ class TestApiKeySettingsPanelHtml:
 
 
 class TestSaveSettingsApiKeyJs:
-    """app.js must contain saveSettingsApiKey() with correct behaviour."""
+    """settings.ts must contain saveSettingsApiKey() with correct behaviour."""
 
     def setup_method(self):
-        with open("web/static/js/app.js", encoding="utf-8") as f:
+        with open("web/src/app/settings.ts", encoding="utf-8") as f:
             self.js = f.read()
 
     def test_function_defined(self):
@@ -345,10 +345,10 @@ class TestSaveSettingsApiKeyJs:
 
 
 class TestOllamaValidationJs:
-    """app.js onLocalOnlyChange must be async and check Ollama before enabling."""
+    """settings.ts onLocalOnlyChange must be async and check Ollama before enabling."""
 
     def setup_method(self):
-        with open("web/static/js/app.js", encoding="utf-8") as f:
+        with open("web/src/app/settings.ts", encoding="utf-8") as f:
             self.js = f.read()
 
     def test_function_is_async(self):

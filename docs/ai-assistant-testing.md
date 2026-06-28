@@ -2,14 +2,14 @@
 
 This repo now has a dedicated regression system for the workspace AI assistant and whitebox file-task flow.
 
-The suite is organized into five lanes:
+The suite is organized into six lanes:
 
 - `smoke`: critical routing and runtime regressions that should stay green on every AI assistant flow change.
 - `contracts`: source-level guards for the bundled TypeScript workspace task chain (`ai-review.ts`, `task-dispatcher.ts`, `task-runner.ts`, and related renderer contracts).
 - `backend`: Flask `POST /api/editor/ai/task-stream` behavior, SSE event contract, request normalization, and session/memory persistence.
 - `runtime`: file-task runtime, planner routing, tool-gap normalization, and provider fallback behavior.
 - `browser`: Playwright smoke for the real workspace page, including a mocked `task-stream` response so task cards render without a real model.
-- `evaluation`: real-LLM intent accuracy and execution-quality checks. These auto-skip unless `GOOGLE_API_KEY` or `GEMINI_API_KEY` is configured.
+- `evaluation`: deterministic offline intent-accuracy and execution-quality checks for daily regression runs. Set `KOTO_LIVE_EVALUATION=1` to run the same lane with real LLM calls and AI-as-Judge.
 
 ## Browser Prerequisites
 
@@ -63,13 +63,20 @@ Run the browser smoke lane only:
 python scripts/run_ai_assistant_flow_tests.py browser -vv
 ```
 
-Run the real-model quality evaluation lane:
+Run the offline quality evaluation lane:
 
 ```powershell
 python scripts/run_ai_assistant_flow_tests.py evaluation -vv
 ```
 
-This lane may take several minutes because it performs real model calls and AI-as-judge checks.
+Run the live-model quality evaluation lane:
+
+```powershell
+$env:KOTO_LIVE_EVALUATION = "1"
+python scripts/run_ai_assistant_flow_tests.py evaluation -vv
+```
+
+Live evaluation requires `GOOGLE_API_KEY` or `GEMINI_API_KEY` and may take several minutes because it performs real model calls and AI-as-Judge checks.
 
 Run the release lane before merging larger flow changes:
 

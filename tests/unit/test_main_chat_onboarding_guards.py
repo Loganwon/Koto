@@ -26,14 +26,14 @@ def test_main_chat_onboarding_uses_prompt_first_welcome():
 
 def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_flow():
     html = _read("web/templates/index.html")
-    app_js = _read("web/static/js/app.js")
+    router_ts = _read("web/src/app/router.ts")
 
     assert "直接告诉我你想完成什么，或拖入文件开始分析…" in html
     assert 'id="welcomeGreeting"' in html
     assert "选择或创建对话" not in html
-    assert "选择或创建对话" not in app_js
-    assert "夜深了，还在呢🌙" in app_js
-    assert "早上好，有什么需要帮忙？☀️" in app_js
+    assert "选择或创建对话" not in router_ts
+    assert "夜深了，还在呢🌙" in router_ts
+    assert "早上好，有什么需要帮忙？☀️" in router_ts
 
 
 def test_setup_wizard_uses_deepseek_api_key_only():

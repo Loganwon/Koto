@@ -1,6 +1,5 @@
 /**
  * Koto Settings Module — settings panel, user preferences, setup wizard
- * Converted from app.js
  */
 
 import { csrfFetch } from '../shared/csrf';
@@ -195,9 +194,52 @@ export function applyLocalOnlyMode(enabled: boolean): void {
 }
 
 export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
+  const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
+  const selectEl = document.getElementById('settingLocalModel') as HTMLSelectElement | null;
+
+  if (enabled) {
+    try {
+      const resp = await fetch('/api/local-model/list');
+      const data = await resp.json().catch(() => ({}));
+      const models = Array.isArray(data.models) ? data.models : [];
+      const ollamaOk = data.success !== false && models.length > 0;
+      if (!ollamaOk) {
+        if (localOnlyEl) localOnlyEl.checked = false;
+        applyLocalOnlyMode(false);
+        const errMsg = String(data.error || '').trim();
+        const msg = errMsg.includes('正在启动')
+          ? '⚠️ Ollama 正在启动，请稍候再试。'
+          : errMsg.includes('未安装')
+            ? '⚠️ Ollama 未安装。请访问 ollama.com 下载安装后再开启本地模式。'
+            : '⚠️ Ollama 未运行。请先启动 Ollama，再开启本地模式。';
+        if (typeof (window as any).showNotification === 'function') {
+          (window as any).showNotification(msg, 'warning', 6000);
+        }
+        return;
+      }
+      if (!selectEl || !selectEl.value) {
+        if (localOnlyEl) localOnlyEl.checked = false;
+        applyLocalOnlyMode(false);
+        if (typeof (window as any).showNotification === 'function') {
+          (window as any).showNotification('⚠️ 请先在下方选择一个本地模型', 'warning', 4000);
+        }
+        const pickerRow = document.getElementById('localModelPickerRow');
+        if (pickerRow) pickerRow.style.display = '';
+        detectLocalModels();
+        return;
+      }
+    } catch (_) {
+      if (localOnlyEl) localOnlyEl.checked = false;
+      applyLocalOnlyMode(false);
+      if (typeof (window as any).showNotification === 'function') {
+        (window as any).showNotification('⚠️ 无法检测 Ollama 状态，请确认 Ollama 已启动', 'warning', 5000);
+      }
+      return;
+    }
+  }
+
   applyLocalOnlyMode(enabled);
   await updateSetting('ai', 'use_local_only', enabled);
-  const selectEl = document.getElementById('settingLocalModel') as HTMLSelectElement | null;
   const modelTag = selectEl?.value || currentSettings?.local_model || currentSettings?.ai?.local_model || '';
   csrfFetch('/api/local-model/switch', {
     method: 'POST',

@@ -1,6 +1,5 @@
 /**
  * Koto Theme Module — theme management, dark mode, UI zoom
- * Converted from app.js
  */
 
 export function applyTheme(theme: string): void {

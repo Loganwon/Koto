@@ -1,6 +1,5 @@
 /**
  * Koto Marketplace Module — skills management, bindings, triggers, filehub
- * Converted from app.js
  */
 
 import { csrfFetch } from '../shared/csrf';

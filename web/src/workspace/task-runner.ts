@@ -179,6 +179,14 @@ function planViolationLabel(code: string): string {
   return value.replace(/_/g, ' ');
 }
 
+function planGateVisibleIssues(data: Record<string, any>): string[] {
+  const violations = Array.isArray(data.violations) ? data.violations : [];
+  const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+  const passed = data.passed !== false && String(data.status || '').trim().toLowerCase() !== 'failed';
+  return uniqueTextParts([...violations, ...warnings])
+    .filter((item) => !(passed && item === 'model_execution_plan_missing'));
+}
+
 function csrfToken(): string {
   const meta = document.querySelector('meta[name="csrf-token"]');
   return meta ? String(meta.getAttribute('content') || '') : '';
@@ -1319,9 +1327,7 @@ function handleEvent_plan_checked(card: TaskCardElement, evt: Record<string, any
 }
 
 function planGateIssueHtml(data: Record<string, any>): string {
-  const violations = Array.isArray(data.violations) ? data.violations : [];
-  const warnings = Array.isArray(data.warnings) ? data.warnings : [];
-  const details = uniqueTextParts([...violations, ...warnings])
+  const details = planGateVisibleIssues(data)
     .slice(0, 5)
     .map((item) => planViolationLabel(item));
   return details.length
@@ -1532,7 +1538,8 @@ function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any
   if (summaryContainer) {
     const finalReport = String(data.summary || data.text || data.error || result.summary || '').trim();
     const visibleSummary = finalReport || terminalStepSummary(result);
-    summaryContainer.innerHTML = taskResultActionsHtml(card) + '<div class="wa-task-final-report">' + renderTaskFinalReport(visibleSummary) + '</div>';
+    const auditHtml = supervisorAuditHtml(data);
+    summaryContainer.innerHTML = taskResultActionsHtml(card) + auditHtml + '<div class="wa-task-final-report">' + renderTaskFinalReport(visibleSummary) + '</div>';
     summaryContainer.hidden = false;
   }
   const process = card.querySelector('[data-role="process"]') as HTMLDetailsElement | null;

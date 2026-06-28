@@ -246,6 +246,7 @@ def enqueue_frontend_action(
     key: str = "",
     target_session_id: str = "",
     options: Dict[str, Any] | None = None,
+    wait_ms: int = 0,
     **_: Any,
 ) -> Dict[str, Any]:
     action_name = str(action or "").strip().lower()
@@ -304,6 +305,10 @@ def enqueue_frontend_action(
     with _LOCK:
         _ACTIONS.append(item)
         _ACTION_CONDITION.notify_all()
+    if wait_ms:
+        waited = wait_frontend_action(action_id=item["id"], timeout_ms=wait_ms)
+        waited["queued_action"] = item
+        return waited
     return {"success": True, "action": item}
 
 
@@ -347,6 +352,7 @@ def complete_frontend_action(
                 item["result"] = _trim(result or {})
                 item["error"] = str(error or "")[:2000]
                 item["updated_ts"] = time.time()
+                _ACTION_CONDITION.notify_all()
                 return {"success": True, "action": dict(item)}
     return {"success": False, "error": "action not found", "action": None}
 
@@ -365,14 +371,16 @@ def frontend_action_status(action_id: str = "", **_: Any) -> Dict[str, Any]:
 
 def wait_frontend_action(action_id: str = "", timeout_ms: int = 5000, **_: Any) -> Dict[str, Any]:
     deadline = time.time() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
-    while True:
-        status = frontend_action_status(action_id=action_id)
-        action = status.get("action")
-        if action and action.get("status") in {"completed", "failed"}:
-            return status
-        if time.time() >= deadline:
-            return status
-        time.sleep(0.05)
+    with _ACTION_CONDITION:
+        while True:
+            status = frontend_action_status(action_id=action_id)
+            action = status.get("action")
+            if action and action.get("status") in {"completed", "failed"}:
+                return status
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                return status
+            _ACTION_CONDITION.wait(timeout=min(remaining, 0.5))
 
 
 def frontend_surface_inventory(

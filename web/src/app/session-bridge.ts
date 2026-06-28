@@ -1,6 +1,5 @@
 /**
  * Koto Session Bridge Module — session management, API bridge, project management
- * Converted from app.js
  */
 
 import { csrfFetch } from '../shared/csrf';

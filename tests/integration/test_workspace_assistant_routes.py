@@ -1585,6 +1585,12 @@ class TestEmbeddedModeRenderGuards:
     FILE_OPEN_PATH = (
         Path(__file__).parents[2] / "web" / "src" / "workspace" / "file-open.ts"
     )
+    XSLX_EDITOR_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "editors" / "xlsx-editor.ts"
+    )
+    EMBEDDED_MODE_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "ui" / "embedded-mode.ts"
+    )
     PPTX_EDITOR_PATH = (
         Path(__file__).parents[2] / "web" / "src" / "editors" / "pptx-editor.ts"
     )
@@ -1595,6 +1601,8 @@ class TestEmbeddedModeRenderGuards:
             [
                 self.STATE_PATH.read_text(encoding="utf-8"),
                 self.FILE_OPEN_PATH.read_text(encoding="utf-8"),
+                self.XSLX_EDITOR_PATH.read_text(encoding="utf-8"),
+                self.EMBEDDED_MODE_PATH.read_text(encoding="utf-8"),
             ]
         )
 
@@ -1652,29 +1660,23 @@ class TestEmbeddedModeRenderGuards:
     # ── Router.load guard ────────────────────────────────────────────────
 
     def test_router_load_awaits_layout_guard(self):
-        """The file-open path must await _waitForEditorLayout after toggleWorkspace."""
+        """The unified editor mount path must await _waitForEditorLayout."""
         src = self.src
-        # The actual file-open logic lives in _applyFileJson (called by Router.load)
-        fn_start = src.find("async function _applyFileJson")
-        if fn_start == -1:
-            fn_start = src.find("const Router = {")
+        fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoXlsxEditor()", fn_start)
         body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
         assert "await _waitForEditorLayout" in body, (
-            "File-open path must await _waitForEditorLayout before creating editors"
+            "_mountEditor must await _waitForEditorLayout before creating editors"
         )
 
     def test_router_load_guard_before_xlsx_editor(self):
         """The guard await must appear before new KotoXlsxEditor() in _applyFileJson."""
         src = self.src
-        # The actual file-open logic lives in _applyFileJson (called by Router.load)
-        fn_start = src.find("async function _applyFileJson")
-        if fn_start == -1:
-            fn_start = src.find("const Router = {")
-        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        fn_start = src.find("async function _mountEditor")
+        fn_end = src.find("new (window as any).KotoXlsxEditor()", fn_start)
         body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
         guard_pos = body.find("await _waitForEditorLayout")
-        xlsx_pos  = body.find("new KotoXlsxEditor()")
+        xlsx_pos  = body.find("new (window as any).KotoXlsxEditor()")
         assert guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos, (
             "_waitForEditorLayout await must precede new KotoXlsxEditor()"
         )
@@ -1682,21 +1684,19 @@ class TestEmbeddedModeRenderGuards:
     def test_router_load_primes_layout_before_waiting(self):
         """The file-open path must prime xlsx/pptx shells before waiting for size."""
         src = self.src
-        fn_start = src.find("async function _applyFileJson")
+        fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoXlsxEditor()", fn_start)
         body = src[fn_start:fn_end + 120] if fn_end != -1 else src[fn_start:fn_start + 3200]
-        prime_pos = body.find("_primeEditorLayout(state.fileType)")
-        guard_pos = body.find("await _waitForEditorLayout(state.fileType)")
+        prime_pos = body.find("_primeEditorLayout(tab.fileType)")
+        guard_pos = body.find("await _waitForEditorLayout(tab.fileType)")
         assert prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos, (
-            "_applyFileJson must prime the editor shell before waiting for layout"
+            "_mountEditor must prime the editor shell before waiting for layout"
         )
 
     def test_router_load_guard_before_pptx_editor(self):
         """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
         src = self.src
-        fn_start = src.find("async function _applyFileJson")
-        if fn_start == -1:
-            fn_start = src.find("const Router = {")
+        fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoPptxEditor()", fn_start)
         body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
         guard_pos = body.find("await _waitForEditorLayout")
@@ -1708,25 +1708,25 @@ class TestEmbeddedModeRenderGuards:
     # ── _switchToTab guard ───────────────────────────────────────────────
 
     def test_switch_to_tab_awaits_layout_guard(self):
-        """_switchToTab must also await _waitForEditorLayout for tab-switch renders."""
+        """_switchToTab must also route tab-switch renders through _mountEditor."""
         src = self.src
-        tab_start = src.find("async function _switchToTab")
-        tab_end   = src.find("\n  }", tab_start) + 4
+        tab_start = src.find("async function _switchToTabImpl")
+        tab_end   = src.find("function _highlightActiveFile", tab_start)
         tab_body  = src[tab_start:tab_end]
-        assert "await _waitForEditorLayout" in tab_body, (
-            "_switchToTab must await _waitForEditorLayout before creating editors"
+        assert "await _mountEditor(tab, tab.serverData);" in tab_body, (
+            "_switchToTab must use _mountEditor so layout guards run before creating editors"
         )
 
     def test_switch_to_tab_primes_layout_before_waiting(self):
-        """Tab switches must re-activate xlsx/pptx shells before waiting for layout."""
+        """Tab switches must use the shared mount path that primes before waiting."""
         src = self.src
-        tab_start = src.find("async function _switchToTab")
-        tab_end = src.find("new KotoXlsxEditor()", tab_start)
-        tab_body = src[tab_start:tab_end + 120] if tab_end != -1 else src[tab_start:tab_start + 2400]
+        mount_start = src.find("async function _mountEditor")
+        mount_end = src.find("new KotoXlsxEditor()", mount_start)
+        tab_body = src[mount_start:mount_end + 120] if mount_end != -1 else src[mount_start:mount_start + 2400]
         prime_pos = tab_body.find("_primeEditorLayout(tab.fileType)")
         guard_pos = tab_body.find("await _waitForEditorLayout(tab.fileType)")
         assert prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos, (
-            "_switchToTab must prime the editor shell before waiting for layout"
+            "_mountEditor must prime the editor shell before waiting for layout"
         )
 
     # ── KotoXlsxEditor size-polling ──────────────────────────────────────
@@ -1734,7 +1734,7 @@ class TestEmbeddedModeRenderGuards:
     def test_xlsx_editor_polls_for_non_zero_size(self):
         """KotoXlsxEditor.render must use requestAnimationFrame before calling KotoSheetsAPI.create."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_start = src.find("class KotoXlsxEditor")
         xlsx_end   = src.find("\n  class Koto", xlsx_start)
         xlsx_body  = src[xlsx_start:xlsx_end]
         assert "requestAnimationFrame" in xlsx_body, (
@@ -1747,7 +1747,7 @@ class TestEmbeddedModeRenderGuards:
     def test_xlsx_editor_has_mount_deadline(self):
         """KotoXlsxEditor.render must have error handling for create failures."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_start = src.find("class KotoXlsxEditor")
         xlsx_end   = src.find("\n  class Koto", xlsx_start)
         xlsx_body  = src[xlsx_start:xlsx_end]
         assert "catch" in xlsx_body and "初始化失败" in xlsx_body, (
@@ -1757,7 +1757,7 @@ class TestEmbeddedModeRenderGuards:
     def test_xlsx_editor_resize_nudge_present(self):
         """KotoXlsxEditor.render must pass string container ID to KotoSheetsAPI.create."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_start = src.find("class KotoXlsxEditor")
         xlsx_end   = src.find("\n  class Koto", xlsx_start)
         xlsx_body  = src[xlsx_start:xlsx_end]
         assert "this._containerId" in xlsx_body, (
@@ -1791,8 +1791,8 @@ class TestEmbeddedModeRenderGuards:
     def test_open_in_main_view_reflows_xlsx(self):
         """openInMainView must trigger a ResizeObserver nudge for active XLSX editors."""
         src = self.src
-        oim_start = src.find("window.WA.openInMainView = function")
-        oim_end   = src.find("\n  };", oim_start) + 4
+        oim_start = src.find("export function openInMainView")
+        oim_end   = src.find("export function closeInMainView", oim_start)
         oim_body  = src[oim_start:oim_end]
         assert "wa-xlsx-sheet" in oim_body, (
             "openInMainView must reference 'wa-xlsx-sheet' for the reflow nudge"
@@ -1804,8 +1804,8 @@ class TestEmbeddedModeRenderGuards:
     def test_open_in_main_view_reflows_pptx(self):
         """openInMainView must trigger a re-render for active PPTX editors."""
         src = self.src
-        oim_start = src.find("window.WA.openInMainView = function")
-        oim_end   = src.find("\n  };", oim_start) + 4
+        oim_start = src.find("export function openInMainView")
+        oim_end   = src.find("export function closeInMainView", oim_start)
         oim_body  = src[oim_start:oim_end]
         assert "_renderSlide" in oim_body, (
             "openInMainView must call _renderSlide for active PPTX editor after showing"

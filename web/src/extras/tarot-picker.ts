@@ -1,6 +1,5 @@
 /**
  * tarot-picker.ts — Koto 塔罗牌交互式 UI
- * Converted from tarot-picker.js
  */
 
 export interface TarotCard {

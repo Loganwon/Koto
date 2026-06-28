@@ -69,6 +69,20 @@ def _sse_body(events: list[dict]) -> str:
     )
 
 
+def _mock_file_task_route(page):
+    page.route(
+        "**/api/workspace/ai/route-intent",
+        lambda route: route.fulfill(
+            status=200,
+            content_type="application/json",
+            body=json.dumps(
+                {"ok": True, "route": "file_task", "reason": "mocked file task"},
+                ensure_ascii=False,
+            ),
+        ),
+    )
+
+
 @pytest.mark.e2e
 class TestWorkspaceAiAssistantSmoke:
     def test_workspace_ai_panel_shell_loads(self, e2e_page, console_errors, e2e_base_url):
@@ -103,6 +117,7 @@ class TestWorkspaceAiAssistantSmoke:
                 body=_sse_body(sse_events),
             )
 
+        _mock_file_task_route(e2e_page)
         e2e_page.route("**/api/editor/ai/task-stream", fulfill_task_stream)
 
         _open_workspace_ai(e2e_page, e2e_base_url)
@@ -120,7 +135,7 @@ class TestWorkspaceAiAssistantSmoke:
         assert isinstance(captured["payload"].get("history"), list)
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_task_card_renders_step_result_rollups_in_browser(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_task_card_renders_terminal_process_in_browser(self, e2e_page, console_errors, e2e_base_url):
         sse_events = [
             {"type": "run.started", "run_id": "browser_step_result", "seq": 1, "payload": {"mode": "whitebox_v1"}},
             {"type": "plan.created", "run_id": "browser_step_result", "seq": 2, "payload": {"summary": "准备处理任务。"}},
@@ -131,6 +146,7 @@ class TestWorkspaceAiAssistantSmoke:
             {"type": "run.finished", "run_id": "browser_step_result", "seq": 7, "payload": {"summary": "模拟任务已完成", "completed_task": True}},
         ]
 
+        _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
             lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
@@ -146,14 +162,16 @@ class TestWorkspaceAiAssistantSmoke:
         e2e_page.wait_for_function(
             """() => {
                 const card = document.querySelector('.wa-task-run');
-                return !!card && /已整理 1 份上下文片段/.test(card.textContent || '') && /已完成第 1 轮工具执行/.test(card.textContent || '');
+                const text = card && (card.textContent || '');
+                return /模拟任务已完成/.test(text) && /执行过程/.test(text) && /完成核验/.test(text);
             }""",
             timeout=PAGE_TIMEOUT,
         )
 
         card_text = task_card.evaluate("(el) => el.textContent || ''")
-        assert "已整理 1 份上下文片段" in card_text
-        assert "已完成第 1 轮工具执行" in card_text
+        assert "执行过程" in card_text
+        assert "读取文件" in card_text
+        assert "完成核验" in card_text
         assert "模拟任务已完成" in card_text
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
@@ -187,14 +205,7 @@ class TestWorkspaceAiAssistantSmoke:
             {"type": "run.finished", "run_id": "browser_supervisor", "seq": 4, "payload": {"summary": "模拟监管任务已完成", "completed_task": True, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
         ]
 
-        e2e_page.route(
-            "**/api/workspace/ai/route-intent",
-            lambda route: route.fulfill(
-                status=200,
-                content_type="application/json",
-                body=json.dumps({"ok": True, "route": "file_task", "reason": "mocked file task"}, ensure_ascii=False),
-            ),
-        )
+        _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
             lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
@@ -257,6 +268,7 @@ class TestWorkspaceAiAssistantSmoke:
             {"type": "run.finished", "run_id": "browser_refresh", "seq": 6, "payload": {"summary": "模拟刷新已完成", "completed_task": True}},
         ]
 
+        _mock_file_task_route(e2e_page)
         e2e_page.route("**/api/v1/workspace/open_file_by_path", fulfill_open_file)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
@@ -338,6 +350,7 @@ class TestWorkspaceAiAssistantSmoke:
                 ),
             )
 
+        _mock_file_task_route(e2e_page)
         e2e_page.route("**/api/v1/workspace/open_file_by_path", fulfill_open_file)
         e2e_page.route("**/api/editor/ai/task-stream", fulfill_task_stream)
 

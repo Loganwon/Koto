@@ -188,7 +188,8 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "function compactTerminalProcess(" in task_runner
     assert "(window as any)._waRenderMarkdown" in task_runner
     assert "wa-task-final-report" in task_runner
-    assert "taskResultActionsHtml(card) + '<div class=\"wa-task-final-report\">' + renderTaskFinalReport(visibleSummary)" in task_runner
+    assert "const auditHtml = supervisorAuditHtml(data);" in task_runner
+    assert "taskResultActionsHtml(card) + auditHtml + '<div class=\"wa-task-final-report\">' + renderTaskFinalReport(visibleSummary)" in task_runner
     assert "wa-task-step-detail" in task_runner
     assert "data-role=\"process\"" in task_runner
     assert "handleEvent_supervisor_step_verified" in task_runner

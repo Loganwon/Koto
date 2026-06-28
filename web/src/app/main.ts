@@ -1,6 +1,5 @@
 /**
  * Koto Main Module — app initialization, boot sequence, core utilities
- * Converted from app.js
  */
 
 import { csrfFetch } from '../shared/csrf';
@@ -1203,11 +1202,367 @@ export async function saveCreateSkill(): Promise<void> {
 
 // ── Send Message (main entry for form submit) ──
 export async function sendMessage(event: Event): Promise<void> {
-  // Delegated to chat-ui module's sendMessage if available
-  if (typeof (window as any).sendMessage === 'function') {
-    return (window as any).sendMessage(event);
+  event.preventDefault();
+
+  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+  const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement | null;
+  const container = document.getElementById('chatMessages');
+  if (!input || !container) return;
+
+  const message = input.value.trim();
+  const selectedFiles: File[] = Array.isArray((window as any).selectedFiles) ? (window as any).selectedFiles : [];
+  let sessionName = (window as any).currentSession || '';
+
+  if (sessionName && typeof (window as any).isSessionGenerating === 'function' && (window as any).isSessionGenerating(sessionName)) {
+    sendBtn?.setAttribute('disabled', 'true');
+    const controller = (window as any).getSessionAbortController?.(sessionName);
+    if (controller) controller.abort();
+    try {
+      await fetch('/api/chat/interrupt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          session: sessionName,
+          task_id: (window as any).getSessionTaskId?.(sessionName) || null,
+        }),
+      });
+    } catch (_) {}
+    if (sendBtn) sendBtn.disabled = false;
+    return;
   }
-  // ... existing sendMessage logic from chat-ui module handles this
+
+  if (!message && selectedFiles.length === 0) return;
+
+  if (!sessionName && typeof (window as any).createNewSession === 'function') {
+    const generatedName = typeof (window as any).generateSessionName === 'function'
+      ? (window as any).generateSessionName(message || '新对话')
+      : (message || '新对话').slice(0, 24);
+    await (window as any).createNewSession(generatedName);
+    sessionName = (window as any).currentSession || '';
+    if (sessionName && (window as any)._newlyCreatedSessions instanceof Set) {
+      (window as any)._newlyCreatedSessions.add(sessionName);
+    }
+  }
+
+  input.value = '';
+  input.style.height = 'auto';
+  const welcome = container.querySelector('.welcome-screen, #welcomeScreen') as HTMLElement | null;
+  if (welcome) welcome.remove();
+
+  const renderMessageFn = (window as any).renderMessage;
+  if (typeof renderMessageFn === 'function') {
+    container.insertAdjacentHTML('beforeend', renderMessageFn('user', message || '(附件)', { attachments: selectedFiles.map(f => ({ name: f.name, type: f.type, size: f.size })) }));
+  }
+  (window as any).scrollToBottomForce?.();
+
+  let taskInfo: any = null;
+  let taskType = (window as any).lockedTaskType || null;
+  const modelToUse = (window as any).selectedModel || 'auto';
+  try {
+    (window as any).showLoading?.('分析任务类型...', '');
+    const analyzeResp = await fetch('/api/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message,
+        locked_task: taskType,
+        locked_model: modelToUse,
+        has_file: selectedFiles.length > 0,
+        file_type: selectedFiles.length === 1 ? selectedFiles[0].type : (selectedFiles.length > 1 ? 'multiple' : ''),
+      }),
+    });
+    taskInfo = await analyzeResp.json().catch(() => null);
+    taskType = taskType || taskInfo?.task || null;
+    const modelDisplay = taskInfo?.model_speed ? `${taskInfo.model_name} ${taskInfo.model_speed}` : (taskInfo?.model_name || '');
+    (window as any).showLoading?.(`${taskType || 'CHAT'} 任务处理中...`, modelDisplay);
+  } catch (_) {
+    (window as any).showLoading?.('Koto 正在思考...', '');
+  }
+
+  const thisSession = sessionName || (window as any).currentSession || 'default';
+  const abortController = new AbortController();
+  (window as any).setSessionGenerating?.(thisSession, true);
+  (window as any).setSessionAbortController?.(thisSession, abortController);
+  if (sendBtn) {
+    sendBtn.classList.add('generating');
+    sendBtn.disabled = false;
+    sendBtn.title = '停止生成';
+  }
+
+  const msgId = `msg-${Date.now()}`;
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'message assistant';
+  msgDiv.id = msgId;
+  msgDiv.innerHTML = `
+    <div class="message-avatar"><img src="/static/assets/koto_chat_icon.png" alt="Koto" class="avatar-img"></div>
+    <div class="message-content">
+      <div class="message-header">
+        <span class="message-sender">Koto</span>
+        <div class="message-meta"><span class="time-info" id="${msgId}-time">...</span></div>
+      </div>
+      <div class="message-body" id="${msgId}-body"><span class="typing-cursor">▊</span></div>
+    </div>`;
+  container.appendChild(msgDiv);
+  (window as any).scrollToBottom?.();
+
+  const bodyEl = document.getElementById(`${msgId}-body`) as HTMLElement | null;
+  const timeEl = document.getElementById(`${msgId}-time`) as HTMLElement | null;
+  const startedAt = Date.now();
+  let fullText = '';
+  let agentStepCounter = 0;
+  let canonicalStepTotal = 0;
+  let canonicalCurrentStepIndex = 0;
+  const canonicalStepOrder = new Map<string, number>();
+  const taskStepStates = new Map<number, { status?: string; title?: string; detail?: string }>();
+
+  const safeHtml = (value: any) => typeof (window as any).escapeHtml === 'function'
+    ? (window as any).escapeHtml(String(value || ''))
+    : escapeHtmlLocal(String(value || ''));
+  const parse = (text: string) => {
+    try {
+      return typeof (window as any).parseMarkdown === 'function'
+        ? (window as any).parseMarkdown(text)
+        : `<div class="markdown-fallback" style="white-space:pre-wrap;">${safeHtml(text)}</div>`;
+    } catch (_) {
+      return `<div class="markdown-fallback" style="white-space:pre-wrap;">${safeHtml(text)}</div>`;
+    }
+  };
+  const describeAction = (toolName: string, toolArgs: any) => {
+    const args = toolArgs || {};
+    const path = String(args.path || args.file_path || args.filename || '');
+    const query = String(args.query || args.q || args.search_query || '');
+    if (path) return `处理文件：${path.split(/[\\/]/).pop()}`;
+    if (query) return `检索：${query.slice(0, 48)}`;
+    return String(toolName || '执行工具').replace(/_/g, ' ');
+  };
+  const briefObsText = (raw: any) => {
+    const text = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
+    return text.length > 60 ? text.slice(0, 57) + '...' : text;
+  };
+  const ensureCanonicalStepIndex = (rawStepId: any, fallbackTitle = '') => {
+    const key = String(rawStepId || '').trim() || fallbackTitle || `step_${canonicalStepOrder.size + 1}`;
+    if (canonicalStepOrder.has(key)) return canonicalStepOrder.get(key)!;
+    const nextIdx = canonicalStepOrder.size + 1;
+    canonicalStepOrder.set(key, nextIdx);
+    canonicalStepTotal = Math.max(canonicalStepTotal, nextIdx);
+    return nextIdx;
+  };
+  const canonicalProgressFraction = (milestone = 'step_progress') => {
+    const fractions: Record<string, number> = {
+      phase_running: 0.5,
+      phase_done: 1,
+      step_start: 0.35,
+      tool_call: 0.5,
+      step_progress: 0.7,
+      tool_result: 0.85,
+      step_done: 1,
+      step_error: 1,
+    };
+    return Object.prototype.hasOwnProperty.call(fractions, milestone) ? fractions[milestone] : 0;
+  };
+  const canonicalProgressPercent = (index: number, total: number, milestone = 'step_progress') => {
+    const safeTotal = Math.max(Number(total) || 0, Number(index) || 0, 1);
+    const safeIndex = Math.min(Math.max(Number(index) || 1, 1), safeTotal);
+    const fraction = canonicalProgressFraction(milestone);
+    return Math.max(0, Math.min(100, Math.round((((safeIndex - 1) + fraction) / safeTotal) * 100)));
+  };
+  const normalizeEvent = (evt: any) => {
+    if (!evt || typeof evt !== 'object') return evt;
+    if (evt.type === 'error' && evt.data && !evt.message) return { type: 'error', message: evt.data.error || '未知错误' };
+    if (evt.type === 'plan' && Array.isArray(evt.steps)) {
+      canonicalStepOrder.clear();
+      canonicalCurrentStepIndex = 0;
+      canonicalStepTotal = evt.steps.length;
+      const steps = evt.steps.map((step: any, idx: number) => {
+        const title = step.description || step.label || step.text || step.id || `步骤 ${idx + 1}`;
+        const key = String(step.id || step.step_id || step.step || title || idx + 1);
+        canonicalStepOrder.set(key, idx + 1);
+        return { index: idx + 1, title };
+      });
+      return { type: 'task_step', status: 'init', steps, step_total: steps.length };
+    }
+    if (evt.type === 'phase' && Array.isArray(evt.phases) && evt.phases.length) {
+      const currentKey = String(evt.current || '').trim();
+      const currentIdx = evt.phases.findIndex((phase: any) => String(phase.id || phase.label || '').trim() === currentKey);
+      const phaseIndex = currentIdx >= 0 ? currentIdx + 1 : 1;
+      const phase = evt.phases[currentIdx] || evt.phases[0];
+      return {
+        type: 'task_step',
+        step_index: phaseIndex,
+        step_total: evt.phases.length,
+        status: evt.status === 'done' && phaseIndex >= evt.phases.length ? 'done' : 'running',
+        title: phase?.label || phase?.id || evt.text || currentKey || '执行阶段',
+        detail: '',
+        progress: canonicalProgressPercent(phaseIndex, evt.phases.length, evt.status === 'done' ? 'phase_done' : 'phase_running'),
+      };
+    }
+    if (evt.type === 'step_start') {
+      const title = evt.text || evt.label || evt.step_id || evt.step || '执行步骤';
+      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, title);
+      canonicalCurrentStepIndex = idx;
+      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title, detail: evt.detail || '', progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_start') };
+    }
+    if (evt.type === 'step_progress') {
+      const detail = evt.detail || evt.text || '处理中';
+      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, detail);
+      canonicalCurrentStepIndex = idx;
+      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title: taskStepStates.get(idx)?.title || `步骤 ${idx}`, detail, progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_progress') };
+    }
+    if (evt.type === 'step_done') {
+      const title = evt.text || evt.label || evt.step_id || evt.step || '步骤完成';
+      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, title);
+      canonicalCurrentStepIndex = idx;
+      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'done', title, detail: evt.detail || '', progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_done') };
+    }
+    if (evt.type === 'step_error') {
+      const errText = evt.error || evt.text || '步骤失败';
+      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, errText);
+      canonicalCurrentStepIndex = idx;
+      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'failed', title: taskStepStates.get(idx)?.title || evt.step_id || `步骤 ${idx}`, detail: errText, progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_error') };
+    }
+    if (evt.type === 'tool_call') {
+      if (canonicalCurrentStepIndex > 0 || canonicalStepTotal > 0) {
+        const idx = canonicalCurrentStepIndex || 1;
+        return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title: taskStepStates.get(idx)?.title || `步骤 ${idx}`, detail: describeAction(evt.tool_name, evt.tool_args), progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'tool_call') };
+      }
+      agentStepCounter += 1;
+      return { type: 'agent_step', step_number: agentStepCounter, total_steps: '?', tool_name: evt.tool_name || 'tool', tool_args: evt.tool_args || {} };
+    }
+    if (evt.type === 'tool_result') {
+      const preview = evt.result_preview || evt.content || '';
+      if (canonicalCurrentStepIndex > 0 || canonicalStepTotal > 0) {
+        const idx = canonicalCurrentStepIndex || 1;
+        return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title: taskStepStates.get(idx)?.title || `步骤 ${idx}`, detail: briefObsText(preview), progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'tool_result') };
+      }
+      return { type: 'observation', message: preview, observation: preview };
+    }
+    if (evt.type === 'task_final' && evt.data) return { type: 'done', content: evt.data.result || '', elapsed_time: evt.data.elapsed_time };
+    return evt;
+  };
+  const renderTaskStep = (data: any) => {
+    if (!bodyEl) return;
+    if (Array.isArray(data.steps)) {
+      data.steps.forEach((s: any) => taskStepStates.set(Number(s.index), { status: 'pending', title: s.title || `步骤 ${s.index}` }));
+    } else if (data.step_index) {
+      taskStepStates.set(Number(data.step_index), { status: data.status, title: data.title, detail: data.detail });
+    }
+    const total = Number(data.step_total || canonicalStepTotal || taskStepStates.size || 1);
+    const rows = Array.from({ length: total }, (_, i) => {
+      const idx = i + 1;
+      const state = taskStepStates.get(idx) || {};
+      const done = state.status === 'done';
+      const failed = state.status === 'failed';
+      const active = data.step_index === idx && !done && !failed;
+      return `<div class="koto-progress-row ${active ? 'active' : ''}">
+        <span>${done ? '✓' : failed ? '!' : active ? '...' : idx}</span>
+        <div><strong>${safeHtml(state.title || `步骤 ${idx}`)}</strong>${state.detail ? `<small>${safeHtml(state.detail)}</small>` : ''}</div>
+      </div>`;
+    }).join('');
+    const pct = Math.max(0, Math.min(100, Number(data.progress || 0)));
+    bodyEl.innerHTML = `<div class="koto-stream-progress">${rows}<div class="koto-stream-progress-track"><i style="width:${pct}%"></i></div></div>`;
+  };
+  const applyStreamEvent = (data: any) => {
+    if (!bodyEl) return;
+    if (data.type === 'token') {
+      fullText += data.content || '';
+      bodyEl.innerHTML = parse(fullText) + '<span class="typing-cursor">▊</span>';
+    } else if (data.type === 'progress') {
+      (window as any).showMiniGame?.();
+      (window as any).showLoading?.(data.message || '处理中...', data.detail || '');
+      if (!fullText) {
+        bodyEl.innerHTML = `<div class="doc-progress" style="padding:16px;"><strong>${safeHtml(data.message || '处理中...')}</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px;">${safeHtml(data.detail || '')}</div><div style="height:6px;border-radius:8px;background:rgba(0,0,0,.08);margin-top:10px;overflow:hidden;"><i style="display:block;height:100%;width:${Math.max(0, Math.min(100, Number(data.progress || 0)))}%;background:var(--accent-primary);"></i></div></div>`;
+      }
+    } else if (data.type === 'task_step') {
+      renderTaskStep(data);
+    } else if (data.type === 'agent_step') {
+      bodyEl.innerHTML = `<div class="koto-steps"><div class="koto-steps-row">${safeHtml(describeAction(data.tool_name, data.tool_args))}</div></div>`;
+    } else if (data.type === 'observation') {
+      const obs = safeHtml(data.observation || data.message || '');
+      bodyEl.insertAdjacentHTML('beforeend', `<div class="agent-observation-text">${obs}</div>`);
+    } else if (data.type === 'done') {
+      if (data.content && !fullText) fullText = data.content;
+      bodyEl.innerHTML = parse(fullText || data.content || '');
+    } else if (data.type === 'error') {
+      bodyEl.innerHTML = `<div class="error-message">${safeHtml(data.message || '请求失败')}</div>`;
+    }
+    (window as any).scrollToBottom?.();
+  };
+
+  try {
+    let response: Response;
+    if (selectedFiles.length > 0) {
+      const formData = new FormData();
+      formData.append('session', thisSession);
+      formData.append('message', message);
+      formData.append('locked_task', taskType || '');
+      formData.append('locked_model', modelToUse || 'auto');
+      selectedFiles.forEach(file => formData.append('file', file));
+      response = await fetch('/api/chat/file', { method: 'POST', body: formData, signal: abortController.signal });
+      (window as any).removeFile?.();
+    } else {
+      const useUnifiedAgentStream = String(taskType || '').toUpperCase() === 'AGENT';
+      const streamEndpoint = useUnifiedAgentStream ? '/api/agent/process-stream' : '/api/chat/stream';
+      const contextFiles = Array.isArray((window as any)._kotoContextFiles) ? (window as any)._kotoContextFiles.map((f: any) => f.path) : [];
+      const payload = useUnifiedAgentStream
+        ? { request: message, context: { history: [] }, session_id: thisSession, model: modelToUse || 'gemini-3-flash-preview', ...(contextFiles.length ? { context_files: contextFiles } : {}) }
+        : { session: thisSession, message, locked_task: taskType, locked_model: modelToUse, ...(contextFiles.length ? { context_files: contextFiles } : {}) };
+      response = await fetch(streamEndpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+        signal: abortController.signal,
+      });
+    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+
+    const contentType = response.headers.get('Content-Type') || '';
+    if (!response.body || !contentType.includes('text/event-stream')) {
+      const data = await response.json().catch(() => ({}));
+      fullText = data.response || data.content || data.message || '';
+      if (bodyEl) bodyEl.innerHTML = parse(fullText || JSON.stringify(data));
+    } else {
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let streamBuffer = '';
+      let done = false;
+      while (!done) {
+        const chunk = await reader.read();
+        done = chunk.done;
+        if (chunk.value) {
+          streamBuffer += decoder.decode(chunk.value, { stream: true });
+          const lines = streamBuffer.split('\n');
+          streamBuffer = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.startsWith('data: ')) continue;
+            const raw = line.slice(6).trim();
+            if (!raw || raw === '[DONE]') { done = true; continue; }
+            try { applyStreamEvent(normalizeEvent(JSON.parse(raw))); } catch (_) {}
+          }
+        }
+      }
+      if (bodyEl) bodyEl.innerHTML = parse(fullText || bodyEl.textContent || '');
+    }
+    if (timeEl) timeEl.textContent = `${Math.max(1, Math.round((Date.now() - startedAt) / 1000))}s`;
+    if ((window as any)._newlyCreatedSessions instanceof Set && (window as any)._newlyCreatedSessions.has(thisSession) && typeof (window as any).autoTitleSession === 'function') {
+      (window as any).autoTitleSession(thisSession, message, fullText);
+    }
+  } catch (error: any) {
+    if (bodyEl) {
+      const aborted = error?.name === 'AbortError';
+      bodyEl.innerHTML = `<div class="${aborted ? 'warning-message' : 'error-message'}">${safeHtml(aborted ? '已停止生成' : `请求失败：${error?.message || error}`)}</div>`;
+    }
+  } finally {
+    (window as any).hideLoading?.();
+    (window as any).hideMiniGame?.();
+    (window as any).setSessionGenerating?.(thisSession, false);
+    (window as any).setSessionAbortController?.(thisSession, null);
+    if (sendBtn) {
+      sendBtn.classList.remove('generating');
+      sendBtn.disabled = false;
+      sendBtn.title = '发送';
+    }
+    (window as any).scrollToBottom?.();
+  }
 }
 
 // ── Console init message ──

@@ -237,9 +237,11 @@ def validate_whitebox_plan(
     warnings: List[str] = []
     allowed = {str(item) for item in skeleton.get("allowed_tools") or [] if str(item)}
     write_intent = bool(skeleton.get("write_intent"))
+    calls = list(tool_calls or [])
 
     if plan is None:
-        warnings.append("model_execution_plan_missing")
+        if not calls:
+            warnings.append("model_execution_plan_missing")
     else:
         if not plan.goal:
             warnings.append("execution_plan_goal_missing")
@@ -281,7 +283,6 @@ def validate_whitebox_plan(
             elif required_id and required_id.lower() not in plan_stage_text:
                 warnings.append(f"required_step_{index}_id_not_visible:{required_id}")
 
-    calls = list(tool_calls or [])
     for index, call in enumerate(calls, start=1):
         tool_name = str(call.get("name") or "").strip()
         if tool_name and allowed and tool_name not in allowed:

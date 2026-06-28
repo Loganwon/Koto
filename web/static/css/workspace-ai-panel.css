@@ -40,9 +40,17 @@
 
 .wa-ai-chat-view {
   position: relative;
+  z-index: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .wa-ai-chat-header {
+  position: relative;
+  top: auto;
+  left: auto;
+  right: auto;
   min-height: 38px;
   padding: 3px 11px 8px;
   border-bottom: 1px solid color-mix(in srgb, var(--ai-border) 48%, transparent);
@@ -209,7 +217,9 @@
 /* Chat input area */
 .wa-composer-host {
   width: 100%;
+  max-width: 100%;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 #wa-ai-input-area {
@@ -218,7 +228,48 @@
   flex-direction: column;
   gap: 6px;
   min-width: 0;
+  max-width: 100%;
   padding: 2px 0 0;
+  box-sizing: border-box;
+}
+
+.wa-ai-chat-view > #wa-ai-messages,
+#wa-ai-messages {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+#wa-ai-messages > * {
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+#wa-ai-messages .wa-msg,
+#wa-ai-messages .wa-task-run,
+#wa-ai-messages .wa-task-process-report,
+#wa-ai-messages .wa-history-test-structure,
+#wa-ai-messages .wa-task-final-answer {
+  min-width: 0;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+
+#wa-ai-messages .wa-msg.user {
+  max-width: min(88%, calc(100% - 18px));
+}
+
+#wa-ai-messages .wa-msg.ai,
+#wa-ai-messages .wa-task-run {
+  max-width: 100%;
+}
+
+.wa-ai-chat-view > #wa-chat-composer-host {
+  flex: 0 0 auto;
+  padding: 0 12px 12px;
 }
 
 .wa-input-box {

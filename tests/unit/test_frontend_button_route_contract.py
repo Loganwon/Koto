@@ -263,6 +263,8 @@ def _frontend_global_function_names() -> set[str]:
         re.compile(r"\b(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),
         re.compile(r"\b(?:export\s+)?(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*="),
         re.compile(r"(?:window|globalThis)\.([A-Za-z_$][\w$]*)\s*="),
+        re.compile(r"\((?:window|globalThis)\s+as\s+any\)\.([A-Za-z_$][\w$]*)\s*="),
+        re.compile(r"(?:window|globalThis)\[['\"]([A-Za-z_$][\w$]*)['\"]\]\s*="),
         re.compile(r"export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),
     ]
     names: set[str] = set()

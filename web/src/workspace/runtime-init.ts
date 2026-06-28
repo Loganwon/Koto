@@ -341,19 +341,3 @@ if (typeof window !== 'undefined') {
   (window as any)._persistWorkspaceConversationTurn = _persistWorkspaceConversationTurn;
   _syncRuntimeGlobals();
 }
-// ── MCP Panel injection ──
-setTimeout(() => {
-  try {
-    if ((window as any).WA && (window as any).WA.initMCPPanel) {
-      const statusBar = document.querySelector(".activity-bar-bottom");
-      if (statusBar) {
-        const mcpEl = (window as any).WA.initMCPPanel();
-        if (mcpEl) {
-          mcpEl.style.position = "relative";
-          statusBar.appendChild(mcpEl);
-          console.log("[MCP] Panel mounted in activity bar");
-        }
-      }
-    }
-  } catch (_) { /* non-critical */ }
-}, 2000);

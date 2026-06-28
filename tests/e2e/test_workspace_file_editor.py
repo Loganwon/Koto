@@ -828,12 +828,8 @@ class TestWorkspaceAssistantJsSource:
             Path(__file__).parents[2] / "web" / "blueprints" / "workspace_assistant.py"
         )
         src = wa_py.read_text(encoding="utf-8")
-        # Count occurrences — there should be at least 2 (one per endpoint)
-        count = src.count("st_size == 0")
-        assert count >= 2, (
-            f"Expected at least 2 zero-byte guards (open_file + open_file_by_path), "
-            f"found {count}"
-        )
+        assert "_repair_zero_byte_office_file" in src
+        assert "repair_zero_byte_file=_repair_zero_byte_office_file" in src
 
     def test_open_browser_file_routes_workspace_files_through_open_file_by_path(self):
         """
@@ -881,11 +877,11 @@ class TestWorkspaceAssistantJsSource:
     def test_file_type_icons_are_mapped_to_distinct_svgs(self):
         """Workspace file list should keep colored Office-style icon mappings for common file types."""
         src = self.src
-        assert "function _waBrandFileSvg(label, opts = {})" in src, "Brand-style file SVG helper should exist"
-        assert "const _WORD_FILE_SVG" in src, "Word files should have a dedicated colored icon definition"
-        assert "const _EXCEL_FILE_SVG" in src, "Excel files should have a dedicated colored icon definition"
-        assert "const _POWERPOINT_FILE_SVG" in src, "PowerPoint files should have a dedicated colored icon definition"
-        assert "const _PDF_SVG" in src, "PDF should have a dedicated colored icon definition"
+        assert "function _waBrandFileSvg(label: string" in src, "Brand-style file SVG helper should exist"
+        assert "export const _WORD_FILE_SVG" in src, "Word files should have a dedicated colored icon definition"
+        assert "export const _EXCEL_FILE_SVG" in src, "Excel files should have a dedicated colored icon definition"
+        assert "export const _POWERPOINT_FILE_SVG" in src, "PowerPoint files should have a dedicated colored icon definition"
+        assert "export const _PDF_SVG" in src, "PDF should have a dedicated colored icon definition"
         assert "#185ABD" in src, "Word icon should keep Office blue branding"
         assert "#107C41" in src, "Excel icon should keep Office green branding"
         assert "#D24726" in src, "PowerPoint icon should keep Office orange branding"
@@ -894,10 +890,10 @@ class TestWorkspaceAssistantJsSource:
         assert "xlsx: _EXCEL_FILE_SVG" in src, "XLSX extension should map to Excel icon"
         assert "pptx: _POWERPOINT_FILE_SVG" in src, "PPTX extension should map to PowerPoint icon"
         assert "pdf: _PDF_SVG" in src, "PDF extension should map to PDF icon"
-        assert src.count("const _PDF_SVG") == 1, "PDF icon constant must not be declared twice"
-        assert src.count("const _TEXT_SVG") == 1, "Text icon constant must not be declared twice"
-        assert src.count("const _CODE_SVG") == 1, "Code icon constant must not be declared twice"
-        assert src.count("const _IMAGE_SVG") == 1, "Image icon constant must not be declared twice"
+        assert src.count("export const _PDF_SVG") == 1, "PDF icon constant must not be declared twice"
+        assert src.count("export const _TEXT_SVG") == 1, "Text icon constant must not be declared twice"
+        assert src.count("export const _CODE_SVG") == 1, "Code icon constant must not be declared twice"
+        assert src.count("export const _IMAGE_SVG") == 1, "Image icon constant must not be declared twice"
 
     def test_reload_file_by_path_routes_workspace_relative_paths_through_open_file_by_path(self):
         """

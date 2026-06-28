@@ -81,6 +81,44 @@ def test_whitebox_plan_extracts_and_gates_tool_calls():
     assert "tool_call_1_not_allowed:unknown_tool" in blocked["violations"]
 
 
+def test_whitebox_gate_does_not_warn_missing_plan_when_tools_are_valid():
+    request = FileTaskRequest(
+        task="把分析结论写入 report.docx",
+        target_path="report.docx",
+        files=[FileTaskFile(path="report.docx", type="docx", target=True)],
+        model_mode="local",
+    )
+    classification = FileTaskClassification(
+        task_family="summarize",
+        operation_kind="write",
+        output_mode="write",
+        write_intent=True,
+        target_file_type="docx",
+    )
+    intent_plan = FileTaskIntentPlan(
+        intent_type="summarize",
+        output_mode="write",
+        write_intent=True,
+        recommended_strategy="write_through",
+    )
+    skeleton = build_recipe_skeleton(
+        request,
+        request.files,
+        classification,
+        intent_plan,
+        [{"name": "write_docx_content"}],
+    )
+
+    gate = validate_whitebox_plan(
+        None,
+        skeleton,
+        tool_calls=[{"name": "write_docx_content", "args": {"path": "report.docx"}}],
+    )
+
+    assert gate["passed"] is True
+    assert "model_execution_plan_missing" not in gate["warnings"]
+
+
 def test_completion_contract_unifies_complex_task_decomposition_and_gates():
     request = FileTaskRequest(
         task="读取 sales.xlsx，生成财务问题清单和图表写入 report.docx",

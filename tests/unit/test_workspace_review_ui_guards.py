@@ -36,8 +36,13 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
             _read("web/src/ui/docx-pptx-toolbar.ts"),
         ]
     )
-    layout_js = _read("web/static/js/docx-review-layout.js")
-    geometry_js = _read("web/static/js/docx-review-geometry.js")
+    layout_js = "\n".join(
+        [
+            _read("web/src/review/layout-position.ts"),
+            _read("web/src/review/layout-svg.ts"),
+        ]
+    )
+    geometry_js = _read("web/src/review/geometry.ts")
     review_bundle = _read("web/static/js/build/review-bundle.js")
     css = _read("web/static/css/workspace.css")
 
@@ -63,24 +68,24 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "function _scrollReviewCardIntoView(reviewId: string): void" in js
     assert "function _createReviewComment(): void" in js
     assert "function _setDocxReviewRailWidth" in js
-    assert "window.KotoDocxReviewLayout" in layout_js
+    assert "(window as any).KotoDocxReviewLayout" in layout_js
     assert "factory.create({ state })" in js
     assert "function _ensureReviewShellHost" in js
     assert "shell.style.display = state._reviewCenterOpen === false ? 'none' : 'flex';" in js
     assert "ensureReviewShellHost" in js
     assert "const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;" in layout_js
-    assert "function _shiftReviewRailLeft(value, host)" in layout_js
+    assert "function _shiftReviewRailLeft(value: number, host: HTMLElement | null): number" in layout_js
     assert "const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;" in layout_js
-    assert "function _reviewRailRightShift(host)" in layout_js
-    assert "function _positionReviewRail(value, host)" in layout_js
-    assert "function _reviewLayoutScale(element, rect)" in layout_js
-    assert "function _screenDeltaToLayout(delta, scale)" in layout_js
+    assert "function _reviewRailRightShift(host: HTMLElement | null): number" in layout_js
+    assert "function _positionReviewRail(value: number, host: HTMLElement | null): number" in layout_js
+    assert "function _reviewLayoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutScale" in layout_js
+    assert "function _screenDeltaToLayout(delta: number, scale: number): number" in layout_js
     assert "const minRailWidth  = 220;" in layout_js
-    assert "const minRailWidth  = 220;" in geometry_js
+    assert "const minRailWidth = 220;" in geometry_js
     assert "parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'))" in layout_js
     assert "host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);" not in layout_js
     assert "_setDocxReviewRailWidth(host, railWidth);" in layout_js
-    assert "if (!textIndex) textIndex = _buildReviewTextIndex(contentRoot);" in layout_js
+    assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot as HTMLElement);" in layout_js
     assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot);" in review_bundle
     assert "function _ensureReviewAnchorHighlightLayer" in layout_js
     assert "function _drawReviewAnchorHighlight" in layout_js
@@ -92,13 +97,13 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "railWidth," in layout_js
     assert "laneLeft," in layout_js
     assert "const desiredCardColLeft = Math.max(12, _positionReviewRail(rawCardColLeft, host));" in layout_js
-    assert "const maxVisibleCardColLeft = Math.round(viewportRight - cardColWidth - 12);" in layout_js
+    assert "const maxVisibleCardColLeft = Math.round(viewportRight2 - cardColWidth - 12);" in layout_js
     assert "minCardColFromText," in layout_js
     assert "Math.min(desiredCardColLeft, maxVisibleCardColLeft)" in layout_js
     assert "shell.style.width = Math.max(0, viewportWidth) + 'px';" in layout_js
     assert "shell.style.overflow = 'hidden';" in layout_js
-    assert "function _layoutScale(element, rect)" in geometry_js
-    assert "const layoutScale = _layoutScale(viewport, viewportRect);" in geometry_js
+    assert "function layoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutScale" in geometry_js
+    assert "const ls = layoutScale(viewport, viewportRect);" in geometry_js
     assert "textColRight = toContentX(pageRect.right) - Math.round(pagePaddingRight * (zoom.x || 1));" in geometry_js
     assert "viewportRight: Math.round(scrollLeft + viewportWidth)" in geometry_js
     assert "function _resolveReviewPageBoundsForScreenY" in layout_js
@@ -108,29 +113,29 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "nextTop: _screenYToReviewContentY(startRect.top, layoutState)" in layout_js
     assert "pageTop: pageBounds ? pageBounds.top : null" in layout_js
     assert "pageBottom: pageBounds ? pageBounds.bottom : null" in layout_js
-    assert "function _reviewAnchorHeight(anchorGeometry)" in layout_js
-    assert "function _clampReviewConnectorOffsetY(anchorGeometry, cardHeight)" in layout_js
-    assert "function _reviewLayoutEntryBottom(entry)" in layout_js
+    assert "function _reviewAnchorHeight(anchorGeometry: AnchorGeometry | null): number" in layout_js
+    assert "function _clampReviewConnectorOffsetY(anchorGeometry: AnchorGeometry | null, cardHeight: number): number" in layout_js
+    assert "function _reviewLayoutEntryBottom(entry: LayoutEntry | null): number" in layout_js
     assert "entry.collisionHeight || 0" in layout_js
-    assert "function _resolveNonOverlappingCardTop(layoutEntries, desiredTop, desiredLeft, cardWidth, cardHeight, bounds, cardCollisionHeight)" in layout_js
+    assert "function _resolveNonOverlappingCardTop(" in layout_js
     assert "const effectiveCardHeight = Math.max(" in layout_js
     assert "let resolvedByCollision = false;" in layout_js
     assert "resolvedByCollision = true;" in layout_js
     assert "const driftMaxTop = Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)" in layout_js
-    assert "const measuredCards = cards.map((card, index) =>" in layout_js
-    assert "card.style.removeProperty('--wa-review-card-anchor-min-height');" in layout_js
+    assert "const measuredCards: MeasuredCard[] = cards.map((card, index) =>" in layout_js
+    assert "(card as HTMLElement).style.removeProperty('--wa-review-card-anchor-min-height');" in layout_js
     assert "const anchorHeight = _reviewAnchorHeight(anchorGeometry);" in layout_js
-    assert "card.style.setProperty('--wa-review-card-anchor-min-height'" in layout_js
+    assert "(card as HTMLElement).style.setProperty('--wa-review-card-anchor-min-height'" in layout_js
     assert "const cardCollisionHeight = Math.max(cardHeight, anchorHeight);" in layout_js
     assert "Math.round(anchorGeometry.top - 2)" in layout_js
     assert "}).sort((a, b) =>" in layout_js
     assert "const peerEntries = item.pageBounds" in layout_js
-    assert "entry.pageTop === item.pageBounds.minTop" in layout_js
+    assert "entry.pageTop === item.pageBounds!.minTop" in layout_js
     assert "item.cardCollisionHeight," in layout_js
     assert "collisionHeight: item.cardCollisionHeight" in layout_js
     assert "Math.max(...layoutEntries.map((entry) => _reviewLayoutEntryBottom(entry))) + 24" in layout_js
     assert "card.classList.add('is-page-bounded');" in layout_js
-    assert "card.style.setProperty('--wa-review-card-page-max-height'" in layout_js
+    assert "(card as HTMLElement).style.setProperty('--wa-review-card-page-max-height'" in layout_js
     assert "min-height: var(--wa-review-card-anchor-min-height, 54px);" in css
     assert "min-height: var(--wa-review-card-anchor-min-height, 72px);" in css
     assert "scheduleReviewShellLayout" in js
