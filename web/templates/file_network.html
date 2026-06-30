@@ -590,9 +590,9 @@
                                 </div>
                             </div>
                             <div class="file-actions" onclick="event.stopPropagation()">
-                                <button class="btn-icon" onclick="openFile('${file.file_id}')">
-                                    <span>📂</span>
-                                    <span>打开</span>
+                                <button class="btn-icon" onclick="copyFilePath('${escapeJs(file.path || '')}')">
+                                    <span>📋</span>
+                                    <span>复制路径</span>
                                 </button>
                                 <button class="btn-icon" onclick="viewNetwork('${file.file_id}')">
                                     <span>🕸️</span>
@@ -621,23 +621,20 @@
             }).join('');
         }
 
-        // 打开文件
-        async function openFile(fileId) {
-            try {
-                const response = await fetch('/api/file-network/open', {
-                    method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({file_id: fileId})
-                });
+        function escapeJs(value) {
+            return String(value || '')
+                .replace(/\\/g, '\\\\')
+                .replace(/'/g, "\\'")
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r');
+        }
 
-                const result = await response.json();
-                if (result.success) {
-                    alert('✅ 文件已打开');
-                } else {
-                    alert('❌ 打开失败: ' + result.error);
-                }
+        async function copyFilePath(path) {
+            try {
+                await navigator.clipboard.writeText(path);
+                alert('✅ 路径已复制');
             } catch (error) {
-                alert('❌ 网络错误: ' + error.message);
+                alert('请手动复制路径：\n' + path);
             }
         }
 

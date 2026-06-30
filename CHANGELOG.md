@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.7.4] - 2026-06-09
+
+### Fixed
+- **File assistant DOCX comparison flow**: Reworked DOCX compare/annotation routing so two-document review tasks annotate differences on the selected/original Word document instead of producing detached comparison text.
+- **Financial XLSX to DOCX reports**: Added a dedicated financial-report runner that writes analysis, issue lists, and real chart images into the target DOCX, including follow-up runs with supplemental sales ledgers.
+- **Release chart dependency**: Added `matplotlib` and its packaging hooks to the Windows build so installed releases can generate financial charts instead of failing with `No module named 'matplotlib'`.
+- **Writable chart config**: Set `MPLCONFIGDIR` in sandbox and native runners so packaged/sandboxed chart generation does not write to protected Python locations.
+
+### Changed
+- Split the legacy DOCX annotation bridge behind smaller boundary, intent, event, and runner modules so file-task runtime no longer owns that whole path directly.
+- Removed stale document annotation/proxy compatibility modules and simplified review UI wiring around the active track-changes/comment workflow.
+
+### Tests
+- Added packaging guards for `matplotlib` in requirements, PyInstaller spec, and sandbox configuration.
+- Added/updated runtime and task-tool tests for DOCX comparison annotations, financial DOCX reports, follow-up task context, and local model recommendation defaults.
+
 ## [1.7.0] - 2026-04-01
 
 ### Fixed

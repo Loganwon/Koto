@@ -122,8 +122,9 @@ class AppContext:
 
     def get(self, name: str) -> Any:
         """按名称获取服务（推荐使用 property）。"""
-        if name in self._overrides:
-            return self._overrides[name]
+        with self._global_lock:
+            if name in self._overrides:
+                return self._overrides[name]
         slot = self._slots.get(name)
         if slot is None:
             raise KeyError(f"[AppContext] 未注册的服务: {name}")
@@ -131,7 +132,8 @@ class AppContext:
 
     def override(self, name: str, instance: Any):
         """测试时替换服务实例。"""
-        self._overrides[name] = instance
+        with self._global_lock:
+            self._overrides[name] = instance
 
     def reset(self, name: Optional[str] = None):
         """
@@ -140,15 +142,47 @@ class AppContext:
         Args:
             name: 指定服务名则只重置该服务；None 则全部重置。
         """
-        if name:
-            self._overrides.pop(name, None)
+        slots_to_reset = []
+        with self._global_lock:
+            if name:
+                self._overrides.pop(name, None)
+                slot = self._slots.get(name)
+                if slot:
+                    slots_to_reset.append(slot)
+            else:
+                self._overrides.clear()
+                slots_to_reset = list(self._slots.values())
+        for slot in slots_to_reset:
+            slot.reset()
+
+    def shutdown(self):
+        """优雅关闭所有服务（释放连接、线程等资源）。
+
+        按注册逆序调用每个服务的 close()/shutdown()/dispose() 方法，
+        安全重启或进程退出时调用。
+        """
+        with self._global_lock:
+            names = reversed(list(self._slots.keys()))
+        for name in names:
             slot = self._slots.get(name)
-            if slot:
-                slot.reset()
-        else:
-            self._overrides.clear()
-            for slot in self._slots.values():
-                slot.reset()
+            if slot is None:
+                continue
+            inst = None
+            with slot.lock:
+                if slot.instance is not None:
+                    inst = slot.instance
+                    slot.instance = None
+            if inst is not None:
+                for method_name in ("close", "shutdown", "dispose", "cleanup"):
+                    method = getattr(inst, method_name, None)
+                    if callable(method):
+                        try:
+                            method()
+                        except Exception as e:
+                            logger.debug(
+                                "[AppContext] %s.%s() 失败: %s", name, method_name, e
+                            )
+                        break
 
     def register_custom(self, name: str, factory: Callable[[], Any]):
         """运行时注册自定义服务（插件扩展用）。"""

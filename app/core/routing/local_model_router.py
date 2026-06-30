@@ -1,4 +1,4 @@
-# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+﻿# Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import json
 import logging
@@ -74,17 +74,18 @@ class LocalModelRouter:
     _available = None  # 缓存可用性状态
     _check_time = 0  # 上次检查时间
 
-    # 推荐的快速模型（按优先级排序）
+    # 推荐的快速分类模型（按优先级排序）
     OLLAMA_MODELS = [
-        "qwen3.5:9b",  # ★ 最佳中英文能力
-        "qwen3:8b",  # 次选
-        "qwen3:4b",  # 快速备选
+        "koto-router",  # LocalModelInstaller 创建的专用任务路由器
+        "qwen3:4b",  # 中英文分类质量好，速度适中
         "qwen3:1.7b",  # 轻量备选
-        "qwen2.5:7b",  # 旧版但质量好
         "qwen2.5:3b",  # 旧版快速
         "qwen2.5:1.5b",  # 旧版轻量
         "llama3.2:3b",  # 英文为主
-        "koto-router",  # 自定义路由器（如未充分训练则不稳定，保留作备选）
+        "gemma3:4b",
+        "gemma3:1b",
+        "qwen3:8b",
+        "qwen2.5:7b",
     ]
 
     # 分类 Prompt（固定 JSON 格式，确保输出一致）
@@ -98,7 +99,7 @@ class LocalModelRouter:
 - DOC_ANNOTATE: 对用户提供的已有文本/代码进行修改、润色、标注、批注、校对、优化
 - RESEARCH   : 对某主题做系统性深入研究，输出长篇结构化内容（须含"深入/全面/系统"等信号词）
 - CODER      : 编写/调试/重构代码、脚本、算法（侧重"产出可运行代码"），或制作数据图表/可视化（折线图/柱状图/饼图/散点图/图表/plot/chart/matplotlib等）
-- SYSTEM     : 命令执行操作系统级操作（打开/关闭应用、文件管理、系统设置、截图、关机）
+- SYSTEM     : 查询低风险本机信息（时间、日期、CPU/内存/磁盘/系统状态）
 - AGENT      : 命令执行跨应用工具操作（发送消息/邮件、设提醒/闹钟、日历、浏览器自动化）
 - WEB_SEARCH : 需要实时/当前信息（今日天气、即时股价/汇率、最新新闻、当前价格/排名）
 - CHAT       : 知识问答、概念解释、日常对话、建议咨询、历史信息、通用翻译、短文本创作
@@ -109,7 +110,7 @@ class LocalModelRouter:
 2. FILE_GEN       ← 明确要生成+保存为文件格式（Word/PPT/Excel/PDF）
 3. DOC_ANNOTATE   ← 有"这段/这篇/以下/下面的内容/代码"等**已有内容**的改写/润色请求；或 [FILE_ATTACHED] + 标注/批注/修改动作
 4. CODER          ← 要求输出可运行代码（写代码/写脚本/实现功能/帮我写一个函数），或调试/检查代码bug（这段代码有bug/帮我debug），或制作数据图表/可视化（作图/图表/折线图/柱状图/饼图/散点图）
-5. SYSTEM         ← 命令语气 + 操作本机系统/进程/环境（打开应用、关机、调音量、截图、修改设置、运行程序）
+5. SYSTEM         ← 查询本机状态/时间/日期/CPU/内存/磁盘等低风险信息
 6. AGENT          ← 命令语气 + 跨应用工具/服务（消息/提醒/日历/浏览器），或要求执行自动化工作流/多步骤任务（帮我自动完成X/按流程执行X/多步骤任务）
 7. MEETING_EXTRACT← 用户粘贴/提供了会议转录/对话记录 + 提炼/整理/总结/归纳关键信息/纪要/行动项
 8. WEB_SEARCH     ← 明确需要实时变化的数据（今天/现在/最新/当前）
@@ -132,21 +133,21 @@ class LocalModelRouter:
 - "[FILE_ATTACHED:.docx] 润色这篇论文" → DOC_ANNOTATE
 
 【SYSTEM vs AGENT】
-- SYSTEM: 操作本机系统（打开微信、关机、调音量、截图、打开文件夹、运行程序）
+- SYSTEM: 查询本机信息（系统状态、当前时间、CPU/内存/磁盘）
 - AGENT: 控制应用发送内容/调用外部服务（给X发消息、发邮件、设提醒、操作浏览器）
 - AGENT: 执行自动化工作流/多步骤任务（帮我自动完成这个工作流/按流程执行/帮我完成多步骤任务）
-- "打开微信" → SYSTEM  |  "给微信好友发消息" → AGENT
+- "系统状态" → SYSTEM  |  "给微信好友发消息" → AGENT
 - "帮我自动完成这个工作流" → AGENT  |  "帮我规划并执行这个多步骤任务" → AGENT
 
 【FILE_SEARCH vs SYSTEM vs CODER】
 - FILE_SEARCH: 搜索/查找/定位文件（在磁盘/目录/文件夹中找文件，不管文件类型）
-- SYSTEM: 操作系统执行（运行、打开、安装、删除、配置）
+- SYSTEM: 查询低风险系统信息（时间/日期/状态）
 - FILE_SEARCH 信号：找/搜索/查找/定位 + 文件名/目录/路径/有没有/存不存在
 - "帮我找一下桌面上的文件" → FILE_SEARCH（搜索桌面文件，不是操作系统）
 - "在我的文档里搜索合同" → FILE_SEARCH（文档目录下找文件）
 - "项目目录里有没有config.yaml" → FILE_SEARCH（查询文件是否存在）
 - "找到所有包含TODO的代码文件" → FILE_SEARCH（搜索文件内容，不是写代码）
-- "列出当前运行的进程" → SYSTEM（操作系统命令）
+- "系统状态怎么样" → SYSTEM（低风险系统信息查询）
 
 【CODER vs AGENT】
 - "用Python写一个脚本来爬取数据" → CODER（要求代码输出）
@@ -215,7 +216,11 @@ class LocalModelRouter:
 
 【附件分析 vs DOC_ANNOTATE vs FILE_GEN（输入含 [FILE_ATTACHED:xxx] 标记 = 用户上传了文件）】
 - [FILE_ATTACHED] + 提问/分析/告诉我/帮我看/检查/评估/是否/有没有/怎么/什么意思 → CHAT（读文件作答）
-- [FILE_ATTACHED:.docx/.doc] + 标注/批注/润色/修改/改善/校对/标记/标出/改正/纠正/优化翻译/语序 → DOC_ANNOTATE（在上传文件上直接标注修改）
+- [FILE_ATTACHED:.docx/.doc] + **明确要求在文档内标注/批注/Track Changes/修订** → DOC_ANNOTATE（在文件上标注修改）
+- [FILE_ATTACHED:.docx/.doc] + **分析/评估/通读/审阅报告/指出问题（口头）** → CHAT（纯阅读分析，不修改文件）
+- 关键区分："标注这篇文档" → DOC_ANNOTATE  |  "分析这篇文档的问题" → CHAT
+- 关键区分："在文档里标出错误" → DOC_ANNOTATE  |  "告诉我这篇文档有什么问题" → CHAT
+- 只有用户明确说"在文档上"/"写回"/"标注到"/"Track Changes"/"修订模式"等才走 DOC_ANNOTATE
 - [FILE_ATTACHED] + 明确含"深入/全面/系统/详尽"等词 + 具体研究主题 → RESEARCH
 - [FILE_ATTACHED] + 明确要生成新文件（含格式词 word/ppt/pdf/excel + 生成动作词） → FILE_GEN
 - 关键原则：用户传文件是为了让你"读"它，不是让你"生成"它——默认走 CHAT，除非明确说要生成新文件或编辑原文
@@ -227,7 +232,7 @@ class LocalModelRouter:
 - "[FILE_ATTACHED:.docx] 深入研究这家公司的财务状况" → RESEARCH
 
 ━━━ 正例 ━━━
-输入: 打开微信
+输入: 系统状态怎么样
 输出: {{"task":"SYSTEM","confidence":0.95}}
 输入: 画一只猫
 输出: {{"task":"PAINTER","confidence":0.92}}
@@ -287,6 +292,12 @@ class LocalModelRouter:
 输入: [FILE_ATTACHED:.docx] 深入分析这家公司的财务状况和经营风险
 输出: {{"task":"RESEARCH","confidence":0.87}}
 （有"深入分析"信号词 + 具体研究主题 → RESEARCH）
+输入: [FILE_ATTACHED:.docx] 通读这篇口播稿，分析其优劣，指出用语问题和逻辑问题
+输出: {{"task":"CHAT","confidence":0.90}}
+（"分析优劣/指出问题"=口头分析报告，不是要求文档标注 → CHAT）
+输入: [FILE_ATTACHED:.docx] 评估这个presentation是否可行，有什么改进建议
+输出: {{"task":"CHAT","confidence":0.89}}
+（"评估是否可行"=内容分析问答 → CHAT，不在文件上标注修改）
 输入: [FILE_ATTACHED:.pdf] 帮我看看这里有没有法律风险
 输出: {{"task":"CHAT","confidence":0.90}}
 （"帮我看看/有没有"=内容问答 → CHAT，不是生成文件）
@@ -421,8 +432,8 @@ class LocalModelRouter:
                 return ""
             models_data = resp.json().get("models", [])
             available = [m["name"] for m in models_data]
-            # 按 OLLAMA_MODELS 偏好顺序选最佳
-            for preferred in cls.OLLAMA_MODELS:
+            # 按聊天/生成偏好顺序选最佳，避免把 koto-router 当通用聊天模型
+            for preferred in cls.OLLAMA_RESPONSE_MODELS:
                 base = preferred.split(":")[0]
                 for name in available:
                     if name == preferred or name.split(":")[0] == base:
@@ -496,7 +507,7 @@ class LocalModelRouter:
         return True
 
     # ══════════════════════════════════════════════════════════════════
-    # 共享 Ollama 调用工具 — 消除 intent_analyzer / local_planner 中的重复 HTTP 代码
+    # 共享 Ollama 调用工具 — 消除各路由辅助模块中的重复 HTTP 代码
     # ══════════════════════════════════════════════════════════════════
 
     @classmethod
@@ -897,12 +908,15 @@ class LocalModelRouter:
 
     # 用于响应生成的模型（按偏好排序，比分类模型可以更大）
     OLLAMA_RESPONSE_MODELS = [
-        "qwen3.5:9b",  # ★ 最佳，中英文流畅
-        "qwen3:8b",  # 次选
-        "qwen3:4b",  # 快速备选
+        "qwen3:8b",
+        "qwen2.5:14b",
+        "gemma3:12b",
         "qwen2.5:7b",  # 旧版质量好
-        "qwen2.5:3b",  # 旧版快速
+        "qwen3:4b",  # 快速备选
+        "gemma3:4b",
         "llama3.2:3b",
+        "qwen3:1.7b",
+        "gemma3:1b",
     ]
 
     _response_model = None  # 用于生成的模型（可能比分类模型大）

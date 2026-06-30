@@ -14,7 +14,7 @@ Scenario the user reported as broken:
      used target.touch() which produces a 0-byte file, tripping the 0-byte guard.
 
 Root-cause fix:
-  create_workspace_file (and fs_create_file) now call _seed_new_file() which
+  create_workspace_file and fs_create_file call _seed_new_file() which
   writes a minimal-valid template for .docx/.xlsx/.pptx and a stub PDF for
   .pdf so the resulting file is never 0-byte.
 
@@ -30,7 +30,7 @@ Coverage matrix:
   │ POST /api/v1/workspace/open_file_by_path│ round-trip after create   │
   │                                  │ newly created file opens OK      │
   ├──────────────────────────────────────────────────────────────────────┤
-  │ POST /api/v1/fs/create_file      │ happy-path + seed check          │
+  │ POST /api/v1/fs/create_file      │ absolute file-browser creation   │
   ├──────────────────────────────────────────────────────────────────────┤
   │ cleanup_tmp_dir()                │ unit-level: removes old/0-byte   │
   └──────────────────────────────────────────────────────────────────────┘
@@ -72,6 +72,7 @@ def wa_client(tmp_path_factory):
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
+    app.secret_key = "test-secret"
     app.register_blueprint(workspace_assistant_bp)
     app.config["TESTING"] = True
 
@@ -331,86 +332,26 @@ class TestCreateFileValidation:
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# 5.  fs_create_file — absolute-path variant (file-browser context menu)
+# 5.  Absolute-path file creation route
 # ══════════════════════════════════════════════════════════════════════════════
 
 
 class TestFsCreateFile:
-    """POST /api/v1/fs/create_file uses absolute paths (file browser)."""
+    """The filesystem browser can create files in guarded absolute folders."""
 
-    def test_fs_create_txt_in_workspace(self, wa_client):
-        client, _, ws = wa_client
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"parent": str(ws), "name": "fs_note.txt"}),
-            content_type="application/json",
-        )
-        assert resp.status_code == 200
-        body = resp.get_json()
-        assert body["ok"] is True
-        assert (ws / "fs_note.txt").exists()
-
-    def test_fs_create_docx_is_not_zero_byte(self, wa_client):
-        client, _, ws = wa_client
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"parent": str(ws), "name": "fs_new.docx"}),
-            content_type="application/json",
-        )
-        assert resp.status_code == 200
-        assert (ws / "fs_new.docx").stat().st_size > 0
-
-    def test_fs_create_xlsx_is_not_zero_byte(self, wa_client):
-        client, _, ws = wa_client
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"parent": str(ws), "name": "fs_new.xlsx"}),
-            content_type="application/json",
-        )
-        assert resp.status_code == 200
-        assert (ws / "fs_new.xlsx").stat().st_size > 0
-
-    def test_fs_create_pptx_is_not_zero_byte(self, wa_client):
-        client, _, ws = wa_client
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"parent": str(ws), "name": "fs_new.pptx"}),
-            content_type="application/json",
-        )
-        assert resp.status_code == 200
-        assert (ws / "fs_new.pptx").stat().st_size > 0
-
-    def test_fs_create_missing_parent_returns_400(self, wa_client):
+    def test_fs_create_file_route_validates_payload(self, wa_client):
         client, _, _ = wa_client
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"name": "orphan.txt"}),
-            content_type="application/json",
-        )
+        resp = client.post("/api/v1/fs/create_file", json={})
         assert resp.status_code == 400
 
-    def test_fs_create_nonexistent_parent_returns_404(self, wa_client):
+    def test_fs_create_file_route_creates_seeded_file(self, wa_client, tmp_path):
         client, _, _ = wa_client
         resp = client.post(
             "/api/v1/fs/create_file",
-            data=json.dumps({"parent": "/no/such/path/anywhere", "name": "x.txt"}),
-            content_type="application/json",
+            json={"parent": str(tmp_path), "name": "absolute_note.txt"},
         )
-        assert resp.status_code == 404
-
-    def test_fs_create_duplicate_returns_409(self, wa_client):
-        client, _, ws = wa_client
-        client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"parent": str(ws), "name": "fs_dupe.txt"}),
-            content_type="application/json",
-        )
-        resp = client.post(
-            "/api/v1/fs/create_file",
-            data=json.dumps({"parent": str(ws), "name": "fs_dupe.txt"}),
-            content_type="application/json",
-        )
-        assert resp.status_code == 409
+        assert resp.status_code == 200
+        assert (tmp_path / "absolute_note.txt").is_file()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

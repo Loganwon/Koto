@@ -72,8 +72,10 @@ def _resolve_provider_arg(model_mode: str) -> dict:
     if normalized_mode == "local":
         return {"provider": "ollama"}
     if normalized_mode == "cloud":
-        return {"provider": "gemini"}
-    if normalized_mode in ("gemini", "openai", "anthropic", "ollama"):
+        from app.core.llm.model_selection import get_configured_cloud_provider
+
+        return {"provider": get_configured_cloud_provider()}
+    if normalized_mode in ("gemini", "deepseek", "openai", "anthropic", "ollama"):
         return {"provider": normalized_mode}
     # "auto" 或其他 → 不指定，由 provider_factory 自动检测
     return {}
@@ -106,10 +108,21 @@ def call_llm(
         **_resolve_provider_arg(model_mode),
         allow_local_fallback=False,
     )
+    try:
+        from app.core.llm.model_selection import get_configured_cloud_model
+
+        model = get_configured_cloud_model(
+            task_type="FILE_TASK",
+            fallback_model="",
+            provider=_resolve_provider_arg(model_mode).get("provider"),
+        )
+    except Exception:
+        model = ""
 
     try:
         result = provider.generate_content(
             prompt,
+            model=model,
             system_instruction=system or None,
             max_tokens=max_tokens,
             call_timeout=call_timeout,
@@ -198,13 +211,13 @@ def parse_source_file(file_path: str) -> str:
 
     try:
         if ext == ".pdf":
-            from app.core.file.file_parser import parse_pdf
+            from app.core.file.parsers.pdf_parser import parse_pdf
 
             result = parse_pdf(str(p), str(uuid.uuid4()))
             return result.get("text", "")
 
         if ext in (".docx", ".doc"):
-            from app.core.file.file_parser import parse_docx
+            from app.core.file.parsers.docx_parser import parse_docx
 
             result = parse_docx(str(p))
             # 提取纯文本（去除 HTML 标签）
@@ -214,7 +227,7 @@ def parse_source_file(file_path: str) -> str:
             return re.sub(r"<[^>]+>", " ", html).strip()
 
         if ext in (".xlsx", ".xls"):
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
 
             result = parse_xlsx(str(p), p.name)
             # 组装为 CSV-like 文本
@@ -234,7 +247,7 @@ def parse_source_file(file_path: str) -> str:
             return "\n".join(lines)
 
         if ext in (".pptx", ".ppt"):
-            from app.core.file.file_parser import parse_pptx
+            from app.core.file.parsers.pptx_parser import parse_pptx
 
             slides = parse_pptx(str(p))
             lines = []

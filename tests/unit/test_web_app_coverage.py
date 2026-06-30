@@ -50,7 +50,7 @@ class TestStreamInterruptManager:
     """Tests for the thread-safe StreamInterruptManager class."""
 
     def setup_method(self):
-        from web.app import StreamInterruptManager
+        from web.sse.interrupt_manager import StreamInterruptManager
 
         self.mgr = StreamInterruptManager()
 
@@ -134,6 +134,7 @@ class TestStreamInterruptManager:
 @pytest.mark.unit
 class TestLoadUserSettings:
     def test_returns_dict_from_file(self, tmp_path):
+        import web.config as webcfg
         from web import app as webapp
 
         settings_path = tmp_path / "config" / "user_settings.json"
@@ -142,30 +143,32 @@ class TestLoadUserSettings:
             json.dumps({"storage": {"workspace_dir": "/w"}}), encoding="utf-8"
         )
 
-        # Clear cache before test
-        webapp._user_settings_cache.clear()
-        with patch.object(webapp, "PROJECT_ROOT", str(tmp_path)):
+        webcfg._user_settings_cache.clear()
+        with patch.dict(os.environ, {"KOTO_USER_SETTINGS_PATH": str(settings_path)}):
             result = webapp._load_user_settings()
         assert result == {"storage": {"workspace_dir": "/w"}}
-        webapp._user_settings_cache.clear()
+        webcfg._user_settings_cache.clear()
 
     def test_returns_empty_dict_on_missing_file(self, tmp_path):
+        import web.config as webcfg
         from web import app as webapp
 
-        webapp._user_settings_cache.clear()
-        with patch.object(webapp, "PROJECT_ROOT", str(tmp_path)):
+        settings_path = tmp_path / "config" / "user_settings.json"
+        webcfg._user_settings_cache.clear()
+        with patch.dict(os.environ, {"KOTO_USER_SETTINGS_PATH": str(settings_path)}):
             result = webapp._load_user_settings()
         assert result == {}
-        webapp._user_settings_cache.clear()
+        webcfg._user_settings_cache.clear()
 
     def test_caches_result(self, tmp_path):
+        import web.config as webcfg
         from web import app as webapp
 
-        webapp._user_settings_cache.clear()
-        webapp._user_settings_cache["data"] = {"cached": True}
+        webcfg._user_settings_cache.clear()
+        webcfg._user_settings_cache["data"] = {"cached": True}
         result = webapp._load_user_settings()
         assert result == {"cached": True}
-        webapp._user_settings_cache.clear()
+        webcfg._user_settings_cache.clear()
 
 
 # =====================================================================
@@ -174,16 +177,17 @@ class TestLoadUserSettings:
 @pytest.mark.unit
 class TestStorageHelpers:
     def _with_settings(self, settings_dict):
+        import web.config as webcfg
         from web import app as webapp
 
-        webapp._user_settings_cache.clear()
-        webapp._user_settings_cache["data"] = settings_dict
+        webcfg._user_settings_cache.clear()
+        webcfg._user_settings_cache["data"] = settings_dict
         return webapp
 
     def teardown_method(self):
-        from web import app as webapp
+        import web.config as webcfg
 
-        webapp._user_settings_cache.clear()
+        webcfg._user_settings_cache.clear()
 
     def test_workspace_root_from_settings(self):
         webapp = self._with_settings({"storage": {"workspace_dir": "D:\\work"}})
@@ -218,9 +222,9 @@ class TestStorageHelpers:
 @pytest.mark.unit
 class TestNormalizeProxyUrl:
     def setup_method(self):
-        from web.app import _normalize_proxy_url
+        from web.llm_runtime_helpers import normalize_proxy_url
 
-        self.fn = _normalize_proxy_url
+        self.fn = normalize_proxy_url
 
     def test_empty_string(self):
         assert self.fn("") == ""
@@ -294,9 +298,9 @@ class TestExtractSystemProxyCandidates:
 @pytest.mark.unit
 class TestFakeGenerateContentResponse:
     def setup_method(self):
-        from web.app import _FakeGenerateContentResponse
+        from web.llm_runtime_helpers import FakeGenerateContentResponse
 
-        self.cls = _FakeGenerateContentResponse
+        self.cls = FakeGenerateContentResponse
 
     def test_stores_text(self):
         resp = self.cls("hello")
@@ -323,9 +327,9 @@ class TestFakeGenerateContentResponse:
 @pytest.mark.unit
 class TestExtractPromptText:
     def setup_method(self):
-        from web.app import _extract_prompt_text
+        from web.llm_runtime_helpers import extract_prompt_text
 
-        self.fn = _extract_prompt_text
+        self.fn = extract_prompt_text
 
     def test_none_contents(self):
         text, sys_instr = self.fn(None)
@@ -374,9 +378,9 @@ class TestExtractPromptText:
 @pytest.mark.unit
 class TestIsInteractionsOnly:
     def setup_method(self):
-        from web.app import _is_interactions_only
+        from web.llm_runtime_helpers import is_interactions_only
 
-        self.fn = _is_interactions_only
+        self.fn = is_interactions_only
 
     def test_known_interactions_model(self):
         assert self.fn("deep-research-pro-preview-12-2025") is True
@@ -400,7 +404,7 @@ class TestIsInteractionsOnly:
 @pytest.mark.unit
 class TestFileOperator:
     def setup_method(self):
-        from web.app import FileOperator
+        from web.file_operator import FileOperator
 
         self.cls = FileOperator
 
@@ -446,7 +450,7 @@ class TestFileOperator:
 
     # -- execute (folder organize — missing path) --
     def test_execute_organize_no_path(self):
-        with patch("web.app.get_default_wechat_files_dir", return_value=""):
+        with patch("web.file_operator._default_wechat_files_dir", return_value=""):
             result = self.cls.execute("自动归纳文件夹")
         assert result["success"] is False
         assert "路径" in result["message"]
@@ -454,8 +458,7 @@ class TestFileOperator:
     # -- execute (organize with nonexistent dir) --
     def test_execute_organize_nonexistent_dir(self, tmp_path):
         bogus = str(tmp_path / "no_such_dir")
-        with patch("web.app.get_default_wechat_files_dir", return_value=""):
-            result = self.cls.execute(f'整理文件夹 "{bogus}"')
+        result = self.cls.execute(f'整理文件夹 "{bogus}"')
         assert result["success"] is False
 
 
@@ -465,7 +468,7 @@ class TestFileOperator:
 @pytest.mark.unit
 class TestWebSearcher:
     def setup_method(self):
-        from web.app import WebSearcher
+        from web.web_searcher import WebSearcher
 
         self.cls = WebSearcher
 
@@ -525,7 +528,7 @@ class TestWebSearcher:
 @pytest.mark.unit
 class TestContextAnalyzer:
     def setup_method(self):
-        from web.app import ContextAnalyzer
+        from web.context_analyzer import ContextAnalyzer
 
         self.cls = ContextAnalyzer
 
@@ -614,7 +617,7 @@ class TestContextAnalyzer:
 @pytest.mark.unit
 class TestUtils:
     def setup_method(self):
-        from web.app import Utils
+        from web.utils.assistant_utils import Utils
 
         self.cls = Utils
 
@@ -673,7 +676,7 @@ class TestUtils:
     def test_adapt_prompt_fallback(self):
         # When PromptAdapter is not available, should return original input
         with patch(
-            "web.app.Utils.adapt_prompt_to_markdown",
+            "web.utils.assistant_utils.Utils.adapt_prompt_to_markdown",
             wraps=self.cls.adapt_prompt_to_markdown,
         ):
             result = self.cls.adapt_prompt_to_markdown("FILE_GEN", "make a report")
@@ -683,7 +686,9 @@ class TestUtils:
     # -- quick_self_check --
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_quick_self_check_exception_returns_pass(self):
-        with patch("web.app.client") as mock_client:
+        with patch("web.utils.assistant_utils._client") as mock_get_client:
+            mock_client = Mock()
+            mock_get_client.return_value = mock_client
             mock_client.models.generate_content.side_effect = Exception("no API")
             result = self.cls.quick_self_check("CHAT", "hello", "world")
         assert result["pass"] is True
@@ -709,16 +714,13 @@ class TestUtils:
 class TestSessionManager:
     @pytest.fixture(autouse=True)
     def setup_session_mgr(self, tmp_path):
-        import web.app as webapp
-        from web.app import SessionManager
+        from web.session_manager import SessionManager
 
         self.chat_dir = str(tmp_path / "chats")
         os.makedirs(self.chat_dir, exist_ok=True)
-        self._orig_chat_dir = webapp.CHAT_DIR
-        webapp.CHAT_DIR = self.chat_dir
-        self.mgr = SessionManager()
-        yield
-        webapp.CHAT_DIR = self._orig_chat_dir
+        with patch("web.session_manager._chat_dir", return_value=self.chat_dir):
+            self.mgr = SessionManager()
+            yield
 
     def test_list_sessions_empty(self):
         assert self.mgr.list_sessions() == []
@@ -783,28 +785,28 @@ class TestSessionManager:
 @pytest.mark.unit
 class TestChatSystemInstruction:
     def test_default_instruction_returns_string(self):
-        from web.app import _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION
+        from web.chat_system_instruction import get_default_chat_system_instruction
 
-        result = _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION()
+        result = get_default_chat_system_instruction()
         assert isinstance(result, str)
         assert "Koto" in result
 
     def test_instruction_without_question(self):
-        from web.app import _get_chat_system_instruction
+        from web.chat_system_instruction import get_chat_system_instruction
 
-        result = _get_chat_system_instruction()
+        result = get_chat_system_instruction()
         assert isinstance(result, str)
         assert "Koto" in result
 
     def test_instruction_with_question_fallback(self):
-        from web.app import _get_chat_system_instruction
+        from web.chat_system_instruction import get_chat_system_instruction
 
         # When context_injector fails, should fall back
         with patch(
             "web.context_injector.get_dynamic_system_instruction",
             side_effect=Exception("fail"),
         ):
-            result = _get_chat_system_instruction(question="hello")
+            result = get_chat_system_instruction(question="hello")
         assert isinstance(result, str)
         assert "Koto" in result
 
@@ -815,10 +817,13 @@ class TestChatSystemInstruction:
 @pytest.mark.unit
 class TestTimeInfoParsing:
     def setup_method(self):
-        from web.app import _build_filegen_time_context, _parse_time_info_for_filegen
+        from web.filegen_time_context import (
+            build_filegen_time_context,
+            parse_time_info_for_filegen,
+        )
 
-        self.parse = _parse_time_info_for_filegen
-        self.build = _build_filegen_time_context
+        self.parse = parse_time_info_for_filegen
+        self.build = build_filegen_time_context
 
     def test_parse_full_date(self):
         info = self.parse("2024年6月的报告")
@@ -857,7 +862,7 @@ class TestTimeInfoParsing:
 @pytest.mark.unit
 class TestFilterHistory:
     def setup_method(self):
-        from web.app import ContextAnalyzer
+        from web.context_analyzer import ContextAnalyzer
 
         self.cls = ContextAnalyzer
 
@@ -1235,6 +1240,7 @@ class TestWebAppRoutes:
         from web.app import app as flask_app
 
         flask_app.config["TESTING"] = True
+        flask_app.config["WTF_CSRF_ENABLED"] = False
         self.app = flask_app
         with flask_app.test_client() as c:
             self.client = c
@@ -1368,15 +1374,9 @@ class TestWebAppRoutes:
             resp = self.client.get("/api/search/all?query=test")
         assert resp.status_code in (200, 500)
 
-    # -- GET /api/voice/engines --
-    def test_voice_engines(self):
-        mock_result = {"success": True, "engines": []}
-        with patch.dict(
-            "sys.modules",
-            {"web.voice_fast": MagicMock(get_available_engines=lambda: mock_result)},
-        ):
-            resp = self.client.get("/api/voice/engines")
-        assert resp.status_code in (200, 500)
+    def test_legacy_audio_route_removed(self):
+        resp = self.client.get("/api/" + "voice" + "/engines")
+        assert resp.status_code == 404
 
 
 # =====================================================================
@@ -1386,43 +1386,41 @@ class TestWebAppRoutes:
 class TestEdgeCases:
     """Miscellaneous edge-case tests for additional coverage."""
 
-    def test_lazy_module_repr_unloaded(self):
-        from web.app import _LazyModule
+    def test_legacy_lazy_module_stays_removed(self):
+        import web.app as webapp
 
-        lm = _LazyModule(lambda: None)
-        assert "not loaded" in repr(lm)
+        assert not hasattr(webapp, "_LazyModule")
 
     def test_normalize_proxy_url_with_scheme(self):
-        from web.app import _normalize_proxy_url
+        from web.llm_runtime_helpers import normalize_proxy_url
 
-        assert _normalize_proxy_url("https://proxy:443") == "https://proxy:443"
+        assert normalize_proxy_url("https://proxy:443") == "https://proxy:443"
 
     def test_fake_response_empty_text(self):
-        from web.app import _FakeGenerateContentResponse
+        from web.llm_runtime_helpers import FakeGenerateContentResponse
 
-        r = _FakeGenerateContentResponse("")
+        r = FakeGenerateContentResponse("")
         assert r.text == ""
 
     def test_extract_prompt_text_list_fallback(self):
-        from web.app import _extract_prompt_text
+        from web.llm_runtime_helpers import extract_prompt_text
 
-        text, _ = _extract_prompt_text([123, 456])
+        text, _ = extract_prompt_text([123, 456])
         assert "123" in text
         assert "456" in text
 
-    def test_file_operator_keywords_exist(self):
-        from web.app import FileOperator
+    def test_orphan_file_operator_stays_removed(self):
+        import web.app as webapp
 
-        assert len(FileOperator.FILE_KEYWORDS) > 10
-        assert len(FileOperator.FOLDER_ORGANIZE_KEYWORDS) > 5
+        assert not hasattr(webapp, "FileOperator")
 
     def test_web_searcher_keywords_exist(self):
-        from web.app import WebSearcher
+        from web.web_searcher import WebSearcher
 
         assert len(WebSearcher.WEB_KEYWORDS) > 20
 
     def test_context_analyzer_task_signatures(self):
-        from web.app import ContextAnalyzer
+        from web.context_analyzer import ContextAnalyzer
 
         assert "PAINTER" in ContextAnalyzer.TASK_SIGNATURES
         assert "FILE_GEN" in ContextAnalyzer.TASK_SIGNATURES
@@ -1430,49 +1428,44 @@ class TestEdgeCases:
         assert "CHAT" in ContextAnalyzer.TASK_SIGNATURES
 
     def test_context_analyzer_continuation_patterns(self):
-        from web.app import ContextAnalyzer
+        from web.context_analyzer import ContextAnalyzer
 
         assert "modify" in ContextAnalyzer.CONTINUATION_PATTERNS
         assert "convert" in ContextAnalyzer.CONTINUATION_PATTERNS
         assert "continue" in ContextAnalyzer.CONTINUATION_PATTERNS
 
     def test_utils_package_allowlist(self):
-        from web.app import Utils
+        from web.utils.assistant_utils import Utils
 
         assert "pygame" in Utils._PACKAGE_ALLOWLIST
         assert Utils._PACKAGE_ALLOWLIST["cv2"] == "opencv-python"
         assert Utils._PACKAGE_ALLOWLIST["PIL"] == "Pillow"
 
     def test_session_manager_append_and_save(self, tmp_path):
-        import web.app as webapp
-        from web.app import SessionManager
+        from web.session_manager import SessionManager
 
         chat_dir = str(tmp_path / "chats")
         os.makedirs(chat_dir, exist_ok=True)
-        orig = webapp.CHAT_DIR
-        webapp.CHAT_DIR = chat_dir
-        try:
+        with patch("web.session_manager._chat_dir", return_value=chat_dir):
             mgr = SessionManager()
             fn = mgr.create("append_test")
             result = mgr.append_and_save(fn, "user msg", "model msg")
             assert len(result) == 2
             assert result[0]["role"] == "user"
             assert result[1]["role"] == "model"
-        finally:
-            webapp.CHAT_DIR = orig
 
     def test_web_searcher_news_keyword(self):
-        from web.app import WebSearcher
+        from web.web_searcher import WebSearcher
 
         assert WebSearcher.needs_web_search("最新新闻") is True
 
     def test_web_searcher_flight_keyword(self):
-        from web.app import WebSearcher
+        from web.web_searcher import WebSearcher
 
         assert WebSearcher.needs_web_search("查航班动态") is True
 
     def test_context_build_rag_prompt(self):
-        from web.app import ContextAnalyzer
+        from web.context_analyzer import ContextAnalyzer
 
         summary = {
             "conversation_topic": "PAINTER",

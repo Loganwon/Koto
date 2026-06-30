@@ -50,19 +50,9 @@
         .bar input:focus { border-color: #3b82f6; }
         .bar input::placeholder { color: #94a3b8; }
         .bar button { width: 32px; height: 32px; border-radius: 50%; border: none; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; flex-shrink: 0; }
-        .mic { background: #f1f5f9; color: #64748b; transition: all 0.2s; }
-        .mic:hover { background: #e2e8f0; }
-        .mic.on { background: #ef4444; color: #fff; animation: pulse 1s infinite; width: 80px; border-radius: 16px; }
-        .mic.on::after { content: '点击停止'; font-size: 10px; margin-left: 4px; }
-        @keyframes pulse { 50% { transform: scale(1.02); } }
         .send { background: #3b82f6; color: #fff; }
         .send:hover { background: #2563eb; }
         
-        .pv { position: absolute; bottom: 100%; left: 8px; right: 8px; background: #fff; border: 1px solid #3b82f6; padding: 8px 12px; border-radius: 8px; font-size: 13px; color: #334155; display: none; margin-bottom: 4px; box-shadow: 0 2px 12px rgba(59,130,246,0.2); }
-        .pv.show { display: block; }
-        .pv .label { color: #3b82f6; font-size: 11px; margin-bottom: 4px; }
-        .pv .text { min-height: 20px; }
-        .pv .hint { color: #94a3b8; font-size: 10px; margin-top: 4px; }
         .wrap { flex: 1; position: relative; min-width: 0; }
     </style>
 </head>
@@ -75,33 +65,12 @@
         <div class="chat" id="c"></div>
         <div class="bar">
             <div class="wrap">
-                <div class="pv" id="pv">
-                    <div class="label">🎤 正在聆听...</div>
-                    <div class="text" id="pvText"></div>
-                    <div class="hint"></div>
-                </div>
                 <input id="q" placeholder="输入消息..." onkeypress="if(event.key==='Enter')ask()">
             </div>
-            <button class="mic" id="mic" onclick="vc()">🎙️</button>
             <button class="send" onclick="ask()">➤</button>
         </div>
     </div>
     <script>
-        let on = false;
-        let voiceSource = null;  // EventSource 对象
-        let voiceAutoMode = true; // 默认自动模式
-        let pendingText = '';     // 手动模式暂存文本
-        
-        // 加载设置
-        async function loadVoiceSettings() {
-            try {
-                const r = await fetch('/api/settings');
-                const s = await r.json();
-                voiceAutoMode = s.ai?.voice_auto_mode !== false;
-            } catch (e) {}
-        }
-        loadVoiceSettings();
-        
         function add(t, x) {
             const d = document.createElement('div');
             d.className = 'm ' + t;
@@ -179,140 +148,6 @@
                 send.disabled = false;
                 send.textContent = '➤';
                 q.focus();
-            }
-        }
-        
-        async function vc() {
-            // 如果正在录音，点击处理
-            if (on) {
-                // 手动模式：点击发送
-                if (!voiceAutoMode && pendingText) {
-                    document.getElementById('q').value = pendingText;
-                    pendingText = '';
-                    stopVoice();
-                    ask();
-                    return;
-                }
-                stopVoice();
-                return;
-            }
-            
-            on = true;
-            pendingText = '';
-            const mic = document.getElementById('mic');
-            const pv = document.getElementById('pv');
-            const pvText = document.getElementById('pvText');
-            
-            mic.classList.add('on');
-            mic.textContent = '⏹';
-            pv.classList.add('show');
-            pvText.textContent = '';
-            
-            // 根据模式显示不同提示
-            const modeHint = voiceAutoMode 
-                ? '🟢 自动模式 - 说完自动发送' 
-                : '🟡 手动模式 - 点击麦克风确认';
-            document.querySelector('#pv .label').textContent = '🎤 正在聆听...';
-            document.querySelector('#pv .hint').textContent = modeHint;
-            
-            try {
-                // 使用流式 API
-                voiceSource = new EventSource('/api/voice/stream');
-                
-                voiceSource.onmessage = (event) => {
-                    const data = JSON.parse(event.data);
-                    
-                    if (data.type === 'partial') {
-                        // 状态消息显示在标签，不是文本区
-                        if (data.text && (data.text.includes('🎤') || data.text.includes('🎧') || data.text.includes('✨') || data.text.includes('⏱️'))) {
-                            // 这是状态消息
-                            document.querySelector('#pv .label').textContent = data.text;
-                        } else {
-                            // 这是识别的文字
-                            pvText.textContent = data.text;
-                            pendingText = data.text;
-                            document.querySelector('#pv .label').textContent = '✨ 正在识别...';
-                        }
-                    } else if (data.type === 'final') {
-                        if (voiceAutoMode) {
-                            // 自动模式：直接发送
-                            stopVoice();
-                            if (data.text) {
-                                document.getElementById('q').value = data.text;
-                                ask();
-                            }
-                        } else {
-                            // 手动模式：等待点击确认
-                            pendingText = data.text;
-                            pvText.textContent = data.text;
-                            document.querySelector('#pv .label').textContent = '✅ 识别完成';
-                            document.querySelector('#pv .hint').textContent = '👆 点击麦克风发送';
-                        }
-                    } else if (data.type === 'error') {
-                        stopVoice();
-                        if (data.message !== '未检测到语音') {
-                            add('s', data.message || '识别失败');
-                        }
-                    }
-                };
-                
-                voiceSource.onerror = () => {
-                    stopVoice();
-                    vcFallback();
-                };
-                
-            } catch (e) {
-                stopVoice();
-                add('s', '语音服务不可用');
-            }
-        }
-        
-        function stopVoice() {
-            if (voiceSource) {
-                voiceSource.close();
-                voiceSource = null;
-            }
-            on = false;
-            pendingText = '';
-            const mic = document.getElementById('mic');
-            mic.classList.remove('on');
-            mic.textContent = '🎙️';
-            document.getElementById('pv').classList.remove('show');
-            fetch('/api/voice/stop', { method: 'POST' }).catch(() => {});
-        }
-        
-        // 非流式 API 降级方案
-        async function vcFallback() {
-            if (on) return;
-            on = true;
-            document.getElementById('mic').classList.add('on');
-            document.getElementById('mic').textContent = '⏹';
-            document.getElementById('pv').classList.add('show');
-            document.getElementById('pvText').textContent = '正在聆听...';
-            
-            try {
-                const r = await fetch('/api/voice/listen', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ timeout: 8, language: 'zh-CN' })
-                });
-                
-                const d = await r.json();
-                document.getElementById('pv').classList.remove('show');
-                
-                if (d.success && d.text) {
-                    document.getElementById('q').value = d.text;
-                    ask();
-                } else {
-                    add('s', d.message || '未能识别');
-                }
-            } catch (e) {
-                document.getElementById('pv').classList.remove('show');
-                add('s', '语音服务不可用');
-            } finally {
-                on = false;
-                document.getElementById('mic').classList.remove('on');
-                document.getElementById('mic').textContent = '🎙️';
             }
         }
         

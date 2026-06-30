@@ -10,9 +10,7 @@ from typing import Any, Dict, Generator, List, Optional, Union
 from .base import LLMProvider
 from .gemini_config import get_gemini_api_key, load_gemini_config_env
 from .model_capabilities import (
-    DEFAULT_INTERACTIONS_ONLY_MODELS as _INTERACTIONS_ONLY_MODELS,
-)
-from .model_capabilities import (
+    DEFAULT_INTERACTIONS_ONLY_MODELS,
     is_interactions_only_model,
 )
 
@@ -30,108 +28,22 @@ def _ensure_gemini_env_loaded() -> None:
     load_gemini_config_env(override=False)
 
 
-def _normalize_proxy_url(proxy_value: str) -> str:
-    value = str(proxy_value or "").strip()
-    if not value:
-        return ""
-    if "://" not in value:
-        value = f"http://{value}"
-    return value
-
-
-def _iter_proxy_candidates() -> List[str]:
-    candidates: List[str] = []
-
-    force_proxy = str(os.getenv("FORCE_PROXY") or "").strip()
-    if force_proxy and force_proxy.lower() not in {"auto", "system"}:
-        candidates.append(_normalize_proxy_url(force_proxy))
-
-    env_proxy = (
-        os.getenv("HTTPS_PROXY")
-        or os.getenv("https_proxy")
-        or os.getenv("HTTP_PROXY")
-        or os.getenv("http_proxy")
-    )
-    if env_proxy:
-        candidates.append(_normalize_proxy_url(env_proxy))
-
-    if os.name == "nt":
-        try:
-            import winreg
-
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                proxy_enabled = int(winreg.QueryValueEx(key, "ProxyEnable")[0] or 0)
-                if proxy_enabled:
-                    proxy_server = str(
-                        winreg.QueryValueEx(key, "ProxyServer")[0] or ""
-                    ).strip()
-                    if proxy_server:
-                        if "=" in proxy_server and ";" in proxy_server:
-                            parsed_map = {}
-                            for pair in proxy_server.split(";"):
-                                if "=" not in pair:
-                                    continue
-                                key_name, value = pair.split("=", 1)
-                                parsed_map[key_name.strip().lower()] = value.strip()
-                            for proto in ("https", "http", "socks", "socks5"):
-                                value = parsed_map.get(proto)
-                                if value:
-                                    candidates.append(_normalize_proxy_url(value))
-                        else:
-                            candidates.append(_normalize_proxy_url(proxy_server))
-        except Exception:
-            pass
-
-    candidates.extend(
-        [
-            "http://127.0.0.1:7890",
-            "http://127.0.0.1:10809",
-            "http://127.0.0.1:1080",
-        ]
-    )
-
-    deduped: List[str] = []
-    seen = set()
-    for item in candidates:
-        if not item:
-            continue
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
-
-
 def _ensure_gemini_proxy_configured() -> Optional[str]:
-    import socket
-    from urllib.parse import urlparse
+    from app.core.utils.proxy_utils import (
+        collect_proxy_candidates,
+        detect_live_proxy,
+        set_env_proxy,
+    )
 
-    for proxy in _iter_proxy_candidates():
-        try:
-            parsed = urlparse(proxy)
-            host = parsed.hostname
-            port = parsed.port
-            if not host or not port:
-                continue
-
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            result = sock.connect_ex((host, port))
-            sock.close()
-
-            if result == 0:
-                os.environ["HTTPS_PROXY"] = proxy
-                os.environ["HTTP_PROXY"] = proxy
-                return proxy
-        except Exception:
-            continue
-    return None
+    proxy = detect_live_proxy(collect_proxy_candidates(), timeout=0.1)
+    if proxy:
+        set_env_proxy(proxy)
+    return proxy
 
 
 # model_capabilities.is_interactions_only_model() is evaluated per-call (not baked
 # at import time), so env overrides (KOTO_INTERACTIONS_ONLY_MODELS) are always live.
+_INTERACTIONS_ONLY_MODELS = DEFAULT_INTERACTIONS_ONLY_MODELS
 
 
 class GeminiProvider(LLMProvider):
@@ -235,11 +147,7 @@ class GeminiProvider(LLMProvider):
             try:
                 return self._make_client(request_key)
             except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
+                logger.debug("Non-fatal", exc_info=True)
         return self.client
 
     def generate_content(
@@ -316,9 +224,7 @@ class GeminiProvider(LLMProvider):
                             f"retrying in {_delay:.1f}s: {_se}"
                         )
                         time.sleep(_delay)
-                if last_stream_exc is not None:
-                    raise last_stream_exc
-                raise RuntimeError("Gemini stream failed without an exception")
+                raise last_stream_exc  # unreachable but satisfies type checker
 
             # File-task style calls can override the hard timeout per request.
             result = self._call_with_retry(
@@ -414,6 +320,7 @@ class GeminiProvider(LLMProvider):
         """Run callable in a daemon thread and fail fast on timeout.
 
         Daemon thread ensures timed-out SDK calls never block process shutdown.
+        A brief join after timeout prevents orphaned thread accumulation.
         """
         _q: queue.Queue = queue.Queue(maxsize=1)
 
@@ -429,6 +336,7 @@ class GeminiProvider(LLMProvider):
         try:
             status, payload = _q.get(timeout=timeout_seconds)
         except queue.Empty as exc:
+            _t.join(timeout=1.0)
             raise TimeoutError(timeout_message) from exc
 
         if status == "err":

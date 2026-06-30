@@ -2,13 +2,21 @@ from __future__ import annotations
 
 from typing import Optional
 
-_EXPLICIT_MODEL_MODES = {"local", "cloud"}
+_EXPLICIT_MODEL_MODES = {
+    "local",
+    "cloud",
+    "gemini",
+    "deepseek",
+    "openai",
+    "anthropic",
+    "ollama",
+}
 
 
 def normalize_model_mode(model_mode: Optional[str], default: str = "auto") -> str:
     """Normalize UI/API model mode values.
 
-    Supported explicit modes are `local` and `cloud`.
+    Supported explicit modes are `local`, `cloud`, and provider names.
     Legacy `auto` remains accepted as a compatibility input and is mapped to
     the caller-provided default.
     """

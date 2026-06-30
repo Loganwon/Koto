@@ -180,7 +180,7 @@ def _now_iso() -> str:
 
 
 def _file_hash(path: str, chunk: int = 65536) -> str:
-    h = hashlib.md5()
+    h = hashlib.md5(usedforsecurity=False)
     try:
         with open(path, "rb") as f:
             while True:

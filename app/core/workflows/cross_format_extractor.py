@@ -110,7 +110,7 @@ class CrossFormatExtractor(WorkflowExecutor):
     def _extract_template_fields(self, template_path: str) -> list[str]:
         """从 Excel 第一行提取列标题。"""
         try:
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
 
             result = parse_xlsx(template_path, "")
             for sheet_id, sheet in result.get("sheets", {}).items():

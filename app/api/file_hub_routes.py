@@ -71,26 +71,6 @@ file_hub_bp = Blueprint("file_hub", __name__)
 # ── 工具函数 ──────────────────────────────────────────────────────────────────
 
 
-def _archive_folder_name(value: str) -> str:
-    """Return a safe archive category folder name."""
-    folder = (value or "其他").strip() or "其他"
-    if folder in {".", ".."} or any(sep in folder for sep in ("/", "\\")):
-        return "其他"
-    return "".join(ch for ch in folder if ch.isprintable())[:80] or "其他"
-
-
-def _resolve_existing_local_path(raw_path: str) -> Path | None:
-    """Resolve a local user-selected path after basic existence checks."""
-    raw = (raw_path or "").strip()
-    if not raw:
-        return None
-    try:
-        candidate = Path(raw).expanduser().resolve(strict=True)
-    except (OSError, RuntimeError, ValueError):
-        return None
-    return candidate
-
-
 @file_hub_bp.route("/pick-folder", methods=["GET"])
 def pick_folder():
     """弹出系统原生「选择文件夹」对话框，返回所选路径。
@@ -470,7 +450,7 @@ def archive_files():
                 for rule in rules:
                     pat = (rule.get("match") or "").strip()
                     if pat and fnmatch.fnmatch(fp.name, pat):
-                        folder = _archive_folder_name(rule.get("folder") or "其他")
+                        folder = (rule.get("folder") or "其他").strip()
                         break
 
             target_dir = dest / folder
@@ -485,12 +465,11 @@ def archive_files():
                     target = target_dir / f"{stem}_{idx}{suffix}"
                     idx += 1
 
-            if action == "copy":
-                # codeql[py/path-injection]
+            (
                 shutil.copy2(str(fp), str(target))
-            else:
-                # codeql[py/path-injection]
-                shutil.move(str(fp), str(target))
+                if action == "copy"
+                else shutil.move(str(fp), str(target))
+            )
             copied += 1
             report.append(
                 {
@@ -515,6 +494,14 @@ def archive_files():
             "errors": errors[:20],
             "report": report[:200],
         }
+    )
+
+
+@file_hub_bp.route("/open", methods=["POST"])
+def removed_native_open_file():
+    return (
+        jsonify({"error": "该文件原生打开接口已移除，请使用工作区文件助手打开文件"}),
+        404,
     )
 
 
@@ -601,39 +588,6 @@ def copy_file():
     return jsonify({"status": "ok" if ok else "error", "message": result}), (
         200 if ok else 400
     )
-
-
-@file_hub_bp.route("/open", methods=["POST"])
-def open_file():
-    """
-    用系统默认程序打开文件或文件夹。
-    Body JSON: { "path": "绝对路径" }
-    """
-    import os
-    import subprocess
-    import sys
-
-    data = request.get_json(silent=True) or {}
-    path = (data.get("path") or "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 字段"}), 400
-    p = _resolve_existing_local_path(path)
-    if p is None:
-        return jsonify({"error": "文件不存在"}), 404
-    try:
-        if hasattr(os, "startfile"):
-            # codeql[py/path-injection]
-            os.startfile(str(p))  # noqa: S606
-        elif sys.platform == "win32":
-            # codeql[py/path-injection]
-            os.startfile(str(p))  # noqa: S606
-        elif sys.platform == "darwin":
-            subprocess.Popen(["open", str(p)])
-        else:
-            subprocess.Popen(["xdg-open", str(p)])
-        return jsonify({"status": "ok"}), 200
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
 
 
 @file_hub_bp.route("/disk", methods=["DELETE"])
@@ -1525,7 +1479,7 @@ def graph_data():
     )
 
 
-# ── 文件内容读取 / OS 默认程序打开 ────────────────────────────────────────────
+# ── 文件内容读取 ──────────────────────────────────────────────────────────────
 
 
 _TEXT_EXTS = {
@@ -1581,7 +1535,7 @@ def read_file_content():
         return jsonify({"error": "文件不存在"}), 404
 
     if p.suffix.lower() not in _TEXT_EXTS:
-        return jsonify({"error": "不支持预览该类型文件，请用默认程序打开"}), 415
+        return jsonify({"error": "不支持预览该类型文件"}), 415
 
     try:
         size = p.stat().st_size
@@ -1598,39 +1552,3 @@ def read_file_content():
     except Exception as exc:
         logger.warning(f"[FileHub] read_file_content 失败: {exc}")
         return jsonify({"error": "读取失败"}), 500
-
-
-@file_hub_bp.route("/open", methods=["POST"])
-def open_file_with_os():
-    """
-    用系统默认程序打开文件（适用于非代码类文件）。
-    Body JSON: { "path": "<绝对路径>" }
-    """
-    import platform
-    import subprocess as _sp
-
-    data = request.get_json(silent=True) or {}
-    path = (data.get("path") or "").strip()
-    if not path:
-        return jsonify({"error": "缺少 path 字段"}), 400
-
-    p = _resolve_existing_local_path(path)
-    if p is None:
-        return jsonify({"error": "文件或目录不存在"}), 404
-
-    try:
-        sys_name = platform.system()
-        if hasattr(os, "startfile"):
-            # codeql[py/path-injection]
-            os.startfile(str(p))  # type: ignore[attr-defined]
-        elif sys_name == "Windows":
-            # codeql[py/path-injection]
-            os.startfile(str(p))  # type: ignore[attr-defined]
-        elif sys_name == "Darwin":
-            _sp.Popen(["open", str(p)])
-        else:
-            _sp.Popen(["xdg-open", str(p)])
-        return jsonify({"status": "ok", "path": str(p)})
-    except Exception as exc:
-        logger.warning(f"[FileHub] open_file_with_os 失败: {exc}")
-        return jsonify({"error": f"打开失败: {exc}"}), 500

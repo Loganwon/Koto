@@ -5,7 +5,7 @@ Playwright E2E tests for DOCX rendering fidelity in the Koto file assistant.
 
 These tests:
   1. Open the test document via the API
-  2. Navigate to /workspace-assistant
+  2. Navigate to the unified Koto app entry /
   3. Inject the HTML into the TipTap editor via JS
   4. Take screenshots to compare with Word visually
   5. Assert DOM-measurable properties (page count, header visibility, etc.)
@@ -45,15 +45,28 @@ REAL_OPEN_DOCX_CANDIDATES = [
 SCREENSHOTS_DIR = os.path.join(os.path.dirname(__file__), "screenshots")
 
 WORD_PAGE_COUNT = 72
+PAGE_BOUNDARY_SELECTOR = "[data-page-break],[data-soft-page-break]"
 # TipTap renders at different heights than Word (different font metrics, line
 # heights, table sizing), so use ±30% when comparing to Word's page count.
-# The primary assertions use internal consistency (line_count == totalPages - 1)
+# The primary assertions use internal consistency (boundary_count == totalPages - 1)
 # which is independent of the Word reference.
 PAGE_COUNT_LOWER = int(WORD_PAGE_COUNT * 0.70)
 PAGE_COUNT_UPPER = int(WORD_PAGE_COUNT * 1.30)
 
 EDITOR_LOAD_TIMEOUT = 30_000  # ms — TipTap needs time to render large documents
-ANIMATION_SETTLE_MS = 1_000  # wait after page-break lines appear (extra settle)
+ANIMATION_SETTLE_MS = 1_000  # wait after page-boundary markers appear (extra settle)
+
+
+def _preferred_page_count_docx_path() -> str | None:
+    """Return the expected 72-page 雷鸟 document, allowing the local '(1)' copy."""
+    preferred_candidates = [
+        os.path.join(_REPO_ROOT, "workspace", "雷鸟创新-投资建议书 (1).docx"),
+        DOCX_PATH,
+    ]
+    for path in preferred_candidates:
+        if os.path.exists(path):
+            return path
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -67,15 +80,19 @@ def docx_html_from_api(e2e_base_url: str) -> str:
     POST the DOCX to /api/v1/workspace/open_file and return the rendered HTML.
     Runs once per test session — shared across all tests in this module.
     """
-    if not os.path.exists(DOCX_PATH):
-        pytest.skip(f"Test document not found: {DOCX_PATH}")
+    source_docx_path = _preferred_page_count_docx_path()
+    if not source_docx_path:
+        pytest.skip(
+            "No 72-page 雷鸟 DOCX found in candidates: "
+            f"{[os.path.join(_REPO_ROOT, 'workspace', '雷鸟创新-投资建议书 (1).docx'), DOCX_PATH]!r}"
+        )
 
-    with open(DOCX_PATH, "rb") as fh:
+    with open(source_docx_path, "rb") as fh:
         resp = requests.post(
             f"{e2e_base_url}/api/v1/workspace/open_file",
             files={
                 "file": (
-                    "雷鸟创新-邗投珒创-投资建议书.docx",
+                    os.path.basename(source_docx_path),
                     fh,
                     "application/octet-stream",
                 )
@@ -171,7 +188,7 @@ def _docx_render_opts(data: dict | None) -> dict:
 
 def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> None:
     """
-    Navigate to /workspace-assistant (which loads workspace.css and the TipTap
+    Navigate to the unified Koto app entry (which loads workspace.css and the TipTap
     bundle), then inject the DOCX HTML into TipTap via JS.
 
     workspace.css scopes the TipTap styles to ``#wa-docx-editor .ProseMirror``
@@ -183,16 +200,14 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
     * We create a FRESH ``#wa-docx-editor`` container at ``document.body`` level
       and give it inline ``display:flex`` so no CSS specificity rule can hide it.
     * We add ``class="active"`` as belt-and-suspenders (workspace.css rule).
-    * workspace-assistant.js can call ``.classList.remove('active')`` via
+    * The workspace runtime can call ``.classList.remove('active')`` via
       ``destroy()``, but inline-style ``display:flex`` always wins the cascade.
-    * We wait explicitly for ``.koto-pb-line`` to appear before returning.
+    * We wait explicitly for page-boundary markers to appear before returning.
     """
-    page.goto(
-        f"{base_url}/workspace-assistant", timeout=15_000, wait_until="domcontentloaded"
-    )
+    page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
 
-    # Ensure the TipTap bundle is available (workspace-assistant.js lazy-loads it)
+    # Ensure the TipTap bundle is available for the workspace DOCX runtime.
     page.wait_for_function(
         "() => typeof window.KotoDocxEditorLib !== 'undefined' || "
         "document.querySelector('#wa-docx-editor') !== null",
@@ -223,7 +238,7 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
             container.id = 'wa-docx-editor';
             container.classList.add('active');
             // Inline style trumps ALL CSS selector rules (highest cascade priority).
-            // Even if workspace-assistant.js removes the .active class, display:flex
+            // Even if the workspace runtime removes the .active class, display:flex
             // in the inline style keeps the element visible.
             container.style.cssText =
                 'position:fixed;inset:0;z-index:9999;' +
@@ -244,10 +259,10 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
         "#wa-docx-editor .ProseMirror", state="visible", timeout=EDITOR_LOAD_TIMEOUT
     )
 
-    # Wait for page-break lines to populate (debounced after first DOM layout)
+    # Wait for page-boundary markers to populate (debounced after first DOM layout)
     try:
         page.wait_for_function(
-            "() => document.querySelectorAll('.koto-pb-line').length > 0",
+            "() => document.querySelectorAll('[data-page-break],[data-soft-page-break]').length > 0",
             timeout=15_000,
         )
     except Exception:
@@ -258,10 +273,8 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
 
 
 def _open_docx_via_file_input(page, base_url: str, docx_path: str) -> None:
-    """Open a DOCX through the real workspace-assistant file input flow."""
-    page.goto(
-        f"{base_url}/workspace-assistant", timeout=15_000, wait_until="domcontentloaded"
-    )
+    """Open a DOCX through the real unified workspace file input flow."""
+    page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
     page.locator("#wa-file-input").set_input_files(docx_path)
     page.wait_for_selector(
@@ -780,46 +793,149 @@ class TestHeaderFooterEditing:
             assert abs(item["widgetRect"]["right"] - metrics["pmRect"]["right"]) < 4
         assert console_errors == [], f"JS errors: {console_errors}"
 
+    def test_table_page_break_rows_only_insert_at_safe_rowspan_boundaries(
+        self,
+        e2e_page,
+        e2e_base_url,
+        real_open_docx_path,
+        console_errors,
+    ):
+        _open_docx_via_file_input(e2e_page, e2e_base_url, real_open_docx_path)
+
+        metrics = e2e_page.evaluate("""() => {
+                const tables = Array.from(document.querySelectorAll('#wa-docx-editor .ProseMirror table'));
+                const consumeRowspans = (activeRowspans, row, columnCount) => {
+                    const width = Math.max(1, columnCount || 1);
+                    const current = Array.from({ length: width }, (_, idx) => Math.max(0, Number(activeRowspans[idx] || 0)));
+                    const next = current.map((span) => Math.max(0, span - 1));
+                    let colIdx = 0;
+
+                    Array.from(row.cells || []).forEach((cell) => {
+                        while (colIdx < width && current[colIdx] > 0) colIdx += 1;
+                        const colspan = Math.max(1, Number(cell.colSpan) || 1);
+                        const rowspan = Math.max(1, Number(cell.rowSpan) || 1);
+                        if (rowspan > 1) {
+                            for (let offset = 0; offset < colspan && colIdx + offset < width; offset += 1) {
+                                next[colIdx + offset] = Math.max(next[colIdx + offset], rowspan - 1);
+                            }
+                        }
+                        colIdx += colspan;
+                    });
+
+                    return next;
+                };
+
+                const items = [];
+                tables.forEach((table, tableIndex) => {
+                    const rows = Array.from(table.rows || []);
+                    const columnCount = Math.max(
+                        1,
+                        ...rows.map((row) => Array.from(row.cells || []).reduce(
+                            (sum, cell) => sum + Math.max(1, Number(cell.colSpan) || 1),
+                            0,
+                        )),
+                    );
+                    let activeRowspans = Array(columnCount).fill(0);
+
+                    rows.forEach((row, rowIndex) => {
+                        if (row.classList.contains('koto-table-page-break-row')) {
+                            items.push({
+                                tableIndex,
+                                rowIndex,
+                                carriedCols: activeRowspans.filter((span) => span > 0).length,
+                            });
+                            return;
+                        }
+                        activeRowspans = consumeRowspans(activeRowspans, row, columnCount);
+                    });
+                });
+
+                return { items };
+            }""")
+
+        assert metrics[
+            "items"
+        ], "Expected at least one row-level table page break in the real DOCX"
+        assert all(item["carriedCols"] == 0 for item in metrics["items"]), metrics[
+            "items"
+        ][:10]
+        assert console_errors == [], f"JS errors: {console_errors}"
+
+    def test_real_docx_outline_recovers_full_navigation_tree_for_chaptered_doc(
+        self,
+        e2e_page,
+        e2e_base_url,
+        real_open_docx_path,
+        console_errors,
+    ):
+        _open_docx_via_file_input(e2e_page, e2e_base_url, real_open_docx_path)
+        e2e_page.wait_for_function(
+            "() => document.querySelectorAll('.wa-outline-item').length >= 20",
+            timeout=30_000,
+        )
+
+        metrics = e2e_page.evaluate("""() => {
+                const outlineItems = Array.from(document.querySelectorAll('.wa-outline-item'));
+                const visibleItems = outlineItems.filter((el) => el.offsetParent !== null);
+                return {
+                    outlineCount: outlineItems.length,
+                    visibleCount: visibleItems.length,
+                    texts: outlineItems.map((el) => (el.querySelector('.wa-outline-text')?.textContent || '').trim()),
+                };
+            }""")
+
+        assert metrics["outlineCount"] >= 20, metrics
+        assert metrics["visibleCount"] >= 10, metrics
+        assert "第二章 行业分析" in metrics["texts"], metrics["texts"][:20]
+        assert "四、公司历次融资情况" in metrics["texts"], metrics["texts"][:20]
+        assert console_errors == [], f"JS errors: {console_errors}"
+
 
 @pytest.mark.e2e
 class TestPageCount:
     """Page count accuracy — must be close to Word's 72 pages."""
 
-    def test_page_break_overlay_exists(
+    def test_page_break_boundaries_exist(
         self, e2e_page, e2e_base_url, docx_html_from_api
     ):
-        """#koto-pb-overlay must exist after editor setup."""
+        """At least one real page-boundary marker must exist after editor setup."""
         _mount_docx(e2e_page, docx_html_from_api, e2e_base_url)
-        count = e2e_page.locator("#koto-pb-overlay").count()
+        count = e2e_page.locator(PAGE_BOUNDARY_SELECTOR).count()
         assert (
             count > 0
-        ), "#koto-pb-overlay element not found — _setupPageFeatures() may not have run"
+        ), "No page-boundary marker found — pagination markers may not have rendered"
 
-    def test_page_break_line_count(self, e2e_page, e2e_base_url, docx_html_from_api):
+    def test_page_break_boundary_count(
+        self, e2e_page, e2e_base_url, docx_html_from_api
+    ):
         """
-        Number of .koto-pb-line elements must equal (totalPages - 1) exactly,
+        Number of real page-boundary markers must equal (totalPages - 1) exactly,
         and totalPages must be within ±30% of Word's page count.
 
-        Also validates internal consistency: line_count == totalPages − 1
+        Also validates internal consistency: boundary_count == totalPages − 1
         (the number of separators between pages equals pages minus one).
         """
         _mount_docx(e2e_page, docx_html_from_api, e2e_base_url)
-        # Give the debounced _updateBreaks() another chance to finish
+        # Give the debounced AutoPageBreakPlugin measurement another chance to finish.
         try:
             e2e_page.wait_for_function(
-                "() => document.querySelectorAll('.koto-pb-line').length > 0",
+                "() => document.querySelectorAll('[data-page-break],[data-soft-page-break]').length > 0",
                 timeout=20_000,
             )
         except Exception:
             pass
-        line_count = e2e_page.locator(".koto-pb-line").count()
-        # _totalPages is set by _updateBreaks() on the editor instance
+        boundary_count = e2e_page.evaluate(
+            "() => window._testEditor && typeof window._testEditor._getDocxPageBreakBoundaries === 'function'"
+            " ? window._testEditor._getDocxPageBreakBoundaries().length"
+            " : document.querySelectorAll('[data-page-break],[data-soft-page-break]').length"
+        )
+        # _totalPages is set by the pagination plugin on the editor instance.
         total_pages = e2e_page.evaluate(
             "() => window._testEditor ? window._testEditor._totalPages : 0"
         )
-        # Internal consistency: separators == pages - 1
-        assert line_count == total_pages - 1, (
-            f"Separator line count ({line_count}) != _totalPages ({total_pages}) - 1. "
+        # Internal consistency: unique page boundaries == pages - 1
+        assert boundary_count == total_pages - 1, (
+            f"Page-boundary count ({boundary_count}) != _totalPages ({total_pages}) - 1. "
             "Page break logic is inconsistent."
         )
         # Sanity range: TipTap does not always match Word exactly because line
@@ -948,19 +1064,17 @@ class TestScreenshots:
         self._ensure_dir()
         _mount_docx(e2e_page, docx_html_from_api, e2e_base_url)
 
-        if e2e_page.locator(".koto-pb-line").count() == 0:
-            pytest.skip("No page break lines rendered")
+        if e2e_page.locator(PAGE_BOUNDARY_SELECTOR).count() == 0:
+            pytest.skip("No page-boundary markers rendered")
 
-        # .koto-pb-line lives inside #koto-pb-overlay (height:0, overflow:visible)
-        # so Playwright's scroll_into_view_if_needed() doesn't work.
-        # Instead, read the element's top offset and scroll the fixed container.
+        # Page-boundary markers are in-flow blocks, so we can scroll the first one directly.
         e2e_page.evaluate("""() => {
-            const line = document.querySelector('.koto-pb-line');
-            const container = document.getElementById('wa-docx-editor');
-            if (!line || !container) return;
-            const lineRect = line.getBoundingClientRect();
+            const boundary = document.querySelector('[data-page-break],[data-soft-page-break]');
+            const container = document.getElementById('wa-editor-content') || document.getElementById('wa-docx-editor');
+            if (!boundary || !container) return;
+            const lineRect = boundary.getBoundingClientRect();
             const containerRect = container.getBoundingClientRect();
-            // Center the line in the viewport (line is relative to container top)
+            // Center the first boundary in the viewport.
             const target = (lineRect.top - containerRect.top) + container.scrollTop
                            - (container.clientHeight / 2);
             container.scrollTo({ top: target, behavior: 'instant' });

@@ -1,4 +1,4 @@
-"""Unit tests for web.app.Utils.is_failure_output().
+"""Unit tests for web.utils.assistant_utils.Utils.is_failure_output().
 
 Pure string-logic function — no mocks needed.
 """
@@ -10,7 +10,7 @@ import pytest
 
 @pytest.fixture(scope="module")
 def is_failure():
-    from web.app import Utils
+    from web.utils.assistant_utils import Utils
 
     return Utils.is_failure_output
 

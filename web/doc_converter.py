@@ -170,7 +170,7 @@ def _try_libreoffice(source_path: str, out_dir: str) -> Optional[str]:
                 if os.path.exists(expected):
                     return expected
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
     return None
 
 
@@ -189,7 +189,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
         logger.info(f"[DocConverter] .doc → .docx via python-docx ✓")
         return out_path, warning
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
 
     # 方法 2: LibreOffice CLI
     lo_result = _try_libreoffice(source_path, os.path.dirname(out_path))
@@ -212,7 +212,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
             )
             return out_path, warning
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
 
     # 方法 4: 以 UTF-8 / Latin-1 强行读取二进制文本（最后手段）
     try:
@@ -248,7 +248,7 @@ def _convert_doc(source_path: str, out_path: str) -> Tuple[str, str]:
             )
             return out_path, warning
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
 
     raise RuntimeError(
         "无法转换 `.doc` 文件。请用 Microsoft Word 另存为 `.docx` 后重新上传，"

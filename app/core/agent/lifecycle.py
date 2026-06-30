@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════
 # lifecycle.py — Agent Run Lifecycle & Event Types
 #
-# Inspired by OpenClaw's agent lifecycle model:
+# Koto agent lifecycle model:
 #   queued → running → streaming/tool_exec → succeeded | failed | cancelled
 #
 # Every agent run emits a typed stream of AgentEvent objects.

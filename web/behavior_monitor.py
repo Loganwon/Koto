@@ -29,7 +29,7 @@ class BehaviorMonitor:
     EVENT_FILE_ORGANIZE = "file_organize"
     EVENT_ANNOTATION = "annotation"
     EVENT_EXPORT = "export"
-    EVENT_VOICE_INPUT = "voice_input"
+    EVENT_AUDIO_INPUT = "audio_input"
     EVENT_IMAGE_GEN = "image_generation"
 
     def __init__(self, db_path: str = "config/user_behavior.db"):

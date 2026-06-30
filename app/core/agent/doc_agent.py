@@ -2,8 +2,8 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-DocAgent — OpenClaw-style Document AI Agent
-============================================
+DocAgent — Document AI Agent
+============================
 
 A unified agent for document processing tasks that follows the
 plan → execute → verify loop. Integrates TaskPlanner's DAG framework
@@ -29,6 +29,8 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any, AsyncIterator, Callable, Dict, Iterator, List, Optional, Set
+
+from app.core.agent.file_task_result_markers import KOTO_CREATED_RESULT_MARKER
 
 logger = logging.getLogger(__name__)
 
@@ -164,7 +166,7 @@ MAX_CONSECUTIVE_ERRORS = 3
 
 class DocAgent:
     """
-    OpenClaw-style Document AI Agent.
+    Document AI Agent.
 
     Orchestrates document processing tasks through:
     1. Planning: LLM generates a step-by-step execution plan
@@ -650,7 +652,7 @@ class DocAgent:
 
         # run_python_code: detect files via __koto_created__ markers
         if tool_name == "run_python_code":
-            _marker = "__koto_created__:"
+            _marker = KOTO_CREATED_RESULT_MARKER
             idx = result.rfind(_marker)
             if idx != -1:
                 try:
@@ -787,16 +789,27 @@ class DocAgent:
                 self._provider_mode = "local"
                 return OllamaLLMProvider(model=self._local_model_id() or None)
 
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.model_selection import (
+                get_configured_cloud_model,
+                get_provider_for_model_mode,
+            )
+            from app.core.llm.provider_factory import get_llm_provider
 
-            self._provider_mode = "cloud"
-
-            api_key = self._api_key
-            provider = GeminiProvider(api_key=api_key)
-            if not provider.api_key:
-                logger.error("[DocAgent] No API key available")
-                return None
-            return provider
+            provider_name = get_provider_for_model_mode(model_mode)
+            self._provider_mode = provider_name
+            self._model_id = (
+                get_configured_cloud_model(
+                    task_type="FILE_TASK",
+                    fallback_model=self._model_id,
+                    provider=provider_name,
+                )
+                or self._model_id
+            )
+            return get_llm_provider(
+                provider=provider_name,
+                model=self._model_id,
+                allow_local_fallback=False,
+            )
         except Exception as e:
             logger.error("[DocAgent] Failed to init LLM provider: %s", e)
             return None
@@ -886,6 +899,7 @@ class DocAgent:
 - `list_workspace_files(path?, recursive?)` — 列出工作区文件
 
 **文件写入:**
+- `insert_image_into_docx(path, image_path, title?, caption?, width_inches?)` — 把图表/图片作为真实 Word 图片插入到 DOCX 文件末尾
 - `insert_excel_as_docx_table(source_path, target_path, sheet_name?, table_title?)` — 把 Excel 表格数据作为 Word 表格插入到 DOCX 文件末尾
 - `write_docx_content(path, content, mode?)` — 写入 Word 文档内容
 - `write_sheet_data(path, data, sheet_name?)` — 写入/更新 Excel 表格数据

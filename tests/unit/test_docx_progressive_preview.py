@@ -78,6 +78,8 @@ def test_workspace_docx_open_file_returns_full_payload_by_default(wa_client):
     assert resp.status_code == 200, resp.get_data(as_text=True)
     open_json = resp.get_json()
     assert open_json["file_type"] == "docx"
+    assert open_json["capability_profile"]["format"] == "docx"
+    assert open_json["capability_profile"]["workspace"]["progressive_loading"] is True
     assert open_json["data"].get("progressive") in (None, {}) or not open_json[
         "data"
     ].get("progressive", {}).get("pending")
@@ -90,9 +92,28 @@ def test_workspace_docx_open_file_returns_full_payload_by_default(wa_client):
     assert full_resp.status_code == 200, full_resp.get_data(as_text=True)
     full_json = full_resp.get_json()
     assert full_json["file_type"] == "docx"
+    assert full_json["capability_profile"]["format"] == "docx"
     assert len(full_json["data"].get("html", "")) == len(
         open_json["data"].get("html", "")
     )
     assert full_json["data"].get("progressive") in (None, {}) or not full_json[
         "data"
     ].get("progressive", {}).get("pending")
+
+
+def test_workspace_open_abs_file_returns_capability_profile(tmp_path, wa_client):
+    pytest.importorskip("docx", reason="python-docx 未安装")
+
+    docx_path = tmp_path / "absolute.docx"
+    docx_path.write_bytes(_make_table_heavy_docx())
+
+    resp = wa_client.post(
+        "/api/v1/workspace/open_abs_file",
+        json={"path": str(docx_path)},
+    )
+
+    assert resp.status_code == 200, resp.get_data(as_text=True)
+    payload = resp.get_json()
+    assert payload["file_type"] == "docx"
+    assert payload["capability_profile"]["format"] == "docx"
+    assert payload["capability_profile"]["task"]["write_support"] == "native"

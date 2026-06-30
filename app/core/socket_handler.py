@@ -13,6 +13,7 @@
 import logging
 
 from app.core.llm.model_mode import is_explicit_model_mode, normalize_model_mode
+from app.core.security.output_validator import sanitize_user_visible_text
 from app.core.shared.llm_helpers import get_local_provider as _get_local_provider_shared
 from app.core.shared.llm_helpers import is_ollama_alive as _is_ollama_alive_shared
 from app.core.shared.llm_helpers import (  # noqa: F401
@@ -24,6 +25,14 @@ from app.core.shared.tool_parser import (  # noqa: F401
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_user_error_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback, treat_as_error=True)
+
+
+def _safe_user_preview_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback)
 
 
 def register_socket_events(socketio):
@@ -83,7 +92,10 @@ def register_socket_events(socketio):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"服务端处理失败: {exc}",
+                    "text": _safe_user_error_text(
+                        f"服务端处理失败: {exc}",
+                        "服务端处理失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
@@ -117,7 +129,7 @@ def register_socket_events(socketio):
         if not prompt:
             return
 
-        # ── Agent Loop path (OpenClaw-inspired unified agent) ─────────
+        # ── Agent Loop path (unified agent) ─────────
         _use_agent_loop = data.get("_use_agent_loop", True)
         if not _use_agent_loop:
             try:
@@ -316,7 +328,12 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
         logger.exception("[DocAssistant] sandbox error: %s", exc)
         emit(
             "code_result",
-            {"error": str(exc), "stdout": "", "stderr": "", "files": {}},
+            {
+                "error": _safe_user_error_text(str(exc), "代码执行失败，请稍后重试。"),
+                "stdout": "",
+                "stderr": "",
+                "files": {},
+            },
             namespace="/doc",
         )
 
@@ -336,11 +353,11 @@ _ONLINE_DOC_MODELS = [
 
 
 def _pick_online_model() -> str:
-    """直接使用 MODEL_MAP[CHAT]，保持与 Koto 主体一致；若取不到则用首选。"""
+    """Use the current CHAT model when available; otherwise use the preferred fallback."""
     try:
-        from web.app import MODEL_MAP  # type: ignore
+        from web.runtime_context import get_model_id
 
-        m = MODEL_MAP.get("CHAT", "")
+        m = get_model_id("CHAT")
         if m:
             return m
     except Exception:
@@ -350,9 +367,15 @@ def _pick_online_model() -> str:
 
 def _get_provider():
     """Return the configured online LLMProvider."""
+    from app.core.llm.model_selection import get_provider_for_model_mode
     from app.core.llm.provider_factory import get_llm_provider
 
-    return get_llm_provider(provider="gemini", allow_local_fallback=False)
+    model = _pick_online_model()
+    return get_llm_provider(
+        provider=get_provider_for_model_mode("cloud"),
+        model=model,
+        allow_local_fallback=False,
+    )
 
 
 # Delegate to shared implementations – kept as module-level aliases so any
@@ -407,7 +430,13 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
             logger.error("[DocAssistant] Local-only stream failed: %s", exc_lo)
             emit(
                 "agent_task_complete",
-                {"full_text": "", "error": str(exc_lo)},
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(
+                        str(exc_lo),
+                        "本地 AI 调用失败，请检查 Ollama 后重试。",
+                    ),
+                },
                 namespace="/doc",
             )
             return None
@@ -436,14 +465,22 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"❌ AI 调用失败：{exc}",
+                    "text": _safe_user_error_text(
+                        f"❌ AI 调用失败：{exc}",
+                        "❌ AI 调用失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
             )
             emit(
                 "agent_task_complete",
-                {"full_text": "", "error": str(exc)},
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(
+                        str(exc), "AI 调用失败，请稍后重试。"
+                    ),
+                },
                 namespace="/doc",
             )
             return None
@@ -500,7 +537,13 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         )
         emit(
             "agent_task_complete",
-            {"full_text": "", "error": str(exc2)},
+            {
+                "full_text": "",
+                "error": _safe_user_error_text(
+                    str(exc2),
+                    "本地 AI 调用失败，请检查 Ollama 后重试。",
+                ),
+            },
             namespace="/doc",
         )
         return None
@@ -727,7 +770,10 @@ def _emit_agent_event(socketio, sid, event) -> None:
             {
                 "type": "step_error",
                 "step_id": d.get("step_id", ""),
-                "error": d.get("error", ""),
+                "error": _safe_user_error_text(
+                    d.get("error", ""),
+                    "处理失败，请稍后重试。",
+                ),
             },
             namespace=ns,
             to=sid,
@@ -752,7 +798,10 @@ def _emit_agent_event(socketio, sid, event) -> None:
             {
                 "type": "tool_result",
                 "tool_name": d.get("tool_name", ""),
-                "result_preview": d.get("result_preview", ""),
+                "result_preview": _safe_user_preview_text(
+                    d.get("result_preview", ""),
+                    "工具已执行。",
+                ),
             },
             namespace=ns,
             to=sid,
@@ -766,7 +815,7 @@ def _emit_agent_event(socketio, sid, event) -> None:
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": text,
+                    "text": _safe_user_error_text(text, "AI 调用失败，请稍后重试。"),
                     "is_error": True,
                 },
                 namespace=ns,
@@ -777,7 +826,7 @@ def _emit_agent_event(socketio, sid, event) -> None:
                 "agent_progress",
                 {
                     "step": "status",
-                    "detail": text,
+                    "detail": _safe_user_preview_text(text, "处理中…"),
                 },
                 namespace=ns,
                 to=sid,
@@ -863,7 +912,7 @@ def _get_session_queue():
 
 
 # ══════════════════════════════════════════════════════════════
-# DocAgent Integration — OpenClaw-style document processing
+# DocAgent Integration — document processing
 # ══════════════════════════════════════════════════════════════
 
 

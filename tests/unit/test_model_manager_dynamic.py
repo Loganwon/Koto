@@ -18,9 +18,19 @@ class _FakeModelApi:
         return list(self._models)
 
 
+class _NoneModelApi:
+    def list(self, config=None):
+        return None
+
+
 class _FakeClient:
     def __init__(self, models):
         self.models = _FakeModelApi(models)
+
+
+class _NoneClient:
+    def __init__(self):
+        self.models = _NoneModelApi()
 
 
 def _caps(speed: int, quality: int, reasoning: int, context: int, tier: int):
@@ -44,6 +54,8 @@ def _caps(speed: int, quality: int, reasoning: int, context: int, tier: int):
 def test_interactions_only_detection_supports_prefix_and_normalization():
     assert is_interactions_only_model("models/deep-research-pro-preview-12-2025")
     assert is_interactions_only_model("deep-research-next-agent-preview")
+    assert not is_interactions_only_model("gemini-3-flash-preview")
+    assert not is_interactions_only_model("gemini-3.1-pro-preview")
     assert not is_interactions_only_model("gemini-2.5-flash")
 
 
@@ -105,6 +117,14 @@ def test_fetch_available_model_ids_respects_env_blocklist(monkeypatch):
     assert "gemini-2.5-flash" in ids
 
 
+def test_fetch_available_model_ids_treats_none_list_response_as_empty():
+    manager = ModelManager(client=_NoneClient())
+
+    ids = manager._fetch_available_model_ids()
+
+    assert ids == []
+
+
 def test_select_best_prefers_gemini3_flash_for_chat_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
@@ -158,4 +178,6 @@ def test_select_best_prefers_gemini31_pro_for_file_task_when_available():
 
 def test_static_default_map_includes_file_task_route():
     manager = ModelManager(client=None)
-    assert manager._static_default_map()["FILE_TASK"] == "gemini-3.1-pro-preview"
+    assert manager._static_default_map()["FILE_TASK"] == "deepseek-v4-pro"
+    assert manager._static_default_map()["CHAT"] == "deepseek-v4-pro"
+    assert manager._static_default_map()["VISION"] == "gemini-3-flash-preview"

@@ -21,9 +21,9 @@ Koto Generic Task Planner
     planner = TaskPlanner()
 
     # 方式 1：静态构建计划
-    plan = Plan(task_id="xxx", original_request="帮我写周报并发邮件")
+    plan = Plan(task_id="xxx", original_request="帮我写周报并保存到文件")
     plan.add_step(PlanStep(name="write_report", description="撰写周报内容"))
-    plan.add_step(PlanStep(name="send_email", description="发送邮件", depends_on=["write_report"]))
+    plan.add_step(PlanStep(name="save_report", description="保存周报文件", depends_on=["write_report"]))
 
     # 方式 2：LLM 动态规划
     plan = await planner.plan_with_llm(task_id, user_input, llm_provider)

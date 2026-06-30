@@ -223,6 +223,138 @@ class TestOpenFile:
         file_id = resp.get_json()["file_id"]
         assert file_id.isalnum() and len(file_id) == 32
 
+    def test_open_file_by_path_retries_docx_after_tmp_zip_failure(
+        self, wa_client, monkeypatch
+    ):
+        import zipfile
+
+        client, tmp_dir, workspace_dir = wa_client
+        docx_bytes = _fake_docx_bytes()
+        if not docx_bytes:
+            pytest.skip("python-docx not available")
+
+        target = workspace_dir / "retry.docx"
+        target.write_bytes(docx_bytes)
+
+        import app.core.file.parsers.docx_parser as parser_mod
+
+        real_parse_docx = parser_mod.parse_docx
+        call_count = {"value": 0}
+
+        def flaky_parse_docx(path: str, *args, **kwargs):
+            call_count["value"] += 1
+            if call_count["value"] == 1:
+                raise zipfile.BadZipFile("File is not a zip file")
+            return real_parse_docx(path, *args, **kwargs)
+
+        monkeypatch.setattr(parser_mod, "parse_docx", flaky_parse_docx)
+
+        resp = client.post(
+            "/api/v1/workspace/open_file_by_path",
+            json={"path": "retry.docx"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        assert call_count["value"] == 2
+        body = resp.get_json()
+        assert body["file_type"] == "docx"
+        assert body.get("data", {}).get("raw_url")
+        tmp_copy = tmp_dir / f"{body['file_id']}.docx"
+        assert tmp_copy.is_file()
+        assert tmp_copy.read_bytes() == docx_bytes
+
+
+class TestAIContextPreview:
+
+    def test_unicode_docx_path_is_readable(self, wa_client):
+        client, _, workspace_dir = wa_client
+        target_name = "\u8bfb\u53d6\u6d4b\u8bd5.docx"
+        target = workspace_dir / target_name
+        target.write_bytes(_make_docx_bytes(["中文文件名读取测试", "第二段内容"]))
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": target_name},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        assert body["file_name"] == target_name
+        assert body["file_type"] == "docx"
+        assert "中文文件名读取测试" in body["content_preview"]
+
+    def test_docx_original_chars_uses_full_document_count(self, wa_client):
+        client, _, workspace_dir = wa_client
+        paragraphs = [
+            f"第{idx + 1}段：" + "这是用于验证DOCX统计更接近Word和WPS的测试内容。" * 5
+            for idx in range(360)
+        ]
+        expected_chars = sum(len("".join(text.split())) for text in paragraphs)
+
+        target = workspace_dir / "long-preview.docx"
+        target.write_bytes(_make_docx_bytes(paragraphs))
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": "long-preview.docx"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        preview_chars = len("".join(str(body.get("content_preview") or "").split()))
+        assert body["file_type"] == "docx"
+        assert body["original_chars"] == expected_chars
+        assert body["original_chars"] > preview_chars
+
+    def test_parse_error_keeps_attachment_available(self, wa_client, monkeypatch):
+        client, _, workspace_dir = wa_client
+        target = workspace_dir / "parse-warning.pdf"
+        target.write_bytes(_fake_pdf_bytes())
+
+        from app.core.agent import task_tools
+
+        monkeypatch.setattr(
+            task_tools,
+            "parse_file_to_text",
+            lambda *args, **kwargs: "Error parsing file: simulated parser failure",
+        )
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": "parse-warning.pdf"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        assert body["file_type"] == "pdf"
+        assert body["content_preview"] == ""
+        assert "simulated parser failure" in body["preview_error"]
+
+    def test_unexpected_parse_exception_keeps_attachment_available(
+        self, wa_client, monkeypatch
+    ):
+        client, _, workspace_dir = wa_client
+        target = workspace_dir / "parse-exception.docx"
+        target.write_bytes(_make_docx_bytes("body"))
+
+        from app.core.agent import task_tools
+
+        def _raise_parse_error(*args, **kwargs):
+            raise RuntimeError("unexpected parser boom")
+
+        monkeypatch.setattr(task_tools, "parse_file_to_text", _raise_parse_error)
+
+        resp = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": "parse-exception.docx"},
+        )
+
+        assert resp.status_code == 200, resp.get_data(as_text=True)
+        body = resp.get_json()
+        assert body["file_type"] == "docx"
+        assert body["content_preview"] == ""
+        assert "unexpected parser boom" in body["preview_error"]
+
 
 # ── 2b. PDF-specific loading tests ───────────────────────────────────────────
 
@@ -364,6 +496,16 @@ class TestServeWorkspaceFile:
         client, _, _ = wa_client
         resp = client.get("/api/v1/workspace/file/../../../etc/passwd")
         assert resp.status_code in (403, 404)
+
+
+class TestLegacyRoutesRemoved:
+
+    def test_obsolete_workspace_assistant_routes_are_unregistered(self, wa_client):
+        client, _, _ = wa_client
+        rules = {rule.rule for rule in client.application.url_map.iter_rules()}
+        assert "/api/v1/workspace/read_for_ai" not in rules
+        assert "/api/v1/workspace/summarize" not in rules
+        assert "/api/v1/workspace/quick-action" not in rules
 
 
 # ── 5. Round-trip: upload → raw endpoint ─────────────────────────────────────
@@ -509,10 +651,19 @@ class TestRenameEndpoint:
 # ── helpers shared by new test classes ───────────────────────────────────────
 
 
-def _make_docx_bytes(text: str = "Test") -> bytes:
-    """Minimal valid .docx (ZIP) with a single paragraph of text."""
+def _make_docx_bytes(text: str | list[str] = "Test") -> bytes:
+    """Minimal valid .docx (ZIP) with one or more paragraphs of text."""
     import io as _io
     import zipfile
+    from xml.sax.saxutils import escape as _xml_escape
+
+    if isinstance(text, list):
+        body = "".join(
+            f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(str(item))}</w:t></w:r></w:p>'
+            for item in text
+        )
+    else:
+        body = f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(str(text))}</w:t></w:r></w:p>'
 
     ct = (
         '<?xml version="1.0"?>'
@@ -534,7 +685,7 @@ def _make_docx_bytes(text: str = "Test") -> bytes:
     doc = (
         '<?xml version="1.0"?>'
         '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-        f"<w:body><w:p><w:r><w:t>{text}</w:t></w:r></w:p></w:body>"
+        f"<w:body>{body}</w:body>"
         "</w:document>"
     )
     dr = (
@@ -770,6 +921,76 @@ class TestAutoSave:
             )
         assert "PAGE" in header_xml, "header export should preserve Word PAGE field"
 
+    def test_structured_docx_payload_writes_comments_xml(self, wa_client):
+        client, _, _ = wa_client
+        docx_module = pytest.importorskip("docx")
+        import zipfile
+
+        src = io.BytesIO()
+        source_doc = docx_module.Document()
+        source_doc.add_paragraph("第一段原文")
+        source_doc.add_paragraph("第二段保留")
+        source_doc.save(src)
+        src.seek(0)
+
+        upload = client.post(
+            "/api/v1/workspace/open_file",
+            data={"file": (src, "comment_save.docx")},
+            content_type="multipart/form-data",
+        )
+        if upload.status_code != 200:
+            pytest.skip("docx parse not available in this environment")
+        fid = upload.get_json()["file_id"]
+
+        payload = {
+            "html": "<p>第一段原文</p><p>第二段保留</p>",
+            "comments": [
+                {
+                    "id": "comment-1",
+                    "author": "审阅人",
+                    "date": "2026-05-12T10:30:00Z",
+                    "text": "这里需要进一步说明",
+                    "anchor_text": "第一段原文",
+                }
+            ],
+        }
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "docx",
+                "file_id": fid,
+                "ws_source_path": "comment_save.docx",
+                "explicit": True,
+                "data": payload,
+            },
+        )
+        assert resp.status_code == 200
+
+        raw = client.get(f"/api/v1/workspace/raw/{fid}").data
+        with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+            names = archive.namelist()
+            assert "word/comments.xml" in names
+            comments_xml = archive.read("word/comments.xml").decode(
+                "utf-8", errors="ignore"
+            )
+            document_xml = archive.read("word/document.xml").decode(
+                "utf-8", errors="ignore"
+            )
+            rels_xml = archive.read("word/_rels/document.xml.rels").decode(
+                "utf-8", errors="ignore"
+            )
+            content_types_xml = archive.read("[Content_Types].xml").decode(
+                "utf-8", errors="ignore"
+            )
+
+        assert "这里需要进一步说明" in comments_xml
+        assert "审阅人" in comments_xml
+        assert "commentRangeStart" in document_xml
+        assert "commentReference" in document_xml
+        assert "comments.xml" in rels_xml
+        assert "/word/comments.xml" in content_types_xml
+
     def test_src_written_true_when_ws_path_provided(self, wa_client):
         """Response must include src_written=True when ws_source_path is given."""
         client, _, _ = wa_client
@@ -838,16 +1059,14 @@ class TestRawFileNoCacheHeaders:
 
 class TestSaveFlowJsFixes:
     """
-    Validates workspace-assistant.js contains all three save-flow fixes:
-      (a) State (tab, fsHandle, fileId, etc.) captured before any await
+    Validates the current workspace save runtime contains the save-flow fixes:
+      (a) Active tab and write handle are resolved before save writes
       (b) showSaveFilePicker called when no fsHandle exists (first save)
       (c) Cache-buster ?_=Date.now() on the /raw/ fetch URL
       (d) _isSaving guard with finally-block reset
     """
 
-    JS_PATH = (
-        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
-    )
+    JS_PATH = Path(__file__).parents[2] / "web" / "src" / "workspace" / "save.ts"
 
     @property
     def src(self) -> str:
@@ -856,27 +1075,30 @@ class TestSaveFlowJsFixes:
     # (a) pre-await state capture -----------------------------------------
 
     def test_save_tab_captured_before_await(self):
-        assert "_saveTab" in self.src, "saveFile must capture _saveTab before any await"
+        assert (
+            "const tab = _activeTab();" in self.src
+        ), "saveFile must resolve the active tab before saving"
 
     def test_save_fshandle_captured_before_await(self):
         assert (
-            "_saveFsHandle" in self.src
-        ), "saveFile must capture _saveFsHandle before any await"
+            "const fsHandle = (tab && tab.fsHandle) || _fsHandleMap.get(state.wsSourcePath || '') || null;"
+            in self.src
+        ), "saveFile must resolve the File System Access handle before writing"
 
     def test_save_file_id_captured_before_await(self):
         assert (
-            "_saveFileId" in self.src
-        ), "saveFile must capture _saveFileId before any await"
+            "if (!_ensureCanSave(tab, true)) return;" in self.src
+        ), "saveFile must validate the current file before any write"
 
     def test_save_file_type_captured_before_await(self):
         assert (
-            "_saveFileType" in self.src
-        ), "saveFile must capture _saveFileType before any await"
+            "file_type: state.fileType" in self.src
+        ), "auto-save payload must include the current file type"
 
     def test_save_ws_path_captured_before_await(self):
         assert (
-            "_saveWsPath" in self.src
-        ), "saveFile must capture _saveWsPath before any await"
+            "ws_source_path: state.wsSourcePath || null" in self.src
+        ), "auto-save payload must include the workspace source path"
 
     # (b) showSaveFilePicker on first save ---------------------------------
 
@@ -897,7 +1119,7 @@ class TestSaveFlowJsFixes:
 
     def test_handle_stored_on_tab_after_picker(self):
         assert (
-            "_saveTab.fsHandle = _saveFsHandle" in self.src
+            "if (tab) tab.fsHandle = fsHandle;" in self.src
         ), "Acquired fsHandle must be stored on the tab object for the next save"
 
     # (c) cache-buster on raw fetch ----------------------------------------
@@ -1402,7 +1624,7 @@ class TestPptxOpenFile:
 
 class TestEmbeddedModeRenderGuards:
     """
-    Validates that workspace-assistant.js contains all guards required for
+    Validates that the current workspace modules contain all guards required for
     reliable XLSX/PPTX rendering in embedded mode (#workspaceView starts
     hidden and transitions from display:none → flex before files are opened).
 
@@ -1411,13 +1633,34 @@ class TestEmbeddedModeRenderGuards:
     and should catch regressions introduced by future refactors.
     """
 
-    JS_PATH = (
-        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
+    STATE_PATH = Path(__file__).parents[2] / "web" / "src" / "workspace" / "state.ts"
+    FILE_OPEN_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "workspace" / "file-open.ts"
+    )
+    XSLX_EDITOR_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "editors" / "xlsx-editor.ts"
+    )
+    EMBEDDED_MODE_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "ui" / "embedded-mode.ts"
+    )
+    PPTX_EDITOR_PATH = (
+        Path(__file__).parents[2] / "web" / "src" / "editors" / "pptx-editor.ts"
     )
 
     @property
     def src(self) -> str:
-        return self.JS_PATH.read_text(encoding="utf-8")
+        return "\n".join(
+            [
+                self.STATE_PATH.read_text(encoding="utf-8"),
+                self.FILE_OPEN_PATH.read_text(encoding="utf-8"),
+                self.XSLX_EDITOR_PATH.read_text(encoding="utf-8"),
+                self.EMBEDDED_MODE_PATH.read_text(encoding="utf-8"),
+            ]
+        )
+
+    @property
+    def pptx_src(self) -> str:
+        return self.PPTX_EDITOR_PATH.read_text(encoding="utf-8")
 
     # ── Layout guard helper ────────────────────────────────────────────────
 
@@ -1425,7 +1668,7 @@ class TestEmbeddedModeRenderGuards:
         """_waitForEditorLayout must be defined — it is the central visibility guard."""
         assert (
             "_waitForEditorLayout" in self.src
-        ), "_waitForEditorLayout() is missing from workspace-assistant.js"
+        ), "_waitForEditorLayout() is missing from the workspace runtime"
 
     def test_wait_for_editor_layout_handles_xlsx(self):
         """Guard must cover xlsx container id."""
@@ -1438,6 +1681,22 @@ class TestEmbeddedModeRenderGuards:
         assert (
             "wa-pptx-editor" in self.src and "_waitForEditorLayout" in self.src
         ), "_waitForEditorLayout must reference 'wa-pptx-editor'"
+
+    def test_prime_editor_layout_helper_exists(self):
+        """xlsx/pptx shells must be pre-activated before waiting for layout."""
+        assert (
+            "export function _primeEditorLayout" in self.src
+        ), "workspace state runtime must define _primeEditorLayout()"
+
+    def test_prime_editor_layout_activates_hidden_shells(self):
+        """The priming helper must add the active class so hidden shells can size."""
+        src = self.src
+        helper_start = src.find("export function _primeEditorLayout")
+        helper_end = src.find("export function _waitForEditorLayout", helper_start)
+        helper_body = src[helper_start:helper_end]
+        assert (
+            "classList.add('active')" in helper_body
+        ), "_primeEditorLayout must activate the editor shell before waiting"
 
     def test_wait_for_editor_layout_timeout_resolve(self):
         """Guard must resolve (not reject) on timeout so editors receive a mount attempt."""
@@ -1453,12 +1712,9 @@ class TestEmbeddedModeRenderGuards:
     # ── Router.load guard ────────────────────────────────────────────────
 
     def test_router_load_awaits_layout_guard(self):
-        """The file-open path must await _waitForEditorLayout after toggleWorkspace."""
+        """The unified editor mount path must await _waitForEditorLayout."""
         src = self.src
-        # The actual file-open logic lives in _applyFileJson (called by Router.load)
-        fn_start = src.find("async function _applyFileJson")
-        if fn_start == -1:
-            fn_start = src.find("const Router = {")
+        fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoXlsxEditor()", fn_start)
         body = (
             src[fn_start : fn_end + 100]
@@ -1467,33 +1723,44 @@ class TestEmbeddedModeRenderGuards:
         )
         assert (
             "await _waitForEditorLayout" in body
-        ), "File-open path must await _waitForEditorLayout before creating editors"
+        ), "_mountEditor must await _waitForEditorLayout before creating editors"
 
     def test_router_load_guard_before_xlsx_editor(self):
         """The guard await must appear before new KotoXlsxEditor() in _applyFileJson."""
         src = self.src
-        # The actual file-open logic lives in _applyFileJson (called by Router.load)
-        fn_start = src.find("async function _applyFileJson")
-        if fn_start == -1:
-            fn_start = src.find("const Router = {")
-        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        fn_start = src.find("async function _mountEditor")
+        fn_end = src.find("new (window as any).KotoXlsxEditor()", fn_start)
         body = (
             src[fn_start : fn_end + 100]
             if fn_end != -1
             else src[fn_start : fn_start + 3000]
         )
         guard_pos = body.find("await _waitForEditorLayout")
-        xlsx_pos = body.find("new KotoXlsxEditor()")
+        xlsx_pos = body.find("new (window as any).KotoXlsxEditor()")
         assert (
             guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos
         ), "_waitForEditorLayout await must precede new KotoXlsxEditor()"
 
+    def test_router_load_primes_layout_before_waiting(self):
+        """The file-open path must prime xlsx/pptx shells before waiting for size."""
+        src = self.src
+        fn_start = src.find("async function _mountEditor")
+        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        body = (
+            src[fn_start : fn_end + 120]
+            if fn_end != -1
+            else src[fn_start : fn_start + 3200]
+        )
+        prime_pos = body.find("_primeEditorLayout(tab.fileType)")
+        guard_pos = body.find("await _waitForEditorLayout(tab.fileType)")
+        assert (
+            prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos
+        ), "_mountEditor must prime the editor shell before waiting for layout"
+
     def test_router_load_guard_before_pptx_editor(self):
         """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
         src = self.src
-        fn_start = src.find("async function _applyFileJson")
-        if fn_start == -1:
-            fn_start = src.find("const Router = {")
+        fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoPptxEditor()", fn_start)
         body = (
             src[fn_start : fn_end + 100]
@@ -1509,21 +1776,37 @@ class TestEmbeddedModeRenderGuards:
     # ── _switchToTab guard ───────────────────────────────────────────────
 
     def test_switch_to_tab_awaits_layout_guard(self):
-        """_switchToTab must also await _waitForEditorLayout for tab-switch renders."""
+        """_switchToTab must also route tab-switch renders through _mountEditor."""
         src = self.src
-        tab_start = src.find("async function _switchToTab")
-        tab_end = src.find("\n  }", tab_start) + 4
+        tab_start = src.find("async function _switchToTabImpl")
+        tab_end = src.find("function _highlightActiveFile", tab_start)
         tab_body = src[tab_start:tab_end]
         assert (
-            "await _waitForEditorLayout" in tab_body
-        ), "_switchToTab must await _waitForEditorLayout before creating editors"
+            "await _mountEditor(tab, tab.serverData);" in tab_body
+        ), "_switchToTab must use _mountEditor so layout guards run before creating editors"
+
+    def test_switch_to_tab_primes_layout_before_waiting(self):
+        """Tab switches must use the shared mount path that primes before waiting."""
+        src = self.src
+        mount_start = src.find("async function _mountEditor")
+        mount_end = src.find("new KotoXlsxEditor()", mount_start)
+        tab_body = (
+            src[mount_start : mount_end + 120]
+            if mount_end != -1
+            else src[mount_start : mount_start + 2400]
+        )
+        prime_pos = tab_body.find("_primeEditorLayout(tab.fileType)")
+        guard_pos = tab_body.find("await _waitForEditorLayout(tab.fileType)")
+        assert (
+            prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos
+        ), "_mountEditor must prime the editor shell before waiting for layout"
 
     # ── KotoXlsxEditor size-polling ──────────────────────────────────────
 
     def test_xlsx_editor_polls_for_non_zero_size(self):
         """KotoXlsxEditor.render must use requestAnimationFrame before calling KotoSheetsAPI.create."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_start = src.find("class KotoXlsxEditor")
         xlsx_end = src.find("\n  class Koto", xlsx_start)
         xlsx_body = src[xlsx_start:xlsx_end]
         assert (
@@ -1536,7 +1819,7 @@ class TestEmbeddedModeRenderGuards:
     def test_xlsx_editor_has_mount_deadline(self):
         """KotoXlsxEditor.render must have error handling for create failures."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_start = src.find("class KotoXlsxEditor")
         xlsx_end = src.find("\n  class Koto", xlsx_start)
         xlsx_body = src[xlsx_start:xlsx_end]
         assert (
@@ -1546,7 +1829,7 @@ class TestEmbeddedModeRenderGuards:
     def test_xlsx_editor_resize_nudge_present(self):
         """KotoXlsxEditor.render must pass string container ID to KotoSheetsAPI.create."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor {")
+        xlsx_start = src.find("class KotoXlsxEditor")
         xlsx_end = src.find("\n  class Koto", xlsx_start)
         xlsx_body = src[xlsx_start:xlsx_end]
         assert (
@@ -1557,9 +1840,9 @@ class TestEmbeddedModeRenderGuards:
 
     def test_pptx_editor_polls_for_slide_area_width(self):
         """KotoPptxEditor.render must poll clientWidth before calling _renderSlide(0)."""
-        src = self.src
-        pptx_start = src.find("class KotoPptxEditor {")
-        pptx_end = src.find("\n  class Koto", pptx_start)
+        src = self.pptx_src
+        pptx_start = src.find("class KotoPptxEditor")
+        pptx_end = len(src)
         pptx_body = src[pptx_start:pptx_end]
         assert (
             "_tryPptxRender" in pptx_body or "_pptxMountDeadline" in pptx_body
@@ -1567,9 +1850,9 @@ class TestEmbeddedModeRenderGuards:
 
     def test_pptx_editor_has_mount_deadline(self):
         """KotoPptxEditor must have a deadline to prevent infinite polling."""
-        src = self.src
-        pptx_start = src.find("class KotoPptxEditor {")
-        pptx_end = src.find("\n  class Koto", pptx_start)
+        src = self.pptx_src
+        pptx_start = src.find("class KotoPptxEditor")
+        pptx_end = len(src)
         pptx_body = src[pptx_start:pptx_end]
         assert (
             "_pptxMountDeadline" in pptx_body or "Date.now()" in pptx_body
@@ -1580,8 +1863,8 @@ class TestEmbeddedModeRenderGuards:
     def test_open_in_main_view_reflows_xlsx(self):
         """openInMainView must trigger a ResizeObserver nudge for active XLSX editors."""
         src = self.src
-        oim_start = src.find("window.WA.openInMainView = function")
-        oim_end = src.find("\n  };", oim_start) + 4
+        oim_start = src.find("export function openInMainView")
+        oim_end = src.find("export function closeInMainView", oim_start)
         oim_body = src[oim_start:oim_end]
         assert (
             "wa-xlsx-sheet" in oim_body
@@ -1593,8 +1876,8 @@ class TestEmbeddedModeRenderGuards:
     def test_open_in_main_view_reflows_pptx(self):
         """openInMainView must trigger a re-render for active PPTX editors."""
         src = self.src
-        oim_start = src.find("window.WA.openInMainView = function")
-        oim_end = src.find("\n  };", oim_start) + 4
+        oim_start = src.find("export function openInMainView")
+        oim_end = src.find("export function closeInMainView", oim_start)
         oim_body = src[oim_start:oim_end]
         assert (
             "_renderSlide" in oim_body

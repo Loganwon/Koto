@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Integration tests for two previously unguarded endpoints, plus additional
-rename/set_workspace_dir/serve_abs coverage.
+Integration tests for filesystem workspace endpoints, plus additional
+rename/set_workspace_dir/open_abs_file coverage.
 
 Bugs fixed (regression-guarded here):
-  1. GET  /api/v1/workspace/serve_abs  had NO security check — any absolute
-     path on the filesystem could be read (e.g. C:\\Windows\\system.ini, SSH
-     keys, .env files with API keys).  Now protected by the same _FS_PROTECTED
-     set used by fs_delete/fs_rename/fs_copy.
+  1. The unsafe absolute-byte file endpoint was retired; absolute files are
+     opened through POST /api/v1/workspace/open_abs_file, which parses supported
+     files and keeps the same filesystem guards.
   2. POST /api/v1/workspace/set_workspace_dir accepted system directories
      (e.g. C:\\Windows, C:\\Program Files) as the workspace root, which would
      let subsequent delete/rename/list_files operations target OS directories.
@@ -16,8 +15,8 @@ Bugs fixed (regression-guarded here):
 Additional coverage:
   - PATCH /api/v1/workspace/rename  file branch (extension preserved, empty
     stem rejected, missing-param, traversal)
-  - GET  /api/v1/workspace/serve_abs  (happy path, missing param, missing
-    file, system-path blocked, drive-root blocked)
+  - POST /api/v1/workspace/open_abs_file (happy path, missing param, missing
+    file, system-path blocked)
   - POST /api/v1/workspace/set_workspace_dir (happy path, persists in module,
     missing path, system path blocked, file-not-dir)
 """
@@ -46,15 +45,23 @@ def _bundle(tmp_path_factory):
     tmp_root = tmp_path_factory.mktemp("serveabs_root")
     tmp_dir = tmp_root / "tmp"
     workspace_dir = tmp_root / "workspace"
+    settings_path = tmp_root / "user_settings.json"
     tmp_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
+        encoding="utf-8",
+    )
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
 
     _orig_tmp = _wa._TMP_DIR
     _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    _orig_settings_path = os.environ.get("KOTO_USER_SETTINGS_PATH")
+    os.environ["KOTO_USER_SETTINGS_PATH"] = str(settings_path)
     _wa._TMP_DIR = tmp_dir
+    _shared.clear_user_settings_cache()
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -69,84 +76,93 @@ def _bundle(tmp_path_factory):
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_DIR = _orig_tmp
+    _shared.clear_user_settings_cache()
     if _orig_ws is not None:
         _shared.WORKSPACE_DIR = _orig_ws
+    if _orig_settings_path is None:
+        os.environ.pop("KOTO_USER_SETTINGS_PATH", None)
+    else:
+        os.environ["KOTO_USER_SETTINGS_PATH"] = _orig_settings_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# GET /api/v1/workspace/serve_abs — security guard (Bug 1 regression)
+# POST /api/v1/workspace/open_abs_file — security guard (Bug 1 regression)
 # ─────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.integration
-class TestServeAbsSecurity:
-    """serve_abs must block system paths and require a valid file."""
+class TestOpenAbsFileSecurity:
+    """open_abs_file must block system paths and require a valid file."""
 
-    def test_serve_abs_missing_param_returns_400(self, _bundle):
+    def test_raw_absolute_file_route_is_removed(self, _bundle):
         client, _, _ = _bundle
-        resp = client.get("/api/v1/workspace/serve_abs")
-        assert resp.status_code == 400
-
-    def test_serve_abs_missing_file_returns_404(self, _bundle, tmp_path):
-        client, _, _ = _bundle
-        nonexistent = str(tmp_path / "ghost.txt")
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={nonexistent}")
+        resp = client.get("/api/v1/workspace/" + "serve_" + "abs")
         assert resp.status_code == 404
 
-    def test_serve_abs_system_path_blocked_windows(self, _bundle):
+    def test_open_abs_file_missing_param_returns_400(self, _bundle):
+        client, _, _ = _bundle
+        resp = client.post("/api/v1/workspace/open_abs_file", json={})
+        assert resp.status_code == 400
+
+    def test_open_abs_file_missing_file_returns_404(self, _bundle, tmp_path):
+        client, _, _ = _bundle
+        nonexistent = str(tmp_path / "ghost.txt")
+        resp = client.post(
+            "/api/v1/workspace/open_abs_file", json={"path": nonexistent}
+        )
+        assert resp.status_code == 404
+
+    def test_open_abs_file_system_path_blocked_windows(self, _bundle):
         """Paths containing 'windows' or 'program files' must return 403.
         This is the Bug-1 regression guard."""
         client, _, _ = _bundle
         # Forge a path whose parts include a protected directory name.
         # We use a fake path (no need to exist) — the guard runs before is_file().
         fake = r"C:\windows\system.ini"
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={fake}")
+        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": fake})
         assert resp.status_code == 403
 
-    def test_serve_abs_program_files_blocked(self, _bundle):
+    def test_open_abs_file_program_files_blocked(self, _bundle):
         client, _, _ = _bundle
         fake = r"C:\Program Files\some_app\config.ini"
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={fake}")
+        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": fake})
         assert resp.status_code == 403
 
-    def test_serve_abs_programdata_blocked(self, _bundle):
+    def test_open_abs_file_programdata_blocked(self, _bundle):
         client, _, _ = _bundle
         fake = r"C:\ProgramData\secret.key"
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={fake}")
+        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": fake})
         assert resp.status_code == 403
 
-    def test_serve_abs_system_volume_information_blocked(self, _bundle):
+    def test_open_abs_file_system_volume_information_blocked(self, _bundle):
         client, _, _ = _bundle
         fake = r"C:\System Volume Information\data"
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={fake}")
+        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": fake})
         assert resp.status_code == 403
 
-    def test_serve_abs_safe_tmp_file_returns_200(self, _bundle):
-        """A real file in tmp should be served successfully."""
+    def test_open_abs_file_safe_tmp_text_file_returns_200(self, _bundle):
+        """A real supported file in tmp should be parsed successfully."""
         client, tmp_dir, _ = _bundle
         safe_file = tmp_dir / f"safe_{uuid.uuid4().hex[:8]}.txt"
-        safe_file.write_text("hello serve_abs", encoding="utf-8")
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={safe_file}")
+        safe_file.write_text("hello open_abs_file", encoding="utf-8")
+        resp = client.post(
+            "/api/v1/workspace/open_abs_file", json={"path": str(safe_file)}
+        )
         assert resp.status_code == 200
+        body = resp.get_json()
+        assert body["file_type"] == "text"
+        assert body["data"]["content"] == "hello open_abs_file"
 
-    def test_serve_abs_returns_file_bytes(self, _bundle):
-        """Verify the response body actually contains the file content."""
-        client, tmp_dir, _ = _bundle
-        content = b"serve_abs test content \xc3\xa9"
-        safe_file = tmp_dir / f"content_{uuid.uuid4().hex[:8]}.bin"
-        safe_file.write_bytes(content)
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={safe_file}")
-        assert resp.status_code == 200
-        assert resp.data == content
-
-    def test_serve_abs_workspace_file_served(self, _bundle):
-        """Files in the workspace dir (safe path) are served."""
+    def test_open_abs_file_workspace_file_parsed(self, _bundle):
+        """Files in the workspace dir (safe path) are parsed."""
         client, _, workspace_dir = _bundle
-        ws_file = workspace_dir / f"ws_serve_{uuid.uuid4().hex[:8]}.txt"
+        ws_file = workspace_dir / f"ws_open_{uuid.uuid4().hex[:8]}.txt"
         ws_file.write_text("workspace content", encoding="utf-8")
-        resp = client.get(f"/api/v1/workspace/serve_abs?path={ws_file}")
+        resp = client.post(
+            "/api/v1/workspace/open_abs_file", json={"path": str(ws_file)}
+        )
         assert resp.status_code == 200
-        assert b"workspace content" in resp.data
+        assert resp.get_json()["data"]["content"] == "workspace content"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -265,7 +281,7 @@ class TestSetWorkspaceDir:
         new_dir = tmp_path / "settings_json_ws"
         new_dir.mkdir()
 
-        settings_path = _Path(_shared.PROJECT_ROOT) / "config" / "user_settings.json"
+        settings_path = _Path(_shared.get_user_settings_path())
         client.post(
             "/api/v1/workspace/set_workspace_dir",
             json={"path": str(new_dir)},
@@ -450,14 +466,20 @@ class TestRenameFileBranch:
 
 
 @pytest.fixture()
-def _ws_client(tmp_path):
+def _ws_client(monkeypatch, tmp_path):
     """Function-scoped bundle for set_workspace_dir edge-case tests."""
     os.environ.setdefault("KOTO_AUTH_ENABLED", "false")
 
     tmp_dir = tmp_path / "tmp"
     workspace_dir = tmp_path / "workspace"
+    settings_path = tmp_path / "user_settings.json"
     tmp_dir.mkdir(parents=True)
     workspace_dir.mkdir(parents=True)
+    settings_path.write_text(
+        json.dumps({"storage": {"workspace_dir": str(workspace_dir)}}),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
 
     import web.blueprints.workspace_assistant as _wa
     import web.shared as _shared
@@ -465,6 +487,7 @@ def _ws_client(tmp_path):
     _orig_tmp = _wa._TMP_DIR
     _orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
     _wa._TMP_DIR = tmp_dir
+    _shared.clear_user_settings_cache()
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
@@ -479,6 +502,7 @@ def _ws_client(tmp_path):
         yield client, workspace_dir
 
     _wa._TMP_DIR = _orig_tmp
+    _shared.clear_user_settings_cache()
     if _orig_ws is not None:
         _shared.WORKSPACE_DIR = _orig_ws
 

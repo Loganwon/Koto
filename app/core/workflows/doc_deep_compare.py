@@ -165,7 +165,7 @@ class DocDeepCompare(WorkflowExecutor):
         try:
             import uuid
 
-            from app.core.file.file_parser import parse_pdf
+            from app.core.file.parsers.pdf_parser import parse_pdf
 
             result = parse_pdf(file_path, str(uuid.uuid4()))
             return result.get("text", "")

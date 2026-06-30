@@ -174,51 +174,15 @@ class TestFileFavorites:
 
 @pytest.mark.integration
 class TestFileOpenEndpoint:
-    """Tests for /api/files/open (used by "系统打开" button)."""
+    """Native OS file opening through FileHub is retired."""
 
-    def test_open_file_missing_path_returns_400(self, full_client):
+    def test_open_file_route_removed(self, full_client):
         resp = full_client.post(
-            "/api/files/open",
+            "/api/files/" + "open",
             json={},
             content_type="application/json",
         )
-        data = resp.get_json()
-        assert resp.status_code == 400
-        assert "error" in data
-
-    def test_open_nonexistent_file_returns_404(self, full_client):
-        resp = full_client.post(
-            "/api/files/open",
-            json={"path": "/nonexistent/path/that/does/not/exist.txt"},
-            content_type="application/json",
-        )
-        data = resp.get_json()
         assert resp.status_code == 404
-        assert "error" in data
-
-    def test_open_existing_file_returns_ok(self, full_client, tmp_path, monkeypatch):
-        """A file that exists on disk should be opened (os.startfile mocked)."""
-        test_file = tmp_path / "sample.txt"
-        test_file.write_text("hello")
-
-        opened = []
-
-        def fake_startfile(path):  # noqa: ANN001
-            opened.append(path)
-
-        import os as _os
-
-        monkeypatch.setattr(_os, "startfile", fake_startfile, raising=False)
-
-        resp = full_client.post(
-            "/api/files/open",
-            json={"path": str(test_file)},
-            content_type="application/json",
-        )
-        data = resp.get_json()
-        assert resp.status_code == 200
-        assert data.get("status") == "ok"
-        assert len(opened) == 1
 
 
 @pytest.mark.integration
@@ -269,123 +233,68 @@ class TestFileBrowseEndpoint:
         assert "a.txt" in names and "b.md" in names
 
 
-class TestFilehubJSSource:
-    """Static analysis: verify the JS source has the correct quoting fixes."""
+class TestFilehubLegacyUISource:
+    """Static analysis: the retired FileHub modal UI must not return via old app.js."""
 
     @pytest.fixture(scope="class")
-    def app_js(self):
+    def frontend_sources(self):
         from pathlib import Path
 
-        js_path = (
-            Path(__file__).resolve().parents[2] / "web" / "static" / "js" / "app.js"
-        )
-        return js_path.read_text(encoding="utf-8", errors="replace")
+        root = Path(__file__).resolve().parents[2]
+        src_parts = []
+        for path in [
+            root / "web" / "templates" / "index.html",
+            root / "web" / "src" / "bundles" / "app.ts",
+            root / "web" / "src" / "app" / "main.ts",
+            root / "web" / "static" / "css" / "inline-extracted.css",
+        ]:
+            src_parts.append(path.read_text(encoding="utf-8", errors="replace"))
+        return "\n".join(src_parts)
 
-    def test_fh_render_uses_amp_quot_not_raw_json_stringify(self, app_js):
-        """_fhRenderFiles must not embed raw JSON.stringify() inside onclick attrs."""
-        # After the fix, onclick values use pathArg / copyArg variables (with &quot;)
-        assert (
-            "replace(/\"/g, '&quot;')" in app_js
-        ), "_fhRenderFiles: pathArg must apply .replace(/\"/g, '&quot;') encoding"
+    def test_legacy_app_js_removed(self):
+        from pathlib import Path
 
-    def test_fh_render_no_bare_json_stringify_in_onclick(self, app_js):
-        """There must be no raw JSON.stringify inside an onclick template literal."""
+        root = Path(__file__).resolve().parents[2]
+        assert not (root / "web" / "static" / "js" / "app.js").exists()
+
+    def test_filehub_modal_entry_removed(self, frontend_sources):
+        assert "openFileHubModal" not in frontend_sources
+        assert "filehubModal" not in frontend_sources
+        assert "fhNavSwitch" not in frontend_sources
+
+    def test_no_inline_filehub_json_handlers(self, frontend_sources):
         import re
 
-        # Pattern: onclick="...${JSON.stringify(... which breaks HTML attr parsing
-        bad = re.search(
-            r'onclick="\$\{[^}]*JSON\.stringify',
-            app_js,
-        )
+        bad = re.search(r'onclick="\$\{[^}]*JSON\.stringify', frontend_sources)
         assert (
             bad is None
-        ), f"Found unescaped JSON.stringify in onclick attribute at: {bad.group()}"
+        ), f"Found unescaped JSON.stringify in inline onclick: {bad.group()}"
 
-    def test_filehub_modal_id_lowercase(self, app_js):
-        """_fhOpenInAssistant must reference 'filehubModal' (lowercase h), not 'fileHubModal'."""
-        assert (
-            "'filehubModal'" in app_js
-        ), "_fhOpenInAssistant must use getElementById('filehubModal')"
-        assert (
-            "'fileHubModal'" not in app_js
-        ), "Found wrong ID 'fileHubModal' — should be 'filehubModal'"
-
-    def test_open_in_assistant_uses_wa_open(self, app_js):
-        """_fhOpenInAssistant must use WA.openInMainView / WA.openRecentFile, not the Univer editor API."""
-        assert (
-            "WA.openInMainView" in app_js
-        ), "_fhOpenInAssistant must call WA.openInMainView()"
-        assert (
-            "WA.openRecentFile" in app_js
-        ), "_fhOpenInAssistant must call WA.openRecentFile(path)"
-
-    def test_open_in_assistant_no_univer_import(self, app_js):
-        """_fhOpenInAssistant must NOT call the Univer editor import API."""
-        # Check that the import_path fetch call is gone from _fhOpenInAssistant
-        import re
-
-        # Look for the old pattern: fetch('/api/editor/docs/import_path' inside _fhOpenInAssistant
-        # We search the function body specifically
-        fn_match = re.search(
-            r"async function _fhOpenInAssistant\(path\)\s*\{(.+?)\n\}",
-            app_js,
-            re.DOTALL,
-        )
-        assert fn_match, "_fhOpenInAssistant function not found in app.js"
-        fn_body = fn_match.group(1)
-        assert (
-            "/api/editor/docs/import_path" not in fn_body
-        ), "_fhOpenInAssistant must not call Univer editor import API"
+    def test_filehub_no_univer_import_fallback(self, frontend_sources):
+        assert "/api/editor/docs/import_path" not in frontend_sources
 
 
 class TestFilehubHTMLSource:
-    """Static analysis: verify the HTML template has correct modal layout fixes."""
+    """Static analysis: verify the old modal layout has been removed with app.js."""
 
     @pytest.fixture(scope="class")
     def index_html(self):
         from pathlib import Path
 
-        html_path = (
-            Path(__file__).resolve().parents[2] / "web" / "templates" / "index.html"
-        )
-        return html_path.read_text(encoding="utf-8", errors="replace")
-
-    def test_modal_has_fixed_height(self, index_html):
-        """fh-app must use height: to stay consistent between tabs."""
-        import re
-
-        # New v2 design uses .fh-app with height in CSS
-        fh_app_rule = re.search(
-            r"\.fh-app\s*\{([^}]*)\}",
-            index_html,
-        )
-        assert fh_app_rule, "Could not find .fh-app CSS rule in index.html"
-        fh_app_style = fh_app_rule.group(1)
-        assert "height:" in fh_app_style or "height: " in fh_app_style, (
-            ".fh-app must have an explicit 'height:' property to keep the panel "
-            "a consistent size when switching tabs"
+        root = Path(__file__).resolve().parents[2]
+        html_path = root / "web" / "templates" / "index.html"
+        css_path = root / "web" / "static" / "css" / "inline-extracted.css"
+        return "\n".join(
+            [
+                html_path.read_text(encoding="utf-8", errors="replace"),
+                css_path.read_text(encoding="utf-8", errors="replace"),
+            ]
         )
 
-    def test_filelist_no_conflicting_max_height(self, index_html):
-        """#fhFileList CSS must NOT have max-height (conflicts with flex:1 expansion)."""
-        import re
+    def test_filehub_modal_css_removed(self, index_html):
+        assert ".fh-app" not in index_html
+        assert "#fhFileList" not in index_html
+        assert "filehubModal" not in index_html
 
-        # Find the style block rule for #fhFileList
-        fhlist_rule = re.search(
-            r"#fhFileList\s*\{([^}]*)\}",
-            index_html,
-        )
-        assert (
-            fhlist_rule
-        ), "#fhFileList style rule not found in index.html <style> block"
-        rule_body = fhlist_rule.group(1)
-        assert "max-height" not in rule_body, (
-            "#fhFileList must not set max-height — it conflicts with flex:1 and "
-            "prevents the modal from filling its fixed height"
-        )
-
-    def test_modal_overlay_uses_flex_centering(self, index_html):
-        """modal-overlay CSS must use flexbox centering (align-items + justify-content center)."""
-        assert (
-            "align-items: center" in index_html or "align-items:center" in index_html
-        ), "modal-overlay must have align-items:center for vertical centering"
+    def test_general_modal_overlay_still_centers(self, index_html):
+        assert "align-items: center" in index_html or "align-items:center" in index_html

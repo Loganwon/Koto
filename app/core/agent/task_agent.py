@@ -1,11 +1,16 @@
 # ══════════════════════════════════════════════════════════════
-# task_agent.py — Dynamic AI Task Engine for Koto File Assistant
+# task_agent.py — Generic tool-using task engine for nested skill execution
 #
 # Replaces hardcoded workflow executors with an LLM-driven
 # plan → execute → deliver loop. The model freely composes
-# tools from task_tools.py to accomplish user tasks on files.
+# tools from task_tools.py to accomplish tool-using tasks.
 #
-# Inspired by OpenClaw's architecture:
+# Current role:
+#   - used by skill_runner.py for nested skill execution
+#   - retained for skill/tool workflows outside the whitebox file-task runtime
+#   - NOT the active workspace-assistant file-task runtime
+#
+# Koto task-agent architecture:
 #   - LLM IS the planner (no separate planning module)
 #   - Skills = prompt injection, not hardcoded logic
 #   - Streaming execution with approval gates
@@ -22,8 +27,18 @@ import uuid
 from pathlib import Path
 from typing import Any, Dict, Generator, List, Optional
 
+from app.core.agent.file_task_result_markers import (
+    KOTO_CREATED_RESULT_MARKER,
+    KOTO_MODIFIED_RESULT_MARKER,
+    fallback_key_for_marker,
+    result_key_for_marker,
+)
 from app.core.llm.model_mode import normalize_model_mode
-from app.core.shared.tool_parser import stringify_tool_result
+from app.core.llm.model_selection import (
+    get_configured_cloud_model,
+    get_provider_for_model_mode,
+)
+from app.core.shared.tool_parser import parse_task_tool_calls, stringify_tool_result
 
 logger = logging.getLogger(__name__)
 
@@ -34,18 +49,40 @@ _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"
 _REPEATED_TOOL_BATCH_MESSAGE = (
     "检测到模型重复请求同一组工具，已自动停止以避免重复处理。"
 )
-_KOTO_CREATED_MARKER = "__koto_created__:"
+
+
+def _extract_koto_paths(result_str: Any, marker: str) -> List[str]:
+    text = str(result_str or "")
+
+    try:
+        payload = json.loads(text)
+    except Exception:
+        payload = None
+
+    if isinstance(payload, dict):
+        values = payload.get(result_key_for_marker(marker))
+        if not isinstance(values, list):
+            values = payload.get(fallback_key_for_marker(marker))
+        if isinstance(values, list):
+            return [str(item) for item in values if str(item or "").strip()]
+
+    idx = text.rfind(marker)
+    if idx == -1:
+        return []
+    try:
+        return json.loads(text[idx + len(marker) :])
+    except Exception:
+        return []
 
 
 def _extract_koto_created_paths(result_str: str) -> List[str]:
     """Parse __koto_created__:[...] marker appended by run_python_in_sandbox."""
-    idx = result_str.rfind(_KOTO_CREATED_MARKER)
-    if idx == -1:
-        return []
-    try:
-        return json.loads(result_str[idx + len(_KOTO_CREATED_MARKER) :])
-    except Exception:
-        return []
+    return _extract_koto_paths(result_str, KOTO_CREATED_RESULT_MARKER)
+
+
+def _extract_koto_modified_paths(result_str: str) -> List[str]:
+    """Parse __koto_modified__:[...] marker appended by run_python_in_sandbox."""
+    return _extract_koto_paths(result_str, KOTO_MODIFIED_RESULT_MARKER)
 
 
 def _sample_context_text(text: Any, limit: int) -> str:
@@ -58,6 +95,74 @@ def _sample_context_text(text: Any, limit: int) -> str:
     if tail <= 0:
         return content[:limit]
     return content[:head] + marker + content[-tail:]
+
+
+def _extract_tool_error_text(result_str: Any) -> str:
+    text = str(result_str or "").strip()
+    if not text:
+        return ""
+
+    try:
+        payload = json.loads(text)
+    except Exception:
+        payload = None
+
+    if isinstance(payload, dict):
+        error_text = str(payload.get("error") or "").strip()
+        if error_text:
+            return error_text
+
+    for prefix in ("Error:", "Sandbox error:", "[error]"):
+        if text.startswith(prefix):
+            return text[len(prefix) :].strip() or text
+
+    marker_idx = text.rfind("\n[error]")
+    if marker_idx != -1:
+        tail = text[marker_idx + 1 :].strip()
+        return tail[len("[error]") :].strip() or tail
+
+    inline_error_idx = text.find("[error]")
+    if inline_error_idx != -1:
+        tail = text[inline_error_idx + len("[error]") :].strip()
+        if tail:
+            return tail
+
+    return ""
+
+
+def _build_failed_tool_feedback(failures: List[Dict[str, str]]) -> str:
+    if not failures:
+        return ""
+
+    lines = [
+        "上一轮工具调用失败。你必须先理解失败原因，再决定下一步。",
+        "不要重复完全相同的工具调用、参数或代码。",
+        "如果要重试，必须明确修正点，并改动参数、代码或工具选择。",
+        "如果已有专用写入工具适合当前任务，优先改用专用工具，不要继续盲目重复 run_python_code。",
+        "",
+        "失败详情:",
+    ]
+    for index, item in enumerate(failures[:3], start=1):
+        tool_name = str(item.get("tool_name") or "tool")
+        error_text = str(item.get("error") or "未知错误")
+        lines.append(f"{index}. {tool_name}: {error_text}")
+        args_preview = str(item.get("args_preview") or "").strip()
+        if args_preview:
+            lines.append(f"   参数摘要: {args_preview}")
+    return "\n".join(lines)
+
+
+def _summarize_failed_tool_batch(failures: List[Dict[str, str]]) -> str:
+    if not failures:
+        return ""
+
+    parts = []
+    for item in failures[:2]:
+        tool_name = str(item.get("tool_name") or "tool")
+        error_text = str(item.get("error") or "未知错误")
+        short_error = error_text if len(error_text) <= 80 else error_text[:80] + "..."
+        parts.append(f"{tool_name}: {short_error}")
+    return "；".join(parts)
 
 
 # ── SSE event builders (compatible with workflow_engine format) ────────────
@@ -109,13 +214,15 @@ def sse_tool_call(step_id: str, tool_name: str, tool_args: dict) -> str:
     )
 
 
-def sse_tool_result(step_id: str, tool_name: str, result_preview: str) -> str:
+def sse_tool_result(
+    step_id: str, tool_name: str, result_preview: str, max_len: int = 500
+) -> str:
     return _sse(
         {
             "type": "tool_result",
             "step_id": step_id,
             "tool_name": tool_name,
-            "result_preview": result_preview[:500],
+            "result_preview": result_preview[:max_len],
         }
     )
 
@@ -216,6 +323,7 @@ _SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及
 **文件写入:**
 - `write_sheet_data(path, sheet_name?, updates)` — 写入 Excel 单元格（自动备份）
 - `write_docx_content(path, paragraphs)` — 写入 Word 段落
+- `insert_image_into_docx(path, image_path, title?, caption?, width_inches?)` — 将图表/图片作为真实 Word 图片插入 DOCX
 - `insert_excel_as_docx_table(source_path, target_path, sheet_name?, table_title?)` — 将 Excel 工作表作为真实 Word 表格插入 DOCX
 - `create_file(path, content)` — 创建新文件
 - `copy_file(source, destination)` — 复制文件
@@ -237,9 +345,11 @@ _SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及
 5. 每一步都给用户清晰的进展说明
 6. 如果任务不明确，先用已有工具探索文件内容，然后再决定具体做法
 7. 当任务要求把 Excel 数据写入 Word 新表格时，优先使用 `insert_excel_as_docx_table`
-8. 对结果文件负责：完成写入后，必须确认目标文件已经更新，并在最终答复中明确说明修改的是哪个文件
-9. 同一轮里不要对完全相同的工具参数重复调用同一个工具；如果某个写入工具已经成功完成，下一步应校验结果或结束，而不是再次重复写入
-10. 所有写入文件的内容必须是基于实际任务数据生成的真实内容；严禁使用任何占位符、示例文本或模板内容（如"内容示例""请替换为实际内容""XX此处填写YY"等）——没有数据时先调用读取工具获取，再写入"""
+8. 当任务要求把图表或图片加入 Word/DOCX 时，优先使用 `insert_image_into_docx`；如需先制图，先用 `run_python_code` 生成真实图片文件，再插入 DOCX，不要用 `write_docx_content` 以文字代替图片
+9. 生成中文图表时，优先配置 matplotlib 中文字体候选（`Microsoft YaHei`、`SimHei`、`Noto Sans CJK SC`、`WenQuanYi Micro Hei`、`DejaVu Sans`），并用 `plt.savefig(..., dpi=220, bbox_inches='tight')` 保存
+10. 对结果文件负责：完成写入后，必须确认目标文件已经更新，并在最终答复中明确说明修改的是哪个文件
+11. 同一轮里不要对完全相同的工具参数重复调用同一个工具；如果某个写入工具已经成功完成，下一步应校验结果或结束，而不是再次重复写入
+12. 所有写入文件的内容必须是基于实际任务数据生成的真实内容；严禁使用任何占位符、示例文本或模板内容（如"内容示例""请替换为实际内容""XX此处填写YY"等）——没有数据时先调用读取工具获取，再写入"""
 
 
 _LIVE_UPDATE_PROMPT = """
@@ -269,12 +379,19 @@ _LOCAL_SYSTEM_PROMPT = """你是 Koto 文件助手（本地模式）。
 
 ## 工具使用规则
 
-1. 优先调用 `parse_file_to_text` 或 `read_docx_content` 读取文件，再决定如何修改
+1. 优先调用 `parse_file_to_text`、`read_docx_content` 或 `read_sheet_data` 读取文件，再决定如何修改
 2. 对文件的所有修改必须通过工具完成并落盘；如需操作 PPTX/PDF 等，使用 `run_python_code` 编写 python-pptx 代码执行
 3. **严禁新建文件**：所有修改必须写回原始文件路径，不能另存为新文件（如 _优化版、_updated 等）
 4. 每步给用户简洁的进度说明
 5. 写入工具执行成功后确认结果，不要重复写入同一文件
-6. 如果文件内容不足以完成任务，先调用读取工具获取，再写入；严禁使用占位符或示例内容"""
+6. 如果文件内容不足以完成任务，先调用读取工具获取，再写入；严禁使用占位符或示例内容
+7. 当任务是把 Excel/XLSX 数据加入 Word/DOCX 时，默认目标仍是生成真实 Word 表格；优先调用 `insert_excel_as_docx_table` 完成表格落盘。
+8. 当任务要求把图表或图片加入 Word/DOCX 时，优先调用 `insert_image_into_docx`；如果需要先生成图表，先用 `run_python_code` 产出真实图片文件，再把图片写回目标文档；不要把图片描述文字写进 Word 代替真实插图
+9. 生成中文图表时，优先配置 matplotlib 中文字体候选（`Microsoft YaHei`、`SimHei`、`Noto Sans CJK SC`、`WenQuanYi Micro Hei`、`DejaVu Sans`），并用 `plt.savefig(..., dpi=220, bbox_inches='tight')` 保存
+10. 如果用户明确要求“整理、摘要、分析、结论、说明”等文字结果，先用 `write_docx_content` 把基于真实表格数据生成的摘要/结论写入目标文档，再按需调用一次 `insert_excel_as_docx_table` 插入支撑表格；不要只插原表就结束，也不要只写摘要而漏掉需要保留的表格
+11. `write_docx_content` 只适合写自由文本段落、结论、说明；只有用户明确要求“摘要、分析、结论、说明”时，才把表格数据改写成文字段落
+12. 完成 Excel 到 Word 的写入后，优先再次调用 `read_docx_content` 检查目标文档已经新增了表格或对应内容
+13. 同一轮里不要对完全相同的工具参数重复调用同一个工具；如果某个写入工具已经成功完成，下一步应校验结果或结束，而不是再次重复写入"""
 
 
 # ── TaskAgent ──────────────────────────────────────────────────────────────
@@ -288,6 +405,7 @@ MAX_CONSECUTIVE_ERRORS = 3
 _MODIFIER_TOOLS = {
     "write_sheet_data",
     "write_docx_content",
+    "insert_image_into_docx",
     "create_file",
     "copy_file",
     "extract_to_file",
@@ -296,9 +414,7 @@ _MODIFIER_TOOLS = {
 
 # 一次任务中，写入工具对同一个目标文件的最大成功执行次数
 # 超过此数字认为是重复写入，跳过并注入警告
-# NOTE: insert_excel_as_docx_table 不按 sheet 单独计数（见 _canonical_write_target），
-#       最多允许对同一 DOCX 写入 3 次（首次 + 2 次格式修正）。
-_MAX_WRITE_OPS_PER_FILE = 3
+_MAX_WRITE_OPS_PER_FILE = 1
 
 
 class TaskAgent:
@@ -363,7 +479,7 @@ class TaskAgent:
                 system += f"\n\n## 参考知识\n\n{skill_prompt}"
 
         # ── Build initial messages ─────────────────────────────────────
-        user_message = self._build_user_message(task, file_context)
+        user_message = self._build_user_message(task, file_context, options)
         history = self._normalize_history_messages(
             options.get("history") if options else []
         )
@@ -393,6 +509,8 @@ class TaskAgent:
         )
         last_successful_tool_batch_signature: Optional[str] = None
         last_successful_tool_batch_summary = ""
+        last_failed_tool_batch_signature: Optional[str] = None
+        last_failed_tool_batch_summary = ""
         final_summary = ""
         file_states: list[dict[str, Any]] = []
         # Cross-round write dedup: tracks (tool_name, canonical_target_path) → success count
@@ -438,6 +556,17 @@ class TaskAgent:
 
             content_text = response.get("content", "")
             tool_calls = response.get("tool_calls", [])
+            parsed_text_tool_calls = False
+            if not tool_calls and content_text:
+                allowed_tool_names = {
+                    str(defn.get("name") or "").strip()
+                    for defn in tool_defs
+                    if str(defn.get("name") or "").strip()
+                }
+                content_text, tool_calls = parse_task_tool_calls(
+                    content_text, allowed_tool_names
+                )
+                parsed_text_tool_calls = bool(tool_calls)
 
             # ── Emit model's user-facing response text ─────────────────
             # Only emit when the model produces a short, user-relevant message,
@@ -458,6 +587,13 @@ class TaskAgent:
                         _tc["id"] = uuid.uuid4().hex[:8]
                 model_msg["tool_calls"] = tool_calls
             raw_parts = response.get("_raw_parts")
+            if parsed_text_tool_calls and isinstance(raw_parts, list):
+                raw_parts = [
+                    part
+                    for part in raw_parts
+                    if isinstance(part, dict)
+                    and (part.get("thought") or part.get("thought_signature"))
+                ]
             if raw_parts:
                 model_msg["parts"] = raw_parts
             messages.append(model_msg)
@@ -494,6 +630,17 @@ class TaskAgent:
                     final_summary = "检测到重复步骤，已自动停止"
                     break
 
+            if (
+                tool_batch_signature
+                and tool_batch_signature == last_failed_tool_batch_signature
+            ):
+                repeat_notice = "检测到模型重复提交上一轮失败的工具调用，已自动停止"
+                if last_failed_tool_batch_summary:
+                    repeat_notice = f"{repeat_notice}：{last_failed_tool_batch_summary}"
+                yield sse_thought(repeat_notice)
+                final_summary = "检测到重复失败步骤，已自动停止"
+                break
+
             # ── No tool calls → final answer, we're done ───────────────
             if not tool_calls:
                 # Detect tasks that should have written files but didn't.
@@ -507,6 +654,7 @@ class TaskAgent:
 
             # ── Execute tool calls ─────────────────────────────────────
             batch_had_error = False
+            batch_failures: list[dict[str, str]] = []
             batch_summaries: list[str] = []
             batch_file_changes: list[dict[str, Any]] = []
             batch_seen_tool_signatures: set[str] = set()
@@ -569,27 +717,67 @@ class TaskAgent:
                 yield sse_tool_call(current_step_id, tool_name, tool_args)
 
                 # Execute the tool
+                caught_error_text = ""
                 try:
                     result = (
                         registry.execute(tool_name, tool_args) if registry else None
                     )
                     result_str = stringify_tool_result(result)
                 except Exception as e:
+                    caught_error_text = str(e).strip()
                     result_str = f"Error: {e}"
                     batch_had_error = True
                     had_any_error = True
                     logger.warning("[TaskAgent] Tool %s failed: %s", tool_name, e)
-                    yield sse_step_error(current_step_id, str(e))
+                    yield sse_step_error(current_step_id, caught_error_text or str(e))
+
+                error_text = caught_error_text or _extract_tool_error_text(result_str)
+                if error_text:
+                    batch_had_error = True
+                    had_any_error = True
+                    batch_failures.append(
+                        {
+                            "tool_name": tool_name,
+                            "error": error_text,
+                            "args_preview": _sample_context_text(
+                                json.dumps(
+                                    tool_args or {},
+                                    ensure_ascii=False,
+                                    sort_keys=True,
+                                    default=str,
+                                ),
+                                320,
+                            ),
+                        }
+                    )
+                    if not caught_error_text:
+                        logger.warning(
+                            "[TaskAgent] Tool %s reported error: %s",
+                            tool_name,
+                            error_text,
+                        )
+                        yield sse_step_error(current_step_id, error_text)
 
                 # Stream result preview
                 preview_text = self._tool_result_preview(tool_name, result_str)
-                if result_str.startswith("Error:"):
-                    batch_had_error = True
-                    had_any_error = True
-                elif preview_text:
+                if not error_text and preview_text:
                     batch_summaries.append(preview_text)
-                yield sse_tool_result(current_step_id, tool_name, preview_text)
-                if not result_str.startswith("Error:") and has_live_update_tool:
+                _result_max_len = 2000 if tool_name == "run_python_code" else 500
+                yield sse_tool_result(
+                    current_step_id, tool_name, preview_text, max_len=_result_max_len
+                )
+                # Emit code_block event so the frontend can render code + output together
+                if tool_name == "run_python_code":
+                    yield _sse(
+                        {
+                            "type": "code_block",
+                            "step_id": current_step_id,
+                            "code": tool_args.get("code", ""),
+                            "output": result_str[:2000],
+                            "error": bool(error_text),
+                        }
+                    )
+                if not error_text and has_live_update_tool:
                     self._emit_auto_live_update(
                         registry, tool_name, tool_args, files, options
                     )
@@ -601,9 +789,7 @@ class TaskAgent:
                     yield sse_file_change(**file_change)
 
                 # run_python_code may create workspace files — detect KOTO_CREATED markers
-                if tool_name == "run_python_code" and not result_str.startswith(
-                    "Error:"
-                ):
+                if tool_name == "run_python_code" and not error_text:
                     for created_path in _extract_koto_created_paths(result_str):
                         py_change = {
                             "path": created_path,
@@ -621,17 +807,28 @@ class TaskAgent:
                         completed_write_ops[write_key] = (
                             completed_write_ops.get(write_key, 0) + 1
                         )
+                    for modified_path in _extract_koto_modified_paths(result_str):
+                        py_change = {
+                            "path": modified_path,
+                            "file_type": Path(modified_path).suffix.lstrip(".").lower(),
+                            "operation": "run_python_code",
+                            "summary": f"Python 代码修改了 {os.path.basename(modified_path)}",
+                            "preview": "",
+                            "change_type": "modify",
+                            "focus": False,
+                        }
+                        batch_file_changes.append(py_change)
+                        yield sse_file_change(**py_change)
+                        write_key = (
+                            f"run_python_code::{os.path.normcase(modified_path)}"
+                        )
+                        completed_write_ops[write_key] = (
+                            completed_write_ops.get(write_key, 0) + 1
+                        )
 
                 # Track successful write operations for cross-round dedup
                 # Treat both "Error: ..." strings and {"error": ...} JSON as failures.
-                _is_success = not result_str.startswith("Error:")
-                if _is_success:
-                    try:
-                        _p = json.loads(result_str)
-                        if isinstance(_p, dict) and _p.get("error"):
-                            _is_success = False
-                    except Exception:
-                        pass
+                _is_success = not error_text
                 if tool_name in _MODIFIER_TOOLS and _is_success:
                     canonical_target = self._canonical_write_target(
                         tool_name, tool_args
@@ -641,7 +838,8 @@ class TaskAgent:
                         completed_write_ops.get(write_key, 0) + 1
                     )
 
-                yield sse_step_done(current_step_id, f"{tool_name} 完成")
+                if not error_text:
+                    yield sse_step_done(current_step_id, f"{tool_name} 完成")
 
                 # Append to conversation as function response
                 messages.append(
@@ -660,9 +858,26 @@ class TaskAgent:
                 last_successful_tool_batch_summary = "；".join(batch_summaries[:3])[
                     :240
                 ]
+                last_failed_tool_batch_signature = None
+                last_failed_tool_batch_summary = ""
             elif batch_had_error:
                 last_successful_tool_batch_signature = None
                 last_successful_tool_batch_summary = ""
+                last_failed_tool_batch_signature = tool_batch_signature or None
+                last_failed_tool_batch_summary = _summarize_failed_tool_batch(
+                    batch_failures
+                )
+                corrective_feedback = _build_failed_tool_feedback(batch_failures)
+                if corrective_feedback:
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": _sample_context_text(corrective_feedback, 4_000),
+                        }
+                    )
+            else:
+                last_failed_tool_batch_signature = None
+                last_failed_tool_batch_summary = ""
 
             if has_stage_verification_tool and batch_file_changes:
                 # Run verification whenever any files were written in this batch,
@@ -750,9 +965,44 @@ class TaskAgent:
 
         return "\n".join(parts)
 
-    def _build_user_message(self, task: str, file_context: str) -> str:
+    def _build_selection_context_block(self, options: Dict[str, Any]) -> str:
+        selection_context = (
+            options.get("selection_context") if isinstance(options, dict) else {}
+        )
+        if not isinstance(selection_context, dict):
+            return ""
+
+        text = str(selection_context.get("text") or "").strip()
+        if not text:
+            return ""
+
+        source_path = str(selection_context.get("source_path") or "").strip()
+        source_name = str(selection_context.get("source_name") or "").strip() or (
+            os.path.basename(source_path) if source_path else ""
+        )
+        source_type = str(selection_context.get("source_type") or "").strip().lower()
+
+        parts = ["## 参考文本上下文"]
+        if source_name:
+            parts.append(f"- 来源文件: {source_name}")
+        if source_path:
+            parts.append(f"- 来源路径: {source_path}")
+        if source_type:
+            parts.append(f"- 来源类型: {source_type}")
+        parts.append(
+            f"- 文本内容:\n```\n{_sample_context_text(text, _FILE_CONTEXT_PREVIEW_LIMIT)}\n```"
+        )
+        parts.append("- 说明: 这段文本是显式提供的参考上下文，不应默认视为待修改文件。")
+        return "\n".join(parts)
+
+    def _build_user_message(
+        self, task: str, file_context: str, options: Dict[str, Any]
+    ) -> str:
         """Compose the user message with task + file context."""
         parts = [f"## 任务\n\n{task}"]
+        selection_context = self._build_selection_context_block(options or {})
+        if selection_context:
+            parts.append(selection_context)
         if file_context:
             parts.append(file_context)
         return "\n\n".join(parts)
@@ -1049,7 +1299,7 @@ class TaskAgent:
         payload = json.dumps(
             normalized_calls, ensure_ascii=False, sort_keys=True, default=str
         )
-        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     @staticmethod
     def _tool_call_signature(tool_name: str, tool_args: Dict[str, Any]) -> str:
@@ -1061,7 +1311,7 @@ class TaskAgent:
             sort_keys=True,
             default=str,
         )
-        return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+        return hashlib.sha1(payload.encode("utf-8"), usedforsecurity=False).hexdigest()
 
     @staticmethod
     def _merge_file_states(
@@ -1211,19 +1461,22 @@ class TaskAgent:
                 return None
 
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            api_key = self._api_key
-            if not api_key:
-                api_key = (
-                    os.environ.get("GEMINI_API_KEY")
-                    or os.environ.get("API_KEY")
-                    or os.environ.get("GOOGLE_API_KEY")
+            provider_name = get_provider_for_model_mode(model_mode)
+            self._model_id = (
+                get_configured_cloud_model(
+                    task_type="FILE_TASK",
+                    fallback_model=self._model_id,
+                    provider=provider_name,
                 )
-            if not api_key:
-                logger.error("[TaskAgent] No API key available")
-                return None
-            return GeminiProvider(api_key=api_key)
+                or self._model_id
+            )
+            return get_llm_provider(
+                provider=provider_name,
+                model=self._model_id,
+                allow_local_fallback=False,
+            )
         except Exception as e:
             logger.error("[TaskAgent] Failed to init LLM provider: %s", e)
             return None

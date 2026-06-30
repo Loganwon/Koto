@@ -82,6 +82,21 @@ def _serialize_status(status) -> dict:
                 for s in status.plan.steps
             ],
         }
+    artifact_result = getattr(status, "artifact_result", None)
+    if artifact_result is None:
+        try:
+            from app.core.artifacts import build_background_artifact_result
+
+            artifact_result = build_background_artifact_result(
+                task_id=status.task_id,
+                goal=status.goal,
+                phase=status.phase,
+                final_report=status.final_report,
+                error=status.error,
+                steps=status.plan.steps if status.plan else None,
+            )
+        except Exception:
+            artifact_result = None
     return {
         "task_id": status.task_id,
         "goal": status.goal,
@@ -95,12 +110,35 @@ def _serialize_status(status) -> dict:
         "error": status.error,
         "submitted_at": status.submitted_at,
         "updated_at": status.updated_at,
+        "artifact_result": (
+            artifact_result.to_dict()
+            if hasattr(artifact_result, "to_dict")
+            else artifact_result
+        ),
     }
 
 
 # ============================================================================
 # 提交任务
 # ============================================================================
+
+
+@bg_agent_bp.get("")
+@bg_agent_bp.get("/")
+def bg_agent_index():
+    """Return a compact status document for module root probes."""
+    return _ok(
+        {
+            "service": "background-agent",
+            "routes": {
+                "submit": "/api/bg-agent/submit",
+                "list": "/api/bg-agent/list",
+                "task": "/api/bg-agent/<task_id>",
+                "stream": "/api/bg-agent/<task_id>/stream",
+            },
+        },
+        sessions=len(_agents),
+    )
 
 
 @bg_agent_bp.post("/submit")
@@ -156,6 +194,21 @@ def get_task(task_id: str):
         status = agent.get_status(task_id)
         if status:
             return _ok(_serialize_status(status))
+
+    return _err("任务不存在", 404)
+
+
+@bg_agent_bp.get("/<task_id>/artifact")
+def get_task_artifact(task_id: str):
+    """获取任务的标准化 ArtifactResult。"""
+    with _agents_lock:
+        agents_snapshot = dict(_agents)
+
+    for agent in agents_snapshot.values():
+        status = agent.get_status(task_id)
+        if status:
+            serialized = _serialize_status(status)
+            return _ok(serialized.get("artifact_result") or {})
 
     return _err("任务不存在", 404)
 

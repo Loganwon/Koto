@@ -18,7 +18,6 @@ Covers every layer of the Excel pipeline that lacked dedicated tests:
      - Styles survive round-trip  (bold, color, bg, alignment)
      - Merged cells survive round-trip
      - Multi-sheet export
-     - Luckysheet legacy format
      - Empty / invalid data graceful handling
      - Image embedding from base64
 
@@ -104,6 +103,32 @@ def _make_styled_xlsx() -> bytes:
     buf = io.BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def _resolve_cell_style(data: dict, sheet_idx_or_id, row: int, col: int) -> dict:
+    """Return the resolved style dict for a cell from parse_xlsx output.
+
+    parse_xlsx stores cell["s"] as a string style-ID keying into
+    data["styles"].  This helper resolves the lookup so tests can
+    assert style properties directly.
+    """
+    if isinstance(sheet_idx_or_id, int):
+        sid_key = data["sheetOrder"][sheet_idx_or_id]
+    else:
+        sid_key = sheet_idx_or_id
+    cd = data["sheets"][sid_key]["cellData"]
+    # cellData keys can be int (parse_xlsx direct) or str (API JSON response)
+    rk = str(row) if str(row) in cd else row
+    ck = (
+        str(col)
+        if (rk in cd and isinstance(cd[rk], dict) and str(col) in cd[rk])
+        else col
+    )
+    cell = cd[rk][ck]
+    s = cell.get("s")
+    if isinstance(s, str):
+        return data.get("styles", {}).get(s, {})
+    return s or {}
 
 
 def _make_formula_xlsx() -> bytes:
@@ -240,42 +265,42 @@ class TestParseXlsx:
 
     def test_bold_style_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][0]
-        assert cell.get("s", {}).get("bl") == 1
+        style = _resolve_cell_style(data, 0, 0, 0)
+        assert style.get("bl") == 1
 
     def test_italic_style_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][1]
-        assert cell.get("s", {}).get("it") == 1
+        style = _resolve_cell_style(data, 0, 0, 1)
+        assert style.get("it") == 1
 
     def test_font_size_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][0]
-        assert cell.get("s", {}).get("fs") == 14
+        style = _resolve_cell_style(data, 0, 0, 0)
+        assert style.get("fs") == 14
 
     def test_font_color_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][0]
-        cl = cell.get("s", {}).get("cl", {})
+        style = _resolve_cell_style(data, 0, 0, 0)
+        cl = style.get("cl", {})
         assert cl.get("rgb", "").upper().endswith("FF0000")
 
     def test_background_fill_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][0]
-        bg = cell.get("s", {}).get("bg", {})
+        style = _resolve_cell_style(data, 0, 0, 0)
+        bg = style.get("bg", {})
         assert bg.get("rgb", "").upper().endswith("FFFF00")
 
     def test_horizontal_alignment_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][0]
+        style = _resolve_cell_style(data, 0, 0, 0)
         # center → 2
-        assert cell.get("s", {}).get("ht") == 2
+        assert style.get("ht") == 2
 
     def test_vertical_alignment_extracted(self, tmp_path):
         data = self._parse(_make_styled_xlsx(), tmp_path)
-        cell = data["sheets"][data["sheetOrder"][0]]["cellData"][0][0]
+        style = _resolve_cell_style(data, 0, 0, 0)
         # top → 1
-        assert cell.get("s", {}).get("vt") == 1
+        assert style.get("vt") == 1
 
     # ── Merged cells ─────────────────────────────────────────────────────
 
@@ -477,23 +502,6 @@ class TestExportXlsx:
         assert len(merged) == 1
         mr = merged[0]
         assert (mr.min_row, mr.min_col, mr.max_row, mr.max_col) == (1, 1, 2, 2)
-
-    # ── Luckysheet legacy ────────────────────────────────────────────────
-
-    def test_luckysheet_format_export(self):
-        legacy = [
-            {
-                "name": "LegacySheet",
-                "celldata": [
-                    {"r": 0, "c": 0, "v": {"v": "abc"}},
-                    {"r": 1, "c": 1, "v": {"v": 999}},
-                ],
-            }
-        ]
-        wb = self._export_and_reload(legacy)
-        assert wb.sheetnames == ["LegacySheet"]
-        assert wb.active.cell(1, 1).value == "abc"
-        assert wb.active.cell(2, 2).value == 999
 
     # ── Empty / edge cases ───────────────────────────────────────────────
 
@@ -774,8 +782,8 @@ class TestRoundTrip:
 
     def test_bold_style_survives_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
-        cell = d2["sheets"][d2["sheetOrder"][0]]["cellData"][0][0]
-        assert cell.get("s", {}).get("bl") == 1, "Bold style lost in round-trip"
+        style = _resolve_cell_style(d2, 0, 0, 0)
+        assert style.get("bl") == 1, "Bold style lost in round-trip"
 
     def test_merge_data_survives_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
@@ -790,23 +798,23 @@ class TestRoundTrip:
 
     def test_font_color_survives_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
-        cell = d2["sheets"][d2["sheetOrder"][0]]["cellData"][0][0]
-        cl = cell.get("s", {}).get("cl", {})
+        style = _resolve_cell_style(d2, 0, 0, 0)
+        cl = style.get("cl", {})
         assert "FF0000" in cl.get("rgb", "").upper(), "Font color lost in round-trip"
 
     def test_background_fill_survives_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
-        cell = d2["sheets"][d2["sheetOrder"][0]]["cellData"][0][0]
-        bg = cell.get("s", {}).get("bg", {})
+        style = _resolve_cell_style(d2, 0, 0, 0)
+        bg = style.get("bg", {})
         assert (
             "FFFF00" in bg.get("rgb", "").upper()
         ), "Background fill lost in round-trip"
 
     def test_alignment_survives_round_trip(self, tmp_path):
         d1, d2 = self._round_trip(_make_styled_xlsx(), tmp_path)
-        cell = d2["sheets"][d2["sheetOrder"][0]]["cellData"][0][0]
-        assert cell.get("s", {}).get("ht") == 2, "Horizontal alignment lost"
-        assert cell.get("s", {}).get("vt") == 1, "Vertical alignment lost"
+        style = _resolve_cell_style(d2, 0, 0, 0)
+        assert style.get("ht") == 2, "Horizontal alignment lost"
+        assert style.get("vt") == 1, "Vertical alignment lost"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -894,7 +902,8 @@ class TestXlsxUploadEndpoint:
         assert resp.status_code == 200
         data = resp.get_json()["data"]
         cd = data["sheets"][data["sheetOrder"][0]]["cellData"]
-        assert cd["0"]["0"].get("s", {}).get("bl") == 1, "Bold not preserved on upload"
+        style = _resolve_cell_style(data, 0, 0, 0)
+        assert style.get("bl") == 1, "Bold not preserved on upload"
 
     def test_upload_xlsx_with_merges_preserves_merge_data(self, xlsx_client):
         client, _, _ = xlsx_client
@@ -1031,11 +1040,11 @@ class TestXlsxAutoSaveEndpoint:
             "/api/v1/workspace/open_file_by_path", json={"path": "styled_save.xlsx"}
         )
         assert resp3.status_code == 200
-        sheet = resp3.get_json()["data"]["sheets"][
-            resp3.get_json()["data"]["sheetOrder"][0]
-        ]
-        # Bold style
-        assert sheet["cellData"]["0"]["0"].get("s", {}).get("bl") == 1
+        wb_data = resp3.get_json()["data"]
+        sheet = wb_data["sheets"][wb_data["sheetOrder"][0]]
+        # Bold style (resolved from styles registry)
+        style = _resolve_cell_style(wb_data, 0, 0, 0)
+        assert style.get("bl") == 1
         # Merge
         assert len(sheet["mergeData"]) >= 1
 
@@ -1171,7 +1180,7 @@ class TestXlsxSaveFileEndpoint:
 
 
 class TestXlsxOpenByPathExternal:
-    """open_file_by_path with an absolute external xlsx path."""
+    """open_abs_file with an absolute external xlsx path."""
 
     def test_open_external_xlsx(self, xlsx_client, tmp_path):
         client, _, _ = xlsx_client
@@ -1179,7 +1188,7 @@ class TestXlsxOpenByPathExternal:
         ext_file.write_bytes(_make_xlsx({"Ext": [["External", 999]]}))
 
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path", json={"path": str(ext_file)}
+            "/api/v1/workspace/open_abs_file", json={"path": str(ext_file)}
         )
         assert resp.status_code == 200
         body = resp.get_json()
@@ -1194,13 +1203,12 @@ class TestXlsxOpenByPathExternal:
         ext_file.write_bytes(_make_styled_xlsx())
 
         resp = client.post(
-            "/api/v1/workspace/open_file_by_path", json={"path": str(ext_file)}
+            "/api/v1/workspace/open_abs_file", json={"path": str(ext_file)}
         )
         assert resp.status_code == 200
-        cd = resp.get_json()["data"]["sheets"][
-            resp.get_json()["data"]["sheetOrder"][0]
-        ]["cellData"]
-        assert cd["0"]["0"].get("s", {}).get("bl") == 1
+        wb_data = resp.get_json()["data"]
+        style = _resolve_cell_style(wb_data, 0, 0, 0)
+        assert style.get("bl") == 1
 
 
 class TestXlsxRawFile:

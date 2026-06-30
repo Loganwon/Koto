@@ -150,7 +150,7 @@ class TestCheckpointerSingleton:
 class TestStreamInterruptManagerConcurrency:
 
     def setup_method(self):
-        from web.app import StreamInterruptManager
+        from web.sse.interrupt_manager import StreamInterruptManager
 
         self.manager = StreamInterruptManager()
 
@@ -272,7 +272,7 @@ class TestStreamInterruptManagerConcurrency:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. _user_settings_cache / _user_settings_lock
+# 4. web.shared user settings cache / lock
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
@@ -280,7 +280,7 @@ class TestStreamInterruptManagerConcurrency:
 class TestUserSettingsCacheConcurrency:
 
     def setup_method(self):
-        import web.app as _mod
+        import web.shared as _mod
 
         self._mod = _mod
         self._orig_cache = _mod._user_settings_cache.copy()

@@ -71,29 +71,15 @@ class TestAgentRoutes:
         )
         assert resp.status_code in _ANY_VALID
 
-    # -- /confirm ------------------------------------------------------------
+    # -- retired interaction callbacks --------------------------------------
 
-    def test_confirm_missing_fields(self, full_client):
+    def test_confirm_route_is_removed(self, full_client):
         resp = full_client.post("/api/agent/confirm", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
+        assert resp.status_code == 404
 
-    def test_confirm_valid(self, full_client):
-        resp = full_client.post(
-            "/api/agent/confirm", json={"session": "s1", "confirmed": True}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /choice -------------------------------------------------------------
-
-    def test_choice_missing_fields(self, full_client):
+    def test_choice_route_is_removed(self, full_client):
         resp = full_client.post("/api/agent/choice", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_choice_valid(self, full_client):
-        resp = full_client.post(
-            "/api/agent/choice", json={"session": "s1", "selected": "option_a"}
-        )
-        assert resp.status_code in _ANY_VALID
+        assert resp.status_code == 404
 
     # -- /plan ---------------------------------------------------------------
 
@@ -141,29 +127,29 @@ class TestAgentRoutes:
         resp = full_client.post("/api/agent/monitor/clear")
         assert resp.status_code in _ANY_VALID
 
-    # -- /generate-script/* --------------------------------------------------
+    # -- retired /generate-script/* -----------------------------------------
 
     def test_generate_script_missing_body(self, full_client):
         resp = full_client.post("/api/agent/generate-script", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
+        assert resp.status_code == 404
 
     def test_generate_script_valid(self, full_client):
         resp = full_client.post(
             "/api/agent/generate-script",
             json={"issue_type": "high_cpu", "process_name": "python"},
         )
-        assert resp.status_code in _ANY_VALID
+        assert resp.status_code == 404
 
     def test_list_available_scripts(self, full_client):
         resp = full_client.get("/api/agent/generate-script/list")
-        assert resp.status_code in _ANY_VALID
+        assert resp.status_code == 404
 
     def test_save_generated_script(self, full_client):
         resp = full_client.post(
             "/api/agent/generate-script/save",
             json={"script_content": "echo hello", "filename": "test.sh"},
         )
-        assert resp.status_code in _ANY_VALID
+        assert resp.status_code == 404
 
     # -- /feedback/* ---------------------------------------------------------
 
@@ -616,11 +602,11 @@ class TestFileHubRoutes:
         )
         assert resp.status_code in _ANY_VALID
 
-    # -- /open, /disk (DELETE) -----------------------------------------------
+    # -- retired native open, /disk (DELETE) ----------------------------------
 
     def test_open_file(self, full_client):
-        resp = full_client.post("/api/files/open", json={"file_id": "fake"})
-        assert resp.status_code in _ANY_VALID
+        resp = full_client.post("/api/files/" + "open", json={"file_id": "fake"})
+        assert resp.status_code == 404
 
     def test_delete_file_disk(self, full_client):
         resp = full_client.delete(
