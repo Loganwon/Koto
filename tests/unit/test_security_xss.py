@@ -211,7 +211,7 @@ class TestMdToHtmlXssPrevention:
 # JavaScript escapeHtml / showNotification — documentation only
 # ---------------------------------------------------------------------------
 #
-# The front-end function escapeHtml() (web/static/js/app.js:3226, 5399)
+# The front-end escape helpers in the app bundle
 # uses the DOM-based pattern:
 #
 #     function escapeHtml(text) {
@@ -220,7 +220,7 @@ class TestMdToHtmlXssPrevention:
 #         return div.innerHTML;
 #     }
 #
-# showNotification() (app.js:277) passes its `message` parameter through
+# showNotification() passes its `message` parameter through
 # escapeHtml() before inserting it into the DOM via innerHTML, which
 # prevents XSS when notification messages contain user-controlled content.
 #

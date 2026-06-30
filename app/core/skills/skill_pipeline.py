@@ -185,15 +185,21 @@ class SkillPipeline:
                 continue
 
             # ── Condition gate ──────────────────────────────────────
-            if step.condition and not self._eval_condition(step.condition, ctx, steps_executed):
-                logger.info("[KotoFlow] ⏭ condition not met, skipping: %s", step.skill_id)
+            if step.condition and not self._eval_condition(
+                step.condition, ctx, steps_executed
+            ):
+                logger.info(
+                    "[KotoFlow] ⏭ condition not met, skipping: %s", step.skill_id
+                )
                 steps_skipped.append(step.skill_id)
                 continue
 
             # ── Approval gate ───────────────────────────────────────
             if step.approval == "required":
                 elapsed = (time.perf_counter() - t0) * 1000
-                token = self._make_resume_token(user_input, ctx, steps_executed, steps_skipped, idx)
+                token = self._make_resume_token(
+                    user_input, ctx, steps_executed, steps_skipped, idx
+                )
                 logger.info("[KotoFlow] ⏸ approval required before: %s", step.skill_id)
                 return PipelineResult(
                     final_output=last_output,
@@ -234,9 +240,7 @@ class SkillPipeline:
                 logger.info("[KotoFlow] ✅ step done: %s", step.skill_id)
 
             except Exception as exc:
-                logger.warning(
-                    "[KotoFlow] ⚠️ step failed: %s — %s", step.skill_id, exc
-                )
+                logger.warning("[KotoFlow] ⚠️ step failed: %s — %s", step.skill_id, exc)
                 if step.skip_on_error:
                     steps_skipped.append(step.skill_id)
                 else:
@@ -292,9 +296,7 @@ class SkillPipeline:
     # ── Condition evaluator ──────────────────────────────────────────
 
     @staticmethod
-    def _eval_condition(
-        expr: str, ctx: Dict[str, Any], executed: List[str]
-    ) -> bool:
+    def _eval_condition(expr: str, ctx: Dict[str, Any], executed: List[str]) -> bool:
         """Evaluate a simple condition expression against pipeline context.
 
         Supported forms:

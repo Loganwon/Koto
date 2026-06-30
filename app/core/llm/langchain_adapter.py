@@ -279,3 +279,6 @@ else:
                 "langchain-core is not installed. "
                 "Run: pip install langchain-core langchain-google-genai langgraph"
             )
+
+        def get_num_tokens(self, text: str) -> int:
+            return len(text) // 4

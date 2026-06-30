@@ -44,7 +44,7 @@ class AnnotationPlugin(AgentPlugin):
                 "name": "annotate_document",
                 "func": self.annotate_document,
                 "description": (
-                    "对本地 Word (.docx) 文档执行批量标注/修改，生成 _revised 副本。"
+                    "对本地 Word (.docx) 文档执行批量标注/修改，直接写回原始 DOCX。"
                     "适用于翻译润色、学术批注、商务文稿规范化等场景。"
                     "file_path: 文档路径（支持绝对路径/工作目录相对路径）；"
                     "requirement: 用户标注需求描述。"
@@ -97,12 +97,11 @@ class AnnotationPlugin(AgentPlugin):
         import os
 
         cwd = os.path.realpath(os.getcwd())
-        roots = [
+        return [
             os.path.join(cwd, "workspace"),
             os.path.join(cwd, "uploads"),
             os.path.join(cwd, "dist"),
         ]
-        return [os.path.abspath(r) for r in roots if os.path.isdir(r)]
 
     @classmethod
     def _resolve_docx_path(cls, file_path: str) -> tuple[str | None, str | None]:
@@ -141,9 +140,9 @@ class AnnotationPlugin(AgentPlugin):
 
         try:
             try:
-                from web.document_batch_annotator_v2 import annotate_large_document
-            except Exception:
                 from web.document_batch_annotator import annotate_large_document
+            except Exception:
+                from web.document_batch_annotator_v2 import annotate_large_document
 
             events = []
             output_file = None
@@ -231,7 +230,9 @@ class AnnotationPlugin(AgentPlugin):
                 paras = [p.text.strip() for p in doc.paragraphs if p.text.strip()][
                     :max_paragraphs
                 ]
-                lines = [f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"]
+                lines = [
+                    f"【{os.path.basename(resolved_path)}，显示 {len(paras)} 段】\n"
+                ]
                 lines += [f"[{i}] {t}" for i, t in enumerate(paras, 1)]
                 return "\n".join(lines)
             except Exception as e2:

@@ -79,6 +79,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
 
+from app.core.artifacts import ArtifactResult, build_background_artifact_result
+
 logger = logging.getLogger(__name__)
 
 
@@ -137,6 +139,7 @@ class BackgroundTaskStatus:
     error: str
     submitted_at: float
     updated_at: float
+    artifact_result: Optional[ArtifactResult] = None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -285,6 +288,11 @@ class BackgroundAgent:
             error="",
             submitted_at=now,
             updated_at=now,
+            artifact_result=build_background_artifact_result(
+                task_id=task_id,
+                goal=goal,
+                phase="planning",
+            ),
         )
 
         cancel_event = threading.Event()
@@ -324,7 +332,17 @@ class BackgroundAgent:
         event = self._review_events.get(task_id)
         if event:
             event.set()
-            self._update(task_id, phase="executing")
+            status = self._tasks.get(task_id)
+            self._update(
+                task_id,
+                phase="executing",
+                artifact_result=build_background_artifact_result(
+                    task_id=task_id,
+                    goal=status.goal if status else "",
+                    phase="executing",
+                    steps=status.plan.steps if status and status.plan else None,
+                ),
+            )
             self._emit(task_id, "approved", "计划已批准，开始执行...")
         else:
             raise KeyError(f"Task {task_id} not found")
@@ -339,7 +357,19 @@ class BackgroundAgent:
         event = self._cancel_events.get(task_id)
         if event:
             event.set()
-            self._update(task_id, phase="failed", error="用户取消")
+            status = self._tasks.get(task_id)
+            self._update(
+                task_id,
+                phase="failed",
+                error="用户取消",
+                artifact_result=build_background_artifact_result(
+                    task_id=task_id,
+                    goal=status.goal if status else "",
+                    phase="failed",
+                    error="用户取消",
+                    steps=status.plan.steps if status and status.plan else None,
+                ),
+            )
             self._emit(task_id, "cancelled", "任务已取消")
 
     def get_status(self, task_id: str) -> Optional[BackgroundTaskStatus]:
@@ -376,12 +406,31 @@ class BackgroundAgent:
             self._emit(task_id, "planning", "正在生成执行计划...")
             plan = self._plan(task_id, goal, context, cancel_event)
             if plan is None or cancel_event.is_set():
-                self._update(task_id, phase="failed", error="规划失败或已取消")
+                self._update(
+                    task_id,
+                    phase="failed",
+                    error="规划失败或已取消",
+                    artifact_result=build_background_artifact_result(
+                        task_id=task_id,
+                        goal=goal,
+                        phase="failed",
+                        error="规划失败或已取消",
+                    ),
+                )
                 return
 
             self._plans[task_id] = plan
             self._update(
-                task_id, phase="review", plan=plan, steps_total=len(plan.steps)
+                task_id,
+                phase="review",
+                plan=plan,
+                steps_total=len(plan.steps),
+                artifact_result=build_background_artifact_result(
+                    task_id=task_id,
+                    goal=goal,
+                    phase="review",
+                    steps=plan.steps,
+                ),
             )
             self._emit(
                 task_id,
@@ -396,12 +445,32 @@ class BackgroundAgent:
                 return
 
             # ── 阶段 3：逐步执行 ─────────────────────────────────────────
-            self._update(task_id, phase="executing")
+            self._update(
+                task_id,
+                phase="executing",
+                artifact_result=build_background_artifact_result(
+                    task_id=task_id,
+                    goal=goal,
+                    phase="executing",
+                    steps=plan.steps,
+                ),
+            )
             step_results: Dict[str, str] = {}
 
             for i, step in enumerate(plan.steps):
                 if cancel_event.is_set():
-                    self._update(task_id, phase="failed", error="执行中途取消")
+                    self._update(
+                        task_id,
+                        phase="failed",
+                        error="执行中途取消",
+                        artifact_result=build_background_artifact_result(
+                            task_id=task_id,
+                            goal=goal,
+                            phase="failed",
+                            error="执行中途取消",
+                            steps=plan.steps,
+                        ),
+                    )
                     return
 
                 self._update(task_id, current_step=step.step_id, steps_done=i)
@@ -422,6 +491,15 @@ class BackgroundAgent:
                 step_results[step.step_id] = result
 
                 self._update(task_id, steps_done=i + 1)
+                self._update(
+                    task_id,
+                    artifact_result=build_background_artifact_result(
+                        task_id=task_id,
+                        goal=goal,
+                        phase="executing",
+                        steps=plan.steps,
+                    ),
+                )
                 self._emit(
                     task_id, "step_done", f"[{i+1}/{len(plan.steps)}] {step.title} ✓"
                 )
@@ -435,6 +513,13 @@ class BackgroundAgent:
                 final_report=report,
                 steps_done=len(plan.steps),
                 current_step=None,
+                artifact_result=build_background_artifact_result(
+                    task_id=task_id,
+                    goal=goal,
+                    phase="done",
+                    final_report=report,
+                    steps=plan.steps,
+                ),
             )
             self._emit(task_id, "completed", "任务已完成，最终报告已生成")
 
@@ -446,7 +531,17 @@ class BackgroundAgent:
 
         except Exception as exc:
             logger.exception(f"[BackgroundAgent] 任务 {task_id[:8]} 异常: {exc}")
-            self._update(task_id, phase="failed", error=str(exc))
+            self._update(
+                task_id,
+                phase="failed",
+                error=str(exc),
+                artifact_result=build_background_artifact_result(
+                    task_id=task_id,
+                    goal=goal,
+                    phase="failed",
+                    error=str(exc),
+                ),
+            )
             self._emit(task_id, "error", f"任务执行异常: {exc}")
 
     # ── 规划 ──────────────────────────────────────────────────────────────────
@@ -598,6 +693,8 @@ class BackgroundAgent:
         logger.info(f"[BackgroundAgent:{task_id[:8]}] [{event_type}] {message}")
         if self._progress_bus and self._ProgressEvent and self.session_id:
             try:
+                status = self._tasks.get(task_id)
+                artifact_result = getattr(status, "artifact_result", None)
                 self._progress_bus.publish(
                     self._ProgressEvent(
                         session_id=self.session_id,
@@ -607,6 +704,11 @@ class BackgroundAgent:
                             "event": event_type,
                             "message": message,
                             "ts": time.time(),
+                            "artifact_result": (
+                                artifact_result.to_dict()
+                                if hasattr(artifact_result, "to_dict")
+                                else artifact_result
+                            ),
                         },
                     )
                 )

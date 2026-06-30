@@ -4,6 +4,7 @@ request_validator.py — Prompt / instruction building helpers extracted from Ko
 Provides a stateless RequestValidator class so that KotoAgentLoop methods
 become thin delegators and the prompt-building logic lives here.
 """
+
 from __future__ import annotations
 
 import logging
@@ -14,12 +15,14 @@ logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────
 
-FILE_CONTEXT_PREVIEW_LIMIT = 8_000    # characters for file content preview
-TOOL_RESULT_CONTEXT_LIMIT = 24_000    # characters for tool result context
+FILE_CONTEXT_PREVIEW_LIMIT = 8_000  # characters for file content preview
+TOOL_RESULT_CONTEXT_LIMIT = 24_000  # characters for tool result context
 MAX_HISTORY_TURNS = 10
 MAX_TASK_ROUNDS = 20
 
-_TASK_SKILL_PROMPTS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "config" / "task_skills"
+_TASK_SKILL_PROMPTS_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent / "config" / "task_skills"
+)
 
 _TASK_SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及文件操作的任务，你需要理解任务、制定计划、使用工具执行。
 
@@ -75,7 +78,9 @@ def _load_task_skill_prompts(task_description: str) -> str:
         for md_file in _TASK_SKILL_PROMPTS_DIR.glob("*.md"):
             content = md_file.read_text(encoding="utf-8", errors="replace")
             first_line = content.split("\n", 1)[0].lower()
-            keywords = [k.strip() for k in first_line.replace("#", "").split(",") if k.strip()]
+            keywords = [
+                k.strip() for k in first_line.replace("#", "").split(",") if k.strip()
+            ]
             if keywords and any(keyword in task_lower for keyword in keywords):
                 parts.append(content)
     except Exception as exc:
@@ -207,7 +212,7 @@ class RequestValidator:
         Mirrors KotoAgentLoop._assemble_prompt.
         """
         history = request.history or []
-        recent = history[-MAX_HISTORY_TURNS * 2:] if history else []
+        recent = history[-MAX_HISTORY_TURNS * 2 :] if history else []
         history_text = ""
         if recent:
             parts = []
@@ -220,7 +225,9 @@ class RequestValidator:
                     parts.append(f"Koto AI：{content}")
             history_text = "\n".join(parts) + "\n\n"
 
-        csv_block = f"[表格数据（CSV）]\n{request.csv_data}\n\n" if request.csv_data else ""
+        csv_block = (
+            f"[表格数据（CSV）]\n{request.csv_data}\n\n" if request.csv_data else ""
+        )
         if request.selection:
             return (
                 f'[用户选中的文字]\n"{request.selection}"\n\n'

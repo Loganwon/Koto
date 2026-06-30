@@ -1,5 +1,5 @@
 # ══════════════════════════════════════════════════════════════
-# hooks.py — Hook Registry (OpenClaw-inspired)
+# hooks.py — Hook Registry
 #
 # Provides a lightweight plugin system for the agent loop.
 # Hooks fire at well-defined points in the agent lifecycle:
@@ -34,6 +34,7 @@ class HookPoint(Enum):
 @dataclass
 class HookEntry:
     """A registered hook callback."""
+
     name: str
     point: HookPoint
     fn: Callable
@@ -48,6 +49,7 @@ class HookContext:
     Hooks can read/write fields to influence the agent loop.
     Each hook point uses a subset of these fields.
     """
+
     def __init__(self, **kwargs: Any):
         self.messages: List[Dict[str, str]] = kwargs.get("messages", [])
         self.tool_call: Optional[Dict[str, Any]] = kwargs.get("tool_call")
@@ -55,8 +57,8 @@ class HookContext:
         self.reply_text: str = kwargs.get("reply_text", "")
         self.metadata: Dict[str, Any] = kwargs.get("metadata", {})
         self.request: Any = kwargs.get("request")  # AgentRequest
-        self.skip: bool = False        # set True to skip the operation
-        self.abort_reason: str = ""    # set non-empty to abort the run
+        self.skip: bool = False  # set True to skip the operation
+        self.abort_reason: str = ""  # set non-empty to abort the run
         self.extra: Dict[str, Any] = {}
 
 
@@ -75,12 +77,15 @@ class HookRegistry:
     def __init__(self) -> None:
         self._hooks: Dict[HookPoint, List[HookEntry]] = {p: [] for p in HookPoint}
 
-    def register(self, name: str, point: HookPoint, fn: Callable,
-                 priority: int = 100) -> None:
+    def register(
+        self, name: str, point: HookPoint, fn: Callable, priority: int = 100
+    ) -> None:
         entry = HookEntry(name=name, point=point, fn=fn, priority=priority)
         self._hooks[point].append(entry)
         self._hooks[point].sort(key=lambda e: e.priority)
-        logger.debug("Hook registered: %s @ %s (priority=%d)", name, point.value, priority)
+        logger.debug(
+            "Hook registered: %s @ %s (priority=%d)", name, point.value, priority
+        )
 
     def unregister(self, name: str) -> None:
         for point in HookPoint:
@@ -106,10 +111,14 @@ class HookRegistry:
         points = [point] if point else list(HookPoint)
         for p in points:
             for e in self._hooks[p]:
-                result.append({
-                    "name": e.name, "point": p.value,
-                    "priority": e.priority, "enabled": e.enabled,
-                })
+                result.append(
+                    {
+                        "name": e.name,
+                        "point": p.value,
+                        "priority": e.priority,
+                        "enabled": e.enabled,
+                    }
+                )
         return result
 
     def clear(self) -> None:

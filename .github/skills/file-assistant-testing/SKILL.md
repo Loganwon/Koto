@@ -20,6 +20,27 @@ tests/
 
 ## Running Tests
 
+Prefer the curated suite runner for workspace AI assistant and whitebox
+file-task changes. It encodes the repo's supported lanes and is the default
+entrypoint other coding agents should reuse instead of inventing ad hoc test
+commands.
+
+```powershell
+# Fast regression lane for AI assistant / whitebox task changes
+cd C:\Users\12524\Desktop\Koto
+python scripts/run_ai_assistant_flow_tests.py smoke -vv
+
+# Full non-browser assistant regression pack
+python scripts/run_ai_assistant_flow_tests.py full -vv
+
+# Browser lane or pre-merge release lane (requires Playwright)
+python scripts/run_ai_assistant_flow_tests.py browser -vv
+python scripts/run_ai_assistant_flow_tests.py release -vv
+```
+
+See `docs/ai-assistant-testing.md` for lane definitions and Playwright
+prerequisites.
+
 ```powershell
 # Backend API tests only (fast, no browser)
 cd C:\Users\12524\Desktop\Koto

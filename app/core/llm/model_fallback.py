@@ -122,36 +122,49 @@ def _is_transient_error(exc: Exception) -> bool:
     if exc_type in ("ReadTimeout", "ConnectTimeout", "ConnectionError", "Timeout"):
         return True
     msg = str(exc).lower()
-    return any(re.search(p, msg, re.IGNORECASE) for p in _TRANSIENT_MODEL_ERROR_PATTERNS)
+    return any(
+        re.search(p, msg, re.IGNORECASE) for p in _TRANSIENT_MODEL_ERROR_PATTERNS
+    )
+
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
-# 3.x 模型优先；2.5 系列作为稳定兜底。
+# DeepSeek 是当前默认云端主通路；Gemini 只在显式选择或 Gemini-only 任务中使用。
+# 可通过环境变量 KOTO_FALLBACK_CHAIN_DEFAULT 覆盖（逗号分隔）。
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "gemini-3-flash-preview",   # 首选：当前轻量主力
-    "gemini-3.1-pro-preview",   # 重任务 Pro 备选
-    "gemini-2.5-flash",         # 稳定快速兜底
-    "gemini-2.5-flash-lite",    # 轻量最终兜底
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+]
+
+_DEEPSEEK_FALLBACK_CHAIN: List[str] = [
+    "deepseek-v4-pro",
+    "deepseek-v4-flash",
+]
+
+_GEMINI_DEFAULT_FALLBACK_CHAIN: List[str] = [
+    "gemini-3-flash-preview",
+    "gemini-3.1-pro-preview",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
 ]
 
 # ── 按任务类型的专属降级链 ──────────────────────────────────────────────────────
-# 原则：3.x 模型始终先于 2.x 模型；链长控制在 3-4 个（越短越快降级判断）。
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     "CHAT": [
-        "gemini-3-flash-preview",   # 快速对话主力
-        "gemini-2.5-flash",         # 稳定备选
-        "gemini-2.5-flash-lite",    # 轻量兜底
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
     ],
     "CODER": [
-        "gemini-3.1-pro-preview",   # 代码首选：最强推理
-        "gemini-3-pro-preview",     # Pro 3 备选
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
     ],
     "RESEARCH": [
-        "gemini-3.1-pro-preview",   # 长上下文推理
-        "gemini-3-pro-preview",     # Pro 3 备选
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
     ],
     "PAINTER": [
         "gemini-3.1-flash-image-preview",
@@ -163,27 +176,27 @@ _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini-2.5-flash-lite",
     ],
     "FILE_GEN": [
-        "gemini-3.1-pro-preview",   # 文档生成需要高质量
-        "gemini-3-pro-preview",     # Pro 3 备选
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
     ],
     "FILE_TASK": [
-        "gemini-3.1-pro-preview",   # 文件任务首选：工具调用能力强
-        "gemini-3-flash-preview",   # 快速备选（工具调用支持良好）
-        "gemini-2.5-flash",         # 稳定兜底
-        "gemini-2.5-flash-lite",    # 轻量最终兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
     ],
     "AGENT": [
-        "gemini-3.1-pro-preview",   # Agent 首选：多步推理最强
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
-        "gemini-2.5-flash-lite",    # 轻量最终兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
     ],
     "DOC_ANNOTATE": [
-        "gemini-3.1-pro-preview",   # 文档注释需要理解能力
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
     ],
     "FILE_SEARCH": [
         "gemini-3-flash-preview",
@@ -196,18 +209,54 @@ _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
         "gemini-2.5-flash-lite",
     ],
     "MULTI_STEP": [
-        "gemini-3.1-pro-preview",   # 多步任务首选
-        "gemini-3-pro-preview",     # Pro 3 备选
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
     ],
     "COMPLEX": [
-        "gemini-3.1-pro-preview",   # 复杂任务首选
-        "gemini-3-pro-preview",     # Pro 3 备选
-        "gemini-3-flash-preview",   # 快速备选
-        "gemini-2.5-flash",         # 稳定兜底
+        "gemini-3.1-pro-preview",
+        "gemini-3-pro-preview",
+        "gemini-3-flash-preview",
+        "gemini-2.5-flash",
     ],
 }
+
+
+def _load_env_fallback_chains() -> None:
+    """Load fallback chain overrides from environment variables.
+
+    Environment variables like KOTO_FALLBACK_CHAIN_CHAT=model1,model2,model3
+    override the hardcoded chains.  KOTO_FALLBACK_CHAIN_DEFAULT overrides
+    the default chain.
+    """
+    import os as _os
+
+    for key in list(_TASK_FALLBACK_CHAINS):
+        env_val = _os.getenv(f"KOTO_FALLBACK_CHAIN_{key}", "").strip()
+        if env_val:
+            _TASK_FALLBACK_CHAINS[key] = [
+                m.strip() for m in env_val.split(",") if m.strip()
+            ]
+            logger.info(
+                "[ModelFallback] Env override: %s = %s", key, _TASK_FALLBACK_CHAINS[key]
+            )
+    default_env = _os.getenv("KOTO_FALLBACK_CHAIN_DEFAULT", "").strip()
+    if default_env:
+        _DEFAULT_FALLBACK_CHAIN.clear()
+        _DEFAULT_FALLBACK_CHAIN.extend(
+            m.strip() for m in default_env.split(",") if m.strip()
+        )
+        logger.info(
+            "[ModelFallback] Env override: DEFAULT = %s", _DEFAULT_FALLBACK_CHAIN
+        )
+
+
+# ── 模块加载时尝试读取环境变量覆盖 ──────────────────────────────────────────────
+try:
+    _load_env_fallback_chains()
+except Exception:
+    pass
 
 
 def _is_model_unavailable_error(exc: Exception) -> bool:
@@ -244,7 +293,9 @@ class ModelFallbackExecutor:
     _cascade_failure_times: Dict[str, float] = (
         {}
     )  # task_type → timestamp of last cascade failure
-    _cascade_lock: threading.Lock = threading.Lock()  # guards _cascade_failures/_cascade_failure_times
+    _cascade_lock: threading.Lock = (
+        threading.Lock()
+    )  # guards _cascade_failures/_cascade_failure_times
     _CIRCUIT_BREAKER_BASE: float = 5.0  # initial backoff in seconds
     _CIRCUIT_BREAKER_CAP: float = 120.0  # max backoff in seconds
 
@@ -333,9 +384,12 @@ class ModelFallbackExecutor:
                 self._CIRCUIT_BREAKER_CAP,
             )
             elapsed = time.time() - last_failure_time
-            if elapsed < backoff:
+            if elapsed > backoff:
+                # Backoff expired: enter half-open — allow one probe attempt
+                pass
+            else:
                 raise RuntimeError(
-                    f"Circuit breaker open. task={task_type}, backing off {backoff:.0f}s"
+                    f"Circuit breaker open. task={task_type}, backing off {backoff - elapsed:.0f}s remaining"
                 )
         # ─────────────────────────────────────────────────────────────────
 
@@ -366,7 +420,10 @@ class ModelFallbackExecutor:
                         self._cascade_failures[task_type] = 0
                     return result
                 except Exception as _exc:
-                    if _gen_attempt < _RETRYABLE_GENERATION_MAX and _is_retryable_generation_error(_exc):
+                    if (
+                        _gen_attempt < _RETRYABLE_GENERATION_MAX
+                        and _is_retryable_generation_error(_exc)
+                    ):
                         logger.warning(
                             f"[ModelFallback] ⟳ 生成错误可重试，原地重试 {_gen_attempt + 1}/{_RETRYABLE_GENERATION_MAX}: "
                             f"{model_id} — {_exc}"
@@ -379,15 +436,11 @@ class ModelFallbackExecutor:
             last_exc = exc
             if _is_location_blocked_error(exc):
                 # 地区/帐号限制：所有云端模型都会失败，无需继续尝试，直接跳出循环
-                logger.warning(
-                    f"[ModelFallback] 🌐 地区限制，跳过剩余云端候选: {exc}"
-                )
+                logger.warning(f"[ModelFallback] 🌐 地区限制，跳过剩余云端候选: {exc}")
                 break
             elif _is_model_unavailable_error(exc):
                 self.mark_unavailable(model_id)
-                logger.warning(
-                    f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}"
-                )
+                logger.warning(f"[ModelFallback] 模型不可用，切换: {model_id} — {exc}")
                 # 继续尝试下一个候选
             elif _is_transient_error(exc):
                 # 超时/瞬时网络错误：短暂标记当前模型不可用，尝试下一个
@@ -422,6 +475,7 @@ class ModelFallbackExecutor:
                 if tools:
                     try:
                         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
+
                         _ollama = OllamaLLMProvider()
                         _result = _ollama.generate_content(
                             prompt=_msgs,
@@ -429,7 +483,9 @@ class ModelFallbackExecutor:
                             tools=tools,
                             stream=False,
                         )
-                        if _result and (_result.get("content") or _result.get("tool_calls")):
+                        if _result and (
+                            _result.get("content") or _result.get("tool_calls")
+                        ):
                             logger.info(
                                 "[ModelFallback] ✅ 云端全部失败，Ollama 本地兜底（含工具）成功 (task=%s)",
                                 task_type,
@@ -438,7 +494,10 @@ class ModelFallbackExecutor:
                                 self._cascade_failures[task_type] = 0
                             return _result
                     except Exception as _oe:
-                        logger.warning("[ModelFallback] Ollama 工具模式兜底失败，降级为纯文本: %s", _oe)
+                        logger.warning(
+                            "[ModelFallback] Ollama 工具模式兜底失败，降级为纯文本: %s",
+                            _oe,
+                        )
 
                 # 无工具或工具模式失败时，退回简单文本调用
                 _content, _err = LocalModelRouter.call_ollama_chat(
@@ -451,14 +510,20 @@ class ModelFallbackExecutor:
                     )
                     with self._cascade_lock:
                         self._cascade_failures[task_type] = 0
-                    return {"content": _content, "tool_calls": [], "model": "local/ollama"}
+                    return {
+                        "content": _content,
+                        "tool_calls": [],
+                        "model": "local/ollama",
+                    }
                 logger.warning("[ModelFallback] Ollama 兜底失败: %s", _err)
         except Exception as _le:
             logger.warning("[ModelFallback] Ollama 兜底异常: %s", _le)
 
         # 所有候选均失败 — record cascade failure for circuit breaker
         with self._cascade_lock:
-            self._cascade_failures[task_type] = self._cascade_failures.get(task_type, 0) + 1
+            self._cascade_failures[task_type] = (
+                self._cascade_failures.get(task_type, 0) + 1
+            )
             self._cascade_failure_times[task_type] = time.time()
         if last_exc:
             raise last_exc
@@ -480,9 +545,17 @@ class ModelFallbackExecutor:
 
         _add(preferred)
         _add(self._model_map.get(task_type))
+        if any(str(m or "").lower().startswith("deepseek") for m in result):
+            for m in _DEEPSEEK_FALLBACK_CHAIN:
+                _add(m)
+            return result
+        if not result:
+            for m in _DEFAULT_FALLBACK_CHAIN:
+                _add(m)
+            return result
         for m in _TASK_FALLBACK_CHAINS.get(task_type, []):
             _add(m)
-        for m in _DEFAULT_FALLBACK_CHAIN:
+        for m in _GEMINI_DEFAULT_FALLBACK_CHAIN:
             _add(m)
         return result
 

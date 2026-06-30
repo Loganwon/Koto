@@ -1,5 +1,5 @@
 """
-E2E UI tests for the PPTX editor in workspace-assistant.
+E2E UI tests for the PPTX editor in the unified Koto workspace.
 Simulates real user interaction: upload → render → edit → toolbar → move → new slide.
 
 Run:
@@ -46,7 +46,7 @@ def run_test(name: str, fn):
 
 
 def test_page_load(page: Page):
-    page.goto(BASE_URL + "/workspace-assistant", wait_until="networkidle")
+    page.goto(BASE_URL + "/", wait_until="networkidle")
     check("Page title contains Koto", "Koto" in page.title(), page.title())
     check("PPTX toolbar exists in DOM", page.locator("#wa-pptx-toolbar").count() > 0)
     check("Slide canvas exists", page.locator("#wa-pptx-slide-canvas").count() > 0)

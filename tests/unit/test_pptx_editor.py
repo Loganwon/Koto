@@ -206,3 +206,41 @@ class TestApplyEdits:
         joined = " ".join(all_texts)
         assert "EDITED" in joined
         assert "Slide Two" in joined
+
+    def test_new_frontend_picture_shape_is_embedded(self):
+        from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+        from web.blueprints.pptx_editor import _apply_edits, _parse_slides
+
+        raw = _make_pptx([["Image Slide"]])
+        parsed = _parse_slides(raw)
+        parsed["slides"][0]["shapes"].append(
+            {
+                "id": 987654,
+                "name": "tiny.png",
+                "type": "picture",
+                "_type": "PICTURE",
+                "left": 914400,
+                "top": 914400,
+                "width": 914400,
+                "height": 914400,
+                "z_order": 99,
+                "has_text": False,
+                "image_b64": (
+                    "data:image/png;base64,"
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk"
+                    "+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+                ),
+            }
+        )
+
+        edited = _apply_edits(raw, parsed["slides"])
+        prs = Presentation(io.BytesIO(edited))
+        pictures = [
+            shape
+            for shape in prs.slides[0].shapes
+            if shape.shape_type == MSO_SHAPE_TYPE.PICTURE
+        ]
+
+        assert pictures

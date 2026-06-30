@@ -1,14 +1,19 @@
 """
 Routing constants for SmartDispatcher.
 
-All hard-coded task-corpus entries, trivial-input sets, and model-mapping
-defaults live here so smart_dispatcher.py stays focused on orchestration.
+All hard-coded task-corpus entries, trivial-input sets, keyword patterns,
+and model-mapping defaults live here so smart_dispatcher.py stays focused
+on orchestration.
 """
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import List, Optional, Tuple
+
 # ── Task corpus ───────────────────────────────────────────────────────────────
 # Used for n-gram similarity scoring (fallback when ML classifiers don't fire).
+
 TASK_CORPUS: dict[str, list[str]] = {
     "PAINTER": ["画一张图", "帮我画", "生成图片", "draw me", "generate image"],
     "CODER": [
@@ -88,22 +93,14 @@ TASK_CORPUS: dict[str, list[str]] = {
     "FILE_SEARCH": ["找文件", "哪个文件", "文件在哪", "find file", "search for"],
     "CHAT": ["你好", "是什么", "介绍一下", "tell me about", "help me understand"],
     "SYSTEM": [
-        "打开微信",
-        "启动chrome",
-        "关闭qq",
-        "截图",
         "系统时间",
-        "shutdown",
-        "关机",
-        "打开steam",
-        "打开edge",
-        "启动vscode",
-        "打开计算器",
-        "关掉任务管理器",
-        "打开加速器",
-        "启动游戏",
-        "打开软件",
-        "运行程序",
+        "当前时间",
+        "今天日期",
+        "系统状态",
+        "系统信息",
+        "cpu状态",
+        "内存状态",
+        "磁盘状态",
     ],
     "AGENT": [
         "发微信",
@@ -134,41 +131,648 @@ TASK_CORPUS: dict[str, list[str]] = {
 
 # ── Trivial-input sets ────────────────────────────────────────────────────────
 
-TRIVIAL_GREETINGS: frozenset[str] = frozenset({
-    "你好", "你好呀", "你好啊",
-    "hi", "hello", "哈喽", "嗨", "hey",
-    "早上好", "早安", "中午好", "下午好", "晚上好", "晚安",
-    "谢谢", "谢谢你", "谢了", "感谢", "多谢", "thanks", "thank you",
-    "再见", "拜拜", "bye", "goodbye", "下次见",
-    "好的", "好", "嗯", "嗯嗯", "明白了", "知道了", "收到",
-    "ok", "okay",
-})
+TRIVIAL_GREETINGS: frozenset[str] = frozenset(
+    {
+        "你好",
+        "你好呀",
+        "你好啊",
+        "hi",
+        "hello",
+        "哈喽",
+        "嗨",
+        "hey",
+        "早上好",
+        "早安",
+        "中午好",
+        "下午好",
+        "晚上好",
+        "晚安",
+        "谢谢",
+        "谢谢你",
+        "谢了",
+        "感谢",
+        "多谢",
+        "thanks",
+        "thank you",
+        "再见",
+        "拜拜",
+        "bye",
+        "goodbye",
+        "下次见",
+        "好的",
+        "好",
+        "嗯",
+        "嗯嗯",
+        "明白了",
+        "知道了",
+        "收到",
+        "ok",
+        "okay",
+    }
+)
 
 TRIVIAL_IDENTITY: tuple[str, ...] = (
-    "你是谁", "你叫什么", "你叫啥", "你是什么", "介绍一下你自己",
-    "你是koto", "koto是什么",
+    "你是谁",
+    "你叫什么",
+    "你叫啥",
+    "你是什么",
+    "介绍一下你自己",
+    "你是koto",
+    "koto是什么",
 )
 
 # If any of these appear, the input cannot take the trivial fast-path
-# even if it's very short.
 TRIVIAL_EXCLUDE: tuple[str, ...] = (
-    "画", "图片", "照片", "图", "代码", "程序", "脚本", "文件", "文档", "报告",
-    "pdf", "word", "excel", "ppt", "天气", "股价", "新闻", "汇率",
-    "打开", "关闭", "截图", "启动", "运行", "搜索", "微信", "发送",
-    "发消息", "发邮件", "购票", "研究", "分析", "深入", "全面",
-    # Chart/dataviz
-    "作图", "图表", "折线图", "柱状图", "饼图", "散点图", "直方图",
-    "可视化", "统计图", "数据图", "chart", "plot", "matplotlib",
-    "seaborn", "plotly",
-    # Finance/commodity
-    "原油", "布伦特", "黄金", "白银", "铜价", "期货", "汇率",
-    "比特币", "以太坊", "价格", "行情", "走势", "现价", "涨跌",
-    "金价", "油价", "银价", "气价",
-    # Weather variants
-    "下雨", "下雪", "气温", "天气",
-    # Programming
-    "python", "javascript", "java", "golang", "rust", "c++", "sql",
-    "函数", "算法", "脚本", "接口", "api",
-    # Timeliness signals
-    "目前", "近期", "局势", "战况", "动态", "进展", "现状", "近况",
+    "画",
+    "图片",
+    "照片",
+    "图",
+    "代码",
+    "程序",
+    "脚本",
+    "文件",
+    "文档",
+    "报告",
+    "pdf",
+    "word",
+    "excel",
+    "ppt",
+    "天气",
+    "股价",
+    "新闻",
+    "汇率",
+    "搜索",
+    "微信",
+    "发送",
+    "发消息",
+    "发邮件",
+    "购票",
+    "研究",
+    "分析",
+    "深入",
+    "全面",
+    "作图",
+    "图表",
+    "折线图",
+    "柱状图",
+    "饼图",
+    "散点图",
+    "直方图",
+    "可视化",
+    "统计图",
+    "数据图",
+    "chart",
+    "plot",
+    "matplotlib",
+    "seaborn",
+    "plotly",
+    "原油",
+    "布伦特",
+    "黄金",
+    "白银",
+    "铜价",
+    "期货",
+    "汇率",
+    "比特币",
+    "以太坊",
+    "价格",
+    "行情",
+    "走势",
+    "现价",
+    "涨跌",
+    "金价",
+    "油价",
+    "银价",
+    "气价",
+    "下雨",
+    "下雪",
+    "气温",
+    "天气",
+    "系统状态",
+    "系统信息",
+    "系统时间",
+    "当前时间",
+    "日期",
+    "cpu",
+    "内存",
+    "硬盘",
+    "python",
+    "javascript",
+    "java",
+    "golang",
+    "rust",
+    "c++",
+    "sql",
+    "函数",
+    "算法",
+    "脚本",
+    "接口",
+    "api",
+    "目前",
+    "近期",
+    "局势",
+    "战况",
+    "动态",
+    "进展",
+    "现状",
+    "近况",
 )
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Composable Routing Rules (extracted from SmartDispatcher.analyze() cascade)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+
+@dataclass
+class RoutingRule:
+    """A single routing rule: checks a pattern and returns a task type if matched."""
+
+    task_type: str
+    label: str
+    priority: int  # 0 = highest, larger = lower priority
+    keywords: List[str] = field(default_factory=list)
+    regex_patterns: List[str] = field(default_factory=list)
+    _requires_file_context: bool = False
+    _exclude_keywords: List[str] = field(default_factory=list)
+
+    def matches(self, user_input: str, user_lower: str, has_file: bool = False) -> bool:
+        if self._requires_file_context and not has_file:
+            return False
+        if self._exclude_keywords and any(
+            k in user_lower for k in self._exclude_keywords
+        ):
+            return False
+        if self.keywords and any(k in user_lower for k in self.keywords):
+            return True
+        if self.regex_patterns:
+            import re as _re
+
+            return any(_re.search(p, user_input) for p in self.regex_patterns)
+        return False
+
+
+# ─── Rule Chains (ordered by priority in analyze() cascade) ───────────────────
+
+FORCE_PLAN_TRIGGERS: List[str] = [
+    "请制定计划",
+    "拆解任务",
+    "帮我计划",
+    "分步骤",
+    "一步步",
+    "分步完成",
+    "制定方案",
+    "拆分任务",
+    "步骤规划",
+    "step by step",
+    "step-by-step",
+    "plan and execute",
+]
+
+AGENT_NOTIFY_PATTERNS: List[str] = [
+    r"(设置?|帮我设?)(提醒|闹钟|定时).{0,20}",
+    r"提醒我.{0,25}(点|时|分|号|日)",
+    r"(给|向).{1,8}(发|回)(微信|消息|邮件)",
+    r"(发|回)(微信|消息).{0,15}给.{1,8}",
+]
+
+PAINTER_PATTERNS: List[str] = [
+    r"(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,20}(图片|照片|壁纸|头像|封面)",
+    r"(画|做|生成|创作|绘制|帮我画|帮我做|帮我生成).{0,3}(一张|一幅|一个|张|幅).{0,30}图",
+    r"(一张|一幅).{1,20}(图|图片|照片)",
+    r"(ai|AI).{0,5}(画|绘|生成|创作)",
+]
+
+PAINTER_CHART_EXCLUDE: List[str] = [
+    "图表",
+    "折线图",
+    "柱状图",
+    "饼图",
+    "散点图",
+    "直方图",
+    "条形图",
+    "可视化",
+    "统计图",
+    "数据图",
+    "chart",
+    "plot",
+    "matplotlib",
+]
+
+EDIT_INTENT_KEYWORDS: List[str] = [
+    "修改",
+    "更改",
+    "标注",
+    "批注",
+    "润色",
+    "改写",
+    "校对",
+    "审校",
+    "修订",
+    "纠错",
+    "改善",
+    "优化",
+    "调整",
+    "精炼",
+    "通畅",
+    "通顺",
+    "流畅",
+    "精简",
+    "凝练",
+    "简洁",
+    "整理",
+    "梳理",
+    "提炼",
+    "整体修改",
+    "修一下",
+    "帮我改",
+    "改一改",
+    "改得",
+    "写得",
+    "polish",
+    "refine",
+    "revise",
+    "edit",
+    "improve",
+]
+
+ANNOTATE_FILE_TYPES: Tuple[str, ...] = (".docx", ".doc")
+WORKFLOW_FILE_TYPES: Tuple[str, ...] = (".md", ".txt")
+
+PATH_LIST_KEYWORDS: List[str] = [
+    "归纳",
+    "列出",
+    "列举",
+    "有哪些",
+    "所有",
+    "全部",
+    "找",
+    "查",
+    "看看",
+    "显示",
+    "汇总",
+    "整理",
+    "监控",
+    "监视",
+    "停止监控",
+    "自动归类",
+    "提取",
+    "关键信息",
+    "合同信息",
+    "解读",
+    "分析",
+    "哪个",
+    "哪些",
+    "里面",
+    "这几份",
+    "对比",
+    "哪几",
+    "几个",
+    "几份",
+    "路径下",
+    "下有",
+    "下面有",
+    "属于",
+    "什么文件",
+    "文件类型",
+    "下的文件",
+]
+
+WEATHER_KEYWORDS: List[str] = [
+    "天气",
+    "气温",
+    "下雨吗",
+    "下雨",
+    "下雪吗",
+    "下雪",
+    "天气怎么样",
+    "天气怎样",
+    "天气预报",
+    "weather",
+    "温度多少",
+    "穿什么衣服",
+]
+
+MEETING_VERBS: List[str] = ["提炼", "提取", "整理", "总结", "分析", "归纳"]
+MEETING_NOUNS: List[str] = ["会议", "纪要", "会议记录", "会议内容", "转录", "会议文字"]
+MEETING_QUESTION_GUARDS: List[str] = [
+    "什么是",
+    "是什么",
+    "怎么写",
+    "如何写",
+    "怎么做",
+    "如何做",
+    "怎么用",
+    "有什么区别",
+]
+
+CODE_WRITE_VERBS: List[str] = [
+    "帮我写",
+    "给我写",
+    "写一个",
+    "写个",
+    "实现",
+    "编写",
+    "开发",
+    "编程",
+]
+CODE_CONCEPTS: List[str] = [
+    "函数",
+    "算法",
+    "类",
+    "接口",
+    "脚本",
+    "程序",
+    "代码",
+    "排序",
+    "查找",
+    "递归",
+    "遍历",
+    "爬虫",
+    "api",
+    "模块",
+]
+CODE_LANGS: List[str] = [
+    "python",
+    "javascript",
+    "java",
+    "c++",
+    "golang",
+    "rust",
+    "typescript",
+    "kotlin",
+    "swift",
+    "php",
+    "ruby",
+    "sql",
+]
+
+REALTIME_SIGNALS: List[str] = ["目前", "现在", "当前", "最新", "近期", "今日", "近况"]
+REALTIME_TOPICS: List[str] = [
+    "新闻",
+    "消息",
+    "进展",
+    "动态",
+    "局势",
+    "战况",
+    "现状",
+    "情况",
+    "比分",
+    "结果",
+    "成绩",
+    "排名",
+    "股价",
+    "金价",
+    "油价",
+]
+REALTIME_EXCLUDE: List[str] = [
+    "历史",
+    "是什么",
+    "什么是",
+    "定义",
+    "原理",
+    "原因",
+    "介绍",
+    "解释",
+]
+
+CHART_KEYWORDS: List[str] = [
+    "图表",
+    "折线图",
+    "柱状图",
+    "饼图",
+    "散点图",
+    "直方图",
+    "条形图",
+    "热力图",
+    "作图",
+    "可视化",
+    "统计图",
+    "数据图",
+    "chart",
+    "plot",
+    "graph",
+    "matplotlib",
+    "seaborn",
+    "plotly",
+    "echarts",
+]
+CHART_ACTION_KEYWORDS: List[str] = [
+    "画",
+    "作",
+    "生成",
+    "做",
+    "绘制",
+    "创建",
+    "画出",
+    "plot",
+    "draw",
+    "show",
+    "显示",
+]
+CHART_KNOWLEDGE_GUARDS: List[str] = [
+    "什么是",
+    "是什么",
+    "怎么",
+    "如何",
+    "定义",
+    "原理",
+    "介绍",
+    "解释",
+]
+
+TRAVEL_SEARCH_PATTERNS: List[str] = [
+    r"(查|查询|查一下|看|有没有|有无|还有).{0,8}(火车票|高铁票|动车票|机票|余票|班次)",
+    r"(下周|明天|后天|今天|大后天|[0-9]+[号日]).{0,14}(去|到|从).{0,14}(高铁|动车|火车|航班|机票)",
+    r"(去|从).{1,14}(去|到).{1,20}(火车|高铁|动车|机)",
+    r"(几点|什么时候).{0,8}(从|到|出发|到达).{0,12}(车|班|次|机)",
+    r"(余票|时刻表|列车时刻|航班动态|航班查询)",
+]
+TRAVEL_BUY_KEYWORDS: List[str] = ["订票", "买票", "购票", "帮我买", "帮我订", "12306"]
+
+PRICE_ASSETS: List[str] = [
+    "原油",
+    "布伦特",
+    "wti",
+    "天然气",
+    "黄金",
+    "白银",
+    "铜",
+    "铁矿石",
+    "大豆",
+    "小麦",
+    "棉花",
+    "黄铜",
+    "铝",
+    "锌",
+    "铅",
+    "镍",
+    "比特币",
+    "以太坊",
+    "btc",
+    "eth",
+    "加密货币",
+    "数字货币",
+    "美元",
+    "欧元",
+    "日元",
+    "英镑",
+    "港币",
+    "外汇",
+    "汇率",
+    "a股",
+    "港股",
+    "道琼斯",
+    "纳斯达克",
+    "标普",
+    "上证",
+    "深证",
+    "期货",
+    "基金",
+    "债券",
+    "股票",
+    "金价",
+    "油价",
+    "银价",
+    "铜价",
+]
+PRICE_SIGNALS: List[str] = [
+    "价格",
+    "现价",
+    "报价",
+    "行情",
+    "走势",
+    "涨跌",
+    "多少钱",
+    "今日价",
+    "实时",
+    "最新价",
+    "开盘",
+    "收盘",
+    "涨了",
+    "跌了",
+]
+
+PPT_DIRECT_KEYWORDS: List[str] = [
+    "ppt",
+    "幻灯片",
+    "演示文稿",
+    "presentation",
+    "slide",
+    "slides",
+    ".pptx",
+]
+PPT_ACTION_WORDS: List[str] = [
+    "做",
+    "生成",
+    "创建",
+    "制作",
+    "做一个",
+    "做个",
+    "帮我做",
+    "帮我生成",
+]
+PPT_QUESTION_GUARDS: List[str] = [
+    "怎么",
+    "如何",
+    "什么",
+    "你会",
+    "你能",
+    "能不能",
+    "可以吗",
+    "能否",
+    "支持",
+]
+
+DOC_GEN_OUTPUT_KEYWORDS: List[str] = [
+    "word",
+    "docx",
+    ".doc",
+    "pdf",
+    "excel",
+    ".xlsx",
+    "报告",
+    "文档",
+    "介绍文档",
+    "word版",
+]
+DOC_GEN_ACTION_KEYWORDS: List[str] = [
+    "做一个",
+    "做一份",
+    "做个",
+    "写一份",
+    "写一个",
+    "帮我做",
+    "帮我写",
+    "生成一个",
+    "生成一份",
+    "生成",
+    "创建一个",
+    "创建一份",
+    "制作",
+]
+DOC_GEN_QUESTION_GUARDS: List[str] = [
+    "怎么",
+    "如何",
+    "什么",
+    "你会",
+    "你能",
+    "能不能",
+    "可以吗",
+    "能否",
+    "支持",
+    "功能",
+]
+
+FILE_SEARCH_PATTERNS: List[str] = [
+    r"帮我找.{0,20}文件",
+    r"找一下.{1,30}",
+    r"找找.{1,30}",
+    r"找到.{1,20}文件",
+    r"定位.{1,20}文件",
+    r"搜索文件",
+    r"在哪(里|儿|个目录)",
+    r"哪个文件.{0,10}",
+    r"扫描(我的)?(电脑|磁盘|硬盘|文件)",
+    r"全盘扫描",
+    r"帮我打开.{1,30}(文件|\.)",
+]
+
+AGENT_SAFETY_PATTERNS: List[str] = [
+    r"发微信",
+    r"回微信",
+    r"微信发",
+    r"微信回",
+    r"给.{1,6}发消息",
+    r"给.{1,6}发微信",
+    r"浏览器打开",
+    r"点击.{1,6}按键",
+]
+
+SEARCH_FOLLOWUP_VERBS: List[str] = [
+    "查",
+    "搜",
+    "搜索",
+    "查询",
+    "找",
+    "再找",
+    "再查",
+    "再搜",
+    "再看看",
+]
+
+GENERIC_QUESTION_WORDS: List[str] = [
+    "怎么",
+    "如何",
+    "什么",
+    "为什么",
+    "能不能",
+    "可以吗",
+    "怎样",
+    "咋",
+    "啥",
+    "how",
+    "what",
+    "why",
+    "which",
+]

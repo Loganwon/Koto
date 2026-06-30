@@ -35,6 +35,13 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/univer-editor/package-lock.json
+
       - name: Determine version
         shell: pwsh
         run: |
@@ -89,11 +96,26 @@ jobs:
           }
           Write-Host "Dependencies installed"
 
+      - name: Install frontend dependencies
+        shell: pwsh
+        run: |
+          npm ci --prefix web/univer-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::npm ci failed"; exit 1 }
+
+      - name: Build file assistant frontend assets
+        shell: pwsh
+        run: |
+          npm run build --prefix web/univer-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Frontend build failed"; exit 1 }
+
       - name: Build with PyInstaller
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path logs | Out-Null
-          .\.venv\Scripts\pyinstaller.exe koto.spec --clean -y *> logs\build_latest.log
+          $cmd = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
+          $pyinstaller = Join-Path $PWD ".venv\Scripts\pyinstaller.exe"
+          $cmdLine = '"{0}" koto.spec --clean -y > "logs\build_latest.log" 2>&1' -f $pyinstaller
+          & $cmd /d /c $cmdLine
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::PyInstaller build failed. Last 60 lines:"
             Get-Content logs\build_latest.log -Tail 60
@@ -106,13 +128,43 @@ jobs:
         shell: pwsh
         run: |
           $internal = "dist\Koto\_internal"
+          $staticRoot = Join-Path $internal "web\static"
+          $configRoot = Join-Path $internal "config"
+          $requiredConfigDirs = @("context", "divination_data", "skills", "skill_packs", "tools", "workflows")
+          foreach ($dirName in $requiredConfigDirs) {
+            $dirPath = Join-Path $configRoot $dirName
+            if (-not (Test-Path $dirPath)) {
+              New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
+              Write-Host "  NOTE: normalized empty config dir: $dirPath"
+            }
+          }
           $checks = @(
             "dist\Koto\Koto.exe",
             "$internal\base_library.zip",
             "$internal\psutil",
             "$internal\app",
             "$internal\web",
-            "$internal\config"
+            "$internal\config",
+            "$staticRoot\js\workspace-assistant.js",
+            "$staticRoot\jszip.min.js",
+            "$staticRoot\docx-preview.min.js",
+            "$staticRoot\univer-dist\index.html",
+            "$staticRoot\univer-dist\assets\sheets-main.js",
+            "$staticRoot\univer-dist\assets\sheets-main.css",
+            "$configRoot\.builtin_key",
+            "$configRoot\gemini_config.env.example",
+            "$configRoot\macro_suggestions.json",
+            "$configRoot\personality_matrix.json",
+            "$configRoot\skill_affinity.json",
+            "$configRoot\skill_bindings.json",
+            "$configRoot\skill_ratings.json",
+            "$configRoot\triggers.json",
+            "$configRoot\context",
+            "$configRoot\divination_data",
+            "$configRoot\skills",
+            "$configRoot\skill_packs",
+            "$configRoot\tools",
+            "$configRoot\workflows"
           )
           $failed = @()
           foreach ($p in $checks) {
@@ -123,6 +175,27 @@ jobs:
           $pyd = Get-ChildItem "$internal\psutil" -Filter "_psutil_windows*.pyd" -ErrorAction SilentlyContinue
           if ($pyd) { Write-Host "  OK: psutil C extension: $($pyd.Name)" }
           else       { $failed += "psutil/_psutil_windows.pyd"; Write-Host "::error::MISSING: psutil C extension .pyd" }
+
+          $indexHtml = Join-Path $staticRoot "univer-dist\index.html"
+          if (Test-Path $indexHtml) {
+            $html = Get-Content $indexHtml -Raw -Encoding UTF8
+            $refs = [regex]::Matches($html, '(assets/index-[^"''>]+\.(?:js|css))') |
+              ForEach-Object { $_.Groups[1].Value } |
+              Select-Object -Unique
+            if (-not $refs) {
+              $failed += "univer-dist/index.html asset refs"
+              Write-Host "::error::MISSING: no hashed index asset refs found in $indexHtml"
+            }
+            foreach ($rel in $refs) {
+              $assetPath = Join-Path (Split-Path $indexHtml -Parent) $rel
+              if (Test-Path $assetPath) { Write-Host "  OK: $assetPath" }
+              else {
+                $failed += $assetPath
+                Write-Host "::error::MISSING: $assetPath"
+              }
+            }
+          }
+
           if ($failed.Count -gt 0) {
             Write-Host "::error::Smoke test failed: $($failed.Count) item(s) missing"
             exit 1
@@ -141,7 +214,10 @@ jobs:
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path logs | Out-Null
-          .\.venv\Scripts\pyinstaller.exe local_model_installer.spec --clean -y *> logs\local_model_installer_build_latest.log
+          $cmd = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
+          $pyinstaller = Join-Path $PWD ".venv\Scripts\pyinstaller.exe"
+          $cmdLine = '"{0}" local_model_installer.spec --clean -y > "logs\local_model_installer_build_latest.log" 2>&1' -f $pyinstaller
+          & $cmd /d /c $cmdLine
           if ($LASTEXITCODE -ne 0) {
             Write-Host "::error::LocalModelInstaller build failed. Last 30 lines:"
             Get-Content logs\local_model_installer_build_latest.log -Tail 30

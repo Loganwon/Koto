@@ -718,10 +718,57 @@ class TestKotoApp:
 
     def test_window_api_close(self):
         mod = self._import_module()
+        mod._clear_app_shutdown_request()
         window = MagicMock()
         api = mod.WindowAPI(window, "http://127.0.0.1:5000")
         api.close()
+        assert mod._get_app_shutdown_reason() == "js_close"
         window.destroy.assert_called_once()
+        mod._clear_app_shutdown_request()
+
+    def test_handle_webview_exit_exits_cleanly_after_explicit_shutdown(self):
+        mod = self._import_module()
+        mod._clear_app_shutdown_request()
+        mod._request_app_shutdown("native_close")
+
+        with patch.object(mod, "_write_log") as mock_log, patch.object(
+            mod.os, "_exit"
+        ) as mock_exit, patch.object(mod.os, "execve") as mock_execve:
+            mod._handle_webview_exit()
+
+        mock_exit.assert_called_once_with(0)
+        mock_execve.assert_not_called()
+        mock_log.assert_called_once()
+        mod._clear_app_shutdown_request()
+
+    def test_handle_webview_exit_attempts_single_recovery_when_unexpected(self):
+        mod = self._import_module()
+        mod._clear_app_shutdown_request()
+
+        with patch.dict(
+            os.environ,
+            {
+                "KOTO_WINDOW_RECOVERY_COUNT": "0",
+                "KOTO_MAX_UNEXPECTED_WINDOW_RECOVERY": "1",
+            },
+            clear=False,
+        ), patch.object(mod, "_write_log"), patch.object(
+            mod, "_dump_threads"
+        ) as mock_dump, patch.object(
+            mod.os, "execve"
+        ) as mock_execve, patch.object(
+            mod.os, "_exit"
+        ) as mock_exit:
+            mod._handle_webview_exit()
+
+        mock_dump.assert_called_once_with("unexpected-webview-exit")
+        mock_execve.assert_called_once()
+        assert mock_execve.call_args[0][2]["KOTO_WINDOW_RECOVERY_COUNT"] == "1"
+        assert (
+            mock_execve.call_args[0][2]["KOTO_WINDOW_LAST_EXIT_REASON"]
+            == "unexpected_webview_exit"
+        )
+        mock_exit.assert_not_called()
 
     def test_window_api_open_url_success(self):
         mod = self._import_module()
@@ -801,6 +848,38 @@ class TestKotoApp:
                 with patch("time.sleep"):
                     assert mod._wait_for_port("127.0.0.1", 5000, 3) is False
 
+    def test_start_flask_server_avoids_reusing_healthy_backend(self):
+        mod = self._import_module()
+        original_port = mod.KOTO_PORT
+        original_fallback = mod.FALLBACK_PORT
+
+        try:
+            mod.KOTO_PORT = 5000
+            mod.FALLBACK_PORT = 5001
+
+            sock = MagicMock()
+            sock.connect_ex.return_value = 0
+            mock_thread = MagicMock()
+
+            with patch("socket.socket", return_value=sock), patch.object(
+                mod, "_check_http_ok", return_value=True
+            ), patch.object(mod, "_find_available_port", return_value=5001), patch.dict(
+                os.environ, {"KOTO_REUSE_HEALTHY_BACKEND": "0"}, clear=False
+            ), patch.object(
+                mod.threading, "Thread", return_value=mock_thread
+            ), patch.object(
+                mod, "_write_log"
+            ):
+                result = mod.start_flask_server()
+
+            assert mod.KOTO_PORT == 5001
+            assert result["started"] is True
+            assert result["already_running"] is False
+            mock_thread.start.assert_called_once()
+        finally:
+            mod.KOTO_PORT = original_port
+            mod.FALLBACK_PORT = original_fallback
+
     # -- _check_http_ok ----------------------------------------------------
 
     def test_check_http_ok_success(self):
@@ -818,6 +897,210 @@ class TestKotoApp:
         mod = self._import_module()
         with patch("urllib.request.build_opener", side_effect=OSError):
             assert mod._check_http_ok("http://bad") is False
+
+    def test_wait_for_http_ok_respects_total_deadline(self):
+        mod = self._import_module()
+        monotonic_values = iter([0.0, 0.0, 0.6, 0.6, 1.05])
+
+        with patch.object(
+            mod, "_check_http_ok", return_value=False
+        ) as mock_check, patch(
+            "time.monotonic", side_effect=lambda: next(monotonic_values)
+        ), patch(
+            "time.sleep"
+        ) as mock_sleep:
+            assert (
+                mod._wait_for_http_ok(
+                    "http://127.0.0.1:5000/api/health",
+                    1.0,
+                    request_timeout=0.5,
+                    poll_interval=0.25,
+                )
+                is False
+            )
+
+        assert mock_check.call_count == 2
+        mock_check.assert_any_call("http://127.0.0.1:5000/api/health", timeout=0.5)
+        mock_check.assert_any_call("http://127.0.0.1:5000/api/health", timeout=0.4)
+        mock_sleep.assert_called_once_with(0.25)
+
+    def test_wait_for_http_ok_succeeds_before_deadline(self):
+        mod = self._import_module()
+        monotonic_values = iter([0.0, 0.0, 0.2, 0.2])
+
+        with patch.object(
+            mod, "_check_http_ok", side_effect=[False, True]
+        ) as mock_check, patch(
+            "time.monotonic", side_effect=lambda: next(monotonic_values)
+        ), patch(
+            "time.sleep"
+        ) as mock_sleep:
+            assert (
+                mod._wait_for_http_ok(
+                    "http://127.0.0.1:5000/api/health",
+                    1.0,
+                    request_timeout=0.5,
+                    poll_interval=0.25,
+                )
+                is True
+            )
+
+        assert mock_check.call_count == 2
+        mock_sleep.assert_called_once_with(0.25)
+
+    def test_attempt_process_recovery_reexecs_with_incremented_counter(self):
+        mod = self._import_module()
+
+        with patch.dict(
+            os.environ,
+            {
+                mod.BACKEND_RECOVERY_COUNT_ENV: "0",
+                mod.BACKEND_RECOVERY_MAX_ENV: "2",
+            },
+            clear=False,
+        ), patch.object(mod, "_write_log"), patch.object(
+            mod.os, "execve"
+        ) as mock_execve:
+            assert (
+                mod._attempt_process_recovery(
+                    "backend_unreachable",
+                    count_env=mod.BACKEND_RECOVERY_COUNT_ENV,
+                    max_env=mod.BACKEND_RECOVERY_MAX_ENV,
+                    default_max=1,
+                )
+                is True
+            )
+
+        env = mock_execve.call_args[0][2]
+        assert env[mod.BACKEND_RECOVERY_COUNT_ENV] == "1"
+        assert env["KOTO_LAST_RECOVERY_REASON"] == "backend_unreachable"
+
+    def test_attempt_process_recovery_stops_at_limit(self):
+        mod = self._import_module()
+
+        with patch.dict(
+            os.environ,
+            {
+                mod.BACKEND_RECOVERY_COUNT_ENV: "1",
+                mod.BACKEND_RECOVERY_MAX_ENV: "1",
+            },
+            clear=False,
+        ), patch.object(mod, "_write_log"), patch.object(
+            mod.os, "execve"
+        ) as mock_execve:
+            assert (
+                mod._attempt_process_recovery(
+                    "backend_unreachable",
+                    count_env=mod.BACKEND_RECOVERY_COUNT_ENV,
+                    max_env=mod.BACKEND_RECOVERY_MAX_ENV,
+                    default_max=1,
+                )
+                is False
+            )
+
+        mock_execve.assert_not_called()
+
+    def test_backend_watchdog_enabled_defaults_false(self):
+        mod = self._import_module()
+
+        with patch.dict(os.environ, {}, clear=True):
+            assert mod._backend_watchdog_enabled() is False
+
+    def test_backend_watchdog_enabled_accepts_truthy_env(self):
+        mod = self._import_module()
+
+        with patch.dict(
+            os.environ,
+            {mod.BACKEND_WATCHDOG_ENABLED_ENV: "1"},
+            clear=False,
+        ):
+            assert mod._backend_watchdog_enabled() is True
+
+    def test_backend_health_watchdog_recovers_after_consecutive_failures(self):
+        mod = self._import_module()
+
+        class FakeThread:
+            def __init__(self, target=None, daemon=None, name=None):
+                self._target = target
+                self.daemon = daemon
+                self.name = name
+                self.started = False
+
+            def start(self):
+                self.started = True
+                self._target()
+
+        with patch.object(
+            mod.threading,
+            "Thread",
+            side_effect=lambda *args, **kwargs: FakeThread(**kwargs),
+        ), patch.object(
+            mod, "_get_app_shutdown_reason", return_value=None
+        ), patch.object(
+            mod, "_check_http_ok", side_effect=[False, False]
+        ), patch.object(
+            mod, "_dump_threads"
+        ) as mock_dump, patch.object(
+            mod, "_attempt_process_recovery", return_value=True
+        ) as mock_recover, patch(
+            "time.sleep"
+        ):
+            thread = mod._start_backend_health_watchdog(
+                "http://127.0.0.1:5000/api/health",
+                expect_server_thread=False,
+                interval_sec=0.5,
+                max_failures=2,
+            )
+
+        assert isinstance(thread, FakeThread)
+        assert thread.started is True
+        mock_dump.assert_called_once_with("backend-health-watchdog")
+        mock_recover.assert_called_once_with(
+            "backend_unreachable",
+            count_env=mod.BACKEND_RECOVERY_COUNT_ENV,
+            max_env=mod.BACKEND_RECOVERY_MAX_ENV,
+            default_max=1,
+        )
+
+    def test_backend_health_watchdog_ignores_transient_failure_after_success(self):
+        mod = self._import_module()
+
+        class FakeThread:
+            def __init__(self, target=None, daemon=None, name=None):
+                self._target = target
+                self.daemon = daemon
+                self.name = name
+                self.started = False
+
+            def start(self):
+                self.started = True
+                self._target()
+
+        shutdown_states = iter([None, None, None, None, "manual_stop"])
+
+        with patch.object(
+            mod.threading,
+            "Thread",
+            side_effect=lambda *args, **kwargs: FakeThread(**kwargs),
+        ), patch.object(
+            mod, "_get_app_shutdown_reason", side_effect=lambda: next(shutdown_states)
+        ), patch.object(
+            mod, "_check_http_ok", side_effect=[False, True, False, True]
+        ), patch.object(
+            mod, "_attempt_process_recovery"
+        ) as mock_recover, patch(
+            "time.sleep"
+        ):
+            thread = mod._start_backend_health_watchdog(
+                "http://127.0.0.1:5000/api/health",
+                expect_server_thread=False,
+                interval_sec=0.5,
+                max_failures=2,
+            )
+
+        assert isinstance(thread, FakeThread)
+        assert thread.started is True
+        mock_recover.assert_not_called()
 
     # -- _find_available_port ----------------------------------------------
 

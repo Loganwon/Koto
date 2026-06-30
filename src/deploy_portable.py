@@ -16,6 +16,18 @@ _HERE = Path(__file__).resolve().parent
 ROOT = _HERE.parent if _HERE.name == "src" else _HERE
 APP_BUILD_DIR = ROOT / "dist" / "Koto"
 OUTPUT_DIR = ROOT / "dist" / "Koto_Portable"
+RELEASE_ROOT_ENTRIES = (
+    "Koto.exe",
+    "_internal",
+)
+REQUIRED_CONFIG_DIRS = (
+    "context",
+    "divination_data",
+    "skills",
+    "skill_packs",
+    "tools",
+    "workflows",
+)
 
 LOCAL_INSTALLER_CANDIDATES = [
     ROOT / "dist" / "LocalModelInstaller.exe",
@@ -81,6 +93,11 @@ def write_text(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def ensure_required_config_dirs(config_root: Path) -> None:
+    for dir_name in REQUIRED_CONFIG_DIRS:
+        (config_root / dir_name).mkdir(parents=True, exist_ok=True)
+
+
 def create_launchers(output_dir: Path, include_installer: bool) -> None:
     write_text(
         output_dir / "Start_Koto.bat",
@@ -135,7 +152,18 @@ def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
         )
 
     ensure_clean_output(output_dir)
-    shutil.copytree(APP_BUILD_DIR, output_dir, dirs_exist_ok=True)
+
+    for entry_name in RELEASE_ROOT_ENTRIES:
+        source_path = APP_BUILD_DIR / entry_name
+        if not source_path.exists():
+            raise FileNotFoundError(f"发行目录缺少必需项: {source_path}")
+        target_path = output_dir / entry_name
+        if source_path.is_dir():
+            shutil.copytree(source_path, target_path, dirs_exist_ok=True)
+        else:
+            shutil.copy2(source_path, target_path)
+
+    ensure_required_config_dirs(output_dir / "_internal" / "config")
 
     if installer_path is not None:
         shutil.copy2(installer_path, output_dir / "LocalModelInstaller.exe")

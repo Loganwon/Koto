@@ -23,6 +23,21 @@ import re
 
 from flask import Blueprint, Response, jsonify, request
 
+from web.document_feedback import (
+    analyze_annotations_only,
+    collect_annotation_result,
+    stream_annotation_events,
+)
+
+
+def _resolve_document_path(file_path: str, workspace_dir: str) -> str:
+    text = str(file_path or "").strip()
+    if not text:
+        return ""
+    if os.path.isabs(text):
+        return text
+    return os.path.join(workspace_dir, "documents", text)
+
 _logger = logging.getLogger("koto.routes.document")
 
 document_bp = Blueprint("document", __name__)
@@ -34,15 +49,15 @@ document_bp = Blueprint("document", __name__)
 
 
 def _get_client():
-    from web.app import client
+    from web.runtime_context import get_client_proxy
 
-    return client
+    return get_client_proxy()
 
 
 def _get_workspace_dir():
-    from web.app import WORKSPACE_DIR
+    from web.runtime_context import get_workspace_dir
 
-    return WORKSPACE_DIR
+    return get_workspace_dir()
 
 
 # ---------------------------------------------------------------------------
@@ -112,20 +127,15 @@ def _call_document_annotate(file_path: str, requirement: str):
     """调用文档标注系统"""
     try:
         workspace_dir = _get_workspace_dir()
-        # 转换为绝对路径
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(workspace_dir, "documents", file_path)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
-        from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=_get_client())
-
-        result = feedback_system.full_annotation_loop(
+        result = collect_annotation_result(
             file_path=file_path,
             user_requirement=requirement,
+            gemini_client=_get_client(),
             model_id="gemini-2.5-pro",
         )
 
@@ -267,9 +277,7 @@ def document_feedback() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        # 转换为绝对路径
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(workspace_dir, "documents", file_path)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
@@ -419,21 +427,16 @@ def document_annotate() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        # 转换为绝对路径
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(workspace_dir, "documents", file_path)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
-        # 初始化反馈系统
-        from web.document_feedback import DocumentFeedbackSystem
-
-        feedback_system = DocumentFeedbackSystem(gemini_client=_get_client())
-
-        # 执行完整标注闭环
-        result = feedback_system.full_annotation_loop(
-            file_path=file_path, user_requirement=user_requirement, model_id=model_id
+        result = collect_annotation_result(
+            file_path=file_path,
+            user_requirement=user_requirement,
+            gemini_client=_get_client(),
+            model_id=model_id,
         )
 
         return jsonify(result)
@@ -457,34 +460,19 @@ def document_analyze_annotations() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        # 转换为绝对路径
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(workspace_dir, "documents", file_path)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
-        # 使用V2批量标注系统（立即返回结果，不流式）
-        from web.document_direct_edit import ImprovedBatchAnnotator
+        result = analyze_annotations_only(
+            file_path=file_path,
+            user_requirement=user_requirement,
+            gemini_client=_get_client(),
+            model_id="gemini-2.5-pro",
+        )
 
-        annotator = ImprovedBatchAnnotator(gemini_client=_get_client(), batch_size=5)
-
-        # 收集所有事件（非流式）
-        events = []
-        final_result = None
-
-        for event in annotator.annotate_document_streaming(file_path, user_requirement):
-            # 解析事件
-            if event.startswith("event: complete"):
-                data_line = event.split("\n")[1]
-                if data_line.startswith("data: "):
-                    final_result = json.loads(data_line[6:])
-            events.append(event)
-
-        if final_result:
-            return jsonify({"success": True, **final_result})
-        else:
-            return jsonify({"success": False, "error": "处理失败，未收到完成事件"}), 500
+        return jsonify(result)
 
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
@@ -516,23 +504,18 @@ def document_batch_annotate_stream() -> Response:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
 
         workspace_dir = _get_workspace_dir()
-        # 转换为绝对路径
-        if not os.path.isabs(file_path):
-            file_path = os.path.join(workspace_dir, "documents", file_path)
+        file_path = _resolve_document_path(file_path, workspace_dir)
 
         if not os.path.exists(file_path):
             return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
 
-        # 导入V2批量标注系统
-        from web.document_batch_annotator import annotate_large_document
-
         # 返回SSE流
         return Response(
-            annotate_large_document(
+            stream_annotation_events(
                 file_path=file_path,
                 user_requirement=user_requirement,
                 gemini_client=_get_client(),
-                batch_size=batch_size,
+                model_id="gemini-2.5-pro",
             ),
             mimetype="text/event-stream",
             headers={

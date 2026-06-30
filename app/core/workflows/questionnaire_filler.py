@@ -14,12 +14,12 @@ from typing import Any
 
 from app.core.workflow_engine import (
     WorkflowExecutor,
+    sse_error,
     sse_output,
     sse_progress,
+    sse_status,
     sse_step_done,
     sse_step_start,
-    sse_error,
-    sse_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -69,12 +69,16 @@ class QuestionnaireFiller(WorkflowExecutor):
         yield sse_step_start("parse_questions", "📋 解析问题表格…")
         questions = self._parse_questions(question_file, question_col)
         if not questions:
-            yield sse_error("未能从 Excel 中识别到任何问题，请检查文件或指定 question_col 参数")
+            yield sse_error(
+                "未能从 Excel 中识别到任何问题，请检查文件或指定 question_col 参数"
+            )
             return
         yield sse_step_done("parse_questions", f"📋 识别到 {len(questions)} 个问题")
 
         # ── Step 2: 索引参考文档（临时 RAG）──────────────────────────────────
-        yield sse_step_start("index_refs", f"📚 索引 {len(reference_files)} 份参考文档…")
+        yield sse_step_start(
+            "index_refs", f"📚 索引 {len(reference_files)} 份参考文档…"
+        )
         rag = self._build_temp_rag(reference_files)
         if rag is None and reference_files:
             yield sse_error("参考文档索引失败，将仅凭 LLM 自有知识作答（可能不准确）")
@@ -86,9 +90,12 @@ class QuestionnaireFiller(WorkflowExecutor):
         total = len(questions)
 
         for batch_start in range(0, total, _BATCH_QUESTIONS):
-            batch = questions[batch_start: batch_start + _BATCH_QUESTIONS]
-            yield sse_progress(batch_start + len(batch), total,
-                               f"第 {batch_start+1}–{batch_start+len(batch)} 题")
+            batch = questions[batch_start : batch_start + _BATCH_QUESTIONS]
+            yield sse_progress(
+                batch_start + len(batch),
+                total,
+                f"第 {batch_start+1}–{batch_start+len(batch)} 题",
+            )
 
             # 对每题分别检索上下文（因为每题的语义焦点不同）
             for q in batch:
@@ -113,10 +120,12 @@ class QuestionnaireFiller(WorkflowExecutor):
         返回: [{row: int, question: str, other_cols: dict}]
         """
         try:
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
+
             result = parse_xlsx(file_path, "")
             for sheet_id, sheet in result.get("sheets", {}).items():
                 cell_data = sheet.get("cellData", {})
+
                 # 统一键类型为整数（parse_xlsx 返回 int 键）
                 def _int_key(d: dict) -> dict:
                     return {int(k): v for k, v in d.items()}
@@ -126,7 +135,9 @@ class QuestionnaireFiller(WorkflowExecutor):
                 if not row0:
                     continue
                 col_count = max(row0.keys()) + 1
-                headers = {c: str(row0.get(c, {}).get("v", "")) for c in range(col_count)}
+                headers = {
+                    c: str(row0.get(c, {}).get("v", "")) for c in range(col_count)
+                }
 
                 # 识别问题列
                 q_col_idx: int | None = None
@@ -145,9 +156,10 @@ class QuestionnaireFiller(WorkflowExecutor):
                     best_col = max(
                         headers.keys(),
                         key=lambda c: sum(
-                            1 for r in cell_data_int.values()
+                            1
+                            for r in cell_data_int.values()
                             if str(r.get(c, {}).get("v", "")).strip()
-                        )
+                        ),
                     )
                     q_col_idx = best_col
 
@@ -162,13 +174,15 @@ class QuestionnaireFiller(WorkflowExecutor):
                         for c in range(col_count)
                         if c != q_col_idx and headers.get(c, "").strip()
                     }
-                    questions.append({
-                        "row": r_idx,
-                        "question": q_text,
-                        "question_col_idx": q_col_idx,
-                        "other": other,
-                        "headers": headers,
-                    })
+                    questions.append(
+                        {
+                            "row": r_idx,
+                            "question": q_text,
+                            "question_col_idx": q_col_idx,
+                            "other": other,
+                            "headers": headers,
+                        }
+                    )
                 return questions
         except Exception as e:
             logger.warning(f"[QuestionnaireFiller] 问题解析失败: {e}")
@@ -179,8 +193,9 @@ class QuestionnaireFiller(WorkflowExecutor):
         if not file_paths:
             return None
         try:
-            import tempfile
             import os
+            import tempfile
+
             from app.core.services.rag_service import RAGService
 
             tmp_index_dir = tempfile.mkdtemp(prefix="koto_rag_")
@@ -216,7 +231,9 @@ class QuestionnaireFiller(WorkflowExecutor):
 
     def _answer_question(self, question: str, context: str, model_mode: str) -> dict:
         """对单个问题用 RAG 上下文生成答案。"""
-        ctx_section = f"\n\n参考文档片段:\n---\n{context}\n---\n\n" if context else "\n\n"
+        ctx_section = (
+            f"\n\n参考文档片段:\n---\n{context}\n---\n\n" if context else "\n\n"
+        )
         prompt = (
             f"请回答以下问题：\n\n{question}"
             f"{ctx_section}"
@@ -244,10 +261,13 @@ class QuestionnaireFiller(WorkflowExecutor):
         低置信度行用黄色背景标注，需要人工复核的行用橙色标注。
         """
         try:
-            from app.core.file.file_parser import parse_xlsx
+            from app.core.file.parsers.xlsx_parser import parse_xlsx
+
             xlsx_result = parse_xlsx(original_file, "")
         except Exception as e:
-            logger.warning(f"[QuestionnaireFiller] 原始 Excel 读取失败: {e}, 重建空工作簿")
+            logger.warning(
+                f"[QuestionnaireFiller] 原始 Excel 读取失败: {e}, 重建空工作簿"
+            )
             xlsx_result = {}
 
         import uuid as _uuid
@@ -265,7 +285,10 @@ class QuestionnaireFiller(WorkflowExecutor):
             row0 = cell_data.get(0) or cell_data.get("0") or {}
             if row0:
                 original_col_count = max((int(k) for k in row0.keys()), default=-1) + 1
-                original_headers = {str(c): str((row0.get(c) or row0.get(str(c)) or {}).get("v", "")) for c in range(original_col_count)}
+                original_headers = {
+                    str(c): str((row0.get(c) or row0.get(str(c)) or {}).get("v", ""))
+                    for c in range(original_col_count)
+                }
             original_sheet = cell_data
             break
 
@@ -295,8 +318,10 @@ class QuestionnaireFiller(WorkflowExecutor):
 
         # 数据行
         max_row = max(
-            (max((int(k) for k in original_sheet.keys()), default=0),
-             max((a["row"] for a in answers), default=0))
+            (
+                max((int(k) for k in original_sheet.keys()), default=0),
+                max((a["row"] for a in answers), default=0),
+            )
         )
 
         for r in range(1, max_row + 1):

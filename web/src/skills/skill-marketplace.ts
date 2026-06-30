@@ -1,0 +1,1475 @@
+/** skill-marketplace.ts — Koto Skill Marketplace Frontend Logic */
+
+export interface SkillItem {
+  id: string;
+  name: string;
+  icon?: string;
+  description?: string;
+  author?: string;
+  version?: string;
+  category?: string;
+  subcategory?: string;
+  skill_nature?: string;
+  enabled?: boolean;
+  is_builtin?: boolean;
+  rating?: number;
+  rating_count?: number;
+  tags?: string[];
+  prompt?: string;
+  system_prompt_template?: string;
+  intent_description?: string;
+  input_variables?: Array<{ name: string; type?: string; required?: boolean; description?: string }>;
+  task_types?: string[];
+  created_at?: string;
+  [key: string]: any;
+}
+
+export interface ApiResponse {
+  success?: boolean;
+  skills?: SkillItem[];
+  skill?: SkillItem;
+  error?: string;
+  total?: number;
+  [key: string]: any;
+}
+
+export interface RepoInfo {
+  repo: string;
+  name: string;
+  icon?: string;
+  stars?: number;
+  tags?: string[];
+  skills_path?: string;
+  branch?: string;
+  [key: string]: any;
+}
+
+export interface GhSkillInfo {
+  name: string;
+  path: string;
+  repo?: string;
+  branch?: string;
+  github_url?: string;
+  is_installed?: boolean;
+  [key: string]: any;
+}
+
+interface SubcatConfig {
+  id: string;
+  label: string;
+  cls: string;
+  group: string;
+}
+
+const API = {
+  base: '/api/skillmarket',
+  catalog: () => `${API.base}/catalog`,
+  library: () => `${API.base}/library`,
+  featured: () => `${API.base}/featured`,
+  search: (q: string) => `${API.base}/search?q=${encodeURIComponent(q)}`,
+  autoBuild: () => `${API.base}/auto-build`,
+  previewPrompt: () => `${API.base}/preview-prompt`,
+  fromSession: () => `${API.base}/from-session`,
+  sessions: () => `${API.base}/sessions`,
+  active: () => `${API.base}/active`,
+  install: () => `${API.base}/install`,
+  uninstall: (id: string) => `${API.base}/uninstall/${id}`,
+  toggle: (id: string) => `${API.base}/toggle/${id}`,
+  edit: (id: string) => `${API.base}/edit/${id}`,
+  duplicate: (id: string) => `${API.base}/duplicate/${id}`,
+  exportOne: (id: string) => `${API.base}/export/${id}`,
+  exportPack: (ids: string[]) => `${API.base}/export-pack?${ids.map(i => `ids[]=${i}`).join('&')}`,
+  importPack: () => `${API.base}/import`,
+  rate: (id: string) => `${API.base}/rate/${id}`,
+  stats: () => `${API.base}/stats`,
+  ghRepos: () => `${API.base}/github/repos`,
+  ghSkills: (repo: string, path?: string, branch?: string) => {
+    let u = `${API.base}/github/skills?repo=${encodeURIComponent(repo)}`;
+    if (path) u += `&path=${encodeURIComponent(path)}`;
+    if (branch) u += `&branch=${encodeURIComponent(branch)}`;
+    return u;
+  },
+  ghInstall: () => `${API.base}/github/install`,
+};
+
+const SUBCAT_CONFIG: SubcatConfig[] = [
+  { id: 'koto_thinking', label: '🤔 思维增强', cls: 'subcat-koto-thinking', group: 'Koto 对话能力' },
+  { id: 'personality', label: '🎭 风格 & 人格', cls: 'subcat-personality', group: 'Koto 对话能力' },
+  { id: 'code_debug', label: '🐛 代码调试', cls: 'subcat-code-debug', group: '具体任务技能' },
+  { id: 'code_craft', label: '⚙️ 代码 & 工程', cls: 'subcat-code-craft', group: '具体任务技能' },
+  { id: 'annotation', label: '📝 批注 & 审阅', cls: 'subcat-annotation', group: '具体任务技能' },
+  { id: 'data_excel', label: '📊 数据 & 表格', cls: 'subcat-data-excel', group: '具体任务技能' },
+  { id: 'writing', label: '✍️ 写作 & 文案', cls: 'subcat-writing', group: '具体任务技能' },
+  { id: 'research', label: '🔍 调研 & 分析', cls: 'subcat-research', group: '具体任务技能' },
+  { id: 'file_ops', label: '📁 文件操作', cls: 'subcat-file-ops', group: '具体任务技能' },
+  { id: 'career', label: '👔 职场 & 学习', cls: 'subcat-career', group: '具体任务技能' },
+  { id: 'doc_gen', label: '📄 文档生成', cls: 'subcat-doc-gen', group: '自动化工作流' },
+];
+const SUBCAT_BY_ID: Record<string, SubcatConfig> = Object.fromEntries(SUBCAT_CONFIG.map(s => [s.id, s]));
+
+const state = {
+  currentTab: 'catalog',
+  activeCategory: 'all',
+  activeSubcategory: 'all',
+  activeNature: 'all',
+  searchQuery: '',
+  allSkills: [] as SkillItem[],
+  filteredSkills: [] as SkillItem[],
+  sortBy: 'name',
+  selectedSkills: new Set<string>(),
+  stats: {} as Record<string, any>,
+  density: 'standard',
+};
+
+function $(sel: string, ctx: Document | HTMLElement = document): HTMLElement | null {
+  return ctx.querySelector(sel);
+}
+function $$(sel: string, ctx: Document | HTMLElement = document): Element[] {
+  return [...ctx.querySelectorAll(sel)];
+}
+
+function toast(msg: string, type: string = 'info', duration: number = 3500): void {
+  const container = document.getElementById('sm-toast-container');
+  const el = document.createElement('div');
+  const icons: Record<string, string> = { success: '✅', error: '❌', info: 'ℹ️' };
+  el.className = `sm-toast ${type}`;
+  el.innerHTML = `<span>${icons[type] || 'ℹ️'}</span> <span>${msg}</span>`;
+  container!.appendChild(el);
+  setTimeout(() => el.remove(), duration);
+}
+
+async function api(method: string, url: string, body: any = null, isForm: boolean = false): Promise<any> {
+  const opts: RequestInit = { method, headers: {} as Record<string, string> };
+  if (body) {
+    if (isForm) {
+      opts.body = body;
+    } else {
+      (opts.headers as Record<string, string>)['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    }
+  }
+  const res = await fetch(url, opts);
+  if (!res.ok && res.status !== 409) {
+    const err = await res.json().catch(() => ({ error: res.statusText }));
+    throw new Error(err.error || res.statusText);
+  }
+  return res.json();
+}
+
+// ── Tab Navigation ────────────────────────────────────────
+function switchTab(tabName: string): void {
+  state.currentTab = tabName;
+  $$('.sm-tab').forEach(t => t.classList.toggle('active', (t as HTMLElement).dataset.tab === tabName));
+  $$('.sm-panel').forEach(p => p.classList.toggle('hidden', p.id !== `panel-${tabName}`));
+
+  if (tabName === 'catalog') loadCatalog();
+  if (tabName === 'library') loadLibrary();
+  if (tabName === 'import-export') loadImportExport();
+  if (tabName === 'stats') loadStats();
+  if (tabName === 'github-hub') ghLoadRepos();
+}
+
+// ── Catalog ────────────────────────────────────────────────
+async function loadCatalog(category: string | null = null): Promise<void> {
+  if (category !== null) state.activeCategory = category;
+  showSkeletons('catalog-grid');
+
+  try {
+    let data: ApiResponse;
+    if (state.searchQuery) {
+      data = await api('GET', API.search(state.searchQuery));
+    } else {
+      let url = API.catalog();
+      const params: string[] = [];
+      if (state.activeNature && state.activeNature !== 'all') {
+        params.push(`skill_nature=${state.activeNature}`);
+      }
+      if (params.length) url += '?' + params.join('&');
+      data = await api('GET', url);
+    }
+
+    const skills = data.skills || [];
+    state.allSkills = skills;
+
+    let filtered = skills;
+    if (state.activeSubcategory && state.activeSubcategory !== 'all') {
+      filtered = skills.filter((s: SkillItem) => s.subcategory === state.activeSubcategory);
+    }
+
+    state.filteredSkills = sortSkills(filtered);
+    renderSkillGrid('catalog-grid', state.filteredSkills);
+    updateResultCount(state.filteredSkills.length, 'catalog');
+
+    updateSidebarCounts(skills);
+    updateActiveBar(skills);
+    renderFilterChips();
+  } catch (e: any) {
+    showError('catalog-grid', e.message);
+    toast(e.message, 'error');
+  }
+}
+
+function renderFilterChips(): void {
+  const bar = document.getElementById('filter-chips');
+  if (!bar) return;
+  const chips: string[] = [];
+  if (state.searchQuery) {
+    chips.push(`<span class="filter-chip chip-search">🔍 "${escHtml(state.searchQuery)}" <span class="chip-x" data-clear="search">×</span></span>`);
+  }
+  if (state.activeSubcategory !== 'all') {
+    const sc = SUBCAT_BY_ID[state.activeSubcategory];
+    chips.push(`<span class="filter-chip chip-subcat">${sc ? sc.label : state.activeSubcategory} <span class="chip-x" data-clear="subcat">×</span></span>`);
+  }
+  if (state.activeNature !== 'all') {
+    const nlabel: Record<string, string> = { model_hint: '🧠 通用能力', domain_skill: '🎯 任务技能' };
+    chips.push(`<span class="filter-chip chip-nature">${nlabel[state.activeNature] || state.activeNature} <span class="chip-x" data-clear="nature">×</span></span>`);
+  }
+  if (!chips.length) { bar.classList.add('hidden'); return; }
+  bar.classList.remove('hidden');
+  bar.innerHTML = `<span class="chips-label">筛选：</span>${chips.join('')}<button class="chip-clear-all" id="chip-clear-all">清除全部 ×</button>`;
+  bar.querySelectorAll('.chip-x').forEach(x => {
+    x.addEventListener('click', () => {
+      const type = (x as HTMLElement).dataset.clear;
+      if (type === 'search') {
+        state.searchQuery = '';
+        const inp = document.getElementById('sm-search-input') as HTMLInputElement;
+        if (inp) inp.value = '';
+      } else if (type === 'subcat') {
+        state.activeSubcategory = 'all';
+        $$('.sm-sidebar-item[data-subcat]').forEach(i => i.classList.remove('active'));
+        const all = document.querySelector('.sm-sidebar-item[data-subcat="all"]');
+        if (all) all.classList.add('active');
+      } else if (type === 'nature') {
+        state.activeNature = 'all';
+        $$('.sm-sidebar-item[data-nature]').forEach(i => i.classList.remove('active'));
+        const all = document.querySelector('.sm-sidebar-item[data-nature="all"]');
+        if (all) all.classList.add('active');
+      }
+      loadCatalog();
+    });
+  });
+  document.getElementById('chip-clear-all')?.addEventListener('click', () => {
+    state.searchQuery = '';
+    state.activeSubcategory = 'all';
+    state.activeNature = 'all';
+    const inp = document.getElementById('sm-search-input') as HTMLInputElement;
+    if (inp) inp.value = '';
+    $$('.sm-sidebar-item[data-subcat]').forEach(i => i.classList.remove('active'));
+    const subAll = document.querySelector('.sm-sidebar-item[data-subcat="all"]');
+    if (subAll) subAll.classList.add('active');
+    $$('.sm-sidebar-item[data-nature]').forEach(i => i.classList.remove('active'));
+    const natAll = document.querySelector('.sm-sidebar-item[data-nature="all"]');
+    if (natAll) natAll.classList.add('active');
+    loadCatalog();
+  });
+}
+
+function highlightText(text: string, q: string): string {
+  if (!q || !text) return escHtml(text || '');
+  const safe = escHtml(text);
+  const safeQ = escHtml(q).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return safe.replace(new RegExp(safeQ, 'gi'), m => `<mark class="hl">${m}</mark>`);
+}
+
+function updateSidebarCounts(skills: SkillItem[]): void {
+  const subcatCounts: Record<string, number> = { all: skills.length };
+  SUBCAT_CONFIG.forEach(s => { subcatCounts[s.id] = 0; });
+  skills.forEach(s => { if (s.subcategory) subcatCounts[s.subcategory] = (subcatCounts[s.subcategory] || 0) + 1; });
+  Object.entries(subcatCounts).forEach(([sc, count]) => {
+    const el = document.querySelector(`[data-subcat-count="${sc}"]`);
+    if (el) el.textContent = String(count);
+  });
+
+  const natureCounts: Record<string, number> = { all: skills.length, model_hint: 0, domain_skill: 0, system: 0 };
+  skills.forEach(s => { natureCounts[s.skill_nature!] = (natureCounts[s.skill_nature!] || 0) + 1; });
+  Object.entries(natureCounts).forEach(([nat, count]) => {
+    const el = document.querySelector(`[data-nature-count="${nat}"]`);
+    if (el) el.textContent = String(count);
+  });
+}
+
+function updateActiveBar(skills: SkillItem[]): void {
+  const enabled = skills.filter(s => s.enabled && s.id !== 'long_term_memory');
+  const bar = document.getElementById('active-count-bar');
+  if (!bar) return;
+  const pillsEl = document.getElementById('active-pills');
+  if (!pillsEl) return;
+
+  if (!enabled.length) {
+    pillsEl.innerHTML = '<span class="no-active-msg">暂无激活的 Skill — 在下方卡片中点击「启用」开始体验</span>';
+    return;
+  }
+
+  const SHOW_MAX = 8;
+  const visible = enabled.slice(0, SHOW_MAX);
+  const overflow = enabled.length - SHOW_MAX;
+  const expanded = bar.dataset.expanded === 'true';
+  const displayList = expanded ? enabled : visible;
+
+  const pillsHtml = displayList.map(s => `
+    <span class="active-pill" title="点击禁用：${escHtml(s.name)}" data-id="${s.id}">
+      ${escHtml(s.icon || '🔧')} ${escHtml(s.name)}
+      <span class="pill-x" data-id="${s.id}" title="禁用">×</span>
+    </span>
+  `).join('');
+
+  const overflowBtn = !expanded && overflow > 0
+    ? `<button class="pill-overflow-btn" id="pill-show-more">+${overflow} 更多 ▾</button>`
+    : (expanded && overflow > 0 ? `<button class="pill-overflow-btn" id="pill-show-more">收起 ▴</button>` : '');
+
+  pillsEl.innerHTML = pillsHtml + overflowBtn;
+
+  pillsEl.querySelectorAll('.pill-x').forEach(x => {
+    x.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSkill((x as HTMLElement).dataset.id!, false);
+    });
+  });
+
+  document.getElementById('pill-show-more')?.addEventListener('click', () => {
+    bar.dataset.expanded = expanded ? 'false' : 'true';
+    updateActiveBar(state.allSkills);
+  });
+}
+
+// ── Library ────────────────────────────────────────────────
+async function loadLibrary(): Promise<void> {
+  showSkeletons('library-grid');
+  try {
+    const data = await api('GET', API.library());
+    renderSkillGrid('library-grid', data.skills || []);
+    updateResultCount(data.total || 0, 'library');
+  } catch (e: any) {
+    showError('library-grid', e.message);
+  }
+}
+
+// ── Card Rendering ─────────────────────────────────────────
+function sortSkills(skills: SkillItem[]): SkillItem[] {
+  const copy = [...skills];
+  switch (state.sortBy) {
+    case 'name': return copy.sort((a, b) => a.name.localeCompare(b.name));
+    case 'rating': return copy.sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    case 'enabled': return copy.sort((a, b) => (b.enabled ? 1 : 0) - (a.enabled ? 1 : 0));
+    default: return copy;
+  }
+}
+
+function renderSkillGrid(gridId: string, skills: SkillItem[]): void {
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
+
+  if (!skills.length) {
+    grid.innerHTML = `
+      <div class="sm-empty" style="grid-column:1/-1">
+        <div class="empty-icon">🔍</div>
+        <h3>没有找到匹配的 Skill</h3>
+        <p>尝试更换搜索词或分类过滤，或去 Studio 创建一个新的 Skill</p>
+      </div>`;
+    return;
+  }
+
+  const showGrouped = state.activeSubcategory === 'all' &&
+    state.activeNature === 'all' &&
+    !state.searchQuery &&
+    gridId === 'catalog-grid';
+
+  if (showGrouped) {
+    const groups: Record<string, SkillItem[]> = {};
+    skills.forEach(s => {
+      const sc = s.subcategory || 'custom';
+      (groups[sc] || (groups[sc] = [])).push(s);
+    });
+
+    const parts: string[] = [];
+    const renderedIds = new Set<string>();
+    SUBCAT_CONFIG.forEach(({ id, label, cls }) => {
+      if (!groups[id] || !groups[id].length) return;
+      renderedIds.add(id);
+      parts.push(`<div class="skill-group-header" style="grid-column:1/-1">
+        <span class="sm-tag ${cls} group-label-tag">${label}</span>
+        <span class="group-count">${groups[id].length} 个技能</span>
+      </div>`);
+      parts.push(...groups[id].map(s => renderSkillCard(s)));
+    });
+    const remaining: SkillItem[] = [];
+    Object.keys(groups).forEach(id => {
+      if (!renderedIds.has(id)) remaining.push(...groups[id]);
+    });
+    if (remaining.length) {
+      parts.push(`<div class="skill-group-header" style="grid-column:1/-1">
+        <span class="sm-tag group-label-tag">🔧 其他技能</span>
+        <span class="group-count">${remaining.length} 个技能</span>
+      </div>`);
+      parts.push(...remaining.map(s => renderSkillCard(s)));
+    }
+    grid.innerHTML = parts.length ? parts.join('') : skills.map(s => renderSkillCard(s)).join('');
+  } else {
+    grid.innerHTML = skills.map(skill => renderSkillCard(skill)).join('');
+  }
+
+  grid.querySelectorAll('.sm-card').forEach(card => {
+    card.addEventListener('click', (e) => {
+      if ((e.target as HTMLElement).closest('.btn')) return;
+      openDrawer((card as HTMLElement).dataset.skillId!);
+    });
+  });
+
+  grid.querySelectorAll('[data-action="toggle"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSkill((btn as HTMLElement).dataset.id!, (btn as HTMLElement).dataset.enabled !== 'true');
+    });
+  });
+
+  grid.querySelectorAll('[data-action="edit"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openEditModal((btn as HTMLElement).dataset.id!);
+    });
+  });
+
+  grid.querySelectorAll('[data-action="uninstall"]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      uninstallSkill((btn as HTMLElement).dataset.id!);
+    });
+  });
+}
+
+function renderSkillCard(skill: SkillItem): string {
+  const q = state.searchQuery;
+  const sc = SUBCAT_BY_ID[skill.subcategory!];
+  const subcatTag = sc
+    ? `<span class="sm-tag ${sc.cls}">${sc.label}</span>`
+    : `<span class="sm-tag category-${skill.category}">${skill.category}</span>`;
+  const natureLabel: Record<string, string> = { model_hint: '🧠 通用能力', domain_skill: '🎯 任务技能', system: '⚙️ 系统' };
+  const natureClass = skill.skill_nature ? `nature-${skill.skill_nature}` : '';
+  const natureBadge = (skill.skill_nature && skill.skill_nature !== 'system')
+    ? `<span class="sm-tag ${natureClass}">${natureLabel[skill.skill_nature] || skill.skill_nature}</span>`
+    : '';
+  const stars = renderStarsMini(skill.rating || 0, skill.rating_count || 0);
+  const enabledBadge = skill.enabled
+    ? `<span class="sm-badge enabled">● 已启用</span>`
+    : `<span class="sm-badge disabled">○ 已禁用</span>`;
+  const builtinBadge = skill.is_builtin ? `<span class="sm-badge builtin">内置</span>` : '';
+
+  const editBtn = !skill.is_builtin
+    ? `<button class="btn-gear" data-action="edit" data-id="${skill.id}" title="编辑技能">⚙</button>`
+    : '';
+
+  return `
+  <div class="sm-card ${skill.enabled ? 'enabled' : ''}" data-skill-id="${skill.id}">
+    <div class="sm-card-header">
+      <div class="sm-card-icon">${skill.icon || '🔧'}</div>
+      <div class="sm-card-meta">
+        <div class="sm-card-name">${highlightText(skill.name, q)}</div>
+        <div class="sm-card-author">
+          <span class="author-name">${escHtml(skill.author || 'builtin')}</span>
+          &nbsp;·&nbsp; v${escHtml(skill.version || '1.0.0')}
+        </div>
+      </div>
+      ${editBtn}
+    </div>
+    <div class="sm-card-desc">${q ? highlightText(skill.description || '（暂无描述）', q) : escHtml(skill.description || '（暂无描述）')}</div>
+    <div class="sm-card-footer">
+      ${subcatTag}
+      ${natureBadge}
+      ${(skill.tags || []).slice(0, 2).map(t => `<span class="sm-tag">${escHtml(t)}</span>`).join('')}
+      ${stars}
+    </div>
+    <div class="sm-card-actions" style="margin-top:4px">
+      ${enabledBadge}
+      ${builtinBadge}
+      <button class="btn btn-sm ${skill.enabled ? 'btn-secondary' : 'btn-primary'} ml-auto"
+        data-action="toggle" data-id="${skill.id}" data-enabled="${skill.enabled}"
+        style="margin-left:auto">
+        ${skill.enabled ? '禁用' : '启用'}
+      </button>
+      ${!skill.is_builtin ? `
+      <button class="btn btn-sm btn-danger"
+        data-action="uninstall" data-id="${skill.id}"
+        style="margin-left:6px"
+        title="删除">
+        删除
+      </button>` : ''}
+    </div>
+  </div>`;
+}
+
+function renderStarsMini(avg: number, count: number): string {
+  if (!count) return '';
+  const full = Math.round(avg);
+  const stars = Array.from({ length: 5 }, (_, i) =>
+    `<span style="color:${i < full ? '#e3b341' : '#30363d'}">★</span>`
+  ).join('');
+  return `<span class="sm-rating" style="margin-left:auto">${stars} <span style="color:var(--text-muted);font-size:11px">(${count})</span></span>`;
+}
+
+// ── Drawer ──────────────────────────────────────────────────
+async function openDrawer(skillId: string): Promise<void> {
+  try {
+    const data = await api('GET', `/api/skills/${skillId}`);
+    const skill: SkillItem = data.skill;
+
+    const drawer = document.getElementById('sm-drawer')!;
+    const overlay = document.getElementById('sm-drawer-overlay')!;
+
+    await api('GET', API.stats()).catch(() => ({}));
+
+    ($('#drawer-icon', drawer) as HTMLElement)!.textContent = skill.icon || '🔧';
+    ($('#drawer-name', drawer) as HTMLElement)!.textContent = skill.name;
+    ($('#drawer-sub', drawer) as HTMLElement)!.textContent = `${skill.author || 'builtin'} · v${skill.version || '1.0.0'} · ${skill.category}`;
+    ($('#drawer-desc', drawer) as HTMLElement)!.textContent = skill.description || '（暂无描述）';
+    ($('#drawer-intent', drawer) as HTMLElement)!.textContent = skill.intent_description || '（未设置）';
+
+    const prompt = skill.system_prompt_template || skill.prompt || '（未设置）';
+    ($('#drawer-prompt', drawer) as HTMLElement)!.textContent = prompt;
+
+    const catLabel: Record<string, string> = { behavior: '⚙️ 行为', style: '🎨 风格', domain: '🔬 领域', custom: '✨ 自定义' };
+    const metaEl = $('#drawer-meta', drawer);
+    if (metaEl) {
+      metaEl.innerHTML = `
+        <div class="sm-meta-item"><div class="meta-label">分类</div><div class="meta-value">${catLabel[skill.category!] || skill.category}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">状态</div><div class="meta-value">${skill.enabled ? '✅ 已启用' : '⏸️ 已禁用'}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">作者</div><div class="meta-value">${escHtml(skill.author || 'builtin')}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">版本</div><div class="meta-value">v${skill.version || '1.0.0'}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">任务类型</div><div class="meta-value">${(skill.task_types || []).join(', ') || '通用'}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">创建时间</div><div class="meta-value">${skill.created_at ? skill.created_at.slice(0, 10) : '—'}</div></div>
+      `;
+    }
+
+    const tagsEl = $('#drawer-tags', drawer);
+    if (tagsEl) {
+      tagsEl.innerHTML = (skill.tags || []).map(t => `<span class="sm-tag">${escHtml(t)}</span>`).join('') || '<span class="text-muted">无标签</span>';
+    }
+
+    const varsEl = $('#drawer-variables', drawer);
+    if (varsEl) {
+      const vars = skill.input_variables || [];
+      varsEl.innerHTML = vars.length
+        ? vars.map((v: any) => `<div style="background:var(--bg-base);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-size:12px;font-family:monospace;margin-bottom:6px">
+          <span style="color:#e3b341">{${v.name}}</span>
+          <span style="color:var(--text-muted)"> · ${v.type || 'string'} · ${v.required ? '必填' : '可选'}</span>
+          ${v.description ? `<br><span style="color:var(--text-muted);font-family:sans-serif">${escHtml(v.description)}</span>` : ''}
+        </div>`).join('')
+        : '<span class="text-muted text-sm">无（直接注入 prompt）</span>';
+    }
+
+    const footerEl = $('#drawer-footer', drawer);
+    const isBuiltin = skill.author === 'builtin';
+    if (footerEl) {
+      footerEl.innerHTML = `
+        <button class="btn btn-primary" onclick="toggleSkill('${skill.id}', ${!skill.enabled})" id="drawer-toggle-btn">
+          ${skill.enabled ? '禁用' : '启用'}
+        </button>
+        ${!isBuiltin ? `<button class="btn btn-secondary btn-gear-label" onclick="openEditModal('${skill.id}')" title="编辑 Skill"><span class="gear-icon">⚙</span> 编辑</button>` : ''}
+        <button class="btn btn-secondary" onclick="duplicateSkill('${skill.id}')">🔁 克隆</button>
+        <button class="btn btn-secondary" onclick="exportOneSkill('${skill.id}')">⬇️ 导出</button>
+        ${!isBuiltin ? `<button class="btn btn-danger" onclick="uninstallSkill('${skill.id}')">🗑️ 卸载</button>` : ''}
+        <div style="margin-left:auto;display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px;color:var(--text-muted)">评分：</span>
+          <div class="sm-stars" onmouseleave="resetStarHover()" id="drawer-stars">
+            ${[1, 2, 3, 4, 5].map(s => `<span class="star" data-score="${s}" onclick="rateSkill('${skill.id}',${s})" onmouseenter="hoverStar(this)">★</span>`).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    drawer.dataset.skillId = skillId;
+
+    overlay.classList.add('open');
+    drawer.classList.add('open');
+  } catch (e: any) {
+    toast(`加载 Skill 详情失败: ${e.message}`, 'error');
+  }
+}
+
+function closeDrawer(): void {
+  document.getElementById('sm-drawer')!.classList.remove('open');
+  document.getElementById('sm-drawer-overlay')!.classList.remove('open');
+}
+
+// ── Edit Modal ─────────────────────────────────────────────
+async function openEditModal(skillId: string): Promise<void> {
+  const modal = document.getElementById('skill-edit-modal');
+  const overlay = document.getElementById('skill-edit-overlay');
+  if (!modal || !overlay) return;
+
+  try {
+    const data = await api('GET', `/api/skills/${skillId}`);
+    const skill: SkillItem = data.skill;
+
+    ($('#edit-modal-title') as HTMLElement)!.textContent = `⚙ 编辑：${skill.name}`;
+    ($('#edit-skill-id') as HTMLInputElement)!.value = skill.id;
+    ($('#edit-skill-name') as HTMLInputElement)!.value = skill.name || '';
+    ($('#edit-skill-icon') as HTMLInputElement)!.value = skill.icon || '🔧';
+    ($('#edit-skill-description') as HTMLInputElement)!.value = skill.description || '';
+    ($('#edit-skill-prompt') as HTMLInputElement)!.value = skill.system_prompt_template || skill.prompt || '';
+    ($('#edit-skill-intent') as HTMLInputElement)!.value = skill.intent_description || '';
+    ($('#edit-skill-tags') as HTMLInputElement)!.value = (skill.tags || []).join(', ');
+
+    overlay.classList.add('open');
+    modal.classList.add('open');
+    ($('#edit-skill-name') as HTMLInputElement)!.focus();
+  } catch (e: any) {
+    toast(`加载 Skill 失败: ${e.message}`, 'error');
+  }
+}
+
+function closeEditModal(): void {
+  document.getElementById('skill-edit-modal')?.classList.remove('open');
+  document.getElementById('skill-edit-overlay')?.classList.remove('open');
+}
+
+async function saveSkillEdit(): Promise<void> {
+  const skillId = ($('#edit-skill-id') as HTMLInputElement)!.value;
+  const name = ($('#edit-skill-name') as HTMLInputElement)!.value.trim();
+  const icon = ($('#edit-skill-icon') as HTMLInputElement)!.value.trim();
+  const description = ($('#edit-skill-description') as HTMLInputElement)!.value.trim();
+  const prompt = ($('#edit-skill-prompt') as HTMLInputElement)!.value.trim();
+  const intent = ($('#edit-skill-intent') as HTMLInputElement)!.value.trim();
+  const tagsRaw = ($('#edit-skill-tags') as HTMLInputElement)!.value.trim();
+  const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+  if (!name) { toast('技能名称不能为空', 'error'); return; }
+
+  const saveBtn = document.getElementById('edit-save-btn') as HTMLButtonElement;
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中…'; }
+
+  try {
+    await api('PUT', API.edit(skillId), {
+      name, icon, description,
+      system_prompt_template: prompt,
+      intent_description: intent,
+      tags,
+    });
+    toast(`✅ 技能「${name}」已更新`, 'success');
+    closeEditModal();
+    loadCatalog();
+    loadLibrary();
+    const drawer = document.getElementById('sm-drawer');
+    if (drawer?.classList.contains('open') && drawer.dataset.skillId === skillId) {
+      openDrawer(skillId);
+    }
+  } catch (e: any) {
+    toast(`保存失败: ${e.message}`, 'error');
+  } finally {
+    if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = '保存更改'; }
+  }
+}
+
+function hoverStar(starEl: HTMLElement): void {
+  const score = parseInt(starEl.dataset.score!);
+  const stars = starEl.closest('#drawer-stars')!.querySelectorAll('.star');
+  stars.forEach((s, i) => s.classList.toggle('filled', i < score));
+}
+
+function resetStarHover(): void {
+  const stars = document.querySelectorAll('#drawer-stars .star');
+  stars.forEach(s => s.classList.remove('filled'));
+}
+
+async function rateSkill(skillId: string, score: number): Promise<void> {
+  try {
+    const data = await api('POST', API.rate(skillId), { score });
+    toast(`已评 ${score} 星！平均：${data.avg} ★`, 'success');
+  } catch (e: any) {
+    toast(`评分失败: ${e.message}`, 'error');
+  }
+}
+
+// ── Toggle / Install / Uninstall ───────────────────────────
+async function toggleSkill(skillId: string, enable: boolean): Promise<void> {
+  try {
+    const data = await api('POST', API.toggle(skillId), { enabled: enable });
+    toast(`${enable ? '✅ 已启用' : '⏸️ 已禁用'} ${skillId}`, 'success');
+    if (state.currentTab === 'catalog') loadCatalog();
+    else if (state.currentTab === 'library') loadLibrary();
+    const drawer = document.getElementById('sm-drawer');
+    if (drawer!.classList.contains('open') && drawer!.dataset.skillId === skillId) {
+      openDrawer(skillId);
+    }
+  } catch (e: any) {
+    toast(`操作失败: ${e.message}`, 'error');
+  }
+}
+
+async function uninstallSkill(skillId: string): Promise<void> {
+  if (!confirm(`确定要卸载 Skill「${skillId}」吗？此操作不可撤销。`)) return;
+  try {
+    await api('POST', API.uninstall(skillId));
+    toast(`已卸载 ${skillId}`, 'success');
+    closeDrawer();
+    loadLibrary();
+    loadCatalog();
+  } catch (e: any) {
+    toast(`卸载失败: ${e.message}`, 'error');
+  }
+}
+
+async function duplicateSkill(skillId: string): Promise<void> {
+  const newName = prompt('新技能名称（留空使用默认副本名）:', '');
+  try {
+    const body = newName ? { new_name: newName } : {};
+    const data = await api('POST', API.duplicate(skillId), body);
+    toast(`已克隆 → ${data.new_skill_id}`, 'success');
+    loadCatalog();
+    loadLibrary();
+  } catch (e: any) {
+    toast(`克隆失败: ${e.message}`, 'error');
+  }
+}
+
+function exportOneSkill(skillId: string): void {
+  window.location.href = API.exportOne(skillId);
+  toast('正在下载 .kotosk 文件…', 'info');
+}
+
+// ── Studio ──────────────────────────────────────────────────
+let previewDebounceTimer: ReturnType<typeof setTimeout> | null = null;
+let studioSourceMode = 'description';
+
+function initStudio(): void {
+  $$('.source-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      studioSourceMode = (tab as HTMLElement).dataset.mode!;
+      $$('.source-tab').forEach(t => t.classList.toggle('active', (t as HTMLElement).dataset.mode === studioSourceMode));
+      const sd = document.getElementById('source-description');
+      if (sd) sd.classList.toggle('hidden', studioSourceMode !== 'description');
+      const ss = document.getElementById('source-session');
+      if (ss) ss.classList.toggle('hidden', studioSourceMode !== 'session');
+      if (studioSourceMode === 'session') loadSessionList();
+    });
+  });
+
+  const sliders = $$('.style-slider') as HTMLInputElement[];
+  sliders.forEach(slider => {
+    const valEl = document.getElementById(`val-${slider.id}`);
+    slider.addEventListener('input', () => {
+      if (valEl) valEl.textContent = parseFloat(slider.value).toFixed(1);
+      schedulePreview();
+    });
+  });
+
+  ['studio-name', 'studio-description'].forEach(id => {
+    const el = document.getElementById(id) as HTMLInputElement | null;
+    if (el) el.addEventListener('input', schedulePreview);
+  });
+
+  $('#studio-build-btn')?.addEventListener('click', buildSkill);
+  $('#studio-session-btn')?.addEventListener('click', buildFromSession);
+}
+
+function schedulePreview(): void {
+  clearTimeout(previewDebounceTimer!);
+  previewDebounceTimer = setTimeout(fetchPreview, 600);
+}
+
+async function fetchPreview(): Promise<void> {
+  const name = (document.getElementById('studio-name') as HTMLInputElement)?.value?.trim() || '';
+  const desc = (document.getElementById('studio-description') as HTMLInputElement)?.value?.trim() || '';
+  if (!name && !desc) return;
+
+  const body = buildStyleBody({ name: name || '未命名', description: desc });
+  try {
+    const data = await api('POST', API.previewPrompt(), body);
+    const el = document.getElementById('prompt-preview');
+    if (el) {
+      el.classList.remove('prompt-preview-placeholder');
+      el.textContent = data.system_prompt || '（无内容）';
+    }
+    const idEl = document.getElementById('studio-suggested-id');
+    if (idEl) idEl.textContent = data.suggested_id || '';
+  } catch (e) {
+    // ignore preview errors
+  }
+}
+
+function buildStyleBody(extra: Record<string, any> = {}): Record<string, any> {
+  const getSlider = (id: string) => parseFloat((document.getElementById(id) as HTMLInputElement)?.value || '0.5');
+  const getDomain = () => (document.getElementById('studio-domain') as HTMLInputElement)?.value || 'general';
+  return {
+    formality: getSlider('slider-formality'),
+    verbosity: getSlider('slider-verbosity'),
+    empathy: getSlider('slider-empathy'),
+    structure: getSlider('slider-structure'),
+    creativity: getSlider('slider-creativity'),
+    positivity: getSlider('slider-positivity'),
+    proactivity: getSlider('slider-proactivity'),
+    humor: getSlider('slider-humor'),
+    domain: getDomain(),
+    ...extra,
+  };
+}
+
+async function buildSkill(): Promise<void> {
+  const name = (document.getElementById('studio-name') as HTMLInputElement)?.value?.trim() || '';
+  const desc = (document.getElementById('studio-description') as HTMLInputElement)?.value?.trim() || '';
+  const icon = (document.getElementById('studio-icon') as HTMLInputElement)?.value?.trim() || '🎭';
+  const category = (document.getElementById('studio-category') as HTMLInputElement)?.value || 'style';
+  const subcategory = (document.getElementById('studio-subcategory') as HTMLInputElement)?.value || '';
+  const enabled = (document.getElementById('studio-enabled') as HTMLInputElement)?.checked || false;
+
+  if (!name) { toast('请填写技能名称', 'error'); return; }
+  if (!desc) { toast('请填写风格描述', 'error'); return; }
+
+  const btn = document.getElementById('studio-build-btn') as HTMLButtonElement;
+  btn.disabled = true;
+  btn.textContent = '⏳ 生成中…';
+
+  try {
+    const body = buildStyleBody({ name, description: desc, icon, category, subcategory, enabled, save: true });
+    const data = await api('POST', API.autoBuild(), body);
+    toast(`✅ 技能「${data.skill.name}」已创建！ID: ${data.skill_id}`, 'success', 5000);
+    (document.getElementById('studio-name') as HTMLInputElement)!.value = '';
+    (document.getElementById('studio-description') as HTMLInputElement)!.value = '';
+    (document.getElementById('prompt-preview') as HTMLElement)!.textContent = '';
+    const preview = document.getElementById('prompt-preview')!;
+    preview.classList.add('prompt-preview-placeholder');
+    preview.textContent = '在上方填写技能信息后，这里将实时预览生成的系统 Prompt…';
+    loadLibrary();
+  } catch (e: any) {
+    if (e.message.includes('已存在')) {
+      if (confirm(`技能已存在，是否覆盖？`)) {
+        const body = buildStyleBody({ name, description: desc, icon, category, enabled, save: true, overwrite: true });
+        await api('POST', API.autoBuild(), body);
+        toast('✅ 已覆盖更新', 'success');
+        loadLibrary();
+      }
+    } else {
+      toast(`创建失败: ${e.message}`, 'error');
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '✨ 生成 Skill';
+  }
+}
+
+// ── Session picker ─────────────────────────────────────────
+let selectedSessionId: string | null = null;
+
+async function loadSessionList(): Promise<void> {
+  const listEl = document.getElementById('session-picker-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="session-loading">🔄 正在加载对话列表…</div>';
+  try {
+    const data = await api('GET', API.sessions());
+    const sessions = data.sessions || [];
+    if (!sessions.length) {
+      listEl.innerHTML = '<div class="session-empty">暂无对话记录。先去和 Koto 聊几条消息吧。</div>';
+      return;
+    }
+    listEl.innerHTML = sessions.map((s: any) => `
+      <div class="session-item" data-id="${escHtml(s.session_id)}" onclick="selectSession('${escHtml(s.session_id)}', this)">
+        <div class="session-item-icon">💬</div>
+        <div class="session-item-body">
+          <div class="session-item-title">${escHtml(s.title)}</div>
+          <div class="session-item-meta">${s.message_count} 条消息 · ${escHtml(s.updated_at)}</div>
+        </div>
+        <span class="session-item-check">✓</span>
+      </div>
+    `).join('');
+  } catch (e: any) {
+    listEl.innerHTML = `<div class="session-empty">加载失败：${escHtml(e.message)}</div>`;
+  }
+}
+
+(window as any).selectSession = function (sessionId: string, el: HTMLElement) {
+  selectedSessionId = sessionId;
+  document.querySelectorAll('#session-picker-list .session-item').forEach(i => i.classList.remove('selected'));
+  if (el) el.classList.add('selected');
+  const inp = document.getElementById('studio-session-id') as HTMLInputElement;
+  if (inp) inp.value = sessionId;
+  setWizardStep(2);
+};
+
+function setWizardStep(active: number): void {
+  [1, 2, 3].forEach(n => {
+    const el = document.getElementById(`wstep-${n}`);
+    if (!el) return;
+    el.classList.toggle('active', n === active);
+    el.classList.toggle('done', n < active);
+  });
+}
+
+async function buildFromSession(): Promise<void> {
+  const sessionId = ((document.getElementById('studio-session-id') as HTMLInputElement)?.value || selectedSessionId || '').trim();
+  const name = ((document.getElementById('studio-session-name') as HTMLInputElement)?.value || '').trim();
+  const desc = ((document.getElementById('studio-session-desc') as HTMLInputElement)?.value || '').trim();
+  const icon = ((document.getElementById('studio-session-icon') as HTMLInputElement)?.value || '💬').trim();
+  const enableAfter = (document.getElementById('studio-session-enabled') as HTMLInputElement)?.checked ?? true;
+
+  if (!sessionId) { toast('请先选择一段对话或输入 Session ID', 'error'); return; }
+  if (!name) { toast('请填写技能名称', 'error'); return; }
+
+  const btn = document.getElementById('studio-session-btn') as HTMLButtonElement;
+  const resultEl = document.getElementById('session-extract-result') as HTMLElement;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 分析中…'; }
+  if (resultEl) {
+    resultEl.className = 'session-extracting';
+    resultEl.innerHTML = '<span class="spinner">⏳</span> 正在分析对话风格，自动提取行为模式…';
+  }
+  setWizardStep(3);
+
+  try {
+    const data = await api('POST', API.fromSession(), {
+      session_id: sessionId, name, description: desc, icon,
+      save: true, enabled: enableAfter,
+    });
+
+    const prompt = data.skill?.system_prompt_template || data.skill?.prompt || '（提取完成，但 Prompt 为空）';
+    if (resultEl) {
+      resultEl.className = 'session-extract-result';
+      resultEl.textContent = prompt;
+    }
+
+    const enableMsg = enableAfter ? ' 已自动启用，下次对话即可感受效果。' : '';
+    toast(`✅ 技能「${data.skill.name}」已创建！${enableMsg}`, 'success', 6000);
+    loadLibrary();
+    if (enableAfter) loadCatalog();
+  } catch (e: any) {
+    if (resultEl) {
+      resultEl.className = 'session-extract-placeholder';
+      resultEl.textContent = `提取失败：${e.message}`;
+    }
+    toast(`提取失败: ${e.message}`, 'error');
+    setWizardStep(1);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '💬 提取技能'; }
+  }
+}
+
+// ── Import / Export ────────────────────────────────────────
+function loadImportExport(): void {
+  loadExportChecklist();
+}
+
+async function loadExportChecklist(): Promise<void> {
+  const container = document.getElementById('export-checklist');
+  if (!container) return;
+
+  try {
+    const data = await api('GET', API.catalog());
+    const skills = data.skills || [];
+    state.selectedSkills = new Set();
+
+    container.innerHTML = skills.map((s: SkillItem) => `
+      <label class="export-check-item">
+        <input type="checkbox" value="${s.id}" onchange="toggleExportSelect('${s.id}', this.checked)">
+        <span class="check-icon">${s.icon || '🔧'}</span>
+        <span class="check-name">${escHtml(s.name)}</span>
+        <span class="check-category">${s.category}</span>
+      </label>
+    `).join('');
+  } catch (e) {
+    toast('加载技能列表失败', 'error');
+  }
+}
+
+(window as any).toggleExportSelect = function (id: string, checked: boolean) {
+  if (checked) state.selectedSkills.add(id);
+  else state.selectedSkills.delete(id);
+  const btn = document.getElementById('export-pack-btn');
+  if (btn) btn.textContent = `⬇️ 打包导出 (${state.selectedSkills.size})`;
+};
+
+function exportSelectedPack(): void {
+  if (!state.selectedSkills.size) { toast('请先选择至少一个 Skill', 'error'); return; }
+  const packName = (document.getElementById('export-pack-name') as HTMLInputElement)?.value || 'my-skill-pack';
+  const ids = [...state.selectedSkills];
+  const url = API.exportPack(ids) + `&pack_name=${encodeURIComponent(packName)}`;
+  window.location.href = url;
+  toast(`正在下载包含 ${ids.length} 个 Skill 的 .kotosk 包…`, 'info');
+}
+
+function initDropZone(): void {
+  const zone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('import-file-input') as HTMLInputElement;
+  if (!zone || !fileInput) return;
+
+  zone.addEventListener('click', () => fileInput.click());
+  zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('dragover'); });
+  zone.addEventListener('dragleave', () => zone.classList.remove('dragover'));
+  zone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    zone.classList.remove('dragover');
+    const file = e.dataTransfer!.files[0];
+    if (file) handleImportFile(file);
+  });
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files![0]) handleImportFile(fileInput.files![0]);
+  });
+}
+
+async function handleImportFile(file: File): Promise<void> {
+  if (!file.name.endsWith('.kotosk')) { toast('仅支持 .kotosk 文件', 'error'); return; }
+
+  const overwrite = (document.getElementById('import-overwrite') as HTMLInputElement)?.checked || false;
+  const formData = new FormData();
+  formData.append('file', file);
+  if (overwrite) formData.append('overwrite', 'true');
+
+  const zone = document.getElementById('drop-zone')!;
+  zone.innerHTML = `<div class="drop-icon">⏳</div><p>正在导入 ${escHtml(file.name)}…</p>`;
+
+  try {
+    const data = await api('POST', API.importPack(), formData, true);
+    const msg = `导入成功：${data.installed.length} 个 Skill | 跳过: ${data.skipped.length} | 错误: ${data.errors.length}`;
+    toast(msg, data.errors.length ? 'info' : 'success', 6000);
+    loadCatalog();
+    loadLibrary();
+
+    zone.innerHTML = `
+      <div class="drop-icon">✅</div>
+      <p>导入完成！${msg}</p>
+      <p style="margin-top:8px;font-size:11px;color:var(--text-muted)">已安装: ${data.installed.join(', ') || '无'}</p>
+    `;
+  } catch (e: any) {
+    toast(`导入失败: ${e.message}`, 'error');
+    zone.innerHTML = `<div class="drop-icon">📦</div><p>拖入 .kotosk 文件，或点击选择文件</p><p style="margin-top:8px;font-size:12px;color:var(--text-muted)">支持批量 Skill 包导入</p>`;
+  }
+}
+
+// ── Stats Panel ────────────────────────────────────────────
+async function loadStats(): Promise<void> {
+  try {
+    const data = await api('GET', API.stats());
+    const el = document.getElementById('stats-content');
+    if (!el) return;
+
+    const catColors: Record<string, string> = { behavior: '#58a6ff', style: '#a371f7', domain: '#e3b341', custom: '#3fb950' };
+    const catBars = Object.entries(data.by_category || {}).map(([cat, count]) => `
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px">
+        <span style="width:60px;font-size:12px;color:var(--text-muted)">${cat}</span>
+        <div style="flex:1;background:var(--bg-elevated);border-radius:4px;height:18px;overflow:hidden">
+          <div style="width:${Math.round((count as number) / data.total_skills * 100)}%;background:${catColors[cat] || '#8b949e'};height:100%;border-radius:4px;transition:width 0.5s"></div>
+        </div>
+        <span style="font-size:12px;color:var(--text-muted);width:20px;text-align:right">${count}</span>
+      </div>
+    `).join('');
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px">
+        <div class="sm-meta-item"><div class="meta-label">总 Skill 数</div><div class="meta-value" style="font-size:22px">${data.total_skills}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">当前启用</div><div class="meta-value" style="font-size:22px;color:var(--accent-green)">${data.enabled_skills}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">自定义</div><div class="meta-value" style="font-size:22px;color:#a371f7">${data.custom_skills}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">内置</div><div class="meta-value" style="font-size:22px;color:#58a6ff">${data.builtin_skills}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">平均评分</div><div class="meta-value" style="font-size:22px;color:#e3b341">${data.avg_rating ? '★ ' + data.avg_rating : '—'}</div></div>
+        <div class="sm-meta-item"><div class="meta-label">已评分 Skill</div><div class="meta-value" style="font-size:22px">${data.rated_count}</div></div>
+      </div>
+      <h3 style="font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--text-muted);margin-bottom:10px">分类分布</h3>
+      ${catBars}
+    `;
+  } catch (e: any) {
+    toast(`加载统计失败: ${e.message}`, 'error');
+  }
+}
+
+// ── Search ─────────────────────────────────────────────────
+let searchDebounce: ReturnType<typeof setTimeout> | null = null;
+function onSearchInput(e: Event): void {
+  state.searchQuery = (e.target as HTMLInputElement).value.trim();
+  clearTimeout(searchDebounce!);
+  searchDebounce = setTimeout(() => {
+    if (state.currentTab === 'catalog') loadCatalog();
+  }, 400);
+}
+
+// ── Skeleton / Error Helpers ───────────────────────────────
+function showSkeletons(gridId: string, count: number = 6): void {
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
+  grid.innerHTML = Array.from({ length: count }, () => `
+    <div class="skeleton-card">
+      <div style="display:flex;gap:12px">
+        <div class="skeleton" style="width:48px;height:48px;border-radius:10px;flex-shrink:0"></div>
+        <div style="flex:1">
+          <div class="skeleton" style="height:14px;width:70%;margin-bottom:8px"></div>
+          <div class="skeleton" style="height:11px;width:40%"></div>
+        </div>
+      </div>
+      <div class="skeleton" style="height:12px;width:90%;margin-top:4px"></div>
+      <div class="skeleton" style="height:12px;width:60%"></div>
+      <div style="display:flex;gap:8px;margin-top:4px">
+        <div class="skeleton" style="height:22px;width:60px;border-radius:20px"></div>
+        <div class="skeleton" style="height:22px;width:50px;border-radius:20px"></div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function showError(gridId: string, msg: string): void {
+  const grid = document.getElementById(gridId);
+  if (!grid) return;
+  grid.innerHTML = `
+    <div class="sm-empty" style="grid-column:1/-1">
+      <div class="empty-icon">⚠️</div>
+      <h3>加载失败</h3>
+      <p>${escHtml(msg)}</p>
+    </div>`;
+}
+
+function updateResultCount(count: number, tab: string): void {
+  const el = document.getElementById(`${tab}-count`);
+  if (el) el.textContent = String(count);
+  const header = document.getElementById('results-count');
+  if (header) header.textContent = `${count} 个结果`;
+}
+
+// ── Utils ──────────────────────────────────────────────────
+function escHtml(str: string): string {
+  if (!str) return '';
+  return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// ── Init ────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  $$('.sm-tab').forEach(tab => {
+    tab.addEventListener('click', () => switchTab((tab as HTMLElement).dataset.tab!));
+  });
+
+  $$('.sm-sidebar-item[data-subcat]').forEach(item => {
+    item.addEventListener('click', () => {
+      $$('.sm-sidebar-item[data-subcat]').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      state.activeSubcategory = (item as HTMLElement).dataset.subcat!;
+      loadCatalog();
+    });
+  });
+
+  $$('.sm-sidebar-item[data-nature]').forEach(item => {
+    item.addEventListener('click', () => {
+      $$('.sm-sidebar-item[data-nature]').forEach(i => i.classList.remove('active'));
+      item.classList.add('active');
+      state.activeNature = (item as HTMLElement).dataset.nature!;
+      loadCatalog();
+    });
+  });
+
+  const searchInput = document.getElementById('sm-search-input');
+  if (searchInput) searchInput.addEventListener('input', onSearchInput);
+
+  const sortSelect = document.getElementById('sort-select') as HTMLSelectElement;
+  if (sortSelect) sortSelect.addEventListener('change', () => {
+    state.sortBy = sortSelect.value;
+    state.filteredSkills = sortSkills(state.filteredSkills);
+    renderSkillGrid('catalog-grid', state.filteredSkills);
+  });
+
+  document.getElementById('sm-drawer-overlay')?.addEventListener('click', closeDrawer);
+  document.getElementById('drawer-close-btn')?.addEventListener('click', closeDrawer);
+
+  document.getElementById('skill-edit-overlay')?.addEventListener('click', closeEditModal);
+
+  document.getElementById('export-pack-btn')?.addEventListener('click', exportSelectedPack);
+
+  initStudio();
+  initDropZone();
+
+  document.addEventListener('keydown', (e) => {
+    const tag = (document.activeElement as HTMLElement)?.tagName;
+    const inField = tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT';
+    if ((e.key === 'k' && (e.ctrlKey || e.metaKey)) || (e.key === '/' && !inField)) {
+      e.preventDefault();
+      (document.getElementById('sm-search-input') as HTMLInputElement)?.focus();
+    }
+    if (e.key === 'Escape' && !inField) { closeDrawer(); closeEditModal(); }
+  });
+
+  $$('.density-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      $$('.density-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.density = (btn as HTMLElement).dataset.density!;
+      const grid = document.getElementById('catalog-grid');
+      if (grid) {
+        grid.classList.remove('sm-grid--compact', 'sm-grid--comfortable');
+        if (state.density !== 'standard') grid.classList.add(`sm-grid--${state.density}`);
+      }
+    });
+  });
+
+  switchTab('catalog');
+});
+
+// ── GitHub Skills Hub ───────────────────────────────────────
+const ghState = {
+  repos: [] as RepoInfo[],
+  currentRepo: null as RepoInfo | null,
+  allSkills: [] as GhSkillInfo[],
+  filteredSkills: [] as GhSkillInfo[],
+  loadingSkills: false,
+};
+
+async function ghLoadRepos(): Promise<void> {
+  const listEl = document.getElementById('gh-repos-list');
+  if (!listEl) return;
+
+  if (ghState.repos.length > 0) {
+    ghRenderRepos(ghState.repos);
+    return;
+  }
+
+  listEl.innerHTML = '<div class="gh-loading">⏳ 加载仓库列表…</div>';
+  try {
+    const data = await api('GET', API.ghRepos());
+    ghState.repos = data.repos || [];
+    ghRenderRepos(ghState.repos);
+  } catch (e: any) {
+    listEl.innerHTML = `<div class="gh-error">❌ ${escHtml(e.message)}</div>`;
+  }
+}
+
+function ghRenderRepos(repos: RepoInfo[]): void {
+  const listEl = document.getElementById('gh-repos-list');
+  if (!listEl) return;
+  listEl.innerHTML = '';
+  repos.forEach(repo => {
+    const isActive = ghState.currentRepo && ghState.currentRepo.repo === repo.repo;
+    const card = document.createElement('div');
+    card.className = `gh-repo-card${isActive ? ' active' : ''}`;
+    card.dataset.repoId = repo.repo;
+    card.innerHTML = `
+      <div class="gh-repo-icon">${escHtml(repo.icon || '📦')}</div>
+      <div class="gh-repo-info">
+        <div class="gh-repo-name">${escHtml(repo.name)}</div>
+        <div class="gh-repo-meta">
+          <span class="gh-stars">⭐ ${ghFormatStars(repo.stars)}</span>
+          <span class="gh-repo-slug">${escHtml(repo.repo)}</span>
+        </div>
+        <div class="gh-repo-tags">
+          ${(repo.tags || []).map(t => `<span class="gh-tag">${escHtml(t)}</span>`).join('')}
+        </div>
+      </div>
+    `;
+    card.addEventListener('click', () => ghSelectRepo(repo));
+    listEl.appendChild(card);
+  });
+}
+
+function ghFormatStars(n: number | undefined): string {
+  if (!n) return '—';
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+  return String(n);
+}
+
+async function ghSelectRepo(repo: RepoInfo): Promise<void> {
+  if (ghState.loadingSkills) return;
+  ghState.currentRepo = repo;
+
+  $$('.gh-repo-card').forEach(c => (c as HTMLElement).classList.toggle('active', (c as HTMLElement).dataset.repoId === repo.repo));
+
+  const repoNameEl = document.getElementById('gh-skills-repo-name');
+  if (repoNameEl) {
+    repoNameEl.textContent = `${repo.icon || '📦'} ${repo.name}`;
+  }
+
+  document.getElementById('gh-skills-search-wrap')?.classList.remove('hidden');
+
+  const searchEl = document.getElementById('gh-skills-search') as HTMLInputElement;
+  if (searchEl) searchEl.value = '';
+
+  const listEl = document.getElementById('gh-skills-list');
+  if (!listEl) return;
+  listEl.innerHTML = '<div class="gh-loading">⏳ 正在从 GitHub 获取技能列表…</div>';
+  ghState.loadingSkills = true;
+
+  try {
+    const data = await api('GET', API.ghSkills(repo.repo, repo.skills_path, repo.branch));
+    ghState.allSkills = data.skills || [];
+    ghState.filteredSkills = ghState.allSkills;
+
+    const countEl = document.getElementById('gh-skills-count');
+    if (countEl) {
+      countEl.textContent = `${ghState.allSkills.length} 个技能`;
+      countEl.classList.remove('hidden');
+    }
+
+    ghRenderSkills(ghState.filteredSkills);
+  } catch (e: any) {
+    listEl.innerHTML = `
+      <div class="gh-error-state">
+        <div class="gh-empty-icon">❌</div>
+        <p>${escHtml(e.message)}</p>
+        <p style="font-size:12px;color:var(--text-muted);margin-top:8px">
+          可能是该仓库结构与预期不同，或网络请求超时。
+          <a href="https://github.com/${escHtml(repo.repo)}" target="_blank" rel="noopener noreferrer"
+             style="color:var(--text-link)">在 GitHub 上查看 ↗</a>
+        </p>
+      </div>`;
+  } finally {
+    ghState.loadingSkills = false;
+  }
+}
+
+function ghRenderSkills(skills: GhSkillInfo[]): void {
+  const listEl = document.getElementById('gh-skills-list');
+  if (!listEl) return;
+
+  if (!skills.length) {
+    listEl.innerHTML = `
+      <div class="gh-empty-state">
+        <div class="gh-empty-icon">🔍</div>
+        <p>没有找到匹配的技能</p>
+      </div>`;
+    return;
+  }
+
+  listEl.innerHTML = '';
+  skills.forEach(skill => {
+    const card = document.createElement('div');
+    card.className = 'gh-skill-card';
+    const isInstalled = skill.is_installed;
+    card.innerHTML = `
+      <div class="gh-skill-card-main">
+        <div class="gh-skill-icon">🌐</div>
+        <div class="gh-skill-info">
+          <div class="gh-skill-name">${escHtml(skill.name)}</div>
+          <div class="gh-skill-path">${escHtml(skill.path)}</div>
+        </div>
+        <div class="gh-skill-actions">
+          ${isInstalled
+        ? `<span class="gh-badge-installed">✅ 已安装</span>`
+        : `<button class="btn btn-primary btn-xs gh-install-btn"
+                   data-repo="${escHtml(skill.repo!)}"
+                   data-path="${escHtml(skill.path)}"
+                   data-branch="${escHtml(skill.branch || 'main')}"
+                   data-name="${escHtml(skill.name)}"
+                   onclick="ghInstallSkill(this)">
+               ⬇️ 安装
+             </button>`
+      }
+          <a class="btn btn-secondary btn-xs"
+             href="${escHtml(skill.github_url!)}"
+             target="_blank" rel="noopener noreferrer"
+             title="在 GitHub 上查看">↗</a>
+        </div>
+      </div>`;
+    listEl.appendChild(card);
+  });
+}
+
+function ghFilterSkills(q: string): void {
+  const query = (q || '').toLowerCase().trim();
+  if (!query) {
+    ghState.filteredSkills = ghState.allSkills;
+  } else {
+    ghState.filteredSkills = ghState.allSkills.filter(s =>
+      s.name.toLowerCase().includes(query) ||
+      (s.path || '').toLowerCase().includes(query)
+    );
+  }
+  ghRenderSkills(ghState.filteredSkills);
+}
+
+async function ghInstallSkill(btn: HTMLElement): Promise<void> {
+  const repo = btn.dataset.repo!;
+  const path = btn.dataset.path!;
+  const branch = btn.dataset.branch || 'main';
+  const name = btn.dataset.name || path.split('/').pop();
+
+  (btn as HTMLButtonElement).disabled = true;
+  btn.textContent = '⏳ 安装中…';
+
+  try {
+    await api('POST', API.ghInstall(), {
+      repo,
+      skill_path: path,
+      branch,
+      overwrite: false,
+    });
+    btn.parentElement!.innerHTML = `<span class="gh-badge-installed">✅ 已安装</span>
+      <a class="btn btn-secondary btn-xs"
+         href="https://github.com/${escHtml(repo)}/tree/${escHtml(branch)}/${escHtml(path)}"
+         target="_blank" rel="noopener noreferrer">↗</a>`;
+    const item = ghState.allSkills.find(s => s.path === path && s.repo === repo);
+    if (item) item.is_installed = true;
+    toast(`✅ "${escHtml(name)}" 安装成功！前往「我的技能库」查看`, 'success', 4000);
+  } catch (e: any) {
+    (btn as HTMLButtonElement).disabled = false;
+    btn.textContent = '⬇️ 安装';
+    if (e.message && e.message.includes('已安装')) {
+      toast(`"${escHtml(name)}" 已安装`, 'info');
+    } else {
+      toast(`安装失败: ${e.message}`, 'error');
+    }
+  }
+}
+
+function ghToggleCustomUrl(): void {
+  const box = document.getElementById('gh-custom-url-box');
+  const btn = document.getElementById('gh-custom-url-btn');
+  if (!box) return;
+  const isHidden = box.classList.toggle('hidden');
+  if (btn) btn.textContent = isHidden ? '🔗 自定义 URL 安装' : '✕ 关闭';
+}
+
+async function ghInstallCustomUrl(): Promise<void> {
+  const input = document.getElementById('gh-custom-url-input') as HTMLInputElement;
+  if (!input) return;
+  const rawUrl = (input.value || '').trim();
+  if (!rawUrl) { toast('请粘贴 raw.githubusercontent.com 链接', 'error'); return; }
+  if (!rawUrl.startsWith('https://raw.githubusercontent.com/')) {
+    toast('仅支持 https://raw.githubusercontent.com/ 开头的链接', 'error');
+    return;
+  }
+
+  const btn = input.nextElementSibling as HTMLButtonElement;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中…'; }
+
+  try {
+    const result = await api('POST', API.ghInstall(), { raw_url: rawUrl });
+    toast(`✅ "${escHtml(result.skill?.name || result.skill_id)}" 安装成功！`, 'success', 4000);
+    input.value = '';
+    ghToggleCustomUrl();
+  } catch (e: any) {
+    toast(`安装失败: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇️ 安装'; }
+  }
+}
+
+async function ghInstallInlineUrl(): Promise<void> {
+  const input = document.getElementById('gh-custom-url-input-inline') as HTMLInputElement;
+  if (!input) return;
+  const rawUrl = (input.value || '').trim();
+  if (!rawUrl) { toast('请粘贴 raw.githubusercontent.com 链接', 'error'); return; }
+  if (!rawUrl.startsWith('https://raw.githubusercontent.com/')) {
+    toast('仅支持 https://raw.githubusercontent.com/ 开头的链接', 'error');
+    return;
+  }
+
+  const btn = input.nextElementSibling as HTMLButtonElement;
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ 安装中…'; }
+
+  try {
+    const result = await api('POST', API.ghInstall(), { raw_url: rawUrl });
+    toast(`✅ "${escHtml(result.skill?.name || result.skill_id)}" 安装成功！前往「我的技能库」查看`, 'success', 4500);
+    input.value = '';
+  } catch (e: any) {
+    toast(`安装失败: ${e.message}`, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⬇️ 安装'; }
+  }
+}
+
+// ── Expose to window and export ────────────────────────────
+const SM = (window as any).SM || {};
+Object.assign(SM, {
+  switchTab, loadCatalog, loadLibrary, toggleSkill, uninstallSkill,
+  duplicateSkill, exportOneSkill, openDrawer, closeDrawer,
+  openEditModal, closeEditModal, saveSkillEdit,
+  hoverStar, resetStarHover, rateSkill,
+  buildSkill, buildFromSession, selectSession: (window as any).selectSession,
+  toggleExportSelect: (window as any).toggleExportSelect, exportSelectedPack,
+  ghLoadRepos, ghFilterSkills, ghInstallSkill, ghToggleCustomUrl, ghInstallCustomUrl, ghInstallInlineUrl,
+});
+(window as any).SM = SM;
+
+export {
+  switchTab, loadCatalog, loadLibrary, toggleSkill, uninstallSkill, duplicateSkill,
+  openDrawer, closeDrawer, openEditModal, closeEditModal, saveSkillEdit,
+  rateSkill, buildSkill, buildFromSession, exportSelectedPack,
+  ghLoadRepos, ghFilterSkills, ghInstallSkill,
+};

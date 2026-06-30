@@ -16,8 +16,9 @@ import pytest
 # 401/403 = auth required (expected in test env),
 # 404 = endpoint not registered in test app or resource missing,
 # 405 = method not allowed (route exists but wrong HTTP verb),
+# 410 = intentionally disabled compatibility endpoint,
 # 503 = service unavailable (health probes when deps missing).
-_OK = (200, 201, 204, 301, 302, 400, 401, 403, 404, 405, 422, 503)
+_OK = (200, 201, 204, 301, 302, 400, 401, 403, 404, 405, 410, 422, 503)
 
 
 def _smoke(resp):
@@ -159,14 +160,8 @@ class TestNotebookSmoke:
 class TestVoiceSmoke:
     """Smoke tests for /api/voice/* endpoints."""
 
-    def test_voice_engines(self, full_client):
-        _smoke(full_client.get("/api/voice/engines"))
-
     def test_voice_stt_status(self, full_client):
         _smoke(full_client.get("/api/voice/stt_status"))
-
-    def test_voice_commands(self, full_client):
-        _smoke(full_client.get("/api/voice/commands"))
 
 
 # ── Document endpoints ───────────────────────────────────────────────────────

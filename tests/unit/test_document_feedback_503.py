@@ -13,6 +13,8 @@ Covers the two bugs fixed in document_feedback.py:
 
 from __future__ import annotations
 
+import sys
+import types
 import unittest
 from collections import deque
 from unittest.mock import MagicMock, PropertyMock, call, patch
@@ -103,6 +105,266 @@ def _503_error():
     return Exception(
         "503 UNAVAILABLE. {'error': {'code': 503, 'message': 'high demand'}}"
     )
+
+
+@requires_df
+def test_build_annotation_prompt_includes_reference_context():
+    df = _make_feedback()
+
+    prompt = df._build_annotation_prompt(
+        "docx",
+        "这是当前译稿片段。",
+        "请根据原文审校当前译稿。",
+        full_doc_context="这是全文背景。",
+        reference_context="[Page 12]\nThis is the original source passage.",
+    )
+
+    assert "参考原文" in prompt
+    assert "This is the original source passage." in prompt
+
+
+@requires_df
+def test_analyze_for_annotation_chunked_honors_chunk_range():
+    df = _make_feedback(client=None)
+    df.reader.read_document.return_value = {"success": True, "type": "resume"}
+    df.reader.format_for_ai.return_value = (
+        "## 文档内容\n\nchunk-1\n\nchunk-2\n\nchunk-3\n\nchunk-4"
+    )
+    df._split_into_chunks_by_paragraphs = MagicMock(
+        return_value=["chunk-1", "chunk-2", "chunk-3", "chunk-4"]
+    )
+    df._select_best_model = MagicMock(return_value=("gemini-3-flash-preview", []))
+
+    seen = []
+
+    def _fake_analyze(
+        chunk,
+        doc_type,
+        user_requirement,
+        model_id,
+        chunk_index,
+        total_chunks,
+        full_doc_context="",
+        reference_context="",
+        max_retries=2,
+    ):
+        seen.append((chunk, chunk_index, total_chunks))
+        return [
+            {
+                "原文片段": f"片段-{chunk_index}",
+                "修改建议": "建议",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
+
+    df._analyze_chunk_for_annotations = _fake_analyze
+
+    result = df.analyze_for_annotation_chunked(
+        file_path="/fake/batch.docx",
+        user_requirement="请分批审校",
+        model_id="gemini-3-flash-preview",
+        chunk_size=10,
+        chunk_range=(2, 3),
+    )
+
+    assert result["success"] is True
+    assert seen == [("chunk-2", 2, 4), ("chunk-3", 3, 4)]
+    assert result["chunks_processed"] == 2
+    assert result["selected_chunk_start"] == 2
+    assert result["selected_chunk_end"] == 3
+
+
+@requires_df
+def test_analyze_for_annotation_chunked_honors_chunk_range_when_ai_disabled():
+    df = _make_feedback(client=None)
+    df.reader.read_document.return_value = {"success": True, "type": "resume"}
+    df.reader.format_for_ai.return_value = (
+        "## 文档内容\n\nchunk-1\n\nchunk-2\n\nchunk-3\n\nchunk-4"
+    )
+    df._split_into_chunks_by_paragraphs = MagicMock(
+        return_value=["chunk-1", "chunk-2", "chunk-3", "chunk-4"]
+    )
+    df._fallback_annotations_from_chunk = MagicMock(
+        side_effect=lambda chunk: [
+            {
+                "原文片段": f"片段-{chunk}",
+                "修改建议": "建议",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
+    )
+
+    with patch.dict("os.environ", {"KOTO_DISABLE_AI": "1"}, clear=False):
+        result = df.analyze_for_annotation_chunked(
+            file_path="/fake/batch.docx",
+            user_requirement="请分批审校",
+            model_id="gemini-3-flash-preview",
+            chunk_size=10,
+            chunk_range=(2, 3),
+        )
+
+    assert result["success"] is True
+    assert result["chunks_processed"] == 2
+    assert result["selected_chunk_start"] == 2
+    assert result["selected_chunk_end"] == 3
+    assert df._fallback_annotations_from_chunk.call_count == 2
+
+
+@requires_df
+def test_list_available_models_returns_local_proxy_identity_without_remote_listing():
+    class _LocalModels:
+        _model_tag = "qwen3.5:9b"
+
+        def list(self):
+            raise AssertionError("local proxy should not fetch cloud model list")
+
+    class _LocalClient:
+        _model_tag = "qwen3.5:9b"
+        models = _LocalModels()
+
+    df = _make_feedback(client=_LocalClient())
+
+    assert df._list_available_models() == [
+        {"name": "qwen3.5:9b", "display_name": "qwen3.5:9b"}
+    ]
+
+
+@requires_df
+def test_full_annotation_loop_streaming_uses_local_model_identity_and_chunk_budget():
+    class _LocalModels:
+        _model_tag = "qwen3.5:9b"
+
+    class _LocalClient:
+        _model_tag = "qwen3.5:9b"
+        models = _LocalModels()
+
+    df = _make_feedback(client=_LocalClient())
+    df.reader.read_document.return_value = {
+        "success": True,
+        "type": "docx",
+        "paragraphs": [{"text": "示例文本" * 20}],
+    }
+    df.analyze_for_annotation_chunked = MagicMock(
+        return_value={"success": False, "error": "stop"}
+    )
+
+    with patch.dict(
+        sys.modules, {"schedule": types.ModuleType("schedule")}, clear=False
+    ):
+        events = list(df.full_annotation_loop_streaming("/fake.docx"))
+    analyzing = next(event for event in events if event["stage"] == "analyzing")
+    analyze_kwargs = df.analyze_for_annotation_chunked.call_args.kwargs
+
+    assert analyze_kwargs["model_id"] == "qwen3.5:9b"
+    assert analyze_kwargs["chunk_size"] == 2400
+    assert "qwen3.5:9b" in analyzing["detail"]
+
+
+@requires_df
+def test_full_annotation_loop_delegates_to_streaming_path():
+    df = _make_feedback(client=None)
+    df.analyze_for_annotation_chunked = MagicMock(
+        side_effect=AssertionError(
+            "legacy sync annotation path should not analyze directly"
+        )
+    )
+
+    captured = {}
+
+    def _fake_stream(
+        file_path,
+        user_requirement="",
+        task_id=None,
+        model_id=None,
+        cancel_check=None,
+        skill_prompt="",
+        reference_context="",
+    ):
+        captured["file_path"] = file_path
+        captured["user_requirement"] = user_requirement
+        captured["model_id"] = model_id
+        captured["reference_context"] = reference_context
+        yield {
+            "stage": "complete",
+            "result": {
+                "success": True,
+                "revised_file": "/fake/batch_revised.docx",
+                "applied": 2,
+            },
+        }
+
+    df.full_annotation_loop_streaming = _fake_stream
+
+    result = df.full_annotation_loop(
+        "/fake/batch.docx",
+        user_requirement="请继续审校",
+        model_id="gemini-2.5-pro",
+        reference_context="[Page 1] source",
+    )
+
+    assert result["success"] is True
+    assert result["revised_file"] == "/fake/batch_revised.docx"
+    assert result["applied"] == 2
+    assert captured == {
+        "file_path": "/fake/batch.docx",
+        "user_requirement": "请继续审校",
+        "model_id": "gemini-2.5-pro",
+        "reference_context": "[Page 1] source",
+    }
+
+
+@requires_df
+def test_full_feedback_loop_is_analysis_apply_wrapper():
+    df = _make_feedback(client=None)
+    df.analyze_and_suggest = MagicMock(
+        return_value={
+            "success": True,
+            "modification_count": 2,
+            "modifications": [{"kind": "update"}],
+            "summary": "summary",
+        }
+    )
+    df.apply_suggestions = MagicMock(
+        return_value={
+            "success": True,
+            "file_path": "/fake/result.docx",
+            "applied_count": 2,
+        }
+    )
+
+    result = df.full_feedback_loop("/fake/source.docx", "请优化", auto_apply=True)
+
+    df.analyze_and_suggest.assert_called_once_with("/fake/source.docx", "请优化")
+    df.apply_suggestions.assert_called_once_with(
+        "/fake/source.docx", [{"kind": "update"}]
+    )
+    assert result["success"] is True
+    assert result["new_file_path"] == "/fake/result.docx"
+    assert result["applied_count"] == 2
+
+
+@requires_df
+def test_full_feedback_loop_can_return_analysis_only():
+    df = _make_feedback(client=None)
+    df.analyze_and_suggest = MagicMock(
+        return_value={
+            "success": True,
+            "modification_count": 1,
+            "modifications": [{"kind": "update"}],
+            "summary": "summary",
+        }
+    )
+    df.apply_suggestions = MagicMock(
+        side_effect=AssertionError("analysis-only path should not apply suggestions")
+    )
+
+    result = df.full_feedback_loop("/fake/source.docx", "请优化", auto_apply=False)
+
+    df.analyze_and_suggest.assert_called_once_with("/fake/source.docx", "请优化")
+    assert result["success"] is True
+    assert result["message"] == "仅分析，未应用修改"
 
 
 # ===========================================================================

@@ -87,8 +87,8 @@ class PIIConfig:
 # 每条规则: (label, pattern, flags)
 _RULES: List[Tuple[str, str, int]] = [
     # ─── 手机号 ───────────────────────────────────────────────────
-    # 匹配：1[3-9] + 9位，前后为非数字边界
-    ("手机号", r"(?<!\d)1[3-9]\d{9}(?!\d)", 0),
+    # 匹配：1[0-9] + 9位，前后为非数字边界（涵盖所有号段包括10/11/12）
+    ("手机号", r"(?<!\d)1[0-9]\d{9}(?!\d)", 0),
     # ─── 固定电话 ─────────────────────────────────────────────────
     # 0xx-xxxxxxxx 或 (0xx)xxxxxxxx
     ("固话", r"(?<!\d)0\d{2,3}[-\s]?\d{7,8}(?!\d)", 0),
@@ -100,8 +100,9 @@ _RULES: List[Tuple[str, str, int]] = [
         0,
     ),
     # ─── 银行卡 ───────────────────────────────────────────────────
-    # 16-19位连续数字（非身份证覆盖区域）
-    ("银行卡", r"(?<!\d)\d{16,19}(?!\d)", 0),
+    # UnionPay cards commonly start with 62; avoid treating arbitrary long
+    # numeric identifiers as bank cards.
+    ("银行卡", r"(?<!\d)62\d{14,17}(?!\d)", 0),
     # ─── 电子邮箱 ─────────────────────────────────────────────────
     ("邮箱", r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", 0),
     # ─── IPv4 地址 ────────────────────────────────────────────────
@@ -116,7 +117,12 @@ _RULES: List[Tuple[str, str, int]] = [
     (
         "姓名",
         r"(?:叫|是|给|向|找|告诉|通知|联系|发给|转发给|抄送|cc)[：:：\s]*"
-        r"([\u4e00-\u9fa5]{2,4})(?=[，。！？\s「」【】]|$)",
+        r"([\u4e00-\u9fa5]{2,4})(?=[，。！？\s「」【】]|来|去|到|$)",
+        re.UNICODE,
+    ),
+    (
+        "姓名",
+        r"(?<![\u4e00-\u9fa5])[\u4e00-\u9fa5]{2,3}(?=(?:去了|来|到|在|和|与|，|。|！|？|\s|$))",
         re.UNICODE,
     ),
     # ─── 家庭住址 ─────────────────────────────────────────────────
@@ -260,13 +266,20 @@ class PIIFilter:
             result = pattern.sub(_replace, result)
 
         # ── 自定义关键词 ─────────────────────────────────────────────
-        for keyword in cfg.custom_keywords:
-            if keyword and keyword in result:
+        for keyword in sorted(cfg.custom_keywords, key=lambda k: -len(k)):
+            if not keyword:
+                continue
+            idx = 0
+            while True:
+                idx = result.find(keyword, idx)
+                if idx == -1:
+                    break
                 counters["自定义"] = counters.get("自定义", 0) + 1
                 placeholder = f"<<自定义-{counters['自定义']}>>"
                 mask_map[placeholder] = keyword
                 stats["自定义"] = stats.get("自定义", 0) + 1
-                result = result.replace(keyword, placeholder)
+                result = result[:idx] + placeholder + result[idx + len(keyword) :]
+                idx += len(placeholder)
 
         if stats:
             if cfg.log_stats:

@@ -13,14 +13,27 @@
 import logging
 
 from app.core.llm.model_mode import is_explicit_model_mode, normalize_model_mode
-from app.core.shared.tool_parser import parse_tool_calls, stringify_tool_result  # noqa: F401
+from app.core.security.output_validator import sanitize_user_visible_text
+from app.core.shared.llm_helpers import get_local_provider as _get_local_provider_shared
+from app.core.shared.llm_helpers import is_ollama_alive as _is_ollama_alive_shared
 from app.core.shared.llm_helpers import (  # noqa: F401
     is_online_failure as _is_online_failure_shared,
-    is_ollama_alive as _is_ollama_alive_shared,
-    get_local_provider as _get_local_provider_shared,
+)
+from app.core.shared.tool_parser import (  # noqa: F401
+    parse_tool_calls,
+    stringify_tool_result,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _safe_user_error_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback, treat_as_error=True)
+
+
+def _safe_user_preview_text(text, fallback: str) -> str:
+    return sanitize_user_visible_text(text, fallback=fallback)
+
 
 def register_socket_events(socketio):
     """Register all /doc namespace WebSocket event handlers."""
@@ -79,7 +92,10 @@ def register_socket_events(socketio):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"服务端处理失败: {exc}",
+                    "text": _safe_user_error_text(
+                        f"服务端处理失败: {exc}",
+                        "服务端处理失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
@@ -103,17 +119,22 @@ def register_socket_events(socketio):
         language = data.get("language", "")  # "python" | "r" | "" → text mode
         csv_data = data.get("csv_data", "")  # table CSV for chart context
         output_mode = data.get("output_mode", "inline")  # 'inline' | 'chat'
-        model_mode = normalize_model_mode(data.get("model_mode"), default="auto")  # 'local' | 'cloud' | 'auto'
+        model_mode = normalize_model_mode(
+            data.get("model_mode"), default="auto"
+        )  # 'local' | 'cloud' | 'auto'
         # FloatingToolbar actions pass a pre-built system prompt via this field
-        action_system_prompt = data.get("_action_system_prompt", "")  # overrides system_instruction
+        action_system_prompt = data.get(
+            "_action_system_prompt", ""
+        )  # overrides system_instruction
         if not prompt:
             return
 
-        # ── Agent Loop path (OpenClaw-inspired unified agent) ─────────
+        # ── Agent Loop path (unified agent) ─────────
         _use_agent_loop = data.get("_use_agent_loop", True)
         if not _use_agent_loop:
             try:
                 from web.settings import SettingsManager as _SM
+
                 _use_agent_loop = bool(_SM().get("ai", "use_agent_loop"))
             except Exception:
                 pass
@@ -123,12 +144,14 @@ def register_socket_events(socketio):
         if not _use_doc_agent:
             try:
                 from web.settings import SettingsManager as _SM
+
                 _use_doc_agent = bool(_SM().get("ai", "use_doc_agent"))
             except Exception:
                 pass
 
         # DocAgent takes priority if enabled
         if _use_doc_agent:
+
             def _doc_agent_task():
                 try:
                     _run_doc_agent(socketio, sid, data)
@@ -137,8 +160,10 @@ def register_socket_events(socketio):
                     socketio.emit(
                         "agent_task_complete",
                         {"full_text": "", "error": f"DocAgent 错误：{_da_exc}"},
-                        namespace="/doc", to=sid,
+                        namespace="/doc",
+                        to=sid,
                     )
+
             socketio.start_background_task(_doc_agent_task)
             return
 
@@ -151,8 +176,10 @@ def register_socket_events(socketio):
                 socketio.emit(
                     "agent_task_complete",
                     {"full_text": "", "error": f"Agent loop 错误：{_al_exc}"},
-                    namespace="/doc", to=sid,
+                    namespace="/doc",
+                    to=sid,
                 )
+
         socketio.start_background_task(_agent_loop_task)
         return
 
@@ -301,7 +328,12 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
         logger.exception("[DocAssistant] sandbox error: %s", exc)
         emit(
             "code_result",
-            {"error": str(exc), "stdout": "", "stderr": "", "files": {}},
+            {
+                "error": _safe_user_error_text(str(exc), "代码执行失败，请稍后重试。"),
+                "stdout": "",
+                "stderr": "",
+                "files": {},
+            },
             namespace="/doc",
         )
 
@@ -315,17 +347,17 @@ _parse_tool_calls = parse_tool_calls
 
 _ONLINE_DOC_MODELS = [
     "gemini-3-flash-preview",  # 首选：当前主聊天模型
-    "gemini-2.5-flash",        # 稳定快速回退
-    "gemini-2.5-flash-lite",   # 轻量兜底
+    "gemini-2.5-flash",  # 稳定快速回退
+    "gemini-2.5-flash-lite",  # 轻量兜底
 ]
 
 
 def _pick_online_model() -> str:
-    """直接使用 MODEL_MAP[CHAT]，保持与 Koto 主体一致；若取不到则用首选。"""
+    """Use the current CHAT model when available; otherwise use the preferred fallback."""
     try:
-        from web.app import MODEL_MAP  # type: ignore
+        from web.runtime_context import get_model_id
 
-        m = MODEL_MAP.get("CHAT", "")
+        m = get_model_id("CHAT")
         if m:
             return m
     except Exception:
@@ -335,9 +367,15 @@ def _pick_online_model() -> str:
 
 def _get_provider():
     """Return the configured online LLMProvider."""
+    from app.core.llm.model_selection import get_provider_for_model_mode
     from app.core.llm.provider_factory import get_llm_provider
 
-    return get_llm_provider(provider="gemini", allow_local_fallback=False)
+    model = _pick_online_model()
+    return get_llm_provider(
+        provider=get_provider_for_model_mode("cloud"),
+        model=model,
+        allow_local_fallback=False,
+    )
 
 
 # Delegate to shared implementations – kept as module-level aliases so any
@@ -363,24 +401,44 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         if not _is_ollama_alive():
             emit(
                 "agent_execute_command",
-                {"action": "show_message", "text": "❌ 本地模式下 Ollama 未运行，请启动 Ollama。", "is_error": True},
+                {
+                    "action": "show_message",
+                    "text": "❌ 本地模式下 Ollama 未运行，请启动 Ollama。",
+                    "is_error": True,
+                },
                 namespace="/doc",
             )
-            emit("agent_task_complete", {"full_text": "", "error": "ollama not running"}, namespace="/doc")
+            emit(
+                "agent_task_complete",
+                {"full_text": "", "error": "ollama not running"},
+                namespace="/doc",
+            )
             return None
         try:
             local = _get_local_provider()
             gen = local.generate_content(prompt=full_prompt, stream=True)
             full = []
             for chunk in gen:
-                part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+                part = (
+                    chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
+                )
                 if part:
                     full.append(part)
                     emit("agent_stream_chunk", {"chunk": part}, namespace="/doc")
             return "".join(full) if full else ""
         except Exception as exc_lo:
             logger.error("[DocAssistant] Local-only stream failed: %s", exc_lo)
-            emit("agent_task_complete", {"full_text": "", "error": str(exc_lo)}, namespace="/doc")
+            emit(
+                "agent_task_complete",
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(
+                        str(exc_lo),
+                        "本地 AI 调用失败，请检查 Ollama 后重试。",
+                    ),
+                },
+                namespace="/doc",
+            )
             return None
 
     # ── Attempt 1: Online ────────────────────────────────────────────────────
@@ -407,14 +465,22 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": f"❌ AI 调用失败：{exc}",
+                    "text": _safe_user_error_text(
+                        f"❌ AI 调用失败：{exc}",
+                        "❌ AI 调用失败，请稍后重试。",
+                    ),
                     "is_error": True,
                 },
                 namespace="/doc",
             )
             emit(
                 "agent_task_complete",
-                {"full_text": "", "error": str(exc)},
+                {
+                    "full_text": "",
+                    "error": _safe_user_error_text(
+                        str(exc), "AI 调用失败，请稍后重试。"
+                    ),
+                },
                 namespace="/doc",
             )
             return None
@@ -471,7 +537,13 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         )
         emit(
             "agent_task_complete",
-            {"full_text": "", "error": str(exc2)},
+            {
+                "full_text": "",
+                "error": _safe_user_error_text(
+                    str(exc2),
+                    "本地 AI 调用失败，请检查 Ollama 后重试。",
+                ),
+            },
             namespace="/doc",
         )
         return None
@@ -488,7 +560,9 @@ def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
         try:
             local = _get_local_provider()
             result = local.generate_content(prompt=prompt, stream=False)
-            return result.get("content", "") if isinstance(result, dict) else str(result)
+            return (
+                result.get("content", "") if isinstance(result, dict) else str(result)
+            )
         except Exception as exc_lo:
             logger.error("[DocAssistant] Local-only sync failed: %s", exc_lo)
             return None
@@ -523,6 +597,7 @@ def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
 # ══════════════════════════════════════════════════════════════
 # Agent Loop Bridge — maps AgentEvent → WebSocket emit()
 # ══════════════════════════════════════════════════════════════
+
 
 def _run_agent_loop(socketio, sid, data: dict) -> None:
     """
@@ -583,135 +658,241 @@ def _emit_agent_event(socketio, sid, event) -> None:
         socketio.emit("agent_stream_chunk", {"chunk": chunk}, namespace=ns, to=sid)
         # Parallel live-doc channel: only when caller opted in
         if d.get("live_doc"):
-            socketio.emit("doc_live_chunk", {
-                "chunk": chunk,
-                "mode": d.get("live_mode", "replace"),
-                "request_id": d.get("request_id", ""),
-            }, namespace=ns, to=sid)
+            socketio.emit(
+                "doc_live_chunk",
+                {
+                    "chunk": chunk,
+                    "mode": d.get("live_mode", "replace"),
+                    "request_id": d.get("request_id", ""),
+                },
+                namespace=ns,
+                to=sid,
+            )
 
     elif etype == EventType.LIVE_DOC_COMMIT:
-        socketio.emit("doc_live_commit", {
-            "full_text": d.get("full_text", ""),
-            "mode": d.get("live_mode", "replace"),
-            "original_selection": d.get("original_selection", ""),
-            "request_id": d.get("request_id", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_live_commit",
+            {
+                "full_text": d.get("full_text", ""),
+                "mode": d.get("live_mode", "replace"),
+                "original_selection": d.get("original_selection", ""),
+                "request_id": d.get("request_id", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.TASK_COMPLETE:
-        socketio.emit("agent_task_complete", {
-            "result": d.get("result", ""),
-            "has_proposals": d.get("has_proposals", False),
-            "error": d.get("error", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_task_complete",
+            {
+                "result": d.get("result", ""),
+                "has_proposals": d.get("has_proposals", False),
+                "error": d.get("error", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.PHASE:
-        socketio.emit("agent_phase", {
-            "phases": d.get("phases", []),
-            "current": d.get("current", ""),
-            "status": d.get("status", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_phase",
+            {
+                "phases": d.get("phases", []),
+                "current": d.get("current", ""),
+                "status": d.get("status", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.THOUGHT:
-        socketio.emit("agent_event", {
-            "type": "thought",
-            "text": d.get("text", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "thought",
+                "text": d.get("text", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.PLAN:
-        socketio.emit("agent_event", {
-            "type": "plan",
-            "steps": d.get("steps", []),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "plan",
+                "steps": d.get("steps", []),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.STEP_START:
-        socketio.emit("agent_event", {
-            "type": "step_start",
-            "step_id": d.get("step_id", ""),
-            "text": d.get("text", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "step_start",
+                "step_id": d.get("step_id", ""),
+                "text": d.get("text", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.STEP_PROGRESS:
-        socketio.emit("agent_event", {
-            "type": "step_progress",
-            "step_id": d.get("step_id", ""),
-            "detail": d.get("detail", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "step_progress",
+                "step_id": d.get("step_id", ""),
+                "detail": d.get("detail", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.STEP_DONE:
-        socketio.emit("agent_event", {
-            "type": "step_done",
-            "step_id": d.get("step_id", ""),
-            "text": d.get("text", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "step_done",
+                "step_id": d.get("step_id", ""),
+                "text": d.get("text", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.STEP_ERROR:
-        socketio.emit("agent_event", {
-            "type": "step_error",
-            "step_id": d.get("step_id", ""),
-            "error": d.get("error", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "step_error",
+                "step_id": d.get("step_id", ""),
+                "error": _safe_user_error_text(
+                    d.get("error", ""),
+                    "处理失败，请稍后重试。",
+                ),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.TOOL_CALL:
         tool_call = d.get("tool_call", {}) or {}
-        socketio.emit("agent_event", {
-            "type": "tool_call",
-            "tool_name": tool_call.get("name", ""),
-            "tool_args": tool_call.get("args", {}),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "tool_call",
+                "tool_name": tool_call.get("name", ""),
+                "tool_args": tool_call.get("args", {}),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.TOOL_RESULT:
-        socketio.emit("agent_event", {
-            "type": "tool_result",
-            "tool_name": d.get("tool_name", ""),
-            "result_preview": d.get("result_preview", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "tool_result",
+                "tool_name": d.get("tool_name", ""),
+                "result_preview": _safe_user_preview_text(
+                    d.get("result_preview", ""),
+                    "工具已执行。",
+                ),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.STATUS_MESSAGE:
         text = d.get("text", "")
         is_error = d.get("is_error", False)
         if is_error:
-            socketio.emit("agent_execute_command", {
-                "action": "show_message", "text": text, "is_error": True,
-            }, namespace=ns, to=sid)
+            socketio.emit(
+                "agent_execute_command",
+                {
+                    "action": "show_message",
+                    "text": _safe_user_error_text(text, "AI 调用失败，请稍后重试。"),
+                    "is_error": True,
+                },
+                namespace=ns,
+                to=sid,
+            )
         else:
-            socketio.emit("agent_progress", {
-                "step": "status", "detail": text,
-            }, namespace=ns, to=sid)
+            socketio.emit(
+                "agent_progress",
+                {
+                    "step": "status",
+                    "detail": _safe_user_preview_text(text, "处理中…"),
+                },
+                namespace=ns,
+                to=sid,
+            )
 
     elif etype == EventType.PROPOSAL:
-        socketio.emit("agent_proposals", {
-            "proposals": d.get("proposals", []),
-            "summary": d.get("summary", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_proposals",
+            {
+                "proposals": d.get("proposals", []),
+                "summary": d.get("summary", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.DOC_TOOL_CALL:
         socketio.emit("doc_tool_call", d, namespace=ns, to=sid)
 
     elif etype == EventType.SKILL_SUGGESTIONS:
-        socketio.emit("skill_suggestions", {
-            "suggestions": d.get("suggestions", []),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "skill_suggestions",
+            {
+                "suggestions": d.get("suggestions", []),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.RAG_INFO:
         socketio.emit("rag_info", d, namespace=ns, to=sid)
-        socketio.emit("agent_event", {
-            "type": "rag_info",
-            **d,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_event",
+            {
+                "type": "rag_info",
+                **d,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == EventType.CODE_RESULT:
         socketio.emit("code_result", d, namespace=ns, to=sid)
 
     elif etype == EventType.ERROR:
-        socketio.emit("agent_task_complete", {
-            "full_text": "", "error": d.get("text", "未知错误"),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_task_complete",
+            {
+                "full_text": "",
+                "error": d.get("text", "未知错误"),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype in (EventType.LIFECYCLE_START, EventType.LIFECYCLE_END):
         # New lifecycle events — emit for frontend observability
-        socketio.emit("agent_lifecycle", {
-            "type": etype.value, **d,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_lifecycle",
+            {
+                "type": etype.value,
+                **d,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     # Other event types (THOUGHT, PLAN, etc.) are logged but not emitted yet
     # to maintain backward compatibility with the existing frontend.
@@ -720,17 +901,20 @@ def _emit_agent_event(socketio, sid, event) -> None:
 # Singleton session queue
 _session_queue = None
 
+
 def _get_session_queue():
     global _session_queue
     if _session_queue is None:
         from app.core.agent.session_queue import SessionQueue
+
         _session_queue = SessionQueue(global_concurrency=4)
     return _session_queue
 
 
 # ══════════════════════════════════════════════════════════════
-# DocAgent Integration — OpenClaw-style document processing
+# DocAgent Integration — document processing
 # ══════════════════════════════════════════════════════════════
+
 
 def _run_doc_agent(socketio, sid, data: dict) -> None:
     """
@@ -742,7 +926,7 @@ def _run_doc_agent(socketio, sid, data: dict) -> None:
     - File change tracking for frontend highlighting
     - Task completion verification
     """
-    from app.core.agent.doc_agent import DocAgent, DocTask, FileHandle, DocEventType
+    from app.core.agent.doc_agent import DocAgent, DocEventType, DocTask, FileHandle
     from app.core.agent.doc_event_emitter import DocEventEmitter
 
     # Build FileHandle objects from data
@@ -756,23 +940,29 @@ def _run_doc_agent(socketio, sid, data: dict) -> None:
     selection = data.get("selection", "")
 
     if file_path or context:
-        files.append(FileHandle(
-            path=file_path or file_name or "document",
-            file_type=file_type,
-            content_snapshot=context[:5000] if context else "",
-            selection=selection if selection else None,
-        ))
+        files.append(
+            FileHandle(
+                path=file_path or file_name or "document",
+                file_type=file_type,
+                content_snapshot=context[:5000] if context else "",
+                selection=selection if selection else None,
+            )
+        )
 
     # Add additional files from open_tabs
     open_tabs = data.get("open_tabs", [])
     for tab in open_tabs[:5]:  # Limit to 5 files
         tab_path = tab.get("path", tab.get("name", ""))
         if tab_path and tab_path != file_path:
-            files.append(FileHandle(
-                path=tab_path,
-                file_type=tab.get("type", ""),
-                content_snapshot=tab.get("content", "")[:2000] if tab.get("content") else "",
-            ))
+            files.append(
+                FileHandle(
+                    path=tab_path,
+                    file_type=tab.get("type", ""),
+                    content_snapshot=(
+                        tab.get("content", "")[:2000] if tab.get("content") else ""
+                    ),
+                )
+            )
 
     # Build DocTask
     task = DocTask(
@@ -808,117 +998,207 @@ def _emit_doc_agent_event(socketio, sid, event, emitter) -> None:
     ns = "/doc"
 
     if etype == DocEventType.PLAN_START:
-        socketio.emit("doc_plan_start", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_plan_start",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.PLAN_CREATED:
-        socketio.emit("doc_plan_created", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_plan_created",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.STEP_START:
-        socketio.emit("doc_step_start", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_step_start",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.STEP_PROGRESS:
-        socketio.emit("doc_step_progress", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_step_progress",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.STEP_DONE:
-        socketio.emit("doc_step_done", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_step_done",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.STEP_ERROR:
-        socketio.emit("doc_step_error", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_step_error",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.TOOL_CALL:
-        socketio.emit("doc_tool_call", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_tool_call",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.TOOL_RESULT:
-        socketio.emit("doc_tool_result", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_tool_result",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.FILE_CHANGE:
-        socketio.emit("doc_file_change", {
-            "task_id": event.task_id,
-            "step_id": event.step_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_file_change",
+            {
+                "task_id": event.task_id,
+                "step_id": event.step_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.HIGHLIGHT:
-        socketio.emit("doc_highlight", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_highlight",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.USER_CONFIRM:
-        socketio.emit("doc_user_confirm", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_user_confirm",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.REPLAN:
-        socketio.emit("doc_replan", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_replan",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.THOUGHT:
         # Stream to chat area
         text = data.get("text", "")
         if text:
-            socketio.emit("agent_stream_chunk", {
-                "chunk": text,
-            }, namespace=ns, to=sid)
+            socketio.emit(
+                "agent_stream_chunk",
+                {
+                    "chunk": text,
+                },
+                namespace=ns,
+                to=sid,
+            )
 
     elif etype == DocEventType.STREAM_CHUNK:
-        socketio.emit("agent_stream_chunk", {
-            "chunk": data.get("chunk", ""),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_stream_chunk",
+            {
+                "chunk": data.get("chunk", ""),
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.VERIFICATION:
-        socketio.emit("doc_verification", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_verification",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.TASK_COMPLETE:
-        socketio.emit("agent_task_complete", {
-            "task_id": event.task_id,
-            "full_text": data.get("summary", ""),
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_task_complete",
+            {
+                "task_id": event.task_id,
+                "full_text": data.get("summary", ""),
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
 
     elif etype == DocEventType.ERROR:
-        socketio.emit("doc_error", {
-            "task_id": event.task_id,
-            **data,
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "doc_error",
+            {
+                "task_id": event.task_id,
+                **data,
+            },
+            namespace=ns,
+            to=sid,
+        )
         # Also emit task_complete with error for frontend compatibility
-        socketio.emit("agent_task_complete", {
-            "full_text": "",
-            "error": data.get("message", "未知错误"),
-        }, namespace=ns, to=sid)
+        socketio.emit(
+            "agent_task_complete",
+            {
+                "full_text": "",
+                "error": data.get("message", "未知错误"),
+            },
+            namespace=ns,
+            to=sid,
+        )

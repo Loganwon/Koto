@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>Koto (言)</title>
 <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/koto_icon.svg') }}">
+<meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
 <meta name="theme-color" content="#0b111d">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -358,38 +359,6 @@ a{color:var(--accent);}
 }
 #toast.on{opacity:1;}
 
-/* ── Voice overlay ── */
-#voiceOv{
-  position:fixed;inset:0;z-index:500;
-  background:rgba(4,12,26,.93);
-  display:flex;flex-direction:column;
-  align-items:center;justify-content:center;gap:20px;
-  opacity:0;pointer-events:none;transition:opacity .2s ease;
-  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
-}
-#voiceOv.on{opacity:1;pointer-events:all;}
-.voEng{font-size:11.5px;color:#7fb8e8;background:rgba(74,184,255,.08);border:1px solid rgba(74,184,255,.25);padding:4px 12px;border-radius:20px;}
-.voWave{display:flex;align-items:center;gap:4px;height:52px;}
-.voBar{width:4px;border-radius:3px;background:linear-gradient(to top,#4ab8ff,#a8e8ff);height:12px;animation:wi 1.4s ease-in-out infinite;}
-.voBar:nth-child(2){animation-delay:.1s;}.voBar:nth-child(3){animation-delay:.2s;}
-.voBar:nth-child(4){animation-delay:.3s;}.voBar:nth-child(5){animation-delay:.2s;}
-.voBar:nth-child(6){animation-delay:.1s;}.voBar:nth-child(7){animation-delay:0s;}
-@keyframes wi{0%,100%{height:12px;opacity:.45;}50%{height:38px;opacity:1;}}
-.voBigBtn{
-  width:80px;height:80px;border-radius:50%;border:none;
-  background:linear-gradient(135deg,#3aadff,#72d8ff);
-  color:#fff;font-size:28px;
-  display:flex;align-items:center;justify-content:center;
-  box-shadow:0 0 0 0 rgba(74,184,255,.45);
-  animation:mp 1.8s ease-in-out infinite;
-}
-@keyframes mp{0%{box-shadow:0 0 0 0 rgba(74,184,255,.45);}70%{box-shadow:0 0 0 22px rgba(74,184,255,0);}100%{box-shadow:0 0 0 0 rgba(74,184,255,0);}}
-#micBtn.rec{color:#4ab8ff;background:rgba(74,184,255,.15);}
-.voLbl{font-size:15px;color:#a8d8f8;font-weight:500;}
-.voPrev{max-width:280px;text-align:center;font-size:14px;color:#cce8ff;min-height:36px;line-height:1.5;}
-.voCan{font-size:13px;color:#7fb8e8;background:none;border:1px solid rgba(74,184,255,.3);padding:8px 20px;border-radius:20px;transition:all .15s;}
-.voCan:hover{color:#cce8ff;border-color:rgba(74,184,255,.6);}
-
 /* ── New-session sheet ── */
 #shOverlay{
   position:fixed;inset:0;z-index:600;background:rgba(0,0,0,.6);
@@ -479,7 +448,7 @@ a{color:var(--accent);}
     <div id="welcome">
       <div class="wcCircle">言</div>
       <h2>欢迎使用 Koto</h2>
-      <p>AI 助手 · 对话、写作、编程、语音一体化</p>
+      <p>AI 助手 · 对话、写作、编程一体化</p>
       <div class="wcHints">
         <div class="wcH" onclick="quickSend('帮我写一份今天的工作总结')">
           <span class="wcHT">✍️ 写作助手</span>帮我写今天的工作总结
@@ -497,7 +466,7 @@ a{color:var(--accent);}
   <!-- ── Generating bar ── -->
   <div id="genBar">
     <div class="gSpin"></div>
-    <span id="genTxt">Koto 正在思考...</span>
+    <span id="genTxt">准备就绪</span>
     <button id="stopBtn" onclick="stopGen()">⏹ 停止</button>
   </div>
 
@@ -514,7 +483,6 @@ a{color:var(--accent);}
         <textarea id="txIn" placeholder="输入消息..." rows="1"
           oninput="txResize(this)" onkeydown="txKey(event)"></textarea>
       </div>
-      <button class="iBtn" id="micBtn" onclick="voiceToggle()" title="语音输入">🎙️</button>
       <button id="sendBtn" onclick="sendMsg()" title="发送" aria-label="发送">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
           <line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/>
@@ -560,21 +528,6 @@ a{color:var(--accent);}
   </div>
 </div>
 
-<!-- ── Voice overlay ── -->
-<div id="voiceOv">
-  <div class="voEng" id="voEngLbl">检测引擎…</div>
-  <div class="voWave">
-    <div class="voBar" id="vb0"></div><div class="voBar" id="vb1"></div>
-    <div class="voBar" id="vb2"></div><div class="voBar" id="vb3"></div>
-    <div class="voBar" id="vb4"></div><div class="voBar" id="vb5"></div>
-    <div class="voBar" id="vb6"></div>
-  </div>
-  <button class="voBigBtn" onclick="voiceStop()">⏹</button>
-  <div class="voLbl" id="voLbl">正在聆听…</div>
-  <div class="voPrev" id="voPrev"></div>
-  <button class="voCan" onclick="voiceCancel()">取消</button>
-</div>
-
 <!-- ── Settings sheet ── -->
 <div id="spOverlay" onclick="if(event.target===this)spClose()">
   <div id="sp">
@@ -597,26 +550,13 @@ a{color:var(--accent);}
         <span>默认模型</span>
         <select id="spModel" onchange="saveSp('ai','default_model',this.value)">
           <option value="auto">🤖 Auto</option>
-          <option value="gemini-3-flash-preview">⚡ Gemini 3 Flash</option>
-          <option value="gemini-3-pro-preview">🚀 Gemini 3 Pro</option>
-          <option value="gemini-2.5-flash">⚡ Gemini 2.5 Flash</option>
-          <option value="gemini-2.5-pro">🚀 Gemini 2.5 Pro</option>
+          <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+          <option value="local">本地模型</option>
         </select>
       </div>
       <div class="spRow">
         <span>仅本地模型</span>
         <label class="sw"><input type="checkbox" id="spLocal" onchange="saveSp('ai','local_only',this.checked)"><span class="sws"></span></label>
-      </div>
-    </div>
-    <div class="spSec">
-      <div class="spLbl">语音</div>
-      <div class="spRow">
-        <span>识别引擎</span>
-        <span id="spVoiceEng" style="font-size:12px;color:var(--fg3)">检测中…</span>
-      </div>
-      <div class="spRow">
-        <span>说完自动发送</span>
-        <label class="sw"><input type="checkbox" id="spVoiceAuto" checked onchange="saveSp('ai','voice_auto_send',this.checked)"><span class="sws"></span></label>
       </div>
     </div>
     <button style="width:100%;padding:12px;border-radius:12px;border:none;background:var(--grad);color:#fff;font-size:14px;font-weight:500;margin-top:4px" onclick="spClose()">完成</button>
@@ -648,8 +588,6 @@ a{color:var(--accent);}
    POST /api/chat/file         form: session+message+file(s)
         → SSE (same as above) OR JSON {response,...}
    POST /api/chat/interrupt    body: {session}   → {success}
-   GET  /api/voice/stt_status  → {local:{available,engine}, gemini:{available}, active}
-   POST /api/voice/stt         body: {audio:base64, mime:string}
         → {success, text, engine?, message}
    GET  /api/settings          → full settings object (categories: storage,appearance,ai,proxy,skills)
    POST /api/settings          body: {category, key, value}  → {success}
@@ -663,11 +601,6 @@ let sessList   = [];     // [{name}] from API
 let pendFiles  = [];     // File[] pending attachment
 let generating = false;
 let abortCtrl  = null;
-let voiceAuto  = true;   // voice_auto_send setting
-let voiceRec   = false;
-let vSR        = null;   // SpeechRecognition (Web Speech API, primary)
-let vSRTimer   = null;   // waveform animation timer
-let vSRAbort   = null;   // AbortController for server-side recording path
 let toastTimer = null;
 
 /* ────────────────── Boot ────────────────── */
@@ -675,7 +608,6 @@ document.addEventListener('DOMContentLoaded', () => {
   applyTheme(ls('koto_m_theme') || 'dark');
   loadSettings();
   loadSessions();
-  initVoice();
   watchScroll();
   document.getElementById('txIn').focus();
 
@@ -699,6 +631,58 @@ function ls(k, v) {
   localStorage.setItem(k, v);
 }
 
+let csrfRefreshPromise = null;
+function csrfToken() {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  return meta ? (meta.getAttribute('content') || '') : '';
+}
+function setCsrfToken(token) {
+  let meta = document.querySelector('meta[name="csrf-token"]');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.setAttribute('name', 'csrf-token');
+    document.head.appendChild(meta);
+  }
+  meta.setAttribute('content', token || '');
+  return token || '';
+}
+async function refreshCsrfToken() {
+  if (csrfRefreshPromise) return csrfRefreshPromise;
+  csrfRefreshPromise = fetch('/api/csrf-token', { credentials: 'same-origin', cache: 'no-store' })
+    .then(async r => {
+      if (!r.ok) return csrfToken();
+      const d = await r.json().catch(() => ({}));
+      return d.csrf_token || d.token ? setCsrfToken(d.csrf_token || d.token) : csrfToken();
+    })
+    .catch(() => csrfToken())
+    .finally(() => { csrfRefreshPromise = null; });
+  return csrfRefreshPromise;
+}
+function methodNeedsCsrf(method) {
+  return !['GET', 'HEAD', 'OPTIONS', 'TRACE'].includes(String(method || 'GET').toUpperCase());
+}
+function withCsrfHeaders(headers, token) {
+  const h = new Headers(headers || {});
+  const t = token || csrfToken();
+  if (t && !h.has('X-CSRFToken') && !h.has('X-CSRF-Token')) h.set('X-CSRFToken', t);
+  return h;
+}
+async function csrfFetch(url, options = {}) {
+  const method = String(options.method || 'GET').toUpperCase();
+  const needsCsrf = methodNeedsCsrf(method);
+  const makeInit = (token) => {
+    const init = Object.assign({}, options, { credentials: options.credentials || 'same-origin' });
+    if (needsCsrf) init.headers = withCsrfHeaders(options.headers, token);
+    return init;
+  };
+  let response = await fetch(url, makeInit());
+  if (response.status === 400 && needsCsrf) {
+    const token = await refreshCsrfToken();
+    if (token) response = await fetch(url, makeInit(token));
+  }
+  return response;
+}
+
 /* ────────────────── Theme ── */
 function applyTheme(t) {
   document.documentElement.setAttribute('data-theme', t);
@@ -717,8 +701,6 @@ async function loadSettings() {
     if (!r.ok) return;
     const s = await r.json();
     const ai = s.ai || {};
-    voiceAuto = ai.voice_auto_send !== false;
-    document.getElementById('spVoiceAuto').checked = voiceAuto;
     document.getElementById('spLocal').checked = !!ai.local_only;
     const model = ai.default_model || 'auto';
     const sel = document.getElementById('spModel');
@@ -728,9 +710,8 @@ async function loadSettings() {
 
 async function saveSp(cat, key, val) {
   // /api/settings POST expects {category, key, value}
-  if (cat === 'ai' && key === 'voice_auto_send') voiceAuto = val;
   try {
-    await fetch('/api/settings', {
+    await csrfFetch('/api/settings', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ category: cat, key: key, value: val })
@@ -797,7 +778,7 @@ async function delSess(name, ev) {
   ev.stopPropagation();
   if (!confirm(`删除对话「${name}」？`)) return;
   try {
-    await fetch(`/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    await csrfFetch(`/api/sessions/${encodeURIComponent(name)}`, { method: 'DELETE' });
     if (curSess === name) { curSess = null; document.getElementById('hdrTitle').textContent = 'Koto'; clearMsgs(); document.getElementById('welcome').style.display = ''; }
     await loadSessions();
     toast('对话已删除');
@@ -819,7 +800,7 @@ async function shConfirm() {
   }
   shHide();
   try {
-    const r = await fetch('/api/sessions', {
+    const r = await csrfFetch('/api/sessions', {
       method: 'POST', headers: {'Content-Type':'application/json'},
       body: JSON.stringify({ name })
     });
@@ -921,7 +902,7 @@ async function sendMsg() {
     const d = new Date();
     const name = `对话 ${d.getMonth()+1}/${d.getDate()} ${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
     try {
-      await fetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
+      await csrfFetch('/api/sessions', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({name}) });
       curSess = name;
       document.getElementById('hdrTitle').textContent = name;
       document.getElementById('welcome').style.display = 'none';
@@ -957,7 +938,7 @@ async function streamChat(text) {
   let started = false;
 
   try {
-    const resp = await fetch('/api/chat/stream', {
+    const resp = await csrfFetch('/api/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -1095,7 +1076,7 @@ async function sendWithFiles(text) {
   let aiRow = null; let aiBbl = null;
 
   try {
-    const resp = await fetch('/api/chat/file', { method:'POST', body:form, signal:abortCtrl.signal });
+    const resp = await csrfFetch('/api/chat/file', { method:'POST', body:form, signal:abortCtrl.signal });
 
     if (!resp.ok) {
       removeTyping();
@@ -1153,6 +1134,7 @@ async function sendWithFiles(text) {
 function startGen() {
   generating = true;
   document.getElementById('genBar').classList.add('on');
+  document.getElementById('genTxt').textContent = 'Koto 正在思考…';
   document.getElementById('sendBtn').disabled = true;
   document.getElementById('sendBtn').classList.add('stop');
   document.getElementById('sendBtn').onclick = stopGen;
@@ -1161,7 +1143,7 @@ function startGen() {
 function stopGen() {
   generating = false;
   document.getElementById('genBar').classList.remove('on');
-  document.getElementById('genTxt').textContent = 'Koto 正在思考…';
+  document.getElementById('genTxt').textContent = '准备就绪';
   document.getElementById('sendBtn').disabled = false;
   document.getElementById('sendBtn').classList.remove('stop');
   document.getElementById('sendBtn').onclick = sendMsg;
@@ -1170,7 +1152,7 @@ function stopGen() {
 async function stopGen_withInterrupt() {
   if (abortCtrl) { abortCtrl.abort(); abortCtrl = null; }
   try {
-    if (curSess) await fetch('/api/chat/interrupt', {
+    if (curSess) await csrfFetch('/api/chat/interrupt', {
       method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({ session: curSess })  // API expects 'session' key
     });
@@ -1231,125 +1213,6 @@ function setBadge(m) {
   document.getElementById('hdrBadge').textContent = short;
 }
 
-/* ────────────────── Voice ── */
-async function initVoice() {
-  let lbl = '🖥️ 本地语音识别';
-  try {
-    const r = await fetch('/api/voice/stt_status');
-    const d = await r.json();
-    const fast = d.fast || {};
-    if (fast.engine === 'vosk' || fast.engine === 'vosk_sr') {
-      lbl = '🖥️ 本地离线 (Vosk)';
-    } else if (fast.engine === 'win32_sapi') {
-      lbl = '🖥️ 本地离线 (Windows SAPI)';
-    } else if (fast.available) {
-      lbl = `🖥️ 本地 (${fast.label || fast.engine})`;
-    } else {
-      lbl = '⏳ 正在准备离线模型…';
-    }
-  } catch(e) {}
-  document.getElementById('voEngLbl').textContent = lbl;
-  document.getElementById('spVoiceEng').textContent = lbl;
-}
-
-function waveStartSR() {
-  waveStopSR();
-  const bars = [0,1,2,3,4,5,6].map(i => document.getElementById(`vb${i}`));
-  let t = 0;
-  vSRTimer = setInterval(() => {
-    t++;
-    bars.forEach((b, i) => {
-      if (!b) return;
-      const h = Math.round(8 + 28 * Math.abs(Math.sin((t * 0.18) + i * 0.65)));
-      b.style.height = h + 'px';
-    });
-  }, 50);
-}
-
-function waveStopSR() {
-  if (vSRTimer) { clearInterval(vSRTimer); vSRTimer = null; }
-  [0,1,2,3,4,5,6].forEach(i => { const b = document.getElementById(`vb${i}`); if (b) b.style.height = ''; });
-}
-
-// ──────────── Local Vosk SSE (本地离线，无云端) ────────────
-function _voiceClose() {
-  waveStopSR();
-  voiceRec = false;
-  vSR = null;
-  vSRAbort = null;
-  document.getElementById('micBtn').classList.remove('rec');
-  document.getElementById('voiceOv').classList.remove('on');
-}
-
-async function _startServerListen() {
-  if (voiceRec) return;
-  voiceRec = true;
-  document.getElementById('micBtn').classList.add('rec');
-  const ovEl   = document.getElementById('voiceOv');
-  const lblEl  = document.getElementById('voLbl');
-  const prevEl = document.getElementById('voPrev');
-  ovEl.classList.add('on');
-  lblEl.textContent  = '🎤 正在聆听…';
-  prevEl.textContent = '';
-  waveStartSR();
-
-  let finalText = '';
-  let es = null;
-  vSRAbort = { abort() { if (es) { es.close(); es = null; } } };
-
-  es = new EventSource('/api/voice/stream');
-
-  es.onmessage = async (evt) => {
-    let d;
-    try { d = JSON.parse(evt.data); } catch { return; }
-
-    if (d.type === 'ping') {
-      if (!finalText)
-        lblEl.textContent = d.elapsed !== undefined ? `⏱️ 请开始说话… ${d.elapsed}s` : '🎤 正在聆听…';
-
-    } else if (d.type === 'partial') {
-      prevEl.textContent = d.text || '';
-      lblEl.textContent  = '✨ 识别中…';
-
-    } else if (d.type === 'final') {
-      finalText = (d.text || '').trim();
-      es.close(); es = null;
-      _voiceClose();
-      if (!finalText) { toast('⚠️ 未检测到语音'); return; }
-      const inp = document.getElementById('txIn');
-      inp.value = finalText; txResize(inp);
-      if (voiceAuto) await sendMsg(); else { inp.focus(); toast('✅ 识别完成'); }
-
-    } else if (d.type === 'error') {
-      es.close(); es = null;
-      _voiceClose();
-      toast(d.message || '❌ 识别失败，请重试');
-    }
-  };
-
-  es.onerror = () => {
-    if (!voiceRec) return;
-    if (es) { es.close(); es = null; }
-    _voiceClose();
-    if (!finalText) toast('❌ 连接中断，请重试');
-  };
-}
-
-// ──────────── Public API ────────────
-function voiceToggle() {
-  if (voiceRec || vSR) { voiceStop(); return; }
-  _startServerListen();
-}
-
-function voiceStop() {
-  // 只更新提示文字，让 Vosk 在说话结束时自然停止并返回结果
-  document.getElementById('voLbl').textContent = '✨ 正在处理…';
-}
-
-function voiceCancel() {
-  if (vSRAbort) vSRAbort.abort();
-  _voiceClose();
-}
 </script>
 </body>
 </html>

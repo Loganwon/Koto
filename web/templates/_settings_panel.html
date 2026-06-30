@@ -1,0 +1,348 @@
+        <!-- ==================== Settings Panel ==================== -->
+        <aside class="settings-panel" id="settingsPanel" role="dialog" aria-label="设置" aria-modal="false" aria-hidden="true" tabindex="-1">
+            <div class="resize-handle resize-handle-skills" id="settingsResizeHandle"></div>
+            <div class="panel-header">
+                <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 设置</h3>
+                <button class="close-panel" onclick="closeSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+            </div>
+            <div class="settings-content">
+                <!-- ── API 配置 ── -->
+                <div class="settings-section">
+                    <h4>🔑 API 配置</h4>
+                    <p class="setting-desc" id="settingsApiKeyDesc">更新 DeepSeek API 密钥。云端任务默认使用 DeepSeek V4 Pro。</p>
+                    <div class="setting-item" style="margin-top:8px;">
+                        <label>云端供应商</label>
+                        <select id="settingCloudProvider" class="form-select" onchange="onCloudProviderChange(this.value)">
+                            <option value="deepseek">DeepSeek</option>
+                        </select>
+                        <p class="setting-hint" id="settingCloudProviderHint">云端模式下使用 DeepSeek；需要完全本地时开启本地模型。</p>
+                    </div>
+                    <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+                        <input type="password" id="settingsApiKeyInput" placeholder="粘贴新的 API Key…"
+                               style="flex:1;padding:7px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;">
+                        <button onclick="saveSettingsApiKey()"
+                                style="padding:7px 14px;background:var(--accent-primary);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;">保存</button>
+                    </div>
+                    <div id="settingsApiKeyStatus" style="font-size:12px;margin-top:6px;color:var(--text-secondary);"></div>
+                </div>
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path>
+                        </svg>
+                        存储路径
+                    </h4>
+                    <div class="setting-item">
+                        <label>工作区目录</label>
+                        <div class="path-input">
+                            <input type="text" id="settingWorkspaceDir" readonly>
+                            <button class="browse-btn" onclick="browseFolder('workspace_dir')">浏览</button>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <label>文档目录</label>
+                        <div class="path-input">
+                            <input type="text" id="settingDocumentsDir" readonly>
+                            <button class="browse-btn" onclick="browseFolder('documents_dir')">浏览</button>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <label>图片目录</label>
+                        <div class="path-input">
+                            <input type="text" id="settingImagesDir" readonly>
+                            <button class="browse-btn" onclick="browseFolder('images_dir')">浏览</button>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <label>对话历史目录</label>
+                        <div class="path-input">
+                            <input type="text" id="settingChatsDir" readonly>
+                            <button class="browse-btn" onclick="browseFolder('chats_dir')">浏览</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Memory Section removed: memories are now managed by Shadow Watcher (影子追踪 · 主动交互 section above) -->
+
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="5"></circle>
+                            <line x1="12" y1="1" x2="12" y2="3"></line>
+                            <line x1="12" y1="21" x2="12" y2="23"></line>
+                            <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+                            <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+                            <line x1="1" y1="12" x2="3" y2="12"></line>
+                            <line x1="21" y1="12" x2="23" y2="12"></line>
+                            <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+                            <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+                        </svg>
+                        外观
+                    </h4>
+                        <div class="theme-selector" id="themeSelector">
+                            <div class="theme-option" data-theme="light" onclick="selectTheme('light')">
+                                <div class="theme-preview light-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>浅色</span>
+                            </div>
+                            <div class="theme-option" data-theme="dark" onclick="selectTheme('dark')">
+                                <div class="theme-preview dark-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>深色</span>
+                            </div>
+                            <div class="theme-option" data-theme="ocean" onclick="selectTheme('ocean')">
+                                <div class="theme-preview ocean-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>海洋</span>
+                            </div>
+                            <div class="theme-option" data-theme="forest" onclick="selectTheme('forest')">
+                                <div class="theme-preview forest-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>森林</span>
+                            </div>
+                            <div class="theme-option" data-theme="sunset" onclick="selectTheme('sunset')">
+                                <div class="theme-preview sunset-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>日落</span>
+                            </div>
+                            <div class="theme-option" data-theme="lavender" onclick="selectTheme('lavender')">
+                                <div class="theme-preview lavender-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>薰衣草</span>
+                            </div>
+                            <div class="theme-option" data-theme="midnight" onclick="selectTheme('midnight')">
+                                <div class="theme-preview midnight-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>午夜</span>
+                            </div>
+                            <div class="theme-option" data-theme="auto" onclick="selectTheme('auto')">
+                                <div class="theme-preview auto-preview">
+                                    <div class="preview-sidebar"></div>
+                                    <div class="preview-content"></div>
+                                </div>
+                                <span>跟随系统</span>
+                            </div>
+                        </div>
+
+                    <!-- UI Zoom / Font Scale -->
+                    <div class="setting-item" style="margin-top:12px;">
+                        <label style="display:flex;align-items:center;justify-content:space-between;">
+                            🔍 界面缩放
+                            <span class="fs-badge" id="uiZoomDisplay">100%</span>
+                        </label>
+                        <div class="font-scale-row">
+                            <input type="range" id="uiZoomSlider" min="70" max="150" step="5" value="100"
+                                   oninput="setUIZoom(this.value / 100)">
+                        </div>
+                        <div class="fs-presets">
+                            <button class="fs-preset-btn" onclick="setUIZoom(0.8)">80%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(0.9)">90%</button>
+                            <button class="fs-preset-btn active" onclick="setUIZoom(1.0)">100%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(1.1)">110%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(1.2)">120%</button>
+                            <button class="fs-preset-btn" onclick="setUIZoom(1.3)">130%</button>
+                        </div>
+                        <p class="setting-hint">整体放大/缩小界面与字体，设置会自动保存</p>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2a4 4 0 0 1 4 4v2a4 4 0 0 1-8 0V6a4 4 0 0 1 4-4z"></path>
+                            <path d="M16 14v6a2 2 0 0 1-2 2h-4a2 2 0 0 1-2-2v-6"></path>
+                            <path d="M12 14v8"></path>
+                        </svg>
+                        AI 设置
+                    </h4>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px;vertical-align:-3px;"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg> 仅使用本地模型</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingLocalOnly" onchange="onLocalOnlyChange(this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后所有请求只走本地模型（Ollama），不调用云端 API，保证完全本地隐私。</p>
+                    </div>
+                    <!-- 本地模型选择 -->
+                    <div class="setting-item" id="localModelPickerRow">
+                        <label style="display:flex;align-items:center;gap:8px;">
+                            本地模型
+                            <span id="ollamaStatusBadge" style="font-size:11px;font-weight:400;color:var(--text-secondary);">未检测</span>
+                        </label>
+                        <input type="text" id="localModelSearch" placeholder="搜索模型名称…"
+                               style="width:100%;box-sizing:border-box;margin-bottom:6px;padding:4px 8px;border:1px solid var(--border-color);border-radius:4px;background:var(--input-bg,var(--bg-secondary));color:var(--text-primary);font-size:13px;"
+                               oninput="filterLocalModels(this.value)">
+                        <div style="display:flex;gap:6px;align-items:center;">
+                            <select id="settingLocalModel" style="flex:1;" onchange="onLocalModelChange(this.value)">
+                                <option value="">— 检测后选择 —</option>
+                            </select>
+                            <button class="btn-secondary btn-sm" onclick="detectLocalModels()" title="扫描 Ollama 可用模型">🔍 检测</button>
+                        </div>
+                        <p class="setting-hint" id="localModelHint">点击「检测」扫描本地 Ollama 已安装的模型</p>
+                    </div>
+
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">自动保存回复文件</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingAutoSaveFiles" onchange="updateSetting('ai', 'auto_save_files', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后 AI 回复中生成的代码、文档、总结等文件会自动保存到工作区</p>
+                    </div>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">显示思考过程</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingShowThinking" onchange="updateSetting('ai', 'show_thinking', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后可以看到 AI 的推理过程和决策步骤</p>
+                    </div>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">显示任务分类标签</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingShowTaskType" onchange="updateSetting('ai', 'show_task_type', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">开启后每条回复旁会显示任务类型（如 CHAT、CODER、RESEARCH 等）</p>
+                    </div>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">等待时启用小游戏</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingEnableMiniGame" checked onchange="updateSetting('ai', 'enable_mini_game', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                        <p class="setting-hint">等待回复时显示小恐龙游戏</p>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <line x1="2" y1="12" x2="22" y2="12"></line>
+                            <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path>
+                        </svg>
+                        网络代理
+                    </h4>
+                    <div class="setting-item">
+                        <div class="toggle-row">
+                            <span class="toggle-label">启用代理</span>
+                            <label class="toggle">
+                                <input type="checkbox" id="settingProxyEnabled" onchange="updateSetting('proxy', 'enabled', this.checked)">
+                                <span class="toggle-slider"></span>
+                            </label>
+                        </div>
+                    </div>
+                    <div class="setting-item">
+                        <label>代理地址</label>
+                        <input type="text" id="settingManualProxy" placeholder="http://127.0.0.1:7890"
+                               onchange="updateSetting('proxy', 'manual_proxy', this.value)">
+                        <p class="setting-hint">留空则使用系统代理设置</p>
+                        <details class="proxy-help-details">
+                            <summary>常见 VPN/代理软件端口参考</summary>
+                            <table class="proxy-help-table">
+                                <thead>
+                                    <tr><th>软件</th><th>默认端口</th><th>协议</th></tr>
+                                </thead>
+                                <tbody>
+                                    <tr><td>Clash / Clash Verge / ClashX</td><td>7890 (HTTP)，7891 (SOCKS5)</td><td>HTTP / SOCKS5</td></tr>
+                                    <tr><td>v2rayN / v2rayNG</td><td>10809 (HTTP)，10808 (SOCKS5)</td><td>HTTP / SOCKS5</td></tr>
+                                    <tr><td>Surge</td><td>6152</td><td>HTTP</td></tr>
+                                    <tr><td>Shadowsocks</td><td>1080 (SOCKS5)</td><td>SOCKS5</td></tr>
+                                    <tr><td>Proxifier</td><td>自定义</td><td>—</td></tr>
+                                </tbody>
+                            </table>
+                            <p class="proxy-help-tip">填写示例：<code>http://127.0.0.1:7890</code> 或 <code>socks5://127.0.0.1:1080</code></p>
+                        </details>
+                    </div>
+                </div>
+
+                <!-- Shadow Watcher Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                            <circle cx="12" cy="12" r="3"></circle>
+                        </svg>
+                        影子追踪 · 主动交互
+                    </h4>
+                    <p class="setting-desc">长期观察您的常用话题、活跃时段和未完成任务，由 Koto 主动进行问候、跨日跟进和智能提醒。记忆由影子追踪自动管理，无需手动维护。</p>
+                    <div class="bindings-toolbar">
+                        <label class="toggle" title="开关影子追踪">
+                            <input type="checkbox" id="shadowWatcherToggle" onchange="toggleShadowWatcher(this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <span id="shadowWatcherLabel" style="font-size:13px;color:var(--text-secondary);flex:1;">加载中...</span>
+                        <button class="btn-secondary btn-sm" onclick="shadowForceTick()">✨ 立即检查</button>
+                        <button class="btn-secondary btn-sm" onclick="shadowOpenObservations()">&#128202; 观察统计</button>
+                    </div>
+                    <!-- 观察摘要卡片区 -->
+                    <div id="shadowSummaryCards" style="display:none;margin-top:8px;"></div>
+                    <!-- 待处理任务列表 -->
+                    <div id="shadowOpenTasksList" style="margin-top:6px;"></div>
+
+                    <!-- 影子记忆（长期记忆，由影子追踪自动管理） -->
+                    <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:12px;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
+                            <span style="font-size:13px;font-weight:500;color:var(--text-primary);">🧠 影子记忆</span>
+                            <span style="font-size:11px;color:var(--text-muted);">自动从对话中学习，也可手动添加</span>
+                        </div>
+                        <div class="memory-input-group" style="margin-bottom:8px;">
+                            <input type="text" id="shadowMemoryInput" placeholder="输入你想让 Koto 记住的事实或偏好...">
+                            <button class="btn-primary btn-sm" onclick="addShadowMemory()">添加</button>
+                        </div>
+                        <div id="shadowMemoryList" style="max-height:200px;overflow-y:auto;">
+                            <div class="memory-empty" style="font-size:12px;color:var(--text-muted);">正在加载影子记忆...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Scheduled Triggers Section -->
+                <div class="settings-section">
+                    <h4>
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"></circle>
+                            <polyline points="12 6 12 12 16 14"></polyline>
+                        </svg>
+                        定时触发器
+                    </h4>
+                    <p class="setting-desc">后台自动化任务，支持 interval / cron / startup 类型。启用后按计划自动执行。</p>
+                    <div class="bindings-toolbar">
+                        <button class="btn-secondary btn-sm" onclick="openCreateTriggerModal()">＋ 新建</button>
+                        <button class="btn-secondary btn-sm" onclick="bootstrapTriggers(false)">✨ 初始化推荐</button>
+                        <button class="btn-secondary btn-sm" onclick="bootstrapTriggers(true)" style="color:var(--accent-warning)">🔄 重建</button>
+                    </div>
+                    <div id="triggersList" class="triggers-list">
+                        <div class="memory-empty">正在加载触发器...</div>
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <button class="btn-secondary" onclick="resetSettings()">重置默认</button>
+                    <button class="btn-primary" onclick="closeSettings()">完成</button>
+                </div>
+            </div>
+        </aside>

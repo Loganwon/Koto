@@ -1392,10 +1392,21 @@ class FileToolsPlugin(AgentPlugin):
         try:
             if ext == ".zip":
                 with zipfile.ZipFile(str(arc), "r") as zf:
-                    zf.extractall(str(dest))
+                    for zi in zf.infolist():
+                        if zi.is_dir():
+                            continue
+                        target = dest / zi.filename
+                        if not target.resolve().is_relative_to(dest.resolve()):
+                            continue
+                        target.parent.mkdir(parents=True, exist_ok=True)
+                        target.write_bytes(zf.read(zi))
             elif ext in {".tar", ".gz", ".bz2", ".xz", ".tgz"}:
                 with tarfile.open(str(arc), "r:*") as tf:
-                    tf.extractall(str(dest))
+                    for member in tf.getmembers():
+                        target = dest / member.name
+                        if not target.resolve().is_relative_to(dest.resolve()):
+                            continue
+                        tf.extract(member, str(dest), filter="data")
             else:
                 return f"不支持的压缩格式：{ext}（支持 zip / tar / tar.gz / tar.bz2）"
         except Exception as e:
