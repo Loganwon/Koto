@@ -100,32 +100,48 @@ class DocSmartCompare(WorkflowExecutor):
         if not text_a.strip() or not text_b.strip():
             yield sse_error("文档解析失败或内容为空")
             return
-        yield sse_step_done("parse", f"📄 原始 {len(text_a)} 字 ↔ 对比 {len(text_b)} 字")
+        yield sse_step_done(
+            "parse", f"📄 原始 {len(text_a)} 字 ↔ 对比 {len(text_b)} 字"
+        )
 
         # ── Step 2: 分割条款 ───────────────────────────────────────
         yield sse_step_start("split", "✂️ 分割条款…")
         clauses_a = self._split_clauses(text_a[:16000], model_mode)
         clauses_b = self._split_clauses(text_b[:16000], model_mode)
-        yield sse_step_done("split", f"✂️ 原始 {len(clauses_a)} 条 ↔ 对比 {len(clauses_b)} 条")
+        yield sse_step_done(
+            "split", f"✂️ 原始 {len(clauses_a)} 条 ↔ 对比 {len(clauses_b)} 条"
+        )
 
         # ── Step 3: 语义比对 ──────────────────────────────────────
         yield sse_step_start("compare", "🔍 逐条款语义比对…")
         alignments = self._compare_clauses(
-            clauses_a, clauses_b, model_mode,
-            lambda cur, tot: (yield sse_progress(cur, tot, f"比对第 {cur}/{tot} 批"))
+            clauses_a,
+            clauses_b,
+            model_mode,
+            lambda cur, tot: (yield sse_progress(cur, tot, f"比对第 {cur}/{tot} 批")),
         )
         yield sse_step_done("compare", f"🔍 比对完成，共 {len(alignments)} 对条款")
 
-        changes = [a for a in alignments if a.get("diff_type") not in ("unchanged", "minor_format")]
+        changes = [
+            a
+            for a in alignments
+            if a.get("diff_type") not in ("unchanged", "minor_format")
+        ]
         high_risk = [a for a in alignments if a.get("risk_flag")]
 
         if not changes:
-            yield sse_output("markdown", "# 比对结果\n\n两份文档内容一致，未发现实质性差异。", "无差异")
+            yield sse_output(
+                "markdown",
+                "# 比对结果\n\n两份文档内容一致，未发现实质性差异。",
+                "无差异",
+            )
             return
 
         # ── Step 4: 输出 ──────────────────────────────────────────
         if output_mode == "docx":
-            yield from self._output_docx(file_a, alignments, changes, high_risk, model_mode)
+            yield from self._output_docx(
+                file_a, alignments, changes, high_risk, model_mode
+            )
         else:
             yield from self._output_html(alignments, changes, high_risk, model_mode)
 
@@ -146,11 +162,14 @@ class DocSmartCompare(WorkflowExecutor):
             modified = a.get("修改建议", "")
             reason = a.get("修改原因", "内容变更")
             if orig and modified:
-                annotations.append({"原文片段": orig, "修改建议": modified, "修改原因": reason})
+                annotations.append(
+                    {"原文片段": orig, "修改建议": modified, "修改原因": reason}
+                )
 
         applied = 0
         try:
             from web.track_changes_editor import TrackChangesEditor
+
             editor = TrackChangesEditor("文档对比")
             result = editor.apply_hybrid_changes(str(output_path), annotations)
             applied = result.get("applied", 0)
@@ -177,7 +196,11 @@ class DocSmartCompare(WorkflowExecutor):
         summary = self._generate_summary(alignments, model_mode)
         yield sse_step_done("report", "📋 报告生成完成")
 
-        yield sse_output("html", diff_html, f"比对报告（{len(changes)} 处变更，{len(high_risk)} 处高风险）")
+        yield sse_output(
+            "html",
+            diff_html,
+            f"比对报告（{len(changes)} 处变更，{len(high_risk)} 处高风险）",
+        )
         yield sse_output("markdown", summary, "变更摘要")
 
     # ── 条款分割 ──────────────────────────────────────────────────────
@@ -199,7 +222,9 @@ class DocSmartCompare(WorkflowExecutor):
         paras = [p.strip() for p in re.split(r"\n{2,}", text) if p.strip()]
         if len(paras) >= 3:
             return [{"idx": i, "heading": "", "text": p} for i, p in enumerate(paras)]
-        sentences = [s.strip() for s in re.split(r"[。！？\.\!\?]", text) if len(s.strip()) > 20]
+        sentences = [
+            s.strip() for s in re.split(r"[。！？\.\!\?]", text) if len(s.strip()) > 20
+        ]
         return [{"idx": i, "heading": "", "text": s} for i, s in enumerate(sentences)]
 
     # ── 条款比对 ──────────────────────────────────────────────────────
@@ -220,7 +245,7 @@ class DocSmartCompare(WorkflowExecutor):
                 next(progress_cb(bi + 1, total_batches))
             except StopIteration:
                 pass
-            batch = pairs[bi * _COMPARE_BATCH: (bi + 1) * _COMPARE_BATCH]
+            batch = pairs[bi * _COMPARE_BATCH : (bi + 1) * _COMPARE_BATCH]
             alignments.extend(self._compare_batch(batch, model_mode))
 
         return alignments
@@ -228,21 +253,31 @@ class DocSmartCompare(WorkflowExecutor):
     def _compare_batch(self, pairs, model_mode):
         formatted = []
         for i, (orig, comp) in enumerate(pairs):
-            formatted.append({
-                "pair_idx": i,
-                "original": orig["text"] if orig else "[已删除]",
-                "scanned": comp["text"] if comp else "[已删除]",
-            })
+            formatted.append(
+                {
+                    "pair_idx": i,
+                    "original": orig["text"] if orig else "[已删除]",
+                    "scanned": comp["text"] if comp else "[已删除]",
+                }
+            )
         prompt = f"请比较以下 {len(formatted)} 对条款，识别实质性变更：\n\n{json.dumps(formatted, ensure_ascii=False, indent=2)}"
         try:
-            result = self.llm_json(prompt, system=_COMPARE_SYSTEM, model_mode=model_mode)
+            result = self.llm_json(
+                prompt, system=_COMPARE_SYSTEM, model_mode=model_mode
+            )
             if isinstance(result, list):
                 return result
         except Exception as e:
             logger.warning("[DocCompare] 批量比较失败: %s", e)
         return [
-            {"原文片段": (p[0]["text"] if p[0] else ""), "修改建议": (p[1]["text"] if p[1] else ""),
-             "修改原因": "", "diff_type": "unchanged", "severity": "none", "risk_flag": False}
+            {
+                "原文片段": (p[0]["text"] if p[0] else ""),
+                "修改建议": (p[1]["text"] if p[1] else ""),
+                "修改原因": "",
+                "diff_type": "unchanged",
+                "severity": "none",
+                "risk_flag": False,
+            }
             for p in pairs
         ]
 
@@ -250,10 +285,18 @@ class DocSmartCompare(WorkflowExecutor):
 
     def _generate_diff_html(self, alignments):
         severity_colors = {
-            "critical": ("#fff3e0", "#e65100", "🚨"), "high": ("#fff8e1", "#f9a825", "⚠️"),
-            "low": ("#f1f8e9", "#558b2f", "📝"), "none": ("#fafafa", "#9e9e9e", "✅"),
+            "critical": ("#fff3e0", "#e65100", "🚨"),
+            "high": ("#fff8e1", "#f9a825", "⚠️"),
+            "low": ("#f1f8e9", "#558b2f", "📝"),
+            "none": ("#fafafa", "#9e9e9e", "✅"),
         }
-        diff_labels = {"unchanged": "无变化", "minor_format": "格式变化", "modified": "内容修改", "deleted": "已删除", "added": "新增"}
+        diff_labels = {
+            "unchanged": "无变化",
+            "minor_format": "格式变化",
+            "modified": "内容修改",
+            "deleted": "已删除",
+            "added": "新增",
+        }
         rows = []
         for a in alignments:
             dt = a.get("diff_type", "unchanged")
@@ -267,31 +310,52 @@ class DocSmartCompare(WorkflowExecutor):
             scan = self._esc(str(a.get("修改建议", "")))
             reason = a.get("修改原因", "")
             label = diff_labels.get(dt, dt)
-            rows.append(f'''<div style="border-left:4px solid {border};background:{bg};margin:8px 0;padding:12px;border-radius:4px;">
+            rows.append(
+                f"""<div style="border-left:4px solid {border};background:{bg};margin:8px 0;padding:12px;border-radius:4px;">
   <div style="font-size:12px;color:{border};font-weight:bold;margin-bottom:6px;">{icon} {label}{' — ' + reason if reason else ''}</div>
   <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
     <div><div style="font-size:11px;color:#666;margin-bottom:4px;">原始版本</div><div style="background:#fff;padding:8px;border-radius:3px;font-size:13px;">{orig}</div></div>
     <div><div style="font-size:11px;color:#666;margin-bottom:4px;">对比版本</div><div style="background:#fff;padding:8px;border-radius:3px;font-size:13px;">{scan}</div></div>
-  </div></div>''')
+  </div></div>"""
+            )
         if not rows:
-            rows = ["<p style='text-align:center;color:#4caf50;padding:20px;'>✅ 未发现实质性变更</p>"]
-        changes_count = len([a for a in alignments if a.get("diff_type") not in ("unchanged", "minor_format", None)])
+            rows = [
+                "<p style='text-align:center;color:#4caf50;padding:20px;'>✅ 未发现实质性变更</p>"
+            ]
+        changes_count = len(
+            [
+                a
+                for a in alignments
+                if a.get("diff_type") not in ("unchanged", "minor_format", None)
+            ]
+        )
         risk_count = len([a for a in alignments if a.get("risk_flag")])
-        return f'''<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><style>body{{font-family:-apple-system,sans-serif;max-width:900px;margin:0 auto;padding:20px;color:#333;}}.summary{{background:#f5f5f5;padding:16px;border-radius:8px;margin-bottom:20px;}}.badge{{display:inline-block;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:bold;margin:4px;}}</style></head><body>
+        return f"""<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><style>body{{font-family:-apple-system,sans-serif;max-width:900px;margin:0 auto;padding:20px;color:#333;}}.summary{{background:#f5f5f5;padding:16px;border-radius:8px;margin-bottom:20px;}}.badge{{display:inline-block;padding:4px 12px;border-radius:20px;font-size:13px;font-weight:bold;margin:4px;}}</style></head><body>
 <h2>📋 文档比对报告</h2>
 <div class="summary"><span class="badge" style="background:#ffcccc;color:#c62828;">⚠️ {changes_count} 处变更</span> <span class="badge" style="background:#ffe0b2;color:#e65100;">🚨 {risk_count} 处高风险</span></div>
-{"".join(rows)}</body></html>'''
+{"".join(rows)}</body></html>"""
 
     # ── 摘要 ──────────────────────────────────────────────────────────
 
     def _generate_summary(self, alignments, model_mode):
-        critical = [a for a in alignments if a.get("severity") in ("critical", "high") or a.get("risk_flag")]
+        critical = [
+            a
+            for a in alignments
+            if a.get("severity") in ("critical", "high") or a.get("risk_flag")
+        ]
         if not critical:
             return "# 比对摘要\n\n✅ **未发现重大条款变更。**"
         summary_data = json.dumps(
-            [{"diff": a.get("修改原因", ""), "original": str(a.get("原文片段", ""))[:100],
-              "changed_to": str(a.get("修改建议", ""))[:100]} for a in critical[:20]],
-            ensure_ascii=False, indent=2
+            [
+                {
+                    "diff": a.get("修改原因", ""),
+                    "original": str(a.get("原文片段", ""))[:100],
+                    "changed_to": str(a.get("修改建议", ""))[:100],
+                }
+                for a in critical[:20]
+            ],
+            ensure_ascii=False,
+            indent=2,
         )
         prompt = f"以下是 {len(critical)} 处重要变更：\n\n{summary_data}\n\n请用简洁中文 Markdown 总结主要变更、潜在风险和建议。"
         try:
@@ -304,4 +368,9 @@ class DocSmartCompare(WorkflowExecutor):
 
     @staticmethod
     def _esc(text):
-        return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
+        return (
+            text.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+        )

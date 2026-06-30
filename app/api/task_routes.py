@@ -22,6 +22,7 @@ Koto Task Management API Routes
 
 from __future__ import annotations
 
+import json
 import logging
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
@@ -47,6 +48,39 @@ def _ok(data=None, **kwargs):
 
 def _err(message: str, code: int = 400):
     return jsonify({"ok": False, "error": message}), code
+
+
+def _safe_metadata_dict(raw_metadata) -> dict:
+    if isinstance(raw_metadata, dict):
+        return raw_metadata
+    try:
+        parsed = json.loads(str(raw_metadata or "{}"))
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _artifact_result_from_task_metadata(metadata: dict) -> dict:
+    for event_key in ("terminal_event", "waiting_event", "last_event"):
+        event = metadata.get(event_key)
+        if not isinstance(event, dict):
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        artifact_result = payload.get("artifact_result")
+        if isinstance(artifact_result, dict) and artifact_result:
+            return artifact_result
+    return {}
+
+
+def _serialize_task(task, *, include_steps: bool = False) -> dict:
+    data = task.to_dict()
+    metadata = _safe_metadata_dict(data.get("metadata"))
+    artifact_result = _artifact_result_from_task_metadata(metadata)
+    if artifact_result:
+        data["artifact_result"] = artifact_result
+    if include_steps:
+        data["steps"] = [s.to_dict() for s in getattr(task, "steps", [])]
+    return data
 
 
 # ============================================================================
@@ -108,7 +142,7 @@ def list_tasks():
     )
     total = ledger.count(session_id=session_id, status=status, date_from=date_from)
     return _ok(
-        data=[t.to_dict() for t in tasks],
+        data=[_serialize_task(t) for t in tasks],
         total=total,
         limit=limit,
         offset=offset,
@@ -136,9 +170,7 @@ def get_task(task_id: str):
     task = ledger.get(task_id, include_steps=True)
     if not task:
         return _err("任务不存在", 404)
-    data = task.to_dict()
-    data["steps"] = [s.to_dict() for s in task.steps]
-    return _ok(data=data)
+    return _ok(data=_serialize_task(task, include_steps=True))
 
 
 @task_bp.post("/<task_id>/cancel")

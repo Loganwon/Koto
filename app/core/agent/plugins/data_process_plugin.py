@@ -170,7 +170,9 @@ class DataProcessPlugin(AgentPlugin):
         else:
             raise ValueError(f"Unsupported file format: {ext}")
 
-    def _load_df_from_user_path(self, filepath: str) -> tuple[Any | None, str | None, str | None]:
+    def _load_df_from_user_path(
+        self, filepath: str
+    ) -> tuple[Any | None, str | None, str | None]:
         """Resolve a user path first, then fall back to raw path when loader can still handle it.
 
         This preserves resolver-first behavior for normal runtime while keeping compatibility

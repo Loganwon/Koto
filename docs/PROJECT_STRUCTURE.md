@@ -1,151 +1,72 @@
 # Koto 项目结构说明
 
-## 📁 目录结构（已优化）
+Koto 是一个桌面端 AI 文件助手。当前产品形态已经合并为单一工作台：文件展示、AI 对话、历史会话、Skills、设置和白盒任务流程都从统一前端 `/` 进入。
 
-### 核心目录 - 直接影响运行
+## 核心目录
 
-```
+```text
 Koto/
-├── web/                    # 核心Web应用代码
-│   ├── app.py             # Flask主应用
-│   ├── tool_registry.py   # Agent工具注册系统
-│   ├── excel_analyzer.py  # Excel数据分析器 🆕
-│   ├── document_reader.py # 文档读取器
-│   ├── file_processor.py  # 文件处理器
-│   ├── adaptive_agent.py  # 自适应Agent
-│   ├── static/            # 前端静态资源
-│   │   ├── js/app.js     # 前端JavaScript (3800+ 行)
-│   │   └── css/style.css  # 样式表
-│   └── templates/         # HTML模板
-│       └── index.html     # 主界面
-│
-├── config/                # 配置文件
-│   ├── user_settings.json # 用户设置
-│   └── gemini_config.env  # API配置
-│
-├── workspace/             # 工作区（用户文件）
-│   ├── code/             # 生成的代码文件
-│   ├── documents/        # 生成的文档
-│   └── [用户上传的文件]
-│
-├── models/               # AI模型缓存
-├── chats/                # 聊天历史（JSON格式）
-├── logs/                 # 运行日志
-└── assets/               # 静态资源（图标、图片等）
+├── app/                 # Agent、路由、LLM、技能和文件任务运行时
+├── web/                 # Flask 应用、模板、静态前端和工作台 BFF
+├── src/                 # 桌面启动壳，src/koto_app.py 是桌面入口
+├── config/              # 用户设置、模型和技能配置
+├── workspace/           # 用户工作区文件
+├── chats/               # AI 对话历史
+├── logs/                # 启动和运行日志
+├── tests/               # 单元、集成、E2E 和评测测试
+└── scripts/             # 构建、迁移和测试辅助脚本
 ```
 
-### 辅助目录 - 开发和调试
+## 启动文件
 
-```
-├── archive/              # 归档文件 🆕
-│   ├── reports/         # 项目报告和文档 (37个文件)
-│   ├── test_scripts/    # 测试脚本 (21个文件)
-│   ├── tests/           # 单元测试 (8个文件)
-│   ├── scripts/         # 辅助脚本 (1个文件)
-│   ├── docs/            # 历史文档 (3个文件)
-│   └── build_logs/      # 构建日志 (3个文件)
-│
-└── installer/            # 安装包构建文件和资源
-```
-
-## 🚀 启动文件（根目录）
-
-| 文件 | 说明 | 推荐使用 |
+| 文件 | 说明 | 推荐场景 |
 |------|------|----------|
-| `Koto.exe` | Windows桌面应用（打包版） | ⭐⭐⭐ 最简单 |
-| `RunSource.bat` | 快速启动脚本 | ⭐⭐ 开发人员 |
-| `run_desktop.bat` / `.ps1` | 桌面版启动脚本 | ⭐ 高级用户 |
-| `koto_app.py` | 独立窗口应用（Python源码） | 开发调试 |
-| `koto_desktop.py` | 桌面应用核心模块 | 库文件 |
-| `launch_desktop.py` | 启动器模块 | 库文件 |
+| `Koto_Start.vbs` | 无控制台启动统一桌面入口 | 日常使用 |
+| `Koto_Start.bat` | 调用 PowerShell 启动器并显示日志 | 调试启动 |
+| `Koto_Start.ps1` | 主启动器，负责端口、锁文件、重试和进程清理 | 高级调试 |
+| `Stop_Koto.bat` | 停止 Koto 进程 | 退出/重启前 |
 
-## 📚 文档文件
+启动链路：
 
-| 文件 | 说明 |
-|------|------|
-| `README.md` | 项目总览和功能介绍 |
-| `QUICKSTART.md` | 快速开始指南 |
-| `EXCEL_FEATURE.md` | Excel分析功能文档 🆕 |
-| `PROJECT_STRUCTURE.md` | 本文档 - 项目结构说明 |
-| `COMPLETION_REPORT.md` | Excel功能添加报告 |
-| `requirements.txt` | Python依赖列表 |
-
-## 🗂️ 归档说明
-
-所有历史文档、测试脚本、构建日志都已整理到 `archive/` 目录：
-
-- **archive/reports/** - 各种项目报告、总结、清单（37个文件）
-- **archive/test_scripts/** - 测试脚本和输出文件（21个文件）
-- **archive/tests/** - 单元测试和集成测试（8个文件）
-- **archive/scripts/** - 辅助脚本（1个文件）
-- **archive/docs/** - 历史文档（3个文件）
-- **archive/build_logs/** - 构建日志和配置（3个文件）
-
-这些文件仍然保留，但**不影响日常使用**。
-
-## 🆕 最新更新 (2026-02-12)
-
-### 新增功能
-1. **表格和代码复制按钮** ✨
-   - 代码块顶部有"复制"按钮
-   - 表格顶部有"复制"按钮
-   - 一键复制到剪贴板
-   - 表格复制为制表符分隔格式（可直接粘贴到Excel）
-
-2. **Excel数据分析器** (`web/excel_analyzer.py`)
-   - 前N名客户分析
-   - 分组聚合分析
-   - 统计分析
-   - 智能分析
-
-3. **工具集成** 
-   - 在 `tool_registry.py` 中注册 `analyze_excel_data` 工具
-   - Agent可直接调用Excel分析功能
-
-### 目录结构优化
-- ✅ 合并 test 和 tests 文件夹
-- ✅ 移动 tests 到 archive/
-- ✅ 移动 scripts 到 archive/
-- ✅ 移动 docs 到 archive/
-- ✅ 精简根目录，只保留核心运行文件和启动器
-- ✅ **根目录现在只有7个核心文件夹 + 2个辅助文件夹**
-
-### 新的目录布局优势
-- 🎯 **更清晰**：核心运行目录一目了然
-- 🧹 **更整洁**：历史文件统一归档
-- 🚀 **更易用**：新用户更容易理解项目结构
-- 📦 **更专业**：符合生产项目标准
-
-## 💡 使用建议
-
-### 日常开发
-- 核心代码在 `web/` 目录
-- 配置文件在 `config/` 目录
-- 用户文件在 `workspace/` 目录
-
-### 查找历史资料
-- 查看 `archive/` 目录
-- 所有历史文档和报告都在里面
-
-### 新功能测试
-- Excel功能测试：直接上传Excel到Koto
-- 工具测试：运行 `web/excel_analyzer.py`
-
-## 📦 依赖管理
-
-安装所有依赖：
-```bash
-pip install -r requirements.txt
+```text
+Koto_Start.vbs / Koto_Start.bat
+  -> Koto_Start.ps1
+  -> src/koto_app.py
+  -> web.app:app
+  -> /
 ```
 
-主要依赖：
-- Flask - Web框架
-- google-genai - AI模型
-- pandas - 数据分析 🆕
-- openpyxl - Excel处理 🆕
-- PySide6 - 桌面GUI
+`/workspace-assistant` 只保留为兼容重定向，不再是独立产品入口。
 
----
+## 主要运行模块
 
-**清理完成日期**: 2026-02-12
-**项目状态**: ✅ 生产就绪
+| 路径 | 说明 |
+|------|------|
+| `app/core/agent/` | 后台 Agent、文件任务、ReAct 执行、审批和并行子任务 |
+| `app/core/routing/` | SmartDispatcher 与任务分类 |
+| `app/core/llm/` | Gemini、DeepSeek、本地模型和容错链 |
+| `app/core/skills/` | Skills 注册与执行 |
+| `web/blueprints/workspace_assistant.py` | 文件工作台 BFF 和文件 API |
+| `web/templates/index.html` | 统一前端页面 |
+| `web/src/` | TypeScript 前端模块源码 |
+| `web/static/js/build/workspace-bundle.js` | 当前前端构建产物 |
+
+## 旧前端入口
+
+旧的 `web/static/js/workspace-*.js` 前端入口和 `web/templates/workspace_assistant.html`
+已经移除。`web/blueprints/workspace_assistant.py` 只是 BFF 模块名暂未重命名，不是第二套页面体系。移除清单和守护测试见 `docs/WORKSPACE_RETAINED_LEGACY.md`。
+
+## 测试建议
+
+日常代码修改后优先运行：
+
+```bash
+pytest tests/unit/ tests/integration/ -v --tb=short
+```
+
+前端构建后运行：
+
+```bash
+cd web
+npm run build
+```

@@ -310,12 +310,11 @@ class PPTGenerationPipeline:
             # 尝试懒加载 client 如果 self.ai_client 为空 (从 app 获取)
             if not client:
                 try:
-                    from web.app import get_client
+                    from web.runtime_context import get_client
 
                     client = get_client()
                     logger.info("[PPT_Pipeline] 已懒加载 AI Client")
-                except ImportError:
-                    # 尝试从 web.app 的 LazyModule 获取
+                except Exception:
                     try:
                         import google.genai as genai
 
@@ -325,7 +324,6 @@ class PPTGenerationPipeline:
                             )
                     except Exception as e:
                         logger.debug("Failed to initialize genai client: %s", e)
-                        pass
 
             if not client:
                 self._log("⚠️ 无法初始化 ImageManager (无 AI Client)，跳过自动配图")

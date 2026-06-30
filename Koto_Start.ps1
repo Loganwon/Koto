@@ -2,11 +2,13 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Koto 高稳定性启动器 v3.0
+    Koto 统一桌面启动器 v3.1
 .DESCRIPTION
+    默认只启动统一 Koto 桌面入口：左侧功能区、文件工作台、AI 对话和任务流程共用同一套前端。
+    server 仅保留为开发调试兼容模式；silent 是历史别名，会自动归并到 desktop。
     重试机制 · 端口冲突处理 · 孤进程清理 · 结构化日志 · 防重复启动
     支持命令行参数：
-      -Mode   : desktop (默认) | server | silent
+      -Mode   : desktop (默认) | server(开发调试) | silent(兼容别名)
       -NoAutoRestart : 禁用崩溃后自动重启
       -MaxRetries N  : 最大重试次数 (默认 3)
 #>
@@ -105,6 +107,22 @@ function Write-Log {
     } catch { }
 }
 
+function Get-UnifiedAppUrl {
+    param([int]$Port)
+    return "http://127.0.0.1:$Port/"
+}
+
+function Normalize-RunMode {
+    param([string]$RunMode)
+
+    if ($RunMode -eq "silent") {
+        Write-Log "INFO" "silent 模式已并入统一桌面入口，将按 desktop 启动。"
+        return "desktop"
+    }
+
+    return $RunMode
+}
+
 function Test-PortFree {
     param([int]$Port)
     try {
@@ -135,9 +153,9 @@ function Invoke-LockCheck {
                 # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
                 $runningCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$lockedPid" -ErrorAction SilentlyContinue).CommandLine
                 if ($runningCmd -match "web[/\\\\]app\.py" -or $runningCmd -notmatch "koto_app\.py") {
-                    Write-Log "INFO" "Koto 已在运行（Flask模式），正在打开浏览器..."
+                    Write-Log "INFO" "Koto 已在运行（Flask调试模式），正在打开统一入口..."
                     $openPort = if ($env:KOTO_PORT) { [int]$env:KOTO_PORT } else { 5000 }
-                    Start-Process "http://127.0.0.1:$openPort"
+                    Start-Process (Get-UnifiedAppUrl -Port $openPort)
                 } else {
                     Write-Log "INFO" "Koto 已在运行（桌面窗口模式），无需打开浏览器"
                 }
@@ -167,6 +185,53 @@ function Clear-OrphanProcesses {
             Start-Sleep -Milliseconds 800
         }
     } catch { }
+}
+
+function Clear-RetiredExternalProcesses {
+    <#
+    清理已经从 Koto 代码中退休的外部自动化残留。
+    只匹配明确的 WebDriver Chrome 和 Windows 旧语音识别进程；
+    普通用户浏览器、Koto WebView2、Office COM 转换流程不受影响。
+    #>
+    try {
+        $targets = @()
+
+        $drivers = Get-CimInstance Win32_Process `
+            -Filter "Name='chromedriver.exe'" `
+            -ErrorAction SilentlyContinue
+        if ($drivers) { $targets += @($drivers) }
+
+        $autoChrome = Get-CimInstance Win32_Process `
+            -Filter "Name='chrome.exe'" `
+            -ErrorAction SilentlyContinue |
+            Where-Object {
+                $_.CommandLine -and (
+                    $_.CommandLine -match "--enable-automation" -or
+                    $_.CommandLine -match "--test-type=webdriver" -or
+                    $_.CommandLine -match "\\Temp\\scoped_dir\d+_"
+                )
+            }
+        if ($autoChrome) { $targets += @($autoChrome) }
+
+        $legacySpeech = Get-CimInstance Win32_Process `
+            -Filter "Name='sapisvr.exe'" `
+            -ErrorAction SilentlyContinue
+        if ($legacySpeech) { $targets += @($legacySpeech) }
+
+        $targets = @($targets | Sort-Object ProcessId -Unique)
+        if (-not $targets -or $targets.Count -eq 0) {
+            return
+        }
+
+        $pids = @($targets | ForEach-Object { $_.ProcessId })
+        Write-Log "WARN" "清理退休外部自动化/旧语音残留进程: $($pids -join ', ')..."
+        foreach ($target in $targets) {
+            Stop-Process -Id ([int]$target.ProcessId) -Force -ErrorAction SilentlyContinue
+        }
+        Start-Sleep -Milliseconds 500
+    } catch {
+        Write-Log "WARN" "清理退休外部进程时遇到非致命错误: $($_.Exception.Message)"
+    }
 }
 
 # ─────────────────────────────────────────────
@@ -318,7 +383,8 @@ function Start-KotoApp {
 
     while ($true) {
         Write-Log "INFO" "============================================"
-        Write-Log "INFO" "启动 Koto  模式=$Mode  端口=$Port  重试=$retryCount"
+        $entryKind = if ($Mode -eq "server") { "开发调试服务器" } else { "统一桌面入口" }
+        Write-Log "INFO" "启动 Koto  入口=$entryKind  模式=$Mode  端口=$Port  重试=$retryCount"
         Write-Log "INFO" "Python: $($PythonInfo.Source) → $($PythonInfo.PythonConsole)"
         Write-Log "INFO" "Entry: $entryScript"
         Write-Log "INFO" "============================================"
@@ -330,12 +396,13 @@ function Start-KotoApp {
         $useExe = switch ($Mode) {
             "desktop" { $PythonInfo.Python }        # pythonw.exe → 无控制台窗口
             "server"  { $PythonInfo.PythonConsole } # python.exe  → 保留控制台
-            "silent"  { $PythonInfo.Python }
             default   { $PythonInfo.Python }
         }
 
         # 环境变量透传
         $env:KOTO_PORT = "$Port"
+        $env:KOTO_DISABLE_LEGACY_VOICE = "1"
+        $env:KOTO_DISABLE_BROWSER_AUTOMATION = "1"
         if ($Mode -eq "server") { $env:KOTO_DEPLOY_MODE = "local" }
 
         # 日志文件（每次重试追加）
@@ -344,7 +411,7 @@ function Start-KotoApp {
 
         try {
             if ($Mode -eq "server") {
-                # 服务器模式：前台运行，输出重定向
+                # 开发调试模式：前台运行，输出重定向
                 $proc = Start-Process -FilePath $useExe `
                     -ArgumentList "`"$entryScript`"" `
                     -WorkingDirectory $KOTO_ROOT `
@@ -353,7 +420,7 @@ function Start-KotoApp {
                     -RedirectStandardOutput $runtimeLog `
                     -RedirectStandardError  $errLog
             } else {
-                # 桌面/静默模式：后台运行
+                # 桌面模式：后台运行
                 $proc = Start-Process -FilePath $useExe `
                     -ArgumentList "`"$entryScript`"" `
                     -WorkingDirectory $KOTO_ROOT `
@@ -364,7 +431,7 @@ function Start-KotoApp {
             Write-Log "OK"   "Koto 已启动  PID=$($proc.Id)"
 
             if ($Mode -eq "server") {
-                Write-Log "INFO" "浏览器访问: http://127.0.0.1:$Port"
+                Write-Log "INFO" "开发调试地址: $(Get-UnifiedAppUrl -Port $Port)"
                 Write-Log "INFO" "按 Ctrl+C 停止服务"
 
                 # 注册 Ctrl+C 优雅退出
@@ -392,8 +459,8 @@ function Start-KotoApp {
                     # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
                     $entryForCheck = Resolve-EntryScript -RunMode $Mode
                     if ($entryForCheck -match "web[/\\]app\.py") {
-                        Write-Log "INFO" "正在打开浏览器: http://127.0.0.1:$Port"
-                        Start-Process "http://127.0.0.1:$Port"
+                        Write-Log "INFO" "正在打开统一入口: $(Get-UnifiedAppUrl -Port $Port)"
+                        Start-Process (Get-UnifiedAppUrl -Port $Port)
                     }
                     exit 0
                 }
@@ -441,21 +508,32 @@ Write-Host "  ██╔═██╗ ██║   ██║   ██║   ██�
 Write-Host "  ██║  ██╗╚██████╔╝   ██║   ╚██████╔╝" -ForegroundColor Magenta
 Write-Host "  ╚═╝  ╚═╝ ╚═════╝    ╚═╝    ╚═════╝ " -ForegroundColor Magenta
 Write-Host ""
-Write-Host "  智能文档处理平台  |  Launcher v3.0" -ForegroundColor White
+Write-Host "  智能文档处理平台  |  Unified Launcher v3.1" -ForegroundColor White
 Write-Host ""
 
-Write-Log "INFO" "启动模式: $Mode | 根目录: $KOTO_ROOT"
+$requestedMode = $Mode
+$Mode = Normalize-RunMode -RunMode $Mode
+Write-Log "INFO" "启动入口: 统一 Koto 桌面入口 | 模式: $Mode | 根目录: $KOTO_ROOT"
+if ($requestedMode -ne $Mode) {
+    Write-Log "INFO" "请求模式 $requestedMode 已归一化为 $Mode。"
+}
+if ($Mode -eq "server") {
+    Write-Log "WARN" "server 仅用于开发调试；日常使用请直接双击 Koto_Start.vbs 或运行 desktop。"
+}
 
 # Step 1: 防重复
 Invoke-LockCheck
 
-# Step 2: 清孤进程
+# Step 2: 清理退休外部自动化/旧语音残留
+Clear-RetiredExternalProcesses
+
+# Step 3: 清孤进程
 Clear-OrphanProcesses
 
-# Step 3: 文件检查
+# Step 4: 文件检查
 Assert-RequiredFiles -RunMode $Mode
 
-# Step 4: 检测 Python
+# Step 5: 检测 Python
 $pyInfo = Find-Python
 if ($null -eq $pyInfo) {
     Write-Log "ERROR" "未找到 Python 环境！"
@@ -471,8 +549,8 @@ if (-not (Assert-PythonVersion -PythonExe $pyConsole)) {
     exit 5
 }
 
-# Step 5: 端口检查
+# Step 6: 端口检查
 $resolvedPort = Resolve-PortConflict -Port $KOTO_PORT
 
-# Step 6: 启动（含重试）
+# Step 7: 启动（含重试）
 Start-KotoApp -PythonInfo $pyInfo -Port $resolvedPort -Mode $Mode

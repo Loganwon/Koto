@@ -5,7 +5,7 @@
 """
 本地知识库系统 - 向量化语义搜索 + 全文检索
 支持：PDF、Word、Markdown、TXT 等格式
-使用 Gemini text-embedding-004 实现语义搜索
+使用 Gemini embedding 模型实现语义搜索
 """
 
 import hashlib
@@ -51,10 +51,15 @@ class KnowledgeBase:
         # Initialize Gemini API
         api_key = api_key or os.getenv("GEMINI_API_KEY")
         self.client = None
-        self.embedding_model = "text-embedding-004"
+        self.embedding_model = "models/gemini-embedding-2"
 
         if api_key and genai:
             try:
+                from app.core.llm.embedding_model_selector import (
+                    resolve_gemini_embedding_model,
+                )
+
+                self.embedding_model = resolve_gemini_embedding_model(api_key)
                 if hasattr(genai, "Client"):
                     # New SDK
                     self.client = genai.Client(api_key=api_key)
@@ -228,7 +233,7 @@ class KnowledgeBase:
                 return []
 
             # Compatible with different SDK versions
-            embedding_model = self.embedding_model or "models/text-embedding-004"
+            embedding_model = self.embedding_model or "models/gemini-embedding-2"
             if "models/" not in embedding_model:
                 embedding_model = f"models/{embedding_model}"
 

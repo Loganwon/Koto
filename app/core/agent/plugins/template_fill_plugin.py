@@ -214,7 +214,7 @@ class TemplateFillPlugin(AgentPlugin):
             from app.core.skills.skill_manager import SkillManager
 
             SkillManager._ensure_init()
-            skill = SkillManager._registry.get(skill_id)
+            skill = SkillManager.get_runtime_entry(skill_id)
             if skill and skill.get("template_path"):
                 p = Path(skill["template_path"])
                 if not p.is_absolute():

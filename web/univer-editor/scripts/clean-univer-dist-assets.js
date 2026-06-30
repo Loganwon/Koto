@@ -3,7 +3,6 @@
  * Clean stale build artifacts under web/static/univer-dist/assets.
  *
  * Keeps:
- * - Assets referenced by web/static/univer-dist/index.html
  * - sheets-main.js / sheets-main.css (+ maps)
  * - Local JS dependencies imported by kept JS assets
  */
@@ -13,7 +12,6 @@ const path = require('path');
 
 const distDir = path.resolve(__dirname, '..', '..', 'static', 'univer-dist');
 const assetsDir = path.join(distDir, 'assets');
-const indexHtmlPath = path.join(distDir, 'index.html');
 
 function exists(filePath) {
   try {
@@ -22,16 +20,6 @@ function exists(filePath) {
   } catch {
     return false;
   }
-}
-
-function collectHtmlAssets(html) {
-  const keep = new Set();
-  const re = /(?:src|href)=["']\.\/assets\/([^"']+)["']/g;
-  let match;
-  while ((match = re.exec(html)) !== null) {
-    keep.add(match[1]);
-  }
-  return keep;
 }
 
 function collectLocalJsDeps(startFiles) {
@@ -61,18 +49,34 @@ function collectLocalJsDeps(startFiles) {
   return keep;
 }
 
+function collectIndexAssetRefs() {
+  const indexPath = path.join(distDir, 'index.html');
+  const refs = new Set();
+  if (!exists(indexPath)) return refs;
+
+  const html = fs.readFileSync(indexPath, 'utf8');
+  const assetRe = /assets\/([^"'>]+\.(?:js|css))/g;
+  let match;
+  while ((match = assetRe.exec(html)) !== null) {
+    refs.add(match[1]);
+  }
+  return refs;
+}
+
 function main() {
-  if (!exists(assetsDir) || !exists(indexHtmlPath)) {
-    console.log('[clean-univer-dist-assets] Skip: dist assets or index.html not found.');
+  if (!exists(assetsDir)) {
+    console.log('[clean-univer-dist-assets] Skip: dist assets not found.');
     return;
   }
 
-  const html = fs.readFileSync(indexHtmlPath, 'utf8');
-  const keep = collectHtmlAssets(html);
+  const keep = new Set();
 
   // Runtime assets required by non-index loading paths.
   keep.add('sheets-main.js');
   keep.add('sheets-main.css');
+
+  // Runtime assets referenced by the legacy Univer index shell.
+  for (const fileName of collectIndexAssetRefs()) keep.add(fileName);
 
   // Include transitive local JS dependencies from kept JS entries.
   const jsEntries = [...keep].filter((name) => name.endsWith('.js'));

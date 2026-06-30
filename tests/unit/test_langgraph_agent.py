@@ -411,6 +411,34 @@ class TestLangGraphAgent:
 
     @patch(f"{_MOD}.build_graph")
     @patch(_TOOL_REG, autospec=False)
+    def test_stream_skips_none_node_updates(self, mock_tr_cls, mock_bg):
+        self._skip_if_unavailable()
+
+        fake_graph = Mock()
+        fake_graph.stream = Mock(
+            return_value=iter(
+                [
+                    {"reason": None},
+                    {"validate": {"final_answer": "done", "messages": []}},
+                ]
+            )
+        )
+        mock_bg.return_value = fake_graph
+
+        from app.core.agent.langgraph_agent import LangGraphAgent
+
+        agent = LangGraphAgent(
+            registry=Mock(),
+            enable_pii_filter=False,
+            enable_output_validation=False,
+        )
+
+        events = list(agent.stream("Hello"))
+
+        assert events == [{"type": "answer", "content": "done"}]
+
+    @patch(f"{_MOD}.build_graph")
+    @patch(_TOOL_REG, autospec=False)
     def test_stream_handles_exception(self, mock_tr_cls, mock_bg):
         self._skip_if_unavailable()
         fake_graph = Mock()

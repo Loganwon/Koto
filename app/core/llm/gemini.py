@@ -9,7 +9,10 @@ from typing import Any, Dict, Generator, List, Optional, Union
 
 from .base import LLMProvider
 from .gemini_config import get_gemini_api_key, load_gemini_config_env
-from .model_capabilities import is_interactions_only_model
+from .model_capabilities import (
+    DEFAULT_INTERACTIONS_ONLY_MODELS,
+    is_interactions_only_model,
+)
 
 try:
     from google import genai
@@ -25,107 +28,22 @@ def _ensure_gemini_env_loaded() -> None:
     load_gemini_config_env(override=False)
 
 
-def _normalize_proxy_url(proxy_value: str) -> str:
-    value = str(proxy_value or "").strip()
-    if not value:
-        return ""
-    if "://" not in value:
-        value = f"http://{value}"
-    return value
-
-
-def _iter_proxy_candidates() -> List[str]:
-    candidates: List[str] = []
-
-    force_proxy = str(os.getenv("FORCE_PROXY") or "").strip()
-    if force_proxy and force_proxy.lower() not in {"auto", "system"}:
-        candidates.append(_normalize_proxy_url(force_proxy))
-
-    env_proxy = (
-        os.getenv("HTTPS_PROXY")
-        or os.getenv("https_proxy")
-        or os.getenv("HTTP_PROXY")
-        or os.getenv("http_proxy")
-    )
-    if env_proxy:
-        candidates.append(_normalize_proxy_url(env_proxy))
-
-    if os.name == "nt":
-        try:
-            import winreg
-
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                proxy_enabled = int(winreg.QueryValueEx(key, "ProxyEnable")[0] or 0)
-                if proxy_enabled:
-                    proxy_server = str(
-                        winreg.QueryValueEx(key, "ProxyServer")[0] or ""
-                    ).strip()
-                    if proxy_server:
-                        if "=" in proxy_server and ";" in proxy_server:
-                            parsed_map = {}
-                            for pair in proxy_server.split(";"):
-                                if "=" not in pair:
-                                    continue
-                                key_name, value = pair.split("=", 1)
-                                parsed_map[key_name.strip().lower()] = value.strip()
-                            for proto in ("https", "http", "socks", "socks5"):
-                                value = parsed_map.get(proto)
-                                if value:
-                                    candidates.append(_normalize_proxy_url(value))
-                        else:
-                            candidates.append(_normalize_proxy_url(proxy_server))
-        except Exception:
-            pass
-
-    candidates.extend(
-        [
-            "http://127.0.0.1:7890",
-            "http://127.0.0.1:10809",
-            "http://127.0.0.1:1080",
-        ]
-    )
-
-    deduped: List[str] = []
-    seen = set()
-    for item in candidates:
-        if not item:
-            continue
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
-
-
 def _ensure_gemini_proxy_configured() -> Optional[str]:
-    import socket
-    from urllib.parse import urlparse
+    from app.core.utils.proxy_utils import (
+        collect_proxy_candidates,
+        detect_live_proxy,
+        set_env_proxy,
+    )
 
-    for proxy in _iter_proxy_candidates():
-        try:
-            parsed = urlparse(proxy)
-            host = parsed.hostname
-            port = parsed.port
-            if not host or not port:
-                continue
+    proxy = detect_live_proxy(collect_proxy_candidates(), timeout=0.1)
+    if proxy:
+        set_env_proxy(proxy)
+    return proxy
 
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            result = sock.connect_ex((host, port))
-            sock.close()
-
-            if result == 0:
-                os.environ["HTTPS_PROXY"] = proxy
-                os.environ["HTTP_PROXY"] = proxy
-                return proxy
-        except Exception:
-            continue
-    return None
 
 # model_capabilities.is_interactions_only_model() is evaluated per-call (not baked
 # at import time), so env overrides (KOTO_INTERACTIONS_ONLY_MODELS) are always live.
+_INTERACTIONS_ONLY_MODELS = DEFAULT_INTERACTIONS_ONLY_MODELS
 
 
 class GeminiProvider(LLMProvider):
@@ -192,15 +110,21 @@ class GeminiProvider(LLMProvider):
                 verify=True,
             )
             opts_kwargs["httpx_client"] = _httpx_client
-            return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
+            return genai.Client(
+                api_key=api_key, http_options=_HttpOptions(**opts_kwargs)
+            )
         except Exception as exc:
             logger.warning("[GeminiProvider] httpx timeout client init failed: %s", exc)
             try:
                 from google.genai._api_client import HttpOptions as _HttpOptions
 
-                return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
+                return genai.Client(
+                    api_key=api_key, http_options=_HttpOptions(**opts_kwargs)
+                )
             except Exception:
-                logger.warning("[GeminiProvider] HttpOptions init failed, using default client")
+                logger.warning(
+                    "[GeminiProvider] HttpOptions init failed, using default client"
+                )
                 return genai.Client(api_key=api_key)
 
     def _get_client(self):
@@ -223,11 +147,7 @@ class GeminiProvider(LLMProvider):
             try:
                 return self._make_client(request_key)
             except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
+                logger.debug("Non-fatal", exc_info=True)
         return self.client
 
     def generate_content(
@@ -394,10 +314,13 @@ class GeminiProvider(LLMProvider):
                 time.sleep(delay)
 
     @staticmethod
-    def _run_call_with_hard_timeout(callable_fn, timeout_seconds: float, timeout_message: str):
+    def _run_call_with_hard_timeout(
+        callable_fn, timeout_seconds: float, timeout_message: str
+    ):
         """Run callable in a daemon thread and fail fast on timeout.
 
         Daemon thread ensures timed-out SDK calls never block process shutdown.
+        A brief join after timeout prevents orphaned thread accumulation.
         """
         _q: queue.Queue = queue.Queue(maxsize=1)
 
@@ -413,6 +336,7 @@ class GeminiProvider(LLMProvider):
         try:
             status, payload = _q.get(timeout=timeout_seconds)
         except queue.Empty as exc:
+            _t.join(timeout=1.0)
             raise TimeoutError(timeout_message) from exc
 
         if status == "err":
@@ -695,12 +619,17 @@ class GeminiProvider(LLMProvider):
             flat = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{flat}"
         flat = flat[:80000]
 
-        rc = self._make_interactions_client(timeout=timeout, is_sync=not is_deep_research)
+        rc = self._make_interactions_client(
+            timeout=timeout, is_sync=not is_deep_research
+        )
 
         if background:
             # Async: create() returns immediately, poll until done
             interaction = rc.interactions.create(
-                agent=model_id, input=flat, background=True, stream=False,
+                agent=model_id,
+                input=flat,
+                background=True,
+                stream=False,
             )
             start = time.time()
             iid = getattr(interaction, "id", None)
@@ -726,7 +655,10 @@ class GeminiProvider(LLMProvider):
             # hard timeout fires even when httpx chunked-transfer keeps the socket open.
             interaction = self._run_call_with_hard_timeout(
                 lambda: rc.interactions.create(
-                    model=model_id, input=flat, background=False, stream=False,
+                    model=model_id,
+                    input=flat,
+                    background=False,
+                    stream=False,
                 ),
                 timeout_seconds=timeout,
                 timeout_message=f"Interactions API sync timeout ({timeout}s) model={model_id}",
@@ -735,11 +667,17 @@ class GeminiProvider(LLMProvider):
         text = self._extract_interactions_text(interaction).strip()
 
         if stream:
+
             def _single_chunk():
                 yield {"content": text, "finish_reason": "stop"}
+
             return _single_chunk()
 
-        return {"content": text, "tool_calls": [], "usage": self._normalize_usage(interaction)}
+        return {
+            "content": text,
+            "tool_calls": [],
+            "usage": self._normalize_usage(interaction),
+        }
 
     def _make_interactions_client(self, timeout: float, is_sync: bool):
         """Build a genai.Client tuned for Interactions API calls.
@@ -755,8 +693,10 @@ class GeminiProvider(LLMProvider):
             connect_t = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
             # Sync: daemon-thread enforces wall-clock timeout; httpx is a secondary
             # guard.  Async: poll requests are tiny, 45 s is plenty.
-            read_t = timeout if is_sync else float(
-                os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45")
+            read_t = (
+                timeout
+                if is_sync
+                else float(os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45"))
             )
             hc = httpx.Client(
                 timeout=httpx.Timeout(read_t, connect=connect_t), verify=True

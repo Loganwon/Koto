@@ -1,7 +1,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-SystemToolsPlugin — Python 代码执行 & 包管理
+SystemToolsPlugin — Python 代码执行 & 环境检查
 
 从 web/adaptive_agent.py 的 python_exec / package_mgmt 工具迁移而来,
 适配 UnifiedAgent 插件体系。
@@ -10,8 +10,6 @@ SystemToolsPlugin — Python 代码执行 & 包管理
 import ast
 import importlib
 import logging
-import subprocess
-import sys
 import traceback
 from typing import Any, Dict, List
 
@@ -97,7 +95,7 @@ def _validate_code_ast(code: str):
 
 
 class SystemToolsPlugin(AgentPlugin):
-    """提供 Python 代码执行和包管理能力。"""
+    """提供 Python 代码执行和环境检查能力。"""
 
     @property
     def name(self) -> str:
@@ -105,7 +103,7 @@ class SystemToolsPlugin(AgentPlugin):
 
     @property
     def description(self) -> str:
-        return "Execute Python code snippets and manage pip packages."
+        return "Execute Python code snippets and check Python package availability."
 
     def get_tools(self) -> List[Dict[str, Any]]:
         return [
@@ -123,21 +121,6 @@ class SystemToolsPlugin(AgentPlugin):
                         }
                     },
                     "required": ["code"],
-                },
-            },
-            {
-                "name": "pip_install",
-                "func": self.pip_install,
-                "description": "Install one or more Python packages via pip.",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "packages": {
-                            "type": "STRING",
-                            "description": "Comma-separated package names, e.g. 'pandas,numpy'.",
-                        }
-                    },
-                    "required": ["packages"],
                 },
             },
             {
@@ -184,36 +167,6 @@ class SystemToolsPlugin(AgentPlugin):
         except Exception as exc:
             tb = traceback.format_exc()
             return f"Execution error:\n{tb}"
-
-    @staticmethod
-    def pip_install(packages: str) -> str:
-        """Install packages using pip."""
-        pkg_list = [p.strip() for p in packages.split(",") if p.strip()]
-        if not pkg_list:
-            return "Error: no packages specified."
-
-        results: List[str] = []
-        for pkg in pkg_list:
-            if getattr(sys, "frozen", False):
-                results.append(f"❌ {pkg}: 打包版不支持安装新包，请联系开发者。")
-                continue
-            try:
-                proc = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", pkg],
-                    capture_output=True,
-                    text=True,
-                    timeout=300,
-                )
-                if proc.returncode == 0:
-                    results.append(f"✅ {pkg} installed successfully.")
-                else:
-                    results.append(f"❌ {pkg} failed: {proc.stderr.strip()[:300]}")
-            except subprocess.TimeoutExpired:
-                results.append(f"❌ {pkg}: installation timed out.")
-            except Exception as exc:
-                results.append(f"❌ {pkg}: {exc}")
-
-        return "\n".join(results)
 
     @staticmethod
     def pip_check(packages: str) -> str:

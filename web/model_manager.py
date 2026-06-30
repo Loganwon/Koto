@@ -23,6 +23,8 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from app.core.llm.model_capabilities import (
     get_interactions_only_model_set as _get_interactions_only_model_set,
+)
+from app.core.llm.model_capabilities import (
     get_model_blocklist_from_env,
     is_interactions_only_model,
     normalize_model_id,
@@ -121,16 +123,19 @@ TASK_REQUIREMENTS: Dict[str, Dict[str, Any]] = {
 
 # ─── 任务级已验证偏好 ────────────────────────────────────────────────────────
 # 基于当前线上可用性与实时探测结果的显式偏好：
-# - 轻量交互优先 Gemini 3 Flash Preview
-# - 重任务优先 Gemini 3.1 Pro Preview（已验证 generate_content + tool call 都稳定）
-# - 文件任务/Agent 在 3.1 Pro 不可用时再回退到 2.5 系列
+# - 轻量交互和文件任务优先 DeepSeek
+# - Gemini 保留为视觉/图片生成，以及显式选择 Gemini 时的备选
 _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
     "CHAT": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3-flash-preview",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
     ],
     "WEB_SEARCH": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3-flash-preview",
         "gemini-2.5-flash",
         "gemini-2.5-flash-lite",
@@ -141,6 +146,8 @@ _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
         "gemini-2.5-flash-lite",
     ],
     "CODER": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-3-pro-preview",
@@ -148,6 +155,8 @@ _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
         "gemini-3-flash-preview",
     ],
     "RESEARCH": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-3-pro-preview",
@@ -155,6 +164,8 @@ _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
         "gemini-2.5-flash",
     ],
     "FILE_GEN": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-pro",
         "gemini-3-pro-preview",
@@ -162,6 +173,8 @@ _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
         "gemini-3-flash-preview",
     ],
     "FILE_TASK": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-flash",
         "gemini-2.5-pro",
@@ -169,6 +182,8 @@ _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
         "gemini-3-pro-preview",
     ],
     "AGENT": [
+        "deepseek-v4-pro",
+        "deepseek-v4-flash",
         "gemini-3.1-pro-preview",
         "gemini-2.5-flash",
         "gemini-2.5-pro",
@@ -190,6 +205,37 @@ LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
 # tier: 综合能力等级（1-10），同任务需求下优先选高 tier
 # interactions_only: True 表示必须走 Interactions API（而非 generate_content）
 KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
+    # ── DeepSeek primary cloud stack ─────────────────────────────
+    "deepseek-v4-pro": {
+        "provider": "deepseek",
+        "tier": 10,
+        "speed": 7,
+        "quality": 10,
+        "reasoning": 10,
+        "context": 10,
+        "multimodal": False,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
+        "interactions_only": False,
+        "display": "DeepSeek V4 Pro",
+        "strengths": ["推理", "代码", "工具调用", "复杂文件任务"],
+    },
+    "deepseek-v4-flash": {
+        "provider": "deepseek",
+        "tier": 8,
+        "speed": 9,
+        "quality": 8,
+        "reasoning": 8,
+        "context": 8,
+        "multimodal": False,
+        "function_calling": True,
+        "grounding": True,
+        "image_gen": False,
+        "interactions_only": False,
+        "display": "DeepSeek V4 Flash",
+        "strengths": ["快速", "对话", "代码", "工具调用"],
+    },
     # ── Gemini 3.x preview (preferred text stack) ──────────────────
     "gemini-3.1-pro-preview": {
         "provider": "gemini",
@@ -631,7 +677,24 @@ class ModelManager:
                 self._preload_static_caps()
             return
 
-        # 路由只使用 API 实际返回的模型（避免将不存在/已下线模型加入评分池）
+        try:
+            from app.core.llm.model_selection import (
+                get_configured_cloud_model,
+                get_configured_cloud_provider,
+            )
+
+            cloud_provider = get_configured_cloud_provider()
+            if cloud_provider != "gemini":
+                for task in ("CHAT", "CODER", "FILE_TASK", "AGENT"):
+                    configured_model = get_configured_cloud_model(task_type=task, provider=cloud_provider)
+                    if configured_model:
+                        discovered.append(configured_model)
+                if cloud_provider == "deepseek":
+                    discovered.extend(["deepseek-v4-pro", "deepseek-v4-flash"])
+        except Exception as exc:
+            logger.debug("[ModelManager] configured cloud model injection skipped: %s", exc)
+
+        # 路由使用 Gemini API 发现结果 + 当前配置的非 Gemini 云端主模型。
         self._available_ids = list(dict.fromkeys(discovered))  # 去重保序
 
         # 构建能力缓存：API 发现的模型优先用注册表补充能力，否则自动推断
@@ -718,15 +781,23 @@ class ModelManager:
                 return
             collector.append(mid)
 
+        def _coerce_list_response(page: Any) -> List[Any]:
+            if page is None:
+                return []
+            try:
+                return list(page)
+            except TypeError as exc:
+                raise RuntimeError("client.models.list() returned a non-iterable response") from exc
+
         model_ids: List[str] = []
         try:
             # google-genai SDK: client.models.list() 返回 Model 对象的迭代器
             page = self._client.models.list(config={"page_size": 200})
-            for model in page:
+            for model in _coerce_list_response(page):
                 _append_model(model, model_ids)
         except TypeError:
             # 部分 SDK 版本 list() 不接受 config 参数
-            for model in self._client.models.list():
+            for model in _coerce_list_response(self._client.models.list()):
                 _append_model(model, model_ids)
 
         logger.info(f"[ModelManager] API 返回 {len(model_ids)} 个可用模型")
@@ -742,7 +813,10 @@ class ModelManager:
 
     def _select_best(self, task: str, model_ids: List[str]) -> Optional[str]:
         """从提供的模型列表中，为指定任务选出得分最高的模型。
-        跳过 interactions_only 模型（不支持 generate_content，无法直接路由）。
+
+        路由表可以选择 interactions-only 模型；调用层会按模型能力切到
+        Interactions API。只有 get_fallback_model() 这类直接 generate_content
+        的稳定兜底路径需要排除它们。
         """
         for preferred_id in _TASK_MODEL_PREFERENCES.get(task, []):
             if preferred_id not in model_ids:
@@ -750,10 +824,7 @@ class ModelManager:
             caps = self._cached_caps.get(preferred_id)
             if not caps:
                 continue
-            if caps.get("interactions_only", False) or is_interactions_only_model(preferred_id):
-                continue
-            if score_model_for_task(caps, task) >= 0:
-                return preferred_id
+            return preferred_id
 
         best_id = None
         best_score = -1.0
@@ -761,9 +832,6 @@ class ModelManager:
         for mid in model_ids:
             caps = self._cached_caps.get(mid)
             if not caps:
-                continue
-            # interactions_only 模型必须走 Interactions API，不能通过 generate_content 调用
-            if caps.get("interactions_only", False) or is_interactions_only_model(mid):
                 continue
             sc = score_model_for_task(caps, task)
             if sc < 0:
@@ -781,22 +849,22 @@ class ModelManager:
 
     @staticmethod
     def _static_default_map() -> Dict[str, str]:
-        """API 不可用时的静态兜底映射（使用 generate_content 兼容的稳定模型）。"""
+        """API 不可用时的静态兜底映射。"""
         defaults = {
-            "CHAT": "gemini-3-flash-preview",
-            "CODER": "gemini-3.1-pro-preview",
-            "WEB_SEARCH": "gemini-3-flash-preview",
+            "CHAT": "deepseek-v4-pro",
+            "CODER": "deepseek-v4-pro",
+            "WEB_SEARCH": "deepseek-v4-pro",
             "VISION": "gemini-3-flash-preview",
-            "RESEARCH": "gemini-3.1-pro-preview",
-            "FILE_GEN": "gemini-3.1-pro-preview",
-            "FILE_TASK": "gemini-3.1-pro-preview",
-            "DOC_ANNOTATE": "gemini-3.1-pro-preview",
-            "MEETING_EXTRACT": "gemini-3.1-pro-preview",
+            "RESEARCH": "deepseek-v4-pro",
+            "FILE_GEN": "deepseek-v4-pro",
+            "FILE_TASK": "deepseek-v4-pro",
+            "DOC_ANNOTATE": "deepseek-v4-pro",
+            "MEETING_EXTRACT": "deepseek-v4-pro",
             "PAINTER": "gemini-3.1-flash-image-preview",
-            "AGENT": "gemini-3.1-pro-preview",
+            "AGENT": "deepseek-v4-pro",
             "SYSTEM": "local-executor",
             "FILE_OP": "local-executor",
-            "COMPLEX": "gemini-3.1-pro-preview",
+            "COMPLEX": "deepseek-v4-pro",
         }
         return defaults
 

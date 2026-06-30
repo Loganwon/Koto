@@ -7,8 +7,9 @@ Univer rendering scenarios affected by DPI counter-zoom.
 """
 
 import os
+
 from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 OUT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -92,6 +93,7 @@ def make_edit_test():
 
     regions = ["华东", "华南", "华北", "西南", "海外"]
     import random
+
     random.seed(42)
     for r, region in enumerate(regions, 4):
         ws.cell(row=r, column=1, value=region)
@@ -106,7 +108,9 @@ def make_edit_test():
     # Long text cell for testing text overflow editing
     ws.cell(row=10, column=1, value="备注")
     ws.merge_cells("B10:F10")
-    ws["B10"] = "这是一段很长的文本，用于测试在DPI缩放模式下双击编辑长文本时编辑器弹出位置是否正确。如果CSS counter-zoom工作正常，编辑框应该出现在单元格正上方，而不是偏移到右下方。"
+    ws["B10"] = (
+        "这是一段很长的文本，用于测试在DPI缩放模式下双击编辑长文本时编辑器弹出位置是否正确。如果CSS counter-zoom工作正常，编辑框应该出现在单元格正上方，而不是偏移到右下方。"
+    )
     ws["B10"].alignment = Alignment(wrap_text=True)
     ws.row_dimensions[10].height = 60
 
@@ -140,6 +144,7 @@ def make_resolution_test():
         header.border = border
 
     import random
+
     random.seed(123)
     for r in range(2, 52):
         for c in range(1, 27):
@@ -191,7 +196,9 @@ def make_multisheet_test():
         ws3.cell(row=1, column=c).font = Font(bold=True, size=11)
     for r in range(2, 21):
         for c in range(1, 6):
-            ws3.cell(row=r, column=c, value=f"单元格 ({r},{c}) — 测试宽列下的鼠标点击定位")
+            ws3.cell(
+                row=r, column=c, value=f"单元格 ({r},{c}) — 测试宽列下的鼠标点击定位"
+            )
 
     _save(wb, "dpi_test_multisheet.xlsx")
 

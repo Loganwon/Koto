@@ -19,6 +19,10 @@ def _clear_env(monkeypatch):
         "PORT",
         "GEMINI_API_KEY",
         "API_KEY",
+        "DEEPSEEK_API_KEY",
+        "DEEPSEEK_KEY",
+        "DS_API_KEY",
+        "DS_KEY",
         "KOTO_WORKSPACE",
         "OLLAMA_BASE_URL",
     ):
@@ -81,16 +85,28 @@ class TestPortValidation:
 
 
 @pytest.mark.unit
-class TestGeminiApiKeyWarning:
-    """Missing GEMINI_API_KEY logs a warning but does not fail."""
+class TestCloudApiKeyWarning:
+    """Missing cloud API keys logs a warning but does not fail."""
 
-    def test_missing_gemini_key_warns(self, monkeypatch, tmp_path, caplog):
+    def test_missing_cloud_api_key_warns(self, monkeypatch, tmp_path, caplog):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
-        with caplog.at_level(logging.WARNING, logger=_LOGGER):
+        with patch("src.config_validator.get_gemini_api_key", return_value=None), patch(
+            "src.config_validator.get_deepseek_api_key", return_value=None
+        ), caplog.at_level(logging.WARNING, logger=_LOGGER):
             validate_startup_config()  # should NOT raise
-        assert any("GEMINI_API_KEY not set" in m for m in caplog.messages)
+        assert any("No cloud API key configured" in m for m in caplog.messages)
+
+    def test_deepseek_key_suppresses_cloud_warning(self, monkeypatch, tmp_path, caplog):
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("KOTO_PORT", "5000")
+        monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
+        with patch("src.config_validator.get_gemini_api_key", return_value=None), patch(
+            "src.config_validator.get_deepseek_api_key", return_value="deepseek-key"
+        ), caplog.at_level(logging.WARNING, logger=_LOGGER):
+            validate_startup_config()
+        assert not any("No cloud API key configured" in m for m in caplog.messages)
 
 
 @pytest.mark.unit

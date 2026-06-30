@@ -94,13 +94,13 @@ class SkillSuggester:
 
         # ── 收集所有未启用的 Skill 作为候选 ─────────────────────────────────
         candidates: List[Dict] = []
-        for skill_id, s in SkillManager._registry.items():
+        for skill_id, s in SkillManager.list_runtime_entries().items():
             if s.get("enabled", False):
                 continue  # 已启用
             if skill_id in exclude_ids:
                 continue  # 本次临时注入过了
 
-            skill_def = SkillManager._def_registry.get(skill_id)
+            skill_def = SkillManager.get_definition(skill_id)
             intent_desc: str = ""
             tags: List[str] = []
             trigger_kws: List[str] = []
@@ -254,8 +254,8 @@ class SkillSuggester:
                    命中即得分，最可靠、覆盖内置 Skill 的典型触发词。
 
         Layer 1b — trigger_keywords 动态匹配（2.5 pts）：读取 SkillDefinition.trigger_keywords
-                   字段，覆盖新安装 Skill 声明的触发词。_def_registry 在 register_custom()
-                   后立即更新，所以新安装的 Skill 无需重启就能即时被发现。
+                   字段，覆盖新安装 Skill 声明的触发词。SkillDefinition 注册后
+                   无需重启就能即时被发现。
 
         Layer 2  — Tags 精确匹配（1.5 pts）：JSON 自定义 Skill 的 tags 字段，
                    任一 tag 在用户输入中出现即计分。
@@ -287,7 +287,6 @@ class SkillSuggester:
                 score += 3.0
 
             # Layer 1b: trigger_keywords（新安装 Skill 声明的动态触发词）
-            # _def_registry 在 register_custom() 时实时更新，零重启即时生效
             for kw in c.get("trigger_keywords", []):
                 if kw and kw.lower() in lowered:
                     score += 2.5
@@ -412,7 +411,7 @@ class SkillSuggester:
         for src_id in active_skill_ids:
             if len(result) >= max_n:
                 break
-            s_def = SkillManager._def_registry.get(src_id)
+            s_def = SkillManager.get_definition(src_id)
             if not s_def:
                 continue
             chains = getattr(s_def, "chains_to", []) or []
@@ -422,11 +421,11 @@ class SkillSuggester:
                 if chain_id in exclude or chain_id in seen_chain_ids:
                     continue
                 seen_chain_ids.add(chain_id)
-                target = SkillManager._registry.get(chain_id)
+                target = SkillManager.get_runtime_entry(chain_id)
                 # 只推荐已注册但尚未启用的 Skill
-                if not target or target.get("enabled", False):
+                if not target or SkillManager.is_enabled(chain_id):
                     continue
-                t_def = SkillManager._def_registry.get(chain_id)
+                t_def = SkillManager.get_definition(chain_id)
                 result.append(
                     {
                         "id": chain_id,

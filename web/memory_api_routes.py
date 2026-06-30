@@ -8,7 +8,7 @@ import logging
 import re
 from datetime import datetime
 
-from flask import jsonify, request
+from flask import Blueprint, jsonify, request
 
 logger = logging.getLogger(__name__)
 
@@ -114,10 +114,11 @@ def register_memory_routes(app, get_memory_manager):
         app: Flask应用实例
         get_memory_manager: 获取记忆管理器的函数
     """
+    memory_api_bp = Blueprint("memory_api", __name__)
 
     # ==================== 基础记忆 CRUD API ====================
 
-    @app.route("/api/memories", methods=["GET"])
+    @memory_api_bp.route("/api/memories", methods=["GET"])
     def get_all_memories():
         """获取所有记忆（优先从 ShadowWatcher 读取，回退到 MemoryManager）"""
         try:
@@ -144,7 +145,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"error": str(e)}), 500
 
-    @app.route("/api/memories", methods=["POST"])
+    @memory_api_bp.route("/api/memories", methods=["POST"])
     def add_memory():
         """添加新记忆"""
         try:
@@ -170,7 +171,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memories/<mem_id>", methods=["DELETE"])
+    @memory_api_bp.route("/api/memories/<mem_id>", methods=["DELETE"])
     def delete_memory(mem_id):
         """删除记忆"""
         try:
@@ -194,7 +195,7 @@ def register_memory_routes(app, get_memory_manager):
 
     # ==================== 增强功能 API ====================
 
-    @app.route("/api/memory/profile", methods=["GET"])
+    @memory_api_bp.route("/api/memory/profile", methods=["GET"])
     def get_user_profile():
         """获取用户画像"""
         try:
@@ -222,7 +223,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memory/profile", methods=["POST"])
+    @memory_api_bp.route("/api/memory/profile", methods=["POST"])
     def update_user_profile():
         """手动更新用户画像"""
         try:
@@ -241,7 +242,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memory/auto-learn", methods=["POST"])
+    @memory_api_bp.route("/api/memory/auto-learn", methods=["POST"])
     def trigger_auto_learn():
         """触发自动学习（测试用）"""
         try:
@@ -263,7 +264,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memory/style-profile", methods=["POST"])
+    @memory_api_bp.route("/api/memory/style-profile", methods=["POST"])
     def learn_writing_style_profile():
         """从样本文本学习写作风格并写入用户画像。"""
         try:
@@ -320,7 +321,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memory/stats", methods=["GET"])
+    @memory_api_bp.route("/api/memory/stats", methods=["GET"])
     def get_memory_stats():
         """获取记忆系统统计"""
         try:
@@ -381,7 +382,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memory/personality", methods=["GET"])
+    @memory_api_bp.route("/api/memory/personality", methods=["GET"])
     def get_personality_matrix():
         """获取个人记忆矩阵（含 ShadowWatcher 整合数据）"""
         try:
@@ -413,7 +414,7 @@ def register_memory_routes(app, get_memory_manager):
                     "last_seen": obs.get("last_seen"),
                 }
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                logger.debug("Non-fatal", exc_info=True)
 
             return jsonify(
                 {
@@ -429,7 +430,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memories/import-profile", methods=["POST"])
+    @memory_api_bp.route("/api/memories/import-profile", methods=["POST"])
     def import_memories_from_profile():
         """从 user_profile.json + shadow_observations.json + personality_matrix.json 生成初始记忆条目"""
         import json
@@ -586,7 +587,7 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
-    @app.route("/api/memories/batch-extract", methods=["POST"])
+    @memory_api_bp.route("/api/memories/batch-extract", methods=["POST"])
     def batch_extract_from_chats():
         """从 chats/ 目录的历史对话 JSON 文件中批量提取记忆（后台异步运行）"""
         import json
@@ -624,7 +625,7 @@ def register_memory_routes(app, get_memory_manager):
                             p, temperature=0.15, max_tokens=600
                         )
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    logger.debug("Non-fatal", exc_info=True)
 
                 if llm_fn is None:
                     logger.warning("[BatchExtract] 没有可用的 LLM 函数，无法提取记忆")
@@ -717,4 +718,5 @@ def register_memory_routes(app, get_memory_manager):
             traceback.print_exc()
             return jsonify({"success": False, "error": str(e)}), 500
 
+    app.register_blueprint(memory_api_bp)
     logger.info("🧠 增强记忆系统API路由已注册")

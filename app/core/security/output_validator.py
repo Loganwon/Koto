@@ -182,6 +182,59 @@ _HARMFUL_RE = [
     re.compile(pat, flags | re.IGNORECASE) for pat, flags in _HARMFUL_PATTERNS
 ]
 
+# 原始异常/堆栈检测：这些内容不应直接展示给终端用户。
+_SENSITIVE_USER_ERROR_PATTERNS = [
+    r"Traceback \(most recent call last\):",
+    r'File "[^"]+", line \d+',
+    r"\b(?:httpx|requests|urllib3|ConnectError|ReadTimeout|ProxyError|SSLError|TimeoutError)\b",
+    r"\b(?:AuthenticationError|PermissionDenied|PermissionError|API key|api_key|authorization|rate limit|quota exceeded)\b",
+    r"\b(?:401|403|429|500|502|503|504)\b",
+]
+_SENSITIVE_USER_ERROR_RE = [
+    re.compile(p, re.IGNORECASE) for p in _SENSITIVE_USER_ERROR_PATTERNS
+]
+
+
+def _looks_like_sensitive_user_error(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _SENSITIVE_USER_ERROR_RE)
+
+
+def sanitize_user_visible_text(
+    text: Any,
+    *,
+    fallback: str,
+    treat_as_error: bool = False,
+) -> str:
+    """Sanitize text before it is shown in the UI.
+
+    This is intentionally lighter than `OutputValidator.validate()` semantics for
+    LLM answers: it only blocks obvious internal prompt leakage and replaces raw
+    backend/framework exception details when the caller marks the text as an
+    error-like channel.
+    """
+
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+
+    safe_text = raw
+    try:
+        validation = OutputValidator.validate(text=raw)
+        if validation.is_blocked:
+            logger.warning(
+                "[OutputValidator] user-visible text blocked; using fallback"
+            )
+            return fallback
+        safe_text = str(validation.text or "").strip() or raw
+    except Exception as exc:
+        logger.debug("[OutputValidator] sanitize_user_visible_text skipped: %s", exc)
+
+    if treat_as_error and _looks_like_sensitive_user_error(safe_text):
+        logger.warning("[OutputValidator] sensitive error text hidden from user")
+        return fallback
+
+    return safe_text
+
 
 # ══════════════════════════════════════════════════════════════════
 # 格式化器（REFORMAT 时使用）
@@ -594,6 +647,49 @@ class OutputValidator:
             reasons=[],
             skill_id=skill_id,
         )
+
+    @classmethod
+    def validate_fast(
+        cls,
+        text: str,
+        skill_id: Optional[str] = None,
+        original_prompt: Optional[str] = None,
+    ) -> ValidationResult:
+        """Run local deterministic validation without the optional LLM judge."""
+        return cls.validate(text=text, skill_id=skill_id, original_prompt=None)
+
+    @classmethod
+    def validate_judge_async(
+        cls,
+        text: str,
+        original_prompt: str,
+        *,
+        callback=None,
+        trace_id: str = "",
+    ) -> None:
+        """Optionally run semantic judge in the background."""
+        if not original_prompt or len(str(text or "")) < cls._judge_min_len:
+            return
+
+        def _run() -> None:
+            try:
+                result = cls.validate(
+                    text=text,
+                    skill_id=None,
+                    original_prompt=original_prompt,
+                )
+                if callback:
+                    callback(result, trace_id)
+            except Exception as exc:
+                logger.debug("[OutputValidator] async judge skipped: %s", exc)
+
+        import threading
+
+        threading.Thread(
+            target=_run,
+            daemon=True,
+            name=f"output-validator-{trace_id or 'async'}",
+        ).start()
 
     # ── 私有检测方法 ──────────────────────────────────────────────
 

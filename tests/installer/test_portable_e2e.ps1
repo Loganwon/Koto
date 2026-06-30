@@ -28,7 +28,7 @@ param(
     [string]$ZipFile          = "",
     [int]$Port                = 5098,
     [int]$HealthTimeoutSec    = 45,
-    [switch]$RequireHealth    = $true   # set to $false in headless/CI
+    [bool]$RequireHealth      = $true   # set to $false in headless/CI
 )
 
 $ErrorActionPreference = "Stop"
@@ -53,6 +53,24 @@ Write-Host "[E2E-Portable] Port: $Port"
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+function Test-WorkspaceAssetBundle([string]$StaticRoot) {
+    $legacyIndexHtml = Join-Path $StaticRoot "univer-dist\index.html"
+    if (Test-Path $legacyIndexHtml) {
+        Fail "Legacy workspace asset index should not be packaged: $legacyIndexHtml"
+    }
+    else {
+        Pass "Legacy workspace asset index removed"
+    }
+
+    $assetPaths = @(
+        (Join-Path $StaticRoot "univer-dist\assets\sheets-main.js"),
+        (Join-Path $StaticRoot "univer-dist\assets\sheets-main.css")
+    )
+    foreach ($assetPath in $assetPaths) {
+        if (Test-Path $assetPath) { Pass "Workspace asset exists: $(Split-Path -Leaf $assetPath)" }
+        else                      { Fail "Missing workspace asset: $assetPath" }
+    }
+}
 
 # ── Cleanup leftovers ────────────────────────────────────────────────────
 if (Test-Path $ExtractDir) {
@@ -72,6 +90,8 @@ Pass "ZIP extracted to $ExtractDir"
 Write-Host "`n[Step 2] Verifying extracted files..."
 $exePath = Join-Path $ExtractDir "Koto.exe"
 $internalDir = Join-Path $ExtractDir "_internal"
+$staticRoot = Join-Path $internalDir "web\static"
+$configRoot = Join-Path $internalDir "config"
 
 $requiredPaths = @(
     $exePath,
@@ -79,6 +99,25 @@ $requiredPaths = @(
     (Join-Path $internalDir "psutil"),
     (Join-Path $internalDir "app"),
     (Join-Path $internalDir "web"),
+    (Join-Path $configRoot ".builtin_key"),
+    (Join-Path $configRoot "gemini_config.env.example"),
+    (Join-Path $configRoot "macro_suggestions.json"),
+    (Join-Path $configRoot "personality_matrix.json"),
+    (Join-Path $configRoot "skill_affinity.json"),
+    (Join-Path $configRoot "skill_bindings.json"),
+    (Join-Path $configRoot "skill_ratings.json"),
+    (Join-Path $configRoot "triggers.json"),
+    (Join-Path $configRoot "context"),
+    (Join-Path $configRoot "divination_data"),
+    (Join-Path $configRoot "skills"),
+    (Join-Path $configRoot "skill_packs"),
+    (Join-Path $configRoot "tools"),
+    (Join-Path $configRoot "workflows"),
+    (Join-Path $staticRoot "js\build\workspace-bundle.js"),
+    (Join-Path $staticRoot "jszip.min.js"),
+    (Join-Path $staticRoot "docx-preview.min.js"),
+    (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
+    (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
     (Join-Path $ExtractDir "Start_Koto.bat")
 )
 foreach ($path in $requiredPaths) {
@@ -86,10 +125,24 @@ foreach ($path in $requiredPaths) {
     else                 { Fail "Missing: $path" }
 }
 
+$unexpectedRuntimePaths = @(
+    (Join-Path $ExtractDir ".webview2_profile"),
+    (Join-Path $ExtractDir "config"),
+    (Join-Path $ExtractDir "chats"),
+    (Join-Path $ExtractDir "logs"),
+    (Join-Path $ExtractDir "workspace")
+)
+foreach ($path in $unexpectedRuntimePaths) {
+    if (Test-Path $path) { Fail "Unexpected runtime state shipped: $path" }
+    else                 { Pass "Runtime state excluded: $(Split-Path -Leaf $path)" }
+}
+
 # File size validation — catch empty or corrupt builds
 $exeSize = (Get-Item $exePath).Length / 1MB
 if ($exeSize -lt 40) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (expected >= 40MB)" }
 else                  { Pass "Koto.exe size is $([math]::Round($exeSize,1))MB" }
+
+Test-WorkspaceAssetBundle -StaticRoot $staticRoot
 
 # Critical DLL check — Python runtime must be present
 $pythonDll = Join-Path $internalDir "python311.dll"
@@ -149,7 +202,18 @@ if (-not $healthy) {
 # /api/ping endpoint check
 if ($healthy) {
     try {
-        $pingResp = Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5
+        $assetResp = Invoke-RestMethod "http://localhost:$Port/api/v1/workspace/asset_health" -TimeoutSec 5
+        if ($assetResp.ok -eq $true) {
+            Pass "/api/v1/workspace/asset_health returned ok"
+        } else {
+            Fail "/api/v1/workspace/asset_health reported missing assets: $($assetResp.missing -join ', ')"
+        }
+    } catch {
+        Fail "/api/v1/workspace/asset_health request failed: $($_.Exception.Message)"
+    }
+
+    try {
+        Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5 | Out-Null
         Pass "/api/ping responded"
     } catch {
         Write-Host "  WARN: /api/ping did not respond"

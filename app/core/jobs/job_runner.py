@@ -503,7 +503,11 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         try:
             from google.genai import types as _types
 
-            from web.app import client
+            from web.runtime_context import get_client_proxy
+
+            client = get_client_proxy()
+            if client is None:
+                raise RuntimeError("Gemini client unavailable")
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(

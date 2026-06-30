@@ -8,7 +8,6 @@ file_scanner.py — Koto 全盘文件扫描器
   - 持久化索引 (config/file_index.json)
   - 基于文件名的模糊搜索 (difflib + 首字母匹配)
   - 按扩展分类：文档 / 图片 / 视频 / 音频 / 代码 / 压缩包 / 其他
-  - open_file(path) — 用系统默认程序打开文件
   - 提供进度回调供 SSE 传输
 
 使用示例:
@@ -19,7 +18,7 @@ logger = logging.getLogger(__name__)
 
     FileScanner.start_scan()                        # 后台扫描
     results = FileScanner.search("报告 2025", limit=10)
-    FileScanner.open_file(results[0]["path"])
+    print(results[0]["path"])
 """
 
 from __future__ import annotations
@@ -247,7 +246,7 @@ class FileScanner:
                 try:
                     loaded[pl] = FileEntry(**d)
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    logger.debug("Non-fatal", exc_info=True)
             with cls._lock:
                 cls._index = loaded
             logger.info(f"[FileScanner] 📂 已加载历史索引 {len(loaded):,} 个文件")
@@ -398,7 +397,7 @@ class FileScanner:
                                 try:
                                     on_progress(cls.get_status())
                                 except Exception:
-                                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                                    logger.debug("Non-fatal", exc_info=True)
                             time.sleep(0.01)  # 让出 CPU
 
                     if scanned > _MAX_FILES:
@@ -512,32 +511,6 @@ class FileScanner:
         # 排序：score 高 → 修改时间新
         results.sort(key=lambda r: (-r["score"], -r["mtime"]))
         return results[:limit]
-
-    # ── Open ───────────────────────────────────────────────────────────────────
-
-    @classmethod
-    def open_file(cls, path: str) -> Dict[str, Any]:
-        """用系统默认程序打开文件"""
-        if not path or not os.path.exists(path):
-            return {"success": False, "error": f"文件不存在: {path}"}
-        try:
-            if sys.platform == "win32":
-                os.startfile(path)
-            elif sys.platform == "darwin":
-                import subprocess
-
-                subprocess.Popen(["open", path])
-            else:
-                import subprocess
-
-                subprocess.Popen(["xdg-open", path])
-            return {
-                "success": True,
-                "path": path,
-                "name": os.path.basename(path),
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
 
     # ── Stats ──────────────────────────────────────────────────────────────────
 
@@ -689,4 +662,4 @@ def is_disk_search_intent(text: str) -> bool:
 try:
     FileScanner.ensure_loaded()
 except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)

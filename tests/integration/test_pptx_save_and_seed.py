@@ -8,7 +8,8 @@ Integration tests for two PPTX fixes:
 2. **Ctrl+S auto_save crash**: The `auto_save` endpoint for PPTX now uses
    `_apply_edits` (from `pptx_editor.py`) when it receives the rich geometry
    canvas format `{slides: [{shapes: [{paragraphs: [...]}]}]}`, matching
-   the `save_file` / download path.  Previously it called `export_pptx` which
+   the `save_file` / download path.  Previously it called the old file-parser
+   PPTX exporter which
    expected a flat `"text"` key, causing:
      - `'str' object has no attribute 'get'` crash when iterating slides, OR
      - silent text loss because `shape_entry.get("text", "")` returned `""`.
@@ -222,7 +223,7 @@ class TestPptxAutoSaveRichFormat:
     """
     auto_save must handle the geometry canvas format with paragraphs/runs.
 
-    Previously, export_pptx only looked for shape_entry.get("text", ""),
+    Previously, the old file-parser PPTX exporter only looked for shape_entry.get("text", ""),
     which returned "" because the frontend sends paragraphs with runs.
     Now auto_save uses _apply_edits for the rich format.
     """
@@ -380,6 +381,33 @@ class TestPptxAutoSaveRichFormat:
         )
         assert resp.status_code == 200
 
+    def test_auto_save_rejects_legacy_text_card_payload(self, wa_client):
+        """Workspace PPTX save must not silently accept the retired text-card format."""
+        client, _, _ = wa_client
+        file_id, data = self._upload_and_get_id(client)
+        shape_id = None
+        for shape in data["slides"][0].get("shapes", []):
+            if shape.get("has_text"):
+                shape_id = shape.get("id")
+                break
+        assert shape_id is not None
+
+        resp = client.post(
+            "/api/v1/workspace/auto_save",
+            json={
+                "file_type": "pptx",
+                "file_id": file_id,
+                "data": [
+                    {
+                        "slide_index": 0,
+                        "texts": [{"shape_id": shape_id, "text": "Legacy Text"}],
+                    }
+                ],
+            },
+        )
+        assert resp.status_code == 400
+        assert "rich slides" in resp.get_json()["error"]
+
     def test_auto_save_consecutive_saves_produce_different_bytes(self, wa_client):
         """Multiple saves with different content must produce different bytes."""
         client, _, _ = wa_client
@@ -515,99 +543,3 @@ class TestPptxAutoSaveRichFormat:
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# C. export_pptx still works for legacy / flat-text formats
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-class TestExportPptxLegacyFormat:
-    """export_pptx must still handle flat text and legacy list formats."""
-
-    def test_flat_text_format(self):
-        """Shapes with a flat 'text' key should work."""
-        from app.core.file.file_parser import export_pptx
-
-        pptx_bytes = _make_pptx_with_text("Test Title")
-        data = _parse_pptx_geometry_data(pptx_bytes)
-
-        # Flatten paragraphs into a single "text" key (old AI tool-call style)
-        for slide in data["slides"]:
-            for shape in slide.get("shapes", []):
-                if shape.get("paragraphs"):
-                    flat_text = "\n".join(
-                        "".join(r.get("text", "") for r in p.get("runs", []))
-                        for p in shape["paragraphs"]
-                    )
-                    shape["text"] = flat_text
-                    del shape["paragraphs"]
-
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as f:
-            f.write(pptx_bytes)
-            f.flush()
-            result = export_pptx(f.name, data)
-        os.unlink(f.name)
-        assert len(result) > 0
-
-    def test_legacy_list_format(self):
-        """Old text-card format [{"slide_index": 0, "texts": [...]}]."""
-        from app.core.file.file_parser import export_pptx
-
-        pptx_bytes = _make_pptx_with_text("Legacy Test")
-
-        # Read shape IDs from the PPTX
-        from pptx import Presentation
-
-        prs = Presentation(io.BytesIO(pptx_bytes))
-        slide = prs.slides[0]
-        shape_ids = [s.shape_id for s in slide.shapes if s.has_text_frame]
-
-        legacy_data = [
-            {
-                "slide_index": 0,
-                "texts": [
-                    {"shape_id": sid, "text": "Legacy Text"} for sid in shape_ids
-                ],
-            }
-        ]
-
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as f:
-            f.write(pptx_bytes)
-            f.flush()
-            result = export_pptx(f.name, legacy_data)
-        os.unlink(f.name)
-
-        saved_texts = _read_pptx_texts(result)
-        assert any("Legacy Text" in t for t in saved_texts)
-
-    def test_export_pptx_with_rich_paragraphs(self):
-        """export_pptx should also handle rich paragraph data now."""
-        from app.core.file.file_parser import export_pptx
-
-        pptx_bytes = _make_pptx_with_text("Rich Test")
-        data = _parse_pptx_geometry_data(pptx_bytes)
-
-        # Modify text in the rich format
-        for slide in data["slides"]:
-            for shape in slide.get("shapes", []):
-                if shape.get("paragraphs"):
-                    for para in shape["paragraphs"]:
-                        for run in para.get("runs", []):
-                            if run.get("text", "").strip():
-                                run["text"] = "Rich Export Updated"
-
-        import tempfile
-
-        with tempfile.NamedTemporaryFile(suffix=".pptx", delete=False) as f:
-            f.write(pptx_bytes)
-            f.flush()
-            result = export_pptx(f.name, data)
-        os.unlink(f.name)
-
-        saved_texts = _read_pptx_texts(result)
-        all_text = " ".join(saved_texts)
-        assert (
-            "Rich Export Updated" in all_text
-        ), f"Rich paragraph data not handled by export_pptx: {saved_texts}"

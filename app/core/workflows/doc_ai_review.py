@@ -1,9 +1,9 @@
 # ══════════════════════════════════════════════════════════════
-# doc_ai_review.py — AI 文档审阅（批注模式）
+# doc_ai_review.py — AI 文档审阅（修订模式）
 #
 # 用户场景：
 #   上传一份 Word 文档，AI 按审阅重点（语法/逻辑/语气/完整性）
-#   审阅后在 DOCX 右侧添加批注气泡，用户可在 Word 中逐条处理。
+#   审阅后直接以 Word/WPS 原生修订写回文档，用户可立即看到并逐条接受/拒绝。
 # ══════════════════════════════════════════════════════════════
 
 from __future__ import annotations
@@ -53,7 +53,7 @@ _FOCUS_DESC = {
 
 class DocAIReview(WorkflowExecutor):
     """
-    AI 文档审阅工作流（批注模式）。
+    AI 文档审阅工作流（修订模式）。
 
     params 期望字段:
         doc_file:     str — Word 文档路径
@@ -90,7 +90,9 @@ class DocAIReview(WorkflowExecutor):
         all_annotations: list[dict] = []
 
         focus_desc = _FOCUS_DESC.get(focus, _FOCUS_DESC["all"])
-        system = _REVIEW_SYSTEM.format(focus_desc=focus_desc, max_per_chunk=max_per_chunk)
+        system = _REVIEW_SYSTEM.format(
+            focus_desc=focus_desc, max_per_chunk=max_per_chunk
+        )
 
         for idx, chunk in enumerate(chunks):
             yield sse_progress(idx + 1, len(chunks), f"审阅第 {idx+1}/{len(chunks)} 段")
@@ -100,25 +102,30 @@ class DocAIReview(WorkflowExecutor):
         yield sse_step_done("review", f"🔍 审阅完成，共 {len(all_annotations)} 条建议")
 
         if not all_annotations:
-            yield sse_output("markdown", "# 审阅结果\n\n文档质量良好，未发现需要修改的地方。", "审阅完成")
+            yield sse_output(
+                "markdown",
+                "# 审阅结果\n\n文档质量良好，未发现需要修改的地方。",
+                "审阅完成",
+            )
             return
 
-        # ── Step 3: 写入批注到 DOCX ────────────────────────────────
-        yield sse_step_start("annotate", "💬 写入批注…")
+        # ── Step 3: 写入修订到 DOCX ────────────────────────────────
+        yield sse_step_start("annotate", "📝 写入修订…")
         output_path = self.save_output_file(".docx")
         shutil.copy2(doc_file, str(output_path))
 
         try:
             from web.track_changes_editor import TrackChangesEditor
+
             editor = TrackChangesEditor("Koto AI")
-            result = editor.apply_comment_changes(str(output_path), all_annotations)
+            result = editor.apply_tracked_changes(str(output_path), all_annotations)
             applied = result.get("applied", 0)
         except Exception as e:
-            logger.error("[DocReview] 批注写入失败: %s", e)
-            yield sse_error(f"批注写入失败: {e}")
+            logger.error("[DocReview] 修订写入失败: %s", e)
+            yield sse_error(f"修订写入失败: {e}")
             return
 
-        yield sse_step_done("annotate", f"💬 已添加 {applied} 条批注")
+        yield sse_step_done("annotate", f"📝 已写入 {applied} 条修订")
 
         # ── Step 4: 生成摘要 ────────────────────────────────────────
         summary = self._build_summary(all_annotations, focus_desc, applied)
@@ -127,7 +134,7 @@ class DocAIReview(WorkflowExecutor):
         yield sse_output(
             "docx_file",
             {"path": str(output_path), "filename": f"审阅_{output_path.name}"},
-            f"审阅结果（{applied} 条批注）",
+            f"审阅结果（{applied} 条修订）",
         )
         yield sse_output("markdown", summary, "审阅摘要")
 
@@ -159,13 +166,15 @@ class DocAIReview(WorkflowExecutor):
             logger.warning("[DocReview] LLM 审阅失败: %s", e)
         return []
 
-    def _build_summary(self, annotations: list[dict], focus_desc: str, applied: int) -> str:
+    def _build_summary(
+        self, annotations: list[dict], focus_desc: str, applied: int
+    ) -> str:
         """生成 Markdown 审阅摘要。"""
         lines = [
             "# AI 文档审阅摘要\n",
             f"- 审阅重点: {focus_desc}",
             f"- 发现问题: {len(annotations)} 处",
-            f"- 已添加批注: {applied} 条\n",
+            f"- 已写入修订: {applied} 条\n",
             "## 修改建议列表\n",
         ]
         for i, a in enumerate(annotations[:20], 1):

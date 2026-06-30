@@ -46,7 +46,7 @@ def embed_annotations(pdf_path: str, annotations: list[dict]) -> bytes:
         from pypdf import PdfReader, PdfWriter  # type: ignore
         from pypdf.generic import (  # type: ignore
             ArrayObject, DictionaryObject, FloatObject,
-            NameObject, NumberObject, StringObject, TextStringObject,
+            NameObject, NumberObject, TextStringObject,
         )
     except ImportError as exc:
         raise RuntimeError("pypdf is required for annotation embedding") from exc
@@ -416,6 +416,58 @@ def _pdf_color_to_hex(color_array: Any) -> str:
     return "#FFFF00"
 
 
+def _page_dimensions(page: Any) -> tuple[float, float]:
+    """Return page width/height in PDF points."""
+    try:
+        box = page.mediabox
+        return float(box.width), float(box.height)
+    except Exception:
+        return 612.0, 792.0
+
+
+def _frontend_rect_to_pdf(rect: Any, annot: dict, page: Any) -> list[float] | None:
+    """Convert a frontend top-left CSS rect to a PDF bottom-left point rect."""
+    if isinstance(rect, dict):
+        try:
+            x = float(rect.get("x", 0))
+            y = float(rect.get("y", 0))
+            w = float(rect.get("w", rect.get("width", 0)))
+            h = float(rect.get("h", rect.get("height", 0)))
+        except Exception:
+            return None
+        if w <= 0 or h <= 0:
+            return None
+        pdf_w, pdf_h = _page_dimensions(page)
+        css_w = float(annot.get("pageWidth") or annot.get("page_width") or pdf_w)
+        css_h = float(annot.get("pageHeight") or annot.get("page_height") or pdf_h)
+        sx = pdf_w / css_w if css_w > 0 else 1.0
+        sy = pdf_h / css_h if css_h > 0 else 1.0
+        x1 = x * sx
+        x2 = (x + w) * sx
+        y1 = pdf_h - ((y + h) * sy)
+        y2 = pdf_h - (y * sy)
+        return [x1, y1, x2, y2]
+    if isinstance(rect, (list, tuple)) and len(rect) >= 4:
+        try:
+            return [float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3])]
+        except Exception:
+            return None
+    return None
+
+
+def _normalize_annotation_rects(annot: dict, page: Any) -> list[list[float]]:
+    """Normalize supported frontend/PDF rect formats to PDF point rectangles."""
+    rects = annot.get("rects", [])
+    if not isinstance(rects, list):
+        return []
+    normalized: list[list[float]] = []
+    for rect in rects:
+        converted = _frontend_rect_to_pdf(rect, annot, page)
+        if converted is not None:
+            normalized.append(converted)
+    return normalized
+
+
 def _build_annot_object(annot: dict, page: Any, writer: Any) -> Any | None:
     """Build a pypdf DictionaryObject for the given annotation dict."""
     try:
@@ -436,7 +488,7 @@ def _build_annot_object(annot: dict, page: Any, writer: Any) -> Any | None:
     pdf_color = ArrayObject([FloatObject(v) for v in color_vals])
 
     # Bounding rect (union of all rects, or first rect)
-    rects: list = annot.get("rects", [])
+    rects: list = _normalize_annotation_rects(annot, page)
     if rects:
         all_x1 = [r[0] for r in rects]
         all_y1 = [r[1] for r in rects]

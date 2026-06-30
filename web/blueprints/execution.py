@@ -27,6 +27,8 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
+from web.runtime_context import get_auto_execution, get_trigger_system
+
 _logger = logging.getLogger("koto.routes.execution")
 
 execution_bp = Blueprint("execution", __name__)
@@ -38,14 +40,10 @@ execution_bp = Blueprint("execution", __name__)
 
 
 def _get_auto_execution():
-    from web.app import get_auto_execution
-
     return get_auto_execution()
 
 
 def _get_trigger_system():
-    from web.app import get_trigger_system
-
     return get_trigger_system()
 
 
