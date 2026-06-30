@@ -579,7 +579,7 @@ def _extract_intent(text: str) -> Tuple[List[str], List[str]]:
 def _make_fingerprint(task_type: str, actions: List[str], objects: List[str]) -> str:
     """生成稳定的 12 位 MD5 指纹供去重。"""
     key = f"{task_type}|{','.join(sorted(actions))}|{','.join(sorted(objects))}"
-    return hashlib.md5(key.encode()).hexdigest()[:12]
+    return hashlib.md5(key.encode(), usedforsecurity=False).hexdigest()[:12]
 
 
 def _jaccard(a: set, b: set) -> float:

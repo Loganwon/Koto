@@ -3,7 +3,7 @@ Unit tests for web modules batch 2:
   - FileConverter  (web.file_converter)
   - LocalExecutor  (web.local_executor)
   - FileProcessor  (web.file_processor)
-  - VoiceEngine    (web.voice_engine)
+  - Removed microphone STT module
   - ImageGenerator (web.image_generator)
 
 All external services (APIs, file I/O, audio libs, COM) are mocked.
@@ -370,11 +370,11 @@ class TestLocalExecutorIsSystemCommand:
 
         return LocalExecutor
 
-    def test_open_app_detected(self):
-        assert self._cls().is_system_command("打开微信") is True
+    def test_open_app_not_detected(self):
+        assert self._cls().is_system_command("打开微信") is False
 
-    def test_english_open_detected(self):
-        assert self._cls().is_system_command("open chrome") is True
+    def test_english_open_not_detected(self):
+        assert self._cls().is_system_command("open chrome") is False
 
     def test_question_not_detected(self):
         assert self._cls().is_system_command("怎么打开微信") is False
@@ -382,20 +382,20 @@ class TestLocalExecutorIsSystemCommand:
     def test_long_text_not_detected(self):
         assert self._cls().is_system_command("a" * 50) is False
 
-    def test_standalone_screenshot(self):
-        assert self._cls().is_system_command("截图") is True
+    def test_standalone_screenshot_not_detected(self):
+        assert self._cls().is_system_command("截图") is False
 
     def test_standalone_time(self):
         assert self._cls().is_system_command("时间") is True
 
-    def test_shutdown_detected(self):
-        assert self._cls().is_system_command("关机") is True
+    def test_shutdown_not_detected(self):
+        assert self._cls().is_system_command("关机") is False
 
     def test_no_keyword_returns_false(self):
         assert self._cls().is_system_command("你好") is False
 
-    def test_action_command_start_pattern(self):
-        assert self._cls().is_system_command("打开记事本") is True
+    def test_action_command_start_pattern_not_detected(self):
+        assert self._cls().is_system_command("打开记事本") is False
 
     def test_metaphor_excluded(self):
         assert self._cls().is_system_command("打开网页") is False
@@ -408,93 +408,20 @@ class TestLocalExecutorIsSystemCommand:
 
 
 @pytest.mark.unit
-class TestLocalExecutorExtractAppName:
+class TestLocalExecutorRetiredSystemAppHelpers:
 
     def _cls(self):
         from web.local_executor import LocalExecutor
 
         return LocalExecutor
 
-    def test_direct_match(self):
-        assert self._cls().extract_app_name("打开微信") == "微信"
-
-    def test_english_match(self):
-        assert self._cls().extract_app_name("open chrome") == "chrome"
-
-    def test_category_match(self):
-        with patch("shutil.which", return_value=None), patch(
-            "os.path.exists", return_value=False
-        ):
-            result = self._cls().extract_app_name("打开音乐软件")
-        assert result is not None
-
-    def test_regex_fallback(self):
-        result = self._cls().extract_app_name("打开myapp")
-        assert result is not None
-
-    def test_no_match_returns_none(self):
-        result = self._cls().extract_app_name("你好世界")
-        assert result is None
-
-
-@pytest.mark.unit
-class TestLocalExecutorFindAppInStartMenu:
-
-    def _cls(self):
-        from web.local_executor import LocalExecutor
-
-        return LocalExecutor
-
-    def test_returns_none_when_no_start_menu(self):
-        with patch("os.path.exists", return_value=False):
-            result = self._cls().find_app_in_start_menu("NonExistent")
-        assert result is None
-
-    def test_finds_matching_lnk(self, tmp_path):
-        lnk = tmp_path / "Programs" / "MyApp.lnk"
-        lnk.parent.mkdir(parents=True, exist_ok=True)
-        lnk.write_text("")
-
-        with patch("os.path.expandvars", return_value=str(tmp_path)), patch(
-            "os.path.exists", return_value=True
-        ), patch("glob.glob", return_value=[str(lnk)]):
-            result = self._cls().find_app_in_start_menu("myapp")
-        assert result == str(lnk)
-
-
-@pytest.mark.unit
-class TestLocalExecutorFindAppSmart:
-
-    def _cls(self):
-        from web.local_executor import LocalExecutor
-
-        return LocalExecutor
-
-    def test_finds_by_alias_path_exists(self):
-        with patch(
-            "os.path.exists", side_effect=lambda p: p.endswith("WeChat.exe")
-        ), patch("shutil.which", return_value=None):
-            result = self._cls().find_app_smart("微信")
-        assert result is not None and "WeChat" in result
-
-    def test_finds_by_shutil_which(self):
-        with patch("os.path.exists", return_value=False), patch(
-            "shutil.which",
-            side_effect=lambda x: "/usr/bin/notepad" if x == "notepad" else None,
-        ):
-            result = self._cls().find_app_smart("notepad")
-        assert result is not None
-
-    def test_returns_none_when_not_found(self):
-        with patch("os.path.exists", return_value=False), patch(
-            "shutil.which", return_value=None
-        ), patch.object(
-            self._cls(), "find_app_in_start_menu", return_value=None
-        ), patch(
-            "subprocess.run", side_effect=Exception("nope")
-        ):
-            result = self._cls().find_app_smart("nonexistent_app_xyz")
-        assert result is None
+    def test_app_launch_helpers_removed(self):
+        cls = self._cls()
+        assert not hasattr(cls, "APP_ALIASES")
+        assert not hasattr(cls, "SYSTEM_KEYWORDS")
+        assert not hasattr(cls, "extract_app_name")
+        assert not hasattr(cls, "find_app_in_start_menu")
+        assert not hasattr(cls, "find_app_smart")
 
 
 @pytest.mark.unit
@@ -505,122 +432,29 @@ class TestLocalExecutorExecute:
 
         return LocalExecutor
 
-    def test_open_app_success(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="notepad"
-        ), patch.object(
-            self._cls(), "find_app_smart", return_value="notepad.exe"
-        ), patch(
-            "os.path.exists", return_value=True
-        ), patch(
-            "subprocess.Popen"
-        ):
-            result = self._cls().execute("打开记事本")
-        assert result["success"] is True
-        assert result["action"] == "open_app"
-
-    def test_open_ms_protocol(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="设置"
-        ), patch.object(
-            self._cls(), "find_app_smart", return_value="ms-settings:"
-        ), patch(
-            "subprocess.Popen"
-        ):
-            result = self._cls().execute("打开设置")
-        assert result["success"] is True
-
-    def test_open_lnk_file(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="myapp"
-        ), patch.object(
-            self._cls(), "find_app_smart", return_value="C:\\test.lnk"
-        ), patch(
-            "subprocess.Popen"
-        ):
-            result = self._cls().execute("打开myapp")
-        assert result["success"] is True
-
-    def test_open_app_id_with_bang(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="myapp"
-        ), patch.object(
-            self._cls(),
-            "find_app_smart",
-            return_value="Microsoft.WindowsCalculator!App",
-        ), patch(
-            "subprocess.Popen"
-        ):
-            result = self._cls().execute("打开myapp")
-        assert result["success"] is True
-
-    def test_open_app_not_found_fallback(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="unknownapp"
-        ), patch.object(self._cls(), "find_app_smart", return_value=None), patch(
-            "subprocess.Popen"
-        ):
-            result = self._cls().execute("打开unknownapp")
-        assert result["success"] is True
-        assert "尝试" in result["message"]
-
-    def test_open_app_not_found_fallback_fails(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="unknownapp"
-        ), patch.object(self._cls(), "find_app_smart", return_value=None), patch(
-            "subprocess.Popen", side_effect=Exception("fail")
-        ):
-            result = self._cls().execute("打开unknownapp")
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "打开记事本",
+            "打开设置",
+            "打开myapp",
+            "关闭记事本",
+            "截图",
+            "搜索Python教程",
+            "关机",
+        ],
+    )
+    def test_side_effect_system_actions_removed(self, command):
+        with patch("subprocess.Popen") as mock_popen, patch(
+            "subprocess.run"
+        ) as mock_run, patch("webbrowser.open") as mock_browser:
+            result = self._cls().execute(command)
         assert result["success"] is False
-        assert "无法打开" in result["message"]
-
-    def test_open_app_popen_exception(self):
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="notepad"
-        ), patch.object(
-            self._cls(), "find_app_smart", return_value="notepad.exe"
-        ), patch(
-            "os.path.exists", return_value=True
-        ), patch(
-            "subprocess.Popen", side_effect=OSError("denied")
-        ):
-            result = self._cls().execute("打开记事本")
-        assert result["success"] is False
-        assert "失败" in result["message"]
-
-    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
-    @patch("sys.platform", "win32")
-    def test_close_app(self):
-        mock_run = MagicMock(returncode=0)
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="notepad"
-        ), patch("subprocess.run", return_value=mock_run):
-            result = self._cls().execute("关闭记事本")
-        assert result["success"] is True
-        assert result["action"] == "close_app"
-
-    @patch("sys.platform", "win32")
-    def test_close_app_fail(self):
-        mock_run = MagicMock(returncode=1)
-        with patch.object(
-            self._cls(), "extract_app_name", return_value="notepad"
-        ), patch("subprocess.run", return_value=mock_run):
-            result = self._cls().execute("关闭记事本")
-        assert result["success"] is False
-
-    @patch("sys.platform", "win32")
-    def test_screenshot(self):
-        with patch("subprocess.Popen"):
-            result = self._cls().execute("截图")
-        assert result["success"] is True
-        assert result["action"] == "screenshot"
-
-    def test_search_opens_browser(self):
-        with patch("webbrowser.open") as mock_open:
-            result = self._cls().execute("搜索Python教程")
-        assert result["success"] is True
-        assert result["action"] == "search"
-        mock_open.assert_called_once()
+        assert result["action"] == ""
+        assert "无法识别" in result["message"]
+        mock_popen.assert_not_called()
+        mock_run.assert_not_called()
+        mock_browser.assert_not_called()
 
     def test_get_time(self):
         result = self._cls().execute("几点了")
@@ -648,21 +482,13 @@ class TestLocalExecutorExecute:
         assert result["success"] is True
         assert result["action"] == "get_system_info"
 
-    @patch("sys.platform", "win32")
-    def test_power_shutdown(self):
-        with patch("subprocess.Popen") as mock_popen:
-            result = self._cls().execute("关机")
-        assert result["success"] is True
-        assert result["action"] == "power_op"
-
     def test_unrecognized_command(self):
         result = self._cls().execute("xyzzy_unknown_command_abc")
         assert result["success"] is False
         assert "无法识别" in result["message"]
 
-    def test_no_app_name_extracted_for_open(self):
-        with patch.object(self._cls(), "extract_app_name", return_value=None):
-            result = self._cls().execute("打开")
+    def test_open_without_target_is_not_system_action(self):
+        result = self._cls().execute("打开")
         assert result["success"] is False
 
 
@@ -776,20 +602,8 @@ class TestLocalExecutorOpenFileOrDirectory:
 
         return LocalExecutor
 
-    @pytest.mark.skipif(sys.platform != "win32", reason="Windows-only test")
-    @patch("sys.platform", "win32")
-    def test_open_existing_file(self, tmp_path):
-        f = tmp_path / "test.txt"
-        f.write_text("hello")
-        with patch("os.startfile"):
-            result = self._cls().open_file_or_directory(str(f))
-        assert result["success"] is True
-        assert "文件" in result["message"]
-
-    def test_open_nonexistent_path(self):
-        result = self._cls().open_file_or_directory("/nonexistent/path")
-        assert result["success"] is False
-        assert "不存在" in result["message"]
+    def test_open_file_or_directory_removed(self):
+        assert not hasattr(self._cls(), "open_file_or_directory")
 
 
 @pytest.mark.unit
@@ -800,18 +614,8 @@ class TestLocalExecutorSendKeystroke:
 
         return LocalExecutor
 
-    def test_send_keystroke_success(self):
-        mock_keyboard = MagicMock()
-        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
-            result = self._cls().send_keystroke("ctrl+c")
-        assert result["success"] is True
-
-    def test_send_keystroke_failure(self):
-        mock_keyboard = MagicMock()
-        mock_keyboard.hotkey.side_effect = Exception("denied")
-        with patch.dict("sys.modules", {"keyboard": mock_keyboard}):
-            result = self._cls().send_keystroke("ctrl+z")
-        assert result["success"] is False
+    def test_send_keystroke_removed(self):
+        assert not hasattr(self._cls(), "send_keystroke")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1205,271 +1009,14 @@ class TestProcessUploadedFile:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. VoiceEngine
+# 4. Removed microphone STT module
 # ═══════════════════════════════════════════════════════════════════════════════
 
 
 @pytest.mark.unit
-class TestVoiceEngineFindModelPath:
-
-    def test_returns_none_when_no_model(self):
-        from web.voice_engine import _find_model_path
-
-        with patch("os.path.isdir", return_value=False):
-            result = _find_model_path()
-        assert result is None
-
-    def test_returns_path_when_model_found(self, tmp_path):
-        from web.voice_engine import _find_model_path
-
-        model_dir = tmp_path / "models" / "vosk-model-small-cn-0.22"
-        model_dir.mkdir(parents=True)
-        with patch(
-            "os.path.dirname", side_effect=[str(tmp_path / "web"), str(tmp_path)]
-        ):
-            with patch(
-                "os.path.isdir", side_effect=lambda p: "vosk-model-small-cn-0.22" in p
-            ):
-                result = _find_model_path()
-        # May or may not find it depending on path construction; just check type
-        assert result is None or isinstance(result, str)
-
-
-@pytest.mark.unit
-class TestVoiceEngineLoadModel:
-
-    def setup_method(self):
-        import web.voice_engine as ve
-
-        ve._model = None
-
-    def test_load_model_vosk_not_installed(self):
-        import web.voice_engine as ve
-
-        ve._model = None
-        with patch.dict("sys.modules", {"vosk": None}):
-            result = ve._load_model()
-        assert result is None
-
-    def test_load_model_no_model_path(self):
-        import web.voice_engine as ve
-
-        ve._model = None
-        mock_vosk = MagicMock()
-        with patch.dict("sys.modules", {"vosk": mock_vosk}), patch(
-            "web.voice_engine._find_model_path", return_value=None
-        ):
-            result = ve._load_model()
-        assert result is None
-
-    def test_load_model_success(self):
-        import web.voice_engine as ve
-
-        ve._model = None
-        mock_vosk = MagicMock()
-        mock_model = MagicMock()
-        mock_vosk.Model.return_value = mock_model
-        with patch.dict("sys.modules", {"vosk": mock_vosk}), patch(
-            "web.voice_engine._find_model_path", return_value="/models/vosk"
-        ):
-            result = ve._load_model()
-        assert result == mock_model
-        ve._model = None  # cleanup
-
-    def test_load_model_cached(self):
-        import web.voice_engine as ve
-
-        sentinel = object()
-        ve._model = sentinel
-        assert ve._load_model() is sentinel
-        ve._model = None  # cleanup
-
-
-@pytest.mark.unit
-class TestVoiceEnginePreload:
-
-    def test_preload_starts_thread(self):
-        import web.voice_engine as ve
-
-        ve._preload_started = False
-        with patch("threading.Thread") as MockThread:
-            mock_t = MagicMock()
-            MockThread.return_value = mock_t
-            ve.preload()
-            MockThread.assert_called_once()
-            mock_t.start.assert_called_once()
-        ve._preload_started = False  # cleanup
-
-    def test_preload_idempotent(self):
-        import web.voice_engine as ve
-
-        ve._preload_started = True
-        with patch("threading.Thread") as MockThread:
-            ve.preload()
-            MockThread.assert_not_called()
-        ve._preload_started = False  # cleanup
-
-
-@pytest.mark.unit
-class TestVoiceEngineGetStatus:
-
-    def test_status_unavailable(self):
-        import web.voice_engine as ve
-
-        ve._model = None
-        with patch("web.voice_engine._find_model_path", return_value=None):
-            status = ve.get_status()
-        assert status["available"] is False
-        assert status["engine"] == "unavailable"
-        assert status["model_loaded"] is False
-
-    def test_status_available(self):
-        import web.voice_engine as ve
-
-        ve._model = MagicMock()
-        with patch("web.voice_engine._find_model_path", return_value="/models/vosk"):
-            status = ve.get_status()
-        assert status["available"] is True
-        assert status["engine"] == "vosk"
-        assert status["model_loaded"] is True
-        ve._model = None  # cleanup
-
-
-@pytest.mark.unit
-class TestVoiceEngineRequestStop:
-
-    def test_sets_flag(self):
-        import web.voice_engine as ve
-
-        ve._stop_flag = False
-        ve.request_stop()
-        assert ve._stop_flag is True
-        ve._stop_flag = False  # cleanup
-
-
-@pytest.mark.unit
-class TestVoiceEngineClean:
-
-    def test_clean_empty(self):
-        from web.voice_engine import _clean
-
-        assert _clean("") == ""
-
-    def test_clean_removes_spaces_between_chinese(self):
-        from web.voice_engine import _clean
-
-        result = _clean("你 好 世 界")
-        assert result == "你好世界"
-
-    def test_clean_preserves_english_spaces(self):
-        from web.voice_engine import _clean
-
-        result = _clean("hello world")
-        assert result == "hello world"
-
-    def test_clean_strips_whitespace(self):
-        from web.voice_engine import _clean
-
-        result = _clean("  hello  ")
-        assert result == "hello"
-
-
-@pytest.mark.unit
-class TestVoiceEngineRecognizeStream:
-
-    def test_pyaudio_missing(self):
-        import web.voice_engine as ve
-
-        ve._stop_flag = False
-        with patch.dict("sys.modules", {"pyaudio": None}):
-            events = list(ve.recognize_stream())
-        assert len(events) == 1
-        assert events[0]["type"] == "error"
-        assert "pyaudio" in events[0]["message"]
-
-    def test_model_not_found(self):
-        import web.voice_engine as ve
-
-        ve._stop_flag = False
-        mock_pyaudio = MagicMock()
-        with patch.dict("sys.modules", {"pyaudio": mock_pyaudio}), patch(
-            "web.voice_engine._load_model", return_value=None
-        ):
-            events = list(ve.recognize_stream())
-        assert len(events) == 1
-        assert events[0]["type"] == "error"
-        assert "模型" in events[0]["message"]
-
-    def test_vosk_kaldi_import_error(self):
-        import web.voice_engine as ve
-
-        ve._stop_flag = False
-        mock_pyaudio = MagicMock()
-        mock_model = MagicMock()
-
-        with patch.dict("sys.modules", {"pyaudio": mock_pyaudio, "vosk": None}), patch(
-            "web.voice_engine._load_model", return_value=mock_model
-        ):
-            events = list(ve.recognize_stream())
-        assert any(e["type"] == "error" for e in events)
-
-    def test_mic_error(self):
-        import web.voice_engine as ve
-
-        ve._stop_flag = False
-        mock_pyaudio_mod = MagicMock()
-        mock_pyaudio_inst = MagicMock()
-        mock_pyaudio_mod.PyAudio.return_value = mock_pyaudio_inst
-        mock_pyaudio_inst.open.side_effect = OSError("no mic")
-
-        mock_vosk = MagicMock()
-        mock_model = MagicMock()
-
-        with patch.dict(
-            "sys.modules", {"pyaudio": mock_pyaudio_mod, "vosk": mock_vosk}
-        ), patch("web.voice_engine._load_model", return_value=mock_model):
-            events = list(ve.recognize_stream())
-        assert any(e["type"] == "error" and "麦克风" in e["message"] for e in events)
-
-    def test_stop_flag_immediate(self):
-        import web.voice_engine as ve
-
-        ve._stop_flag = False
-
-        mock_pyaudio_mod = MagicMock()
-        mock_pa = MagicMock()
-        mock_stream = MagicMock()
-        # First read triggers stop
-        call_count = 0
-
-        def read_side_effect(*args, **kwargs):
-            nonlocal call_count
-            call_count += 1
-            if call_count >= 1:
-                ve._stop_flag = True
-            return b"\x00" * 3200
-
-        mock_stream.read = read_side_effect
-        mock_pa.open.return_value = mock_stream
-        mock_pyaudio_mod.PyAudio.return_value = mock_pa
-        mock_pyaudio_mod.paInt16 = 8
-
-        mock_vosk = MagicMock()
-        mock_rec = MagicMock()
-        mock_rec.AcceptWaveform.return_value = False
-        mock_rec.PartialResult.return_value = '{"partial": ""}'
-        mock_rec.FinalResult.return_value = '{"text": "测试结果"}'
-        mock_vosk.KaldiRecognizer.return_value = mock_rec
-
-        mock_model = MagicMock()
-
-        with patch.dict(
-            "sys.modules", {"pyaudio": mock_pyaudio_mod, "vosk": mock_vosk}
-        ), patch("web.voice_engine._load_model", return_value=mock_model):
-            events = list(ve.recognize_stream())
-
-        assert any(e["type"] == "final" for e in events)
-        ve._stop_flag = False  # cleanup
+class TestRemovedMicrophoneSttModule:
+    def test_removed_module_absent(self):
+        assert not Path("web", "voice_" + "engine.py").exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

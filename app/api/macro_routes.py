@@ -67,6 +67,12 @@ def macro_pending():
 # ══════════════════════════════════════════════════════════════════════════════
 
 
+@macro_bp.post("/confirm/")
+def macro_confirm_missing_id():
+    """Return a clear error when the frontend calls the confirm endpoint without an id."""
+    return _err("suggestion_id 不能为空")
+
+
 @macro_bp.post("/confirm/<suggestion_id>")
 def macro_confirm(suggestion_id: str):
     """
@@ -100,6 +106,12 @@ def macro_confirm(suggestion_id: str):
 # ══════════════════════════════════════════════════════════════════════════════
 # POST /api/macro/dismiss/<id>
 # ══════════════════════════════════════════════════════════════════════════════
+
+
+@macro_bp.post("/dismiss/")
+def macro_dismiss_missing_id():
+    """Return a clear error when the frontend calls the dismiss endpoint without an id."""
+    return _err("suggestion_id 不能为空")
 
 
 @macro_bp.post("/dismiss/<suggestion_id>")

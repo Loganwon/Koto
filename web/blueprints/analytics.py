@@ -22,6 +22,13 @@ Routes:
 
 from flask import Blueprint, Response, jsonify, request
 
+from web.runtime_context import (
+    get_behavior_monitor,
+    get_insight_reporter,
+    get_suggestion_engine,
+    get_trigger_system,
+)
+
 analytics_bp = Blueprint("analytics", __name__)
 
 
@@ -29,26 +36,18 @@ analytics_bp = Blueprint("analytics", __name__)
 
 
 def _get_behavior_monitor():
-    from web.app import get_behavior_monitor
-
     return get_behavior_monitor()
 
 
 def _get_suggestion_engine():
-    from web.app import get_suggestion_engine
-
     return get_suggestion_engine()
 
 
 def _get_insight_reporter():
-    from web.app import get_insight_reporter
-
     return get_insight_reporter()
 
 
 def _get_trigger_system():
-    from web.app import get_trigger_system
-
     return get_trigger_system()
 
 

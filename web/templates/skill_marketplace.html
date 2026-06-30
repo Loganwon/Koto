@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
   <title>Koto Skill 库 — 风格市场</title>
   <link rel="stylesheet" href="/static/css/skill_marketplace.css?v=20260326v1">
 </head>
@@ -653,6 +654,6 @@
 <!-- ═══════════ Toast Container ════════════ -->
 <div id="sm-toast-container"></div>
 
-<script src="/static/js/skill_marketplace.js?v=20260322c"></script>
+<script src="/static/js/build/skill-marketplace-bundle.js?v=20260616"></script>
 </body>
 </html>

@@ -68,6 +68,16 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "6–8 GB 内存，流畅度与效果兼顾，日常任务优选",
     },
     {
+        "tag": "qwen3:1.7b",
+        "name": "Qwen 3 1.7B",
+        "badge": "轻量中文",
+        "vram": 2.0,
+        "ram": 6,
+        "size_gb": 1.4,
+        "tier": "light",
+        "desc": "轻量中文任务与路由表现更稳，适合 6–8 GB 内存",
+    },
+    {
         "tag": "gemma3:4b",
         "name": "Gemma 3 4B",
         "badge": "标准",
@@ -78,6 +88,16 @@ MODEL_CATALOG: List[Dict] = [
         "desc": "8 GB+ 内存，效果优秀，推荐大多数用户",
     },
     {
+        "tag": "qwen3:4b",
+        "name": "Qwen 3 4B",
+        "badge": "中文标准",
+        "vram": 4.0,
+        "ram": 8,
+        "size_gb": 2.6,
+        "tier": "standard",
+        "desc": "8 GB+ 内存，中文分类和日常对话更适配 Koto",
+    },
+    {
         "tag": "qwen2.5:7b",
         "name": "Qwen 2.5 7B",
         "badge": "中文强化",
@@ -86,6 +106,16 @@ MODEL_CATALOG: List[Dict] = [
         "size_gb": 4.7,
         "tier": "powerful",
         "desc": "12 GB+ 内存，中文理解出色，复杂任务首选",
+    },
+    {
+        "tag": "qwen3:8b",
+        "name": "Qwen 3 8B",
+        "badge": "中文高性能",
+        "vram": 7.0,
+        "ram": 16,
+        "size_gb": 5.2,
+        "tier": "highend",
+        "desc": "16 GB 内存 / NVIDIA 8 GB 显卡，Koto 本地回复优选",
     },
     {
         "tag": "llama3.1:8b",
@@ -287,6 +317,65 @@ def recommend_models(info: Dict) -> List[Dict]:
     return out or [MODEL_CATALOG[0]]
 
 
+def choose_best_model(info: Dict, candidates: Optional[List[Dict]] = None) -> Dict:
+    """Pick the default model for Koto's local file-assistant workflow."""
+    usable = candidates or recommend_models(info)
+    if not usable:
+        return MODEL_CATALOG[0]
+
+    ram = float(info.get("ram_gb") or 0)
+    vram = float(info.get("gpu_vram_gb") or 0)
+    cpu_cores = int(info.get("cpu_cores") or 0)
+
+    def score(model: Dict) -> float:
+        tier_score = {
+            "ultralight": 10,
+            "light": 30,
+            "standard": 55,
+            "powerful": 72,
+            "highend": 82,
+            "flagship": 88,
+        }.get(model.get("tier"), 40)
+        text = f"{model.get('tag', '')} {model.get('name', '')}".lower()
+        if "qwen" in text:
+            tier_score += 12
+        if "qwen3" in text:
+            tier_score += 4
+
+        ram_margin = ram - float(model.get("ram") or 0)
+        vram_margin = vram - float(model.get("vram") or 0)
+        if ram_margin < 2 and vram_margin < 1:
+            tier_score -= 18
+        elif ram_margin >= 6 or vram_margin >= 2:
+            tier_score += 6
+
+        size_gb = float(model.get("size_gb") or 0)
+        if ram < 12 and size_gb > 4:
+            tier_score -= 12
+        if cpu_cores and cpu_cores <= 4 and size_gb > 3:
+            tier_score -= 8
+
+        # 24 GB+ machines can use larger models, but avoid making a huge model
+        # the default unless there is enough headroom for repeated office tasks.
+        if model.get("tier") == "flagship" and not (ram >= 28 or vram >= 12):
+            tier_score -= 10
+
+        return tier_score
+
+    return max(usable, key=score)
+
+
+def describe_model_recommendation(info: Dict, model: Dict) -> str:
+    ram = float(info.get("ram_gb") or 0)
+    vram = float(info.get("gpu_vram_gb") or 0)
+    gpu_name = str(info.get("gpu_name") or "").strip()
+    gpu_part = f"，显卡 {gpu_name} / {vram:g} GB 显存" if vram else ""
+    return (
+        f"推荐 {model['name']}：基于 {ram:g} GB 内存{gpu_part}，"
+        "优先兼顾中文文件任务、响应速度和本机余量。"
+    )
+
+
 # ─────────────────────────────────────────────────────────────
 #  Ollama 操作
 # ─────────────────────────────────────────────────────────────
@@ -465,6 +554,40 @@ def save_result(tag: str):
         }
         RESULT_FILE.write_text(
             json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+
+        config_dir = APP_DIR / "config"
+        config_dir.mkdir(parents=True, exist_ok=True)
+        (config_dir / "model_setup_done.json").write_text(
+            json.dumps(
+                {
+                    "done": True,
+                    "mode": "local",
+                    "model": tag,
+                    "timestamp": data["installed_at"],
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+
+        settings_path = config_dir / "user_settings.json"
+        settings = {}
+        if settings_path.exists():
+            try:
+                settings = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+            except Exception:
+                settings = {}
+        if not isinstance(settings, dict):
+            settings = {}
+        settings["model_mode"] = "local"
+        settings["local_model"] = tag
+        ai_settings = settings.setdefault("ai", {})
+        if isinstance(ai_settings, dict):
+            ai_settings["use_local_only"] = False
+        settings_path.write_text(
+            json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
         )
     except Exception:
         pass
@@ -697,9 +820,20 @@ def run_gui():
         side="left"
     )
     rec_hint = tk.Label(
-        p2_top, text="✦ 标记为根据您的硬件自动推荐", font=F_SMALL, bg=BG, fg=MUTED
+        p2_top, text="✦ 已按当前配置选出默认推荐", font=F_SMALL, bg=BG, fg=MUTED
     )
     rec_hint.pack(side="right")
+    rec_detail = tk.Label(
+        p2,
+        text="",
+        font=F_SMALL,
+        bg=BG,
+        fg=MUTED,
+        anchor="w",
+        justify="left",
+        wraplength=820,
+    )
+    rec_detail.pack(fill="x", padx=24, pady=(0, 8))
 
     # 模型列表区
     p2_list_frame = tk.Frame(p2, bg=BG)
@@ -713,8 +847,11 @@ def run_gui():
             w.destroy()
         _model_radio.clear()
 
-        # 按 tier 排列（旗舰到轻量）
-        ordered = list(reversed(candidates))
+        best = choose_best_model(_sys_info, candidates)
+        best_tag = best.get("tag")
+        ordered = [m for m in candidates if m.get("tag") == best_tag]
+        ordered.extend(reversed([m for m in candidates if m.get("tag") != best_tag]))
+        rec_detail.config(text=describe_model_recommendation(_sys_info, best))
 
         canvas = tk.Canvas(p2_list_frame, bg=BG, highlightthickness=0)
         scrollbar = tk.Scrollbar(
@@ -729,15 +866,15 @@ def run_gui():
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        # 设置默认选中最高推荐（候选列表最后一个）
-        if ordered and not selected_model.get():
+        # 设置默认选中最适合 Koto 当前配置的模型
+        if ordered:
             selected_model.set(ordered[0]["tag"])
-        elif not ordered:
+        else:
             selected_model.set("")
 
         for m in ordered:
             is_installed = m["tag"] in installed_tags
-            is_rec = m == ordered[0]  # 最高规格推荐
+            is_rec = m["tag"] == best_tag
             color = TIER_COLOR.get(m["tier"], MUTED)
 
             card = tk.Frame(scroll_frame, bg=PANEL, pady=0)

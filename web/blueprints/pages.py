@@ -8,7 +8,6 @@ Routes:
   GET /app                     — app_main
   GET /file-network            — file_network
   GET /knowledge-graph         — knowledge_graph_page
-  GET /test_upload             — test_upload
   GET /skills                  — skill_marketplace
   GET /skill-marketplace       — skill_marketplace
   GET /monitoring-dashboard    — monitoring_dashboard
@@ -17,13 +16,13 @@ Routes:
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
   GET /notebook                — notebook_ui
-  GET /editor                  — editor_page
-  GET /editor/assets/<file>    — editor_assets
+  GET /workspace               — unified_workspace_redirect
+  GET /workspace-assistant     — unified_workspace_redirect
 """
 
 import os
 
-from flask import Blueprint, Response, make_response, render_template, send_from_directory
+from flask import Blueprint, Response, make_response, redirect, render_template, request, send_from_directory, url_for
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -31,7 +30,11 @@ pages_bp = Blueprint("pages", __name__)
 def _get_initial_theme() -> str:
     """从已保存的用户设置读取初始主题，默认 light。"""
     try:
-        from web.app import settings_manager
+        from web.runtime_context import get_settings_manager
+
+        settings_manager = get_settings_manager()
+        if settings_manager is None:
+            return "light"
         theme = settings_manager.get("appearance", "theme")
         return theme if theme else "light"
     except Exception:
@@ -70,11 +73,6 @@ def file_network() -> str:
 def knowledge_graph_page() -> str:
     """知识图谱可视化界面"""
     return render_template("knowledge_graph.html")
-
-
-@pages_bp.route("/test_upload")
-def test_upload() -> str:
-    return render_template("test_upload.html")
 
 
 @pages_bp.route("/edit-ppt/<session_id>")
@@ -130,10 +128,14 @@ def notebook_ui() -> str:
     return render_template("notebook_lm.html")
 
 
+@pages_bp.route("/workspace")
 @pages_bp.route("/workspace-assistant")
 def workspace_assistant_page() -> Response:
-    """全格式 AI 原生工作区"""
-    resp = make_response(render_template("workspace_assistant.html"))
+    """Legacy workspace URLs kept as compatibility aliases for the unified app."""
+    target = url_for("pages.index")
+    if request.query_string:
+        target = f"{target}?{request.query_string.decode('utf-8', errors='ignore')}"
+    resp = redirect(target, code=302)
     resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
     resp.headers["Pragma"] = "no-cache"
     return resp
@@ -143,22 +145,4 @@ def workspace_assistant_page() -> Response:
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
-
-
-_UNIVER_DIST = os.path.join(os.path.dirname(__file__), os.pardir, "static", "univer-dist")
-
-
-@pages_bp.route("/editor")
-def editor_page() -> Response:
-    """文件助手主页 — 服务 Vite 构建产物 (static/univer-dist/index.html)"""
-    resp = make_response(send_from_directory(_UNIVER_DIST, "index.html"))
-    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-    resp.headers["Pragma"] = "no-cache"
-    return resp
-
-
-@pages_bp.route("/editor/assets/<path:filename>")
-def editor_assets(filename: str) -> Response:
-    """文件助手静态资源 — JS/CSS 束文件"""
-    return send_from_directory(os.path.join(_UNIVER_DIST, "assets"), filename)
 

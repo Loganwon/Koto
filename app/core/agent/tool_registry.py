@@ -12,6 +12,88 @@ logger = logging.getLogger(__name__)
 
 # 单个工具调用的最大允许执行秒数（超时后返回错误，不挂死 agent 循环）
 _TOOL_TIMEOUT: int = 60
+_TOOL_TIMEOUT_OVERRIDES: Dict[str, int] = {
+    # Office writes can legitimately take longer on large files. If the generic
+    # 60s timeout fires while python-docx is still saving, the background worker
+    # may finish anyway and a model retry can duplicate the write.
+    "insert_excel_as_docx_table": 180,
+    "insert_image_into_docx": 120,
+    "design_pptx_theme_layout": 120,
+}
+
+_ARG_ALIASES = {
+    "path": (
+        "file_path",
+        "filepath",
+        "xlsx_path",
+        "docx_path",
+        "pptx_path",
+        "pdf_path",
+    ),
+    "target_path": (
+        "target",
+        "target_file",
+        "destination",
+        "destination_path",
+        "dest",
+        "dst",
+        "dst_path",
+        "output_path",
+        "docx_path",
+        "pptx_path",
+    ),
+    "source_path": (
+        "source",
+        "source_file",
+        "src",
+        "src_path",
+        "input_path",
+        "xlsx_path",
+        "pdf_path",
+    ),
+    "destination": (
+        "destination_path",
+        "dest",
+        "dst",
+        "dst_path",
+        "target_path",
+        "output_path",
+    ),
+    "source": ("source_path", "source_file", "src", "src_path", "input_path"),
+    "file_paths": ("paths", "path_list"),
+}
+
+
+def _normalize_tool_args(func: Callable, tool_args: Dict[str, Any]) -> Dict[str, Any]:
+    normalized = dict(tool_args or {})
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return normalized
+
+    parameters = signature.parameters
+    accepts_var_kwargs = any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    for canonical_name, aliases in _ARG_ALIASES.items():
+        if canonical_name not in parameters or canonical_name in normalized:
+            continue
+        for alias in aliases:
+            if alias in normalized:
+                normalized[canonical_name] = normalized.pop(alias)
+                break
+    if accepts_var_kwargs:
+        return normalized
+    known = {name: value for name, value in normalized.items() if name in parameters}
+    dropped = [name for name in normalized if name not in parameters]
+    if dropped:
+        logger.debug(
+            "_normalize_tool_args: dropped unknown kwargs for %s: %s",
+            getattr(func, "__name__", func),
+            dropped,
+        )
+    return known
 
 
 class ToolRegistry:
@@ -99,14 +181,21 @@ class ToolRegistry:
             raise ValueError(f"Tool '{tool_name}' not found.")
 
         try:
-            with ThreadPoolExecutor(max_workers=1) as _pool:
-                _future = _pool.submit(func, **tool_args)
-                try:
-                    return _future.result(timeout=_TOOL_TIMEOUT)
-                except _FuturesTimeout:
-                    raise RuntimeError(
-                        f"Tool '{tool_name}' timed out after {_TOOL_TIMEOUT}s"
-                    )
+            normalized_args = _normalize_tool_args(func, tool_args)
+            timeout_seconds = _TOOL_TIMEOUT_OVERRIDES.get(tool_name, _TOOL_TIMEOUT)
+            _pool = ThreadPoolExecutor(max_workers=1)
+            _future = _pool.submit(func, **normalized_args)
+            try:
+                return _future.result(timeout=timeout_seconds)
+            except _FuturesTimeout:
+                _future.cancel()
+                _pool.shutdown(wait=False, cancel_futures=True)
+                raise RuntimeError(
+                    f"Tool '{tool_name}' timed out after {timeout_seconds}s"
+                )
+            finally:
+                if _future.done():
+                    _pool.shutdown(wait=True)
         except (ValueError, RuntimeError):
             raise
         except TypeError as e:

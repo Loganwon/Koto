@@ -4,7 +4,7 @@
 Phase 5b: AlertingPlugin
 
 Provides alert management tools for the unified agent.
-Integrates with AlertManager for email and webhook notifications.
+Integrates with AlertManager for local log notifications.
 """
 
 import logging
@@ -21,8 +21,6 @@ class AlertingPlugin(AgentPlugin):
     Alerting plugin for system monitoring.
 
     Tools:
-    - configure_email_alerts: Setup email alerting
-    - add_webhook_alert: Register webhook endpoint
     - create_alert_rule: Add alert rule
     - disable_alert_rule: Disable rule
     - enable_alert_rule: Enable rule
@@ -39,7 +37,7 @@ class AlertingPlugin(AgentPlugin):
     @property
     def description(self) -> str:
         """Plugin description."""
-        return "Email and webhook alerting for system events"
+        return "Local log alerting for system events"
 
     def __init__(self):
         """Initialize alerting plugin."""
@@ -48,62 +46,6 @@ class AlertingPlugin(AgentPlugin):
     def get_tools(self) -> List[Dict[str, Any]]:
         """Return tool definitions."""
         return [
-            {
-                "name": "configure_email_alerts",
-                "func": self.configure_email_alerts,
-                "description": "Configure email alerting with SMTP settings",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "smtp_server": {
-                            "type": "STRING",
-                            "description": "SMTP server address (e.g., smtp.gmail.com)",
-                        },
-                        "smtp_port": {
-                            "type": "INTEGER",
-                            "description": "SMTP port (typically 587 for TLS)",
-                        },
-                        "sender_email": {
-                            "type": "STRING",
-                            "description": "Email address to send from",
-                        },
-                        "sender_password": {
-                            "type": "STRING",
-                            "description": "Email password or app-specific token",
-                        },
-                        "recipients": {
-                            "type": "ARRAY",
-                            "description": "List of recipient email addresses",
-                        },
-                    },
-                    "required": [
-                        "smtp_server",
-                        "smtp_port",
-                        "sender_email",
-                        "sender_password",
-                        "recipients",
-                    ],
-                },
-            },
-            {
-                "name": "add_webhook_alert",
-                "func": self.add_webhook_alert,
-                "description": "Register webhook endpoint for alerts (Slack, Teams, Discord, etc.)",
-                "parameters": {
-                    "type": "OBJECT",
-                    "properties": {
-                        "webhook_name": {
-                            "type": "STRING",
-                            "description": "Name for this webhook (e.g., 'slack', 'teams')",
-                        },
-                        "webhook_url": {
-                            "type": "STRING",
-                            "description": "Full webhook URL to receive alerts",
-                        },
-                    },
-                    "required": ["webhook_name", "webhook_url"],
-                },
-            },
             {
                 "name": "create_alert_rule",
                 "func": self.create_alert_rule,
@@ -125,7 +67,7 @@ class AlertingPlugin(AgentPlugin):
                         },
                         "alert_channels": {
                             "type": "ARRAY",
-                            "description": "Delivery channels: email, webhook, log",
+                            "description": "Delivery channels. Only 'log' is supported.",
                         },
                     },
                     "required": [
@@ -203,43 +145,6 @@ class AlertingPlugin(AgentPlugin):
             },
         ]
 
-    def configure_email_alerts(
-        self,
-        smtp_server: str,
-        smtp_port: int,
-        sender_email: str,
-        sender_password: str,
-        recipients: List[str],
-    ) -> str:
-        """Configure email alerting."""
-        try:
-            result = self.alert_manager.configure_email(
-                smtp_server=smtp_server,
-                smtp_port=smtp_port,
-                sender_email=sender_email,
-                sender_password=sender_password,
-                recipients=recipients,
-            )
-
-            if result:
-                return f"Email alerting configured successfully. Recipients: {', '.join(recipients)}"
-            else:
-                return "Failed to configure email alerting"
-        except Exception as e:
-            return f"Error configuring email alerts: {str(e)}"
-
-    def add_webhook_alert(self, webhook_name: str, webhook_url: str) -> str:
-        """Add webhook alert."""
-        try:
-            result = self.alert_manager.add_webhook(name=webhook_name, url=webhook_url)
-
-            if result:
-                return f"Webhook '{webhook_name}' registered successfully"
-            else:
-                return f"Failed to register webhook '{webhook_name}'"
-        except Exception as e:
-            return f"Error adding webhook: {str(e)}"
-
     def create_alert_rule(
         self,
         rule_name: str,
@@ -252,12 +157,10 @@ class AlertingPlugin(AgentPlugin):
             # Convert channel strings to AlertChannel enums
             channels = []
             for ch in alert_channels:
-                if ch.lower() == "email":
-                    channels.append(AlertChannel.EMAIL)
-                elif ch.lower() == "webhook":
-                    channels.append(AlertChannel.WEBHOOK)
-                elif ch.lower() == "log":
+                if ch.lower() == "log":
                     channels.append(AlertChannel.LOG)
+            if not channels:
+                channels = [AlertChannel.LOG]
 
             rule = AlertRule(
                 name=rule_name,
@@ -357,50 +260,16 @@ class AlertingPlugin(AgentPlugin):
         else:
             return f"Failed to send test alert for rule '{rule_name}'"
 
-    def _configure_email_alerts(self, params: Dict[str, Any]) -> str:
-        """Configure email alerting."""
-        try:
-            result = self.alert_manager.configure_email(
-                smtp_server=params["smtp_server"],
-                smtp_port=params["smtp_port"],
-                sender_email=params["sender_email"],
-                sender_password=params["sender_password"],
-                recipients=params["recipients"],
-            )
-
-            if result:
-                return f"Email alerting configured successfully. Recipients: {', '.join(params['recipients'])}"
-            else:
-                return "Failed to configure email alerting"
-        except Exception as e:
-            return f"Error configuring email alerts: {str(e)}"
-
-    def _add_webhook_alert(self, params: Dict[str, Any]) -> str:
-        """Add webhook alert."""
-        try:
-            result = self.alert_manager.add_webhook(
-                name=params["webhook_name"], url=params["webhook_url"]
-            )
-
-            if result:
-                return f"Webhook '{params['webhook_name']}' registered successfully"
-            else:
-                return f"Failed to register webhook '{params['webhook_name']}'"
-        except Exception as e:
-            return f"Error adding webhook: {str(e)}"
-
     def _create_alert_rule(self, params: Dict[str, Any]) -> str:
         """Create alert rule."""
         try:
             # Convert channel strings to AlertChannel enums
             channels = []
             for ch in params["alert_channels"]:
-                if ch.lower() == "email":
-                    channels.append(AlertChannel.EMAIL)
-                elif ch.lower() == "webhook":
-                    channels.append(AlertChannel.WEBHOOK)
-                elif ch.lower() == "log":
+                if ch.lower() == "log":
                     channels.append(AlertChannel.LOG)
+            if not channels:
+                channels = [AlertChannel.LOG]
 
             rule = AlertRule(
                 name=params["rule_name"],

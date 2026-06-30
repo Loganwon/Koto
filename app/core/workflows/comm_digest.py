@@ -138,10 +138,7 @@ class CommDigest(WorkflowExecutor):
             return
 
         action_items = structured.get("action_items", [])
-        yield sse_step_done(
-            "extract",
-            f"🤖 提取到 {len(action_items)} 条待办事项"
-        )
+        yield sse_step_done("extract", f"🤖 提取到 {len(action_items)} 条待办事项")
 
         # ── Step 3: 根据输出模式生成结果 ──────────────────────────────
         if output_mode == "docx":
@@ -172,7 +169,9 @@ class CommDigest(WorkflowExecutor):
     def _output_excel(self, structured, action_items, model_mode):
         """生成彩色待办事项 Excel 表格。"""
         if not action_items:
-            yield sse_output("markdown", "# 沟通纪要\n\n未发现明确的待办事项。", "提取结果")
+            yield sse_output(
+                "markdown", "# 沟通纪要\n\n未发现明确的待办事项。", "提取结果"
+            )
             return
 
         yield sse_step_start("build_output", "📊 生成任务表格…")
@@ -205,6 +204,7 @@ class CommDigest(WorkflowExecutor):
     def _parse_thread(self, file_path: str) -> str:
         """解析邮件/聊天文件。.eml 额外处理 headers。"""
         from pathlib import Path
+
         ext = Path(file_path).suffix.lower()
 
         if ext == ".eml":
@@ -228,7 +228,9 @@ class CommDigest(WorkflowExecutor):
                     text_parts = []
                     for part, enc in decoded:
                         if isinstance(part, bytes):
-                            text_parts.append(part.decode(enc or "utf-8", errors="replace"))
+                            text_parts.append(
+                                part.decode(enc or "utf-8", errors="replace")
+                            )
                         else:
                             text_parts.append(part)
                     parts.append(f"{h}: {''.join(text_parts)}")
@@ -273,8 +275,8 @@ class CommDigest(WorkflowExecutor):
     def _build_docx(self, data: dict, output_path: str, lang: str) -> None:
         """用 python-docx 构建结构化纪要文档。"""
         from docx import Document
-        from docx.shared import Pt, RGBColor
         from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt, RGBColor
 
         doc = Document()
 

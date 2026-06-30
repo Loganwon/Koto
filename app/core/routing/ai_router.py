@@ -24,10 +24,10 @@ class AIRouter:
     # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
     _ROUTER_MODEL_CHAIN: list = [
         "gemini-3-flash-preview",  # 首选：当前主力快速模型
-        "gemini-2.5-flash",        # 稳定快速回退
-        "gemini-2.5-flash-lite",   # 轻量回退
-        "gemini-2.5-pro",          # 质量兜底
-        "gemini-3-pro-preview",    # 最后再尝试慢速 preview pro
+        "gemini-2.5-flash",  # 稳定快速回退
+        "gemini-2.5-flash-lite",  # 轻量回退
+        "gemini-2.5-pro",  # 质量兜底
+        "gemini-3-pro-preview",  # 最后再尝试慢速 preview pro
     ]
 
     # 判定模型不可用的错误信号词
@@ -103,7 +103,7 @@ class AIRouter:
 - RESEARCH: 用户需要深度系统性研究分析（长篇报告）
 - CODER: 用户要你写代码/编程/调试，或要制作数据图表/可视化图（折线图/柱状图/饼图/散点图/数据图等）
 - FILE_SEARCH: 用户要找某个文件/帮我找xx文件/打开某个文件/全盘扫描/扫描电脑
-- SYSTEM: 用户命令你打开/关闭某个具体应用程序
+- SYSTEM: 用户查询系统时间、日期、CPU/内存/磁盘或系统状态
 - AGENT: 用户要你执行工具操作（发微信/设提醒/浏览器控制/帮我买票订票）
 - WEB_SEARCH: 用户询问需要实时数据的问题（天气/股价/新闻/比赛/票务查询/出行时刻/商品现价/原油价格/黄金价格/期货价格/汇率/加密货币价格）
 - CHAT: 闲聊、知识问答、概念解释、教程咨询
@@ -111,7 +111,7 @@ class AIRouter:
 关键区分:
 - 问知识/教程/方法 → CHAT（即使提到"启动""打开"等词）
 - "帮我找xx文件"/"在哪里"/"全盘扫描" → FILE_SEARCH
-- "打开微信/Chrome/某应用" → SYSTEM（打开某个应用程序）
+- "系统状态/当前时间/cpu情况" → SYSTEM（低风险系统信息查询）
 - "帮我打开/找到某个文件" → FILE_SEARCH（找文件而非启动应用）
 - "查火车票/查机票/查余票/查班次/时刻表/几点到/要多久去/怎么去" → WEB_SEARCH
 - "帮我买票/订票/帮我订高铁/12306购票" → AGENT
@@ -171,9 +171,9 @@ class AIRouter:
                 if _intent and _tts:
                     _hints.append(f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}")
             if _hints:
-                _skill_hint_hash = hashlib.md5("\n".join(_hints).encode()).hexdigest()[
-                    :8
-                ]
+                _skill_hint_hash = hashlib.md5(
+                    "\n".join(_hints).encode(), usedforsecurity=False
+                ).hexdigest()[:8]
                 _dynamic_instruction = (
                     cls.ROUTER_INSTRUCTION
                     + "\n\n当前用户启用的 Skill 路由提示（优先参考）:\n"
@@ -187,9 +187,9 @@ class AIRouter:
             )
 
         # 检查缓存（加入 skill 状态哈希，技能启用变化时自动失效）
-        cache_key = hashlib.md5((user_input + _skill_hint_hash).encode()).hexdigest()[
-            :16
-        ]
+        cache_key = hashlib.md5(
+            (user_input + _skill_hint_hash).encode(), usedforsecurity=False
+        ).hexdigest()[:16]
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
@@ -315,7 +315,10 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
 
         返回: (task_type, confidence, source, hint_or_None)
         """
-        cache_key = "h:" + hashlib.md5(user_input.encode()).hexdigest()[:16]
+        cache_key = (
+            "h:"
+            + hashlib.md5(user_input.encode(), usedforsecurity=False).hexdigest()[:16]
+        )
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             return cached[0], cached[1], "Cache", cached[2] if len(cached) > 2 else None

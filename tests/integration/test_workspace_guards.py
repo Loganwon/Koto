@@ -51,6 +51,7 @@ def wa_client(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
@@ -76,6 +77,7 @@ def _real_docx() -> bytes:
     """Minimal valid DOCX via python-docx, or skip."""
     try:
         from io import BytesIO
+
         import docx
 
         doc = docx.Document()

@@ -51,6 +51,9 @@ _PRICING: Dict[str, Dict[str, float]] = {
     # ── 深度研究 ────────────────────────────────────────────
     "deep-research": {"input": 2.00, "output": 8.00},  # 按 Pro 估算（官方未公布）
     # ── Embedding ────────────────────────────────────────────
+    "gemini-embedding-2": {"input": 0.025, "output": 0.0},
+    "gemini-embedding-001": {"input": 0.025, "output": 0.0},
+    "gemini-embedding": {"input": 0.025, "output": 0.0},
     "text-embedding-004": {"input": 0.025, "output": 0.0},  # $0.025/M tokens
     "text-embedding": {"input": 0.025, "output": 0.0},  # embedding fallback
     # ── 图像生成 ────────────────────────────────────────────
@@ -98,7 +101,7 @@ def _load() -> None:
                 _data = loaded
                 return
     except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
     _data = _empty_data()
 
 
@@ -115,7 +118,7 @@ def _save_if_dirty() -> None:
         os.replace(tmp, _DATA_FILE)
         _dirty = False
     except Exception as e:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 静默失败，不影响主流程
+            logger.debug("Non-fatal", exc_info=True)  # 静默失败，不影响主流程
 
 
 # ── 公开 API ──────────────────────────────────────────────────────────────────

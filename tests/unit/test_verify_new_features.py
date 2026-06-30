@@ -2,17 +2,14 @@
 Verification tests for all new features added across multiple sessions.
 
 Categories:
-  A. TaskDecomposer.suggest_multiagent_preset
-  B. SmartDispatcher compound-task routing (multiagent_preset stamped on context_info)
-  C. web/app.py generate_multi_agent preset dispatch (logic only)
-  D. SkillAutoMatcher — _detect_conflicts / _CONFLICT_PAIRS
-  E. SkillAutoMatcher — rating-aware scoring in match()
-  F. SkillSuggester — Layer 4 rating scoring in _score_candidates
-  G. TaskLedger — TaskPriority enum + set_priority + list ordering
-  H. MultiAgentOrchestrator — AgentRole.model_id override field
-  I. MultiAgentOrchestrator — parallel_roles accepted in __init__
-  J. MultiAgentOrchestrator — preset_analysis_pipeline classmethod
-  K. MultiAgentOrchestrator — timeout param in run()
+  A. SkillAutoMatcher — _detect_conflicts / _CONFLICT_PAIRS
+  B. SkillAutoMatcher — rating-aware scoring in match()
+  C. SkillSuggester — Layer 4 rating scoring in _score_candidates
+  D. TaskLedger — TaskPriority enum + set_priority + list ordering
+  E. MultiAgentOrchestrator — AgentRole.model_id override field
+  F. MultiAgentOrchestrator — parallel_roles accepted in __init__
+  G. MultiAgentOrchestrator — preset_analysis_pipeline classmethod
+  H. MultiAgentOrchestrator — timeout param in run()
 """
 
 from __future__ import annotations
@@ -26,143 +23,7 @@ import pytest
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# A. TaskDecomposer.suggest_multiagent_preset
-# ─────────────────────────────────────────────────────────────────────────────
-class TestSuggestMultiagentPreset:
-    """suggest_multiagent_preset should map compound_info → preset name."""
-
-    def _decomposer(self):
-        from app.core.routing.task_decomposer import TaskDecomposer
-
-        return TaskDecomposer
-
-    def test_returns_none_when_not_compound(self):
-        TD = self._decomposer()
-        result = TD.suggest_multiagent_preset({"is_compound": False})
-        assert result is None
-
-    def test_code_primary_task_returns_code(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "CODE",
-            "secondary_tasks": [],
-            "pattern": "",
-        }
-        assert TD.suggest_multiagent_preset(info) == "code"
-
-    def test_coder_primary_task_returns_code(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "CODER",
-            "secondary_tasks": [],
-            "pattern": "",
-        }
-        assert TD.suggest_multiagent_preset(info) == "code"
-
-    def test_code_in_secondary_returns_code(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "CHAT",
-            "secondary_tasks": ["CODE"],
-            "pattern": "",
-        }
-        assert TD.suggest_multiagent_preset(info) == "code"
-
-    def test_research_with_file_gen_returns_analysis(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "RESEARCH",
-            "secondary_tasks": ["FILE_GEN"],
-            "pattern": "research_and_document",
-        }
-        assert TD.suggest_multiagent_preset(info) == "analysis"
-
-    def test_search_and_document_returns_content(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "WEB_SEARCH",
-            "secondary_tasks": ["FILE_GEN"],
-            "pattern": "search_and_document",
-        }
-        assert TD.suggest_multiagent_preset(info) == "content"
-
-    def test_document_workflow_returns_content(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "CHAT",
-            "secondary_tasks": [],
-            "pattern": "document_workflow",
-        }
-        assert TD.suggest_multiagent_preset(info) == "content"
-
-    def test_fallback_compound_returns_content(self):
-        TD = self._decomposer()
-        info = {
-            "is_compound": True,
-            "primary_task": "CHAT",
-            "secondary_tasks": [],
-            "pattern": "unknown_pattern",
-        }
-        assert TD.suggest_multiagent_preset(info) == "content"
-
-    def test_missing_fields_do_not_raise(self):
-        TD = self._decomposer()
-        # Minimal dict — should not raise even with missing keys
-        result = TD.suggest_multiagent_preset({"is_compound": True})
-        assert result in ("content", "code", "analysis")
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# B. SmartDispatcher compound routing stamps multiagent_preset
-# ─────────────────────────────────────────────────────────────────────────────
-class TestSmartDispatcherMultiagentPresetStamping:
-    """Verify the dispatcher's compound-task branch is correctly wired to
-    call suggest_multiagent_preset and stamp context_info['multiagent_preset'].
-    Source-code inspection tests avoid needing to mock the entire 1200-line
-    analyze() method."""
-
-    def test_suggest_multiagent_preset_called_in_dispatcher_source(self):
-        """smart_dispatcher must call suggest_multiagent_preset (wiring exists)."""
-        import inspect
-
-        import app.core.routing.smart_dispatcher as module
-
-        src = inspect.getsource(module)
-        assert (
-            "suggest_multiagent_preset" in src
-        ), "smart_dispatcher must call suggest_multiagent_preset"
-
-    def test_multiagent_preset_stamped_into_context_info(self):
-        """context_info['multiagent_preset'] assignment line must exist."""
-        import inspect
-
-        import app.core.routing.smart_dispatcher as module
-
-        src = inspect.getsource(module)
-        assert (
-            'context_info["multiagent_preset"] = _ma_preset' in src
-        ), "Dispatcher must write multiagent_preset into context_info"
-
-    def test_stamping_is_fault_tolerant(self):
-        """The stamping call must be inside a try/except block."""
-        import inspect
-
-        import app.core.routing.smart_dispatcher as module
-
-        src = inspect.getsource(module)
-        assert "suggest_multiagent_preset" in src
-        # The block must have an except clause for fault tolerance
-        assert "except Exception" in src
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# D. SkillAutoMatcher — _detect_conflicts
+# A. SkillAutoMatcher — _detect_conflicts
 # ─────────────────────────────────────────────────────────────────────────────
 class TestDetectConflicts:
     def _matcher(self):

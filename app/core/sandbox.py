@@ -15,12 +15,15 @@
 # ══════════════════════════════════════════════════════════════
 
 import base64
+import logging
 import os
 import subprocess
 import sys
 import tempfile
 import textwrap
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT = 30  # seconds
 OUTPUT_SIZE_LIMIT = 512 * 1024  # 512 KB
@@ -32,7 +35,17 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
 # Any env var whose uppercase name contains one of these substrings is
 # stripped before being passed to sandbox subprocesses (S3 fix).
 _SENSITIVE_ENV_PATTERNS = frozenset(
-    {"KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "CREDENTIAL", "AUTH", "CERT", "APIKEY"}
+    {
+        "KEY",
+        "SECRET",
+        "TOKEN",
+        "PASSWORD",
+        "PASS",
+        "CREDENTIAL",
+        "AUTH",
+        "CERT",
+        "APIKEY",
+    }
 )
 
 
@@ -58,6 +71,7 @@ def _build_sandbox_env(tmpdir: str) -> dict:
             "TMPDIR": tmpdir,
             "TEMP": tmpdir,
             "TMP": tmpdir,
+            "MPLCONFIGDIR": tmpdir,
             "R_USER": tmpdir,
             "USERPROFILE": tmpdir,  # Windows
         }
@@ -68,7 +82,9 @@ def _build_sandbox_env(tmpdir: str) -> dict:
 # ── Python ────────────────────────────────────────────────────
 
 
-def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None) -> dict:
+def run_python(
+    code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
+) -> dict:
     """
     Execute Python code in an isolated temp directory.
 
@@ -89,10 +105,23 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
         import os as _os
         import sys as _sys
         _sys.path.insert(0, _os.getcwd())
+        _os.environ.setdefault('MPLCONFIGDIR', _os.getcwd())
 
         try:
             import matplotlib
             matplotlib.use('Agg')
+            matplotlib.rcParams['font.sans-serif'] = [
+                'Microsoft YaHei',
+                'SimHei',
+                'Noto Sans CJK SC',
+                'WenQuanYi Micro Hei',
+                'PingFang SC',
+                'Arial Unicode MS',
+                'DejaVu Sans',
+            ]
+            matplotlib.rcParams['axes.unicode_minus'] = False
+            matplotlib.rcParams['figure.dpi'] = 160
+            matplotlib.rcParams['savefig.dpi'] = 220
             import matplotlib.pyplot as _plt
 
             _orig_show = _plt.show
@@ -100,7 +129,7 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
 
             def _auto_show(*args, **kwargs):
                 _fig_counter[0] += 1
-                _plt.savefig(f'figure_{_fig_counter[0]}.png', dpi=150, bbox_inches='tight')
+                _plt.savefig(f'figure_{_fig_counter[0]}.png', dpi=220, bbox_inches='tight')
                 _plt.close('all')
 
             _plt.show = _auto_show
@@ -109,13 +138,17 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
     """)
 
     full_code = preamble + "\n" + code
-    return _run_in_tempdir("python", [sys.executable, "-c", full_code], timeout, work_dir=work_dir)
+    return _run_in_tempdir(
+        "python", [sys.executable, "-c", full_code], timeout, work_dir=work_dir
+    )
 
 
 # ── R ─────────────────────────────────────────────────────────
 
 
-def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None) -> dict:
+def run_r(
+    code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
+) -> dict:
     """
     Execute R code in an isolated temp directory.
     ggplot2 / base graphics are captured as PNG via a preamble.
@@ -130,7 +163,7 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
         options(device = function(...) {
             .fig_counter <<- .fig_counter + 1L
             grDevices::png(filename = paste0("figure_", .fig_counter, ".png"),
-                           width = 1200, height = 900, res = 150)
+                           width = 1600, height = 1200, res = 220)
         })
     """)
 
@@ -143,7 +176,9 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
         script_path = f.name
 
     try:
-        return _run_in_tempdir("Rscript", ["Rscript", script_path], timeout, work_dir=work_dir)
+        return _run_in_tempdir(
+            "Rscript", ["Rscript", script_path], timeout, work_dir=work_dir
+        )
     finally:
         try:
             os.unlink(script_path)
@@ -162,6 +197,21 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
     files = {}
 
     env = _build_sandbox_env(cwd)
+
+    # Network isolation: block all outbound socket connections in the sandbox.
+    # This prevents sandbox code from exfiltrating data via HTTP/DNS/TCP.
+    _NET_DISABLE_PREAMBLE = (
+        "import socket as _sandbox_socket\n"
+        "class _block_all:\n"
+        "  def __init__(self,*a,**kw): raise PermissionError('Network access disabled in sandbox')\n"
+        "_sandbox_socket.socket=_block_all\n"
+        "import urllib.request as _ur\n"
+        "_ur.urlopen=_block_all\n"
+        "_ur.OpenerDirector.open=_block_all\n"
+    )
+    if lang == "python":
+        cmd = [sys.executable, "-c", _NET_DISABLE_PREAMBLE + cmd[2]]
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -172,6 +222,7 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
             errors="replace",
             cwd=cwd,
             env=env,
+            creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0,
         )
         try:
             out, err = proc.communicate(timeout=timeout)
@@ -195,7 +246,8 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
             else " 请安装 R 并将 Rscript 加入 PATH。"
         )
     except Exception as exc:
-        error = f"执行失败：{exc}"
+        logger.warning("[Sandbox] execution failed: %s", exc)
+        error = "执行失败，请检查代码语法或依赖后重试。"
 
     # Collect image output files
     if error is None:
@@ -216,7 +268,9 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
     }
 
 
-def _run_in_tempdir(lang: str, cmd: list, timeout: int, *, work_dir: str | None = None) -> dict:
+def _run_in_tempdir(
+    lang: str, cmd: list, timeout: int, *, work_dir: str | None = None
+) -> dict:
     """
     Create a temp directory, run `cmd` inside it, collect results.
     The temp directory is always cleaned up.

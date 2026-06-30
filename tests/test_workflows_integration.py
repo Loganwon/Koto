@@ -34,21 +34,21 @@ os.environ["GEMINI_STREAM_CHUNK_TIMEOUT"] = "5"
 # ── 测试文件路径 ────────────────────────────────────────────────────────────────
 WS = ROOT / "workspace"
 
-FILE_DOCX   = WS / "雷鸟访谈问题.docx"         # 普通 Word 文档
-FILE_DOCX2  = WS / "王宇轩-简历（美元).docx"   # 对比用 Word 文档
-FILE_DOCX3  = WS / "documents" / "以新质生产力推进文化产业高质量发展.docx"
-FILE_XLSX   = WS / "销售台账.xlsx"             # Excel 文件
-FILE_PPTX   = WS / "雷鸟投资报告.pptx"         # PPT 文件
-FILE_PDF    = WS / "王宇轩-简历.pdf"           # PDF 文件
-FILE_TXT    = WS / "KOTO.md"                   # 纯文本/Markdown
+FILE_DOCX = WS / "雷鸟访谈问题.docx"  # 普通 Word 文档
+FILE_DOCX2 = WS / "王宇轩-简历（美元).docx"  # 对比用 Word 文档
+FILE_DOCX3 = WS / "documents" / "以新质生产力推进文化产业高质量发展.docx"
+FILE_XLSX = WS / "销售台账.xlsx"  # Excel 文件
+FILE_PPTX = WS / "雷鸟投资报告.pptx"  # PPT 文件
+FILE_PDF = WS / "王宇轩-简历.pdf"  # PDF 文件
+FILE_TXT = WS / "KOTO.md"  # 纯文本/Markdown
 
 # ── 颜色输出 ───────────────────────────────────────────────────────────────────
-GREEN  = "\033[92m"
-RED    = "\033[91m"
+GREEN = "\033[92m"
+RED = "\033[91m"
 YELLOW = "\033[93m"
-CYAN   = "\033[96m"
-RESET  = "\033[0m"
-BOLD   = "\033[1m"
+CYAN = "\033[96m"
+RESET = "\033[0m"
+BOLD = "\033[1m"
 
 results = []  # (name, status, detail)
 
@@ -68,7 +68,7 @@ def _parse_sse(line: str) -> dict:
 
 def run_workflow(name: str, executor_cls, params: dict):
     """运行一个 workflow，收集所有 SSE 事件，返回 (events_as_dicts, elapsed, exc)。
-    
+
     工作流 execute() 有两种事件发射方式：
     1. generator yield SSE string — 通过 for ev in gen 收集
     2. yield_event(dict) callback — 通过 callback 收集
@@ -89,7 +89,9 @@ def run_workflow(name: str, executor_cls, params: dict):
         if gen is not None:
             for raw_ev in gen:
                 # generator 直接 yield SSE 字符串或 dict
-                parsed = _parse_sse(raw_ev) if isinstance(raw_ev, str) else (raw_ev or {})
+                parsed = (
+                    _parse_sse(raw_ev) if isinstance(raw_ev, str) else (raw_ev or {})
+                )
                 if parsed:
                     events.append(parsed)
     except Exception as exc:
@@ -107,7 +109,11 @@ def check(name, events, elapsed, exc=None, required_output_types=None):
     types = [e.get("type") for e in events if isinstance(e, dict)]
 
     if "error" in types:
-        err_msgs = [e.get("text", "") for e in events if isinstance(e, dict) and e.get("type") == "error"]
+        err_msgs = [
+            e.get("text", "")
+            for e in events
+            if isinstance(e, dict) and e.get("type") == "error"
+        ]
         results.append((name, "FAIL", f"workflow error: {err_msgs}"))
         print(f"  {RED}✗ {name}{RESET}  —  error: {err_msgs}")
         return False
@@ -120,12 +126,16 @@ def check(name, events, elapsed, exc=None, required_output_types=None):
 
     # 检查特定输出类型
     if required_output_types:
-        out_events = [e for e in events if isinstance(e, dict) and e.get("type") == "output"]
+        out_events = [
+            e for e in events if isinstance(e, dict) and e.get("type") == "output"
+        ]
         got_types = [e.get("output_type") for e in out_events]
         for req in required_output_types:
             if req not in got_types:
                 results.append((name, "WARN", f"缺少 {req} 输出（got: {got_types}）"))
-                print(f"  {YELLOW}⚠ {name}{RESET}  —  缺少 {req}，实际: {got_types}  ({elapsed:.1f}s)")
+                print(
+                    f"  {YELLOW}⚠ {name}{RESET}  —  缺少 {req}，实际: {got_types}  ({elapsed:.1f}s)"
+                )
                 return False
 
     results.append((name, "PASS", f"events={len(events)} time={elapsed:.1f}s"))
@@ -145,15 +155,31 @@ def test_comm_digest():
     events, elapsed, exc = run_workflow(
         "comm_digest",
         CommDigest,
-        {"texts": [text_sample], "output_mode": "markdown", "output_lang": "zh", "model_mode": "local"},
+        {
+            "texts": [text_sample],
+            "output_mode": "markdown",
+            "output_lang": "zh",
+            "model_mode": "local",
+        },
     )
-    check("comm_digest (markdown)", events, elapsed, exc, required_output_types=["markdown"])
+    check(
+        "comm_digest (markdown)",
+        events,
+        elapsed,
+        exc,
+        required_output_types=["markdown"],
+    )
 
     # 用文件输入
     events2, elapsed2, exc2 = run_workflow(
         "comm_digest_file",
         CommDigest,
-        {"files": [str(FILE_DOCX)], "output_mode": "auto", "output_lang": "zh", "model_mode": "local"},
+        {
+            "files": [str(FILE_DOCX)],
+            "output_mode": "auto",
+            "output_lang": "zh",
+            "model_mode": "local",
+        },
     )
     check("comm_digest (docx file)", events2, elapsed2, exc2)
 
@@ -173,7 +199,12 @@ def test_comm_digest_excel_output():
     events, elapsed, exc = run_workflow(
         "comm_digest_excel",
         CommDigest,
-        {"texts": [text], "output_mode": "excel", "output_lang": "zh", "model_mode": "local"},
+        {
+            "texts": [text],
+            "output_mode": "excel",
+            "output_lang": "zh",
+            "model_mode": "local",
+        },
     )
     check("comm_digest (excel)", events, elapsed, exc)
 
@@ -335,10 +366,11 @@ def test_doc_smart_compare_auto_output():
 # ═══════════════════════════════════════════════════════════════════════════════
 def test_comm_digest_thread_file():
     print(f"\n{CYAN}{BOLD}[11] comm_digest — 邮件线程摘要{RESET}")
-    from app.core.workflows.comm_digest import CommDigest
-
     # 创建一个临时邮件文本文件
     import tempfile
+
+    from app.core.workflows.comm_digest import CommDigest
+
     email_text = """From: alice@company.com
 To: bob@company.com
 Date: Mon, 14 Apr 2026 10:00:00 +0800
@@ -369,8 +401,9 @@ Alice，
 
 Bob
 """
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False,
-                                     encoding="utf-8") as f:
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".txt", delete=False, encoding="utf-8"
+    ) as f:
         f.write(email_text)
         tmp_path = f.name
 
@@ -482,12 +515,12 @@ if __name__ == "__main__":
     print(f"\n{BOLD}>> 检查测试文件{RESET}")
     test_files = {
         "DOCX  (雷鸟访谈问题)": FILE_DOCX,
-        "DOCX2 (王宇轩简历)":   FILE_DOCX2,
-        "DOCX3 (新质生产力)":   FILE_DOCX3,
-        "XLSX  (销售台账)":     FILE_XLSX,
-        "PPTX  (雷鸟报告)":     FILE_PPTX,
-        "PDF   (王宇轩简历)":   FILE_PDF,
-        "TXT   (KOTO.md)":      FILE_TXT,
+        "DOCX2 (王宇轩简历)": FILE_DOCX2,
+        "DOCX3 (新质生产力)": FILE_DOCX3,
+        "XLSX  (销售台账)": FILE_XLSX,
+        "PPTX  (雷鸟报告)": FILE_PPTX,
+        "PDF   (王宇轩简历)": FILE_PDF,
+        "TXT   (KOTO.md)": FILE_TXT,
     }
     missing = []
     for label, path in test_files.items():
@@ -528,7 +561,9 @@ if __name__ == "__main__":
     print(f"\n{BOLD}{'='*60}")
     print(f"  测试结果汇总  (总耗时 {elapsed_total:.1f}s)")
     print(f"{'='*60}{RESET}")
-    print(f"  {GREEN}通过: {len(passed)}{RESET}  {YELLOW}警告: {len(warned)}{RESET}  {RED}失败: {len(failed)}{RESET}  / {len(results)} 总计\n")
+    print(
+        f"  {GREEN}通过: {len(passed)}{RESET}  {YELLOW}警告: {len(warned)}{RESET}  {RED}失败: {len(failed)}{RESET}  / {len(results)} 总计\n"
+    )
 
     if warned:
         print(f"{YELLOW}── 警告详情 ──{RESET}")

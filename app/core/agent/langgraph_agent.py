@@ -48,6 +48,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+from collections.abc import Mapping
 from typing import Any, Dict, Generator, List, Literal, Optional
 
 logger = logging.getLogger(__name__)
@@ -531,8 +532,13 @@ class LangGraphAgent:
             for event in self._graph.stream(
                 state, config=config, stream_mode="updates"
             ):
+                if not isinstance(event, Mapping):
+                    continue
                 for node_name, node_update in event.items():
-                    msgs = node_update.get("messages", [])
+                    if not isinstance(node_update, Mapping):
+                        continue
+
+                    msgs = node_update.get("messages") or []
                     for msg in msgs:
                         if isinstance(msg, AIMessage):
                             if msg.tool_calls:

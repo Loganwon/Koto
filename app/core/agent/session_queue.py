@@ -1,7 +1,7 @@
 # ══════════════════════════════════════════════════════════════
 # session_queue.py — Per-Session Request Serialization
 #
-# Inspired by OpenClaw's per-session queue serialization:
+# Koto per-session queue serialization:
 # Each session gets its own lock so concurrent requests within
 # the same session are serialized (no race on history/context),
 # but different sessions run in parallel.
@@ -42,8 +42,9 @@ class SessionQueue:
             run_agent(...)
     """
 
-    def __init__(self, max_sessions: int = _MAX_SESSIONS,
-                 global_concurrency: int = 0) -> None:
+    def __init__(
+        self, max_sessions: int = _MAX_SESSIONS, global_concurrency: int = 0
+    ) -> None:
         self._sessions: OrderedDict[str, _SessionState] = OrderedDict()
         self._meta_lock = threading.Lock()
         self._max_sessions = max_sessions

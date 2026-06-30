@@ -1220,7 +1220,7 @@ class TestInterruptManagerStress:
     """StreamInterruptManager stress beyond what test_concurrency.py covers."""
 
     def setup_method(self):
-        from web.app import StreamInterruptManager
+        from web.sse.interrupt_manager import StreamInterruptManager
 
         self.mgr = StreamInterruptManager()
 

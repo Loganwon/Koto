@@ -1,0 +1,45 @@
+name: Sync GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - '.github/workflows/pages-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: pages-sync
+  cancel-in-progress: true
+
+jobs:
+  sync-gh-pages:
+    name: Publish docs to gh-pages
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Split docs subtree
+        run: |
+          git subtree split --prefix docs HEAD -b gh-pages-sync
+
+      - name: Push docs to gh-pages
+        run: |
+          git push origin gh-pages-sync:gh-pages --force
+
+      - name: Clean up temp branch
+        if: always()
+        run: |
+          git branch -D gh-pages-sync || true

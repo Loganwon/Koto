@@ -24,8 +24,10 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-PPTX_PATH = os.path.join(os.path.dirname(__file__), "..", "workspace", "植谱生物 投资报告.pptx")
-SLIDE_IDX = 7   # slide 8 (0-based)
+PPTX_PATH = os.path.join(
+    os.path.dirname(__file__), "..", "workspace", "植谱生物 投资报告.pptx"
+)
+SLIDE_IDX = 7  # slide 8 (0-based)
 SHAPE_139_ID = 139
 SHAPE_141_ID = 141
 
@@ -35,13 +37,20 @@ NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
+
 def _load_pptx_slide_xml(pptx_path: str, slide_idx: int) -> ET.Element:
     """Return the root XML element of the given slide from the raw PPTX zip."""
     with zipfile.ZipFile(pptx_path, "r") as z:
         names = z.namelist()
         slide_files = sorted(
-            [n for n in names if n.startswith("ppt/slides/slide") and "/rels/" not in n],
-            key=lambda x: int("".join(c for c in x.split("/")[-1] if c.isdigit()) or "0"),
+            [
+                n
+                for n in names
+                if n.startswith("ppt/slides/slide") and "/rels/" not in n
+            ],
+            key=lambda x: int(
+                "".join(c for c in x.split("/")[-1] if c.isdigit()) or "0"
+            ),
         )
         target = slide_files[slide_idx]
         raw = z.read(target)
@@ -63,6 +72,7 @@ def _get_bodypr(sp: ET.Element) -> ET.Element | None:
 
 # ── fixtures ──────────────────────────────────────────────────────────────────
 
+
 @pytest.fixture(scope="module")
 def pptx_path():
     if not os.path.exists(PPTX_PATH):
@@ -73,6 +83,7 @@ def pptx_path():
 @pytest.fixture(scope="module")
 def parsed_data(pptx_path):
     from app.core.file.file_parser import parse_pptx_geometry
+
     d = parse_pptx_geometry(pptx_path)
     # Normalise key name: parser uses snake_case, expose both
     d.setdefault("slideWidthEmu", d.get("slide_width_emu", 9144000))
@@ -97,13 +108,19 @@ def raw_slide_root(pptx_path):
 
 # ── diagnostic print (always runs, not a test) ────────────────────────────────
 
+
 def _print_slide8_shapes(slide8, slide_width_emu, scale=640):
     s = scale / slide_width_emu
     print(f"\n{'='*70}")
     print(f"Slide 8 shapes  (scale={scale}px / {slide_width_emu} EMU = {s:.7f})")
-    print(f"{'id':>4} {'z':>4} {'type':<7} {'left':>7} {'top':>6} {'w':>7} {'h':>6}  {'pxL':>4} {'pxT':>4} {'pxW':>4} {'pxH':>4}  {'anch':5}  insets(l,t,r,b px)")
+    print(
+        f"{'id':>4} {'z':>4} {'type':<7} {'left':>7} {'top':>6} {'w':>7} {'h':>6}  {'pxL':>4} {'pxT':>4} {'pxW':>4} {'pxH':>4}  {'anch':5}  insets(l,t,r,b px)"
+    )
     for sh in sorted(slide8["shapes"], key=lambda x: x.get("z_order", 0)):
-        l = sh["left"]; t = sh["top"]; w = sh["width"]; h = sh["height"]
+        l = sh["left"]
+        t = sh["top"]
+        w = sh["width"]
+        h = sh["height"]
         ins = sh.get("textInsets", {})
         il = round(ins.get("l", 91440) * s)
         it_ = round(ins.get("t", 45720) * s)
@@ -119,6 +136,7 @@ def _print_slide8_shapes(slide8, slide_width_emu, scale=640):
 
 
 # ── Test 1: raw XML has expected bodyPr attributes for shape 139 ──────────────
+
 
 def test_shape139_bodypr_raw_xml(raw_slide_root, parsed_data):
     """Read shape 139's bodyPr directly from PPTX XML and print actual lIns/rIns."""
@@ -147,6 +165,7 @@ def test_shape139_bodypr_raw_xml(raw_slide_root, parsed_data):
 
 # ── Test 2: shape 141 bodyPr too ──────────────────────────────────────────────
 
+
 def test_shape141_bodypr_raw_xml(raw_slide_root, parsed_data):
     """Read shape 141's bodyPr and position."""
     sp = _find_sp_by_id(raw_slide_root, SHAPE_141_ID)
@@ -167,6 +186,7 @@ def test_shape141_bodypr_raw_xml(raw_slide_root, parsed_data):
 
 
 # ── Test 3: parsed textInsets match raw XML ────────────────────────────────────
+
 
 def test_textinsets_match_raw_xml(raw_slide_root, shapes_by_id, parsed_data):
     """Verify parse_pptx_geometry extracts textInsets from bodyPr.
@@ -192,17 +212,31 @@ def test_textinsets_match_raw_xml(raw_slide_root, shapes_by_id, parsed_data):
 
     parsed_ins = shape_data.get("textInsets", {})
     # l/t/b must match the PPTX XML exactly
-    assert parsed_ins.get("l") == raw_l, "lIns mismatch: parsed=%s raw=%s" % (parsed_ins.get("l"), raw_l)
-    assert parsed_ins.get("t") == raw_t, "tIns mismatch: parsed=%s raw=%s" % (parsed_ins.get("t"), raw_t)
-    assert parsed_ins.get("b") == raw_b, "bIns mismatch: parsed=%s raw=%s" % (parsed_ins.get("b"), raw_b)
+    assert parsed_ins.get("l") == raw_l, "lIns mismatch: parsed=%s raw=%s" % (
+        parsed_ins.get("l"),
+        raw_l,
+    )
+    assert parsed_ins.get("t") == raw_t, "tIns mismatch: parsed=%s raw=%s" % (
+        parsed_ins.get("t"),
+        raw_t,
+    )
+    assert parsed_ins.get("b") == raw_b, "bIns mismatch: parsed=%s raw=%s" % (
+        parsed_ins.get("b"),
+        raw_b,
+    )
     # r must be >= raw value (exclusion zone may expand it)
-    assert parsed_ins.get("r", 0) >= raw_r, "rIns should be >= raw XML value; got %s" % parsed_ins.get("r")
+    assert (
+        parsed_ins.get("r", 0) >= raw_r
+    ), "rIns should be >= raw XML value; got %s" % parsed_ins.get("r")
 
-    print("\nShape 139 textInsets: raw_r=%d  parsed_r=%d (exclusion zone expanded by %d EMU)" % (
-        raw_r, parsed_ins.get("r", raw_r), parsed_ins.get("r", raw_r) - raw_r))
+    print(
+        "\nShape 139 textInsets: raw_r=%d  parsed_r=%d (exclusion zone expanded by %d EMU)"
+        % (raw_r, parsed_ins.get("r", raw_r), parsed_ins.get("r", raw_r) - raw_r)
+    )
 
 
 # ── Test 4: shape 139's text area doesn't reach shape 141 ─────────────────────
+
 
 def test_shape139_text_area_clears_shape141(shapes_by_id, slide8, parsed_data):
     """
@@ -225,16 +259,26 @@ def test_shape139_text_area_clears_shape141(shapes_by_id, slide8, parsed_data):
     shape141_left_emu = s141["left"]
 
     scale = 640 / sW
-    print(f"\n  Shape 139: left={s139['left']} w={s139['width']} rIns={ins139.get('r', 91440)}")
-    print(f"  Shape 139 text right edge: {text_right_emu} EMU = {round(text_right_emu * scale)}px")
-    print(f"  Shape 141 left edge:       {shape141_left_emu} EMU = {round(shape141_left_emu * scale)}px")
+    print(
+        f"\n  Shape 139: left={s139['left']} w={s139['width']} rIns={ins139.get('r', 91440)}"
+    )
+    print(
+        f"  Shape 139 text right edge: {text_right_emu} EMU = {round(text_right_emu * scale)}px"
+    )
+    print(
+        f"  Shape 141 left edge:       {shape141_left_emu} EMU = {round(shape141_left_emu * scale)}px"
+    )
 
     if text_right_emu <= shape141_left_emu:
-        print(f"  ✅ Text area clears shape 141 (gap={round((shape141_left_emu - text_right_emu) * scale)}px)")
+        print(
+            f"  ✅ Text area clears shape 141 (gap={round((shape141_left_emu - text_right_emu) * scale)}px)"
+        )
     else:
         overlap_px = round((text_right_emu - shape141_left_emu) * scale)
         print(f"  ❌ Text area OVERLAPS shape 141 by {overlap_px}px")
-        print(f"     → rIns needs to be at least {s139['left'] + s139['width'] - shape141_left_emu} EMU")
+        print(
+            f"     → rIns needs to be at least {s139['left'] + s139['width'] - shape141_left_emu} EMU"
+        )
         print(f"     → Currently rIns = {ins139.get('r', 91440)} EMU")
 
     # This assertion documents the REQUIRED behaviour for no-overlap rendering.
@@ -247,6 +291,7 @@ def test_shape139_text_area_clears_shape141(shapes_by_id, slide8, parsed_data):
 
 
 # ── Test 5: no-overlap check for all overlapping shape pairs ──────────────────
+
 
 def test_overflow_hidden_applied_in_css(slide8, shapes_by_id):
     """
@@ -263,4 +308,5 @@ def test_overflow_hidden_applied_in_css(slide8, shapes_by_id):
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(pytest.main([__file__, "-v", "--tb=short", "-s"]))

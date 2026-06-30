@@ -20,6 +20,8 @@ sys.path.insert(0, "src")
 
 from local_model_installer import (  # noqa: E402
     MODEL_CATALOG,
+    choose_best_model,
+    describe_model_recommendation,
     recommend_models,
 )
 
@@ -94,3 +96,24 @@ class TestRecommendModels:
         result = recommend_models(self._make_info(8))
         for entry in result:
             assert entry["tag"] in catalog_tags
+
+    # ── default model selection ─────────────────────────────────────────────
+
+    def test_choose_best_model_prefers_koto_chinese_model_on_standard_machine(self):
+        info = {"ram_gb": 16, "gpu_vram_gb": 0.0, "cpu_cores": 8}
+        model = choose_best_model(info)
+        assert model["tag"].startswith("qwen")
+        assert model["ram"] <= 16
+
+    def test_choose_best_model_avoids_flagship_without_headroom(self):
+        info = {"ram_gb": 24, "gpu_vram_gb": 0.0, "cpu_cores": 8}
+        model = choose_best_model(info)
+        assert model["tier"] != "flagship"
+
+    def test_describe_model_recommendation_mentions_reasoning_inputs(self):
+        info = {"ram_gb": 16, "gpu_vram_gb": 8.0, "gpu_name": "NVIDIA RTX"}
+        model = choose_best_model(info)
+        desc = describe_model_recommendation(info, model)
+        assert model["name"] in desc
+        assert "16 GB 内存" in desc
+        assert "中文文件任务" in desc

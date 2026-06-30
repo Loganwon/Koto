@@ -6,18 +6,21 @@ def _repo_root() -> Path:
 
 
 def test_workspace_loader_dedupes_inflight_library_loads():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+    js = (_repo_root() / "web" / "src" / "editors" / "cdn-loaders.ts").read_text(
         encoding="utf-8"
     )
 
-    assert "const _libLoadPromises = { tiptap: null, sheets: null, pdfjs: null };" in js
+    assert (
+        "const _libLoadPromises: Record<string, Promise<void> | null> = { tiptap: null, sheets: null, pdfjs: null };"
+        in js
+    )
     assert "const _assetCacheBust = String(Date.now());" in js
     assert "if (_libLoadPromises.sheets) return _libLoadPromises.sheets;" in js
     assert "if (_libLoadPromises.tiptap) return _libLoadPromises.tiptap;" in js
 
 
 def test_workspace_layout_waits_have_fast_ready_path():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+    js = (_repo_root() / "web" / "src" / "workspace" / "state.ts").read_text(
         encoding="utf-8"
     )
 
@@ -26,18 +29,20 @@ def test_workspace_layout_waits_have_fast_ready_path():
 
 
 def test_xlsx_mount_no_longer_requires_unconditional_double_raf():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+    js = (_repo_root() / "web" / "src" / "editors" / "xlsx-editor.ts").read_text(
         encoding="utf-8"
     )
 
     assert "const mountSheets = () => {" in js
     assert "if (wrapper.offsetWidth > 0 && wrapper.offsetHeight > 0) {" in js
     assert "requestAnimationFrame(() => {" in js
-    assert "requestAnimationFrame(() => {\n        requestAnimationFrame(() => {" not in js
+    assert (
+        "requestAnimationFrame(() => {\n        requestAnimationFrame(() => {" not in js
+    )
 
 
 def test_pptx_initial_render_uses_short_retry_window_without_timeout_poll():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+    js = (_repo_root() / "web" / "src" / "editors" / "pptx-editor.ts").read_text(
         encoding="utf-8"
     )
 
@@ -47,21 +52,30 @@ def test_pptx_initial_render_uses_short_retry_window_without_timeout_poll():
 
 
 def test_xlsx_formula_warning_uses_fast_zip_scan_instead_of_second_workbook_load():
-    py = (_repo_root() / "app" / "core" / "file" / "file_parser.py").read_text(
-        encoding="utf-8"
-    )
+    py = (
+        _repo_root() / "app" / "core" / "file" / "parsers" / "xlsx_parser.py"
+    ).read_text(encoding="utf-8")
 
-    assert "def _xlsx_contains_formula_fast(path: str) -> bool:" in py
+    assert "def xlsx_contains_formula_fast(path: str) -> bool:" in py
     assert 'zipfile.ZipFile(path, "r") as zf' in py
-    assert "_wb_check = openpyxl.load_workbook(file_path, data_only=False, read_only=True)" not in py
+    assert (
+        "_wb_check = openpyxl.load_workbook(file_path, data_only=False, read_only=True)"
+        not in py
+    )
 
 
-def test_docx_progressive_hydration_is_wired_in_workspace_assistant():
-    js = (_repo_root() / "web" / "static" / "js" / "workspace-assistant.js").read_text(
+def test_docx_progressive_save_guard_is_wired_to_current_workspace_modules():
+    state_ts = (_repo_root() / "web" / "src" / "workspace" / "state.ts").read_text(
+        encoding="utf-8"
+    )
+    save_ts = (_repo_root() / "web" / "src" / "workspace" / "save.ts").read_text(
         encoding="utf-8"
     )
 
-    assert "function _startDocxProgressiveHydration(tab)" in js
-    assert "/api/v1/workspace/docx_full" in js
-    assert "state.activeEditor.editor.setEditable(!isLocked);" in js
-    assert "DOCX 仍在后台加载剩余内容，请稍后再保存。" in js
+    assert "progressive_loading: type === 'docx'" in state_ts
+    assert "const progressive = tab && (tab as any).progressive;" in save_ts
+    assert (
+        "tab?.fileType === 'docx' && progressive && progressive.loading && !progressive.complete"
+        in save_ts
+    )
+    assert "DOCX 仍在后台加载，请稍后再保存。" in save_ts

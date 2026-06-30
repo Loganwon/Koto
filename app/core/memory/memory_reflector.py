@@ -14,7 +14,7 @@ MemoryReflector runs a richer LLM prompt that extracts:
 Results are written to EnhancedMemoryManager with category tagging and
 a confidence filter  (only memories with score ≥ 0.6 are persisted).
 
-Usage (web/app.py — called from _start_memory_extraction):
+Usage (web.memory_runtime — called from _start_memory_extraction):
     from app.core.memory.memory_reflector import MemoryReflector
     MemoryReflector.reflect_async(user_msg, ai_msg, history,
                                   task_type, session_name, get_memory_fn, llm_fn)

@@ -1194,7 +1194,7 @@ a { color: var(--accent-primary); }
     gap: 8px;
     padding-right: 6px;
 }
-/* When inside the new Gemini sidebar body, let parent scroll instead */
+/* When inside the assistant sidebar body, let parent scroll instead */
 .sidebar-body .sessions-list {
     max-height: none;
     overflow-y: visible;
@@ -1597,6 +1597,41 @@ a { color: var(--accent-primary); }
 .welcome-logo img { width: 100%; height: 100%; object-fit: cover; border-radius: inherit; display: block; }
 .welcome-copy h2 { font-size: 22px; margin-bottom: 4px; }
 .welcome-copy p { color: var(--text-secondary); font-size: 14px; }
+.welcome-capability-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+.welcome-capability-row span {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+.welcome-prompt-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.welcome-prompt-btn {
+    padding: 10px 14px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: var(--transition);
+}
+.welcome-prompt-btn:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+    transform: translateY(-1px);
+}
 
 /* \u6700\u8fd1\u5bf9\u8bdd\u5feb\u6377\u5165\u53e3 */
 .welcome-recent {
@@ -2310,6 +2345,25 @@ a { color: var(--accent-primary); }
 }
 .settings-panel.active { transform: translateX(0); }
 
+.side-panel-scrim {
+    position: fixed;
+    inset: 0;
+    background: rgba(5, 10, 18, 0.22);
+    backdrop-filter: blur(1px);
+    -webkit-backdrop-filter: blur(1px);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.2s ease;
+    z-index: 35;
+}
+.side-panel-scrim.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+.side-panel-scrim[hidden] {
+    display: none;
+}
+
 /* 设置/技能面板打开时，主内容区向左缩进，避免被遮挡 */
 .main-content {
     transition: margin-right 0.25s ease;
@@ -2322,7 +2376,8 @@ body.skills-panel-open .main-content {
 }
 
 @media (max-width: 1024px) {
-    body.settings-panel-open .main-content {
+    body.settings-panel-open .main-content,
+    body.skills-panel-open .main-content {
         margin-right: 0;
     }
 }
@@ -2506,6 +2561,10 @@ body.skills-panel-open .main-content {
 .step-content h4 { margin-bottom: 6px; font-size: 15px; color: var(--text-primary); }
 .step-content p { margin-bottom: 10px; color: var(--text-secondary); font-size: 13px; }
 .step-content input { width: 100%; padding: 10px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border-color); background: var(--bg-tertiary); color: var(--text-primary); margin-bottom: 8px; }
+.setup-provider-toggle { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; padding: 4px; margin: 2px 0 10px; border: 1px solid var(--border-color); border-radius: var(--radius-md); background: var(--bg-tertiary); }
+.setup-provider-option { border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-secondary); padding: 8px 10px; font-size: 13px; font-weight: 700; cursor: pointer; transition: var(--transition); }
+.setup-provider-option:hover { color: var(--text-primary); background: var(--bg-hover); }
+.setup-provider-option.active { background: var(--accent-primary); color: #03131f; box-shadow: 0 8px 18px rgba(91, 157, 245, 0.22); }
 .step-status { margin-top: 6px; padding: 8px 10px; border-radius: var(--radius-sm); font-size: 13px; display: none; }
 .step-status.success { display: block; background: rgba(42, 212, 137, 0.12); color: var(--accent-success); }
 .step-status.error { display: block; background: rgba(239, 107, 107, 0.15); color: var(--accent-danger); }
@@ -2559,6 +2618,32 @@ body.skills-panel-open .main-content {
     transition: color 0.1s;
 }
 .notif-dismiss:hover { color: white; }
+
+/* ===== KotoDialog — custom modal replacing browser alert/confirm/prompt ===== */
+.koto-dialog-overlay {
+    position: fixed; inset: 0; z-index: 20000;
+    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0); transition: background 0.25s;
+    pointer-events: none;
+}
+.koto-dialog-overlay.koto-dialog-visible { background: rgba(0,0,0,0.45); pointer-events: all; }
+.koto-dialog {
+    background: var(--bg-primary); border-radius: var(--radius-lg);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.25); padding: 28px 32px 20px;
+    max-width: 420px; width: 90%; text-align: center;
+    transform: scale(0.9); opacity: 0; transition: transform 0.25s, opacity 0.25s;
+}
+.koto-dialog-visible .koto-dialog { transform: scale(1); opacity: 1; }
+.koto-dialog-icon { font-size: 40px; margin-bottom: 8px; }
+.koto-dialog-title { font-size: 16px; font-weight: 600; margin-bottom: 8px; color: var(--text-primary); }
+.koto-dialog-msg { font-size: 14px; color: var(--text-secondary); margin-bottom: 16px; line-height: 1.5; white-space: pre-wrap; }
+.koto-dialog-input { width: 100%; padding: 8px 12px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); font-size: 14px; margin-bottom: 16px; outline: none; box-sizing: border-box; }
+.koto-dialog-input:focus { border-color: var(--accent-color); }
+.koto-dialog-btns { display: flex; gap: 10px; justify-content: center; }
+.koto-dialog-cancel { padding: 8px 20px; border: 1px solid var(--border-color); border-radius: var(--radius-sm); background: var(--bg-secondary); color: var(--text-secondary); cursor: pointer; font-size: 14px; }
+.koto-dialog-confirm { padding: 8px 24px; border: none; border-radius: var(--radius-sm); background: var(--accent-color); color: white; cursor: pointer; font-size: 14px; font-weight: 500; }
+.koto-dialog-cancel:hover { background: var(--border-color); }
+.koto-dialog-confirm:hover { opacity: 0.9; }
 
 /* 返回底部浮动按钮（仅生成中+用户上滑时显示） */
 .back-to-bottom-btn {
@@ -3389,7 +3474,6 @@ body.desktop-mode .pill-btn {
     color: var(--accent-primary, #4ca6ff);
     white-space: nowrap;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
 /* ======== Thinking Panel (思考过程面板) ======== */
 .thinking-panel {
@@ -5098,6 +5182,132 @@ body.desktop-mode .pill-btn {
 [data-theme="light"] .sidebar-title { -webkit-text-fill-color: transparent; }
 
 /* ══════════════════════════════════════════════════════════════
+/* ── Latency detail panel (expandable) ── */
+.status-expand-arrow {
+    transition: transform 0.2s;
+    flex-shrink: 0;
+    opacity: 0.5;
+}
+.status-expand-arrow.open { transform: rotate(180deg); opacity: 0.8; }
+.status-indicator { cursor: pointer; }
+
+.latency-detail {
+    overflow: hidden;
+    transition: max-height 0.25s ease, opacity 0.25s ease;
+    max-height: 0;
+    opacity: 0;
+}
+.latency-detail.open {
+    max-height: 160px;
+    opacity: 1;
+}
+.latency-detail-inner {
+    padding: 4px 8px 8px 28px;
+}
+.latency-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+}
+.latency-row.offline .latency-provider,
+.latency-row.offline .latency-value {
+    color: var(--text-muted);
+}
+.latency-provider {
+    font-size: 11px;
+    color: var(--text-secondary);
+    width: 48px;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.latency-bar-bg {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.latency-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease, background 0.3s;
+    width: 0%;
+}
+.latency-bar-fill.good { background: var(--accent-success); }
+.latency-bar-fill.ok   { background: var(--accent-warning); }
+.latency-bar-fill.slow { background: var(--accent-danger); }
+.latency-value {
+    font-size: 11px;
+    color: var(--text-primary);
+    width: 52px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    flex-shrink: 0;
+}
+.latency-tip {
+    display: flex;
+    align-items: flex-start;
+    gap: 5px;
+    margin-top: 6px;
+    padding: 5px 7px;
+    background: var(--bg-tertiary);
+    border-radius: 5px;
+    font-size: 10px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+.latency-tip svg {
+    flex-shrink: 0;
+    margin-top: 1px;
+    opacity: 0.5;
+}
+
+.sidebar-collapsed .activity-bar-bottom {
+    position: relative;
+}
+
+.sidebar-collapsed .latency-detail.open {
+    position: absolute;
+    left: calc(100% + 8px);
+    bottom: 4px;
+    width: 260px;
+    max-height: 220px;
+    padding: 8px 0;
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    background: var(--bg-elevated);
+    box-shadow: var(--shadow-md);
+    z-index: 1200;
+}
+
+.sidebar-collapsed .latency-detail-inner {
+    padding: 4px 10px 8px;
+}
+
+/* Tooltip on hover */
+.status-text[title] {
+    position: relative;
+}
+.status-text[title]:hover::after {
+    content: attr(title);
+    position: absolute;
+    bottom: calc(100% + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 5px 10px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    font-size: 11px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    z-index: 1000;
+    pointer-events: none;
+    font-weight: 400;
+}
+
    END GEMINI-STYLE SIDEBAR v2
    ══════════════════════════════════════════════════════════════ */
 

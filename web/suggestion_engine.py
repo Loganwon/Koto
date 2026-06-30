@@ -374,7 +374,7 @@ class SuggestionEngine:
                     }
                 )
         except Exception as e:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # 忽略错误
+            logger.debug("Non-fatal", exc_info=True)  # 忽略错误
 
         return suggestions
 
@@ -440,7 +440,7 @@ class SuggestionEngine:
                     }
                 )
         except Exception as e:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+            logger.debug("Non-fatal", exc_info=True)
 
         return suggestions
 
