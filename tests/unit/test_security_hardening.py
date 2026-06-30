@@ -196,31 +196,31 @@ class TestUploadSecurity:
 
     def test_secure_filename_strips_path_traversal(self):
         """Path traversal sequences must be sanitized."""
-        from web.app import _secure_filename
+        from web.utils.filenames import secure_filename
 
-        result = _secure_filename("../../etc/passwd")
+        result = secure_filename("../../etc/passwd")
         assert ".." not in result
         assert "/" not in result
         assert "\\" not in result
 
     def test_secure_filename_strips_null_bytes(self):
-        from web.app import _secure_filename
+        from web.utils.filenames import secure_filename
 
-        result = _secure_filename("evil\x00.txt")
+        result = secure_filename("evil\x00.txt")
         assert "\x00" not in result
 
     def test_secure_filename_preserves_unicode(self):
         """CJK filenames should survive sanitization."""
-        from web.app import _secure_filename
+        from web.utils.filenames import secure_filename
 
-        result = _secure_filename("王宇轩-简历.docx")
+        result = secure_filename("王宇轩-简历.docx")
         assert "王宇轩" in result
         assert result.endswith(".docx")
 
     def test_secure_filename_removes_dangerous_chars(self):
-        from web.app import _secure_filename
+        from web.utils.filenames import secure_filename
 
-        result = _secure_filename("file<name>:with|bad*chars?.txt")
+        result = secure_filename("file<name>:with|bad*chars?.txt")
         assert "<" not in result
         assert ">" not in result
         assert ":" not in result

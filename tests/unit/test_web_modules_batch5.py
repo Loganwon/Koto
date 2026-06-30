@@ -627,10 +627,9 @@ class TestProcessedFileNetwork:
         assert stats["success"] is True
         assert stats["statistics"]["total_files"] >= 1
 
-    def test_open_file_nonexistent_id(self):
+    def test_native_open_file_helper_removed(self):
         net = self._make_network()
-        result = net.open_file("no_such_id")
-        assert result["success"] is False
+        assert not hasattr(net, "open_file")
 
     def test_dataclass_file_record_defaults(self):
         from web.processed_file_network import FileRecord

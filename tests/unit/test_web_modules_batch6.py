@@ -6,7 +6,7 @@ Unit tests for web modules batch 6:
   - DocumentComparator
   - DocumentReader
   - DocumentValidator
-  - EmailManager / EmailAccount / Email
+  - Retired EmailManager guard
   - FileOrganizer
   - FileScanner
   - NotificationManager
@@ -21,101 +21,10 @@ import sqlite3
 import tempfile
 import threading
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 
 import pytest
-
-# ---------------------------------------------------------------------------
-# DocumentAnnotator
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.unit
-class TestDocumentAnnotator:
-
-    def test_init_defaults(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator()
-        assert ann.min_similarity == 0.8
-        assert ann.annotation_mode == "comment"
-
-    def test_init_custom(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator(min_similarity=0.5, annotation_mode="highlight")
-        assert ann.min_similarity == 0.5
-        assert ann.annotation_mode == "highlight"
-
-    def test_prepare_document_file_not_found(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator()
-        with pytest.raises(FileNotFoundError):
-            ann.prepare_document("/no/such/file.docx")
-
-    def test_prepare_document_creates_copy(self, tmp_path):
-        from web.document_annotator import DocumentAnnotator
-
-        src = tmp_path / "test.docx"
-        src.write_bytes(b"fake-docx-content")
-        ann = DocumentAnnotator()
-        orig, revised = ann.prepare_document(str(src))
-        assert orig == str(src)
-        assert revised.endswith("_revised.docx")
-        assert os.path.exists(revised)
-
-    def test_extract_text_from_word_exception(self):
-        import sys
-
-        from web.document_annotator import DocumentAnnotator
-
-        mock_docx = MagicMock()
-        mock_docx.Document.side_effect = Exception("read error")
-        with patch.dict(sys.modules, {"docx": mock_docx}):
-            result = DocumentAnnotator.extract_text_from_word("some.docx")
-        assert result["success"] is False
-        assert "error" in result
-
-    def test_locate_text_in_paragraphs_empty_target(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator()
-        assert ann.locate_text_in_paragraphs([], "") is None
-        assert ann.locate_text_in_paragraphs([], "   ") is None
-
-    def test_locate_text_exact_match(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator()
-        paras = [{"index": 0, "text": "Hello World", "para_obj": None}]
-        result = ann.locate_text_in_paragraphs(paras, "Hello")
-        assert result is not None
-        assert result["found"] is True
-        assert result["match_type"] == "exact"
-        assert result["position"] == 0
-
-    def test_locate_text_fuzzy_match(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator(min_similarity=0.5)
-        paras = [{"index": 0, "text": "Hello World Foo Bar", "para_obj": None}]
-        # A string that's similar but not identical
-        result = ann.locate_text_in_paragraphs(paras, "Hello World Foo Baz")
-        assert result is not None
-        assert result["found"] is True
-        assert result["match_type"] == "fuzzy"
-
-    def test_locate_text_no_match(self):
-        from web.document_annotator import DocumentAnnotator
-
-        ann = DocumentAnnotator(min_similarity=0.99)
-        paras = [{"index": 0, "text": "AAAA", "para_obj": None}]
-        result = ann.locate_text_in_paragraphs(
-            paras, "ZZZZZZZZZZZZZZ completely different"
-        )
-        assert result is None
-
 
 # ---------------------------------------------------------------------------
 # DocumentComparator
@@ -438,89 +347,15 @@ class TestDocumentValidator:
 
 
 # ---------------------------------------------------------------------------
-# EmailManager / EmailAccount / Email
+# Retired EmailManager
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.unit
 class TestEmailManager:
 
-    def test_email_account_init(self):
-        from web.email_manager import EmailAccount
-
-        acc = EmailAccount("test@example.com", "pass", "smtp.example.com")
-        assert acc.email_address == "test@example.com"
-        assert acc.imap_server == "imap.example.com"
-        assert acc.smtp_port == 587
-
-    def test_email_object_init(self):
-        from web.email_manager import Email
-
-        e = Email("from@x.com", "to@x.com", "Sub", "Body")
-        assert e.to_addrs == ["to@x.com"]
-        assert e.cc_addrs == []
-        assert e.attachments == []
-        assert e.html is False
-
-    def test_email_object_list_to(self):
-        from web.email_manager import Email
-
-        e = Email("f@x.com", ["a@x.com", "b@x.com"], "S", "B")
-        assert len(e.to_addrs) == 2
-
-    @patch("web.email_manager.os.path.exists", return_value=False)
-    @patch("web.email_manager.os.makedirs")
-    def test_email_manager_init_no_config(self, mock_mkdirs, mock_exists):
-        from web.email_manager import EmailManager
-
-        mgr = EmailManager()
-        assert mgr.accounts == {}
-        assert mgr.default_account is None
-
-    @patch("web.email_manager.os.path.exists", return_value=False)
-    @patch("web.email_manager.os.makedirs")
-    def test_add_account(self, mock_mkdirs, mock_exists):
-        from web.email_manager import EmailManager
-
-        mgr = EmailManager()
-        with patch.object(mgr, "_save_accounts"):
-            result = mgr.add_account(
-                "user@x.com", "pw", "smtp.x.com", set_as_default=True
-            )
-        assert result is True
-        assert mgr.default_account == "user@x.com"
-
-    @patch("web.email_manager.os.path.exists", return_value=False)
-    @patch("web.email_manager.os.makedirs")
-    def test_send_email_no_account(self, mock_mkdirs, mock_exists):
-        from web.email_manager import EmailManager
-
-        mgr = EmailManager()
-        result = mgr.send_email(["to@x.com"], "Hi", "Body")
-        assert result is False
-
-    def test_decode_header_empty(self):
-        from web.email_manager import EmailManager
-
-        with patch("web.email_manager.os.path.exists", return_value=False), patch(
-            "web.email_manager.os.makedirs"
-        ):
-            mgr = EmailManager()
-        assert mgr._decode_header(None) == ""
-        assert mgr._decode_header("") == ""
-
-    def test_get_email_body_non_multipart(self):
-        from web.email_manager import EmailManager
-
-        with patch("web.email_manager.os.path.exists", return_value=False), patch(
-            "web.email_manager.os.makedirs"
-        ):
-            mgr = EmailManager()
-        msg = MagicMock()
-        msg.is_multipart.return_value = False
-        msg.get_payload.return_value = b"Hello"
-        body = mgr._get_email_body(msg)
-        assert "Hello" in body
+    def test_email_manager_module_removed(self):
+        assert not Path("web/email_manager.py").exists()
 
 
 # ---------------------------------------------------------------------------
@@ -699,10 +534,9 @@ class TestFileScanner:
         assert "running" in status
         assert status["running"] is False
 
-    def test_open_file_not_found(self):
+    def test_native_open_file_helper_removed(self):
         FS = self._reset_scanner()
-        result = FS.open_file("/nonexistent/file.txt")
-        assert result["success"] is False
+        assert not hasattr(FS, "open_file")
 
     def test_stats_empty(self):
         FS = self._reset_scanner()

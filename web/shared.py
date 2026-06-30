@@ -11,11 +11,9 @@ Usage:
     from web.shared import get_app, settings_manager, session_manager, ...
 """
 
-import json
 import logging
 import os
 import sys
-import threading
 
 _logger = logging.getLogger("koto.shared")
 
@@ -31,52 +29,21 @@ CHAT_DIR = os.path.join(PROJECT_ROOT, "chats")
 UPLOAD_DIR = os.path.join(PROJECT_ROOT, "web", "uploads")
 
 # ─── User settings cache ─────────────────────────────────────────────────────
-_user_settings_cache = {}
-_user_settings_lock = threading.Lock()
-
-
-def _load_user_settings() -> dict:
-    """Load user_settings.json with caching and safe fallbacks."""
-    with _user_settings_lock:
-        if "data" in _user_settings_cache:
-            return _user_settings_cache["data"]
-        settings_path = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
-        try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except Exception:
-            data = {}
-        _user_settings_cache["data"] = data
-        return data
-
-
-def get_workspace_root() -> str:
-    """Return the workspace root directory from settings or default path."""
-    settings = _load_user_settings()
-    workspace_dir = settings.get("storage", {}).get("workspace_dir")
-    if workspace_dir:
-        return workspace_dir
-    return os.path.join(PROJECT_ROOT, "workspace")
-
-
-def get_organize_root() -> str:
-    """Return the file organization root directory from settings or default path."""
-    settings = _load_user_settings()
-    organize_root = settings.get("storage", {}).get("organize_root")
-    if organize_root:
-        return organize_root
-    return os.path.join(get_workspace_root(), "_organize")
-
-
-def get_default_wechat_files_dir() -> str:
-    """Return configured default WeChat files directory."""
-    settings = _load_user_settings()
-    return settings.get("storage", {}).get("wechat_files_dir", "")
+from web.config import (
+    _load_user_settings,
+    _user_settings_cache,
+    _user_settings_lock,
+    get_default_wechat_files_dir,
+    get_organize_root,
+    get_user_settings_path,
+    get_workspace_root,
+    invalidate_settings_cache,
+)
 
 
 def clear_user_settings_cache():
     """Invalidate user settings cache (e.g. after settings update)."""
-    _user_settings_cache.clear()
+    invalidate_settings_cache()
 
 
 WORKSPACE_DIR = get_workspace_root()

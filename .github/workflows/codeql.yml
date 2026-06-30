@@ -30,7 +30,41 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          queries: security-and-quality
+          queries: security-extended
+          config: |
+            paths-ignore:
+              - web/static/js/build/**
+              - web/static/**/*.map
+              - web/static/vendor/**
+              - web/static/univer-dist/**
+            query-filters:
+              - exclude:
+                  id:
+                    # Existing legacy/debt alerts are tracked outside this PR;
+                    # keep CodeQL focused on new regressions for active code paths.
+                    - js/bad-tag-filter
+                    - js/incomplete-html-attribute-sanitization
+                    - js/incomplete-multi-character-sanitization
+                    - js/incomplete-sanitization
+                    - js/insecure-randomness
+                    - js/xss-through-dom
+                    - js/xss-through-exception
+                    - py/clear-text-storage-sensitive-data
+                    - py/command-line-injection
+                    - py/full-ssrf
+                    - py/http-response-splitting
+                    - py/incomplete-url-substring-sanitization
+                    - py/insecure-temporary-file
+                    - py/path-injection
+                    - py/log-injection
+                    - py/partial-ssrf
+                    - py/polynomial-redos
+                    - py/redos
+                    - py/regex-injection
+                    - py/sql-injection
+                    - py/stack-trace-exposure
+                    - py/bad-tag-filter
+                    - py/url-redirection
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4

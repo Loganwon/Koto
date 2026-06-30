@@ -17,22 +17,6 @@ def __getattr__(name):
         from .ai_router import AIRouter
 
         return AIRouter
-    elif name == "TaskDecomposer":
-        from .task_decomposer import TaskDecomposer
-
-        return TaskDecomposer
-    elif name == "LocalPlanner":
-        from .local_planner import LocalPlanner
-
-        return LocalPlanner
-    elif name == "PlanExecutor":
-        from .plan_executor import PlanExecutor
-
-        return PlanExecutor
-    elif name == "build_handlers_from_orchestrator":
-        from .plan_executor import build_handlers_from_orchestrator
-
-        return build_handlers_from_orchestrator
     elif name == "ToolRouter":
         from .tool_router import ToolRouter
 

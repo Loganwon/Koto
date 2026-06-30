@@ -1,5 +1,5 @@
-' Koto 静默启动器 v3.0
-' 双击此文件可在桌面静默启动 Koto，不显示任何控制台窗口
+' Koto 统一桌面启动器 v3.1
+' 双击此文件启动统一 Koto 桌面入口，不显示任何控制台窗口
 ' 进程名: pythonw.exe (系统托盘不可见，但任务管理器可见)
 '
 ' 如需停止 Koto，请运行 Stop_Koto.bat
@@ -22,7 +22,7 @@ If Not oFSO.FileExists(sPS1) Then
     WScript.Quit 1
 End If
 
-' 构建 PowerShell 命令（静默，无窗口）
+' 构建 PowerShell 命令（统一桌面入口，无窗口）
 sCmd = "powershell.exe -NoProfile -NonInteractive -WindowStyle Hidden " & _
        "-ExecutionPolicy Bypass -File """ & sPS1 & """ -Mode desktop"
 

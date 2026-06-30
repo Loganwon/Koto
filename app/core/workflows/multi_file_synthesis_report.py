@@ -105,7 +105,10 @@ class MultiFileSynthesisReport(WorkflowExecutor):
             findings = self._extract_findings(text[:_MAX_DOC_CHARS], system, model_mode)
             all_findings.append({"source": fname, "findings": findings})
 
-        yield sse_step_done("extract", f"📚 已提取 {sum(len(f['findings']) for f in all_findings)} 个发现")
+        yield sse_step_done(
+            "extract",
+            f"📚 已提取 {sum(len(f['findings']) for f in all_findings)} 个发现",
+        )
 
         # ── Step 2: 交叉分析 ────────────────────────────────────────
         synthesis = {}
@@ -153,14 +156,20 @@ class MultiFileSynthesisReport(WorkflowExecutor):
             logger.warning("[SynthesisReport] 提取失败: %s", e)
         return []
 
-    def _cross_analyze(self, all_findings: list[dict], focus: str, model_mode: str) -> dict:
+    def _cross_analyze(
+        self, all_findings: list[dict], focus: str, model_mode: str
+    ) -> dict:
         """跨文档交叉分析。"""
         findings_text = json.dumps(
-            [{
-                "source": f["source"],
-                "findings": [fi.get("finding", "") for fi in f["findings"]]
-            } for f in all_findings],
-            ensure_ascii=False, indent=2
+            [
+                {
+                    "source": f["source"],
+                    "findings": [fi.get("finding", "") for fi in f["findings"]],
+                }
+                for f in all_findings
+            ],
+            ensure_ascii=False,
+            indent=2,
         )
         focus_hint = f"\n特别关注: {focus}" if focus else ""
         system = _SYNTHESIS_SYSTEM.format(focus_hint=focus_hint)
@@ -174,11 +183,17 @@ class MultiFileSynthesisReport(WorkflowExecutor):
             logger.warning("[SynthesisReport] 交叉分析失败: %s", e)
         return {}
 
-    def _build_docx(self, title: str, exec_summary: str, all_findings: list[dict],
-                    synthesis: dict, output_path: str) -> None:
+    def _build_docx(
+        self,
+        title: str,
+        exec_summary: str,
+        all_findings: list[dict],
+        synthesis: dict,
+        output_path: str,
+    ) -> None:
         from docx import Document
-        from docx.shared import Pt, RGBColor
         from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Pt, RGBColor
 
         doc = Document()
 
@@ -229,8 +244,9 @@ class MultiFileSynthesisReport(WorkflowExecutor):
 
         doc.save(output_path)
 
-    def _build_markdown(self, title: str, exec_summary: str, all_findings: list[dict],
-                        synthesis: dict) -> str:
+    def _build_markdown(
+        self, title: str, exec_summary: str, all_findings: list[dict], synthesis: dict
+    ) -> str:
         lines = [f"# {title}\n", f"## 执行摘要\n\n{exec_summary}\n"]
 
         lines.append("## 各文档发现\n")

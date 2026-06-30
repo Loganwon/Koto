@@ -3,16 +3,13 @@
 Integration tests for workspace-related endpoints in web/app.py:
 - GET  /api/workspace/<path:filepath> — serve workspace files
 - GET  /api/workspace — list workspace files
-- POST /api/open-workspace — open workspace folder
-- POST /api/open-file — open file natively
+- Native OS open routes stay retired
 - GET  /api/browse — browse folders
 """
 
 from __future__ import annotations
 
 import os
-import tempfile
-from unittest.mock import patch
 
 import pytest
 
@@ -52,6 +49,17 @@ class TestListWorkspace:
         assert isinstance(data["files"], list)
 
 
+# ── GET /workspace-assistant ────────────────────────────────────────────────
+
+
+@pytest.mark.integration
+class TestUnifiedWorkspaceEntry:
+    def test_legacy_workspace_assistant_route_redirects_to_unified_app(self, client):
+        resp = client.get("/workspace-assistant?_codex_probe=1", follow_redirects=False)
+        assert resp.status_code == 302
+        assert resp.headers["Location"].endswith("/?_codex_probe=1")
+
+
 # ── GET /api/workspace/<path:filepath> ───────────────────────────────────────
 
 
@@ -73,11 +81,12 @@ class TestWorkspaceFile:
 
     def test_serve_existing_file(self, client):
         """Create a file in workspace and verify it can be served."""
-        from web.app import WORKSPACE_DIR
+        from web.blueprints.workspace import WORKSPACE_DIR
 
         test_filename = "_test_integration_workspace.txt"
         test_path = os.path.join(WORKSPACE_DIR, test_filename)
         try:
+            os.makedirs(WORKSPACE_DIR, exist_ok=True)
             with open(test_path, "w", encoding="utf-8") as f:
                 f.write("workspace file content")
             resp = client.get(f"/api/workspace/{test_filename}")
@@ -95,49 +104,18 @@ class TestWorkspaceFile:
         assert resp.status_code in (403, 404)
 
 
-# ── POST /api/open-file ─────────────────────────────────────────────────────
+# ── Retired native OS open routes ────────────────────────────────────────────
 
 
 @pytest.mark.integration
 class TestOpenFile:
-    def test_missing_filepath_returns_400(self, client):
-        resp = client.post("/api/open-file", json={})
-        assert resp.status_code == 400
-        data = resp.get_json()
-        assert data["success"] is False
-
-    def test_empty_filepath_returns_400(self, client):
-        resp = client.post("/api/open-file", json={"filepath": ""})
-        assert resp.status_code == 400
-
-    def test_nonexistent_file_returns_404(self, client):
-        resp = client.post("/api/open-file", json={"filepath": "nonexistent_xyz.txt"})
+    def test_native_open_file_route_removed(self, client):
+        resp = client.post("/api/" + "open-" + "file", json={})
         assert resp.status_code == 404
-        data = resp.get_json()
-        assert data["success"] is False
 
-    def test_path_traversal_returns_403(self, client):
-        resp = client.post("/api/open-file", json={"filepath": "../../etc/passwd"})
-        assert resp.status_code in (403, 404)
-
-    def test_method_not_allowed_get(self, client):
-        """GET /api/open-file should return 405."""
-        resp = client.get("/api/open-file")
-        assert resp.status_code == 405
-
-
-# ── POST /api/open-workspace ─────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestOpenWorkspace:
-    @patch("subprocess.Popen")
-    def test_open_workspace_returns_success(self, mock_popen, client):
-        mock_popen.return_value = None
-        resp = client.post("/api/open-workspace")
-        data = resp.get_json()
-        assert data["success"] is True
-        assert "path" in data
+    def test_native_open_workspace_route_removed(self, client):
+        resp = client.post("/api/" + "open-" + "workspace")
+        assert resp.status_code == 404
 
 
 # ── GET /api/browse ──────────────────────────────────────────────────────────

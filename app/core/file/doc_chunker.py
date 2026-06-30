@@ -27,9 +27,9 @@ from collections import Counter
 from typing import List, Tuple
 
 # ── 超过此字符数则启用 RAG 路径 ─────────────────────────────────────────────
-CHUNK_THRESHOLD = 8000      # chars — 约等于 2000 个中文字
-CHUNK_SIZE      = 1800      # chars per chunk target
-CHUNK_OVERLAP   = 200       # overlap chars between adjacent chunks
+CHUNK_THRESHOLD = 8000  # chars — 约等于 2000 个中文字
+CHUNK_SIZE = 1800  # chars per chunk target
+CHUNK_OVERLAP = 200  # overlap chars between adjacent chunks
 
 
 class DocChunker:
@@ -71,7 +71,9 @@ class DocChunker:
                     if current_len + len(sent) > chunk_size and current_parts:
                         chunks.append("\n".join(current_parts))
                         # 保留 overlap：从末尾反向收集
-                        overlap_parts = DocChunker._collect_overlap(current_parts, overlap)
+                        overlap_parts = DocChunker._collect_overlap(
+                            current_parts, overlap
+                        )
                         current_parts = overlap_parts
                         current_len = sum(len(p) for p in current_parts)
                     current_parts.append(sent)

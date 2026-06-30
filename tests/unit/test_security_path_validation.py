@@ -97,7 +97,7 @@ class TestAnnotationPluginSandbox:
         valid_path = os.path.join(workspace, "report.docx")
 
         with patch("os.path.exists", return_value=True), patch(
-            "web.document_batch_annotator_v2.annotate_large_document"
+            "web.document_batch_annotator.annotate_large_document"
         ) as mock_ann:
             mock_ann.return_value = iter(
                 ['data:{"type":"complete","output_file":"out.docx","total_edits":3}']
@@ -113,7 +113,7 @@ class TestAnnotationPluginSandbox:
         valid_path = os.path.join(uploads, "doc.docx")
 
         with patch("os.path.exists", return_value=True), patch(
-            "web.document_batch_annotator_v2.annotate_large_document"
+            "web.document_batch_annotator.annotate_large_document"
         ) as mock_ann:
             mock_ann.return_value = iter(
                 ['data:{"type":"complete","output_file":"out.docx","total_edits":1}']
@@ -128,7 +128,7 @@ class TestAnnotationPluginSandbox:
         valid_path = os.path.join(dist, "output.docx")
 
         with patch("os.path.exists", return_value=True), patch(
-            "web.document_batch_annotator_v2.annotate_large_document"
+            "web.document_batch_annotator.annotate_large_document"
         ) as mock_ann:
             mock_ann.return_value = iter(
                 ['data:{"type":"complete","output_file":"out.docx","total_edits":0}']
