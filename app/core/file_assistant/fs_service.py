@@ -386,7 +386,12 @@ class WorkspaceFsService:
         return Path(workspace_dir).resolve()
 
     def _resolve_under_root(self, root: Path, rel_path: str) -> Path:
-        target = root.joinpath(rel_path).resolve()
+        raw = str(rel_path or "")
+        parts = [part for part in re.split(r"[\\/]+", raw) if part and part != "."]
+        if Path(raw).is_absolute() or re.match(r"^[A-Za-z]:", raw) or ".." in parts:
+            raise WorkspaceFsError("路径不合法", status_code=403)
+
+        target = root.joinpath(*parts).resolve() if parts else root.resolve()
         try:
             target.relative_to(root)
         except ValueError as exc:

@@ -44,6 +44,26 @@ def test_create_file_rejects_traversal_folder(tmp_path: Path) -> None:
     assert exc.value.status_code == 403
 
 
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        r"..\..\secret.txt",
+        r"C:\Windows\System32\drivers\etc\hosts",
+    ],
+)
+def test_workspace_relative_paths_reject_windows_traversal_forms(
+    tmp_path: Path, rel_path: str
+) -> None:
+    with pytest.raises(WorkspaceFsError) as exc:
+        WorkspaceFsService().delete_file(
+            workspace_dir=tmp_path,
+            rel_path=rel_path,
+            allowed_extensions={".txt"},
+        )
+
+    assert exc.value.status_code == 403
+
+
 def test_rename_file_preserves_original_extension(tmp_path: Path) -> None:
     (tmp_path / "old.docx").write_bytes(b"doc")
 

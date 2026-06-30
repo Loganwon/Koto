@@ -490,13 +490,20 @@ def get_agent():
     """获取 Agent 实例 — 委托给 AppContext，兼容旧路径。"""
     global _agent_instance
     if _agent_instance is None:
+        agent = None
         try:
             from app.core.app_context import ctx
 
-            _agent_instance = ctx.agent
+            agent = ctx.agent
         except Exception:
-            _agent_instance = create_agent()
+            logger.debug("[agent_routes] AppContext agent unavailable", exc_info=True)
+        _agent_instance = agent or create_agent()
     return _agent_instance
+
+
+def _agent_unavailable_response(exc: Exception):
+    logger.warning("[agent_routes] agent unavailable: %s", exc)
+    return jsonify({"success": False, "error": f"Agent unavailable: {exc}"}), 503
 
 
 def _resolve_runtime_skill(
@@ -790,7 +797,10 @@ def chat():
         rewritten_message, skill_id, task_type
     )
 
-    pipeline = _build_chat_pipeline()
+    try:
+        pipeline = _build_chat_pipeline()
+    except Exception as exc:
+        return _agent_unavailable_response(exc)
     pipeline.tracker = tracker
     pipeline.tracker_path = tracker_path
 
@@ -814,7 +824,10 @@ def chat():
 @agent_bp.route("/tools", methods=["GET"])
 def list_tools():
     """List available tools for the agent."""
-    agent = get_agent()
+    try:
+        agent = get_agent()
+    except Exception as exc:
+        return _agent_unavailable_response(exc)
     definitions = agent.registry.get_definitions()
     return jsonify(definitions)
 
@@ -989,7 +1002,10 @@ def agent_plan():
     if not user_request:
         return jsonify({"success": False, "error": "缺少请求内容"}), 400
 
-    agent = get_agent()
+    try:
+        agent = get_agent()
+    except Exception as exc:
+        return _agent_unavailable_response(exc)
     # Override system instruction for planning mode
     original_instruction = agent.base_system_instruction
     agent.base_system_instruction = (
@@ -1055,7 +1071,10 @@ def agent_optimize():
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
 
-    agent = get_agent()
+    try:
+        agent = get_agent()
+    except Exception as exc:
+        return _agent_unavailable_response(exc)
     # Override system instruction for optimization mode
     original_instruction = agent.base_system_instruction
     agent.base_system_instruction = (
