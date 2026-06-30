@@ -237,7 +237,8 @@ class TestTrackedModels:
         real.generate_content.return_value = Mock(
             text="sdk_result", usage_metadata=None
         )
-        resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
+        with patch.object(app, "_is_interactions_only", return_value=False):
+            resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
         assert resp.text == "sdk_result"
         real.generate_content.assert_called_once()
 
@@ -273,9 +274,12 @@ class TestTrackedModels:
         tm, real, app = self._make()
         chunk = Mock(text="stream_chunk", usage_metadata=None)
         real.generate_content_stream.return_value = iter([chunk])
-        chunks = list(
-            tm.generate_content_stream(model="gemini-3-flash-preview", contents="hi")
-        )
+        with patch.object(app, "_is_interactions_only", return_value=False):
+            chunks = list(
+                tm.generate_content_stream(
+                    model="gemini-3-flash-preview", contents="hi"
+                )
+            )
         assert len(chunks) == 1
         assert chunks[0].text == "stream_chunk"
 
@@ -358,16 +362,15 @@ class TestInteractionsChecks:
         app = _import_app()
         assert app._is_interactions_only("deep-research-pro-preview-12-2025") is True
 
-    def test_is_interactions_only_gemini3_flash_not_static(self):
-        """gemini-3-flash-preview is NOT in the static default set; it may be
-        added dynamically by ModelManager at runtime."""
+    def test_is_interactions_only_gemini3_flash_prefix(self):
+        """gemini-3-flash-preview must use the Interactions API path."""
         app = _import_app()
-        assert app._is_interactions_only("gemini-3-flash-preview") is False
+        assert app._is_interactions_only("gemini-3-flash-preview") is True
 
-    def test_is_interactions_only_gemini3_pro_not_static(self):
-        """gemini-3-pro-preview is NOT in the static default set."""
+    def test_is_interactions_only_gemini3_pro_prefix(self):
+        """gemini-3-pro-preview must use the Interactions API path."""
         app = _import_app()
-        assert app._is_interactions_only("gemini-3-pro-preview") is False
+        assert app._is_interactions_only("gemini-3-pro-preview") is True
 
     def test_is_interactions_only_regular_model_false(self):
         app = _import_app()

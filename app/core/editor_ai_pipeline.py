@@ -57,40 +57,98 @@ logger = logging.getLogger(__name__)
 
 _FILE_TYPE_TASK_MAP: Dict[str, str] = {
     "docx": "FILE_GEN",
-    "doc":  "FILE_GEN",
-    "pdf":  "FILE_GEN",
+    "doc": "FILE_GEN",
+    "pdf": "FILE_GEN",
     "pptx": "FILE_GEN",
-    "ppt":  "FILE_GEN",
+    "ppt": "FILE_GEN",
     "xlsx": "FILE_GEN",
-    "xls":  "FILE_GEN",
-    "csv":  "FILE_GEN",
-    "txt":  "FILE_GEN",
-    "md":   "FILE_GEN",
-    "chat": "CHAT",   # output_mode sentinel
+    "xls": "FILE_GEN",
+    "csv": "FILE_GEN",
+    "txt": "FILE_GEN",
+    "md": "FILE_GEN",
+    "chat": "CHAT",  # output_mode sentinel
 }
 
 # File-type → preferred skill id prefixes / exact ids for the auto-matcher hint
 _FILE_TYPE_SKILL_AFFINITY: Dict[str, List[str]] = {
-    "docx": ["doc_", "writing_assistant", "annotate_", "legal_doc_review",
-             "financial_doc_review", "academic_paper_polish", "marketing_copy",
-             "cross_format_extractor", "doc_smart_compare", "comm_digest"],
-    "doc":  ["doc_", "writing_assistant", "annotate_", "legal_doc_review",
-             "financial_doc_review", "academic_paper_polish", "marketing_copy",
-             "cross_format_extractor", "doc_smart_compare", "comm_digest"],
-    "pdf":  ["doc_", "doc_qa", "doc_summarizer", "annotate_academic", "annotate_business",
-             "doc_smart_compare", "cross_format_extractor", "comm_digest"],
+    "docx": [
+        "doc_",
+        "writing_assistant",
+        "annotate_",
+        "legal_doc_review",
+        "financial_doc_review",
+        "academic_paper_polish",
+        "marketing_copy",
+        "cross_format_extractor",
+        "doc_smart_compare",
+        "comm_digest",
+    ],
+    "doc": [
+        "doc_",
+        "writing_assistant",
+        "annotate_",
+        "legal_doc_review",
+        "financial_doc_review",
+        "academic_paper_polish",
+        "marketing_copy",
+        "cross_format_extractor",
+        "doc_smart_compare",
+        "comm_digest",
+    ],
+    "pdf": [
+        "doc_",
+        "doc_qa",
+        "doc_summarizer",
+        "annotate_academic",
+        "annotate_business",
+        "doc_smart_compare",
+        "cross_format_extractor",
+        "comm_digest",
+    ],
     "pptx": ["slide_", "ppt_outline", "ppt_generator_pro"],
-    "ppt":  ["slide_", "ppt_outline", "ppt_generator_pro"],
-    "xlsx": ["excel_", "pivot_advisor", "data_analysis", "spreadsheet_analyst",
-             "table_enhancer", "data_format_cleaner", "cross_format_extractor"],
-    "xls":  ["excel_", "pivot_advisor", "data_analysis", "spreadsheet_analyst",
-             "table_enhancer", "data_format_cleaner", "cross_format_extractor"],
-    "csv":  ["excel_data_cleaner", "data_analysis", "spreadsheet_analyst", "pivot_advisor",
-             "data_format_cleaner"],
-    "txt":  ["doc_readability", "doc_structure_optimizer", "doc_tone_adjuster",
-             "writing_assistant", "long_doc_parser", "comm_digest"],
-    "md":   ["doc_readability", "doc_structure_optimizer", "doc_tone_adjuster",
-             "writing_assistant", "long_doc_parser", "code_best_practices", "comm_digest"],
+    "ppt": ["slide_", "ppt_outline", "ppt_generator_pro"],
+    "xlsx": [
+        "excel_",
+        "pivot_advisor",
+        "data_analysis",
+        "spreadsheet_analyst",
+        "table_enhancer",
+        "data_format_cleaner",
+        "cross_format_extractor",
+    ],
+    "xls": [
+        "excel_",
+        "pivot_advisor",
+        "data_analysis",
+        "spreadsheet_analyst",
+        "table_enhancer",
+        "data_format_cleaner",
+        "cross_format_extractor",
+    ],
+    "csv": [
+        "excel_data_cleaner",
+        "data_analysis",
+        "spreadsheet_analyst",
+        "pivot_advisor",
+        "data_format_cleaner",
+    ],
+    "txt": [
+        "doc_readability",
+        "doc_structure_optimizer",
+        "doc_tone_adjuster",
+        "writing_assistant",
+        "long_doc_parser",
+        "comm_digest",
+    ],
+    "md": [
+        "doc_readability",
+        "doc_structure_optimizer",
+        "doc_tone_adjuster",
+        "writing_assistant",
+        "long_doc_parser",
+        "code_best_practices",
+        "comm_digest",
+    ],
 }
 
 # Maximum auto-matched skills in file-assistant context (smaller than main chat
@@ -103,9 +161,11 @@ _CWM_TRIGGER_TURNS = 5
 
 # ── Result dataclasses ──────────────────────────────────────────────────────────
 
+
 @dataclass
 class ProcessedInput:
     """Output of EditorAIPipeline.preprocess()."""
+
     # The prompt to send to the LLM (PII-masked if sensitive data was found)
     safe_prompt: str
     # Assembled system instruction (base + memory + skills)
@@ -123,6 +183,7 @@ class ProcessedInput:
 @dataclass
 class ProcessedOutput:
     """Output of EditorAIPipeline.postprocess()."""
+
     # Final text with PII restored
     text: str
     # Validation verdict: "PASS" | "WARN" | "RETRY" | "BLOCK"
@@ -134,6 +195,7 @@ class ProcessedOutput:
 
 
 # ── Main pipeline class ─────────────────────────────────────────────────────────
+
 
 class EditorAIPipeline:
     """
@@ -179,6 +241,7 @@ class EditorAIPipeline:
         force_local = False
         try:
             from app.core.security.pii_filter import PIIFilter
+
             mask_result = PIIFilter.mask(prompt)
             if mask_result.mask_map:
                 safe_prompt = mask_result.masked_text
@@ -195,6 +258,7 @@ class EditorAIPipeline:
         system = base_system_instruction
         try:
             from app.core.app_context import ctx as _ctx
+
             _mem_mgr = _ctx.memory_manager
             if _mem_mgr is not None:
                 _mem_ctx = _mem_mgr.get_context_string(raw_user, history=history)
@@ -214,6 +278,7 @@ class EditorAIPipeline:
         if skill_ids:
             try:
                 from app.core.skills.skill_manager import SkillManager
+
                 system = SkillManager.inject_into_prompt(
                     system,
                     task_type=task_type,
@@ -228,7 +293,7 @@ class EditorAIPipeline:
         # Basic compression: if history exceeds threshold, keep only last N turns
         # (Full MemGPT CWM is optional; skipping here to preserve streaming simplicity)
         if len(history) > _CWM_TRIGGER_TURNS * 2:
-            history = history[-((_CWM_TRIGGER_TURNS) * 2):]
+            history = history[-((_CWM_TRIGGER_TURNS) * 2) :]
             logger.debug(
                 "[EditorPipeline] History trimmed to last %d turns", _CWM_TRIGGER_TURNS
             )
@@ -283,6 +348,7 @@ class EditorAIPipeline:
         validation_reason = ""
         try:
             from app.core.security.output_validator import OutputValidator
+
             vr = OutputValidator.validate(
                 restored_text,
                 skill_id=skill_ids[0] if skill_ids else None,
@@ -293,7 +359,8 @@ class EditorAIPipeline:
             if validation_action == "BLOCK":
                 # Disabled — log only, don't replace content
                 logger.warning(
-                    "[EditorPipeline] OutputValidator BLOCK (ignored): %s", validation_reason
+                    "[EditorPipeline] OutputValidator BLOCK (ignored): %s",
+                    validation_reason,
                 )
         except Exception as _ve:
             logger.debug("[EditorPipeline] Output validation skipped: %s", _ve)
@@ -344,6 +411,7 @@ class EditorAIPipeline:
         _intent_ids: List[str] = []
         try:
             from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+
             _intent_ids = get_skill_binding_manager().match_intent(user_input or "")
         except Exception as _tb_err:
             logger.debug("[EditorPipeline] TriggerBinding skipped: %s", _tb_err)
@@ -390,6 +458,7 @@ class EditorAIPipeline:
     ) -> List[Dict[str, Any]]:
         """Generate skill suggestions based on the conversation."""
         from app.core.skills.skill_suggester import SkillSuggester
+
         return SkillSuggester.suggest(
             user_input=user_input,
             task_type=task_type,

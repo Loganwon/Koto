@@ -65,6 +65,7 @@ def _bundle(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
@@ -266,8 +267,9 @@ class TestSetWorkspaceDir:
 
     def test_persists_to_settings_json(self, _bundle, tmp_path):
         """set_workspace_dir must write the path to user_settings.json."""
-        import web.shared as _shared
         from pathlib import Path as _Path
+
+        import web.shared as _shared
 
         client, _, _ = _bundle
         new_dir = tmp_path / "settings_json_ws"
@@ -310,6 +312,7 @@ def _rename_bundle(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
@@ -482,6 +485,7 @@ def _ws_client(monkeypatch, tmp_path):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)

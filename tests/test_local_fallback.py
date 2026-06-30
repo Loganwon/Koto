@@ -368,8 +368,9 @@ class TestGetLocalProvider:
         mock_opener = MagicMock()
         mock_opener.open.return_value = mock_resp
 
-        with patch("urllib.request.build_opener", return_value=mock_opener), \
-             patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
+        with patch("urllib.request.build_opener", return_value=mock_opener), patch(
+            "app.core.llm.ollama_llm_provider.OllamaLLMProvider"
+        ) as MockOllama:
             MockOllama.return_value = MagicMock()
             provider = _get_local_provider()
 
@@ -389,8 +390,9 @@ class TestGetLocalProvider:
         """当无法查询 Ollama tags 时，应使用 model=None 的默认选择。"""
         mock_opener = MagicMock()
         mock_opener.open.side_effect = ConnectionRefusedError()
-        with patch("urllib.request.build_opener", return_value=mock_opener), \
-             patch("app.core.llm.ollama_llm_provider.OllamaLLMProvider") as MockOllama:
+        with patch("urllib.request.build_opener", return_value=mock_opener), patch(
+            "app.core.llm.ollama_llm_provider.OllamaLLMProvider"
+        ) as MockOllama:
             MockOllama.return_value = MagicMock()
             _get_local_provider()
 

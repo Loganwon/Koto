@@ -17,12 +17,12 @@ from typing import Any
 
 from app.core.workflow_engine import (
     WorkflowExecutor,
+    sse_error,
     sse_output,
     sse_progress,
+    sse_status,
     sse_step_done,
     sse_step_start,
-    sse_error,
-    sse_status,
 )
 
 logger = logging.getLogger(__name__)
@@ -99,7 +99,7 @@ class DataFormatCleaner(WorkflowExecutor):
 
         if exec_result.get("error"):
             stderr_snippet = (exec_result.get("stderr") or "")[:500]
-            err_detail = exec_result['error']
+            err_detail = exec_result["error"]
             if stderr_snippet:
                 err_detail += f"\n{stderr_snippet}"
             yield sse_error(f"代码执行失败: {err_detail}")
@@ -117,16 +117,12 @@ class DataFormatCleaner(WorkflowExecutor):
         diffs = self._diff_csv(csv_data, cleaned_csv)
         yield sse_step_done(
             "diff_preview",
-            f"📊 共 {len(diffs)} 处变更" if diffs else "📊 数据无变化（已是标准格式）"
+            f"📊 共 {len(diffs)} 处变更" if diffs else "📊 数据无变化（已是标准格式）",
         )
 
         # ── Step 4: 输出结果 ──────────────────────────────────────────────────
         workbook = self._csv_to_workbook(cleaned_csv, diffs)
-        yield sse_output(
-            "xlsx_data",
-            workbook,
-            f"清洗完成，{len(diffs)} 处改动"
-        )
+        yield sse_output("xlsx_data", workbook, f"清洗完成，{len(diffs)} 处改动")
 
         # 同时发出 diff 数据（方便前端高亮展示）
         if diffs:
@@ -141,7 +137,9 @@ class DataFormatCleaner(WorkflowExecutor):
             f"请根据以上指令，编写 pandas 清洗代码。"
         )
         try:
-            raw = self.llm(prompt, system=_CLEANING_SYSTEM_PROMPT, model_mode=model_mode)
+            raw = self.llm(
+                prompt, system=_CLEANING_SYSTEM_PROMPT, model_mode=model_mode
+            )
             # 去除可能残留的 markdown 代码块标记
             raw = re.sub(r"^```(?:python)?\s*\n?", "", raw.strip(), flags=re.MULTILINE)
             raw = raw.strip().strip("`").strip()
@@ -157,8 +155,9 @@ class DataFormatCleaner(WorkflowExecutor):
         运行后读取 cleaned.csv 文件。
         """
         try:
-            from app.core.sandbox import _run_in_tempdir
             import sys
+
+            from app.core.sandbox import _run_in_tempdir
 
             # 预先写入原始数据为 input.csv，注入 DataFrame
             preamble = (
@@ -174,7 +173,10 @@ class DataFormatCleaner(WorkflowExecutor):
 
             # 写入 input.csv（通过在 tmpdir 运行时的 setup_code 方式）
             # 使用 _run_in_tempdir_with_files 模式
-            import tempfile, shutil, subprocess, os
+            import os
+            import shutil
+            import subprocess
+            import tempfile
 
             tmpdir = tempfile.mkdtemp(prefix="koto_cleaner_")
             try:
@@ -190,6 +192,7 @@ class DataFormatCleaner(WorkflowExecutor):
 
                 # 构建沙盒环境变量（去除敏感信息）
                 from app.core.sandbox import _build_sandbox_env
+
                 env = _build_sandbox_env(tmpdir)
 
                 result = subprocess.run(
@@ -211,13 +214,22 @@ class DataFormatCleaner(WorkflowExecutor):
                     "cleaned_csv": cleaned_csv,
                     "stdout": result.stdout[:4096],
                     "stderr": result.stderr[:4096],
-                    "error": None if result.returncode == 0 else f"退出码 {result.returncode}",
+                    "error": (
+                        None
+                        if result.returncode == 0
+                        else f"退出码 {result.returncode}"
+                    ),
                 }
             finally:
                 shutil.rmtree(tmpdir, ignore_errors=True)
 
         except subprocess.TimeoutExpired:
-            return {"cleaned_csv": "", "stdout": "", "stderr": "", "error": "执行超时（30秒）"}
+            return {
+                "cleaned_csv": "",
+                "stdout": "",
+                "stderr": "",
+                "error": "执行超时（30秒）",
+            }
         except Exception as e:
             return {"cleaned_csv": "", "stdout": "", "stderr": "", "error": str(e)}
 
@@ -232,12 +244,14 @@ class DataFormatCleaner(WorkflowExecutor):
                     old_v = str(orig.get(col, ""))
                     new_v = str(clean.get(col, ""))
                     if old_v != new_v:
-                        diffs.append({
-                            "row": r_idx + 2,  # 1-based, 行1是表头
-                            "column": col,
-                            "old": old_v,
-                            "new": new_v,
-                        })
+                        diffs.append(
+                            {
+                                "row": r_idx + 2,  # 1-based, 行1是表头
+                                "column": col,
+                                "old": old_v,
+                                "new": new_v,
+                            }
+                        )
         except Exception as e:
             logger.warning(f"[DataCleaner] Diff 生成失败: {e}")
         return diffs
@@ -275,7 +289,11 @@ class DataFormatCleaner(WorkflowExecutor):
                 for c_idx, val in enumerate(row_vals):
                     cell: dict = {"v": val, "t": 1}
                     if is_header:
-                        cell["s"] = {"bl": 1, "bg": {"rgb": "#1a73e8"}, "cl": {"rgb": "#ffffff"}}
+                        cell["s"] = {
+                            "bl": 1,
+                            "bg": {"rgb": "#1a73e8"},
+                            "cl": {"rgb": "#ffffff"},
+                        }
                     elif (r_idx, c_idx) in diff_positions:
                         cell["s"] = highlight_style
                     row_cells[str(c_idx)] = cell
@@ -293,7 +311,11 @@ class DataFormatCleaner(WorkflowExecutor):
                     "id": sheet_id,
                     "name": "清洗结果",
                     "rowCount": len(csv_data.splitlines()),
-                    "columnCount": max(len(r.split(",")) for r in csv_data.splitlines()) if csv_data else 1,
+                    "columnCount": (
+                        max(len(r.split(",")) for r in csv_data.splitlines())
+                        if csv_data
+                        else 1
+                    ),
                     "cellData": cell_data,
                     "mergeData": [],
                 }

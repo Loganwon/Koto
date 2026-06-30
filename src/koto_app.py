@@ -1611,10 +1611,10 @@ def main():
                 ]
                 js_unsaved = _json_mod.dumps(unsaved)
                 window.evaluate_js(
-                    f'window.WA && window.WA.showCloseWarning && '
-                    f'window.WA.showCloseWarning({js_unsaved}).then(function(d){{'
+                    f"window.WA && window.WA.showCloseWarning && "
+                    f"window.WA.showCloseWarning({js_unsaved}).then(function(d){{"
                     f'  if(d!=="cancel") window.pywebview.api.force_close();'
-                    f'}})'
+                    f"}})"
                 )
             except Exception as _e:
                 _write_log(f"⚠️ close-warning JS error: {_e}")
@@ -1628,8 +1628,6 @@ def main():
 
     window.events.closing += _on_closing
     # ──────────────────────────────────────────────────────────────
-
-
 
     # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
     try:

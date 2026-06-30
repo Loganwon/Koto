@@ -11,9 +11,9 @@ from __future__ import annotations
 import re
 
 from app.core.routing.routing_config import (
+    TRIVIAL_EXCLUDE,
     TRIVIAL_GREETINGS,
     TRIVIAL_IDENTITY,
-    TRIVIAL_EXCLUDE,
 )
 
 

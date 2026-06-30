@@ -5,6 +5,7 @@ extracted from KotoAgentLoop.
 Provides a stateless ResponseFormatter class so that KotoAgentLoop._build_proposals
 becomes a thin delegator.
 """
+
 from __future__ import annotations
 
 import re
@@ -52,22 +53,30 @@ class ResponseFormatter:
             derive the proposal rationale note.
         """
         proposals: List[Dict[str, Any]] = []
-        proposed_values = [tc.get("value", "") for tc in tool_calls if tc.get("value", "")]
-        proposal_note = ResponseFormatter.clean_proposal_note(clean_text, selection, proposed_values)
+        proposed_values = [
+            tc.get("value", "") for tc in tool_calls if tc.get("value", "")
+        ]
+        proposal_note = ResponseFormatter.clean_proposal_note(
+            clean_text, selection, proposed_values
+        )
         for idx, tc in enumerate(tool_calls):
             proposed = tc.get("value", "")
             if proposed:
-                proposals.append({
-                    "id": f"p_{idx}",
-                    "original_text": selection,
-                    "proposed_text": proposed,
-                    "rationale": proposal_note,
-                    "tool_call": tc,
-                })
+                proposals.append(
+                    {
+                        "id": f"p_{idx}",
+                        "original_text": selection,
+                        "proposed_text": proposed,
+                        "rationale": proposal_note,
+                        "tool_call": tc,
+                    }
+                )
         return proposals
 
     @staticmethod
-    def clean_proposal_note(note: str, selection: str, proposed_values: List[str]) -> str:
+    def clean_proposal_note(
+        note: str, selection: str, proposed_values: List[str]
+    ) -> str:
         """Return the note text, or empty string if it is redundant.
 
         Mirrors the module-level _proposal_note_or_empty function in

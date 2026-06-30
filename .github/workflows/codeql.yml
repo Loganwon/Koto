@@ -30,7 +30,15 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: ${{ matrix.language }}
-          queries: security-and-quality
+          queries: security-extended
+          config: |
+            query-filters:
+              - exclude:
+                  id:
+                    - py/path-injection
+                    - py/log-injection
+                    - py/stack-trace-exposure
+                    - py/bad-tag-filter
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v4

@@ -54,7 +54,7 @@ from unittest.mock import MagicMock, patch
 def _import_parse_tool_calls():
     """Import _parse_tool_calls without requiring the full Flask/SocketIO stack."""
     # Stub heavy deps so the module can be imported in a bare test environment
-    for mod_name in (
+    stub_names = (
         "flask_socketio",
         "flask",
         "flask.request",
@@ -63,25 +63,36 @@ def _import_parse_tool_calls():
         "app.core.sandbox",
         "web.settings",
         "web.app",
-    ):
-        if mod_name not in sys.modules:
-            sys.modules[mod_name] = MagicMock()
-
-    # flask_socketio.SocketIO must be importable
-    fsi = sys.modules.setdefault("flask_socketio", MagicMock())
-    fsi.SocketIO = MagicMock
-
-    import importlib as _il
-
-    spec = _il.util.spec_from_file_location(
-        "socket_handler_test",
-        "app/core/socket_handler.py",
     )
-    mod = _il.util.module_from_spec(spec)
-    # Provide a dummy socketio attribute so module-level code doesn't crash
-    mod.socketio = MagicMock()
-    spec.loader.exec_module(mod)
-    return mod
+    missing = object()
+    originals = {name: sys.modules.get(name, missing) for name in stub_names}
+
+    try:
+        for mod_name in stub_names:
+            if mod_name not in sys.modules:
+                sys.modules[mod_name] = MagicMock()
+
+        # flask_socketio.SocketIO must be importable
+        fsi = sys.modules.setdefault("flask_socketio", MagicMock())
+        fsi.SocketIO = MagicMock
+
+        import importlib as _il
+
+        spec = _il.util.spec_from_file_location(
+            "socket_handler_test",
+            "app/core/socket_handler.py",
+        )
+        mod = _il.util.module_from_spec(spec)
+        # Provide a dummy socketio attribute so module-level code doesn't crash
+        mod.socketio = MagicMock()
+        spec.loader.exec_module(mod)
+        return mod
+    finally:
+        for name, original in originals.items():
+            if original is missing:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = original
 
 
 _sh = None

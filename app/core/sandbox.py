@@ -35,7 +35,17 @@ IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".svg", ".gif", ".webp"}
 # Any env var whose uppercase name contains one of these substrings is
 # stripped before being passed to sandbox subprocesses (S3 fix).
 _SENSITIVE_ENV_PATTERNS = frozenset(
-    {"KEY", "SECRET", "TOKEN", "PASSWORD", "PASS", "CREDENTIAL", "AUTH", "CERT", "APIKEY"}
+    {
+        "KEY",
+        "SECRET",
+        "TOKEN",
+        "PASSWORD",
+        "PASS",
+        "CREDENTIAL",
+        "AUTH",
+        "CERT",
+        "APIKEY",
+    }
 )
 
 
@@ -72,7 +82,9 @@ def _build_sandbox_env(tmpdir: str) -> dict:
 # ── Python ────────────────────────────────────────────────────
 
 
-def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None) -> dict:
+def run_python(
+    code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
+) -> dict:
     """
     Execute Python code in an isolated temp directory.
 
@@ -126,13 +138,17 @@ def run_python(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None =
     """)
 
     full_code = preamble + "\n" + code
-    return _run_in_tempdir("python", [sys.executable, "-c", full_code], timeout, work_dir=work_dir)
+    return _run_in_tempdir(
+        "python", [sys.executable, "-c", full_code], timeout, work_dir=work_dir
+    )
 
 
 # ── R ─────────────────────────────────────────────────────────
 
 
-def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None) -> dict:
+def run_r(
+    code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
+) -> dict:
     """
     Execute R code in an isolated temp directory.
     ggplot2 / base graphics are captured as PNG via a preamble.
@@ -160,7 +176,9 @@ def run_r(code: str, timeout: int = DEFAULT_TIMEOUT, work_dir: str | None = None
         script_path = f.name
 
     try:
-        return _run_in_tempdir("Rscript", ["Rscript", script_path], timeout, work_dir=work_dir)
+        return _run_in_tempdir(
+            "Rscript", ["Rscript", script_path], timeout, work_dir=work_dir
+        )
     finally:
         try:
             os.unlink(script_path)
@@ -250,7 +268,9 @@ def _run_in_dir(lang: str, cmd: list, timeout: int, cwd: str) -> dict:
     }
 
 
-def _run_in_tempdir(lang: str, cmd: list, timeout: int, *, work_dir: str | None = None) -> dict:
+def _run_in_tempdir(
+    lang: str, cmd: list, timeout: int, *, work_dir: str | None = None
+) -> dict:
     """
     Create a temp directory, run `cmd` inside it, collect results.
     The temp directory is always cleaned up.

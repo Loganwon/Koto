@@ -95,8 +95,7 @@ class EmailThreadDigest(WorkflowExecutor):
         if model_mode == "local":
             # 本地模型简化：只提取 decisions + action_items
             system = system.replace(
-                '"timeline": [',
-                '"timeline": [],  // 本地模式跳过 timeline\n    // '
+                '"timeline": [', '"timeline": [],  // 本地模式跳过 timeline\n    // '
             )
 
         structured = self._extract_structure(text, system, model_mode)
@@ -128,6 +127,7 @@ class EmailThreadDigest(WorkflowExecutor):
     def _parse_thread(self, file_path: str) -> str:
         """解析邮件/聊天文件。.eml 额外处理 headers。"""
         from pathlib import Path
+
         ext = Path(file_path).suffix.lower()
 
         if ext == ".eml":
@@ -152,7 +152,9 @@ class EmailThreadDigest(WorkflowExecutor):
                     text_parts = []
                     for part, enc in decoded:
                         if isinstance(part, bytes):
-                            text_parts.append(part.decode(enc or "utf-8", errors="replace"))
+                            text_parts.append(
+                                part.decode(enc or "utf-8", errors="replace")
+                            )
                         else:
                             text_parts.append(part)
                     parts.append(f"{h}: {''.join(text_parts)}")
@@ -178,7 +180,9 @@ class EmailThreadDigest(WorkflowExecutor):
             logger.warning("[EmailDigest] EML 解析失败: %s", e)
             return self.parse_file(file_path)
 
-    def _extract_structure(self, text: str, system: str, model_mode: str) -> dict | None:
+    def _extract_structure(
+        self, text: str, system: str, model_mode: str
+    ) -> dict | None:
         """调用 LLM 提取结构化数据。"""
         prompt = f"请分析以下邮件/消息记录：\n\n{text}"
         try:
@@ -192,8 +196,8 @@ class EmailThreadDigest(WorkflowExecutor):
     def _build_docx(self, data: dict, output_path: str, lang: str) -> None:
         """用 python-docx 构建结构化纪要文档。"""
         from docx import Document
-        from docx.shared import Inches, Pt, RGBColor
         from docx.enum.text import WD_ALIGN_PARAGRAPH
+        from docx.shared import Inches, Pt, RGBColor
 
         doc = Document()
 
