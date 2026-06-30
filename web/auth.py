@@ -23,7 +23,7 @@ try:
 except ImportError:
     HAS_JWT = False
 
-from flask import g, jsonify, request
+from flask import Blueprint, g, jsonify, request
 
 logger = logging.getLogger(__name__)
 
@@ -361,13 +361,21 @@ def optional_auth(f):
     return decorated
 
 
+def _exempt_csrf_if_available(app, view_func) -> None:
+    csrf = getattr(app, "extensions", {}).get("csrf")
+    exempt = getattr(csrf, "exempt", None)
+    if callable(exempt):
+        exempt(view_func)
+
+
 # ── Auth API 路由注册 ──
 
 
 def register_auth_routes(app):
     """注册认证相关的 API 路由"""
+    auth_bp = Blueprint("auth_api", __name__)
 
-    @app.route("/api/auth/register", methods=["POST"])
+    @auth_bp.route("/api/auth/register", methods=["POST"])
     def auth_register():
         """用户注册（手机号或邮箱 + 密码，无需验证码）"""
         if not AUTH_ENABLED:
@@ -434,8 +442,9 @@ def register_auth_routes(app):
                 },
             }
         )
+    _exempt_csrf_if_available(app, auth_register)
 
-    @app.route("/api/auth/login", methods=["POST"])
+    @auth_bp.route("/api/auth/login", methods=["POST"])
     def auth_login():
         """User login — returns JWT token.
         ---
@@ -522,8 +531,9 @@ def register_auth_routes(app):
                 },
             }
         )
+    _exempt_csrf_if_available(app, auth_login)
 
-    @app.route("/api/auth/me", methods=["GET"])
+    @auth_bp.route("/api/auth/me", methods=["GET"])
     @require_auth
     def auth_me():
         """获取当前用户信息"""
@@ -553,7 +563,7 @@ def register_auth_routes(app):
                 )
         return jsonify({"user_id": g.user_id, "email": g.user_email, "plan": "free"})
 
-    @app.route("/api/auth/bind/apikey", methods=["POST"])
+    @auth_bp.route("/api/auth/bind/apikey", methods=["POST"])
     @require_auth
     def auth_bind_apikey():
         """绑定/更新用户自己的 Gemini API Key"""
@@ -573,7 +583,7 @@ def register_auth_routes(app):
                 return jsonify({"success": True, "message": "API Key 绑定成功"})
         return jsonify({"error": "用户不存在"}), 404
 
-    @app.route("/api/auth/activate", methods=["POST"])
+    @auth_bp.route("/api/auth/activate", methods=["POST"])
     @require_auth
     def auth_activate():
         """用激活码兑换系统 API 使用权限"""
@@ -608,7 +618,7 @@ def register_auth_routes(app):
 
     # ── 管理员接口（需 KOTO_ADMIN_TOKEN） ──
 
-    @app.route("/api/admin/activation_codes/create", methods=["POST"])
+    @auth_bp.route("/api/admin/activation_codes/create", methods=["POST"])
     def admin_create_codes():
         """管理员批量生成激活码"""
         token = request.headers.get("X-Admin-Token", "")
@@ -632,7 +642,7 @@ def register_auth_routes(app):
         logger.info("[Admin] 生成了 %d 个激活码", count)
         return jsonify({"success": True, "codes": new_codes})
 
-    @app.route("/api/admin/activation_codes", methods=["GET"])
+    @auth_bp.route("/api/admin/activation_codes", methods=["GET"])
     def admin_list_codes():
         """管理员查看所有激活码状态"""
         token = request.headers.get("X-Admin-Token", "")
@@ -647,7 +657,7 @@ def register_auth_routes(app):
             }
         )
 
-    @app.route("/api/admin/users", methods=["GET"])
+    @auth_bp.route("/api/admin/users", methods=["GET"])
     def admin_list_users():
         """管理员查看所有注册用户（手机号/邮箱收集）"""
         token = request.headers.get("X-Admin-Token", "")
@@ -670,12 +680,13 @@ def register_auth_routes(app):
             )
         return jsonify({"users": result, "total": len(result)})
 
-    @app.route("/api/auth/logout", methods=["POST"])
+    @auth_bp.route("/api/auth/logout", methods=["POST"])
     def auth_logout():
         """登出（客户端清除 token 即可）"""
         return jsonify({"success": True})
+    _exempt_csrf_if_available(app, auth_logout)
 
-    @app.route("/api/auth/status", methods=["GET"])
+    @auth_bp.route("/api/auth/status", methods=["GET"])
     def auth_status():
         """返回认证系统状态（供前端判断是否需要登录）"""
         return jsonify(
@@ -684,6 +695,8 @@ def register_auth_routes(app):
                 "mode": "cloud" if AUTH_ENABLED else "local",
             }
         )
+
+    app.register_blueprint(auth_bp)
 
     logger.warning(
         f"[Auth] {'✅ 认证系统已启用' if AUTH_ENABLED else '⚠️ 本地模式（无认证）'}"

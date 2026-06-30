@@ -733,17 +733,23 @@ class TestWorkspaceTabManagement:
 @pytest.mark.e2e
 class TestWorkspaceAssistantJsSource:
     """
-    Static analysis of the JS source to verify the critical code fixes are present.
+    Static analysis of the workspace file-open source to verify critical fixes are present.
     These tests run without a browser and don't require the Flask server.
     """
 
-    _JS_PATH = (
-        Path(__file__).parents[2] / "web" / "static" / "js" / "workspace-assistant.js"
-    )
-
     @property
     def src(self) -> str:
-        return self._JS_PATH.read_text(encoding="utf-8")
+        root = Path(__file__).parents[2]
+        return "\n".join(
+            [
+                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(
+                    encoding="utf-8"
+                ),
+                (root / "web" / "src" / "workspace" / "infrastructure.ts").read_text(
+                    encoding="utf-8"
+                ),
+            ]
+        )
 
     def test_open_workspace_file_uses_open_file_by_path(self):
         """
@@ -756,17 +762,15 @@ class TestWorkspaceAssistantJsSource:
 
     def test_open_workspace_file_does_not_use_blob_roundtrip(self):
         """
-        The old double-roundtrip pattern (fetch blob → new File([blob]) → POST to open_file)
-        must be absent from openWorkspaceFile.  Look for the telltale 'new File([blob]'
-        pattern inside the openWorkspaceFile function body.
+        The old raw-byte re-upload path must be absent from openWorkspaceFile.
         """
         # Find the function and check that it does NOT contain the blob pattern
-        fn_start = self.src.find("openWorkspaceFile = async")
+        fn_start = self.src.find("async function openWorkspaceFile")
         assert fn_start >= 0, "openWorkspaceFile function not found"
         # Read ~60 lines of the function body (safe upper bound)
         fn_body = self.src[fn_start : fn_start + 2000]
-        assert "new File([blob]" not in fn_body, (
-            "openWorkspaceFile must NOT use new File([blob]) — that causes 0-byte uploads. "
+        assert ("new File(" + "[blob]") not in fn_body, (
+            "openWorkspaceFile must not use the old raw-byte re-upload path. "
             "It should call open_file_by_path directly."
         )
 
@@ -828,41 +832,109 @@ class TestWorkspaceAssistantJsSource:
             Path(__file__).parents[2] / "web" / "blueprints" / "workspace_assistant.py"
         )
         src = wa_py.read_text(encoding="utf-8")
-        # Count occurrences — there should be at least 2 (one per endpoint)
-        count = src.count("st_size == 0")
-        assert count >= 2, (
-            f"Expected at least 2 zero-byte guards (open_file + open_file_by_path), "
-            f"found {count}"
-        )
+        assert "_repair_zero_byte_office_file" in src
+        assert "repair_zero_byte_file=_repair_zero_byte_office_file" in src
 
-    def test_open_browser_file_uses_open_file_by_path_first(self):
+    def test_open_browser_file_routes_workspace_files_through_open_file_by_path(self):
         """
-        openBrowserFile must try open_file_by_path first for ALL files.
-        The old serve_abs → blob → new File([blob]) → open_file round-trip
-        produced 0-byte uploads whenever the seeded content was not flushed.
-        Now open_file_by_path is always tried first; serve_abs is only the
-        fallback when the backend returns 403 (file outside workspace).
+        openBrowserFile must route workspace files through open_file_by_path.
+        The old raw-byte round-trip produced 0-byte uploads whenever the
+        seeded content was not flushed.
         """
-        fn_start = self.src.find("openBrowserFile = async")
+        fn_start = self.src.find("async function openBrowserFile")
         assert fn_start >= 0, "openBrowserFile function not found"
         fn_body = self.src[fn_start : fn_start + 3000]
-        assert "open_file_by_path" in fn_body, (
-            "openBrowserFile must call open_file_by_path first instead of "
-            "the serve_abs → blob round-trip"
-        )
-        # The 403 fallback check must be present
-        assert (
-            "403" in fn_body
-        ), "openBrowserFile must fall back to serve_abs only on 403 (outside workspace)"
+        assert "openWorkspaceFile(absPath, supported)" in fn_body
+        assert ("new File(" + "[blob]") not in fn_body
 
-    def test_open_browser_file_still_uses_serve_abs_for_external_files(self):
+    def test_open_browser_file_uses_open_abs_file_for_external_files(self):
         """
-        openBrowserFile must still use serve_abs for files outside the workspace
-        (external drives, other directories).
+        openBrowserFile must use open_abs_file for files outside the workspace.
         """
-        fn_start = self.src.find("openBrowserFile = async")
+        fn_start = self.src.find("async function openBrowserFile")
         assert fn_start >= 0, "openBrowserFile function not found"
         fn_body = self.src[fn_start : fn_start + 3000]
         assert (
-            "serve_abs" in fn_body
-        ), "openBrowserFile must still use serve_abs for external files"
+            "open_abs_file" in fn_body
+        ), "openBrowserFile must use open_abs_file for external files"
+
+    def test_open_recent_file_bridge_routes_workspace_and_absolute_paths(self):
+        """
+        The main app opens Office/PDF files through WA.openRecentFile().
+        That bridge must exist and dispatch relative/workspace paths to
+        openWorkspaceFile, while absolute paths still flow through
+        openBrowserFile.
+        """
+        fn_start = self.src.find("openRecentFile = async")
+        assert fn_start >= 0, "WA.openRecentFile bridge function not found"
+        fn_body = self.src[fn_start : fn_start + 2200]
+        assert (
+            "openWorkspaceFile" in fn_body
+        ), "WA.openRecentFile must route workspace-relative paths back through openWorkspaceFile"
+        assert (
+            "openBrowserFile" in fn_body
+        ), "WA.openRecentFile must route absolute paths back through openBrowserFile"
+        assert (
+            "state._workspacePath" in fn_body
+        ), "WA.openRecentFile must compare against the active workspace root before routing"
+
+    def test_file_type_icons_are_mapped_to_distinct_svgs(self):
+        """Workspace file list should keep colored Office-style icon mappings for common file types."""
+        src = self.src
+        assert (
+            "function _waBrandFileSvg(label: string" in src
+        ), "Brand-style file SVG helper should exist"
+        assert (
+            "export const _WORD_FILE_SVG" in src
+        ), "Word files should have a dedicated colored icon definition"
+        assert (
+            "export const _EXCEL_FILE_SVG" in src
+        ), "Excel files should have a dedicated colored icon definition"
+        assert (
+            "export const _POWERPOINT_FILE_SVG" in src
+        ), "PowerPoint files should have a dedicated colored icon definition"
+        assert (
+            "export const _PDF_SVG" in src
+        ), "PDF should have a dedicated colored icon definition"
+        assert "#185ABD" in src, "Word icon should keep Office blue branding"
+        assert "#107C41" in src, "Excel icon should keep Office green branding"
+        assert "#D24726" in src, "PowerPoint icon should keep Office orange branding"
+        assert "#E53935" in src, "PDF icon should keep red branding"
+        assert "docx: _WORD_FILE_SVG" in src, "DOCX extension should map to Word icon"
+        assert "xlsx: _EXCEL_FILE_SVG" in src, "XLSX extension should map to Excel icon"
+        assert (
+            "pptx: _POWERPOINT_FILE_SVG" in src
+        ), "PPTX extension should map to PowerPoint icon"
+        assert "pdf: _PDF_SVG" in src, "PDF extension should map to PDF icon"
+        assert (
+            src.count("export const _PDF_SVG") == 1
+        ), "PDF icon constant must not be declared twice"
+        assert (
+            src.count("export const _TEXT_SVG") == 1
+        ), "Text icon constant must not be declared twice"
+        assert (
+            src.count("export const _CODE_SVG") == 1
+        ), "Code icon constant must not be declared twice"
+        assert (
+            src.count("export const _IMAGE_SVG") == 1
+        ), "Image icon constant must not be declared twice"
+
+    def test_reload_file_by_path_routes_workspace_relative_paths_through_open_file_by_path(
+        self,
+    ):
+        """
+        Task-stream refresh uses WA.reloadFileByPath(). When file-change events
+        carry workspace-relative paths, reloadFileByPath must still route them
+        through open_file_by_path instead of misclassifying them as absolute
+        browser files.
+        """
+        fn_start = self.src.find("async function reloadFileByPath")
+        assert fn_start >= 0, "WA.reloadFileByPath function not found"
+        fn_body = self.src[fn_start : fn_start + 2200]
+        assert "return openWorkspaceFile(filePath, supported)" in fn_body
+        assert (
+            "_isAbsolutePath" in fn_body
+        ), "WA.reloadFileByPath must treat non-absolute file-change paths as workspace-relative"
+        assert (
+            "openBrowserFile(filePath, supported)" in fn_body
+        ), "WA.reloadFileByPath must still support absolute-path refreshes for external files"

@@ -5,6 +5,7 @@ Starts the Flask app on a dedicated test port and provides
 browser fixtures with automatic JS console error collection.
 """
 
+import importlib.util
 import os
 import signal
 import subprocess
@@ -21,6 +22,14 @@ E2E_PORT = int(os.environ.get("KOTO_E2E_PORT", 9876))
 E2E_BASE_URL = f"http://127.0.0.1:{E2E_PORT}"
 APP_STARTUP_TIMEOUT = 60  # seconds
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+PLAYWRIGHT_PREREQ_MESSAGE = (
+    "pytest-playwright is not installed. Install `pytest-playwright` and `playwright`, "
+    "then run `python -m playwright install chromium` to enable browser E2E tests."
+)
+
+
+def _has_playwright_pytest_plugin() -> bool:
+    return importlib.util.find_spec("pytest_playwright") is not None
 
 
 def _wait_for_server(base_url: str, timeout: int) -> bool:
@@ -105,6 +114,13 @@ def browser_context_args():
         "viewport": {"width": 1280, "height": 720},
         "ignore_https_errors": True,
     }
+
+
+if not _has_playwright_pytest_plugin():
+
+    @pytest.fixture()
+    def page():
+        pytest.skip(PLAYWRIGHT_PREREQ_MESSAGE)
 
 
 # ---------------------------------------------------------------------------

@@ -77,21 +77,29 @@ class ContractDiffMarkup(WorkflowExecutor):
         if not text_a.strip() or not text_b.strip():
             yield sse_error("合同文件解析失败或内容为空")
             return
-        yield sse_step_done("parse", f"📄 原始 {len(text_a)} 字 ↔ 对比 {len(text_b)} 字")
+        yield sse_step_done(
+            "parse", f"📄 原始 {len(text_a)} 字 ↔ 对比 {len(text_b)} 字"
+        )
 
         # ── Step 2: 文本差异比对 ────────────────────────────────────
         yield sse_step_start("diff", "🔍 差异比对…")
         changes = self._compute_diff(text_a, text_b)
         if not changes:
-            yield sse_output("markdown", "# 比对结果\n\n两份合同内容完全一致，未发现差异。", "无差异")
+            yield sse_output(
+                "markdown", "# 比对结果\n\n两份合同内容完全一致，未发现差异。", "无差异"
+            )
             return
         yield sse_step_done("diff", f"🔍 发现 {len(changes)} 处变更")
 
         # ── Step 3: LLM 分析变更语义 ───────────────────────────────
         yield sse_step_start("analyze", "🤖 AI 分析变更风险…")
         batch_size = _BATCH_SIZE_LOCAL if model_mode == "local" else _BATCH_SIZE_ONLINE
-        annotations = self._analyze_changes(changes, model_mode, batch_size,
-            lambda cur, tot: (yield sse_progress(cur, tot, f"分析第 {cur}/{tot} 批")))
+        annotations = self._analyze_changes(
+            changes,
+            model_mode,
+            batch_size,
+            lambda cur, tot: (yield sse_progress(cur, tot, f"分析第 {cur}/{tot} 批")),
+        )
         yield sse_step_done("analyze", f"🤖 分析完成，{len(annotations)} 条标注")
 
         # ── Step 4: 写入 DOCX 标记 ──────────────────────────────────
@@ -104,7 +112,11 @@ class ContractDiffMarkup(WorkflowExecutor):
                 base_file = contract_b
             else:
                 # 两份都不是 DOCX，无法直接标注
-                yield sse_output("markdown", self._build_summary(annotations), "变更摘要（无法生成标注DOCX，因为源文件非Word格式）")
+                yield sse_output(
+                    "markdown",
+                    self._build_summary(annotations),
+                    "变更摘要（无法生成标注DOCX，因为源文件非Word格式）",
+                )
                 return
 
         output_path = self.save_output_file(".docx")
@@ -112,6 +124,7 @@ class ContractDiffMarkup(WorkflowExecutor):
 
         try:
             from web.track_changes_editor import TrackChangesEditor
+
             editor = TrackChangesEditor("合同审查")
             result = editor.apply_hybrid_changes(str(output_path), annotations)
             applied = result.get("applied", 0)
@@ -159,7 +172,9 @@ class ContractDiffMarkup(WorkflowExecutor):
 
         return changes
 
-    def _analyze_changes(self, changes: list[dict], model_mode: str, batch_size: int, progress_cb) -> list[dict]:
+    def _analyze_changes(
+        self, changes: list[dict], model_mode: str, batch_size: int, progress_cb
+    ) -> list[dict]:
         """批量调用 LLM 分析变更风险。"""
         all_annotations: list[dict] = []
         total_batches = (len(changes) + batch_size - 1) // batch_size
@@ -170,12 +185,14 @@ class ContractDiffMarkup(WorkflowExecutor):
             except StopIteration:
                 pass
 
-            batch = changes[bi * batch_size: (bi + 1) * batch_size]
+            batch = changes[bi * batch_size : (bi + 1) * batch_size]
             batch_data = json.dumps(batch, ensure_ascii=False, indent=2)
             prompt = f"请分析以下 {len(batch)} 处合同变更：\n\n{batch_data}"
 
             try:
-                result = self.llm_json(prompt, system=_ANALYZE_SYSTEM, model_mode=model_mode)
+                result = self.llm_json(
+                    prompt, system=_ANALYZE_SYSTEM, model_mode=model_mode
+                )
                 if isinstance(result, list):
                     all_annotations.extend(result)
                     continue
@@ -184,11 +201,13 @@ class ContractDiffMarkup(WorkflowExecutor):
 
             # 回退：直接构造标注
             for c in batch:
-                all_annotations.append({
-                    "原文片段": c["old"][:200] if c["old"] else "",
-                    "修改建议": c["new"][:200] if c["new"] else "",
-                    "修改原因": "内容变更",
-                })
+                all_annotations.append(
+                    {
+                        "原文片段": c["old"][:200] if c["old"] else "",
+                        "修改建议": c["new"][:200] if c["new"] else "",
+                        "修改原因": "内容变更",
+                    }
+                )
 
         return all_annotations
 

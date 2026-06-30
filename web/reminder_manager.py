@@ -129,7 +129,7 @@ class ReminderManager:
             try:
                 self.timers[reminder_id].cancel()
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                logger.debug("Non-fatal", exc_info=True)
             self.timers.pop(reminder_id, None)
         if reminder_id in self.reminders:
             self.reminders[reminder_id]["status"] = "cancelled"

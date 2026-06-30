@@ -181,7 +181,7 @@ class PPTGenerator:
         subtitle: str = "",
         author: str = "Koto AI",
         progress_callback: Optional[Any] = None,
-        enable_ai_images: bool = True,  # New Flag
+        enable_ai_images: bool = False,
     ) -> Dict[str, Any]:
         """从大纲生成高质量PPT - 支持智能配图"""
 
@@ -243,7 +243,7 @@ class PPTGenerator:
         # 2. Iterate Outline
         for idx, section in enumerate(outline):
             s_title = section.get("title", "No Title")
-            s_type = section.get("type", "detail")
+            s_type = section.get("type") or section.get("slide_type", "detail")
             s_points = section.get("points", [])
             s_content = section.get("content", [])
 
@@ -367,7 +367,7 @@ class PPTGenerator:
         try:
             slide.shapes.add_picture(image_path, left, top, height=height)
         except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)  # Image load fail
+            logger.debug("Non-fatal", exc_info=True)  # Image load fail
 
         # 3. Content (Left Half)
         body_shape = slide.placeholders[1]
@@ -532,77 +532,7 @@ class PPTGenerator:
 
     def _create_divider_slide(self, prs, title, subtitle):
         """Section divider"""
-        self._create_highlight_slide(prs, title, [subtitle])
-
-        try:
-            from pptx import Presentation
-            from pptx.dml.color import RGBColor
-            from pptx.enum.shapes import MSO_SHAPE
-            from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
-            from pptx.util import Emu, Inches, Pt
-
-            prs = Presentation()
-            prs.slide_width = Inches(13.333)  # 16:9 宽屏
-            prs.slide_height = Inches(7.5)
-
-            total_slides = len(outline)
-
-            # 1. 封面页
-            _progress(0, total_slides, title, "封面")
-            self._add_title_slide(prs, title, subtitle, author)
-
-            # 2. 目录页 (≥3 页内容才需要，过滤掉过渡页)
-            content_slides = [
-                s for s in outline if s.get("type", "detail") != "divider"
-            ]
-            if len(content_slides) >= 3:
-                self._add_agenda_slide(prs, content_slides)
-
-            # 3. 内容页 — 根据 slide type 分发到不同渲染器
-            divider_count = 0
-            for idx, section in enumerate(outline):
-                slide_type = section.get("type", "detail")
-                section_title = section.get("title", "")
-                _progress(idx + 1, total_slides, section_title, slide_type)
-
-                if slide_type == "divider":
-                    divider_count += 1
-                    self._add_section_divider_slide(prs, section, divider_count)
-                elif slide_type == "overview":
-                    self._add_overview_slide(prs, section, idx + 1, len(outline))
-                elif slide_type == "highlight":
-                    self._add_highlight_slide(prs, section, idx + 1, len(outline))
-                elif slide_type == "comparison":
-                    self._add_comparison_slide(prs, section, idx + 1, len(outline))
-                else:  # "detail" 或未指定 → 默认详细内容页
-                    self._add_content_slide(prs, section, idx + 1, len(outline))
-
-            # 4. 结束页
-            _progress(total_slides, total_slides, "结束页", "ending")
-            self._add_ending_slide(prs, title)
-
-            # 5. 给所有非封面和结束页添加页码
-            total = len(prs.slides)
-            for i, slide in enumerate(prs.slides):
-                if 0 < i < total - 1:
-                    self._add_slide_number(prs, slide, i, total - 2)
-
-            os.makedirs(os.path.dirname(output_path) or ".", exist_ok=True)
-            prs.save(output_path)
-
-            return {
-                "success": True,
-                "output_path": output_path,
-                "slide_count": len(prs.slides),
-                "message": f"成功生成 {len(prs.slides)} 页PPT",
-            }
-        except ImportError:
-            return {
-                "success": False,
-                "error": "需要安装 python-pptx: pip install python-pptx",
-            }
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+        return self._create_highlight_slide(prs, title, [subtitle])
 
     # ─── 辅助方法 ───────────────────────────────────
 

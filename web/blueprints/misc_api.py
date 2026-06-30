@@ -3,7 +3,7 @@
 """
 Miscellaneous API blueprint.
 
-Extracts notes, reminders, calendar, clipboard, email, search, data-pipeline,
+Extracts notes, reminders, calendar, clipboard, search, data-pipeline,
 code-generation, and file-network routes from web/app.py.
 """
 
@@ -23,9 +23,9 @@ misc_api_bp = Blueprint("misc_api", __name__)
 
 
 def _get_workspace_dir():
-    from web.app import WORKSPACE_DIR
+    from web.runtime_context import get_workspace_dir
 
-    return WORKSPACE_DIR
+    return get_workspace_dir()
 
 
 # ========================= Notes API =========================
@@ -254,104 +254,6 @@ def copy_from_history() -> Response:
     return jsonify({"success": success})
 
 
-# ========================= Email API =========================
-
-
-@misc_api_bp.route("/api/email/accounts", methods=["GET"])
-def list_email_accounts() -> Response:
-    """列出邮箱账户"""
-    from email_manager import get_email_manager
-
-    email_manager = get_email_manager()
-    accounts = list(email_manager.accounts.keys())
-    default = email_manager.default_account
-
-    return jsonify({"accounts": accounts, "default": default})
-
-
-@misc_api_bp.route("/api/email/accounts/add", methods=["POST"])
-def add_email_account() -> Response:
-    """添加邮箱账户"""
-    from email_manager import get_email_manager
-
-    data = request.json
-    email_address = data.get("email")
-    password = data.get("password")
-    smtp_server = data.get("smtp_server")
-    smtp_port = data.get("smtp_port", 587)
-    imap_server = data.get("imap_server")
-    set_as_default = data.get("set_as_default", False)
-
-    email_manager = get_email_manager()
-    success = email_manager.add_account(
-        email_address=email_address,
-        password=password,
-        smtp_server=smtp_server,
-        smtp_port=smtp_port,
-        imap_server=imap_server,
-        set_as_default=set_as_default,
-    )
-
-    return jsonify({"success": success})
-
-
-@misc_api_bp.route("/api/email/send", methods=["POST"])
-def send_email() -> Response:
-    """发送邮件"""
-    from email_manager import get_email_manager
-
-    data = request.json
-    to_addrs = data.get("to", [])
-    subject = data.get("subject", "")
-    body = data.get("body", "")
-    cc_addrs = data.get("cc", [])
-    attachments = data.get("attachments", [])
-    html = data.get("html", False)
-
-    email_manager = get_email_manager()
-    success = email_manager.send_email(
-        to_addrs=to_addrs,
-        subject=subject,
-        body=body,
-        cc_addrs=cc_addrs,
-        attachments=attachments,
-        html=html,
-    )
-
-    return jsonify({"success": success})
-
-
-@misc_api_bp.route("/api/email/fetch", methods=["GET"])
-def fetch_emails() -> Response:
-    """获取邮件列表"""
-    from email_manager import get_email_manager
-
-    folder = request.args.get("folder", "INBOX")
-    limit = int(request.args.get("limit", 20))
-    unread_only = request.args.get("unread_only", "false").lower() == "true"
-
-    email_manager = get_email_manager()
-    emails = email_manager.fetch_emails(
-        folder=folder, limit=limit, unread_only=unread_only
-    )
-
-    return jsonify({"emails": emails})
-
-
-@misc_api_bp.route("/api/email/search", methods=["GET"])
-def search_emails() -> Response:
-    """搜索邮件"""
-    from email_manager import get_email_manager
-
-    keyword = request.args.get("query", "")
-    folder = request.args.get("folder", "INBOX")
-
-    email_manager = get_email_manager()
-    results = email_manager.search_emails(keyword, folder=folder)
-
-    return jsonify({"results": results})
-
-
 # ========================= Search API =========================
 
 
@@ -543,30 +445,6 @@ def file_network_search() -> Response:
             date_to=data.get("date_to"),
             limit=data.get("limit", 50),
         )
-
-        return jsonify(result)
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@misc_api_bp.route("/api/file-network/open", methods=["POST"])
-def file_network_open() -> Response:
-    """快速打开文件
-
-    请求参数:
-        file_id: 文件ID
-    """
-    try:
-        from web.processed_file_network import get_file_network
-
-        data = request.json
-        file_id = data.get("file_id")
-
-        if not file_id:
-            return jsonify({"success": False, "error": "缺少file_id参数"}), 400
-
-        file_network = get_file_network()
-        result = file_network.open_file(file_id)
 
         return jsonify(result)
     except Exception as e:

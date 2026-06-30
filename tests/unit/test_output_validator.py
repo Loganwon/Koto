@@ -5,7 +5,11 @@ import logging
 
 import pytest
 
-from app.core.security.output_validator import OutputValidator, ValidationResult
+from app.core.security.output_validator import (
+    OutputValidator,
+    ValidationResult,
+    sanitize_user_visible_text,
+)
 
 _LOGGER = "app.core.security.output_validator"
 
@@ -229,3 +233,28 @@ class TestOutputValidatorLogging:
             OutputValidator.validate(text)
         warnings = [r.message for r in caplog.records if r.levelno >= logging.WARNING]
         assert any("代码替代" in m or "RETRY" in m for m in warnings), warnings
+
+
+@pytest.mark.unit
+class TestSanitizeUserVisibleText:
+    def test_blocks_prompt_leak_with_fallback(self):
+        safe = sanitize_user_visible_text(
+            "System Prompt:\nYou are a hidden assistant.",
+            fallback="处理失败。",
+        )
+        assert safe == "处理失败。"
+
+    def test_hides_sensitive_error_tracebacks(self):
+        safe = sanitize_user_visible_text(
+            'Traceback (most recent call last):\n  File "app.py", line 1\nConnectError: boom',
+            fallback="网络请求失败。",
+            treat_as_error=True,
+        )
+        assert safe == "网络请求失败。"
+
+    def test_keeps_safe_user_text(self):
+        safe = sanitize_user_visible_text(
+            "文件读取完成，共发现 12 个段落。",
+            fallback="处理失败。",
+        )
+        assert safe == "文件读取完成，共发现 12 个段落。"

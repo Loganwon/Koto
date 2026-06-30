@@ -27,6 +27,7 @@ _SESSION_TTL_SECONDS = 3600 * 4  # 4 hours idle → evict
 
 # ── Data models ────────────────────────────────────────────────────────────
 
+
 @dataclass
 class TaskRecord:
     """Summary of one completed workspace task."""
@@ -107,6 +108,7 @@ class WorkspaceSession:
 
 # ── Singleton memory store ─────────────────────────────────────────────────
 
+
 class WorkspaceSessionMemory:
     """
     Thread-safe LRU cache of WorkspaceSession objects.
@@ -145,7 +147,9 @@ class WorkspaceSessionMemory:
             to_evict = [sid for sid, s in self._sessions.items() if s.is_expired()]
             for sid in to_evict:
                 del self._sessions[sid]
-                logger.debug("[WorkspaceSessionMemory] evicted expired session: %s", sid)
+                logger.debug(
+                    "[WorkspaceSessionMemory] evicted expired session: %s", sid
+                )
 
             while len(self._sessions) >= _MAX_SESSIONS:
                 evicted_id, _ = self._sessions.popitem(last=False)

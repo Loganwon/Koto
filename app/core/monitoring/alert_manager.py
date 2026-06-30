@@ -3,20 +3,15 @@
 """
 Phase 5b: Alerting System
 
-Email and webhook notifications for monitoring events.
+Local log notifications for monitoring events.
 Supports customizable alert rules and severity thresholds.
 """
 
 import logging
-import smtplib
 import threading
 from datetime import datetime
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
 from enum import Enum
 from typing import Any, Callable, Dict, List, Optional
-
-import requests
 
 logger = logging.getLogger(__name__)
 
@@ -24,8 +19,6 @@ logger = logging.getLogger(__name__)
 class AlertChannel(Enum):
     """Alert delivery channels."""
 
-    EMAIL = "email"
-    WEBHOOK = "webhook"
     LOG = "log"
 
 
@@ -93,60 +86,10 @@ class AlertManager:
     def __init__(self):
         """Initialize alert manager."""
         self.rules: Dict[str, AlertRule] = {}
-        self.email_config: Optional[Dict[str, str]] = None
-        self.webhook_urls: Dict[str, str] = {}  # channel_name -> url
         self.alert_history: List[Dict[str, Any]] = []
         self.handlers: Dict[AlertChannel, Callable] = {
-            AlertChannel.EMAIL: self._send_email_alert,
-            AlertChannel.WEBHOOK: self._send_webhook_alert,
             AlertChannel.LOG: self._send_log_alert,
         }
-
-    def configure_email(
-        self,
-        smtp_server: str,
-        smtp_port: int,
-        sender_email: str,
-        sender_password: str,
-        recipients: List[str],
-    ) -> bool:
-        """
-        Configure email alerting.
-
-        Args:
-            smtp_server: SMTP server address
-            smtp_port: SMTP port
-            sender_email: From email address
-            sender_password: Email password/token
-            recipients: List of recipient emails
-
-        Returns:
-            True if configuration successful
-        """
-        self.email_config = {
-            "smtp_server": smtp_server,
-            "smtp_port": smtp_port,
-            "sender_email": sender_email,
-            "sender_password": sender_password,
-            "recipients": recipients,
-        }
-        logger.info(f"Email alerting configured with {len(recipients)} recipients")
-        return True
-
-    def add_webhook(self, name: str, url: str) -> bool:
-        """
-        Add webhook endpoint for alerts.
-
-        Args:
-            name: Webhook name (e.g., 'slack', 'teams')
-            url: Webhook URL
-
-        Returns:
-            True if added successfully
-        """
-        self.webhook_urls[name] = url
-        logger.info(f"Webhook '{name}' registered: {url}")
-        return True
 
     def add_rule(self, rule: AlertRule) -> bool:
         """
@@ -213,96 +156,6 @@ class AlertManager:
         except Exception as e:
             logger.error(f"Error processing alerts: {e}")
             return None
-
-    def _send_email_alert(self, rule: AlertRule, event: Dict[str, Any]) -> None:
-        """Send email alert."""
-        if not self.email_config:
-            logger.warning("Email alerting not configured")
-            return
-
-        # Build email
-        subject = f"[{event.get('severity').upper()}] {event.get('event_type')}: {event.get('description')}"
-
-        body = f"""
-System Monitoring Alert
-
-Alert Rule: {rule.name}
-Event Type: {event.get('event_type')}
-Severity: {event.get('severity')}
-Timestamp: {event.get('timestamp')}
-
-Description:
-{event.get('description')}
-
-Metric: {event.get('metric_name')}
-Current Value: {event.get('metric_value')}
-Threshold: {event.get('threshold')}
-
-Please log in to the monitoring dashboard for more details.
-        """
-
-        # Send in background thread
-        threading.Thread(
-            target=self._send_email_async, args=(subject, body), daemon=True
-        ).start()
-
-    def _send_email_async(self, subject: str, body: str) -> None:
-        """Send email asynchronously."""
-        try:
-            config = self.email_config
-
-            msg = MIMEMultipart()
-            msg["From"] = config["sender_email"]
-            msg["To"] = ", ".join(config["recipients"])
-            msg["Subject"] = subject
-
-            msg.attach(MIMEText(body, "plain"))
-
-            # Connect and send
-            server = smtplib.SMTP(config["smtp_server"], config["smtp_port"])
-            server.starttls()
-            server.login(config["sender_email"], config["sender_password"])
-            server.send_message(msg)
-            server.quit()
-
-            logger.info(f"Email alert sent: {subject}")
-        except Exception as e:
-            logger.error(f"Error sending email: {e}")
-
-    def _send_webhook_alert(self, rule: AlertRule, event: Dict[str, Any]) -> None:
-        """Send webhook alert."""
-        if not self.webhook_urls:
-            logger.warning("No webhooks configured")
-            return
-
-        payload = {
-            "rule": rule.name,
-            "event": event,
-            "timestamp": datetime.now().isoformat(),
-        }
-
-        # Send to all webhooks in background
-        for name, url in self.webhook_urls.items():
-            threading.Thread(
-                target=self._send_webhook_async, args=(name, url, payload), daemon=True
-            ).start()
-
-    def _send_webhook_async(self, name: str, url: str, payload: Dict[str, Any]) -> None:
-        """Send webhook asynchronously."""
-        try:
-            response = requests.post(
-                url,
-                json=payload,
-                timeout=10,
-                headers={"Content-Type": "application/json"},
-            )
-
-            if response.status_code < 400:
-                logger.info(f"Webhook '{name}' alert sent successfully")
-            else:
-                logger.warning(f"Webhook '{name}' returned {response.status_code}")
-        except Exception as e:
-            logger.error(f"Error sending webhook '{name}': {e}")
 
     def _send_log_alert(self, rule: AlertRule, event: Dict[str, Any]) -> None:
         """Log alert."""

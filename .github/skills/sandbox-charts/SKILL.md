@@ -1,6 +1,6 @@
 ---
 name: sandbox-charts
-description: 'Work with Koto sandbox code execution and chart generation. Use when: modifying sandbox.py; adding chart types; debugging Python/R code execution; working on /api/editor/ai/chart or chart-rerun endpoints; editing chart rendering in AIPanel._sendViaChart; troubleshooting matplotlib/pandas output.'
+description: 'Work with Koto sandbox code execution and chart generation. Use when: modifying sandbox.py; adding chart types; debugging Python/R code execution; working on /api/editor/ai/chart or chart-rerun endpoints; editing chart rendering in workspace-assistant.js; troubleshooting matplotlib/pandas output.'
 ---
 
 # Sandbox & Chart Generation Skill
@@ -18,15 +18,15 @@ Location: `app/core/sandbox.py`
 - `POST /api/editor/ai/chart` — LLM generates code → sandbox executes → SSE returns images
 - `POST /api/editor/ai/chart-rerun` — User-modified code → sandbox executes → JSON returns images
 
-### Frontend: AIPanel.js
-- `_sendViaChart(dataContext, instruction)` — SSE stream handler for chart generation
-- `_rerunChartCode(code, chartWrap)` — Direct code execution with result rendering
+### Frontend: workspace-assistant.js
+- Chart generation UI and SSE handling live in `web/static/js/workspace-assistant.js`
+- The current workspace assistant posts to `/api/editor/ai/chart` and `/api/editor/ai/chart-rerun`
 
 ## Chart Generation Flow
 
 ```
 User selects data → clicks "📊 可视化"
-  → AIPanel._sendViaChart(data, '')
+  → workspace-assistant chart request flow
   → POST /api/editor/ai/chart {data_context, instruction, lang: 'python'}
   → Backend: LLM generates Python code
   → SSE event {type: 'code', text: '...'}

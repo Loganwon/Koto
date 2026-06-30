@@ -327,12 +327,13 @@ class SkillToolsPlugin(AgentPlugin):
                 return f"❌ 未知权限 `{permission}`。可用权限：{valid}"
 
             SkillManager._ensure_init()
-            if skill_id not in SkillManager._registry:
+            skill = SkillManager.get_runtime_entry(skill_id)
+            if not skill:
                 return f"❌ 未找到 Skill ID: `{skill_id}`"
 
             SkillPermissionManager.grant(skill_id, permission)
             meta = PERMISSION_META[permission]
-            name = SkillManager._registry[skill_id].get("name", skill_id)
+            name = skill.get("name", skill_id)
             return (
                 f"✅ 已为「{name}」(`{skill_id}`) 授予权限：**{meta['label']}**\n"
                 f"  - 说明：{meta['description']}\n"
@@ -353,7 +354,8 @@ class SkillToolsPlugin(AgentPlugin):
 
             SkillManager._ensure_init()
             rows = []
-            for sid, s in SkillManager._registry.items():
+            for s in SkillManager.list_skills():
+                sid = s.get("id", "")
                 if category and s.get("category", "") != category:
                     continue
                 if enabled_only and not s.get("enabled", False):
@@ -376,10 +378,11 @@ class SkillToolsPlugin(AgentPlugin):
             from app.core.skills.skill_manager import SkillManager
 
             SkillManager._ensure_init()
-            if skill_id not in SkillManager._registry:
+            skill = SkillManager.get_runtime_entry(skill_id)
+            if not skill:
                 return f"❌ 未找到 Skill ID: `{skill_id}`，请先用 list_skills 确认正确 ID。"
-            SkillManager._registry[skill_id]["enabled"] = True
-            name = SkillManager._registry[skill_id].get("name", skill_id)
+            SkillManager.set_enabled(skill_id, True)
+            name = skill.get("name", skill_id)
             return f"✅ 已启用 Skill：**{name}** (`{skill_id}`)"
         except Exception as e:
             logger.warning(f"[SkillToolsPlugin] enable_skill 失败: {e}")
@@ -391,10 +394,11 @@ class SkillToolsPlugin(AgentPlugin):
             from app.core.skills.skill_manager import SkillManager
 
             SkillManager._ensure_init()
-            if skill_id not in SkillManager._registry:
+            skill = SkillManager.get_runtime_entry(skill_id)
+            if not skill:
                 return f"❌ 未找到 Skill ID: `{skill_id}`，请先用 list_skills 确认正确 ID。"
-            SkillManager._registry[skill_id]["enabled"] = False
-            name = SkillManager._registry[skill_id].get("name", skill_id)
+            SkillManager.set_enabled(skill_id, False)
+            name = skill.get("name", skill_id)
             return f"✅ 已停用 Skill：**{name}** (`{skill_id}`)"
         except Exception as e:
             logger.warning(f"[SkillToolsPlugin] disable_skill 失败: {e}")

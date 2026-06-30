@@ -91,19 +91,23 @@ def _to_ollama_messages(
                 # Convert to Ollama OpenAI-compatible tool_calls format
                 ollama_tcs = []
                 for tc in tool_calls:
-                    ollama_tcs.append({
-                        "id": tc.get("id") or "",
-                        "type": "function",
-                        "function": {
-                            "name": tc.get("name", ""),
-                            "arguments": tc.get("args") or {},
-                        },
-                    })
-                messages.append({
-                    "role": "assistant",
-                    "content": content or "",
-                    "tool_calls": ollama_tcs,
-                })
+                    ollama_tcs.append(
+                        {
+                            "id": tc.get("id") or "",
+                            "type": "function",
+                            "function": {
+                                "name": tc.get("name", ""),
+                                "arguments": tc.get("args") or {},
+                            },
+                        }
+                    )
+                messages.append(
+                    {
+                        "role": "assistant",
+                        "content": content or "",
+                        "tool_calls": ollama_tcs,
+                    }
+                )
             elif content:
                 messages.append({"role": "assistant", "content": str(content)})
 
@@ -123,17 +127,21 @@ def _to_ollama_messages(
                     if tool_call_id:
                         break
             if tool_call_id:
-                messages.append({
-                    "role": "tool",
-                    "content": str(content),
-                    "tool_call_id": tool_call_id,
-                })
+                messages.append(
+                    {
+                        "role": "tool",
+                        "content": str(content),
+                        "tool_call_id": tool_call_id,
+                    }
+                )
             else:
                 # No id available — inject as user message so context isn't lost
-                messages.append({
-                    "role": "user",
-                    "content": f"[Tool result from {fn_name}]: {str(content)}",
-                })
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": f"[Tool result from {fn_name}]: {str(content)}",
+                    }
+                )
 
         elif role == "user":
             content = msg.get("content", "")
@@ -175,6 +183,7 @@ def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
     """Convert Ollama /api/chat response → UnifiedAgent {content, tool_calls, usage}."""
     import re as _re
     import uuid as _uuid
+
     msg = resp_json.get("message") or {}
     content = msg.get("content") or ""
     # Strip <think>...</think> blocks (qwen3 thinking mode)
@@ -207,6 +216,7 @@ def _raw_post(
     url: str,
     payload: Dict,
     stream: bool = False,
+    timeout_seconds: Optional[float] = None,
 ) -> Any:
     """Single HTTP POST.  Non-stream → dict.  Stream → generator of delta str."""
     data = json.dumps(payload).encode("utf-8")
@@ -217,12 +227,19 @@ def _raw_post(
         headers={"Content-Type": "application/json"},
     )
 
+    timeout = 180.0
+    if timeout_seconds is not None:
+        try:
+            timeout = max(1.0, float(timeout_seconds))
+        except Exception:
+            timeout = 180.0
+
     if stream:
-        return _stream_deltas(req)
+        return _stream_deltas(req, timeout_seconds=timeout)
 
     _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     try:
-        with _opener.open(req, timeout=180) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body = e.read().decode("utf-8", errors="replace")
@@ -231,13 +248,22 @@ def _raw_post(
         raise RuntimeError(f"Ollama request failed: {e}") from e
 
 
-def _stream_deltas(req: urllib.request.Request) -> Generator[str, None, None]:
+def _stream_deltas(
+    req: urllib.request.Request,
+    timeout_seconds: Optional[float] = None,
+) -> Generator[str, None, None]:
     """Yield text delta strings from a streaming Ollama response, stripping <think> blocks."""
     _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
     _in_think = False
     _think_buf = ""
+    timeout = 180.0
+    if timeout_seconds is not None:
+        try:
+            timeout = max(1.0, float(timeout_seconds))
+        except Exception:
+            timeout = 180.0
     try:
-        with _opener.open(req, timeout=180) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             for raw in resp:
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
@@ -387,11 +413,14 @@ class OllamaLLMProvider(LLMProvider):
             payload["tools"] = ollama_tools
 
         url = f"{self.base_url}/api/chat"
+        timeout_seconds = kwargs.get("call_timeout")
 
         if stream:
-            return self._stream_chunks(url, payload)
+            return self._stream_chunks(url, payload, timeout_seconds=timeout_seconds)
 
-        resp_json = _raw_post(url, payload, stream=False)
+        resp_json = _raw_post(
+            url, payload, stream=False, timeout_seconds=timeout_seconds
+        )
         return _parse_ollama_response(resp_json)
 
     def get_token_count(
@@ -414,6 +443,7 @@ class OllamaLLMProvider(LLMProvider):
         self,
         url: str,
         payload: Dict,
+        timeout_seconds: Optional[float] = None,
     ) -> Generator[Dict[str, Any], None, None]:
         """Yield UnifiedAgent-format chunks from a streaming Ollama call."""
         payload = {**payload, "stream": True}
@@ -424,5 +454,5 @@ class OllamaLLMProvider(LLMProvider):
             method="POST",
             headers={"Content-Type": "application/json"},
         )
-        for delta in _stream_deltas(req):
+        for delta in _stream_deltas(req, timeout_seconds=timeout_seconds):
             yield {"content": delta, "tool_calls": [], "usage": {}}

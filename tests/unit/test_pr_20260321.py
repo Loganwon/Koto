@@ -49,6 +49,10 @@ class TestProviderFactoryListProviders(unittest.TestCase):
             "GOOGLE_API_KEY",
             "OPENAI_API_KEY",
             "OPENAI_KEY",
+            "DEEPSEEK_API_KEY",
+            "DEEPSEEK_KEY",
+            "DS_API_KEY",
+            "DS_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_API_KEY",
         ):
@@ -59,6 +63,8 @@ class TestProviderFactoryListProviders(unittest.TestCase):
 
         with patch(
             "app.core.llm.provider_factory.get_gemini_api_key", return_value=None
+        ), patch(
+            "app.core.llm.provider_factory.get_deepseek_api_key", return_value=None
         ):
             providers = list_available_providers()
         # ollama may appear if port 11434 is open — filter it out
@@ -86,6 +92,13 @@ class TestProviderFactoryListProviders(unittest.TestCase):
             providers = list_available_providers()
         self.assertIn("anthropic", providers)
 
+    def test_deepseek_detected_via_api_key(self):
+        from app.core.llm.provider_factory import list_available_providers
+
+        with patch.dict(os.environ, {"DEEPSEEK_API_KEY": "test-key"}):
+            providers = list_available_providers()
+        self.assertIn("deepseek", providers)
+
     def test_returns_list_type(self):
         from app.core.llm.provider_factory import list_available_providers
 
@@ -101,9 +114,7 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         mock_inst = MagicMock()
         with patch(
             "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
-        ), patch(
-            "app.core.llm.provider_factory.has_gemini_api_key", return_value=True
-        ):
+        ), patch("app.core.llm.provider_factory.has_gemini_api_key", return_value=True):
             result = get_llm_provider(provider="gemini")
         self.assertIs(result, mock_inst)
 
@@ -143,9 +154,7 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         mock_inst = MagicMock()
         with patch(
             "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
-        ), patch(
-            "app.core.llm.provider_factory.has_gemini_api_key", return_value=True
-        ):
+        ), patch("app.core.llm.provider_factory.has_gemini_api_key", return_value=True):
             result = get_llm_provider(model="gemini-3-flash-preview")
         self.assertIs(result, mock_inst)
 
@@ -172,13 +181,21 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             "GOOGLE_API_KEY",
             "OPENAI_API_KEY",
             "OPENAI_KEY",
+            "DEEPSEEK_API_KEY",
+            "DEEPSEEK_KEY",
+            "DS_API_KEY",
+            "DS_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_API_KEY",
         ):
             os.environ.pop(k, None)
         with patch(
             "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
-        ), self.assertRaises(CloudProviderUnavailableError):
+        ), patch(
+            "app.core.llm.provider_factory.has_deepseek_api_key", return_value=False
+        ), self.assertRaises(
+            CloudProviderUnavailableError
+        ):
             get_llm_provider(provider="nonexistent_provider")
 
     def test_allow_local_fallback_returns_ollama_when_cloud_missing(self):
@@ -191,6 +208,10 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             "GOOGLE_API_KEY",
             "OPENAI_API_KEY",
             "OPENAI_KEY",
+            "DEEPSEEK_API_KEY",
+            "DEEPSEEK_KEY",
+            "DS_API_KEY",
+            "DS_KEY",
             "ANTHROPIC_API_KEY",
             "CLAUDE_API_KEY",
         ):
@@ -198,13 +219,18 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         with patch(
             "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
         ), patch(
+            "app.core.llm.provider_factory.has_deepseek_api_key", return_value=False
+        ), patch(
             "app.core.llm.provider_factory._load_ollama", return_value=mock_inst
         ):
             result = get_llm_provider(allow_local_fallback=True)
         self.assertIs(result, mock_inst)
 
     def test_auto_detect_loads_gemini_config_when_env_empty(self):
-        from app.core.llm.provider_factory import get_llm_provider, list_available_providers
+        from app.core.llm.provider_factory import (
+            get_llm_provider,
+            list_available_providers,
+        )
 
         mock_inst = MagicMock()
         with tempfile.TemporaryDirectory() as tmpdir:

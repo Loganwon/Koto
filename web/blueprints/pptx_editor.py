@@ -84,7 +84,7 @@ def _parse_slides(raw_bytes: bytes) -> dict:
     Parse a .pptx binary blob into structured slide data using the geometry parser.
     """
     import io
-    from app.core.file.file_parser import parse_pptx_geometry
+    from app.core.file.parsers.pptx_parser import parse_pptx_geometry
 
     parsed = parse_pptx_geometry(io.BytesIO(raw_bytes))
 
@@ -306,7 +306,7 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                         except Exception:
                             pass
 
-        # ── New shapes (negative IDs = inserted on frontend) ─────────────────
+        # ── New shapes (inserted on frontend) ────────────────────────────────
         existing_ids = {s.shape_id for s in slide.shapes}
         for edit_shape in edit_slide.get("shapes", []):
             try:
@@ -315,9 +315,44 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                 sid = -1
             if sid >= 0 and sid in existing_ids:
                 continue  # already handled above
+            from pptx.util import Emu
+
+            image_src = (
+                edit_shape.get("image_b64")
+                or edit_shape.get("imageBase64")
+                or edit_shape.get("src")
+                or ""
+            )
+            is_picture = (
+                str(edit_shape.get("_type") or "").upper() == "PICTURE"
+                or str(edit_shape.get("type") or "").lower() == "picture"
+                or bool(image_src)
+            )
+            if is_picture:
+                if not isinstance(image_src, str) or not image_src.startswith("data:image/"):
+                    continue
+                try:
+                    import base64 as _b64
+
+                    _header, _payload = image_src.split(",", 1)
+                    img_bytes = _b64.b64decode(_payload)
+                    pic = slide.shapes.add_picture(
+                        io.BytesIO(img_bytes),
+                        Emu(edit_shape.get("left", 0)),
+                        Emu(edit_shape.get("top", 0)),
+                        Emu(edit_shape.get("width", 2743200)),
+                        Emu(edit_shape.get("height", 1543050)),
+                    )
+                    if edit_shape.get("rotation") is not None:
+                        try:
+                            pic.rotation = float(edit_shape.get("rotation") or 0)
+                        except Exception:
+                            pass
+                except Exception as exc:
+                    _logger.debug("Could not insert PPTX image shape: %s", exc)
+                continue
             if not edit_shape.get("has_text"):
                 continue
-            from pptx.util import Emu
             txBox = slide.shapes.add_textbox(
                 Emu(edit_shape.get("left", 0)),
                 Emu(edit_shape.get("top", 0)),

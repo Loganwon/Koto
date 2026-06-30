@@ -10,10 +10,6 @@ Covers new modules introduced in the PR:
   4. app.core.routing.routing_config — TRIVIAL_GREETINGS, TRIVIAL_IDENTITY, TRIVIAL_EXCLUDE, TASK_CORPUS
   5. app.core.routing.rule_router   — RuleRouter (is_trivial, get_trivial_reply, quick_task_hint,
                                       apply_safety, should_use_annotation_system)
-  6. app.core.routing.fallback_router — FallbackRouter.check_compound_task,
-                                        FallbackRouter.check_rag_context
-  7. app.core.routing.ml_router     — MLRouter.classify_with_task_classifier,
-                                      MLRouter.classify_with_local_model
 """
 
 import os
@@ -40,14 +36,11 @@ for _m in [
     "docx",
     "PIL",
     "PIL.Image",
-    "vosk",
     "pynput",
     "pynput.keyboard",
     "pynput.mouse",
     "scipy",
     "scipy.io",
-    "pyaudio",
-    "sounddevice",
 ]:
     _stub(_m)
 
@@ -103,7 +96,7 @@ class TestNormalizeModelMode(unittest.TestCase):
 
 
 class TestIsExplicitModelMode(unittest.TestCase):
-    """is_explicit_model_mode returns True only for 'local' and 'cloud'."""
+    """is_explicit_model_mode returns True for local/cloud and provider names."""
 
     def setUp(self):
         from app.core.llm.model_mode import is_explicit_model_mode
@@ -131,8 +124,11 @@ class TestIsExplicitModelMode(unittest.TestCase):
     def test_uppercase_cloud_is_explicit(self):
         self.assertTrue(self.is_explicit("CLOUD"))
 
+    def test_provider_name_is_explicit(self):
+        self.assertTrue(self.is_explicit("gemini"))
+
     def test_unknown_not_explicit(self):
-        self.assertFalse(self.is_explicit("gemini"))
+        self.assertFalse(self.is_explicit("bogus"))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -184,10 +180,10 @@ class TestIsInteractionsOnlyModel(unittest.TestCase):
         self.assertTrue(self.check("deep-research-anything"))
 
     def test_gemini_3_dash_prefix(self):
-        self.assertTrue(self.check("gemini-3-flash-preview"))
+        self.assertFalse(self.check("gemini-3-flash-preview"))
 
     def test_gemini_3_dot_prefix(self):
-        self.assertTrue(self.check("gemini-3.1-pro-preview"))
+        self.assertFalse(self.check("gemini-3.1-pro-preview"))
 
     def test_regular_gemini_not_interactions_only(self):
         self.assertFalse(self.check("gemini-2.0-flash"))
@@ -369,9 +365,9 @@ class TestRoutingConfigConstants(unittest.TestCase):
     def setUp(self):
         from app.core.routing.routing_config import (
             TASK_CORPUS,
+            TRIVIAL_EXCLUDE,
             TRIVIAL_GREETINGS,
             TRIVIAL_IDENTITY,
-            TRIVIAL_EXCLUDE,
         )
 
         self.TASK_CORPUS = TASK_CORPUS
@@ -543,8 +539,8 @@ class TestRuleRouterQuickTaskHint(unittest.TestCase):
     def test_weather_returns_web_search(self):
         self.assertEqual(self.router.quick_task_hint("搜索今天天气"), "WEB_SEARCH")
 
-    def test_open_app_short_returns_system(self):
-        self.assertEqual(self.router.quick_task_hint("打开微信"), "SYSTEM")
+    def test_open_app_short_does_not_use_keyword_system_hint(self):
+        self.assertNotEqual(self.router.quick_task_hint("打开微信"), "SYSTEM")
 
     def test_open_app_long_not_system(self):
         # Input too long for SYSTEM fast-path
@@ -652,229 +648,6 @@ class TestRuleRouterShouldUseAnnotationSystem(unittest.TestCase):
 
     def test_default_has_file_false(self):
         self.assertFalse(self.check("润色"))
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 6. FallbackRouter
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestFallbackRouterCheckCompoundTask(unittest.TestCase):
-    """FallbackRouter.check_compound_task returns MULTI_STEP or None."""
-
-    def setUp(self):
-        from app.core.routing.fallback_router import FallbackRouter
-
-        self.router = FallbackRouter
-
-    def test_returns_multi_step_when_compound(self):
-        mock_td = MagicMock()
-        mock_td.detect_compound_task.return_value = {"is_compound": True}
-        with patch(
-            "app.core.routing.fallback_router._get_task_decomposer",
-            return_value=mock_td,
-        ):
-            result = self.router.check_compound_task("做PPT同时发邮件")
-        self.assertEqual(result, "MULTI_STEP")
-
-    def test_returns_none_when_not_compound(self):
-        mock_td = MagicMock()
-        mock_td.detect_compound_task.return_value = {"is_compound": False}
-        with patch(
-            "app.core.routing.fallback_router._get_task_decomposer",
-            return_value=mock_td,
-        ):
-            result = self.router.check_compound_task("你好")
-        self.assertIsNone(result)
-
-    def test_returns_none_on_exception(self):
-        def _raise():
-            raise ImportError("no module")
-
-        with patch(
-            "app.core.routing.fallback_router._get_task_decomposer",
-            side_effect=ImportError,
-        ):
-            result = self.router.check_compound_task("test")
-        self.assertIsNone(result)
-
-
-class TestFallbackRouterCheckRagContext(unittest.TestCase):
-    """FallbackRouter.check_rag_context uses conversation history."""
-
-    def setUp(self):
-        from app.core.routing.fallback_router import FallbackRouter
-
-        self.router = FallbackRouter
-
-    def test_returns_none_when_history_too_short(self):
-        ca = MagicMock()
-        result = self.router.check_rag_context("继续", ["msg1"], ca)
-        self.assertIsNone(result)
-
-    def test_returns_none_when_history_empty(self):
-        ca = MagicMock()
-        result = self.router.check_rag_context("继续", [], ca)
-        self.assertIsNone(result)
-
-    def test_returns_none_when_no_analyzer(self):
-        result = self.router.check_rag_context("继续", ["a", "b"], None)
-        self.assertIsNone(result)
-
-    def test_returns_related_task_when_high_confidence(self):
-        ca = MagicMock()
-        ca.analyze_context.return_value = {
-            "is_continuation": True,
-            "confidence": 0.9,
-            "related_task": "WEB_SEARCH",
-        }
-        result = self.router.check_rag_context("再搜一次", ["q1", "a1"], ca)
-        self.assertEqual(result, "WEB_SEARCH")
-
-    def test_returns_none_when_low_confidence(self):
-        ca = MagicMock()
-        ca.analyze_context.return_value = {
-            "is_continuation": True,
-            "confidence": 0.5,
-            "related_task": "WEB_SEARCH",
-        }
-        result = self.router.check_rag_context("搜", ["q1", "a1"], ca)
-        self.assertIsNone(result)
-
-    def test_returns_none_when_not_continuation(self):
-        ca = MagicMock()
-        ca.analyze_context.return_value = {
-            "is_continuation": False,
-            "confidence": 0.95,
-            "related_task": "WEB_SEARCH",
-        }
-        result = self.router.check_rag_context("你好", ["q1", "a1"], ca)
-        self.assertIsNone(result)
-
-    def test_returns_none_on_exception(self):
-        ca = MagicMock()
-        ca.analyze_context.side_effect = RuntimeError("broken")
-        result = self.router.check_rag_context("test", ["a", "b"], ca)
-        self.assertIsNone(result)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# 7. MLRouter
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestMLRouterConfThreshold(unittest.TestCase):
-    """MLRouter.CONF_THRESHOLD is set correctly."""
-
-    def test_conf_threshold_value(self):
-        from app.core.routing.ml_router import MLRouter
-
-        self.assertEqual(MLRouter.CONF_THRESHOLD, 0.72)
-
-
-class TestMLRouterClassifyWithTaskClassifier(unittest.TestCase):
-    """MLRouter.classify_with_task_classifier wraps TaskClassifier correctly."""
-
-    def setUp(self):
-        from app.core.routing.ml_router import MLRouter
-
-        self.router = MLRouter
-
-    def test_returns_none_when_classifier_unavailable(self):
-        mock_tc = MagicMock()
-        mock_tc.is_available.return_value = False
-        with patch(
-            "app.core.routing.ml_router._get_task_classifier", return_value=mock_tc
-        ):
-            result = self.router.classify_with_task_classifier("hello")
-        self.assertIsNone(result)
-
-    def test_returns_none_when_confidence_below_threshold(self):
-        mock_tc = MagicMock()
-        mock_tc.is_available.return_value = True
-        mock_tc.classify.return_value = ("CHAT", 0.5)
-        with patch(
-            "app.core.routing.ml_router._get_task_classifier", return_value=mock_tc
-        ):
-            result = self.router.classify_with_task_classifier("hello")
-        self.assertIsNone(result)
-
-    def test_returns_task_type_when_above_threshold(self):
-        mock_tc = MagicMock()
-        mock_tc.is_available.return_value = True
-        mock_tc.classify.return_value = ("CODER", 0.85)
-        with patch(
-            "app.core.routing.ml_router._get_task_classifier", return_value=mock_tc
-        ):
-            result = self.router.classify_with_task_classifier("写代码")
-        self.assertEqual(result, ("CODER", 0.85))
-
-    def test_returns_none_on_exception(self):
-        with patch(
-            "app.core.routing.ml_router._get_task_classifier", side_effect=ImportError
-        ):
-            result = self.router.classify_with_task_classifier("test")
-        self.assertIsNone(result)
-
-
-class TestMLRouterClassifyWithLocalModel(unittest.TestCase):
-    """MLRouter.classify_with_local_model wraps LocalModelRouter correctly."""
-
-    def setUp(self):
-        from app.core.routing.ml_router import MLRouter
-
-        self.router = MLRouter
-
-    def test_returns_none_when_ollama_unavailable(self):
-        mock_lmr = MagicMock()
-        mock_lmr.is_ollama_available.return_value = False
-        with patch(
-            "app.core.routing.ml_router._get_local_model_router", return_value=mock_lmr
-        ):
-            result = self.router.classify_with_local_model("hello")
-        self.assertIsNone(result)
-
-    def test_returns_none_when_confidence_string_below_threshold(self):
-        mock_lmr = MagicMock()
-        mock_lmr.is_ollama_available.return_value = True
-        mock_lmr.classify_with_hint.return_value = (
-            "CHAT",
-            "0.50",
-            "local",
-            "CHAT",
-            False,
-        )
-        with patch(
-            "app.core.routing.ml_router._get_local_model_router", return_value=mock_lmr
-        ):
-            result = self.router.classify_with_local_model("hello")
-        self.assertIsNone(result)
-
-    def test_returns_task_type_when_above_threshold(self):
-        mock_lmr = MagicMock()
-        mock_lmr.is_ollama_available.return_value = True
-        mock_lmr.classify_with_hint.return_value = (
-            "CODER",
-            "0.85",
-            "local",
-            "CODER",
-            False,
-        )
-        with patch(
-            "app.core.routing.ml_router._get_local_model_router", return_value=mock_lmr
-        ):
-            result = self.router.classify_with_local_model("写代码")
-        self.assertIsNotNone(result)
-        self.assertEqual(result[0], "CODER")
-        self.assertAlmostEqual(result[1], 0.85)
-
-    def test_returns_none_on_exception(self):
-        with patch(
-            "app.core.routing.ml_router._get_local_model_router",
-            side_effect=ImportError,
-        ):
-            result = self.router.classify_with_local_model("test")
-        self.assertIsNone(result)
 
 
 if __name__ == "__main__":

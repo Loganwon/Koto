@@ -96,17 +96,6 @@ class PromptAdapter:
         解决问题：当用户提出新问题时，旧的历史（特别是长篇大论的回答）会误导模型，使其重复回答旧问题。
         """
         return ""
-        # if not history:
-        #     return ""
-        # last_turns = []
-        # for turn in history[-max_turns:]:
-        #     role = turn.get("role", "")
-        #     parts = " ".join(turn.get("parts", []))
-        #     if parts:
-        #         last_turns.append(f"- {role}: {parts[:120]}")
-        # if not last_turns:
-        #     return ""
-        # return "\n".join(last_turns)
 
     @staticmethod
     def _build_markdown(

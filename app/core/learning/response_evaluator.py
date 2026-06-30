@@ -17,7 +17,7 @@ response_evaluator.py — 模型自我评分器
 加权公式（同 RatingStore）：
   overall = accuracy*0.35 + helpfulness*0.30 + personalization*0.20 + task_completion*0.15
 
-使用方式（web/app.py _start_memory_extraction 内）：
+使用方式（web.memory_runtime _start_memory_extraction 内）：
     from app.core.learning.response_evaluator import ResponseEvaluator
     ResponseEvaluator.evaluate_async(
         msg_id, user_input, ai_response, task_type,

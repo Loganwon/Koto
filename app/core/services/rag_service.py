@@ -102,8 +102,8 @@ def _get_embeddings(prefer_local: bool = False):
     """
     获取嵌入模型。
 
-    优先级：
-      1. Google text-embedding-004（需要 GEMINI_API_KEY，效果最佳）
+        优先级：
+            1. Google Gemini embedding（需要 GEMINI_API_KEY，自动选择当前可用模型）
       2. BAAI/bge-m3（本地，多语言 SOTA，1024 维，中文远优于 MiniLM）
       3. sentence-transformers all-MiniLM-L6-v2（兜底，英文优化，384 维）
 
@@ -120,11 +120,16 @@ def _get_embeddings(prefer_local: bool = False):
             try:
                 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
+                from app.core.llm.embedding_model_selector import (
+                    resolve_gemini_embedding_model,
+                )
+
+                embedding_model = resolve_gemini_embedding_model(api_key)
                 emb = GoogleGenerativeAIEmbeddings(
-                    model="models/text-embedding-004",
+                    model=embedding_model,
                     google_api_key=api_key,
                 )
-                logger.info("[RAGService] 嵌入模型: Google text-embedding-004")
+                logger.info("[RAGService] 嵌入模型: Google %s", embedding_model)
                 return emb
             except Exception as exc:
                 logger.warning(
@@ -253,6 +258,7 @@ class RAGService:
     def _split_text(self, text: str, source: str = "text") -> List[Any]:
         """将文本分块，返回 LangChain Document 对象列表。"""
         from langchain_core.documents import Document
+
         try:
             from langchain_text_splitters import RecursiveCharacterTextSplitter
 

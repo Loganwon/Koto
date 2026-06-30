@@ -1383,44 +1383,87 @@ class SkillAutoMatcher:
         {
             "skill_id": "doc_compare_agent",
             "patterns": [
-                "对比", "比较", "diff", "区别", "差异", "版本对比",
-                "compare", "changes", "什么变了", "改了什么",
+                "对比",
+                "比较",
+                "diff",
+                "区别",
+                "差异",
+                "版本对比",
+                "compare",
+                "changes",
+                "什么变了",
+                "改了什么",
             ],
         },
         {
             "skill_id": "data_viz_workflow",
             "patterns": [
-                "画图", "图表", "可视化", "趋势图", "柱状图", "折线图",
-                "饼图", "散点图", "chart", "plot", "visualization",
-                "画个", "数据图", "生成图",
+                "画图",
+                "图表",
+                "可视化",
+                "趋势图",
+                "柱状图",
+                "折线图",
+                "饼图",
+                "散点图",
+                "chart",
+                "plot",
+                "visualization",
+                "画个",
+                "数据图",
+                "生成图",
             ],
         },
         {
             "skill_id": "report_gen",
             "patterns": [
-                "报告", "汇报", "分析报告", "生成报告", "report",
-                "周报", "月报", "总结报告",
+                "报告",
+                "汇报",
+                "分析报告",
+                "生成报告",
+                "report",
+                "周报",
+                "月报",
+                "总结报告",
             ],
         },
         {
             "skill_id": "batch_format",
             "patterns": [
-                "批量", "批处理", "batch", "bulk", "统一格式",
-                "批量修改", "批量处理",
+                "批量",
+                "批处理",
+                "batch",
+                "bulk",
+                "统一格式",
+                "批量修改",
+                "批量处理",
             ],
         },
         {
             "skill_id": "file_merge",
             "patterns": [
-                "合并", "汇总多", "merge", "combine", "拼接",
-                "合在一起", "多个文件合并",
+                "合并",
+                "汇总多",
+                "merge",
+                "combine",
+                "拼接",
+                "合在一起",
+                "多个文件合并",
             ],
         },
         {
             "skill_id": "contract_review",
             "patterns": [
-                "审查", "合同", "条款", "风险", "contract", "review",
-                "法律", "协议", "甲乙方", "合同审查",
+                "审查",
+                "合同",
+                "条款",
+                "风险",
+                "contract",
+                "review",
+                "法律",
+                "协议",
+                "甲乙方",
+                "合同审查",
             ],
         },
     ]
@@ -1487,12 +1530,16 @@ class SkillAutoMatcher:
         lines: List[str] = []
         tt = task_type.upper() if task_type else ""
 
-        for skill_id, s in SkillManager._registry.items():
+        for s in SkillManager.list_skills():
+            skill_id = s.get("id", "")
             applicable = s.get("task_types", [])
             # 保留所有技能作为候选——task_type 已包含在 Prompt 里，
             # 由 Ollama 语义决定是否适合本轮，而非在目录构建时硬过滤。
             # （原先的过滤会导致 DOC_ANNOTATE 技能在 CHAT 场景下不可见）
-            desc = s.get("intent_description") or s.get("description", "")
+            skill_def = SkillManager.get_definition(skill_id)
+            desc = getattr(skill_def, "intent_description", "") or s.get(
+                "description", ""
+            )
             name = s.get("name", skill_id)
             candidates.append(
                 {
@@ -1518,7 +1565,7 @@ class SkillAutoMatcher:
 
             SkillManager._ensure_init()
             tt = task_type.upper() if task_type else ""
-            for sid, s in SkillManager._registry.items():
+            for s in SkillManager.list_skills():
                 if not s.get("enabled", False):
                     continue
                 # 跳过系统级 Skill（不代表用户的任务导向选择）
@@ -1611,8 +1658,7 @@ class SkillAutoMatcher:
         try:
             from app.core.skills.skill_manager import SkillManager
 
-            SkillManager._ensure_init()
-            for sid, skill_def in SkillManager._def_registry.items():
+            for sid, skill_def in SkillManager.list_definitions().items():
                 if sid not in candidate_ids or sid in matched_set:
                     continue
                 kws = getattr(skill_def, "trigger_keywords", None) or []
@@ -1859,7 +1905,8 @@ class SkillAutoMatcher:
 
                 SkillManager._ensure_init()
                 tt = (task_type or "").upper()
-                for sid, s in SkillManager._registry.items():
+                for s in SkillManager.list_skills():
+                    sid = s.get("id", "")
                     if not s.get("enabled", False):
                         continue
                     if s.get("skill_nature", "") == "system":
@@ -1951,7 +1998,7 @@ class SkillAutoMatcher:
         for sid in list(matched_ids):
             if len(result) >= _MAX_AUTO_SKILLS:
                 break
-            s_def = SkillManager._def_registry.get(sid)
+            s_def = SkillManager.get_definition(sid)
             if not s_def:
                 continue
             partners = getattr(s_def, "synergizes_with", []) or []
@@ -1963,7 +2010,7 @@ class SkillAutoMatcher:
                 if partner_id not in candidate_ids:
                     continue
                 # 快速相关性检查：intent_description 或 trigger_keywords 有命中
-                p_def = SkillManager._def_registry.get(partner_id)
+                p_def = SkillManager.get_definition(partner_id)
                 if p_def:
                     kws = list(getattr(p_def, "trigger_keywords", []) or [])
                     intent = (getattr(p_def, "intent_description", "") or "").lower()
@@ -2028,7 +2075,7 @@ class SkillAutoMatcher:
 
             SkillManager._ensure_init()
             names = [
-                SkillManager._registry.get(sid, {}).get("name", sid)
+                (SkillManager.get_runtime_entry(sid) or {}).get("name", sid)
                 for sid in skill_ids
             ]
             return "、".join(names)

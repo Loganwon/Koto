@@ -1,0 +1,18 @@
+<div
+  id="wa-pdf-tooltip"
+  class="wa-sel-toolbar"
+  style="display:none"
+  {% if wa_pdf_tooltip_root_onmousedown %}onmousedown="{{ wa_pdf_tooltip_root_onmousedown }}"{% endif %}
+>
+  <button type="button" class="wa-sel-close" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.closeSelectionToolbar()" title="关闭" aria-label="关闭">×</button>
+  <span id="wa-tooltip-count" class="wa-sel-count">0字</span>
+  <span class="wa-sel-divider" aria-hidden="true"></span>
+  <button type="button" class="wa-sel-action wa-sel-ai-action" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.sendQuickAction('润色')" title="润色选中文字">润色</button>
+  <button type="button" class="wa-sel-action wa-sel-ai-action" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.sendQuickAction('翻译')" title="翻译选中文字">翻译</button>
+  <button type="button" class="wa-sel-action wa-sel-ai-action" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.sendQuickAction('解释')" title="解释选中文字">解释</button>
+  <button type="button" class="wa-sel-action wa-sel-ai-action" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.sendQuickAction('可视化')" title="将选区生成图表">可视化</button>
+  <button type="button" class="wa-sel-action" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.sendSelectionToAI()" title="加入上下文">加入上下文</button>
+  <span class="wa-sel-divider wa-pdf-annot-sep{% if not wa_pdf_tooltip_show_pdf_annotation_actions %} wa-hidden{% endif %}" aria-hidden="true"></span>
+  <button class="wa-sel-action wa-pdf-annot-btn{% if not wa_pdf_tooltip_show_pdf_annotation_actions %} wa-hidden{% endif %}" type="button" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.pdfAnnotateSelection('highlight')" title="高亮选区">高亮</button>
+  <button class="wa-sel-action wa-pdf-annot-btn{% if not wa_pdf_tooltip_show_pdf_annotation_actions %} wa-hidden{% endif %}" type="button" onmousedown="event.preventDefault()" onclick="if(typeof WA!=='undefined')WA.pdfAnnotateSelection('underline')" title="下划线选区">下划线</button>
+</div>

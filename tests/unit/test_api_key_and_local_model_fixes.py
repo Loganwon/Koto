@@ -3,10 +3,11 @@ Unit tests for:
   1. fix: reset _client cache when API key is updated (settings.py)
   2. fix: reconfigure stdout encoding on Windows (app.py __main__)
   3. feat: API key section in settings panel (index.html)
-  4. fix: validate Ollama before enabling local-only mode (app.js)
+  4. fix: validate Ollama before enabling local-only mode (settings.ts)
 """
 
 import importlib
+import re
 import sys
 import types
 from html.parser import HTMLParser
@@ -96,6 +97,23 @@ def _node_text(node):
             parts.append(child_text)
     return "".join(parts)
 
+
+def _read_template_with_includes(rel_path: str) -> str:
+    root = Path(__file__).resolve().parents[2]
+    source_path = root / rel_path
+    source = source_path.read_text(encoding="utf-8")
+    include_pattern = re.compile(r"{%\s*include\s+['\"]([^'\"]+)['\"]\s*%}")
+
+    def expand(match):
+        include_name = match.group(1)
+        include_path = source_path.parent / include_name
+        if not include_path.exists():
+            return match.group(0)
+        return include_path.read_text(encoding="utf-8")
+
+    return include_pattern.sub(expand, source)
+
+
 # ── 1. _client cache reset on API key save ─────────────────────────────────
 
 
@@ -164,32 +182,82 @@ class TestGetClientLocalIsolation:
     def test_local_mode_without_explicit_model_uses_ollama(self):
         app_mod = self._load_app_module()
 
-        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
-            "app.core.llm.ollama_provider.OllamaClientProxy",
+        with patch.object(
+            app_mod, "_get_local_model_config", return_value=("local", None)
+        ), patch(
+            "app.core.llm.ollama_provider.create_ollama_client",
             return_value=MagicMock(name="ollama_client"),
-        ) as mock_ollama, patch.object(
+        ) as mock_create_ollama, patch.object(
             app_mod,
             "create_client",
-            side_effect=AssertionError("create_client should not be called in local mode"),
+            side_effect=AssertionError(
+                "create_client should not be called in local mode"
+            ),
         ):
             client = app_mod.get_client()
 
-        assert client is mock_ollama.return_value
-        mock_ollama.assert_called_once_with(model_tag=None)
+        assert client is mock_create_ollama.return_value
+        mock_create_ollama.assert_called_once_with(model_tag=None)
 
     def test_local_mode_failure_does_not_reverse_fallback_to_cloud(self):
         app_mod = self._load_app_module()
 
-        with patch.object(app_mod, "_get_local_model_config", return_value=("local", None)), patch(
-            "app.core.llm.ollama_provider.OllamaClientProxy",
+        with patch.object(
+            app_mod, "_get_local_model_config", return_value=("local", None)
+        ), patch(
+            "app.core.llm.ollama_provider.create_ollama_client",
             side_effect=RuntimeError("boom"),
         ), patch.object(
             app_mod,
             "create_client",
-            side_effect=AssertionError("create_client should not be called on local failure"),
+            side_effect=AssertionError(
+                "create_client should not be called on local failure"
+            ),
         ):
-            with pytest.raises(RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"):
+            with pytest.raises(
+                RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"
+            ):
                 app_mod.get_client()
+
+    def test_local_mode_uses_ollama_factory_so_empty_model_can_auto_resolve(self):
+        root = Path(__file__).resolve().parents[2]
+        app_source = (root / "web" / "app.py").read_text(encoding="utf-8")
+
+        assert (
+            "from app.core.llm.ollama_provider import create_ollama_client"
+            in app_source
+        )
+        assert (
+            "_client = create_ollama_client(model_tag=local_model or None)"
+            in app_source
+        )
+        assert "OllamaClientProxy(model_tag=local_model or None)" not in app_source
+
+
+class TestOllamaModelAutoSelection:
+    def test_choose_installed_model_prefers_qwen(self):
+        from app.core.llm import ollama_provider
+
+        assert (
+            ollama_provider._choose_installed_model(["llama3.2:latest", "qwen3.5:9b"])
+            == "qwen3.5:9b"
+        )
+        assert (
+            ollama_provider._choose_installed_model(["mistral:latest", "llama3.1:8b"])
+            == "llama3.1:8b"
+        )
+        assert (
+            ollama_provider._choose_installed_model(["mistral:latest"])
+            == "mistral:latest"
+        )
+        assert ollama_provider._choose_installed_model([]) is None
+
+    def test_ollama_provider_resolves_empty_settings_from_installed_models(self):
+        from app.core.llm import ollama_provider
+
+        source = Path(ollama_provider.__file__).read_text(encoding="utf-8")
+        assert "return _choose_installed_model(_list_installed_models())" in source
+        assert "/api/tags" in source
 
 
 # ── 2. Windows stdout encoding fix ─────────────────────────────────────────
@@ -227,11 +295,10 @@ class TestStdoutEncodingFix:
 
 
 class TestApiKeySettingsPanelHtml:
-    """index.html must contain the API key input section."""
+    """The rendered settings panel must contain the API key input section."""
 
     def setup_method(self):
-        with open("web/templates/index.html", encoding="utf-8") as f:
-            self.html = f.read()
+        self.html = _read_template_with_includes("web/templates/index.html")
 
     def test_api_key_section_heading(self):
         assert "🔑 API 配置" in self.html
@@ -245,8 +312,9 @@ class TestApiKeySettingsPanelHtml:
     def test_api_key_status_element(self):
         assert 'id="settingsApiKeyStatus"' in self.html
 
-    def test_ai_studio_link(self):
-        assert "aistudio.google.com/apikey" in self.html
+    def test_gemini_ai_studio_link_is_hidden_from_frontend(self):
+        assert "aistudio.google.com/apikey" not in self.html
+        assert "Google AI Studio" not in self.html
 
     def test_ui_zoom_controls_stay_inside_appearance_section(self):
         parser = _TemplateTreeParser()
@@ -275,10 +343,10 @@ class TestApiKeySettingsPanelHtml:
 
 
 class TestSaveSettingsApiKeyJs:
-    """app.js must contain saveSettingsApiKey() with correct behaviour."""
+    """settings.ts must contain saveSettingsApiKey() with correct behaviour."""
 
     def setup_method(self):
-        with open("web/static/js/app.js", encoding="utf-8") as f:
+        with open("web/src/app/settings.ts", encoding="utf-8") as f:
             self.js = f.read()
 
     def test_function_defined(self):
@@ -302,10 +370,10 @@ class TestSaveSettingsApiKeyJs:
 
 
 class TestOllamaValidationJs:
-    """app.js onLocalOnlyChange must be async and check Ollama before enabling."""
+    """settings.ts onLocalOnlyChange must be async and check Ollama before enabling."""
 
     def setup_method(self):
-        with open("web/static/js/app.js", encoding="utf-8") as f:
+        with open("web/src/app/settings.ts", encoding="utf-8") as f:
             self.js = f.read()
 
     def test_function_is_async(self):

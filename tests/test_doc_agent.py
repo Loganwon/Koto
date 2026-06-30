@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-Tests for DocAgent — OpenClaw-style document processing
+Tests for DocAgent document processing
 ========================================================
 
 Tests cover:
@@ -16,19 +16,20 @@ Tests cover:
 
 import json
 import os
-import pytest
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch, AsyncMock
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 # Import test subjects
 from app.core.agent.doc_agent import (
     DocAgent,
-    DocTask,
-    FileHandle,
-    FileChange,
     DocEvent,
     DocEventType,
+    DocTask,
+    FileChange,
+    FileHandle,
     create_doc_agent,
 )
 from app.core.agent.doc_event_emitter import (
@@ -36,12 +37,11 @@ from app.core.agent.doc_event_emitter import (
     create_emitter,
 )
 from app.core.file.multi_file_coordinator import (
-    MultiFileCoordinator,
-    FileSnapshot,
     CompareResult,
+    FileSnapshot,
+    MultiFileCoordinator,
     get_file_coordinator,
 )
-
 
 # ============================================================================
 # Fixtures
@@ -85,7 +85,9 @@ def temp_workspace():
     with tempfile.TemporaryDirectory() as tmpdir:
         # Create some test files
         test_doc = Path(tmpdir) / "test.txt"
-        test_doc.write_text("This is a test document.\nLine 2.\nLine 3.", encoding="utf-8")
+        test_doc.write_text(
+            "This is a test document.\nLine 2.\nLine 3.", encoding="utf-8"
+        )
 
         test_xlsx = Path(tmpdir) / "data.xlsx"
         # Create a minimal xlsx file would require openpyxl
@@ -257,7 +259,9 @@ class TestDocAgent:
         assert agent._provider_mode == "local"
 
     @patch("app.core.llm.gemini.GeminiProvider")
-    def test_get_provider_cloud_uses_gemini_provider_env_loading(self, mock_gemini_provider):
+    def test_get_provider_cloud_uses_gemini_provider_env_loading(
+        self, mock_gemini_provider
+    ):
         """Cloud DocAgent requests should reuse GeminiProvider config-file loading."""
         provider_instance = MagicMock()
         provider_instance.api_key = "AIzaSyCZ_test"
@@ -277,7 +281,9 @@ class TestDocAgent:
         provider = MagicMock()
         provider.generate_content.return_value = {"content": "OK", "tool_calls": []}
 
-        with patch("app.core.llm.model_fallback.get_fallback_executor") as mock_get_fallback:
+        with patch(
+            "app.core.llm.model_fallback.get_fallback_executor"
+        ) as mock_get_fallback:
             result = agent._call_llm(
                 provider=provider,
                 messages=[{"role": "user", "content": "请只回复 OK"}],
@@ -324,9 +330,9 @@ class TestDocAgent:
         # Mock provider
         provider = MagicMock()
         provider.generate_content.return_value = {
-            "content": json.dumps([
-                {"name": "step1", "description": "First step", "step_type": "llm"}
-            ])
+            "content": json.dumps(
+                [{"name": "step1", "description": "First step", "step_type": "llm"}]
+            )
         }
         mock_provider.return_value = provider
 
@@ -539,8 +545,7 @@ class TestDocAgentIntegration:
     """Integration tests for the full DocAgent pipeline."""
 
     @pytest.mark.skipif(
-        not os.environ.get("GEMINI_API_KEY"),
-        reason="Requires GEMINI_API_KEY"
+        not os.environ.get("GEMINI_API_KEY"), reason="Requires GEMINI_API_KEY"
     )
     def test_full_pipeline_with_real_llm(self, temp_workspace):
         """Test full pipeline with real LLM (requires API key)."""
@@ -551,10 +556,12 @@ class TestDocAgentIntegration:
         task = DocTask(
             id="integration-test",
             prompt="总结这个文档的内容",
-            files=[FileHandle(
-                path=str(test_file),
-                content_snapshot=test_file.read_text(),
-            )],
+            files=[
+                FileHandle(
+                    path=str(test_file),
+                    content_snapshot=test_file.read_text(),
+                )
+            ],
         )
 
         agent = DocAgent()

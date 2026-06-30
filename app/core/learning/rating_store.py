@@ -64,7 +64,7 @@ _EVAL_WEIGHTS = {
 def _make_id(session_name: str, user_input: str) -> str:
     """稳定的消息指纹（MD5）"""
     key = f"{session_name}::{user_input[:120]}"
-    return hashlib.md5(key.encode("utf-8")).hexdigest()
+    return hashlib.md5(key.encode("utf-8"), usedforsecurity=False).hexdigest()
 
 
 class RatingStore:
