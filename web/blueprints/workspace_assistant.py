@@ -19,10 +19,21 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import uuid
 from pathlib import Path
 
-from flask import Blueprint, Response, current_app, jsonify, request, send_file, session, stream_with_context
+from flask import (
+    Blueprint,
+    Response,
+    current_app,
+    jsonify,
+    request,
+    send_file,
+    session,
+    stream_with_context,
+)
+
 from app.core.file.file_parser import export_docx, export_xlsx
 from app.core.file_assistant import (
     ALLOWED_EXTENSIONS,
@@ -30,8 +41,8 @@ from app.core.file_assistant import (
     TEXT_EXTENSIONS,
     AutoSavePermissionError,
     AutoSavePersistenceService,
-    FileContextPreviewService,
     FileAssistantService,
+    FileContextPreviewService,
     FileTooLargeError,
     OpenFileByPathService,
     OpenFileCopyError,
@@ -81,6 +92,7 @@ _CRITICAL_ASSETS = [
     _STATIC_ROOT / "js" / "build" / "review-bundle.js",
 ]
 
+
 def _check_critical_assets() -> list[str]:
     """Return list of missing critical asset paths."""
     missing = []
@@ -88,6 +100,7 @@ def _check_critical_assets() -> list[str]:
         if not p.exists():
             missing.append(str(p))
     return missing
+
 
 _missing_at_startup = _check_critical_assets()
 if _missing_at_startup:
@@ -164,7 +177,9 @@ def _export_workspace_pptx(file_id: str, data) -> bytes:
     if not file_id or not file_id.isalnum():
         raise ValueError("PPTX 保存需要有效的 file_id")
     if not isinstance(data, dict) or not isinstance(data.get("slides"), list):
-        raise ValueError("PPTX 保存仅支持当前 rich slides 数据格式，请重新打开文件后再保存")
+        raise ValueError(
+            "PPTX 保存仅支持当前 rich slides 数据格式，请重新打开文件后再保存"
+        )
 
     tmp_dir = _ensure_tmp_dir()
     matches = list(tmp_dir.glob(f"{file_id}.pptx"))
@@ -230,11 +245,15 @@ def _seed_new_file(target: Path) -> None:
         from pptx import Presentation
 
         prs = Presentation()
-        layout = prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
+        layout = (
+            prs.slide_layouts[1] if len(prs.slide_layouts) > 1 else prs.slide_layouts[0]
+        )
         slide = prs.slides.add_slide(layout)
         if slide.shapes.title is not None:
             slide.shapes.title.text = "Koto 新建演示文稿"
-        placeholders = [shape for shape in slide.placeholders if shape != slide.shapes.title]
+        placeholders = [
+            shape for shape in slide.placeholders if shape != slide.shapes.title
+        ]
         if placeholders:
             placeholders[0].text = "在此输入内容"
         prs.save(str(target))
@@ -256,7 +275,9 @@ def _repair_zero_byte_office_file(target: Path) -> bool:
         logger.info("[WorkspaceAssistant] 已修复 0 字节办公文件: %s", target)
         return True
     except Exception as exc:
-        logger.warning("[WorkspaceAssistant] 修复 0 字节办公文件失败 %s: %s", target, exc)
+        logger.warning(
+            "[WorkspaceAssistant] 修复 0 字节办公文件失败 %s: %s", target, exc
+        )
         return False
 
 
@@ -300,7 +321,9 @@ def _tmp_file_path(file_id: str, ext: str) -> Path:
     return _ensure_tmp_dir() / f"{file_id}{ext}"
 
 
-def _copy_file_to_tmp_with_validation(src_path: Path, tmp_path: Path, *, ext: str, attempts: int = 2) -> None:
+def _copy_file_to_tmp_with_validation(
+    src_path: Path, tmp_path: Path, *, ext: str, attempts: int = 2
+) -> None:
     import shutil
     import zipfile
 
@@ -327,9 +350,7 @@ def _copy_file_to_tmp_with_validation(src_path: Path, tmp_path: Path, *, ext: st
             src_size = src_path.stat().st_size
             tmp_size = tmp_path.stat().st_size
             if src_size != tmp_size:
-                raise RuntimeError(
-                    f"临时副本大小异常: src={src_size} tmp={tmp_size}"
-                )
+                raise RuntimeError(f"临时副本大小异常: src={src_size} tmp={tmp_size}")
 
             if ext.lower() in {".docx", ".xlsx", ".pptx"} and src_size > 0:
                 if not zipfile.is_zipfile(tmp_path):
@@ -351,7 +372,9 @@ def _copy_file_to_tmp_with_validation(src_path: Path, tmp_path: Path, *, ext: st
     raise RuntimeError(f"临时副本创建失败: {last_error}")
 
 
-def _build_workspace_capability_profile(*, file_type: str, path: str = "", name: str = "") -> dict:
+def _build_workspace_capability_profile(
+    *, file_type: str, path: str = "", name: str = ""
+) -> dict:
     from app.core.agent.file_task_capability import build_file_capability_profile
 
     return build_file_capability_profile(file_type=file_type, path=path, name=name)
@@ -796,7 +819,7 @@ def upload_image():
     # Parse: data:image/png;base64,<b64_payload>
     try:
         header, _, b64_str = data_uri.partition(",")
-        mime = header.split(":")[1].split(";")[0]   # e.g. "image/png"
+        mime = header.split(":")[1].split(";")[0]  # e.g. "image/png"
         img_bytes = _b64.b64decode(b64_str)
     except Exception:
         return jsonify({"error": "图片数据解码失败"}), 400
@@ -854,6 +877,7 @@ def save_to_workspace():
         return jsonify({"error": "无效的文件名"}), 400
 
     from web.shared import WORKSPACE_DIR
+
     ws_root = Path(WORKSPACE_DIR).resolve()
 
     if asset_type == "image":
@@ -862,7 +886,7 @@ def save_to_workspace():
         prefix = "/api/v1/workspace/tmp_image/"
         if not src_url.startswith(prefix):
             return jsonify({"error": "无效的图片 URL"}), 400
-        parts = src_url[len(prefix):].split("/")
+        parts = src_url[len(prefix) :].split("/")
         if len(parts) != 2:
             return jsonify({"error": "无效的图片路径"}), 400
         sid, img_fname = parts
@@ -948,8 +972,12 @@ def serve_tmp_image(session_id: str, filename: str):
         return jsonify({"error": "图片不存在或已过期"}), 404
 
     _mime_map = {
-        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
-        ".gif": "image/gif", ".webp": "image/webp", ".svg": "image/svg+xml",
+        ".png": "image/png",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".svg": "image/svg+xml",
     }
     mime = _mime_map.get(img_path.suffix.lower(), "image/png")
     resp = send_file(str(img_path), mimetype=mime)
@@ -1094,8 +1122,14 @@ def auto_save():
         tmp_dir = _ensure_tmp_dir()
         auto_save_name = f"koto_autosave.{file_type}"
         if file_type in ("text", "code"):
-            existing = [f for f in tmp_dir.glob(f"{file_id}.*") if f.suffix.lower() in _TEXT_EXTS]
-            auto_save_name = f"koto_autosave{existing[0].suffix.lower() if existing else '.txt'}"
+            existing = [
+                f
+                for f in tmp_dir.glob(f"{file_id}.*")
+                if f.suffix.lower() in _TEXT_EXTS
+            ]
+            auto_save_name = (
+                f"koto_autosave{existing[0].suffix.lower() if existing else '.txt'}"
+            )
 
         exported = _FILE_ASSISTANT.export_editor_file(
             file_type=file_type,
@@ -1187,12 +1221,14 @@ def list_versions():
     for s in snaps[:20]:
         try:
             stat = s.stat()
-            result.append({
-                "name": s.name,
-                "snap_path": str(s),
-                "saved_at": s.stem.replace("_", " "),
-                "size_bytes": stat.st_size,
-            })
+            result.append(
+                {
+                    "name": s.name,
+                    "snap_path": str(s),
+                    "saved_at": s.stem.replace("_", " "),
+                    "size_bytes": stat.st_size,
+                }
+            )
         except Exception:
             pass
     return jsonify({"versions": result})
@@ -1205,6 +1241,7 @@ def restore_version():
     Body JSON: { "snap_path": "abs/path/to/snapshot.docx", "target_path": "relative/target.docx" }
     """
     import shutil
+
     from web.shared import WORKSPACE_DIR
 
     body = request.get_json(force=True, silent=True) or {}
@@ -1242,6 +1279,7 @@ def create_checkpoint():
     Returns: { "ok": true, "snap_path": "..." }
     """
     import shutil
+
     from web.shared import WORKSPACE_DIR
 
     body = request.get_json(force=True, silent=True) or {}
@@ -1437,6 +1475,9 @@ def set_workspace_dir_endpoint():
     if not new_path:
         return jsonify({"error": "缺少 path 字段"}), 400
 
+    if not _fs_guard(new_path):
+        return jsonify({"error": "不允许将系统路径设为工作区"}), 403
+
     target = Path(new_path).resolve()
     if not _fs_guard(target):
         return jsonify({"error": "不允许将系统路径设为工作区"}), 403
@@ -1450,6 +1491,7 @@ def set_workspace_dir_endpoint():
 
     # Persist to user_settings.json
     from web.shared import clear_user_settings_cache, get_user_settings_path
+
     settings_path = Path(get_user_settings_path())
     try:
         try:
@@ -1466,6 +1508,7 @@ def set_workspace_dir_endpoint():
     # Invalidate cache and update live module variable (no restart needed)
     clear_user_settings_cache()
     import web.shared as _shared
+
     _shared.WORKSPACE_DIR = str(target)
 
     logger.info("[WorkspaceAssistant] 工作区已切换: %s", target)
@@ -1496,22 +1539,33 @@ def ollama_status():
 
         # 1. Prefer the model configured in user_settings.json
         try:
+            import json as _js
+            import os as _os
+
             from web.shared import PROJECT_ROOT as _PR
-            import json as _js, os as _os
+
             _cfg_path = _os.path.join(_PR, "config", "user_settings.json")
             with open(_cfg_path, "r", encoding="utf-8") as _f:
                 _cfg = _js.load(_f)
-            _configured = (_cfg.get("local_model") or _cfg.get("ai", {}).get("local_model") or "").strip()
+            _configured = (
+                _cfg.get("local_model") or _cfg.get("ai", {}).get("local_model") or ""
+            ).strip()
             if _configured and _configured in models:
-                return jsonify({"running": True, "model": _configured, "models": models})
+                return jsonify(
+                    {"running": True, "model": _configured, "models": models}
+                )
         except Exception:
             pass
 
         # 2. Fall back to size-based preference (include 9b)
         preferred = next(
             (
-                m for m in models
-                if any(k in m.lower() for k in ("9b", "7b", "8b", "13b", "14b", "32b", "70b"))
+                m
+                for m in models
+                if any(
+                    k in m.lower()
+                    for k in ("9b", "7b", "8b", "13b", "14b", "32b", "70b")
+                )
             ),
             models[0],
         )
@@ -1521,6 +1575,7 @@ def ollama_status():
 
 
 # ─── Browse local filesystem (lazy) ──────────────────────────────────────────
+
 
 @workspace_assistant_bp.route("/api/v1/workspace/browse_local")
 def browse_local():
@@ -1539,19 +1594,26 @@ def browse_local():
         # Root level: drives + quick-access locations
         try:
             from web.blueprints.workspace import _list_drives, _quick_access_locations
-            return jsonify({
-                "is_root": True,
-                "drives": _list_drives(),
-                "quick_access": _quick_access_locations(),
-            })
+
+            return jsonify(
+                {
+                    "is_root": True,
+                    "drives": _list_drives(),
+                    "quick_access": _quick_access_locations(),
+                }
+            )
         except Exception as e:
             # Fallback: just return home dir
             home = Path.home()
-            return jsonify({
-                "is_root": True,
-                "quick_access": [{"name": "主目录", "path": str(home), "type": "quick"}],
-                "drives": [],
-            })
+            return jsonify(
+                {
+                    "is_root": True,
+                    "quick_access": [
+                        {"name": "主目录", "path": str(home), "type": "quick"}
+                    ],
+                    "drives": [],
+                }
+            )
 
     target = Path(path).resolve()
     if not target.exists():
@@ -1560,8 +1622,13 @@ def browse_local():
         return jsonify({"error": "不是文件夹"}), 400
 
     _SKIP = {
-        "__pycache__", "node_modules", ".git", ".venv", "venv",
-        "$RECYCLE.BIN", "System Volume Information",
+        "__pycache__",
+        "node_modules",
+        ".git",
+        ".venv",
+        "venv",
+        "$RECYCLE.BIN",
+        "System Volume Information",
     }
 
     entries: list[dict] = []
@@ -1586,12 +1653,14 @@ def browse_local():
     if parent == str(target):
         parent = None  # Drive root (e.g. C:\)
 
-    return jsonify({
-        "is_root": False,
-        "current": str(target),
-        "parent": parent,
-        "entries": entries,
-    })
+    return jsonify(
+        {
+            "is_root": False,
+            "current": str(target),
+            "parent": parent,
+            "entries": entries,
+        }
+    )
 
 
 # Application config directory — must never be served over the API
@@ -1601,6 +1670,7 @@ _APP_CONFIG_DIR = (Path(__file__).resolve().parents[2] / "config").resolve()
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /api/v1/workspace/open_abs_file
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @workspace_assistant_bp.route("/api/v1/workspace/open_abs_file", methods=["POST"])
 def open_abs_file():
@@ -1617,6 +1687,8 @@ def open_abs_file():
     abs_path = (body.get("path") or "").strip()
     if not abs_path:
         return jsonify({"error": "缺少 path 字段"}), 400
+    if not _fs_guard(abs_path):
+        return jsonify({"error": "路径不合法"}), 403
 
     file_id = uuid.uuid4().hex
     try:
@@ -1701,7 +1773,9 @@ def load_full_docx():
     try:
         data = _FILE_ASSISTANT.load_full_docx(tmp_path, file_id=file_id)
     except Exception as exc:
-        logger.error("[load_full_docx] 完整解析失败 %s: %s", file_id, exc, exc_info=True)
+        logger.error(
+            "[load_full_docx] 完整解析失败 %s: %s", file_id, exc, exc_info=True
+        )
         return jsonify({"error": f"DOCX 完整加载失败: {exc}"}), 500
 
     return jsonify(
@@ -1715,14 +1789,28 @@ def load_full_docx():
 
 
 _FS_PROTECTED = {
-    "windows", "program files", "program files (x86)", "programdata",
-    "system volume information", "$recycle.bin",
+    "windows",
+    "program files",
+    "program files (x86)",
+    "programdata",
+    "system volume information",
+    "$recycle.bin",
 }
 
 
-def _fs_guard(p: Path) -> bool:
+def _fs_guard(p: Path | str) -> bool:
     """Return True if the path is safe to operate on (not a system root/dir)."""
-    parts = {pp.lower() for pp in p.parts}
+    raw = str(p or "")
+    raw_parts = {
+        part.rstrip(":").lower()
+        for part in re.split(r"[\\/]+", raw)
+        if part and part not in {".", ".."}
+    }
+    if raw_parts & _FS_PROTECTED:
+        return False
+
+    p = Path(raw)
+    parts = {pp.rstrip(":").lower() for pp in p.parts}
     if parts & _FS_PROTECTED:
         return False
     # Reject drive roots on Windows (e.g. C:\)
@@ -1844,7 +1932,9 @@ def fs_copy():
     except WorkspaceFsError as exc:
         return jsonify({"error": str(exc)}), exc.status_code
 
-    logger.info("[Browser] %s: %s -> %s", "移动" if do_move else "复制", src, result.path)
+    logger.info(
+        "[Browser] %s: %s -> %s", "移动" if do_move else "复制", src, result.path
+    )
     return jsonify({"ok": True, "name": result.name, "path": result.path})
 
 
@@ -1917,6 +2007,7 @@ def patch_file():
     else:
         try:
             from web.shared import WORKSPACE_DIR
+
             ws_root = Path(WORKSPACE_DIR).resolve()
             rel_try = ws_root.joinpath(raw_path).resolve()
             if rel_try.is_file():
@@ -1931,11 +2022,19 @@ def patch_file():
     file_name = target.name
 
     if ext not in (".docx", ".txt", ".md"):
-        return jsonify({"error": f"暂不支持对 {ext} 格式进行文本修补，请使用 .docx / .txt / .md"}), 400
+        return (
+            jsonify(
+                {
+                    "error": f"暂不支持对 {ext} 格式进行文本修补，请使用 .docx / .txt / .md"
+                }
+            ),
+            400,
+        )
 
     # Only include well-formed proposals
     clean = [
-        p for p in proposals
+        p
+        for p in proposals
         if isinstance(p, dict)
         and (p.get("original_text") or "").strip()
         and (p.get("proposed_text") or "").strip()
@@ -1979,7 +2078,7 @@ def patch_file():
 
             for p in clean:
                 orig = p["original_text"].strip()
-                new  = p["proposed_text"].strip()
+                new = p["proposed_text"].strip()
                 _replace_all(orig, new)
 
             buf = _io.BytesIO()
@@ -1988,12 +2087,17 @@ def patch_file():
             return send_file(
                 buf,
                 mimetype="application/"
-                         "vnd.openxmlformats-officedocument.wordprocessingml.document",
+                "vnd.openxmlformats-officedocument.wordprocessingml.document",
                 as_attachment=True,
                 download_name=f"修改后_{file_name}",
             )
         except ImportError:
-            return jsonify({"error": "python-docx 未安装，请执行: pip install python-docx"}), 500
+            return (
+                jsonify(
+                    {"error": "python-docx 未安装，请执行: pip install python-docx"}
+                ),
+                500,
+            )
         except Exception as exc:
             logger.error("[patch_file] DOCX 修补失败: %s", exc, exc_info=True)
             return jsonify({"error": f"DOCX 修补失败: {str(exc)}"}), 500
@@ -2002,10 +2106,18 @@ def patch_file():
     try:
         content = target.read_text(encoding="utf-8", errors="replace")
         for p in clean:
-            content = content.replace(p["original_text"].strip(), p["proposed_text"].strip(), 1)
+            content = content.replace(
+                p["original_text"].strip(), p["proposed_text"].strip(), 1
+            )
         buf = _io.BytesIO(content.encode("utf-8"))
-        mime = "text/markdown; charset=utf-8" if ext == ".md" else "text/plain; charset=utf-8"
-        return send_file(buf, mimetype=mime, as_attachment=True, download_name=f"修改后_{file_name}")
+        mime = (
+            "text/markdown; charset=utf-8"
+            if ext == ".md"
+            else "text/plain; charset=utf-8"
+        )
+        return send_file(
+            buf, mimetype=mime, as_attachment=True, download_name=f"修改后_{file_name}"
+        )
     except Exception as exc:
         logger.error("[patch_file] TXT/MD 修补失败: %s", exc, exc_info=True)
         return jsonify({"error": f"文本修补失败: {str(exc)}"}), 500
@@ -2039,8 +2151,7 @@ def audio_overview():
         return jsonify({"error": "缺少 files 字段"}), 400
 
     combined_text = "\n\n".join(
-        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}"
-        for f in files
+        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}" for f in files
     )[:20000]
 
     session_id = body.get("session_id") or _uuid.uuid4().hex[:12]
@@ -2062,9 +2173,7 @@ def audio_overview():
             # Build a simple wrapper that AudioOverviewGenerator expects
             class _ModelAdapter:
                 def generate_content(self, prompt):
-                    resp = client.models.generate_content(
-                        model=_model, contents=prompt
-                    )
+                    resp = client.models.generate_content(model=_model, contents=prompt)
                     return resp
 
             gen = AudioOverviewGenerator(
@@ -2140,8 +2249,7 @@ def notebook_guide():
         return jsonify({"error": "缺少 files 字段"}), 400
 
     combined_text = "\n\n".join(
-        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}"
-        for f in files
+        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}" for f in files
     )[:24000]
 
     SECTIONS = [
@@ -2217,7 +2325,9 @@ def notebook_guide():
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-@workspace_assistant_bp.route("/api/v1/workspace/pdf/save_annotations", methods=["POST"])
+@workspace_assistant_bp.route(
+    "/api/v1/workspace/pdf/save_annotations", methods=["POST"]
+)
 def pdf_save_annotations():
     """
     Embed client-side annotations into the PDF binary and return the modified file
@@ -2254,12 +2364,14 @@ def pdf_save_annotations():
 
     try:
         from web.pdf_annotator import embed_annotations
+
         pdf_bytes = embed_annotations(pdf_path, annotations)
     except Exception as exc:
         logger.error("[pdf_save_annotations] 注释嵌入失败: %s", exc, exc_info=True)
         return jsonify({"error": f"注释嵌入失败: {str(exc)}"}), 500
 
     import io as _io
+
     buf = _io.BytesIO(pdf_bytes)
     safe_name = filename if filename.lower().endswith(".pdf") else filename + ".pdf"
     return send_file(
@@ -2300,6 +2412,7 @@ def pdf_load_annotations(file_id: str):
 
     try:
         from web.pdf_annotator import read_annotations
+
         annotations = read_annotations(pdf_path)
     except Exception as exc:
         logger.error("[pdf_load_annotations] 批注读取失败: %s", exc, exc_info=True)
@@ -2346,12 +2459,14 @@ def pdf_page_ops():
 
     try:
         from web.pdf_annotator import apply_page_ops
+
         pdf_bytes = apply_page_ops(pdf_path, pages)
     except Exception as exc:
         logger.error("[pdf_page_ops] 页面操作失败: %s", exc, exc_info=True)
         return jsonify({"error": f"页面操作失败: {str(exc)}"}), 500
 
     import io as _io
+
     buf = _io.BytesIO(pdf_bytes)
     return send_file(
         buf,
@@ -2394,7 +2509,12 @@ def pdf_convert():
     if not file_id.isalnum():
         return jsonify({"error": "无效的 file_id"}), 400
     if target_fmt not in _PDF_CONVERT_MIME:
-        return jsonify({"error": f"不支持的目标格式 '{target_fmt}'，支持：docx / xlsx / pptx"}), 400
+        return (
+            jsonify(
+                {"error": f"不支持的目标格式 '{target_fmt}'，支持：docx / xlsx / pptx"}
+            ),
+            400,
+        )
 
     tmp_dir = _ensure_tmp_dir()
     matches = [m for m in tmp_dir.glob(f"{file_id}.*") if m.suffix.lower() == ".pdf"]
@@ -2407,7 +2527,8 @@ def pdf_convert():
     warning = ""
 
     try:
-        from web.pdf_annotator import pdf_to_docx, pdf_to_xlsx, pdf_to_pptx
+        from web.pdf_annotator import pdf_to_docx, pdf_to_pptx, pdf_to_xlsx
+
         if target_fmt == "docx":
             file_bytes, warning = pdf_to_docx(pdf_path)
         elif target_fmt == "xlsx":
@@ -2421,6 +2542,7 @@ def pdf_convert():
         return jsonify({"error": f"格式转换失败: {str(exc)}"}), 500
 
     import io as _io
+
     resp = send_file(
         _io.BytesIO(file_bytes),
         mimetype=_PDF_CONVERT_MIME[target_fmt],
@@ -2436,7 +2558,10 @@ def pdf_convert():
 # POST /api/v1/workspace/pdf/remove_watermark
 # ─────────────────────────────────────────────────────────────────────────────
 
-@workspace_assistant_bp.route("/api/v1/workspace/pdf/remove_watermark", methods=["POST"])
+
+@workspace_assistant_bp.route(
+    "/api/v1/workspace/pdf/remove_watermark", methods=["POST"]
+)
 def pdf_remove_watermark():
     """
     AI-assisted watermark removal.
@@ -2445,7 +2570,7 @@ def pdf_remove_watermark():
     """
     body = request.get_json(silent=True) or {}
     file_id = str(body.get("file_id", ""))
-    use_ai  = bool(body.get("use_ai", True))
+    use_ai = bool(body.get("use_ai", True))
 
     # Validate file_id: must be alphanumeric/hyphen/underscore only (prevents path traversal)
     if not file_id or not file_id.replace("-", "").replace("_", "").isalnum():
@@ -2461,10 +2586,12 @@ def pdf_remove_watermark():
     api_key = None
     if use_ai:
         import os
+
         api_key = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
 
     try:
         from web.pdf_annotator import remove_watermark
+
         pdf_bytes, removed_count, method_used = remove_watermark(
             pdf_path, use_ai=use_ai, api_key=api_key
         )
@@ -2473,6 +2600,7 @@ def pdf_remove_watermark():
         return jsonify({"error": f"去水印失败: {str(exc)}"}), 500
 
     import io as _io
+
     orig_stem = matches[0].stem
     resp = send_file(
         _io.BytesIO(pdf_bytes),
