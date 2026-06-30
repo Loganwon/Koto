@@ -10,38 +10,258 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from app.core.agent.file_task_contract import (
-    FileTaskClassification,
-    FileTaskExecutionContext,
-    FileTaskExecutionBrief,
-    FileTaskEvent,
-    FileTaskFile,
-    FileTaskIntentPlan,
-    FileTaskLedger,
-    FileTaskRequirementSet,
-    FileTaskRequest,
-    FileTaskToolStreamChunk,
-    FileTaskToolStreamResult,
-)
-from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
 from app.core.agent._file_task_stepwise_helpers import (
     file_task_suffix as _file_task_suffix,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     looks_like_windowed_pdf_task as _looks_like_windowed_pdf_task,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     normalized_pdf_body as _normalized_pdf_body,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     pdf_context_read_args as _pdf_context_read_args,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     pdf_text_quality as _pdf_text_quality,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     should_force_pdf_tool_read as _should_force_pdf_tool_read,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_step_index as _stepwise_pdf_step_index,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_window_pages as _stepwise_pdf_window_pages,
 )
+from app.core.agent.file_task_builtin_tool_runner import (
+    run_builtin_tool as _builtin_tool_runner_run_builtin_tool,
+)
+from app.core.agent.file_task_cancel import is_cancel_requested as _is_cancel_requested
+from app.core.agent.file_task_cancel import request_cancel as _request_cancel
 from app.core.agent.file_task_capability import (
     build_request_capability_profiles,
     matched_native_capability_names,
     native_tool_gap_for_request,
 )
+from app.core.agent.file_task_classification_contract import (
+    apply_intent_adjudication as _classification_contract_apply_intent_adjudication,
+)
+from app.core.agent.file_task_classification_contract import (
+    demote_classification_to_read as _classification_contract_demote_to_read,
+)
+from app.core.agent.file_task_classification_contract import (
+    docx_annotation_has_contract as _classification_contract_docx_annotation_has_contract,
+)
+from app.core.agent.file_task_classification_contract import (
+    has_create_or_export_contract as _classification_contract_has_create_or_export_contract,
+)
+from app.core.agent.file_task_classification_contract import (
+    normalize_mainline_contract as _classification_contract_normalize_mainline,
+)
+from app.core.agent.file_task_classification_contract import (
+    refresh_classification_recipe as _classification_contract_refresh_recipe,
+)
+from app.core.agent.file_task_classification_contract import (
+    write_has_contract_anchor as _classification_contract_write_has_contract_anchor,
+)
+from app.core.agent.file_task_classification_semantics import (
+    infer_task_family_operation as _classification_semantics_infer_task_family_operation,
+)
+from app.core.agent.file_task_classification_semantics import (
+    semantic_reason_codes as _classification_semantics_reason_codes,
+)
 from app.core.agent.file_task_completion_contract import build_completion_contract
+from app.core.agent.file_task_contract import (
+    FileTaskClassification,
+    FileTaskEvent,
+    FileTaskExecutionBrief,
+    FileTaskExecutionContext,
+    FileTaskFile,
+    FileTaskIntentPlan,
+    FileTaskLedger,
+    FileTaskRequest,
+    FileTaskRequirementSet,
+    FileTaskToolStreamChunk,
+    FileTaskToolStreamResult,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    docx_polish_wait_artifact as _docx_stepwise_docx_polish_wait_artifact,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    docx_polish_window_prompt as _docx_stepwise_docx_polish_window_prompt,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    parse_polished_docx_paragraphs as _docx_stepwise_parse_polished_docx_paragraphs,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    read_docx_paragraph_window as _docx_stepwise_read_docx_paragraph_window,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    rewrite_docx_paragraph_window as _docx_stepwise_rewrite_docx_paragraph_window,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    simple_polish_docx_paragraph as _docx_stepwise_simple_polish_docx_paragraph,
+)
+from app.core.agent.file_task_docx_stepwise import (
+    stepwise_docx_polish_target_path as _docx_stepwise_polish_target_path,
+)
+from app.core.agent.file_task_execution_brief import (
+    execution_brief_schema as _brief_execution_brief_schema,
+)
+from app.core.agent.file_task_execution_brief import (
+    extract_execution_brief as _brief_extract_execution_brief,
+)
+from app.core.agent.file_task_execution_brief import (
+    looks_like_brief_only_content as _brief_looks_like_brief_only_content,
+)
+from app.core.agent.file_task_execution_brief import (
+    normalize_execution_brief as _brief_normalize_execution_brief,
+)
+from app.core.agent.file_task_followup_context import (
+    followup_context as _build_followup_context,
+)
 from app.core.agent.file_task_guard_emission import build_tool_guard_emission
+from app.core.agent.file_task_intent_adjudication import (
+    classification_task_text as _intent_adjudication_classification_task_text,
+)
+from app.core.agent.file_task_intent_adjudication import (
+    intent_adjudicator_messages as _intent_adjudication_messages,
+)
+from app.core.agent.file_task_intent_adjudication import (
+    intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
+)
+from app.core.agent.file_task_intent_adjudication import (
+    normalize_intent_adjudication_response as _intent_adjudication_normalize_response,
+)
+from app.core.agent.file_task_intent_adjudication import (
+    request_with_task as _intent_adjudication_request_with_task,
+)
+from app.core.agent.file_task_intent_adjudication import (
+    should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
+)
+from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
+from app.core.agent.file_task_intent_predicates import (
+    explicit_output_mode as _intent_explicit_output_mode,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_artifact_creation_intent as _intent_has_artifact_creation_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_explicit_write_intent as _intent_has_explicit_write_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_global_readonly_write_negation as _intent_has_global_readonly_write_negation,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_readonly_write_negation as _intent_has_readonly_write_negation,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_source_scoped_write_negation as _intent_has_source_scoped_write_negation,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_strong_write_intent as _intent_has_strong_write_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_target_context as _intent_has_target_context,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_write_intent as _intent_has_write_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    infer_output_mode as _intent_infer_output_mode,
+)
+from app.core.agent.file_task_intent_predicates import (
+    is_advisory_analysis_request as _intent_is_advisory_analysis_request,
+)
+from app.core.agent.file_task_intent_predicates import (
+    is_diagnostic_request as _intent_is_diagnostic_request,
+)
+from app.core.agent.file_task_intent_predicates import (
+    quick_action_mode as _intent_quick_action_mode,
+)
+from app.core.agent.file_task_messages import (
+    build_file_task_messages as _build_file_task_messages,
+)
 from app.core.agent.file_task_model import FileTaskModelClient
+from app.core.agent.file_task_model_response import (
+    coerce_tool_calls as _model_response_coerce_tool_calls,
+)
+from app.core.agent.file_task_model_response import (
+    normalize_model_response as _model_response_normalize_model_response,
+)
+from app.core.agent.file_task_model_response import (
+    tool_batch_signature as _model_response_tool_batch_signature,
+)
+from app.core.agent.file_task_prompt_sections import (
+    clear_docx_review_guidance as _prompt_clear_docx_review_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
+    docx_compare_annotate_guidance as _prompt_docx_compare_annotate_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
+    financial_chart_docx_guidance as _prompt_financial_chart_docx_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
+    followup_guidance as _prompt_followup_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
+    single_docx_annotate_guidance as _prompt_single_docx_annotate_guidance,
+)
+from app.core.agent.file_task_quality_gate import (
+    change_operations as _quality_change_operations,
+)
+from app.core.agent.file_task_quality_gate import (
+    change_sum_int as _quality_change_sum_int,
+)
+from app.core.agent.file_task_quality_gate import (
+    evaluate_task_quality_gate as _quality_evaluate_task_quality_gate,
+)
+from app.core.agent.file_task_quality_gate import (
+    quality_gate_result as _quality_gate_result,
+)
+from app.core.agent.file_task_quality_gate import (
+    repair_retry_message as _quality_repair_retry_message,
+)
+from app.core.agent.file_task_quality_gate import (
+    should_attempt_repair as _quality_should_attempt_repair,
+)
+from app.core.agent.file_task_quality_gate import (
+    success_criteria as _quality_success_criteria,
+)
+from app.core.agent.file_task_quality_gate import (
+    target_or_request_type as _quality_target_or_request_type,
+)
+from app.core.agent.file_task_readonly_summary import (
+    fallback_readonly_summary as _readonly_fallback_summary,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_answer_required_message as _readonly_answer_required_message,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_context_source_lines as _readonly_context_source_lines,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_context_summary as _readonly_context_summary,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_tool_points as _readonly_tool_points,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_tool_source_label as _readonly_tool_source_label,
+)
+from app.core.agent.file_task_recipes import (
+    FileTaskRecipeMatch,
+    recipe_matches,
+    request_file_types,
+    request_target_file_type,
+    select_task_recipe,
+    semantic_markers,
+)
+from app.core.agent.file_task_result_markers import (
+    KOTO_CREATED_RESULT_MARKER,
+    KOTO_MODIFIED_RESULT_MARKER,
+)
 from app.core.agent.file_task_review_intent import (
     has_explicit_docx_review_intent,
     request_has_file_type,
@@ -53,217 +273,170 @@ from app.core.agent.file_task_runtime_patterns import (
     _RUN_PYTHON_ARTIFACT_WRITE_PATTERNS,
     _RUN_PYTHON_STRONG_WRITE_PATTERNS,
 )
-from app.core.agent.file_task_recipes import (
-    FileTaskRecipeMatch,
-    recipe_matches,
-    request_file_types,
-    request_target_file_type,
-    select_task_recipe,
-    semantic_markers,
-)
-from app.core.agent.file_task_validation import (
-    build_file_task_requirements,
-    validate_file_task_plan,
-)
-from app.core.agent.file_task_whitebox import (
-    WhiteboxExecutionPlan,
-    build_decision_audit,
-    build_recipe_skeleton,
-    extract_whitebox_execution_plan,
-    validate_whitebox_plan,
-)
-from app.core.agent.file_task_cancel import (
-    is_cancel_requested as _is_cancel_requested,
-    request_cancel as _request_cancel,
-)
 from app.core.agent.file_task_runtime_utils import (
     _compact_line,
     _is_error_result,
     _json_payload,
     _preview,
 )
-from app.core.agent.file_task_targeting import (
-    context_files as _targeting_context_files,
-    explicit_output_path_from_task as _targeting_explicit_output_path_from_task,
-    explicit_write_target_path_from_task as _targeting_explicit_write_target_path_from_task,
-    files_explicitly_mentioned_in_task as _targeting_files_explicitly_mentioned_in_task,
-    protected_source_write_block_message as _targeting_protected_source_write_block_message,
-    request_target_points_to_source as _targeting_request_target_points_to_source,
-    request_with_target_path as _targeting_request_with_target_path,
-    resolved_workspace_root as _targeting_resolved_workspace_root,
-    same_task_path as _targeting_same_task_path,
-    should_skip_uncreated_target_context as _targeting_should_skip_uncreated_target_context,
-    task_text_mentions_path as _targeting_task_text_mentions_path,
+from app.core.agent.file_task_step_payload import (
+    build_runtime_metadata as _step_payload_build_runtime_metadata,
 )
-from app.core.agent.file_task_intent_predicates import (
-    explicit_output_mode as _intent_explicit_output_mode,
-    has_artifact_creation_intent as _intent_has_artifact_creation_intent,
-    has_explicit_write_intent as _intent_has_explicit_write_intent,
-    has_global_readonly_write_negation as _intent_has_global_readonly_write_negation,
-    has_readonly_write_negation as _intent_has_readonly_write_negation,
-    has_source_scoped_write_negation as _intent_has_source_scoped_write_negation,
-    has_strong_write_intent as _intent_has_strong_write_intent,
-    has_target_context as _intent_has_target_context,
-    has_write_intent as _intent_has_write_intent,
-    infer_output_mode as _intent_infer_output_mode,
-    is_advisory_analysis_request as _intent_is_advisory_analysis_request,
-    is_diagnostic_request as _intent_is_diagnostic_request,
-    quick_action_mode as _intent_quick_action_mode,
+from app.core.agent.file_task_step_payload import (
+    build_step_result_payload as _step_payload_build_step_result_payload,
 )
-from app.core.agent.file_task_readonly_summary import (
-    fallback_readonly_summary as _readonly_fallback_summary,
-    readonly_answer_required_message as _readonly_answer_required_message,
-    readonly_context_source_lines as _readonly_context_source_lines,
-    readonly_context_summary as _readonly_context_summary,
-    readonly_tool_points as _readonly_tool_points,
-    readonly_tool_source_label as _readonly_tool_source_label,
+from app.core.agent.file_task_step_payload import (
+    check_step_result_status as _step_payload_check_step_result_status,
 )
-from app.core.agent.file_task_quality_gate import (
-    change_operations as _quality_change_operations,
-    change_sum_int as _quality_change_sum_int,
-    evaluate_task_quality_gate as _quality_evaluate_task_quality_gate,
-    quality_gate_result as _quality_gate_result,
-    repair_retry_message as _quality_repair_retry_message,
-    should_attempt_repair as _quality_should_attempt_repair,
-    success_criteria as _quality_success_criteria,
-    target_or_request_type as _quality_target_or_request_type,
+from app.core.agent.file_task_step_payload import (
+    execute_step_result_status as _step_payload_execute_step_result_status,
 )
-from app.core.agent.file_task_verification import (
-    verification_precheck as _verification_precheck,
+from app.core.agent.file_task_step_payload import (
+    execute_step_summary as _step_payload_execute_step_summary,
 )
-from app.core.agent.task_supervisor import TaskSupervisor, SupervisionResult
+from app.core.agent.file_task_step_payload import (
+    public_context_snippets as _step_payload_public_context_snippets,
+)
+from app.core.agent.file_task_step_payload import (
+    step_result_file_changes as _step_payload_step_result_file_changes,
+)
+from app.core.agent.file_task_step_payload import (
+    with_runtime_context as _step_payload_with_runtime_context,
+)
+from app.core.agent.file_task_step_verification import (
+    build_supervisor_step_verification_payload as _build_supervisor_step_verification_payload,
+)
+from app.core.agent.file_task_supervisor_audit import (
+    build_supervisor_audit,
+)
 from app.core.agent.file_task_supervisor_prompts import (
     blocked_run_python_message as _supervisor_blocked_run_python_message,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     duplicate_supervisor_retry_message as _supervisor_duplicate_retry_message,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     file_types as _supervisor_file_types,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_chart_request as _supervisor_looks_like_chart_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_docx_report_request as _supervisor_looks_like_docx_report_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_financial_request as _supervisor_looks_like_financial_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_financial_xlsx_docx_chart_report_task as _supervisor_looks_like_financial_report_task,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_pdf_python_text_read as _supervisor_looks_like_pdf_python_text_read,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_polish_request as _supervisor_looks_like_polish_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_ppt_request as _supervisor_looks_like_ppt_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_ppt_slide_write_request as _supervisor_looks_like_ppt_slide_write_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_problem_analysis_request as _supervisor_looks_like_problem_analysis_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_summary_request as _supervisor_looks_like_summary_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_table_request as _supervisor_looks_like_table_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     looks_like_translation_request as _supervisor_looks_like_translation_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     should_prompt_for_write_after_tool_round as _supervisor_should_prompt_for_write_after_tool_round,
+)
+from app.core.agent.file_task_supervisor_prompts import (
     write_retry_message as _supervisor_write_retry_message,
-)
-from app.core.agent.file_task_prompt_sections import (
-    clear_docx_review_guidance as _prompt_clear_docx_review_guidance,
-    docx_compare_annotate_guidance as _prompt_docx_compare_annotate_guidance,
-    financial_chart_docx_guidance as _prompt_financial_chart_docx_guidance,
-    followup_guidance as _prompt_followup_guidance,
-    single_docx_annotate_guidance as _prompt_single_docx_annotate_guidance,
-)
-from app.core.agent.file_task_messages import (
-    build_file_task_messages as _build_file_task_messages,
-)
-from app.core.agent.file_task_followup_context import (
-    followup_context as _build_followup_context,
 )
 from app.core.agent.file_task_system_prompt import (
     build_file_task_system_prompt as _build_file_task_system_prompt,
+)
+from app.core.agent.file_task_targeting import context_files as _targeting_context_files
+from app.core.agent.file_task_targeting import (
+    explicit_output_path_from_task as _targeting_explicit_output_path_from_task,
+)
+from app.core.agent.file_task_targeting import (
+    explicit_write_target_path_from_task as _targeting_explicit_write_target_path_from_task,
+)
+from app.core.agent.file_task_targeting import (
+    files_explicitly_mentioned_in_task as _targeting_files_explicitly_mentioned_in_task,
+)
+from app.core.agent.file_task_targeting import (
+    protected_source_write_block_message as _targeting_protected_source_write_block_message,
+)
+from app.core.agent.file_task_targeting import (
+    request_target_points_to_source as _targeting_request_target_points_to_source,
+)
+from app.core.agent.file_task_targeting import (
+    request_with_target_path as _targeting_request_with_target_path,
+)
+from app.core.agent.file_task_targeting import (
+    resolved_workspace_root as _targeting_resolved_workspace_root,
+)
+from app.core.agent.file_task_targeting import (
+    same_task_path as _targeting_same_task_path,
+)
+from app.core.agent.file_task_targeting import (
+    should_skip_uncreated_target_context as _targeting_should_skip_uncreated_target_context,
+)
+from app.core.agent.file_task_targeting import (
+    task_text_mentions_path as _targeting_task_text_mentions_path,
 )
 from app.core.agent.file_task_terminal_report import (
     apply_terminal_check_overrides,
     build_terminal_run_summary,
     terminal_completed_task,
 )
-from app.core.agent.file_task_execution_brief import (
-    execution_brief_schema as _brief_execution_brief_schema,
-    extract_execution_brief as _brief_extract_execution_brief,
-    looks_like_brief_only_content as _brief_looks_like_brief_only_content,
-    normalize_execution_brief as _brief_normalize_execution_brief,
-)
-from app.core.agent.file_task_model_response import (
-    coerce_tool_calls as _model_response_coerce_tool_calls,
-    normalize_model_response as _model_response_normalize_model_response,
-    tool_batch_signature as _model_response_tool_batch_signature,
-)
-from app.core.agent.file_task_step_payload import (
-    build_runtime_metadata as _step_payload_build_runtime_metadata,
-    build_step_result_payload as _step_payload_build_step_result_payload,
-    check_step_result_status as _step_payload_check_step_result_status,
-    execute_step_result_status as _step_payload_execute_step_result_status,
-    execute_step_summary as _step_payload_execute_step_summary,
-    public_context_snippets as _step_payload_public_context_snippets,
-    step_result_file_changes as _step_payload_step_result_file_changes,
-    with_runtime_context as _step_payload_with_runtime_context,
-)
-from app.core.agent.file_task_step_verification import (
-    build_supervisor_step_verification_payload as _build_supervisor_step_verification_payload,
-)
-from app.core.agent.file_task_docx_stepwise import (
-    docx_polish_wait_artifact as _docx_stepwise_docx_polish_wait_artifact,
-    docx_polish_window_prompt as _docx_stepwise_docx_polish_window_prompt,
-    parse_polished_docx_paragraphs as _docx_stepwise_parse_polished_docx_paragraphs,
-    read_docx_paragraph_window as _docx_stepwise_read_docx_paragraph_window,
-    rewrite_docx_paragraph_window as _docx_stepwise_rewrite_docx_paragraph_window,
-    simple_polish_docx_paragraph as _docx_stepwise_simple_polish_docx_paragraph,
-    stepwise_docx_polish_target_path as _docx_stepwise_polish_target_path,
-)
-from app.core.agent.file_task_builtin_tool_runner import (
-    run_builtin_tool as _builtin_tool_runner_run_builtin_tool,
-)
-from app.core.agent.file_task_intent_adjudication import (
-    classification_task_text as _intent_adjudication_classification_task_text,
-    intent_adjudicator_messages as _intent_adjudication_messages,
-    intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
-    normalize_intent_adjudication_response as _intent_adjudication_normalize_response,
-    request_with_task as _intent_adjudication_request_with_task,
-    should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
-)
-from app.core.agent.file_task_classification_contract import (
-    apply_intent_adjudication as _classification_contract_apply_intent_adjudication,
-    demote_classification_to_read as _classification_contract_demote_to_read,
-    docx_annotation_has_contract as _classification_contract_docx_annotation_has_contract,
-    has_create_or_export_contract as _classification_contract_has_create_or_export_contract,
-    normalize_mainline_contract as _classification_contract_normalize_mainline,
-    refresh_classification_recipe as _classification_contract_refresh_recipe,
-    write_has_contract_anchor as _classification_contract_write_has_contract_anchor,
-)
-from app.core.agent.file_task_classification_semantics import (
-    infer_task_family_operation as _classification_semantics_infer_task_family_operation,
-    semantic_reason_codes as _classification_semantics_reason_codes,
-)
-from app.core.agent.file_task_workflow_state import (
-    attach_workflow_checkpoint,
-    build_workflow_state,
-    request_with_workflow_checkpoint,
-    supervisor_status_payload,
-    workflow_resume_control,
-    window_read_args_for_file,
-)
-from app.core.agent.file_task_supervisor_audit import (
-    build_supervisor_audit,
-)
-from app.core.agent.file_task_result_markers import (
-    KOTO_CREATED_RESULT_MARKER,
-    KOTO_MODIFIED_RESULT_MARKER,
-)
 from app.core.agent.file_task_tool_catalog import (
     extract_koto_paths,
     file_states_for_changes,
     is_file_task_tool,
     is_write_tool,
+    stringify_result,
     supported_file_workflows,
     tool_result_preview,
-    stringify_result,
     write_target_for_tool,
 )
 from app.core.agent.file_task_tool_feedback import (
     code_output_preview as _feedback_code_output_preview,
+)
+from app.core.agent.file_task_tool_feedback import (
     extract_file_changes as _feedback_extract_file_changes,
+)
+from app.core.agent.file_task_tool_feedback import (
     extract_tool_runtime_outcome as _feedback_extract_tool_runtime_outcome,
+)
+from app.core.agent.file_task_tool_feedback import (
     readonly_run_python_write_block_message as _feedback_readonly_run_python_write_block_message,
+)
+from app.core.agent.file_task_tool_feedback import (
     readonly_write_tool_block_message as _feedback_readonly_write_tool_block_message,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_artifacts as _feedback_tool_artifacts,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_feedback_for_model as _feedback_tool_feedback_for_model,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_result_for_model as _feedback_tool_result_for_model,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_runtime_status as _feedback_tool_runtime_status,
+)
+from app.core.agent.file_task_tool_feedback import (
     truncate_tool_feedback_value as _feedback_truncate_tool_feedback_value,
 )
 from app.core.agent.file_task_tool_gateway import (
@@ -272,6 +445,29 @@ from app.core.agent.file_task_tool_gateway import (
     FileTaskToolProvider,
     ToolExecutor,
 )
+from app.core.agent.file_task_validation import (
+    build_file_task_requirements,
+    validate_file_task_plan,
+)
+from app.core.agent.file_task_verification import (
+    verification_precheck as _verification_precheck,
+)
+from app.core.agent.file_task_whitebox import (
+    WhiteboxExecutionPlan,
+    build_decision_audit,
+    build_recipe_skeleton,
+    extract_whitebox_execution_plan,
+    validate_whitebox_plan,
+)
+from app.core.agent.file_task_workflow_state import (
+    attach_workflow_checkpoint,
+    build_workflow_state,
+    request_with_workflow_checkpoint,
+    supervisor_status_payload,
+    window_read_args_for_file,
+    workflow_resume_control,
+)
+from app.core.agent.task_supervisor import SupervisionResult, TaskSupervisor
 from app.core.agent.tool_design_protocol import (
     TOOL_DESIGN_PROTOCOL,
     build_next_action_artifact,
@@ -279,9 +475,11 @@ from app.core.agent.tool_design_protocol import (
     extract_tool_gap_from_response,
     merge_tool_gaps,
 )
+
 logger = logging.getLogger(__name__)
 
 ModelCaller = Callable[..., Dict[str, Any]]
+
 
 def request_cancel(run_id: str) -> bool:
     return _request_cancel(run_id)
@@ -328,8 +526,7 @@ class FileTaskRuntime:
         self._max_rounds = max(1, int(max_rounds or _MAX_MODEL_ROUNDS))
         self._task_supervisor = task_supervisor
 
-
-# ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
     # Main Entry Point
     # ═══════════════════════════════════════════════════════════════
     def run(self, request: FileTaskRequest) -> Iterable[FileTaskEvent]:
@@ -370,11 +567,10 @@ class FileTaskRuntime:
         if classification.execution_mode != "doc_annotate_bridge":
             from app.core.agent import file_task_doc_annotate_boundary
 
-            if (
-                file_task_doc_annotate_boundary.should_use_bridge_execution(request)
-                and self._docx_annotation_has_contract(
-                    request, context_files, classification
-                )
+            if file_task_doc_annotate_boundary.should_use_bridge_execution(
+                request
+            ) and self._docx_annotation_has_contract(
+                request, context_files, classification
             ):
                 classification.execution_mode = "doc_annotate_bridge"
                 classification.task_family = "annotate"
@@ -837,7 +1033,9 @@ class FileTaskRuntime:
                 snippets.append(snippet)
 
         context_summary = (
-            f"已整理 {len(snippets)} 份上下文片段。" if snippets else "没有显式文件或选区可读取。"
+            f"已整理 {len(snippets)} 份上下文片段。"
+            if snippets
+            else "没有显式文件或选区可读取。"
         )
         yield ledger.event(
             "step.finished",
@@ -1149,7 +1347,9 @@ class FileTaskRuntime:
                             )
                             messages.append({"role": "user", "content": repair_message})
                             continue
-                        final_summary = str(gate_payload.get("summary") or "白盒计划审查未通过。")
+                        final_summary = str(
+                            gate_payload.get("summary") or "白盒计划审查未通过。"
+                        )
                         completed_task = False
                         yield ledger.event(
                             "step.result",
@@ -1336,7 +1536,9 @@ class FileTaskRuntime:
                         request, execution_brief
                     )
                     final_summary = (
-                        execution_brief.summary or content_text or "已完成任务分析，准备继续执行。"
+                        execution_brief.summary
+                        or content_text
+                        or "已完成任务分析，准备继续执行。"
                     )
                     yield ledger.event(
                         "step.result",
@@ -1493,7 +1695,8 @@ class FileTaskRuntime:
                             self._build_step_result_payload(
                                 title="检查执行状态",
                                 summary=str(
-                                    repair_check_payload.get("summary") or "检查未通过。"
+                                    repair_check_payload.get("summary")
+                                    or "检查未通过。"
                                 ),
                                 status=(
                                     "completed"
@@ -1729,11 +1932,11 @@ class FileTaskRuntime:
                     supervisor_status_payload(
                         workflow_state,
                         stage=tool_stage,
-                        summary=(
-                            f"准备调用 {tool_name}，监管层保持主线和工具边界。"
-                        ),
+                        summary=(f"准备调用 {tool_name}，监管层保持主线和工具边界。"),
                         active_step_id=(
-                            "write_output" if tool_stage == "writing" else "model_reasoning"
+                            "write_output"
+                            if tool_stage == "writing"
+                            else "model_reasoning"
                         ),
                         completed_step_ids=["read_context"],
                         file_changes=file_changes,
@@ -1742,9 +1945,7 @@ class FileTaskRuntime:
                 )
 
                 if not is_file_task_tool(tool_name):
-                    error_text = (
-                        f"工具 {tool_name or '<empty>'} 不在 Koto 文件任务 allowlist 中。"
-                    )
+                    error_text = f"工具 {tool_name or '<empty>'} 不在 Koto 文件任务 allowlist 中。"
                     guard = build_tool_guard_emission(
                         tool_name=tool_name,
                         tool_args=tool_args,
@@ -1975,9 +2176,7 @@ class FileTaskRuntime:
                     target = write_target_for_tool(tool_name, tool_args)
                     write_key = f"{tool_name}::{target}"
                     if completed_write_ops.get(write_key, 0) >= _MAX_WRITE_OPS_PER_FILE:
-                        skip_text = (
-                            f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
-                        )
+                        skip_text = f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
                         guard = build_tool_guard_emission(
                             tool_name=tool_name,
                             tool_args=tool_args,
@@ -2306,12 +2505,12 @@ class FileTaskRuntime:
                     repair_check_payload["runtime"] = repair_runtime
                     repair_check_payload["repair_attempt"] = repair_attempts
                     yield ledger.event(
-                            "check.started",
-                            {
-                                "title": "检查执行状态",
-                                "criteria": completion_criteria,
-                                "repair_attempt": repair_attempts,
-                            },
+                        "check.started",
+                        {
+                            "title": "检查执行状态",
+                            "criteria": completion_criteria,
+                            "repair_attempt": repair_attempts,
+                        },
                         step_id="check",
                     )
                     yield ledger.event(
@@ -2507,8 +2706,12 @@ class FileTaskRuntime:
             check_payload = dict(check_payload)
             check_payload["passed"] = False
             check_payload["status"] = "awaiting_confirmation"
-            check_payload["summary"] = "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。"
-            check_payload["remaining"] = ["用户说“继续”后处理下一页窗口，并继续追加 DOCX。"]
+            check_payload["summary"] = (
+                "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。"
+            )
+            check_payload["remaining"] = [
+                "用户说“继续”后处理下一页窗口，并继续追加 DOCX。"
+            ]
             check_payload["next_action_artifact"] = stepwise_artifact
         terminal_runtime = self._build_runtime_metadata(
             terminal_status=str(check_payload.get("status") or "").strip(),
@@ -2566,7 +2769,8 @@ class FileTaskRuntime:
                     plan=recipe_skeleton,
                     step_results=file_changes + readonly_tool_outputs,
                     completion_criteria=completion_criteria,
-                    output_text=final_summary or str(check_payload.get("summary") or ""),
+                    output_text=final_summary
+                    or str(check_payload.get("summary") or ""),
                 )
                 if supervisor_result is not None:
                     yield ledger.event(
@@ -2582,7 +2786,9 @@ class FileTaskRuntime:
                         step_id=check_step_id,
                     )
             except Exception as exc:
-                logger.warning("[FileTaskRuntime] supervisor verification failed: %s", exc)
+                logger.warning(
+                    "[FileTaskRuntime] supervisor verification failed: %s", exc
+                )
 
         run_payload = {
             "task": request.task,
@@ -2740,7 +2946,9 @@ class FileTaskRuntime:
         explicit_output = self._explicit_output_path_from_task(request.task)
         if explicit_output:
             current_target = str(request.target_path or "").strip()
-            if not current_target or not self._same_task_path(current_target, explicit_output):
+            if not current_target or not self._same_task_path(
+                current_target, explicit_output
+            ):
                 return self._request_with_target_path(request, explicit_output)
             return request
 
@@ -2767,7 +2975,9 @@ class FileTaskRuntime:
             return updated
 
         def retarget_file(file_info: FileTaskFile) -> FileTaskFile:
-            is_target = self._same_task_path(file_info.path or file_info.name, clean_target)
+            is_target = self._same_task_path(
+                file_info.path or file_info.name, clean_target
+            )
             if bool(file_info.target) == is_target:
                 return file_info
             return FileTaskFile(
@@ -2850,8 +3060,7 @@ class FileTaskRuntime:
             resolve_task_file_path=self._resolve_task_file_path,
         )
 
-
-# ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
     # File Context & Targeting
     # ═══════════════════════════════════════════════════════════════
     def _context_files(self, request: FileTaskRequest) -> List[FileTaskFile]:
@@ -2969,7 +3178,9 @@ class FileTaskRuntime:
         constraint_audit: Dict[str, Any],
         quick_action_mode: str,
     ) -> Iterable[FileTaskEvent]:
-        from app.core.agent.file_task_doc_annotate_runner import FileTaskDocAnnotateRunner
+        from app.core.agent.file_task_doc_annotate_runner import (
+            FileTaskDocAnnotateRunner,
+        )
 
         yield from FileTaskDocAnnotateRunner(self).stream_bridge_execution(
             ledger,
@@ -3170,7 +3381,10 @@ class FileTaskRuntime:
                         ),
                     }
                 ],
-                system=("你是严谨的中文文档润色助手。只润色用户给出的段落窗口，" "保持原意、术语和段落数量；不要扩写成总结，不要添加解释。"),
+                system=(
+                    "你是严谨的中文文档润色助手。只润色用户给出的段落窗口，"
+                    "保持原意、术语和段落数量；不要扩写成总结，不要添加解释。"
+                ),
                 tools=[],
             )
             content, _tool_calls = self._normalize_model_response(response, [])
@@ -3384,7 +3598,9 @@ class FileTaskRuntime:
             self._request_has_file_type(request, "pdf")
             and any(marker in task_lower for marker in ("翻译", "translation", "译稿"))
             and any(marker in task_lower for marker in ("原文", "source", "pdf"))
-            and any(marker in task_lower for marker in ("处理", "分段", "拆成", "batch"))
+            and any(
+                marker in task_lower for marker in ("处理", "分段", "拆成", "batch")
+            )
         ):
             return True
         return has_explicit_docx_review_intent(task_lower)
@@ -3420,8 +3636,7 @@ class FileTaskRuntime:
                 final_result = chunk.payload
         return final_result
 
-
-# ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
     # Intent Predicates (delegated to file_task_intent_predicates)
     # ═══════════════════════════════════════════════════════════════
     def _has_write_intent(self, task: str) -> bool:
@@ -3723,7 +3938,10 @@ class FileTaskRuntime:
         recipe_match_request = classification_request
         if stepwise_pdf_docx_resume:
             recipe_match_request = FileTaskRequest(
-                task=(f"{classification_task}\n" "分步 长PDF DOCX 总结 每一步写入并等待确认"),
+                task=(
+                    f"{classification_task}\n"
+                    "分步 长PDF DOCX 总结 每一步写入并等待确认"
+                ),
                 run_id=classification_request.run_id,
                 session_id=classification_request.session_id,
                 files=classification_request.files,
@@ -4440,7 +4658,9 @@ class FileTaskRuntime:
         known_tool_gap: Optional[Dict[str, Any]],
     ) -> str:
         if known_tool_gap:
-            capability = str(known_tool_gap.get("missing_capability") or "缺失能力").strip()
+            capability = str(
+                known_tool_gap.get("missing_capability") or "缺失能力"
+            ).strip()
             return f"当前任务触发 Koto 原生能力缺口：{capability}；模型需要产出 {TOOL_DESIGN_PROTOCOL} 工具规格，不调用未注册工具。"
         if write_intent:
             return "模型在 Koto allowlist 工具目录内规划并执行，写入后产生 file.changed 事件。"
@@ -4488,7 +4708,9 @@ class FileTaskRuntime:
             f"- 策略：{str(intent_plan.recommended_strategy or 'answer_only').strip() or 'answer_only'}"
         )
         lines.append(f"- 可应用：{'是' if intent_plan.can_apply else '否'}")
-        lines.append(f"- 写回前需要确认：{'是' if intent_plan.requires_confirmation else '否'}")
+        lines.append(
+            f"- 写回前需要确认：{'是' if intent_plan.requires_confirmation else '否'}"
+        )
         if intent_plan.dynamic_steps:
             lines.append("- 计划步骤：")
             for index, step in enumerate(intent_plan.dynamic_steps[:8], start=1):
@@ -4502,7 +4724,9 @@ class FileTaskRuntime:
                     f"  {index}. {title}" + (f"：{description}" if description else "")
                 )
         if intent_plan.write_intent:
-            lines.append("- 监管约束：写入型任务必须产生真实 file.changed；分步确认任务必须先完成本步骤写入，再进入等待用户继续。")
+            lines.append(
+                "- 监管约束：写入型任务必须产生真实 file.changed；分步确认任务必须先完成本步骤写入，再进入等待用户继续。"
+            )
         return "\n".join(lines) + "\n"
 
     def _execution_brief_schema(self) -> Dict[str, Any]:
@@ -4565,7 +4789,9 @@ class FileTaskRuntime:
         execution_plan: WhiteboxExecutionPlan,
         recipe_skeleton: Dict[str, Any],
     ) -> str:
-        summary = execution_plan.plan_summary or execution_plan.goal or "已完成白盒执行计划。"
+        summary = (
+            execution_plan.plan_summary or execution_plan.goal or "已完成白盒执行计划。"
+        )
         lines = [
             f"已收到 execution_plan：{summary}",
             "现在请按该计划继续调用 Koto allowlist 工具执行；不要重复输出计划，也不要跳过必需写入/核验步骤。",
@@ -4674,7 +4900,9 @@ class FileTaskRuntime:
             }
         )
 
-        clean_summary = _preview(content_text, 180) if content_text else "AI 已确认执行方案。"
+        clean_summary = (
+            _preview(content_text, 180) if content_text else "AI 已确认执行方案。"
+        )
         return {
             "summary": clean_summary,
             "steps": steps,
@@ -4789,7 +5017,11 @@ class FileTaskRuntime:
             )
             before = str(tool_args.get("before_heading") or "").strip()
             after = str(tool_args.get("after_heading") or "").strip()
-            anchor = f"、位于“{before}”之前" if before else (f"、位于“{after}”之后" if after else "")
+            anchor = (
+                f"、位于“{before}”之前"
+                if before
+                else (f"、位于“{after}”之后" if after else "")
+            )
             return f"向 {self._display_path(target) or target} 插入一个 Word 段落{anchor}。"
         if tool_name == "clear_docx_review_marks":
             target = (
@@ -4802,9 +5034,13 @@ class FileTaskRuntime:
                 str(tool_args.get("scope") or "comments").strip().lower() or "comments"
             )
             if scope == "all":
-                return f"清除 {self._display_path(target) or target} 中的批注并接受修订。"
+                return (
+                    f"清除 {self._display_path(target) or target} 中的批注并接受修订。"
+                )
             if scope == "revisions":
-                return f"接受并清除 {self._display_path(target) or target} 中的修订标记。"
+                return (
+                    f"接受并清除 {self._display_path(target) or target} 中的修订标记。"
+                )
             return f"清除 {self._display_path(target) or target} 中的全部批注。"
         if tool_name == "write_sheet_data":
             target = (
@@ -4815,7 +5051,9 @@ class FileTaskRuntime:
             )
             sheet = str(tool_args.get("sheet_name") or "").strip()
             sheet_text = f"，工作表：{sheet}" if sheet else ""
-            return f"把结构化更新写入 {self._display_path(target) or target}{sheet_text}。"
+            return (
+                f"把结构化更新写入 {self._display_path(target) or target}{sheet_text}。"
+            )
         if tool_name == "annotate_file":
             target = (
                 self._display_path(tool_args.get("path"))
@@ -4880,7 +5118,9 @@ class FileTaskRuntime:
         if tool_name == "compare_files":
             raw_paths = str(tool_args.get("file_paths") or "").strip()
             aspect = str(tool_args.get("aspect") or "content").strip()
-            return f"对比文件{f'：{raw_paths}' if raw_paths else ''}，比较维度：{aspect}。"
+            return (
+                f"对比文件{f'：{raw_paths}' if raw_paths else ''}，比较维度：{aspect}。"
+            )
         if tool_name == "run_python_code":
             return "在沙盒中运行代码处理数据，必要时生成图表或中间文件。"
         target = self._display_path(
@@ -5076,8 +5316,9 @@ class FileTaskRuntime:
                 )
                 if generated_image:
                     args["image_path"] = generated_image
-        if tool_name == "insert_docx_paragraph" and self._task_requests_docx_append_end(
-            request.task
+        if (
+            tool_name == "insert_docx_paragraph"
+            and self._task_requests_docx_append_end(request.task)
         ):
             args.pop("before_heading", None)
             args.pop("after_heading", None)
@@ -5154,7 +5395,10 @@ class FileTaskRuntime:
             for artifact in reversed(images):
                 artifact_name = str(artifact.get("name") or "").strip().lower()
                 artifact_path = str(artifact.get("path") or "").strip()
-                if artifact_name == requested_name or Path(artifact_path).name.lower() == requested_name:
+                if (
+                    artifact_name == requested_name
+                    or Path(artifact_path).name.lower() == requested_name
+                ):
                     return artifact_path
         return str(images[-1].get("path") or "").strip()
 
@@ -5596,7 +5840,10 @@ class FileTaskRuntime:
             )
         if section_ranges and section_ranges.count(section_ranges[0]) > 1:
             start, end = section_ranges[0]
-            return f"监管层阻止写入：第 {start}-{end} 页在本次写入中出现了重复小节标题。" " 请合并为一个小节，删除重复标题和重复要点。"
+            return (
+                f"监管层阻止写入：第 {start}-{end} 页在本次写入中出现了重复小节标题。"
+                " 请合并为一个小节，删除重复标题和重复要点。"
+            )
         if (
             expected_range
             and unique_section_ranges
@@ -5636,7 +5883,9 @@ class FileTaskRuntime:
             return "监管层阻止写入：当前分步 DOCX 正文存在重复段落。请去重后再写入。"
 
         label_hits = sum(
-            1 for label in ("文档识别", "段落主题", "结构线索", "内容线索", "来源页码") if label in body
+            1
+            for label in ("文档识别", "段落主题", "结构线索", "内容线索", "来源页码")
+            if label in body
         )
         if label_hits < 4:
             return (
@@ -5825,7 +6074,9 @@ class FileTaskRuntime:
             str(item or "").strip()
             for item in insights
             if item
-            and not str(item).startswith(("文档识别：", "段落主题：", "结构线索：", "内容线索：", "来源页码："))
+            and not str(item).startswith(
+                ("文档识别：", "段落主题：", "结构线索：", "内容线索：", "来源页码：")
+            )
         ]
         if not topic_value:
             topic_seed = (
@@ -5833,7 +6084,10 @@ class FileTaskRuntime:
                 or (supplemental[0] if supplemental else "")
                 or cleaned_preview
             )
-            topic_value = _compact_line(topic_seed, 180) or "当前页窗文本较短，主题需结合后续页窗继续确认。"
+            topic_value = (
+                _compact_line(topic_seed, 180)
+                or "当前页窗文本较短，主题需结合后续页窗继续确认。"
+            )
         if not structure_value:
             structure_seed = "；".join(supplemental[:2])
             structure_value = (
@@ -5842,7 +6096,9 @@ class FileTaskRuntime:
                 else "当前页窗作为本步骤材料，记录可提取的结构与上下文线索，供后续页窗衔接。"
             )
         if not content_value:
-            content_seed = cleaned_preview or "当前页窗未提取到足够正文，暂不能形成可靠内容摘要。"
+            content_seed = (
+                cleaned_preview or "当前页窗未提取到足够正文，暂不能形成可靠内容摘要。"
+            )
             content_value = _compact_line(content_seed, 260)
         paragraphs = [
             {"text": f"当前页窗摘要（{page_range}）", "style": "Heading 1"},
@@ -5871,7 +6127,9 @@ class FileTaskRuntime:
                     re.IGNORECASE,
                 )
                 or "中国博物馆数字技术应用及案例研究年度报告" in compact
-                or re.fullmatch(r"(?:SUMMAR|ARTICLE|综|述|篇)", line, flags=re.IGNORECASE)
+                or re.fullmatch(
+                    r"(?:SUMMAR|ARTICLE|综|述|篇)", line, flags=re.IGNORECASE
+                )
             )
 
         def _is_noise_line(line: str) -> bool:
@@ -5951,7 +6209,8 @@ class FileTaskRuntime:
                 and (
                     "Annual Report" in line
                     or "年度报告" in line
-                    or "中国博物馆数字技术应用及案例研究年度报告" in re.sub(r"\s+", "", line)
+                    or "中国博物馆数字技术应用及案例研究年度报告"
+                    in re.sub(r"\s+", "", line)
                 )
             ),
             "",
@@ -5992,7 +6251,8 @@ class FileTaskRuntime:
         toc_lines = [
             line
             for line in lines
-            if len(line) <= 50 and re.search(r"(?:目录|引言|综述篇|案例篇|参考文献|作者简介)", line)
+            if len(line) <= 50
+            and re.search(r"(?:目录|引言|综述篇|案例篇|参考文献|作者简介)", line)
         ][:4]
         body_blocks = _join_pdf_body_lines(raw_lines)
         content_lines = [
@@ -6014,7 +6274,9 @@ class FileTaskRuntime:
 
         insights: List[str] = []
         if annual_title:
-            insights.append(f"文档识别：当前页窗来自“{_compact_line(annual_title, 180)}”。")
+            insights.append(
+                f"文档识别：当前页窗来自“{_compact_line(annual_title, 180)}”。"
+            )
         if section_title:
             insights.append(f"段落主题：{_compact_line(section_title, 180)}。")
         if organizer and organizer not in {annual_title, section_title}:
@@ -6027,7 +6289,9 @@ class FileTaskRuntime:
             )
         if toc_lines:
             insights.append(
-                "结构线索：" + "；".join(_compact_line(line, 120) for line in toc_lines) + "。"
+                "结构线索："
+                + "；".join(_compact_line(line, 120) for line in toc_lines)
+                + "。"
             )
         if content_lines:
             insights.append(
@@ -6038,7 +6302,9 @@ class FileTaskRuntime:
         if not insights:
             excerpt_lines = [_compact_line(line, 140) for line in lines[:4]]
             if excerpt_lines:
-                insights.append("当前页窗可读内容集中在：" + "；".join(excerpt_lines) + "。")
+                insights.append(
+                    "当前页窗可读内容集中在：" + "；".join(excerpt_lines) + "。"
+                )
         if not insights:
             insights.append("当前页窗未提取到足够正文，暂不能形成可靠内容摘要。")
         return insights
@@ -6254,7 +6520,9 @@ class FileTaskRuntime:
         capability_text = ""
         if capability_profiles:
             capability_text = (
-                "文件能力概览：" + json.dumps(capability_profiles, ensure_ascii=False) + "\n"
+                "文件能力概览："
+                + json.dumps(capability_profiles, ensure_ascii=False)
+                + "\n"
             )
         followup_context = self._followup_context(request)
         financial_chart_docx_guidance = _prompt_financial_chart_docx_guidance(
@@ -6270,8 +6538,7 @@ class FileTaskRuntime:
             in {"docx", "doc"}
         ]
         docx_compare_annotate_guidance = _prompt_docx_compare_annotate_guidance(
-            "compare_docx_and_annotate"
-            in resolved_classification.matched_capabilities,
+            "compare_docx_and_annotate" in resolved_classification.matched_capabilities,
             docx_files,
         )
         followup_guidance = _prompt_followup_guidance(followup_context)
@@ -6291,9 +6558,7 @@ class FileTaskRuntime:
             target_docx,
         )
         return _build_file_task_system_prompt(
-            output_mode_guidance=self._output_mode_guidance(
-                resolved_classification
-            ),
+            output_mode_guidance=self._output_mode_guidance(resolved_classification),
             intent_plan_guidance=self._intent_plan_guidance(resolved_intent_plan),
             followup_guidance=followup_guidance,
             financial_chart_docx_guidance=financial_chart_docx_guidance,
@@ -6555,7 +6820,9 @@ class FileTaskRuntime:
             tool_runtime_outcome=tool_runtime_outcome,
             tool_gap=tool_gap,
             next_action_artifact=next_action_artifact,
-            requires_file_change_before_pause=self._requires_file_change_before_pause(request),
+            requires_file_change_before_pause=self._requires_file_change_before_pause(
+                request
+            ),
         )
         if precheck is not None:
             return precheck
@@ -6565,7 +6832,10 @@ class FileTaskRuntime:
             verify_args = {
                 "task_description": request.task,
                 "file_states": json.dumps(
-                    file_states_for_changes(file_changes, workspace_root=self._workspace_root), ensure_ascii=False
+                    file_states_for_changes(
+                        file_changes, workspace_root=self._workspace_root
+                    ),
+                    ensure_ascii=False,
                 ),
                 "file_changes": json.dumps(file_changes, ensure_ascii=False),
                 "target_path": verify_target_path,
@@ -6635,7 +6905,8 @@ class FileTaskRuntime:
                 "passed": passed,
                 "status": "verified" if passed else "needs_attention",
                 "summary": str(
-                    payload.get("summary") or ("文件变更已记录。" if passed else "核验未通过。")
+                    payload.get("summary")
+                    or ("文件变更已记录。" if passed else "核验未通过。")
                 ),
                 "confidence": payload.get("confidence"),
                 "remaining": payload.get("remaining_steps")
@@ -6647,7 +6918,9 @@ class FileTaskRuntime:
             "passed": True,
             "status": "completed" if not model_failed else "context_only",
             "summary": (
-                "已完成分析建议，当前未直接写入文件。" if output_mode == "hybrid" else "已完成只读任务，没有产生文件写入。"
+                "已完成分析建议，当前未直接写入文件。"
+                if output_mode == "hybrid"
+                else "已完成只读任务，没有产生文件写入。"
             ),
             "remaining": [],
         }
@@ -6657,7 +6930,11 @@ class FileTaskRuntime:
     ) -> bool:
         if context_files:
             return True
-        if request.current_file or request.files or str(request.target_path or "").strip():
+        if (
+            request.current_file
+            or request.files
+            or str(request.target_path or "").strip()
+        ):
             return True
         return bool(
             re.search(
@@ -6684,7 +6961,9 @@ class FileTaskRuntime:
             )
         ]
         if satisfied_refs:
-            return [reference for reference in references if reference not in satisfied_refs]
+            return [
+                reference for reference in references if reference not in satisfied_refs
+            ]
         return references
 
     @staticmethod
@@ -6726,8 +7005,7 @@ class FileTaskRuntime:
 
         for snippet in snippets:
             if any(
-                _matches_path(snippet.get(key))
-                for key in ("path", "source", "name")
+                _matches_path(snippet.get(key)) for key in ("path", "source", "name")
             ):
                 return True
 

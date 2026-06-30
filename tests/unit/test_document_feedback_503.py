@@ -127,8 +127,12 @@ def test_build_annotation_prompt_includes_reference_context():
 def test_analyze_for_annotation_chunked_honors_chunk_range():
     df = _make_feedback(client=None)
     df.reader.read_document.return_value = {"success": True, "type": "resume"}
-    df.reader.format_for_ai.return_value = "## 文档内容\n\nchunk-1\n\nchunk-2\n\nchunk-3\n\nchunk-4"
-    df._split_into_chunks_by_paragraphs = MagicMock(return_value=["chunk-1", "chunk-2", "chunk-3", "chunk-4"])
+    df.reader.format_for_ai.return_value = (
+        "## 文档内容\n\nchunk-1\n\nchunk-2\n\nchunk-3\n\nchunk-4"
+    )
+    df._split_into_chunks_by_paragraphs = MagicMock(
+        return_value=["chunk-1", "chunk-2", "chunk-3", "chunk-4"]
+    )
     df._select_best_model = MagicMock(return_value=("gemini-3-flash-preview", []))
 
     seen = []
@@ -175,14 +179,22 @@ def test_analyze_for_annotation_chunked_honors_chunk_range():
 def test_analyze_for_annotation_chunked_honors_chunk_range_when_ai_disabled():
     df = _make_feedback(client=None)
     df.reader.read_document.return_value = {"success": True, "type": "resume"}
-    df.reader.format_for_ai.return_value = "## 文档内容\n\nchunk-1\n\nchunk-2\n\nchunk-3\n\nchunk-4"
-    df._split_into_chunks_by_paragraphs = MagicMock(return_value=["chunk-1", "chunk-2", "chunk-3", "chunk-4"])
-    df._fallback_annotations_from_chunk = MagicMock(side_effect=lambda chunk: [{
-        "原文片段": f"片段-{chunk}",
-        "修改建议": "建议",
-        "修改后文本": "修改后",
-        "理由": "理由",
-    }])
+    df.reader.format_for_ai.return_value = (
+        "## 文档内容\n\nchunk-1\n\nchunk-2\n\nchunk-3\n\nchunk-4"
+    )
+    df._split_into_chunks_by_paragraphs = MagicMock(
+        return_value=["chunk-1", "chunk-2", "chunk-3", "chunk-4"]
+    )
+    df._fallback_annotations_from_chunk = MagicMock(
+        side_effect=lambda chunk: [
+            {
+                "原文片段": f"片段-{chunk}",
+                "修改建议": "建议",
+                "修改后文本": "修改后",
+                "理由": "理由",
+            }
+        ]
+    )
 
     with patch.dict("os.environ", {"KOTO_DISABLE_AI": "1"}, clear=False):
         result = df.analyze_for_annotation_chunked(
@@ -238,7 +250,9 @@ def test_full_annotation_loop_streaming_uses_local_model_identity_and_chunk_budg
         return_value={"success": False, "error": "stop"}
     )
 
-    with patch.dict(sys.modules, {"schedule": types.ModuleType("schedule")}, clear=False):
+    with patch.dict(
+        sys.modules, {"schedule": types.ModuleType("schedule")}, clear=False
+    ):
         events = list(df.full_annotation_loop_streaming("/fake.docx"))
     analyzing = next(event for event in events if event["stage"] == "analyzing")
     analyze_kwargs = df.analyze_for_annotation_chunked.call_args.kwargs
@@ -251,11 +265,23 @@ def test_full_annotation_loop_streaming_uses_local_model_identity_and_chunk_budg
 @requires_df
 def test_full_annotation_loop_delegates_to_streaming_path():
     df = _make_feedback(client=None)
-    df.analyze_for_annotation_chunked = MagicMock(side_effect=AssertionError("legacy sync annotation path should not analyze directly"))
+    df.analyze_for_annotation_chunked = MagicMock(
+        side_effect=AssertionError(
+            "legacy sync annotation path should not analyze directly"
+        )
+    )
 
     captured = {}
 
-    def _fake_stream(file_path, user_requirement="", task_id=None, model_id=None, cancel_check=None, skill_prompt="", reference_context=""):
+    def _fake_stream(
+        file_path,
+        user_requirement="",
+        task_id=None,
+        model_id=None,
+        cancel_check=None,
+        skill_prompt="",
+        reference_context="",
+    ):
         captured["file_path"] = file_path
         captured["user_requirement"] = user_requirement
         captured["model_id"] = model_id
@@ -292,22 +318,28 @@ def test_full_annotation_loop_delegates_to_streaming_path():
 @requires_df
 def test_full_feedback_loop_is_analysis_apply_wrapper():
     df = _make_feedback(client=None)
-    df.analyze_and_suggest = MagicMock(return_value={
-        "success": True,
-        "modification_count": 2,
-        "modifications": [{"kind": "update"}],
-        "summary": "summary",
-    })
-    df.apply_suggestions = MagicMock(return_value={
-        "success": True,
-        "file_path": "/fake/result.docx",
-        "applied_count": 2,
-    })
+    df.analyze_and_suggest = MagicMock(
+        return_value={
+            "success": True,
+            "modification_count": 2,
+            "modifications": [{"kind": "update"}],
+            "summary": "summary",
+        }
+    )
+    df.apply_suggestions = MagicMock(
+        return_value={
+            "success": True,
+            "file_path": "/fake/result.docx",
+            "applied_count": 2,
+        }
+    )
 
     result = df.full_feedback_loop("/fake/source.docx", "请优化", auto_apply=True)
 
     df.analyze_and_suggest.assert_called_once_with("/fake/source.docx", "请优化")
-    df.apply_suggestions.assert_called_once_with("/fake/source.docx", [{"kind": "update"}])
+    df.apply_suggestions.assert_called_once_with(
+        "/fake/source.docx", [{"kind": "update"}]
+    )
     assert result["success"] is True
     assert result["new_file_path"] == "/fake/result.docx"
     assert result["applied_count"] == 2
@@ -316,13 +348,17 @@ def test_full_feedback_loop_is_analysis_apply_wrapper():
 @requires_df
 def test_full_feedback_loop_can_return_analysis_only():
     df = _make_feedback(client=None)
-    df.analyze_and_suggest = MagicMock(return_value={
-        "success": True,
-        "modification_count": 1,
-        "modifications": [{"kind": "update"}],
-        "summary": "summary",
-    })
-    df.apply_suggestions = MagicMock(side_effect=AssertionError("analysis-only path should not apply suggestions"))
+    df.analyze_and_suggest = MagicMock(
+        return_value={
+            "success": True,
+            "modification_count": 1,
+            "modifications": [{"kind": "update"}],
+            "summary": "summary",
+        }
+    )
+    df.apply_suggestions = MagicMock(
+        side_effect=AssertionError("analysis-only path should not apply suggestions")
+    )
 
     result = df.full_feedback_loop("/fake/source.docx", "请优化", auto_apply=False)
 

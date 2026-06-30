@@ -140,9 +140,7 @@ class TestDocumentFeedbackDeep:
     # -- annotate_document --------------------------------------------------
     def test_annotate_document_delegates_to_track_changes_editor(self):
         obj = self._make()
-        with patch(
-            "web.track_changes_editor.TrackChangesEditor"
-        ) as mock_editor_cls:
+        with patch("web.track_changes_editor.TrackChangesEditor") as mock_editor_cls:
             mock_editor_cls.return_value.apply_tracked_changes.return_value = {
                 "success": True,
                 "original_file": "/a",
@@ -568,13 +566,15 @@ class TestTrackChangesEditorDeep:
         mock_doc.tables = []
         events = []
 
-        with patch("web.track_changes_editor.Document", return_value=mock_doc), patch.object(
-            editor, "_apply_change_to_paragraph", return_value=True
-        ):
+        with patch(
+            "web.track_changes_editor.Document", return_value=mock_doc
+        ), patch.object(editor, "_apply_change_to_paragraph", return_value=True):
             result = editor.apply_tracked_changes(
                 "/fake.docx",
                 [{"原文片段": "旧文本", "修改后文本": "新文本"}],
-                progress_callback=lambda current, total, status, detail, **meta: events.append((status, detail, meta)),
+                progress_callback=lambda current, total, status, detail, **meta: events.append(
+                    (status, detail, meta)
+                ),
             )
 
         assert result["success"] is True

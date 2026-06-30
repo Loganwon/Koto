@@ -23,8 +23,8 @@ from app.core.agent.file_task_contract import (
     FileTaskFile,
     FileTaskRequest,
 )
-from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_model import FileTaskModelClient
+from app.core.agent.file_task_runtime import FileTaskRuntime
 
 
 def _read_file(path: Path) -> str:
@@ -39,8 +39,15 @@ def _read_file(path: Path) -> str:
 def _collect_events_output(events) -> str:
     texts: List[str] = []
     for event in events:
-        payload = event.payload if hasattr(event, "payload") else event.get("payload", {})
-        content = payload.get("content") or payload.get("text") or payload.get("summary") or ""
+        payload = (
+            event.payload if hasattr(event, "payload") else event.get("payload", {})
+        )
+        content = (
+            payload.get("content")
+            or payload.get("text")
+            or payload.get("summary")
+            or ""
+        )
         if isinstance(content, str) and content.strip():
             texts.append(content.strip())
     return "\n\n".join(texts[:30])
@@ -54,6 +61,7 @@ def _make_runtime():
 
 
 # -- Knowledge / Analysis Tasks -----------------------------------------
+
 
 def test_execution_summarize_docx(evaluator, sample_docx):
     req = FileTaskRequest(
@@ -191,6 +199,7 @@ def test_execution_translate_text(evaluator):
 
 # -- Write / Edit Tasks --------------------------------------------------
 
+
 def test_execution_polish_docx(evaluator, workspace, sample_docx):
     text = _read_file(sample_docx)
     req = FileTaskRequest(
@@ -278,6 +287,7 @@ def test_execution_advice_only(evaluator, sample_docx):
 
 # -- Quality Aggregation Report ------------------------------------------
 
+
 def test_execution_quality_report(evaluator, sample_docx, sample_xlsx):
     """Aggregated end-to-end quality report.
 
@@ -300,30 +310,44 @@ def test_execution_quality_report(evaluator, sample_docx, sample_xlsx):
             if case["fn"] == "summarize":
                 req = FileTaskRequest(
                     task="总结这份报告的核心内容",
-                    files=[FileTaskFile(
-                        path=str(sample_docx), name=sample_docx.name,
-                        type="docx", content=_read_file(sample_docx),
-                    )],
-                    run_id=f"eval_report_{case['fn']}", model_mode="cloud",
+                    files=[
+                        FileTaskFile(
+                            path=str(sample_docx),
+                            name=sample_docx.name,
+                            type="docx",
+                            content=_read_file(sample_docx),
+                        )
+                    ],
+                    run_id=f"eval_report_{case['fn']}",
+                    model_mode="cloud",
                 )
             elif case["fn"] == "analyze":
                 req = FileTaskRequest(
                     task="分析这个销售数据表格，找出最关键的发现",
-                    files=[FileTaskFile(
-                        path=str(sample_xlsx), name=sample_xlsx.name,
-                        type="xlsx", content="销售数据",
-                    )],
-                    run_id=f"eval_report_{case['fn']}", model_mode="cloud",
+                    files=[
+                        FileTaskFile(
+                            path=str(sample_xlsx),
+                            name=sample_xlsx.name,
+                            type="xlsx",
+                            content="销售数据",
+                        )
+                    ],
+                    run_id=f"eval_report_{case['fn']}",
+                    model_mode="cloud",
                 )
             elif case["fn"] == "diagnostic":
                 req = FileTaskRequest(
                     task="为什么 xlsx 文件会损坏？分析可能原因",
-                    files=[], run_id=f"eval_report_{case['fn']}", model_mode="cloud",
+                    files=[],
+                    run_id=f"eval_report_{case['fn']}",
+                    model_mode="cloud",
                 )
             elif case["fn"] == "translate":
                 req = FileTaskRequest(
                     task="把'人工智能改变世界'翻译成英文",
-                    files=[], run_id=f"eval_report_{case['fn']}", model_mode="cloud",
+                    files=[],
+                    run_id=f"eval_report_{case['fn']}",
+                    model_mode="cloud",
                 )
             else:
                 continue
@@ -337,8 +361,12 @@ def test_execution_quality_report(evaluator, sample_docx, sample_xlsx):
                 actual=output[:2000],
             )
             status = "PASS" if verdict.pass_ else "FAIL"
-            print(f"  [{status}] {label}  score={verdict.score:.0%}  {verdict.reason[:60]}")
-            results.append({"label": label, "pass": verdict.pass_, "score": verdict.score})
+            print(
+                f"  [{status}] {label}  score={verdict.score:.0%}  {verdict.reason[:60]}"
+            )
+            results.append(
+                {"label": label, "pass": verdict.pass_, "score": verdict.score}
+            )
         except Exception as exc:
             print(f"  [SKIP] {label}  异常: {exc}")
 
@@ -349,6 +377,4 @@ def test_execution_quality_report(evaluator, sample_docx, sample_xlsx):
     print(f"  执行质量通过率: {passed}/{total} = {rate:.0%}")
     print(f"{'='*60}")
 
-    assert rate >= 0.60, (
-        f"端到端执行通过率 {rate:.0%} 低于阈值 60%，请检查失败案例"
-    )
+    assert rate >= 0.60, f"端到端执行通过率 {rate:.0%} 低于阈值 60%，请检查失败案例"

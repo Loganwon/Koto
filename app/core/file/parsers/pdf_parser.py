@@ -47,9 +47,10 @@ def _ocr_pdf_pages(file_path: str, page_indices: list[int]) -> dict[int, str]:
         doc = fitz.open(file_path)
         try:
             langs = pytesseract.get_languages()
-            lang = "+".join(
-                lc for lc in ("chi_sim", "chi_tra", "eng") if lc in langs
-            ) or "eng"
+            lang = (
+                "+".join(lc for lc in ("chi_sim", "chi_tra", "eng") if lc in langs)
+                or "eng"
+            )
         except Exception:
             lang = "eng"
 
@@ -130,7 +131,8 @@ def _apply_ocr_fallback(
     meta: dict | None = None,
 ) -> dict[str, Any]:
     scanned_indices = [
-        i for i, page in enumerate(pages_text)
+        i
+        for i, page in enumerate(pages_text)
         if len(page["text"].strip()) < _PDF_OCR_THRESHOLD
     ]
     ocr_applied = False

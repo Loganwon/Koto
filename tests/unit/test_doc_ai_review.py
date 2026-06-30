@@ -9,7 +9,6 @@ import pytest
 
 from app.core.workflows.doc_ai_review import DocAIReview
 
-
 pytestmark = [pytest.mark.unit]
 
 
@@ -43,11 +42,23 @@ def test_doc_ai_review_writes_tracked_changes(monkeypatch, tmp_path: Path):
 
     fake_track_changes_module = types.ModuleType("web.track_changes_editor")
     fake_track_changes_module.TrackChangesEditor = FakeTrackChangesEditor
-    monkeypatch.setitem(sys.modules, "web.track_changes_editor", fake_track_changes_module)
+    monkeypatch.setitem(
+        sys.modules, "web.track_changes_editor", fake_track_changes_module
+    )
 
-    monkeypatch.setattr(DocAIReview, "parse_file", staticmethod(lambda _path: "需要修改的句子"))
-    monkeypatch.setattr(DocAIReview, "save_output_file", staticmethod(lambda suffix=".docx": output_path))
-    monkeypatch.setattr(DocAIReview, "_review_chunk", lambda self, chunk, system, model_mode: annotations)
+    monkeypatch.setattr(
+        DocAIReview, "parse_file", staticmethod(lambda _path: "需要修改的句子")
+    )
+    monkeypatch.setattr(
+        DocAIReview,
+        "save_output_file",
+        staticmethod(lambda suffix=".docx": output_path),
+    )
+    monkeypatch.setattr(
+        DocAIReview,
+        "_review_chunk",
+        lambda self, chunk, system, model_mode: annotations,
+    )
 
     import app.core.workflows.doc_ai_review as workflow_module
 
@@ -75,7 +86,8 @@ def test_doc_ai_review_writes_tracked_changes(monkeypatch, tmp_path: Path):
         for payload in payloads
     )
     assert any(
-        payload.get("type") == "step_done" and payload.get("label") == "📝 已写入 1 条修订"
+        payload.get("type") == "step_done"
+        and payload.get("label") == "📝 已写入 1 条修订"
         for payload in payloads
     )
     assert any(

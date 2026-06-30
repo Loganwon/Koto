@@ -93,7 +93,11 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Colspan (w:gridSpan) ─────────────────────────────────
                 grid_span_el = tc.find(f".//{_w('gridSpan')}")
-                colspan = int(grid_span_el.get(_w("val"), 1)) if grid_span_el is not None else 1
+                colspan = (
+                    int(grid_span_el.get(_w("val"), 1))
+                    if grid_span_el is not None
+                    else 1
+                )
 
                 # ── Rowspan: count how many rows below start with w:vMerge (no val attr) ──
                 # The first cell of a vertical merge has w:vMerge val="restart";
@@ -118,8 +122,7 @@ def _extract_table_styles(docx_path: str) -> list[dict]:
 
                 # ── Skip continuation vMerge cells (they'll be expressed via rowspan) ──
                 is_merge_continuation = (
-                    v_merge_el is not None
-                    and v_merge_el.get(_w("val"), "") == ""
+                    v_merge_el is not None and v_merge_el.get(_w("val"), "") == ""
                 )
                 if is_merge_continuation:
                     continue  # nothing to write; the HTML rowspan covers it
@@ -183,7 +186,9 @@ def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
                     w_css = f"width:{col_pcts[ci_col]:.1f}%;"
                     # Don't double-inject
                     if "width:" not in existing:
-                        cell_tag["style"] = (existing.rstrip(";") + ";" + w_css).lstrip(";")
+                        cell_tag["style"] = (existing.rstrip(";") + ";" + w_css).lstrip(
+                            ";"
+                        )
 
         for ri, row_tag in enumerate(rows):
             cells = row_tag.find_all(["td", "th"])
@@ -203,7 +208,9 @@ def _inject_table_styles(html: str, table_styles: list[dict]) -> str:
                 if bg:
                     existing = cell_tag.get("style", "")
                     bg_css = f"background-color:#{bg.lower()};"
-                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(";")
+                    cell_tag["style"] = (existing.rstrip(";") + ";" + bg_css).lstrip(
+                        ";"
+                    )
 
     # ── Remove entirely-empty trailing columns ─────────────────────────────
     # The editor sometimes pads rows with phantom empty cells; stripping
@@ -243,14 +250,16 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
     fixed page position, e.g. a resume photo) are silently skipped.
     Uses namespace-aware ElementTree parsing so attribute order never matters.
     """
-    import zipfile as _zipfile
     import xml.etree.ElementTree as _ET
+    import zipfile as _zipfile
 
     # Full OOXML namespace URIs — must match exactly (not prefix aliases)
-    IMG_TYPE = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
-    WP_NS    = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
-    A_NS     = "http://schemas.openxmlformats.org/drawingml/2006/main"
-    R_NS     = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+    IMG_TYPE = (
+        "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image"
+    )
+    WP_NS = "http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing"
+    A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
+    R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
     result: list[str] = []
     try:
@@ -262,7 +271,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 (n for n in file_list if n.lower() == "word/document.xml"), None
             )
             rels_name = next(
-                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"), None
+                (n for n in file_list if n.lower() == "word/_rels/document.xml.rels"),
+                None,
             )
             if not doc_name or not rels_name:
                 return result
@@ -271,9 +281,9 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
             rels_root = _ET.fromstring(z.read(rels_name))
             rel_map: dict[str, str] = {}
             for rel in rels_root:
-                rid   = rel.get("Id", "")
+                rid = rel.get("Id", "")
                 rtype = rel.get("Type", "")
-                tgt   = rel.get("Target", "")
+                tgt = rel.get("Target", "")
                 if rid and IMG_TYPE in rtype and tgt:
                     rel_map[rid] = tgt if tgt.startswith("word/") else f"word/{tgt}"
 
@@ -304,7 +314,8 @@ def _get_floating_image_srcs(docx_path: str) -> list[str]:
                 if not media_path:
                     logger.debug(
                         "[floating_imgs] no media path for rel_id=%s; rel_map keys=%s",
-                        rel_id, list(rel_map)[:8],
+                        rel_id,
+                        list(rel_map)[:8],
                     )
                     continue
                 try:
@@ -429,12 +440,12 @@ def _deduplicate_images(html: str) -> str:
             prefix = src_m.group(1)
             if prefix in seen_prefixes:
                 # Duplicate — skip this <img> tag
-                result_parts.append(html[pos:m.start()])
+                result_parts.append(html[pos : m.start()])
                 pos = m.end()
                 continue
             seen_prefixes.add(prefix)
 
-        result_parts.append(html[pos:m.end()])
+        result_parts.append(html[pos : m.end()])
         pos = m.end()
 
     result_parts.append(html[pos:])
@@ -461,29 +472,48 @@ def _docx_to_rich_html(
     """
     try:
         from docx import Document
-        from docx.oxml.ns import qn
+        from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_ROW_HEIGHT_RULE
         from docx.enum.text import WD_ALIGN_PARAGRAPH
-        from docx.enum.table import WD_ROW_HEIGHT_RULE, WD_CELL_VERTICAL_ALIGNMENT
+        from docx.oxml.ns import qn
         from docx.shared import Pt, RGBColor
     except ImportError:
         raise RuntimeError("python-docx 未安装，请执行: pip install python-docx")
 
     # ── Heading style name → tag map ────────────────────────────────────────
     _HEADING_MAP: dict[str, str] = {
-        "heading 1": "h1", "heading 2": "h2", "heading 3": "h3",
-        "heading 4": "h4", "heading 5": "h5", "heading 6": "h6",
+        "heading 1": "h1",
+        "heading 2": "h2",
+        "heading 3": "h3",
+        "heading 4": "h4",
+        "heading 5": "h5",
+        "heading 6": "h6",
         # Some documents use style IDs/names without spaces.
-        "heading1": "h1", "heading2": "h2", "heading3": "h3",
-        "heading4": "h4", "heading5": "h5", "heading6": "h6",
-        "标题 1": "h1", "标题 2": "h2", "标题 3": "h3",
-        "标题 4": "h4", "标题 5": "h5", "标题 6": "h6",
+        "heading1": "h1",
+        "heading2": "h2",
+        "heading3": "h3",
+        "heading4": "h4",
+        "heading5": "h5",
+        "heading6": "h6",
+        "标题 1": "h1",
+        "标题 2": "h2",
+        "标题 3": "h3",
+        "标题 4": "h4",
+        "标题 5": "h5",
+        "标题 6": "h6",
         # WPS / Word Chinese no-space variants (e.g. "标题1" not "标题 1")
-        "标题1": "h1", "标题2": "h2", "标题3": "h3",
-        "标题4": "h4", "标题5": "h5", "标题6": "h6",
+        "标题1": "h1",
+        "标题2": "h2",
+        "标题3": "h3",
+        "标题4": "h4",
+        "标题5": "h5",
+        "标题6": "h6",
         # Common alternative Chinese heading names
-        "一级标题": "h1", "二级标题": "h2", "三级标题": "h3",
+        "一级标题": "h1",
+        "二级标题": "h2",
+        "三级标题": "h3",
         # subheading
-        "subheading 1": "h2", "subheading 2": "h3",
+        "subheading 1": "h2",
+        "subheading 2": "h3",
     }
 
     _VISUAL_TITLE_STYLE_KEYS: set[str] = {
@@ -513,12 +543,18 @@ def _docx_to_rich_html(
     }
 
     _CN_FONT_MAP_P: dict[str, str] = {
-        "黑体": "SimHei", "宋体": "SimSun", "楷体": "KaiTi",
-        "仿宋": "FangSong", "微软雅黑": "Microsoft YaHei",
-        "华文中宋": "STZhongsong", "华文宋体": "STSong",
-        "华文黑体": "STHeiti", "华文楷体": "STKaiti",
+        "黑体": "SimHei",
+        "宋体": "SimSun",
+        "楷体": "KaiTi",
+        "仿宋": "FangSong",
+        "微软雅黑": "Microsoft YaHei",
+        "华文中宋": "STZhongsong",
+        "华文宋体": "STSong",
+        "华文黑体": "STHeiti",
+        "华文楷体": "STKaiti",
         "华文仿宋": "STFangsong",
-        "方正书宋": "FZShuSong-Z01", "方正黑体": "FZHei-B01",
+        "方正书宋": "FZShuSong-Z01",
+        "方正黑体": "FZHei-B01",
     }
     _CN_FONT_EQUIVALENTS: dict[str, tuple[str, ...]] = {}
     for _cn_name, _ascii_name in _CN_FONT_MAP_P.items():
@@ -567,7 +603,9 @@ def _docx_to_rich_html(
         if rgb is None:
             return None
         try:
-            return "#{:02X}{:02X}{:02X}".format(int(rgb.red), int(rgb.green), int(rgb.blue))
+            return "#{:02X}{:02X}{:02X}".format(
+                int(rgb.red), int(rgb.green), int(rgb.blue)
+            )
         except Exception:
             return None
 
@@ -639,7 +677,9 @@ def _docx_to_rich_html(
             try:
                 _sname = getattr(_style_iter, "name", "") or ""
                 _sid = getattr(_style_iter, "style_id", "") or ""
-                if _is_visual_title_style_key(_sname) or _is_visual_title_style_key(_sid):
+                if _is_visual_title_style_key(_sname) or _is_visual_title_style_key(
+                    _sid
+                ):
                     return True
             except Exception:
                 pass
@@ -681,7 +721,9 @@ def _docx_to_rich_html(
                 return _ch
         return "1"
 
-    def _apply_heading_typography_fallback(tag: str, css: dict[str, str], inner_html: str) -> None:
+    def _apply_heading_typography_fallback(
+        tag: str, css: dict[str, str], inner_html: str
+    ) -> None:
         """Keep semantic headings readable when DOCX outline metadata has no font props."""
         _fallback = _HEADING_TYPOGRAPHY_FALLBACKS.get((tag or "").lower())
         if not _fallback:
@@ -712,15 +754,13 @@ def _docx_to_rich_html(
             return False
         try:
             _instr = " ".join(
-                (_node.text or "")
-                for _node in p_el.iter(qn("w:instrText"))
+                (_node.text or "") for _node in p_el.iter(qn("w:instrText"))
             )
             _instr_norm = re.sub(r"\s+", " ", _instr).strip().upper()
             if not _instr_norm:
                 return False
-            return (
-                " TOC " in f" {_instr_norm} "
-                or (" PAGEREF " in f" {_instr_norm} " and "_TOC" in _instr_norm)
+            return " TOC " in f" {_instr_norm} " or (
+                " PAGEREF " in f" {_instr_norm} " and "_TOC" in _instr_norm
             )
         except Exception:
             return False
@@ -750,7 +790,9 @@ def _docx_to_rich_html(
 
     def _slugify_heading_anchor(text: str) -> str:
         """Create a stable HTML id for structural headings without bookmarks."""
-        _slug = re.sub(r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "-", (text or "").strip().lower())
+        _slug = re.sub(
+            r"[^0-9A-Za-z\u4e00-\u9fff_-]+", "-", (text or "").strip().lower()
+        )
         _slug = re.sub(r"-{2,}", "-", _slug).strip("-_")
         return _slug or "heading"
 
@@ -774,7 +816,9 @@ def _docx_to_rich_html(
 
         return _find_bookmark_id(p_el) or _make_generated_heading_anchor(_text)
 
-    def _record_body_heading(p_el, tag: str | None, anchor_id: str | None = None) -> str:
+    def _record_body_heading(
+        p_el, tag: str | None, anchor_id: str | None = None
+    ) -> str:
         """Append a parser-owned body heading manifest entry and return its anchor id."""
         if not tag or not re.fullmatch(r"h[1-6]", (tag or "").lower()):
             return ""
@@ -783,15 +827,23 @@ def _docx_to_rich_html(
         if not _text:
             return ""
 
-        _anchor_id = (anchor_id or "").strip() or _find_bookmark_id(p_el) or _make_generated_heading_anchor(_text)
-        _heading_manifest.append({
-            "level": int(tag[1]),
-            "text": _text,
-            "id": _anchor_id,
-        })
+        _anchor_id = (
+            (anchor_id or "").strip()
+            or _find_bookmark_id(p_el)
+            or _make_generated_heading_anchor(_text)
+        )
+        _heading_manifest.append(
+            {
+                "level": int(tag[1]),
+                "text": _text,
+                "id": _anchor_id,
+            }
+        )
         return _anchor_id
 
-    def _should_emit_heading_manifest_entry(tag: str | None, block_role: str, p_el=None, style_defaults=None, style_ref=None) -> bool:
+    def _should_emit_heading_manifest_entry(
+        tag: str | None, block_role: str, p_el=None, style_defaults=None, style_ref=None
+    ) -> bool:
         """Populate the navigation manifest for structural headings with durable title signals."""
         if block_role != "structural_heading":
             return False
@@ -845,15 +897,18 @@ def _docx_to_rich_html(
         _text = re.sub(r"\s+", "", str(text or ""))
         if not _text:
             return False
-        return re.match(
-            r"^(?:"
-            r"第[0-9一二三四五六七八九十百千万零两]+[章节部分篇卷]"
-            r"|[0-9]+(?:\.[0-9]+){0,3}[、.．]?"
-            r"|[一二三四五六七八九十百千万零两]+[、.．]"
-            r"|[(（]?[0-9一二三四五六七八九十百千万零两]+[)）][、.．]?"
-            r")",
-            _text,
-        ) is not None
+        return (
+            re.match(
+                r"^(?:"
+                r"第[0-9一二三四五六七八九十百千万零两]+[章节部分篇卷]"
+                r"|[0-9]+(?:\.[0-9]+){0,3}[、.．]?"
+                r"|[一二三四五六七八九十百千万零两]+[、.．]"
+                r"|[(（]?[0-9一二三四五六七八九十百千万零两]+[)）][、.．]?"
+                r")",
+                _text,
+            )
+            is not None
+        )
 
     def _looks_like_outline_only_body_sentence(text: str) -> bool:
         """Reject short clause-style prose that only carries outline metadata."""
@@ -886,14 +941,18 @@ def _docx_to_rich_html(
 
         try:
             _first_line_indent = para.paragraph_format.first_line_indent
-            if _first_line_indent is not None and getattr(_first_line_indent, "twips", 0):
+            if _first_line_indent is not None and getattr(
+                _first_line_indent, "twips", 0
+            ):
                 return False
         except Exception:
             pass
 
         return True
 
-    def _classify_paragraph_block(para, p_el, style_ref=None, style_defaults=None) -> tuple[str, str]:
+    def _classify_paragraph_block(
+        para, p_el, style_ref=None, style_defaults=None
+    ) -> tuple[str, str]:
         """Classify a body paragraph once into structural heading, visual title, TOC line, or body.
 
         Returns (html_tag, role), where role is one of:
@@ -907,7 +966,11 @@ def _docx_to_rich_html(
         result in a second pass.
         """
         _sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
-        _style_defaults = style_defaults if style_defaults is not None else _resolve_style_defaults(_sr)
+        _style_defaults = (
+            style_defaults
+            if style_defaults is not None
+            else _resolve_style_defaults(_sr)
+        )
 
         try:
             _style_name = _style_defaults.get("style_name") or ""
@@ -926,10 +989,14 @@ def _docx_to_rich_html(
         if _is_toc_para:
             return "p", "toc_line"
 
-        if _is_visual_title_style_key(_style_name) or _is_visual_title_style_key(_style_id):
+        if _is_visual_title_style_key(_style_name) or _is_visual_title_style_key(
+            _style_id
+        ):
             return "p", "visual_title"
 
-        _direct_heading_tag = _is_heading_style_key(_style_name) or _is_heading_style_key(_style_id)
+        _direct_heading_tag = _is_heading_style_key(
+            _style_name
+        ) or _is_heading_style_key(_style_id)
         if _direct_heading_tag:
             return _direct_heading_tag, "structural_heading"
 
@@ -937,7 +1004,11 @@ def _docx_to_rich_html(
             return "p", "visual_title"
 
         _outline_tag, _via_outlinelvl = _detect_outline_level(para, p_el)
-        if _via_outlinelvl and _outline_tag and _should_promote_outline_heading(para, p_el, _outline_tag):
+        if (
+            _via_outlinelvl
+            and _outline_tag
+            and _should_promote_outline_heading(para, p_el, _outline_tag)
+        ):
             return _outline_tag, "structural_heading"
 
         return "p", "body"
@@ -1023,9 +1094,15 @@ def _docx_to_rich_html(
         try:
             spacing_el = p_pr.find(qn("w:spacing"))
             if spacing_el is not None:
-                layout["space_before_twips"] = _parse_int_prop(spacing_el.get(qn("w:before")))
-                layout["space_after_twips"] = _parse_int_prop(spacing_el.get(qn("w:after")))
-                layout["line_spacing_twips"] = _parse_int_prop(spacing_el.get(qn("w:line")))
+                layout["space_before_twips"] = _parse_int_prop(
+                    spacing_el.get(qn("w:before"))
+                )
+                layout["space_after_twips"] = _parse_int_prop(
+                    spacing_el.get(qn("w:after"))
+                )
+                layout["line_spacing_twips"] = _parse_int_prop(
+                    spacing_el.get(qn("w:line"))
+                )
                 line_rule = str(spacing_el.get(qn("w:lineRule")) or "").strip()
                 if line_rule:
                     layout["line_spacing_rule"] = line_rule
@@ -1037,7 +1114,9 @@ def _docx_to_rich_html(
         try:
             ind_el = p_pr.find(qn("w:ind"))
             if ind_el is not None:
-                layout["first_line_indent_twips"] = _parse_int_prop(ind_el.get(qn("w:firstLine")))
+                layout["first_line_indent_twips"] = _parse_int_prop(
+                    ind_el.get(qn("w:firstLine"))
+                )
                 layout["left_indent_twips"] = _parse_int_prop(ind_el.get(qn("w:left")))
         except Exception:
             pass
@@ -1185,8 +1264,13 @@ def _docx_to_rich_html(
                             _resolved["space_before"] = _twips_to_pt(_val.twips)
                     except Exception:
                         pass
-                    if _resolved["space_before"] is None and _layout_props["space_before_twips"] is not None:
-                        _resolved["space_before"] = _twips_to_pt(_layout_props["space_before_twips"])
+                    if (
+                        _resolved["space_before"] is None
+                        and _layout_props["space_before_twips"] is not None
+                    ):
+                        _resolved["space_before"] = _twips_to_pt(
+                            _layout_props["space_before_twips"]
+                        )
                 if _resolved["space_after"] is None:
                     try:
                         _val = _spf.space_after
@@ -1194,8 +1278,13 @@ def _docx_to_rich_html(
                             _resolved["space_after"] = _twips_to_pt(_val.twips)
                     except Exception:
                         pass
-                    if _resolved["space_after"] is None and _layout_props["space_after_twips"] is not None:
-                        _resolved["space_after"] = _twips_to_pt(_layout_props["space_after_twips"])
+                    if (
+                        _resolved["space_after"] is None
+                        and _layout_props["space_after_twips"] is not None
+                    ):
+                        _resolved["space_after"] = _twips_to_pt(
+                            _layout_props["space_after_twips"]
+                        )
                 if _resolved["line_height"] is None:
                     try:
                         _line_height = _line_spacing_to_css(
@@ -1207,21 +1296,47 @@ def _docx_to_rich_html(
                     except Exception:
                         pass
 
-            if _resolved["line_spacing_rule"] is None and _layout_props["line_spacing_rule"] is not None:
+            if (
+                _resolved["line_spacing_rule"] is None
+                and _layout_props["line_spacing_rule"] is not None
+            ):
                 _resolved["line_spacing_rule"] = _layout_props["line_spacing_rule"]
-            if _resolved["line_spacing_twips"] is None and _layout_props["line_spacing_twips"] is not None:
+            if (
+                _resolved["line_spacing_twips"] is None
+                and _layout_props["line_spacing_twips"] is not None
+            ):
                 _resolved["line_spacing_twips"] = _layout_props["line_spacing_twips"]
-            if _resolved["first_line_indent_twips"] is None and _layout_props["first_line_indent_twips"] is not None:
-                _resolved["first_line_indent_twips"] = _layout_props["first_line_indent_twips"]
-            if _resolved["left_indent_twips"] is None and _layout_props["left_indent_twips"] is not None:
+            if (
+                _resolved["first_line_indent_twips"] is None
+                and _layout_props["first_line_indent_twips"] is not None
+            ):
+                _resolved["first_line_indent_twips"] = _layout_props[
+                    "first_line_indent_twips"
+                ]
+            if (
+                _resolved["left_indent_twips"] is None
+                and _layout_props["left_indent_twips"] is not None
+            ):
                 _resolved["left_indent_twips"] = _layout_props["left_indent_twips"]
-            if _resolved["keep_with_next"] is None and _layout_props["keep_with_next"] is not None:
+            if (
+                _resolved["keep_with_next"] is None
+                and _layout_props["keep_with_next"] is not None
+            ):
                 _resolved["keep_with_next"] = _layout_props["keep_with_next"]
-            if _resolved["keep_together"] is None and _layout_props["keep_together"] is not None:
+            if (
+                _resolved["keep_together"] is None
+                and _layout_props["keep_together"] is not None
+            ):
                 _resolved["keep_together"] = _layout_props["keep_together"]
-            if _resolved["page_break_before"] is None and _layout_props["page_break_before"] is not None:
+            if (
+                _resolved["page_break_before"] is None
+                and _layout_props["page_break_before"] is not None
+            ):
                 _resolved["page_break_before"] = _layout_props["page_break_before"]
-            if _resolved["widow_control"] is None and _layout_props["widow_control"] is not None:
+            if (
+                _resolved["widow_control"] is None
+                and _layout_props["widow_control"] is not None
+            ):
                 _resolved["widow_control"] = _layout_props["widow_control"]
 
             if _resolved["font_size"] is None:
@@ -1231,7 +1346,10 @@ def _docx_to_rich_html(
                         _resolved["font_size"] = round(_fsize.pt, 1)
                 except Exception:
                     pass
-                if _resolved["font_size"] is None and _rpr_props["font_size"] is not None:
+                if (
+                    _resolved["font_size"] is None
+                    and _rpr_props["font_size"] is not None
+                ):
                     _resolved["font_size"] = _rpr_props["font_size"]
 
             if _resolved["font_family"] is None:
@@ -1277,7 +1395,9 @@ def _docx_to_rich_html(
         return _resolved
 
     def _extract_paragraph_layout_semantics(para, style_ref=None) -> dict[str, Any]:
-        style_ref = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        style_ref = (
+            style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        )
         style_defaults = _resolve_style_defaults(style_ref)
 
         try:
@@ -1297,7 +1417,8 @@ def _docx_to_rich_html(
                 if direct_layout["space_after_twips"] is not None
                 else _pt_to_twips(style_defaults.get("space_after"))
             ),
-            "line_spacing_rule": direct_layout["line_spacing_rule"] or style_defaults.get("line_spacing_rule"),
+            "line_spacing_rule": direct_layout["line_spacing_rule"]
+            or style_defaults.get("line_spacing_rule"),
             "line_spacing_twips": (
                 direct_layout["line_spacing_twips"]
                 if direct_layout["line_spacing_twips"] is not None
@@ -1408,7 +1529,9 @@ def _docx_to_rich_html(
             except Exception:
                 _has_tab = False
         _looks_like_toc_line = _p_elem_looks_like_toc_line(p_el)
-        _has_toc_signal = _has_toc_anchor or _has_toc_field or _has_tab or _looks_like_toc_line
+        _has_toc_signal = (
+            _has_toc_anchor or _has_toc_field or _has_tab or _looks_like_toc_line
+        )
 
         for _sv in style_candidates:
             if _is_toc_style_key(_sv):
@@ -1520,14 +1643,16 @@ def _docx_to_rich_html(
             if pos_h is not None:
                 align_el = pos_h.find(qn("wp:align"))
                 if align_el is not None and align_el.text:
-                    h_align = align_el.text.strip().lower()  # left | center | right | inside | outside
+                    h_align = (
+                        align_el.text.strip().lower()
+                    )  # left | center | right | inside | outside
 
             # ── Wrap mode ─────────────────────────────────────────────────
             # Determine CSS positioning from wrap type.
-            has_wrap_square  = drawing_elem.find(qn("wp:wrapSquare"))  is not None
-            has_wrap_tight   = drawing_elem.find(qn("wp:wrapTight"))   is not None
-            has_wrap_none    = drawing_elem.find(qn("wp:wrapNone"))    is not None
-            has_wrap_tb      = drawing_elem.find(qn("wp:wrapTopAndBottom")) is not None
+            has_wrap_square = drawing_elem.find(qn("wp:wrapSquare")) is not None
+            has_wrap_tight = drawing_elem.find(qn("wp:wrapTight")) is not None
+            has_wrap_none = drawing_elem.find(qn("wp:wrapNone")) is not None
+            has_wrap_tb = drawing_elem.find(qn("wp:wrapTopAndBottom")) is not None
 
             # ── Build CSS ─────────────────────────────────────────────────
             if has_wrap_none:
@@ -1571,12 +1696,19 @@ def _docx_to_rich_html(
 
         def _note_reference_html() -> str:
             markers: list[str] = []
-            for tag_name, data_attr in (("w:footnoteReference", "data-koto-footnote-ref"), ("w:endnoteReference", "data-koto-endnote-ref")):
+            for tag_name, data_attr in (
+                ("w:footnoteReference", "data-koto-footnote-ref"),
+                ("w:endnoteReference", "data-koto-endnote-ref"),
+            ):
                 for ref_el in run._element.findall(qn(tag_name)):
                     note_id = str(ref_el.get(qn("w:id")) or "").strip()
                     if not note_id:
                         continue
-                    cls_name = "koto-footnote-ref" if "footnote" in tag_name else "koto-endnote-ref"
+                    cls_name = (
+                        "koto-footnote-ref"
+                        if "footnote" in tag_name
+                        else "koto-endnote-ref"
+                    )
                     escaped_id = html.escape(note_id, quote=True)
                     markers.append(
                         f'<sup class="{cls_name}" {data_attr}="{escaped_id}">{escaped_id}</sup>'
@@ -1586,7 +1718,9 @@ def _docx_to_rich_html(
         note_ref_html = _note_reference_html()
         text = run.text or ""
         if not text:
-            deleted_text_nodes = [node.text or "" for node in run._element.findall(qn("w:delText"))]
+            deleted_text_nodes = [
+                node.text or "" for node in run._element.findall(qn("w:delText"))
+            ]
             if deleted_text_nodes:
                 text = "".join(deleted_text_nodes)
 
@@ -1604,7 +1738,9 @@ def _docx_to_rich_html(
         _has_tab_char = "\t" in text
         _tab_html = ""
         if _has_tab_elem or _has_tab_char:
-            _tab_html = '<span class="koto-toc-tab"></span>' if _is_toc_run else ('\u00a0' * 6)
+            _tab_html = (
+                '<span class="koto-toc-tab"></span>' if _is_toc_run else ("\u00a0" * 6)
+            )
 
         if not text:
             # Tab character → render appropriately based on context.
@@ -1615,10 +1751,12 @@ def _docx_to_rich_html(
             return note_ref_html
 
         def _esc(_t: str) -> str:
-            return (_t.replace("&", "&amp;")
-                      .replace("<", "&lt;")
-                      .replace(">", "&gt;")
-                      .replace('"', "&quot;"))
+            return (
+                _t.replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace('"', "&quot;")
+            )
 
         tab_segments: list[str] | None = None
         if _has_tab_char:
@@ -1646,8 +1784,11 @@ def _docx_to_rich_html(
             if _rPr is not None:
                 _rFonts = _rPr.find(qn("w:rFonts"))
                 if _rFonts is not None:
-                    ea_font = _rFonts.get(qn("w:eastAsia"), "") or \
-                               _rFonts.get(qn("w:cs"), "") or ""
+                    ea_font = (
+                        _rFonts.get(qn("w:eastAsia"), "")
+                        or _rFonts.get(qn("w:cs"), "")
+                        or ""
+                    )
         except Exception:
             pass
         _font_family_stack = _build_css_font_family_stack(fn, ea_font)
@@ -1692,7 +1833,9 @@ def _docx_to_rich_html(
         _run_rpr = run._element.find(qn("w:rPr"))
         _run_bold_state = _read_bold_state_from_rpr(_run_rpr)
         if _run_bold_state is not None and not _is_toc_run:
-            styles.append("font-weight:bold" if bool(_run_bold_state) else "font-weight:normal")
+            styles.append(
+                "font-weight:bold" if bool(_run_bold_state) else "font-weight:normal"
+            )
         if f.italic:
             styles.append("font-style:italic")
         if f.underline and not _is_toc_run:
@@ -1717,12 +1860,20 @@ def _docx_to_rich_html(
             if highlight_xml is not None:
                 hval = highlight_xml.get(qn("w:val"), "")
                 _HL_MAP = {
-                    "yellow": "#FFFF00", "green": "#00FF00", "cyan": "#00FFFF",
-                    "magenta": "#FF00FF", "blue": "#0000FF", "red": "#FF0000",
-                    "darkBlue": "#00008B", "darkCyan": "#008B8B",
-                    "darkGreen": "#006400", "darkMagenta": "#8B008B",
-                    "darkRed": "#8B0000", "darkYellow": "#808000",
-                    "darkGray": "#A9A9A9", "lightGray": "#D3D3D3",
+                    "yellow": "#FFFF00",
+                    "green": "#00FF00",
+                    "cyan": "#00FFFF",
+                    "magenta": "#FF00FF",
+                    "blue": "#0000FF",
+                    "red": "#FF0000",
+                    "darkBlue": "#00008B",
+                    "darkCyan": "#008B8B",
+                    "darkGreen": "#006400",
+                    "darkMagenta": "#8B008B",
+                    "darkRed": "#8B0000",
+                    "darkYellow": "#808000",
+                    "darkGray": "#A9A9A9",
+                    "lightGray": "#D3D3D3",
                 }
                 if hval in _HL_MAP:
                     styles.append(f"background-color:{_HL_MAP[hval]}")
@@ -1732,7 +1883,10 @@ def _docx_to_rich_html(
         if tab_segments is not None:
             if styles:
                 style_str = ";".join(styles)
-                _styled = [f'<span style="{style_str}">{seg}</span>' if seg else '' for seg in tab_segments]
+                _styled = [
+                    f'<span style="{style_str}">{seg}</span>' if seg else ""
+                    for seg in tab_segments
+                ]
                 return _tab_html.join(_styled) + note_ref_html
             return _tab_html.join(tab_segments) + note_ref_html
 
@@ -1741,7 +1895,9 @@ def _docx_to_rich_html(
             return f'<span style="{style_str}">{text}</span>' + note_ref_html
         return text + note_ref_html
 
-    def _render_inline_hyperlink_html(hyperlink_el, para, doc, toc_class: str = "") -> str:
+    def _render_inline_hyperlink_html(
+        hyperlink_el, para, doc, toc_class: str = ""
+    ) -> str:
         from docx.text.run import Run
 
         rId = hyperlink_el.get(qn("r:id"))
@@ -1763,18 +1919,22 @@ def _docx_to_rich_html(
             return ""
 
         esc_url = url.replace('"', "&quot;")
-        target_attr = '' if url.startswith('#') else ' target="_blank"'
+        target_attr = "" if url.startswith("#") else ' target="_blank"'
         if toc_class:
-            link_style = 'display:flex;align-items:baseline;flex:1;min-width:0;color:#1155CC;'
+            link_style = (
+                "display:flex;align-items:baseline;flex:1;min-width:0;color:#1155CC;"
+            )
         else:
-            link_style = 'color:#1155CC;text-decoration:underline;'
+            link_style = "color:#1155CC;text-decoration:underline;"
         return (
             f'<a href="{esc_url}"{target_attr} '
             f'style="{link_style}">'
-            f'{link_inner}</a>'
+            f"{link_inner}</a>"
         )
 
-    def _docx_revision_data_attrs(review_id: str, action: str, author: str = "", date: str = "") -> str:
+    def _docx_revision_data_attrs(
+        review_id: str, action: str, author: str = "", date: str = ""
+    ) -> str:
         attrs = [
             ("data-koto-review-id", str(review_id or "").strip()),
             ("data-koto-review-source", "docx_revision"),
@@ -1792,11 +1952,34 @@ def _docx_to_rich_html(
             if value
         )
 
-    def _render_docx_revision_html(change_el, para, doc, *, action: str, review_id: str, toc_class: str = "", paired_insert_el=None) -> str:
-        deleted_html = _render_inline_children_html(change_el, para, doc, toc_class=toc_class) if change_el is not None else ""
-        inserted_html = _render_inline_children_html(paired_insert_el, para, doc, toc_class=toc_class) if paired_insert_el is not None else ""
+    def _render_docx_revision_html(
+        change_el,
+        para,
+        doc,
+        *,
+        action: str,
+        review_id: str,
+        toc_class: str = "",
+        paired_insert_el=None,
+    ) -> str:
+        deleted_html = (
+            _render_inline_children_html(change_el, para, doc, toc_class=toc_class)
+            if change_el is not None
+            else ""
+        )
+        inserted_html = (
+            _render_inline_children_html(
+                paired_insert_el, para, doc, toc_class=toc_class
+            )
+            if paired_insert_el is not None
+            else ""
+        )
         author_text = str(
-            (paired_insert_el.get(qn("w:author")) if paired_insert_el is not None else "")
+            (
+                paired_insert_el.get(qn("w:author"))
+                if paired_insert_el is not None
+                else ""
+            )
             or (change_el.get(qn("w:author")) if change_el is not None else "")
             or ""
         ).strip()
@@ -1805,7 +1988,9 @@ def _docx_to_rich_html(
             or (change_el.get(qn("w:date")) if change_el is not None else "")
             or ""
         ).strip()
-        wrapper_attrs = _docx_revision_data_attrs(review_id, action, author_text, date_text)
+        wrapper_attrs = _docx_revision_data_attrs(
+            review_id, action, author_text, date_text
+        )
         if action == "replace":
             if not deleted_html and not inserted_html:
                 return ""
@@ -1813,7 +1998,7 @@ def _docx_to_rich_html(
                 f'<span class="koto-docx-track-change koto-docx-track-change-replace"{wrapper_attrs}>'
                 f'<span class="koto-docx-track-change-delete">{deleted_html}</span>'
                 f'<span class="koto-docx-track-change-insert">{inserted_html}</span>'
-                '</span>'
+                "</span>"
             )
         if action == "delete":
             if not deleted_html:
@@ -1821,17 +2006,19 @@ def _docx_to_rich_html(
             return (
                 f'<span class="koto-docx-track-change koto-docx-track-change-delete-only"{wrapper_attrs}>'
                 f'<span class="koto-docx-track-change-delete">{deleted_html}</span>'
-                '</span>'
+                "</span>"
             )
         if not inserted_html:
             return ""
         return (
             f'<span class="koto-docx-track-change koto-docx-track-change-insert-only"{wrapper_attrs}>'
             f'<span class="koto-docx-track-change-insert">{inserted_html}</span>'
-            '</span>'
+            "</span>"
         )
 
-    def _render_inline_children_html(container_el, para, doc, toc_class: str = "") -> str:
+    def _render_inline_children_html(
+        container_el, para, doc, toc_class: str = ""
+    ) -> str:
         from docx.text.run import Run
 
         parts: list[str] = []
@@ -1852,7 +2039,9 @@ def _docx_to_rich_html(
             tag_name = child.tag.split("}")[-1] if "}" in child.tag else child.tag
 
             if tag_name == "hyperlink":
-                parts.append(_render_inline_hyperlink_html(child, para, doc, toc_class=toc_class))
+                parts.append(
+                    _render_inline_hyperlink_html(child, para, doc, toc_class=toc_class)
+                )
                 index += 1
                 continue
 
@@ -1865,14 +2054,22 @@ def _docx_to_rich_html(
                 change_id = child.get(qn("w:id"), "") or f"inline-del-{index}"
                 next_index = index + 1
                 while next_index < len(children):
-                    next_tag = children[next_index].tag.split("}")[-1] if "}" in children[next_index].tag else children[next_index].tag
+                    next_tag = (
+                        children[next_index].tag.split("}")[-1]
+                        if "}" in children[next_index].tag
+                        else children[next_index].tag
+                    )
                     if next_tag in skip_tags:
                         next_index += 1
                         continue
                     break
                 if next_index < len(children):
                     next_child = children[next_index]
-                    next_tag = next_child.tag.split("}")[-1] if "}" in next_child.tag else next_child.tag
+                    next_tag = (
+                        next_child.tag.split("}")[-1]
+                        if "}" in next_child.tag
+                        else next_child.tag
+                    )
                     if next_tag == "ins":
                         parts.append(
                             _render_docx_revision_html(
@@ -2017,14 +2214,21 @@ def _docx_to_rich_html(
         # This avoids widespread phantom bold in body/table paragraphs while
         # still honoring explicit unbold overrides from OOXML.
         _fw = None
-        if _para_rpr_props.get("font_weight_set") and _para_rpr_props.get("font_weight") == "normal":
+        if (
+            _para_rpr_props.get("font_weight_set")
+            and _para_rpr_props.get("font_weight") == "normal"
+        ):
             _fw = "normal"
-        _direct_sr = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        _direct_sr = (
+            style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        )
         if _fw is None and _direct_sr is not None:
             _direct_rpr_props = _read_rpr_font_props(None)
             try:
                 if hasattr(_direct_sr, "_element"):
-                    _direct_rpr_props = _read_rpr_font_props(_direct_sr._element.find(qn("w:rPr")))
+                    _direct_rpr_props = _read_rpr_font_props(
+                        _direct_sr._element.find(qn("w:rPr"))
+                    )
             except Exception:
                 _direct_rpr_props = _read_rpr_font_props(None)
             if _direct_rpr_props.get("font_weight_set"):
@@ -2043,14 +2247,21 @@ def _docx_to_rich_html(
             css["font-weight"] = _fw
 
         _fi = None
-        if _para_rpr_props.get("font_style_set") and _para_rpr_props.get("font_style") == "normal":
+        if (
+            _para_rpr_props.get("font_style_set")
+            and _para_rpr_props.get("font_style") == "normal"
+        ):
             _fi = "normal"
-        _direct_sr_fi = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        _direct_sr_fi = (
+            style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        )
         if _fi is None and _direct_sr_fi is not None:
             _direct_rpr_props = _read_rpr_font_props(None)
             try:
                 if hasattr(_direct_sr_fi, "_element"):
-                    _direct_rpr_props = _read_rpr_font_props(_direct_sr_fi._element.find(qn("w:rPr")))
+                    _direct_rpr_props = _read_rpr_font_props(
+                        _direct_sr_fi._element.find(qn("w:rPr"))
+                    )
             except Exception:
                 _direct_rpr_props = _read_rpr_font_props(None)
             if _direct_rpr_props.get("font_style_set"):
@@ -2099,7 +2310,9 @@ def _docx_to_rich_html(
         extra_role: str | None = None,
     ) -> str:
         """Render a paragraph to an HTML block element."""
-        style_ref = style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        style_ref = (
+            style_ref if style_ref is not None else _resolve_para_style_ref(para)
+        )
         css = _para_style(para, style_ref=style_ref)
         layout_attrs = _paragraph_layout_data_attrs(para, style_ref=style_ref)
 
@@ -2116,7 +2329,9 @@ def _docx_to_rich_html(
         if _is_toc:
             toc_class = f"koto-toc-{_toc_level}"
 
-        inner = _render_inline_children_html(para._element, para, doc, toc_class=toc_class)
+        inner = _render_inline_children_html(
+            para._element, para, doc, toc_class=toc_class
+        )
         if not inner.strip():
             inner = "<br/>"
 
@@ -2129,10 +2344,19 @@ def _docx_to_rich_html(
         # Keep only font-family and spacing. Then inject display:flex.
         if toc_class:
             # Rebuild style without the properties CSS will normalize
-            _skip = {"font-size", "font-weight", "line-height", "margin-top",
-                     "margin-bottom", "display", "align-items"}
+            _skip = {
+                "font-size",
+                "font-weight",
+                "line-height",
+                "margin-top",
+                "margin-bottom",
+                "display",
+                "align-items",
+            }
             toc_parts = [p for p in css.items() if p[0] not in _skip]
-            style_str = "display:flex;align-items:baseline;" + ";".join(f"{k}:{v}" for k, v in toc_parts)
+            style_str = "display:flex;align-items:baseline;" + ";".join(
+                f"{k}:{v}" for k, v in toc_parts
+            )
         style_attr = f' style="{style_str}"' if style_str else ""
         id_attr = f' id="{bm_id}"' if bm_id else ""
         role_attr = f' data-koto-role="{extra_role}"' if extra_role else ""
@@ -2158,8 +2382,14 @@ def _docx_to_rich_html(
         # Check explicit tblBorders first
         tblBorders = tblPr.find(qn("w:tblBorders"))
         if tblBorders is not None:
-            border_tags = ["w:top", "w:left", "w:bottom", "w:right",
-                           "w:insideH", "w:insideV"]
+            border_tags = [
+                "w:top",
+                "w:left",
+                "w:bottom",
+                "w:right",
+                "w:insideH",
+                "w:insideV",
+            ]
             for bt in border_tags:
                 b_elem = tblBorders.find(qn(bt))
                 if b_elem is not None:
@@ -2200,20 +2430,31 @@ def _docx_to_rich_html(
         Each value is a CSS border string like '0.5pt solid #000', 'none',
         or None when the element is absent.
         """
-        defaults = {"top": None, "bottom": None, "left": None, "right": None,
-                    "insideH": None, "insideV": None}
+        defaults = {
+            "top": None,
+            "bottom": None,
+            "left": None,
+            "right": None,
+            "insideH": None,
+            "insideV": None,
+        }
         tblPr = tbl_elem.find(qn("w:tblPr"))
         if tblPr is None:
             return defaults
         tblBorders = tblPr.find(qn("w:tblBorders"))
         if tblBorders is None:
             return defaults
-        for key, wtag in (("top", "w:top"), ("bottom", "w:bottom"),
-                          ("left", "w:left"), ("right", "w:right"),
-                          ("insideH", "w:insideH"), ("insideV", "w:insideV")):
+        for key, wtag in (
+            ("top", "w:top"),
+            ("bottom", "w:bottom"),
+            ("left", "w:left"),
+            ("right", "w:right"),
+            ("insideH", "w:insideH"),
+            ("insideV", "w:insideV"),
+        ):
             b_el = tblBorders.find(qn(wtag))
             css = _border_elem_to_css(b_el)
-            if css != "":   # only store when element actually exists
+            if css != "":  # only store when element actually exists
                 defaults[key] = css
         return defaults
 
@@ -2222,8 +2463,14 @@ def _docx_to_rich_html(
         tblBorders as a border-defaults dict (same format as _get_table_border_defaults).
         Returns all-None dict if no style, no borders, or any error.
         """
-        defaults = {"top": None, "bottom": None, "left": None, "right": None,
-                    "insideH": None, "insideV": None}
+        defaults = {
+            "top": None,
+            "bottom": None,
+            "left": None,
+            "right": None,
+            "insideH": None,
+            "insideV": None,
+        }
         try:
             tblPr = tbl_elem.find(qn("w:tblPr"))
             if tblPr is None:
@@ -2246,9 +2493,14 @@ def _docx_to_rich_html(
             style_tblBorders = target_style._element.find(".//" + qn("w:tblBorders"))
             if style_tblBorders is None:
                 return defaults
-            for key, wtag in (("top", "w:top"), ("bottom", "w:bottom"),
-                              ("left", "w:left"), ("right", "w:right"),
-                              ("insideH", "w:insideH"), ("insideV", "w:insideV")):
+            for key, wtag in (
+                ("top", "w:top"),
+                ("bottom", "w:bottom"),
+                ("left", "w:left"),
+                ("right", "w:right"),
+                ("insideH", "w:insideH"),
+                ("insideV", "w:insideV"),
+            ):
                 b_el = style_tblBorders.find(qn(wtag))
                 css = _border_elem_to_css(b_el)
                 if css != "":
@@ -2286,13 +2538,19 @@ def _docx_to_rich_html(
                 tbl_border_defs = style_borders
         all_row_elems = tbl_elem.findall(qn("w:tr"))
         table_is_truncated = bool(max_rows and len(all_row_elems) > max_rows)
-        render_row_elems = all_row_elems[:max_rows] if table_is_truncated else all_row_elems
+        render_row_elems = (
+            all_row_elems[:max_rows] if table_is_truncated else all_row_elems
+        )
         num_rows = len(render_row_elems)
         num_cols_grid = len(col_widths_twips) or 1
 
         # Pre-compute pixel widths per grid column (for ProseMirror colwidth).
         # ProseMirror expects absolute pixel values.  1 twip = 1/20 pt; 1 pt = 96/72 px → px = twips/15.
-        col_widths_px: list[int] = [max(1, round(t / 15)) for t in col_widths_twips] if col_widths_twips else []
+        col_widths_px: list[int] = (
+            [max(1, round(t / 15)) for t in col_widths_twips]
+            if col_widths_twips
+            else []
+        )
 
         # Table-level default cell margins (OOXML defaults: 0pt vert, 5.4pt horiz)
         _WORD_DEFAULT_CELL_MAR = {"top": 0.0, "bottom": 0.0, "left": 5.4, "right": 5.4}
@@ -2309,14 +2567,18 @@ def _docx_to_rich_html(
                         _el = _tblCellMar.find(qn("w:end"))
                     if _el is not None:
                         try:
-                            _tbl_cell_mar[_side] = round(int(_el.get(qn("w:w"), 0)) / 20, 2)
+                            _tbl_cell_mar[_side] = round(
+                                int(_el.get(qn("w:w"), 0)) / 20, 2
+                            )
                         except (TypeError, ValueError):
                             pass
 
         parts: list[str] = ["<table"]
         # border-collapse:collapse is always needed so cell borders merge cleanly.
         # Don't set a table-level border — all borders are expressed per-cell.
-        parts.append(' class="koto-docx-table" style="border-collapse:collapse;width:100%;">')
+        parts.append(
+            ' class="koto-docx-table" style="border-collapse:collapse;width:100%;">'
+        )
 
         # Emit <colgroup>/<col> for visual percentage widths (non-TipTap renderers).
         # TipTap strips these, so we also emit data-colwidth on each <td> below.
@@ -2388,30 +2650,43 @@ def _docx_to_rich_html(
                         for prev_tc in tc_elems:
                             if prev_tc is cell_elem:
                                 break
-                            prev_gs_elem = prev_tc.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
+                            prev_gs_elem = prev_tc.find(
+                                qn("w:tcPr") + "/" + qn("w:gridSpan")
+                            )
                             if prev_gs_elem is not None:
                                 try:
-                                    col_idx_in_grid += int(prev_gs_elem.get(qn("w:val"), 1))
+                                    col_idx_in_grid += int(
+                                        prev_gs_elem.get(qn("w:val"), 1)
+                                    )
                                 except (TypeError, ValueError):
                                     col_idx_in_grid += 1
                             else:
                                 col_idx_in_grid += 1
 
                         # Walk subsequent rows looking for vMerge continuation
-                        for next_row_elem in render_row_elems[ri + 1:]:
+                        for next_row_elem in render_row_elems[ri + 1 :]:
                             next_cells = next_row_elem.findall(qn("w:tc"))
                             target_ci = 0
                             found_continue = False
                             for nc in next_cells:
                                 if target_ci == col_idx_in_grid:
-                                    nc_vmerge = nc.find(qn("w:tcPr") + "/" + qn("w:vMerge"))
-                                    if nc_vmerge is not None and nc_vmerge.get(qn("w:val")) != "restart":
+                                    nc_vmerge = nc.find(
+                                        qn("w:tcPr") + "/" + qn("w:vMerge")
+                                    )
+                                    if (
+                                        nc_vmerge is not None
+                                        and nc_vmerge.get(qn("w:val")) != "restart"
+                                    ):
                                         rowspan += 1
                                         found_continue = True
                                     break
                                 nc_gs = nc.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
                                 try:
-                                    target_ci += int(nc_gs.get(qn("w:val"), 1)) if nc_gs is not None else 1
+                                    target_ci += (
+                                        int(nc_gs.get(qn("w:val"), 1))
+                                        if nc_gs is not None
+                                        else 1
+                                    )
                                 except (TypeError, ValueError):
                                     target_ci += 1
                             if not found_continue:
@@ -2466,22 +2741,26 @@ def _docx_to_rich_html(
                         if _prev is cell_elem:
                             break
                         _prev_gs = _prev.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
-                        _cell_grid_col += int(_prev_gs.get(qn("w:val"), 1)) if _prev_gs is not None else 1
+                        _cell_grid_col += (
+                            int(_prev_gs.get(qn("w:val"), 1))
+                            if _prev_gs is not None
+                            else 1
+                        )
                     _cell_grid_end_col = _cell_grid_col + colspan - 1
                 except Exception:
                     _cell_grid_col = ci
                     _cell_grid_end_col = ci
 
-                _is_first_row = (ri == 0)
-                _is_last_row  = (ri == num_rows - 1)
-                _is_first_col = (_cell_grid_col == 0)
-                _is_last_col  = (_cell_grid_end_col >= num_cols_grid - 1)
+                _is_first_row = ri == 0
+                _is_last_row = ri == num_rows - 1
+                _is_first_col = _cell_grid_col == 0
+                _is_last_col = _cell_grid_end_col >= num_cols_grid - 1
 
                 _side_map = {
-                    "top":    ("w:top",    "insideH" if not _is_first_row else "top"),
-                    "bottom": ("w:bottom", "insideH" if not _is_last_row  else "bottom"),
-                    "left":   ("w:left",   "insideV" if not _is_first_col else "left"),
-                    "right":  ("w:right",  "insideV" if not _is_last_col  else "right"),
+                    "top": ("w:top", "insideH" if not _is_first_row else "top"),
+                    "bottom": ("w:bottom", "insideH" if not _is_last_row else "bottom"),
+                    "left": ("w:left", "insideV" if not _is_first_col else "left"),
+                    "right": ("w:right", "insideV" if not _is_last_col else "right"),
                 }
                 _border_css_values: list[str] = []
                 for side, (wtag, tbl_def_key) in _side_map.items():
@@ -2513,11 +2792,15 @@ def _docx_to_rich_html(
                             _el = _tcMar.find(qn("w:end"))
                         if _el is not None:
                             try:
-                                _cell_pad[_side] = round(int(_el.get(qn("w:w"), 0)) / 20, 2)
+                                _cell_pad[_side] = round(
+                                    int(_el.get(qn("w:w"), 0)) / 20, 2
+                                )
                             except (TypeError, ValueError):
                                 pass
-                _pt = _cell_pad["top"]; _pb = _cell_pad["bottom"]
-                _pl = _cell_pad["left"]; _pr = _cell_pad["right"]
+                _pt = _cell_pad["top"]
+                _pb = _cell_pad["bottom"]
+                _pl = _cell_pad["left"]
+                _pr = _cell_pad["right"]
                 if _pt == _pb == 0 and _pl == _pr:
                     cell_style_parts.append(f"padding:0 {_pr}pt")
                 elif _pt == _pb and _pl == _pr:
@@ -2527,7 +2810,9 @@ def _docx_to_rich_html(
 
                 cell_style = ";".join(cell_style_parts)
                 td_attrs = f' style="{cell_style}"'
-                if _border_css_values and all(_val.strip().lower() == "none" for _val in _border_css_values):
+                if _border_css_values and all(
+                    _val.strip().lower() == "none" for _val in _border_css_values
+                ):
                     td_attrs += ' data-koto-borderless-cell="true"'
                 if colspan > 1:
                     td_attrs += f' colspan="{colspan}"'
@@ -2543,10 +2828,16 @@ def _docx_to_rich_html(
                             if _prev is cell_elem:
                                 break
                             _prev_gs = _prev.find(qn("w:tcPr") + "/" + qn("w:gridSpan"))
-                            _cw_start += int(_prev_gs.get(qn("w:val"), 1)) if _prev_gs is not None else 1
-                        _cw_vals = col_widths_px[_cw_start:_cw_start + colspan]
+                            _cw_start += (
+                                int(_prev_gs.get(qn("w:val"), 1))
+                                if _prev_gs is not None
+                                else 1
+                            )
+                        _cw_vals = col_widths_px[_cw_start : _cw_start + colspan]
                         if _cw_vals:
-                            td_attrs += f' data-colwidth="{",".join(str(v) for v in _cw_vals)}"'
+                            td_attrs += (
+                                f' data-colwidth="{",".join(str(v) for v in _cw_vals)}"'
+                            )
                     except Exception:
                         pass
 
@@ -2555,6 +2846,7 @@ def _docx_to_rich_html(
                 cell_inner: list[str] = []
                 for p_elem in cell_elem.findall(qn("w:p")):
                     from docx.text.paragraph import Paragraph as _Paragraph
+
                     cell_para = _Paragraph(p_elem, doc)
                     cell_inner.append(_para_html(cell_para, doc, "p"))
                 # Ensure every cell has at least one child so ProseMirror
@@ -2567,10 +2859,10 @@ def _docx_to_rich_html(
         if table_is_truncated:
             remaining_rows = max(0, len(all_row_elems) - len(render_row_elems))
             parts.append(
-                "<tr data-koto-preview-more=\"true\">"
-                f"<td colspan=\"{num_cols_grid}\" "
+                '<tr data-koto-preview-more="true">'
+                f'<td colspan="{num_cols_grid}" '
                 'style="padding:6pt 5.4pt;border-top:1px dashed #aeb7c6;'
-                'border-bottom:none;border-left:none;border-right:none;'
+                "border-bottom:none;border-left:none;border-right:none;"
                 'background:#f6f8fb;color:#5f6b7a;font-style:italic;">'
                 f"表格其余 {remaining_rows} 行正在后台加载…"
                 "</td></tr>"
@@ -2598,7 +2890,7 @@ def _docx_to_rich_html(
                 if p.text.strip():
                     return True
                 xml = p._element.xml if hasattr(p._element, "xml") else ""
-                return ("fldChar" in xml or "instrText" in xml)
+                return "fldChar" in xml or "instrText" in xml
 
             def _tabs_to_flex(p_html: str) -> str:
                 """Convert tab-based header/footer to a flex row.
@@ -2608,25 +2900,26 @@ def _docx_to_rich_html(
                 use them as separators to create a flex layout.
                 """
                 import re as _re
+
                 # Check if it contains tab characters at all
-                if '\t' not in p_html:
+                if "\t" not in p_html:
                     return p_html
-                m = _re.match(r'(<p[^>]*>)(.*)(</p>)$', p_html, _re.DOTALL)
+                m = _re.match(r"(<p[^>]*>)(.*)(</p>)$", p_html, _re.DOTALL)
                 if not m:
                     return p_html
                 open_tag, inner, close_tag = m.group(1), m.group(2), m.group(3)
                 # Replace <span ...>\t</span> with a special marker
-                _TAB_MARKER = '\x00TAB\x00'
+                _TAB_MARKER = "\x00TAB\x00"
                 # Match spans containing only a tab (with optional trailing whitespace)
-                inner = _re.sub(r'<span[^>]*>\s*\t\s*</span>', _TAB_MARKER, inner)
+                inner = _re.sub(r"<span[^>]*>\s*\t\s*</span>", _TAB_MARKER, inner)
                 # Also handle bare tab characters between spans
-                inner = inner.replace('\t', _TAB_MARKER)
+                inner = inner.replace("\t", _TAB_MARKER)
                 parts = inner.split(_TAB_MARKER)
                 parts = [p.strip() for p in parts]
                 if len(parts) < 2:
                     return p_html
                 # Build flex container
-                flex_style = 'display:flex;justify-content:space-between;align-items:baseline;width:100%'
+                flex_style = "display:flex;justify-content:space-between;align-items:baseline;width:100%"
                 if 'style="' in open_tag:
                     open_tag = open_tag.replace('style="', f'style="{flex_style};', 1)
                 else:
@@ -2634,10 +2927,16 @@ def _docx_to_rich_html(
                 spans = []
                 for i, part in enumerate(parts):
                     if not part:
-                        part = '&nbsp;'
-                    align = 'left' if i == 0 else ('right' if i == len(parts) - 1 else 'center')
-                    spans.append(f'<span class="koto-hdr-col" style="text-align:{align};flex-shrink:0">{part}</span>')
-                return open_tag + ''.join(spans) + close_tag
+                        part = "&nbsp;"
+                    align = (
+                        "left"
+                        if i == 0
+                        else ("right" if i == len(parts) - 1 else "center")
+                    )
+                    spans.append(
+                        f'<span class="koto-hdr-col" style="text-align:{align};flex-shrink:0">{part}</span>'
+                    )
+                return open_tag + "".join(spans) + close_tag
 
             def _build_field_aware_inner(p) -> str:
                 """Build the inner HTML for a header/footer paragraph.
@@ -2651,8 +2950,8 @@ def _docx_to_rich_html(
 
                 Non-field runs are delegated to _run_html.
                 """
-                from docx.text.run import Run as _Run
                 from docx.text.paragraph import Paragraph as _Para
+                from docx.text.run import Run as _Run
 
                 parts: list[str] = []
                 # Complex-field tracking state
@@ -2661,7 +2960,9 @@ def _docx_to_rich_html(
                 _cur_instr: list[str] = []
 
                 for child in p._element:
-                    tag_name = child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                    tag_name = (
+                        child.tag.split("}")[-1] if "}" in child.tag else child.tag
+                    )
 
                     if tag_name == "hyperlink":
                         # Hyperlinks are rare in headers/footers; render normally.
@@ -2682,11 +2983,13 @@ def _docx_to_rich_html(
                             link_inner += _run_html(run_obj, doc)
                         if link_inner:
                             esc_url = url.replace('"', "&quot;")
-                            target_attr = '' if url.startswith('#') else ' target="_blank"'
+                            target_attr = (
+                                "" if url.startswith("#") else ' target="_blank"'
+                            )
                             parts.append(
                                 f'<a href="{esc_url}"{target_attr} '
                                 f'style="color:#1155CC;text-decoration:underline;">'
-                                f'{link_inner}</a>'
+                                f"{link_inner}</a>"
                             )
                         continue
 
@@ -2715,7 +3018,10 @@ def _docx_to_rich_html(
                                     'style="font-size:inherit;color:inherit" '
                                     'contenteditable="false">1</span>'
                                 )
-                            elif "NUMPAGES" in instr_words or "SECTIONPAGES" in instr_words:
+                            elif (
+                                "NUMPAGES" in instr_words
+                                or "SECTIONPAGES" in instr_words
+                            ):
                                 parts.append(
                                     '<span class="koto-hdr-num-pages" '
                                     'style="font-size:inherit;color:inherit" '
@@ -2760,8 +3066,8 @@ def _docx_to_rich_html(
 
                 # _run_html replaces w:tab with 6 × &nbsp; for non-TOC runs,
                 # but we need actual \t characters for _tabs_to_flex detection.
-                _nbsp6 = '\u00a0' * 6
-                p_html = p_html.replace(_nbsp6, '\t')
+                _nbsp6 = "\u00a0" * 6
+                p_html = p_html.replace(_nbsp6, "\t")
                 # Convert tab-based alignment to flex layout
                 p_html = _tabs_to_flex(p_html)
                 texts.append(p_html)
@@ -2793,7 +3099,10 @@ def _docx_to_rich_html(
                         if lvl == 9:
                             return None, False  # 9 = body text
                         if 0 <= lvl <= 5:
-                            return f"h{lvl + 1}", True  # True = caller applies length guard
+                            return (
+                                f"h{lvl + 1}",
+                                True,
+                            )  # True = caller applies length guard
         except Exception:
             pass
         return None, False
@@ -2819,8 +3128,8 @@ def _docx_to_rich_html(
 
     # ── Iterate body elements ─────────────────────────────────────────────
     # Use document.element.body children to interleave paragraphs and tables
-    from docx.text.paragraph import Paragraph
     from docx.table import Table
+    from docx.text.paragraph import Paragraph
 
     # Buffer for list grouping
     current_list_id: int | None = None
@@ -2880,7 +3189,9 @@ def _docx_to_rich_html(
     for child_elem in body_elem:
         if stop_render:
             break
-        tag_local = child_elem.tag.split("}")[-1] if "}" in child_elem.tag else child_elem.tag
+        tag_local = (
+            child_elem.tag.split("}")[-1] if "}" in child_elem.tag else child_elem.tag
+        )
 
         if tag_local == "p":
             para = Paragraph(child_elem, doc)
@@ -2897,8 +3208,12 @@ def _docx_to_rich_html(
             if numPr is not None:
                 numId_elem = numPr.find(qn("w:numId"))
                 ilvl_elem = numPr.find(qn("w:ilvl"))
-                num_id = int(numId_elem.get(qn("w:val"), 0)) if numId_elem is not None else 0
-                ilvl = int(ilvl_elem.get(qn("w:val"), 0)) if ilvl_elem is not None else 0
+                num_id = (
+                    int(numId_elem.get(qn("w:val"), 0)) if numId_elem is not None else 0
+                )
+                ilvl = (
+                    int(ilvl_elem.get(qn("w:val"), 0)) if ilvl_elem is not None else 0
+                )
 
                 # Determine list type from numbering.xml (best-effort)
                 list_tag = "ul"
@@ -2924,8 +3239,12 @@ def _docx_to_rich_html(
                                         if numFmt is not None:
                                             fmt_val = numFmt.get(qn("w:val"), "")
                                             if fmt_val in (
-                                                "decimal", "lowerLetter", "upperLetter",
-                                                "lowerRoman", "upperRoman", "chineseCounting",
+                                                "decimal",
+                                                "lowerLetter",
+                                                "upperLetter",
+                                                "lowerRoman",
+                                                "upperRoman",
+                                                "chineseCounting",
                                             ):
                                                 list_tag = "ol"
                 except Exception:
@@ -2940,7 +3259,9 @@ def _docx_to_rich_html(
                     current_list_tag = list_tag
 
                 # Render list item content (without block tag wrapper)
-                current_list_items.append(_render_inline_children_html(child_elem, para, doc) or "&nbsp;")
+                current_list_items.append(
+                    _render_inline_children_html(child_elem, para, doc) or "&nbsp;"
+                )
                 continue
 
             # Not a list item — flush pending list
@@ -2971,7 +3292,11 @@ def _docx_to_rich_html(
                         # OOXML: section type is a CHILD element, not an attribute:
                         #   <w:sectPr><w:type w:val="nextPage"/></w:sectPr>
                         _type_el = _sectPr.find(qn("w:type"))
-                        _stype = _type_el.get(qn("w:val"), "nextPage") if _type_el is not None else "nextPage"
+                        _stype = (
+                            _type_el.get(qn("w:val"), "nextPage")
+                            if _type_el is not None
+                            else "nextPage"
+                        )
                         if _stype != "continuous":
                             _has_section_pb = True
             except Exception:
@@ -2990,9 +3315,15 @@ def _docx_to_rich_html(
                 stop_render = True
                 break
 
-            heading_anchor_id = _resolve_body_heading_anchor(child_elem, block_tag, block_role)
-            if _should_emit_heading_manifest_entry(block_tag, block_role, child_elem, style_defaults, style_ref):
-                heading_anchor_id = _record_body_heading(child_elem, block_tag, anchor_id=heading_anchor_id)
+            heading_anchor_id = _resolve_body_heading_anchor(
+                child_elem, block_tag, block_role
+            )
+            if _should_emit_heading_manifest_entry(
+                block_tag, block_role, child_elem, style_defaults, style_ref
+            ):
+                heading_anchor_id = _record_body_heading(
+                    child_elem, block_tag, anchor_id=heading_anchor_id
+                )
             body_parts.append(
                 _para_html(
                     para,
@@ -3000,7 +3331,9 @@ def _docx_to_rich_html(
                     block_tag,
                     style_ref=style_ref,
                     anchor_id=heading_anchor_id,
-                    extra_class="koto-visual-title" if block_role == "visual_title" else None,
+                    extra_class=(
+                        "koto-visual-title" if block_role == "visual_title" else None
+                    ),
                     extra_role=None if block_role == "body" else block_role,
                 )
             )
@@ -3012,7 +3345,9 @@ def _docx_to_rich_html(
                     preview_truncated = True
                     stop_render = True
                     break
-                next_section_idx = current_section_idx + 1 if _has_section_pb else current_section_idx
+                next_section_idx = (
+                    current_section_idx + 1 if _has_section_pb else current_section_idx
+                )
                 body_parts.append(
                     '<div data-page-break="true" '
                     f'data-section-idx="{next_section_idx}" '
@@ -3038,7 +3373,13 @@ def _docx_to_rich_html(
                     stop_render = True
                     break
                 if not body_parts and _remaining_units <= _table_units:
-                    _table_row_limit = max(4, min(_DOCX_PREVIEW_MAX_TABLE_ROWS, max(4, _remaining_units // 2 or 4)))
+                    _table_row_limit = max(
+                        4,
+                        min(
+                            _DOCX_PREVIEW_MAX_TABLE_ROWS,
+                            max(4, _remaining_units // 2 or 4),
+                        ),
+                    )
                     preview_truncated = True
             tbl = Table(child_elem, doc)
             body_parts.append(_table_html(tbl, doc, max_rows=_table_row_limit))
@@ -3072,7 +3413,11 @@ def _docx_to_rich_html(
             sdtContent = child_elem.find(qn("w:sdtContent"))
             if sdtContent is not None:
                 for sdt_child in sdtContent:
-                    sdt_tag = sdt_child.tag.split("}")[-1] if "}" in sdt_child.tag else sdt_child.tag
+                    sdt_tag = (
+                        sdt_child.tag.split("}")[-1]
+                        if "}" in sdt_child.tag
+                        else sdt_child.tag
+                    )
                     if sdt_tag == "p":
                         para = Paragraph(sdt_child, doc)
                         style_ref = _resolve_para_style_ref(para)
@@ -3088,9 +3433,15 @@ def _docx_to_rich_html(
                             preview_truncated = True
                             stop_render = True
                             break
-                        heading_anchor_id = _resolve_body_heading_anchor(sdt_child, _btag, _block_role)
-                        if _should_emit_heading_manifest_entry(_btag, _block_role, sdt_child, style_defaults, style_ref):
-                            heading_anchor_id = _record_body_heading(sdt_child, _btag, anchor_id=heading_anchor_id)
+                        heading_anchor_id = _resolve_body_heading_anchor(
+                            sdt_child, _btag, _block_role
+                        )
+                        if _should_emit_heading_manifest_entry(
+                            _btag, _block_role, sdt_child, style_defaults, style_ref
+                        ):
+                            heading_anchor_id = _record_body_heading(
+                                sdt_child, _btag, anchor_id=heading_anchor_id
+                            )
                         body_parts.append(
                             _para_html(
                                 para,
@@ -3098,8 +3449,14 @@ def _docx_to_rich_html(
                                 _btag,
                                 style_ref=style_ref,
                                 anchor_id=heading_anchor_id,
-                                extra_class="koto-visual-title" if _block_role == "visual_title" else None,
-                                extra_role=None if _block_role == "body" else _block_role,
+                                extra_class=(
+                                    "koto-visual-title"
+                                    if _block_role == "visual_title"
+                                    else None
+                                ),
+                                extra_role=(
+                                    None if _block_role == "body" else _block_role
+                                ),
                             )
                         )
                         _record_preview_units(_para_units)
@@ -3107,23 +3464,33 @@ def _docx_to_rich_html(
                         _table_units = _estimate_table_units(sdt_child)
                         _table_row_limit = None
                         if preview_units_limit is not None:
-                            _remaining_units = max(0, preview_units_limit - preview_units_used)
+                            _remaining_units = max(
+                                0, preview_units_limit - preview_units_used
+                            )
                             if body_parts and _remaining_units < _table_units:
                                 preview_truncated = True
                                 stop_render = True
                                 break
                             if not body_parts and _remaining_units <= _table_units:
-                                _table_row_limit = max(4, min(_DOCX_PREVIEW_MAX_TABLE_ROWS, max(4, _remaining_units // 2 or 4)))
+                                _table_row_limit = max(
+                                    4,
+                                    min(
+                                        _DOCX_PREVIEW_MAX_TABLE_ROWS,
+                                        max(4, _remaining_units // 2 or 4),
+                                    ),
+                                )
                                 preview_truncated = True
                         tbl = Table(sdt_child, doc)
-                        body_parts.append(_table_html(tbl, doc, max_rows=_table_row_limit))
+                        body_parts.append(
+                            _table_html(tbl, doc, max_rows=_table_row_limit)
+                        )
                         if _table_row_limit is not None:
                             _record_preview_units(max(6, _table_row_limit * 2))
                             stop_render = True
                             break
                         _record_preview_units(_table_units)
             if _is_toc_sdt:
-                body_parts.append('</div>')
+                body_parts.append("</div>")
             if stop_render:
                 break
 
@@ -3172,22 +3539,24 @@ def _docx_to_rich_html(
 
                 line_pitch = _parse_int_attr(doc_grid.get(qn("w:linePitch")))
                 char_space = _parse_int_attr(doc_grid.get(qn("w:charSpace")))
-                grid_info.update({
-                    "enabled": True,
-                    "type": str(doc_grid.get(qn("w:type")) or ""),
-                    "line_pitch_twips": line_pitch,
-                    "line_pitch_px": _twips_px(line_pitch),
-                    "char_space": char_space,
-                })
+                grid_info.update(
+                    {
+                        "enabled": True,
+                        "type": str(doc_grid.get(qn("w:type")) or ""),
+                        "line_pitch_twips": line_pitch,
+                        "line_pitch_px": _twips_px(line_pitch),
+                        "char_space": char_space,
+                    }
+                )
             except Exception:
                 return grid_info
             return grid_info
 
         for sec in doc.sections:
             sec_info: dict = {
-                "page_width_px":  _emu_px(sec.page_width),
+                "page_width_px": _emu_px(sec.page_width),
                 "page_height_px": _emu_px(sec.page_height),
-                "margin_top_px":  _emu_px(sec.top_margin),
+                "margin_top_px": _emu_px(sec.top_margin),
                 "margin_bottom_px": _emu_px(sec.bottom_margin),
                 "margin_left_px": _emu_px(sec.left_margin),
                 "margin_right_px": _emu_px(sec.right_margin),
@@ -3204,26 +3573,41 @@ def _docx_to_rich_html(
                 sec_info["footer_html"] = ""
             # First-page header / footer (Word's "Different First Page")
             try:
-                sec_info["first_header_html"] = _section_html(sec.first_page_header, doc, "koto-header") if sec.different_first_page_header_footer else ""
+                sec_info["first_header_html"] = (
+                    _section_html(sec.first_page_header, doc, "koto-header")
+                    if sec.different_first_page_header_footer
+                    else ""
+                )
             except Exception:
                 sec_info["first_header_html"] = ""
             try:
-                sec_info["first_footer_html"] = _section_html(sec.first_page_footer, doc, "koto-footer") if sec.different_first_page_header_footer else ""
+                sec_info["first_footer_html"] = (
+                    _section_html(sec.first_page_footer, doc, "koto-footer")
+                    if sec.different_first_page_header_footer
+                    else ""
+                )
             except Exception:
                 sec_info["first_footer_html"] = ""
             # Even-page header / footer
             try:
-                sec_info["even_header_html"] = _section_html(sec.even_page_header, doc, "koto-header")
+                sec_info["even_header_html"] = _section_html(
+                    sec.even_page_header, doc, "koto-header"
+                )
             except Exception:
                 sec_info["even_header_html"] = ""
             try:
-                sec_info["even_footer_html"] = _section_html(sec.even_page_footer, doc, "koto-footer")
+                sec_info["even_footer_html"] = _section_html(
+                    sec.even_page_footer, doc, "koto-footer"
+                )
             except Exception:
                 sec_info["even_footer_html"] = ""
             sections_data.append(sec_info)
     except Exception as sec_exc:
         import logging as _log
-        _log.getLogger(__name__).debug("[DocxParser] 节段信息提取失败 (非致命): %s", sec_exc)
+
+        _log.getLogger(__name__).debug(
+            "[DocxParser] 节段信息提取失败 (非致命): %s", sec_exc
+        )
 
     preview_meta = {
         "pending": bool(progressive_preview and preview_truncated),
@@ -3271,7 +3655,9 @@ def _extract_images_from_paragraphs(html: str) -> str:
         for img in imgs:
             extracted_img = img.extract()
             if wrap_in_paragraph:
-                extracted_img["data-koto-layout"] = extracted_img.get("data-koto-layout") or "top-bottom"
+                extracted_img["data-koto-layout"] = (
+                    extracted_img.get("data-koto-layout") or "top-bottom"
+                )
                 img_row = soup.new_tag("p")
                 img_row["class"] = "koto-docx-image-row"
                 img_row.append(extracted_img)
@@ -3353,11 +3739,15 @@ def _merge_docx_comment_extension_parts(zf: Any, comments_map: dict[str, dict]) 
     def _has_same_para_id(entry: dict[str, Any], comment: dict[str, Any]) -> bool:
         entry_para_id = str(entry.get("para_id") or "").strip()
         comment_para_id = str(comment.get("para_id") or "").strip()
-        return bool(entry_para_id and comment_para_id and entry_para_id == comment_para_id)
+        return bool(
+            entry_para_id and comment_para_id and entry_para_id == comment_para_id
+        )
 
     ext_by_para: dict[str, dict[str, Any]] = {}
     ext_sequence: list[dict[str, Any]] = []
-    ext_name = "word/commentsExtended.xml" if "word/commentsExtended.xml" in names else ""
+    ext_name = (
+        "word/commentsExtended.xml" if "word/commentsExtended.xml" in names else ""
+    )
     if ext_name:
         try:
             ext_tree = ET.fromstring(zf.read(ext_name))
@@ -3367,8 +3757,12 @@ def _merge_docx_comment_extension_parts(zf: Any, comments_map: dict[str, dict]) 
                 entry: dict[str, Any] = {}
                 para_id = _xml_attr_by_local_name(ext_el, "paraId").strip()
                 parent_para_id = _xml_attr_by_local_name(ext_el, "paraIdParent").strip()
-                done_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(ext_el, "done"))
-                resolved_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(ext_el, "resolved"))
+                done_state = _coerce_docx_comment_flag(
+                    _xml_attr_by_local_name(ext_el, "done")
+                )
+                resolved_state = _coerce_docx_comment_flag(
+                    _xml_attr_by_local_name(ext_el, "resolved")
+                )
                 if para_id:
                     entry["para_id"] = para_id
                 if parent_para_id:
@@ -3402,7 +3796,9 @@ def _merge_docx_comment_extension_parts(zf: Any, comments_map: dict[str, dict]) 
         for comment in comment_order
         if str(comment.get("id") or "").strip() not in matched_comment_ids
     ]
-    if unmatched_ext_entries and len(unmatched_ext_entries) == len(unmatched_comments_for_ext):
+    if unmatched_ext_entries and len(unmatched_ext_entries) == len(
+        unmatched_comments_for_ext
+    ):
         for comment, entry in zip(unmatched_comments_for_ext, unmatched_ext_entries):
             _merge_extended_entry(comment, entry)
 
@@ -3449,14 +3845,17 @@ def _merge_docx_comment_extension_parts(zf: Any, comments_map: dict[str, dict]) 
         if str(comment.get("id") or "").strip() not in matched_durable_comment_ids
         and not str(comment.get("durable_id") or "").strip()
     ]
-    if unmatched_id_entries and len(unmatched_id_entries) == len(unmatched_comments_for_ids):
+    if unmatched_id_entries and len(unmatched_id_entries) == len(
+        unmatched_comments_for_ids
+    ):
         for comment, entry in zip(unmatched_comments_for_ids, unmatched_id_entries):
             _merge_extended_entry(comment, entry)
 
     para_to_comment_id = {
         str(comment.get("para_id") or "").strip(): str(comment.get("id") or "").strip()
         for comment in comment_order
-        if str(comment.get("para_id") or "").strip() and str(comment.get("id") or "").strip()
+        if str(comment.get("para_id") or "").strip()
+        and str(comment.get("id") or "").strip()
     }
     for comment in comment_order:
         parent_para_id = str(comment.get("parent_para_id") or "").strip()
@@ -3495,8 +3894,12 @@ def _extract_docx_comments(file_path: str) -> list[dict[str, Any]]:
                 initials = _xml_attr_by_local_name(c, "initials").strip()
                 para_id = _xml_attr_by_local_name(c, "paraId").strip()
                 parent_para_id = _xml_attr_by_local_name(c, "paraIdParent").strip()
-                done_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(c, "done"))
-                resolved_state = _coerce_docx_comment_flag(_xml_attr_by_local_name(c, "resolved"))
+                done_state = _coerce_docx_comment_flag(
+                    _xml_attr_by_local_name(c, "done")
+                )
+                resolved_state = _coerce_docx_comment_flag(
+                    _xml_attr_by_local_name(c, "resolved")
+                )
                 # 拼接所有 <w:t> 文本
                 texts = [t.text or "" for t in c.findall(".//w:t", ns)]
                 comment_payload = {
@@ -3606,7 +4009,9 @@ def _extract_docx_revisions(file_path: str) -> list[dict[str, Any]]:
 
             revisions: list[dict[str, Any]] = []
             for paragraph_index, p_el in enumerate(body.findall(".//w:p", ns), start=1):
-                paragraph_text = _collect_docx_text_from_element(p_el, include_deleted=False)
+                paragraph_text = _collect_docx_text_from_element(
+                    p_el, include_deleted=False
+                )
                 children = list(p_el)
                 child_index = 0
 
@@ -3619,70 +4024,107 @@ def _extract_docx_revisions(file_path: str) -> list[dict[str, Any]]:
 
                     author = child.get(f"{{{ns['w']}}}author", "")
                     date = child.get(f"{{{ns['w']}}}date", "")
-                    change_id = child.get(f"{{{ns['w']}}}id", "") or f"{paragraph_index}-{child_index}"
+                    change_id = (
+                        child.get(f"{{{ns['w']}}}id", "")
+                        or f"{paragraph_index}-{child_index}"
+                    )
 
                     if tag == "del":
-                        deleted_text = _collect_docx_text_from_element(child, include_deleted=True)
+                        deleted_text = _collect_docx_text_from_element(
+                            child, include_deleted=True
+                        )
                         if not deleted_text:
                             child_index += 1
                             continue
 
                         next_index = child_index + 1
-                        while next_index < len(children) and _xml_local_name(getattr(children[next_index], "tag", "")) in skip_tags:
+                        while (
+                            next_index < len(children)
+                            and _xml_local_name(
+                                getattr(children[next_index], "tag", "")
+                            )
+                            in skip_tags
+                        ):
                             next_index += 1
 
-                        if next_index < len(children) and _xml_local_name(getattr(children[next_index], "tag", "")) == "ins":
+                        if (
+                            next_index < len(children)
+                            and _xml_local_name(
+                                getattr(children[next_index], "tag", "")
+                            )
+                            == "ins"
+                        ):
                             ins_child = children[next_index]
-                            inserted_text = _collect_docx_text_from_element(ins_child, include_deleted=True)
-                            ins_author = ins_child.get(f"{{{ns['w']}}}author", "") or author
+                            inserted_text = _collect_docx_text_from_element(
+                                ins_child, include_deleted=True
+                            )
+                            ins_author = (
+                                ins_child.get(f"{{{ns['w']}}}author", "") or author
+                            )
                             ins_date = ins_child.get(f"{{{ns['w']}}}date", "") or date
-                            revisions.append({
-                                "id": f"docx-revision-{change_id}",
-                                "source": "docx_revision",
-                                "action": "replace",
-                                "original_text": deleted_text,
-                                "proposed_text": inserted_text,
-                                "anchor_text": paragraph_text or inserted_text or deleted_text,
-                                "rationale": _format_docx_revision_rationale("replace", ins_author, ins_date),
-                                "author": ins_author,
-                                "date": ins_date,
-                                "read_only": True,
-                                "apply_disabled": True,
-                            })
+                            revisions.append(
+                                {
+                                    "id": f"docx-revision-{change_id}",
+                                    "source": "docx_revision",
+                                    "action": "replace",
+                                    "original_text": deleted_text,
+                                    "proposed_text": inserted_text,
+                                    "anchor_text": paragraph_text
+                                    or inserted_text
+                                    or deleted_text,
+                                    "rationale": _format_docx_revision_rationale(
+                                        "replace", ins_author, ins_date
+                                    ),
+                                    "author": ins_author,
+                                    "date": ins_date,
+                                    "read_only": True,
+                                    "apply_disabled": True,
+                                }
+                            )
                             child_index = next_index + 1
                             continue
 
-                        revisions.append({
-                            "id": f"docx-revision-{change_id}",
-                            "source": "docx_revision",
-                            "action": "delete",
-                            "original_text": deleted_text,
-                            "proposed_text": "",
-                            "anchor_text": paragraph_text or deleted_text,
-                            "rationale": _format_docx_revision_rationale("delete", author, date),
-                            "author": author,
-                            "date": date,
-                            "read_only": True,
-                            "apply_disabled": True,
-                        })
+                        revisions.append(
+                            {
+                                "id": f"docx-revision-{change_id}",
+                                "source": "docx_revision",
+                                "action": "delete",
+                                "original_text": deleted_text,
+                                "proposed_text": "",
+                                "anchor_text": paragraph_text or deleted_text,
+                                "rationale": _format_docx_revision_rationale(
+                                    "delete", author, date
+                                ),
+                                "author": author,
+                                "date": date,
+                                "read_only": True,
+                                "apply_disabled": True,
+                            }
+                        )
                         child_index += 1
                         continue
 
-                    inserted_text = _collect_docx_text_from_element(child, include_deleted=True)
+                    inserted_text = _collect_docx_text_from_element(
+                        child, include_deleted=True
+                    )
                     if inserted_text:
-                        revisions.append({
-                            "id": f"docx-revision-{change_id}",
-                            "source": "docx_revision",
-                            "action": "insert",
-                            "original_text": "",
-                            "proposed_text": inserted_text,
-                            "anchor_text": paragraph_text or inserted_text,
-                            "rationale": _format_docx_revision_rationale("insert", author, date),
-                            "author": author,
-                            "date": date,
-                            "read_only": True,
-                            "apply_disabled": True,
-                        })
+                        revisions.append(
+                            {
+                                "id": f"docx-revision-{change_id}",
+                                "source": "docx_revision",
+                                "action": "insert",
+                                "original_text": "",
+                                "proposed_text": inserted_text,
+                                "anchor_text": paragraph_text or inserted_text,
+                                "rationale": _format_docx_revision_rationale(
+                                    "insert", author, date
+                                ),
+                                "author": author,
+                                "date": date,
+                                "read_only": True,
+                                "apply_disabled": True,
+                            }
+                        )
                     child_index += 1
 
             return revisions
@@ -3735,12 +4177,16 @@ def _extract_docx_footnotes(file_path: str) -> list[dict[str, Any]]:
                 if reference_count <= 0:
                     continue
 
-                footnotes.append({
-                    "id": note_id,
-                    "text": _collect_note_text(footnote_el),
-                    "type": str(footnote_el.get(f"{{{ns['w']}}}type") or "footnote"),
-                    "reference_count": reference_count,
-                })
+                footnotes.append(
+                    {
+                        "id": note_id,
+                        "text": _collect_note_text(footnote_el),
+                        "type": str(
+                            footnote_el.get(f"{{{ns['w']}}}type") or "footnote"
+                        ),
+                        "reference_count": reference_count,
+                    }
+                )
 
             return footnotes
     except Exception as exc:
@@ -3834,12 +4280,18 @@ def _extract_anchor_texts(
 
     for etype, val in events:
         if etype == "start":
-            if val in comments_map and comments_map[val].get("anchor_start_offset") is None:
+            if (
+                val in comments_map
+                and comments_map[val].get("anchor_start_offset") is None
+            ):
                 comments_map[val]["anchor_start_offset"] = cursor
             active_ids.add(val)
             continue
         if etype == "end":
-            if val in comments_map and comments_map[val].get("anchor_end_offset") is None:
+            if (
+                val in comments_map
+                and comments_map[val].get("anchor_end_offset") is None
+            ):
                 comments_map[val]["anchor_end_offset"] = cursor
             active_ids.discard(val)
             continue
@@ -3868,8 +4320,10 @@ def _extract_anchor_texts(
         if end_offset < start_offset:
             continue
 
-        comment["anchor_context_before"] = full_text[max(0, start_offset - 48):start_offset]
-        comment["anchor_context_after"] = full_text[end_offset:end_offset + 48]
+        comment["anchor_context_before"] = full_text[
+            max(0, start_offset - 48) : start_offset
+        ]
+        comment["anchor_context_after"] = full_text[end_offset : end_offset + 48]
 
         anchor_text = str(comment.get("anchor_text") or "")
         if not anchor_text:
@@ -3941,15 +4395,15 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             if sections_data:
                 _sec0 = sections_data[0]
                 page_meta = {
-                    "page_width_px":    _sec0.get("page_width_px", 0),
-                    "page_height_px":   _sec0.get("page_height_px", 0),
-                    "margin_top_px":    _sec0.get("margin_top_px", 0),
+                    "page_width_px": _sec0.get("page_width_px", 0),
+                    "page_height_px": _sec0.get("page_height_px", 0),
+                    "margin_top_px": _sec0.get("margin_top_px", 0),
                     "margin_bottom_px": _sec0.get("margin_bottom_px", 0),
-                    "margin_left_px":   _sec0.get("margin_left_px", 0),
-                    "margin_right_px":  _sec0.get("margin_right_px", 0),
-                    "doc_grid":         _sec0.get("doc_grid", {}),
-                    "header_html":      _sec0.get("header_html", ""),
-                    "footer_html":      _sec0.get("footer_html", ""),
+                    "margin_left_px": _sec0.get("margin_left_px", 0),
+                    "margin_right_px": _sec0.get("margin_right_px", 0),
+                    "doc_grid": _sec0.get("doc_grid", {}),
+                    "header_html": _sec0.get("header_html", ""),
+                    "footer_html": _sec0.get("footer_html", ""),
                 }
                 page_meta["sections"] = sections_data
         except Exception as meta_exc:
@@ -3960,7 +4414,8 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         if progressive_preview:
             result["progressive"] = {
                 "pending": bool(preview_meta.get("pending")),
-                "target_pages": preview_meta.get("target_pages") or _DOCX_PREVIEW_TARGET_PAGES,
+                "target_pages": preview_meta.get("target_pages")
+                or _DOCX_PREVIEW_TARGET_PAGES,
             }
         # ── 提取 DOCX 批注 ──────────────────────────────────────────
         try:
@@ -3989,15 +4444,15 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         return result
 
     except Exception as primary_exc:
-        logger.warning(
-            "[DocxParser] 富格式渲染失败，回退到 mammoth: %s", primary_exc
-        )
+        logger.warning("[DocxParser] 富格式渲染失败，回退到 mammoth: %s", primary_exc)
 
     # ── Fallback path: mammoth semantic renderer ──────────────────────────
     try:
         import mammoth
     except ImportError:
-        raise RuntimeError("python-docx 和 mammoth 均未安装，请执行: pip install python-docx mammoth")
+        raise RuntimeError(
+            "python-docx 和 mammoth 均未安装，请执行: pip install python-docx mammoth"
+        )
 
     def _img_handler(image: Any) -> dict[str, str]:
         """将图片转换为内联 base64 data URI，自动压缩大图。"""

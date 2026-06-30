@@ -16,6 +16,7 @@ Features:
   - Dynamic replanning on errors or discoveries
   - Task completion verification by model
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -41,6 +42,7 @@ logger = logging.getLogger(__name__)
 
 class DocEventType(str, Enum):
     """Event types emitted by DocAgent during execution."""
+
     PLAN_START = "plan_start"
     PLAN_CREATED = "plan_created"
     STEP_START = "step_start"
@@ -63,9 +65,10 @@ class DocEventType(str, Enum):
 @dataclass
 class FileHandle:
     """Reference to a file being processed."""
+
     path: str
-    file_type: str = ""              # docx/xlsx/pptx/pdf/txt
-    content_snapshot: str = ""       # Current content for diff comparison
+    file_type: str = ""  # docx/xlsx/pptx/pdf/txt
+    content_snapshot: str = ""  # Current content for diff comparison
     selection: Optional[str] = None  # User-selected text
     cursor_position: int = 0
 
@@ -83,12 +86,13 @@ class FileHandle:
 @dataclass
 class FileChange:
     """Represents a change made to a file."""
+
     file_path: str
-    change_type: str           # add/modify/delete
-    range_start: int           # Character offset start
-    range_end: int             # Character offset end
-    original: str              # Original content
-    modified: str              # New content
+    change_type: str  # add/modify/delete
+    range_start: int  # Character offset start
+    range_end: int  # Character offset end
+    original: str  # Original content
+    modified: str  # New content
     timestamp: float = field(default_factory=time.time)
     step_id: str = ""
 
@@ -107,6 +111,7 @@ class FileChange:
 @dataclass
 class DocTask:
     """A document processing task."""
+
     id: str
     prompt: str
     files: List[FileHandle] = field(default_factory=list)
@@ -132,6 +137,7 @@ class DocTask:
 @dataclass
 class DocEvent:
     """Event emitted by DocAgent during execution."""
+
     event_type: DocEventType
     task_id: str = ""
     step_id: str = ""
@@ -319,7 +325,8 @@ class DocAgent:
 
             logger.info(
                 "[DocAgent] Plan created: %d steps for task %s",
-                len(plan.steps), task.id
+                len(plan.steps),
+                task.id,
             )
             return plan
 
@@ -333,12 +340,14 @@ class DocAgent:
         from app.core.tasks.task_planner import Plan, PlanStep
 
         plan = Plan(task_id=task.id, original_request=task.prompt)
-        plan.add_step(PlanStep(
-            name="execute",
-            description="直接执行用户请求",
-            step_type="llm",
-            executor_prompt=task.prompt,
-        ))
+        plan.add_step(
+            PlanStep(
+                name="execute",
+                description="直接执行用户请求",
+                step_type="llm",
+                executor_prompt=task.prompt,
+            )
+        )
         return plan
 
     # ── Execution ──────────────────────────────────────────────────────────
@@ -365,7 +374,11 @@ class DocAgent:
                 )
                 return
 
-            step_id = getattr(step, "step_id", step.name if hasattr(step, "name") else str(uuid.uuid4())[:8])
+            step_id = getattr(
+                step,
+                "step_id",
+                step.name if hasattr(step, "name") else str(uuid.uuid4())[:8],
+            )
 
             yield DocEvent(
                 DocEventType.STEP_START,
@@ -373,7 +386,9 @@ class DocAgent:
                 step_id=step_id,
                 data={
                     "name": step.name if hasattr(step, "name") else "execute",
-                    "description": step.description if hasattr(step, "description") else "",
+                    "description": (
+                        step.description if hasattr(step, "description") else ""
+                    ),
                     "progress": 0,
                 },
             )
@@ -425,7 +440,9 @@ class DocAgent:
     ) -> Iterator[DocEvent]:
         """Execute a single step with LLM-driven tool calls."""
         # Build the execution prompt
-        exec_prompt = getattr(step, "executor_prompt", "") or getattr(step, "description", "")
+        exec_prompt = getattr(step, "executor_prompt", "") or getattr(
+            step, "description", ""
+        )
         if not exec_prompt:
             exec_prompt = task.prompt
 
@@ -440,7 +457,9 @@ class DocAgent:
         # Inject suggested tools hint if the planner specified any
         suggested = list(getattr(step, "suggested_tools", None) or [])
         if suggested:
-            user_message += f"\n\n## 建议使用的工具\n" + "\n".join(f"- `{t}`" for t in suggested)
+            user_message += f"\n\n## 建议使用的工具\n" + "\n".join(
+                f"- `{t}`" for t in suggested
+            )
         if file_context:
             user_message += f"\n\n{file_context}"
 
@@ -468,8 +487,19 @@ class DocAgent:
                 except Exception as _exc:
                     _llm_exc = _exc
                     err_msg = str(_exc).lower()
-                    if any(p in err_msg for p in ("malformed_tool_call", "invalid json", "output could not be parsed")):
-                        logger.warning("[DocAgent] LLM tool call error, retrying (%d/3): %s", _llm_attempt + 1, _exc)
+                    if any(
+                        p in err_msg
+                        for p in (
+                            "malformed_tool_call",
+                            "invalid json",
+                            "output could not be parsed",
+                        )
+                    ):
+                        logger.warning(
+                            "[DocAgent] LLM tool call error, retrying (%d/3): %s",
+                            _llm_attempt + 1,
+                            _exc,
+                        )
                         continue
                     raise  # Non-retryable error — propagate
             if _llm_exc is not None:
@@ -501,14 +531,16 @@ class DocAgent:
             if not tool_calls:
                 if tool_calls_count == 0 and no_tool_nudges < _MAX_NO_TOOL_NUDGES:
                     no_tool_nudges += 1
-                    messages.append({
-                        "role": "user",
-                        "content": (
-                            "你必须通过调用工具来完成任务，不能只用文字描述。"
-                            "请立即调用相应的文件操作工具（例如 insert_excel_as_docx_table、"
-                            "write_docx_content、run_python_code 等）来执行写入操作。"
-                        ),
-                    })
+                    messages.append(
+                        {
+                            "role": "user",
+                            "content": (
+                                "你必须通过调用工具来完成任务，不能只用文字描述。"
+                                "请立即调用相应的文件操作工具（例如 insert_excel_as_docx_table、"
+                                "write_docx_content、run_python_code 等）来执行写入操作。"
+                            ),
+                        }
+                    )
                     continue
                 break
 
@@ -556,11 +588,13 @@ class DocAgent:
                 )
 
                 # Append function response
-                messages.append({
-                    "role": "function",
-                    "name": tool_name,
-                    "content": result_str[:4000],
-                })
+                messages.append(
+                    {
+                        "role": "function",
+                        "name": tool_name,
+                        "content": result_str[:4000],
+                    }
+                )
 
                 tool_calls_count += 1
 
@@ -576,12 +610,20 @@ class DocAgent:
     # Tools that only read data and never write files — everything else is
     # assumed to be a potential file-writer and will be tracked if it has a
     # path argument and returns without an error.
-    _READ_ONLY_TOOLS = frozenset({
-        "read_sheet_data", "read_docx_content", "parse_file_to_text",
-        "read_file_range", "list_workspace_files", "compare_files",
-        "llm_extract", "verify_task_completion", "open_file_in_editor",
-        "annotate_file",
-    })
+    _READ_ONLY_TOOLS = frozenset(
+        {
+            "read_sheet_data",
+            "read_docx_content",
+            "parse_file_to_text",
+            "read_file_range",
+            "list_workspace_files",
+            "compare_files",
+            "llm_extract",
+            "verify_task_completion",
+            "open_file_in_editor",
+            "annotate_file",
+        }
+    )
 
     def _detect_file_change(
         self,
@@ -615,12 +657,14 @@ class DocAgent:
             if idx != -1:
                 try:
                     import os as _os
-                    created = json.loads(result[idx + len(_marker):])
+
+                    created = json.loads(result[idx + len(_marker) :])
                     if created:
                         return FileChange(
                             file_path=str(created[0]),
                             change_type="modify",
-                            range_start=0, range_end=0,
+                            range_start=0,
+                            range_end=0,
                             original="",
                             modified=f"Python 代码修改了 {_os.path.basename(str(created[0]))}",
                         )
@@ -644,7 +688,8 @@ class DocAgent:
         return FileChange(
             file_path=str(file_path),
             change_type=change_type,
-            range_start=0, range_end=0,
+            range_start=0,
+            range_end=0,
             original="",
             modified=str(tool_args.get("updates", tool_args.get("content", "")))[:500],
         )
@@ -659,7 +704,9 @@ class DocAgent:
         """Ask the model to verify if the task was completed successfully."""
         # Build change log summary
         change_summary = (
-            json.dumps([c.to_dict() for c in self._change_log], ensure_ascii=False, indent=2)
+            json.dumps(
+                [c.to_dict() for c in self._change_log], ensure_ascii=False, indent=2
+            )
             if self._change_log
             else "无文件变更记录"
         )
@@ -674,8 +721,11 @@ class DocAgent:
             seen.add(fp)
             try:
                 from pathlib import Path as _P
+
                 content = _P(fp).read_text(encoding="utf-8", errors="replace")[:800]
-                file_snapshots += f"\n### 文件快照: {_P(fp).name}\n```\n{content}\n```\n"
+                file_snapshots += (
+                    f"\n### 文件快照: {_P(fp).name}\n```\n{content}\n```\n"
+                )
             except Exception:
                 pass
 
@@ -694,7 +744,11 @@ class DocAgent:
 以 JSON 格式输出：{{"status": "completed|partial|failed", "summary": "说明"}}"""
 
         try:
-            verify_model = self._local_model_id() if self._provider_mode == "local" else self._model_id
+            verify_model = (
+                self._local_model_id()
+                if self._provider_mode == "local"
+                else self._model_id
+            )
             response = provider.generate_content(
                 prompt=[{"role": "user", "content": prompt}],
                 model=verify_model or None,
@@ -715,7 +769,10 @@ class DocAgent:
             logger.warning("[DocAgent] Verification failed: %s", e)
             error_text = str(e)
             if "timed out" in error_text.lower():
-                return {"status": "unknown", "summary": "结果已生成，状态检查超时，未影响本次执行结果"}
+                return {
+                    "status": "unknown",
+                    "summary": "结果已生成，状态检查超时，未影响本次执行结果",
+                }
             return {"status": "unknown", "summary": "结果已生成，状态检查暂不可用"}
 
     # ── Helpers ────────────────────────────────────────────────────────────
@@ -724,6 +781,7 @@ class DocAgent:
         """Get LLM provider instance."""
         try:
             from app.core.llm.model_mode import normalize_model_mode
+
             model_mode = normalize_model_mode((options or {}).get("model_mode"))
             if model_mode == "local":
                 from app.core.llm.ollama_llm_provider import OllamaLLMProvider
@@ -739,11 +797,14 @@ class DocAgent:
 
             provider_name = get_provider_for_model_mode(model_mode)
             self._provider_mode = provider_name
-            self._model_id = get_configured_cloud_model(
-                task_type="FILE_TASK",
-                fallback_model=self._model_id,
-                provider=provider_name,
-            ) or self._model_id
+            self._model_id = (
+                get_configured_cloud_model(
+                    task_type="FILE_TASK",
+                    fallback_model=self._model_id,
+                    provider=provider_name,
+                )
+                or self._model_id
+            )
             return get_llm_provider(
                 provider=provider_name,
                 model=self._model_id,
@@ -755,8 +816,8 @@ class DocAgent:
 
     def _build_registry(self):
         """Build a ToolRegistry with all document tools."""
-        from app.core.agent.tool_registry import ToolRegistry
         from app.core.agent.task_tools import TaskToolsPlugin
+        from app.core.agent.tool_registry import ToolRegistry
 
         registry = ToolRegistry()
         registry.register_plugin(TaskToolsPlugin())
@@ -781,6 +842,7 @@ class DocAgent:
 
         try:
             from app.core.llm.model_fallback import get_fallback_executor
+
             executor = get_fallback_executor()
             return executor.generate_with_fallback(
                 provider=provider,
@@ -802,7 +864,12 @@ class DocAgent:
 
     def _local_model_id(self) -> str:
         target_model = str(self._model_id or "").strip()
-        if target_model.lower() in {"", "local", "ollama", "auto"} or target_model.lower().startswith("gemini"):
+        if target_model.lower() in {
+            "",
+            "local",
+            "ollama",
+            "auto",
+        } or target_model.lower().startswith("gemini"):
             return ""
         return target_model
 
@@ -863,17 +930,15 @@ class DocAgent:
             return ""
 
         relevant = [
-            m for m in history
+            m
+            for m in history
             if m.get("role") in ("user", "model") and m.get("content")
         ][-8:]
 
         if not relevant:
             return ""
 
-        return "\n".join(
-            f"[{m['role']}] {str(m['content'])[:200]}"
-            for m in relevant
-        )
+        return "\n".join(f"[{m['role']}] {str(m['content'])[:200]}" for m in relevant)
 
 
 # ============================================================================

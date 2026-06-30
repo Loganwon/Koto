@@ -19,6 +19,7 @@ from typing import Any, Iterable
 
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
+from web.sse.protocol import sse
 
 logger = logging.getLogger("koto.app")
 
@@ -81,7 +82,7 @@ def safe_editor_sse(payload: dict) -> str:
             fallback="处理中…",
         )
 
-    return f"data: {json.dumps(safe_payload, ensure_ascii=False)}\n\n"
+    return sse.chunk(safe_payload)
 
 
 def _normalize_file_task_payload(data: dict) -> dict:

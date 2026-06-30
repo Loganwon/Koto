@@ -211,7 +211,9 @@ class MCPStdioClient:
             if not self._proc or not self._proc.stdin or not self._proc.stdout:
                 return {"error": "MCP process is not running"}
             if self._proc.poll() is not None:
-                return {"error": f"MCP process exited with code {self._proc.returncode}"}
+                return {
+                    "error": f"MCP process exited with code {self._proc.returncode}"
+                }
             self._req_id += 1
             req_id = self._req_id
             req = _make_request(method, params, req_id)

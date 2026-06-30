@@ -165,16 +165,14 @@ def should_prompt_for_write_after_tool_round(
 
 def write_retry_message(request: FileTaskRequest, files: List[FileTaskFile]) -> str:
     target = request.target_path or next(
-        (
-            file_info.path
-            for file_info in files
-            if file_info.target and file_info.path
-        ),
+        (file_info.path for file_info in files if file_info.target and file_info.path),
         "",
     )
     current_file_types = file_types(files)
     task_text = str(request.task or "")
-    hint = "你还没有完成真实文件写入。不要只总结或结束，下一轮必须调用会修改文件的工具。"
+    hint = (
+        "你还没有完成真实文件写入。不要只总结或结束，下一轮必须调用会修改文件的工具。"
+    )
     if looks_like_financial_xlsx_docx_chart_report_task(request, files):
         hint += (
             " 当前是 Excel 财务预测图表+问题写入 DOCX 任务：不要只插入 Excel 原表，也不要只输出 Python stdout。"
@@ -255,13 +253,11 @@ def duplicate_supervisor_retry_message(
             "DOCX 输出任务：必须调用 write_docx_content 写入本步骤发现；如果没有明确目标路径，就在源文件同目录创建清晰命名的 DOCX 输出文件。"
         )
     if "xlsx" in current_file_types:
-        lines.append("Excel 任务：如果已完成结构读取，下一轮必须进入真实分析/制图/写回，不要重复打印同一张表。")
+        lines.append(
+            "Excel 任务：如果已完成结构读取，下一轮必须进入真实分析/制图/写回，不要重复打印同一张表。"
+        )
     target = request.target_path or next(
-        (
-            file_info.path
-            for file_info in files
-            if file_info.target and file_info.path
-        ),
+        (file_info.path for file_info in files if file_info.target and file_info.path),
         "",
     )
     if target:

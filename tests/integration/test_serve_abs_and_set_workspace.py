@@ -107,7 +107,9 @@ class TestOpenAbsFileSecurity:
     def test_open_abs_file_missing_file_returns_404(self, _bundle, tmp_path):
         client, _, _ = _bundle
         nonexistent = str(tmp_path / "ghost.txt")
-        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": nonexistent})
+        resp = client.post(
+            "/api/v1/workspace/open_abs_file", json={"path": nonexistent}
+        )
         assert resp.status_code == 404
 
     def test_open_abs_file_system_path_blocked_windows(self, _bundle):
@@ -143,7 +145,9 @@ class TestOpenAbsFileSecurity:
         client, tmp_dir, _ = _bundle
         safe_file = tmp_dir / f"safe_{uuid.uuid4().hex[:8]}.txt"
         safe_file.write_text("hello open_abs_file", encoding="utf-8")
-        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": str(safe_file)})
+        resp = client.post(
+            "/api/v1/workspace/open_abs_file", json={"path": str(safe_file)}
+        )
         assert resp.status_code == 200
         body = resp.get_json()
         assert body["file_type"] == "text"
@@ -154,7 +158,9 @@ class TestOpenAbsFileSecurity:
         client, _, workspace_dir = _bundle
         ws_file = workspace_dir / f"ws_open_{uuid.uuid4().hex[:8]}.txt"
         ws_file.write_text("workspace content", encoding="utf-8")
-        resp = client.post("/api/v1/workspace/open_abs_file", json={"path": str(ws_file)})
+        resp = client.post(
+            "/api/v1/workspace/open_abs_file", json={"path": str(ws_file)}
+        )
         assert resp.status_code == 200
         assert resp.get_json()["data"]["content"] == "workspace content"
 

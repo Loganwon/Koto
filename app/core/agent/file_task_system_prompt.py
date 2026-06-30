@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.core.agent.file_task_whitebox import whitebox_execution_plan_schema
 from app.core.agent.tool_design_protocol import (
     TOOL_DESIGN_PROTOCOL,
     tool_design_prompt_text,
 )
-from app.core.agent.file_task_whitebox import whitebox_execution_plan_schema
 
 
 def build_file_task_system_prompt(
@@ -30,7 +30,11 @@ def build_file_task_system_prompt(
     workflows: str,
     current_date: str = "",
 ) -> str:
-    date_line = f"当前日期：{current_date}。生成报告、纪要或文件内容时必须使用这个日期，不要猜测年份。\n" if current_date else ""
+    date_line = (
+        f"当前日期：{current_date}。生成报告、纪要或文件内容时必须使用这个日期，不要猜测年份。\n"
+        if current_date
+        else ""
+    )
     return (
         "你是 Koto 文件助手的后端执行 agent。你可以自主规划并调用工具，"
         "但只能调用系统提供的 Koto 文件工具。不要编造工具、文件路径或已经完成的写入。\n\n"

@@ -23,7 +23,10 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 try:
-    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+    from src.runtime_bootstrap import (
+        configure_process_environment,
+        resolve_runtime_roots,
+    )
 except ImportError:
     from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
 

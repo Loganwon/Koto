@@ -754,7 +754,9 @@ class TestKotoApp:
             clear=False,
         ), patch.object(mod, "_write_log"), patch.object(
             mod, "_dump_threads"
-        ) as mock_dump, patch.object(mod.os, "execve") as mock_execve, patch.object(
+        ) as mock_dump, patch.object(
+            mod.os, "execve"
+        ) as mock_execve, patch.object(
             mod.os, "_exit"
         ) as mock_exit:
             mod._handle_webview_exit()
@@ -861,13 +863,13 @@ class TestKotoApp:
 
             with patch("socket.socket", return_value=sock), patch.object(
                 mod, "_check_http_ok", return_value=True
-            ), patch.object(
-                mod, "_find_available_port", return_value=5001
-            ), patch.dict(
+            ), patch.object(mod, "_find_available_port", return_value=5001), patch.dict(
                 os.environ, {"KOTO_REUSE_HEALTHY_BACKEND": "0"}, clear=False
             ), patch.object(
                 mod.threading, "Thread", return_value=mock_thread
-            ), patch.object(mod, "_write_log"):
+            ), patch.object(
+                mod, "_write_log"
+            ):
                 result = mod.start_flask_server()
 
             assert mod.KOTO_PORT == 5001
@@ -900,9 +902,13 @@ class TestKotoApp:
         mod = self._import_module()
         monotonic_values = iter([0.0, 0.0, 0.6, 0.6, 1.05])
 
-        with patch.object(mod, "_check_http_ok", return_value=False) as mock_check, patch(
+        with patch.object(
+            mod, "_check_http_ok", return_value=False
+        ) as mock_check, patch(
             "time.monotonic", side_effect=lambda: next(monotonic_values)
-        ), patch("time.sleep") as mock_sleep:
+        ), patch(
+            "time.sleep"
+        ) as mock_sleep:
             assert (
                 mod._wait_for_http_ok(
                     "http://127.0.0.1:5000/api/health",
@@ -922,9 +928,13 @@ class TestKotoApp:
         mod = self._import_module()
         monotonic_values = iter([0.0, 0.0, 0.2, 0.2])
 
-        with patch.object(mod, "_check_http_ok", side_effect=[False, True]) as mock_check, patch(
+        with patch.object(
+            mod, "_check_http_ok", side_effect=[False, True]
+        ) as mock_check, patch(
             "time.monotonic", side_effect=lambda: next(monotonic_values)
-        ), patch("time.sleep") as mock_sleep:
+        ), patch(
+            "time.sleep"
+        ) as mock_sleep:
             assert (
                 mod._wait_for_http_ok(
                     "http://127.0.0.1:5000/api/health",
@@ -948,7 +958,9 @@ class TestKotoApp:
                 mod.BACKEND_RECOVERY_MAX_ENV: "2",
             },
             clear=False,
-        ), patch.object(mod, "_write_log"), patch.object(mod.os, "execve") as mock_execve:
+        ), patch.object(mod, "_write_log"), patch.object(
+            mod.os, "execve"
+        ) as mock_execve:
             assert (
                 mod._attempt_process_recovery(
                     "backend_unreachable",
@@ -973,7 +985,9 @@ class TestKotoApp:
                 mod.BACKEND_RECOVERY_MAX_ENV: "1",
             },
             clear=False,
-        ), patch.object(mod, "_write_log"), patch.object(mod.os, "execve") as mock_execve:
+        ), patch.object(mod, "_write_log"), patch.object(
+            mod.os, "execve"
+        ) as mock_execve:
             assert (
                 mod._attempt_process_recovery(
                     "backend_unreachable",
@@ -1020,11 +1034,17 @@ class TestKotoApp:
             mod.threading,
             "Thread",
             side_effect=lambda *args, **kwargs: FakeThread(**kwargs),
-        ), patch.object(mod, "_get_app_shutdown_reason", return_value=None), patch.object(
+        ), patch.object(
+            mod, "_get_app_shutdown_reason", return_value=None
+        ), patch.object(
             mod, "_check_http_ok", side_effect=[False, False]
-        ), patch.object(mod, "_dump_threads") as mock_dump, patch.object(
+        ), patch.object(
+            mod, "_dump_threads"
+        ) as mock_dump, patch.object(
             mod, "_attempt_process_recovery", return_value=True
-        ) as mock_recover, patch("time.sleep"):
+        ) as mock_recover, patch(
+            "time.sleep"
+        ):
             thread = mod._start_backend_health_watchdog(
                 "http://127.0.0.1:5000/api/health",
                 expect_server_thread=False,
@@ -1066,7 +1086,9 @@ class TestKotoApp:
             mod, "_get_app_shutdown_reason", side_effect=lambda: next(shutdown_states)
         ), patch.object(
             mod, "_check_http_ok", side_effect=[False, True, False, True]
-        ), patch.object(mod, "_attempt_process_recovery") as mock_recover, patch(
+        ), patch.object(
+            mod, "_attempt_process_recovery"
+        ) as mock_recover, patch(
             "time.sleep"
         ):
             thread = mod._start_backend_health_watchdog(

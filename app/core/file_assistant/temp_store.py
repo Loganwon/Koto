@@ -103,7 +103,9 @@ class WorkspaceFileDownloadService:
         if not target.is_file():
             raise WorkspaceFileNotFoundError("文件不存在")
 
-        if target.suffix.lower() not in {str(ext).lower() for ext in allowed_extensions}:
+        if target.suffix.lower() not in {
+            str(ext).lower() for ext in allowed_extensions
+        }:
             raise WorkspaceFileUnsupportedTypeError("不支持的文件类型")
 
         return ServedWorkspaceFile(

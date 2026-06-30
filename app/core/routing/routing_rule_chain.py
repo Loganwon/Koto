@@ -137,11 +137,11 @@ class RuleChain:
         boosts: Dict[str, float] = None,
         reasons: Dict[str, List[str]] = None,
     ) -> List[Dict]:
-        return self._dispatcher._build_routing_list(scores, boosts=boosts, reasons=reasons)
+        return self._dispatcher._build_routing_list(
+            scores, boosts=boosts, reasons=reasons
+        )
 
-    def _apply_safety(
-        self, task_type: str, ctx: RuleContext
-    ) -> str:
+    def _apply_safety(self, task_type: str, ctx: RuleContext) -> str:
         return self._dispatcher._apply_routing_safety(
             task_type,
             ctx.user_input,
@@ -175,6 +175,7 @@ class RuleChain:
     # 1. Capability / How-To Query
     def _check_capability_query(self, ctx: RuleContext) -> bool:
         from app.core.routing.rule_router import RuleRouter
+
         return RuleRouter.is_capability_or_howto_query(ctx.user_input)
 
     def _build_capability_query(self, ctx: RuleContext) -> RoutingResult:
@@ -226,11 +227,13 @@ class RuleChain:
     def _build_short_input(self, ctx: RuleContext) -> RoutingResult:
         cleaned = _re.sub(r"^\[FILE_ATTACHED:[^\]]+\]\s*", "", ctx.user_input).strip()
         if ctx.LocalExecutor and ctx.LocalExecutor.is_system_command(cleaned):
-            info = {"routing_list": self._build_routing_list(
-                ctx.similarity_scores,
-                boosts={"SYSTEM": 1.0},
-                reasons={"SYSTEM": ["rule:standalone_command"]},
-            )}
+            info = {
+                "routing_list": self._build_routing_list(
+                    ctx.similarity_scores,
+                    boosts={"SYSTEM": 1.0},
+                    reasons={"SYSTEM": ["rule:standalone_command"]},
+                )
+            }
             return "SYSTEM", "🖥️ Rule-Detected", info
         return "CHAT", "⚡ Quick", None
 
@@ -241,11 +244,13 @@ class RuleChain:
         )
 
     def _build_path_listing(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"FILE_SEARCH": 1.0},
-            reasons={"FILE_SEARCH": ["rule:path_listing"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"FILE_SEARCH": 1.0},
+                reasons={"FILE_SEARCH": ["rule:path_listing"]},
+            )
+        }
         logger.info("[RuleChain] 📁 指定路径列举快速通道 → FILE_SEARCH")
         return "FILE_SEARCH", "📁 Path-Listing", info
 
@@ -254,11 +259,13 @@ class RuleChain:
         return any(_re.search(p, ctx.user_input) for p in AGENT_NOTIFY_PATTERNS)
 
     def _build_agent_notify(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"AGENT": 1.0},
-            reasons={"AGENT": ["rule:agent_notify_direct"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"AGENT": 1.0},
+                reasons={"AGENT": ["rule:agent_notify_direct"]},
+            )
+        }
         logger.info("[RuleChain] 🤖 提醒/消息快速通道 → AGENT")
         return "AGENT", "🤖 Notify-Direct", info
 
@@ -269,27 +276,32 @@ class RuleChain:
         return not any(k in ctx.user_lower for k in PAINTER_CHART_EXCLUDE)
 
     def _build_painter(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"PAINTER": 1.0},
-            reasons={"PAINTER": ["rule:image_gen"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"PAINTER": 1.0},
+                reasons={"PAINTER": ["rule:image_gen"]},
+            )
+        }
         logger.info("[RuleChain] 🎨 图片生成快速通道 → PAINTER")
         return "PAINTER", "🎨 Image-Direct", info
 
     # 7. Trivial input
     def _check_trivial(self, ctx: RuleContext) -> bool:
         from app.core.routing.rule_router import RuleRouter
+
         cleaned = _re.sub(r"^\[FILE_ATTACHED:[^\]]+\]\s*", "", ctx.user_input).strip()
         return RuleRouter.is_trivial(cleaned)
 
     def _build_trivial(self, ctx: RuleContext) -> RoutingResult:
         cleaned = _re.sub(r"^\[FILE_ATTACHED:[^\]]+\]\s*", "", ctx.user_input).strip()
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"CHAT": 1.0},
-            reasons={"CHAT": ["rule:trivial"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"CHAT": 1.0},
+                reasons={"CHAT": ["rule:trivial"]},
+            )
+        }
         logger.info(f"[RuleChain] ⚡ 极简通道: '{cleaned[:20]}' → CHAT")
         return "CHAT", "⚡ Trivial", info
 
@@ -298,11 +310,13 @@ class RuleChain:
         return any(k in ctx.user_lower for k in WEATHER_KEYWORDS)
 
     def _build_weather(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"WEB_SEARCH": 1.0},
-            reasons={"WEB_SEARCH": ["rule:weather_direct"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"WEB_SEARCH": 1.0},
+                reasons={"WEB_SEARCH": ["rule:weather_direct"]},
+            )
+        }
         return "WEB_SEARCH", "🌤️ Weather-Direct", info
 
     # 9. Meeting extract
@@ -314,11 +328,13 @@ class RuleChain:
         )
 
     def _build_meeting(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"MEETING_EXTRACT": 1.0},
-            reasons={"MEETING_EXTRACT": ["rule:meeting_extract_direct"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"MEETING_EXTRACT": 1.0},
+                reasons={"MEETING_EXTRACT": ["rule:meeting_extract_direct"]},
+            )
+        }
         return "MEETING_EXTRACT", "📝 Meeting-Extract-Direct", info
 
     # 10. Code writing
@@ -329,11 +345,13 @@ class RuleChain:
         return has_verb and (has_concept or has_lang)
 
     def _build_code(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"CODER": 1.0},
-            reasons={"CODER": ["rule:code_write_direct"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"CODER": 1.0},
+                reasons={"CODER": ["rule:code_write_direct"]},
+            )
+        }
         return "CODER", "💻 Code-Write-Direct", info
 
     # 11. Realtime info
@@ -345,11 +363,13 @@ class RuleChain:
         )
 
     def _build_realtime(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"WEB_SEARCH": 1.0},
-            reasons={"WEB_SEARCH": ["rule:realtime_signal"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"WEB_SEARCH": 1.0},
+                reasons={"WEB_SEARCH": ["rule:realtime_signal"]},
+            )
+        }
         return "WEB_SEARCH", "⏰ Realtime-Direct", info
 
     # 12. Charts / data visualization
@@ -359,11 +379,13 @@ class RuleChain:
         )
 
     def _build_chart(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"CODER": 1.0},
-            reasons={"CODER": ["rule:chart_viz"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"CODER": 1.0},
+                reasons={"CODER": ["rule:chart_viz"]},
+            )
+        }
         return "CODER", "📊 Chart-Direct", info
 
     # 13. Travel search
@@ -372,17 +394,21 @@ class RuleChain:
 
     def _build_travel(self, ctx: RuleContext) -> RoutingResult:
         if any(k in ctx.user_lower for k in TRAVEL_BUY_KEYWORDS):
-            info = {"routing_list": self._build_routing_list(
-                ctx.similarity_scores,
-                boosts={"AGENT": 1.0},
-                reasons={"AGENT": ["rule:ticket_buy"]},
-            )}
+            info = {
+                "routing_list": self._build_routing_list(
+                    ctx.similarity_scores,
+                    boosts={"AGENT": 1.0},
+                    reasons={"AGENT": ["rule:ticket_buy"]},
+                )
+            }
             return "AGENT", "🤖 Ticket-Buy", info
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"WEB_SEARCH": 1.0},
-            reasons={"WEB_SEARCH": ["rule:travel_query"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"WEB_SEARCH": 1.0},
+                reasons={"WEB_SEARCH": ["rule:travel_query"]},
+            )
+        }
         return "WEB_SEARCH", "🌐 Travel-Query", info
 
     # 14. Financial price
@@ -392,11 +418,13 @@ class RuleChain:
         return has_asset and (has_signal or len(ctx.user_input.strip()) <= 12)
 
     def _build_finance(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"WEB_SEARCH": 1.0},
-            reasons={"WEB_SEARCH": ["rule:financial_price"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"WEB_SEARCH": 1.0},
+                reasons={"WEB_SEARCH": ["rule:financial_price"]},
+            )
+        }
         return "WEB_SEARCH", "💹 Price-Direct", info
 
     # 15. PPT direct
@@ -438,23 +466,29 @@ class RuleChain:
         return any(_re.search(p, ctx.user_input) for p in FILE_SEARCH_PATTERNS)
 
     def _build_file_search(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"FILE_SEARCH": 1.0},
-            reasons={"FILE_SEARCH": ["rule:disk_file_search"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"FILE_SEARCH": 1.0},
+                reasons={"FILE_SEARCH": ["rule:disk_file_search"]},
+            )
+        }
         return "FILE_SEARCH", "🔍 FileSearch-Direct", info
 
     # 18. System command
     def _check_system(self, ctx: RuleContext) -> bool:
-        return bool(ctx.LocalExecutor and ctx.LocalExecutor.is_system_command(ctx.user_input))
+        return bool(
+            ctx.LocalExecutor and ctx.LocalExecutor.is_system_command(ctx.user_input)
+        )
 
     def _build_system(self, ctx: RuleContext) -> RoutingResult:
-        info = {"routing_list": self._build_routing_list(
-            ctx.similarity_scores,
-            boosts={"SYSTEM": 0.9},
-            reasons={"SYSTEM": ["fallback:system"]},
-        )}
+        info = {
+            "routing_list": self._build_routing_list(
+                ctx.similarity_scores,
+                boosts={"SYSTEM": 0.9},
+                reasons={"SYSTEM": ["fallback:system"]},
+            )
+        }
         return "SYSTEM", "🖥️ Fallback-System", info
 
 
@@ -463,7 +497,9 @@ def build_rule_chain(dispatcher: Any) -> RuleChain:
     chain = RuleChain(dispatcher)
 
     chain.add_node("force_plan", chain._check_force_plan, chain._build_force_plan)
-    chain.add_node("capability_query", chain._check_capability_query, chain._build_capability_query)
+    chain.add_node(
+        "capability_query", chain._check_capability_query, chain._build_capability_query
+    )
     # NOTE: model_primary_route is called in SmartDispatcher.analyze() before
     # this chain only for requests without file context.
     chain.add_node("file_edit", chain._check_file_edit, chain._build_file_edit)

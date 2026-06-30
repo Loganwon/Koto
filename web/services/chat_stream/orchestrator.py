@@ -11,6 +11,139 @@ from datetime import datetime
 _logger = logging.getLogger(__name__)
 
 
+def _request_allows_skill_injection(data):
+    if not isinstance(data, dict):
+        return True
+
+    def _disabled(value):
+        text = str(value).strip().lower()
+        return text in {
+            "0",
+            "false",
+            "off",
+            "no",
+            "disabled",
+            "disable",
+            "detached",
+            "none",
+        }
+
+    for key in ("skills_enabled", "enable_skills"):
+        if key in data:
+            return not _disabled(data.get(key))
+    skill_mode = str(data.get("skill_mode") or "").strip().lower()
+    if skill_mode in {"detached", "off", "disabled", "none"}:
+        return False
+    return True
+
+
+def _inject_skills_for_stream(system_instruction, task_type, user_input, data, app_logger):
+    if not _request_allows_skill_injection(data):
+        app_logger.debug("[STREAM] Skills injection disabled by request")
+        return system_instruction
+
+    try:
+        from app.core.skills.skill_manager import SkillManager
+
+        active_skills = SkillManager.get_active_skill_names(task_type=task_type)
+        if active_skills:
+            app_logger.debug(
+                f"[STREAM] 🎯 Active Skills ({task_type}): {', '.join(active_skills)}"
+            )
+        intent_temp_ids = []
+        try:
+            from app.core.skills.skill_trigger_binding import get_skill_binding_manager
+
+            intent_temp_ids = get_skill_binding_manager().match_intent(user_input or "")
+        except Exception as tb_err:
+            app_logger.debug("[STREAM] SkillTriggerBinding 匹配跳过: %s", tb_err)
+        try:
+            from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
+            auto_ids = SkillAutoMatcher.match(
+                user_input=user_input or "", task_type=task_type or "CHAT"
+            )
+            if auto_ids:
+                intent_temp_ids = list(dict.fromkeys(intent_temp_ids + auto_ids))
+        except Exception as am_err:
+            app_logger.debug("[STREAM] SkillAutoMatcher 匹配跳过: %s", am_err)
+        if intent_temp_ids:
+            app_logger.debug(f"[STREAM] 🔗 Auto Skills: {', '.join(intent_temp_ids)}")
+        system_instruction = SkillManager.inject_into_prompt(
+            system_instruction,
+            task_type=task_type,
+            user_input=user_input,
+            temp_skill_ids=intent_temp_ids,
+        )
+
+        divination_active = False
+        try:
+            for skill in SkillManager.list_skills():
+                if skill.get("id") == "divination" and skill.get("enabled", False):
+                    divination_active = True
+                    break
+        except Exception:
+            divination_active = False
+        if not divination_active and "divination" in (intent_temp_ids or []):
+            divination_active = True
+
+        if divination_active and isinstance(system_instruction, str):
+            replacements = {
+                "神谕占卜模式": "塔罗占卜模式",
+                "你现在是「神谕」——一位洞悉宇宙之语的存在。": "你现在是一位塔罗解读师，风格神秘但表达清晰、可执行。",
+                "神谕寄语（必须有）": "结论总结（必须有）",
+                "神谕的话": "结论",
+                "神谕为你揭示牌面": "牌面为你揭示",
+                "神谕静听宇宙之声": "牌面正在回应你的问题",
+                "向神谕倾诉": "说出你的问题",
+            }
+            for old, new in replacements.items():
+                system_instruction = system_instruction.replace(old, new)
+
+            if "默认起牌规则" not in system_instruction:
+                system_instruction += (
+                    "\n\n**默认起牌规则（高优先级）**\n"
+                    "- 占卜技能开启后，只要用户提出占卜相关问题，即默认按问题起牌并解读。\n"
+                    "- 不需要先追问“要不要抽牌”；直接进入抽牌与解读。\n"
+                    "- 若用户未指定牌阵，默认使用「三张牌阵·处境·行动·结果」。"
+                )
+
+            if '竞技比赛问题必须直接写出"谁赢，几比几"' not in system_instruction:
+                system_instruction += (
+                    "\n\n**竞技比赛输出规则（高优先级）**\n"
+                    "- 如果用户问的是比赛、对局、对阵、比分预测，必须直接给出最终判断：谁赢，几比几。\n"
+                    "- 不能只给胜率或倾向，必须补一个确定比分。\n"
+                    "- 回答顺序应为：数据依据 → 牌面含义 → 最终结论（谁赢、几比几）。"
+                )
+
+            try:
+                from app.core.skills.divination_data_handler import DivinationDataHandler
+
+                div_handler = DivinationDataHandler()
+                div_context = div_handler.analyze_divination_question(user_input or "")
+                if (
+                    div_context.is_data_available
+                    and div_context.domain == "sports_esports"
+                ):
+                    div_prediction = div_handler.generate_data_driven_prediction(
+                        div_context, []
+                    )
+                    system_instruction += (
+                        "\n\n**【占卜数据融合提示】**\n"
+                        f"问题领域：{div_context.domain}\n"
+                        f"最终建议输出：{div_prediction.get('prediction', '')}\n"
+                        f"胜者赢面：{int(round((div_prediction.get('winner_probability') or 0.5) * 100))}%\n"
+                        f"预计比分：{div_prediction.get('predicted_score', '')}\n"
+                        "回答时请直接写出这个结论，再解释原因，不要写成模糊倾向。"
+                    )
+            except Exception as div_err:
+                app_logger.debug(f"[STREAM] 占卜数据指导注入跳过: {div_err}")
+    except Exception as sk_err:
+        app_logger.warning(f"[STREAM] ⚠️ Skills 注入失败: {sk_err}")
+
+    return system_instruction
+
+
 def setup_chat_stream_context(
     request,
     session_manager,
@@ -448,101 +581,9 @@ def setup_chat_stream_context(
     )
 
     # ── Skills injection ──────────────────────────────────────────────────
-    try:
-        from app.core.skills.skill_manager import SkillManager
-
-        _active_skills = SkillManager.get_active_skill_names(task_type=task_type)
-        if _active_skills:
-            _app_logger.debug(
-                f"[STREAM] 🎯 Active Skills ({task_type}): {', '.join(_active_skills)}"
-            )
-        _intent_temp_ids = []
-        try:
-            from app.core.skills.skill_trigger_binding import get_skill_binding_manager
-
-            _intent_temp_ids = get_skill_binding_manager().match_intent(
-                user_input or ""
-            )
-        except Exception as _tb_err:
-            _app_logger.debug("[STREAM] SkillTriggerBinding 匹配跳过: %s", _tb_err)
-        try:
-            from app.core.skills.skill_auto_matcher import SkillAutoMatcher
-
-            _auto_ids = SkillAutoMatcher.match(
-                user_input=user_input or "", task_type=task_type or "CHAT"
-            )
-            if _auto_ids:
-                _intent_temp_ids = list(dict.fromkeys(_intent_temp_ids + _auto_ids))
-        except Exception as _am_err:
-            _app_logger.debug("[STREAM] SkillAutoMatcher 匹配跳过: %s", _am_err)
-        if _intent_temp_ids:
-            _app_logger.debug(f"[STREAM] 🔗 Auto Skills: {', '.join(_intent_temp_ids)}")
-        system_instruction = SkillManager.inject_into_prompt(
-            system_instruction,
-            task_type=task_type,
-            user_input=user_input,
-            temp_skill_ids=_intent_temp_ids,
-        )
-
-        _divination_active = False
-        try:
-            for _s in SkillManager.list_skills():
-                if _s.get("id") == "divination" and _s.get("enabled", False):
-                    _divination_active = True
-                    break
-        except Exception:
-            _divination_active = False
-        if not _divination_active and "divination" in (_intent_temp_ids or []):
-            _divination_active = True
-
-        if _divination_active and isinstance(system_instruction, str):
-            _repls = {
-                "神谕占卜模式": "塔罗占卜模式",
-                "你现在是「神谕」——一位洞悉宇宙之语的存在。": "你现在是一位塔罗解读师，风格神秘但表达清晰、可执行。",
-                "神谕寄语（必须有）": "结论总结（必须有）",
-                "神谕的话": "结论",
-                "神谕为你揭示牌面": "牌面为你揭示",
-                "神谕静听宇宙之声": "牌面正在回应你的问题",
-                "向神谕倾诉": "说出你的问题",
-            }
-            for _old, _new in _repls.items():
-                system_instruction = system_instruction.replace(_old, _new)
-
-            if "默认起牌规则" not in system_instruction:
-                system_instruction += (
-                    "\n\n**默认起牌规则（高优先级）**\n"
-                    '- 占卜技能开启后，只要用户提出占卜相关问题，即默认按问题起牌并解读。\n'
-                    '- 不需要先追问\u201c要不要抽牌\u201d；直接进入抽牌与解读。\n'
-                    '- 若用户未指定牌阵，默认使用\u300c三张牌阵\u00b7处境\u00b7行动\u00b7结果\u300d。'
-                )
-
-            if '竞技比赛问题必须直接写出"谁赢，几比几"' not in system_instruction:
-                system_instruction += (
-                    "\n\n**竞技比赛输出规则（高优先级）**\n"
-                    "- 如果用户问的是比赛、对局、对阵、比分预测，必须直接给出最终判断：谁赢，几比几。\n"
-                    "- 不能只给胜率或倾向，必须补一个确定比分。\n"
-                    "- 回答顺序应为：数据依据 → 牌面含义 → 最终结论（谁赢、几比几）。"
-                )
-
-            try:
-                from app.core.skills.divination_data_handler import DivinationDataHandler
-
-                _div_handler = DivinationDataHandler()
-                _div_context = _div_handler.analyze_divination_question(user_input or "")
-                if _div_context.is_data_available and _div_context.domain == "sports_esports":
-                    _div_prediction = _div_handler.generate_data_driven_prediction(_div_context, [])
-                    system_instruction += (
-                        "\n\n**【占卜数据融合提示】**\n"
-                        f"问题领域：{_div_context.domain}\n"
-                        f"最终建议输出：{_div_prediction.get('prediction', '')}\n"
-                        f"胜者赢面：{int(round((_div_prediction.get('winner_probability') or 0.5) * 100))}%\n"
-                        f"预计比分：{_div_prediction.get('predicted_score', '')}\n"
-                        "回答时请直接写出这个结论，再解释原因，不要写成模糊倾向。"
-                    )
-            except Exception as _div_err:
-                _app_logger.debug(f"[STREAM] 占卜数据指导注入跳过: {_div_err}")
-    except Exception as _sk_err:
-        _app_logger.warning(f"[STREAM] ⚠️ Skills 注入失败: {_sk_err}")
+    system_instruction = _inject_skills_for_stream(
+        system_instruction, task_type, user_input, data, _app_logger
+    )
 
     # ── RAG context building ──────────────────────────────────────────────
     _rag_context_block = ""

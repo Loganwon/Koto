@@ -15,6 +15,7 @@ from unittest.mock import Mock, PropertyMock, patch
 
 import pytest
 
+
 @pytest.fixture()
 def tmp_dir():
     d = tempfile.mkdtemp(prefix="koto_gen_test_")
@@ -357,7 +358,6 @@ class TestDocumentGenerator:
         md = "Before\n---\nAfter"
         path = save_docx(md, title="Sep", output_dir=tmp_dir, filename="sep")
         assert os.path.exists(path)
-
 
         report_path = path.replace(".json", "_report.txt")
         assert os.path.exists(report_path)

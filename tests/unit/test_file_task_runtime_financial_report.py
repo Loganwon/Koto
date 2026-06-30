@@ -115,7 +115,9 @@ def test_file_task_runtime_quality_gate_rejects_financial_report_without_chart_i
 
     def fake_executor(tool_name, args):
         assert tool_name == "verify_task_completion"
-        return json.dumps({"completed": True, "summary": "文件已更新。"}, ensure_ascii=False)
+        return json.dumps(
+            {"completed": True, "summary": "文件已更新。"}, ensure_ascii=False
+        )
 
     check = runtime._verify_task(
         request,
@@ -164,8 +166,7 @@ def test_file_task_runtime_quality_gate_rejects_generated_image_not_inserted_int
 
     assert result["passed"] is False
     assert any(
-        item["criterion"] == "docx_chart_request_has_image"
-        and item["passed"] is False
+        item["criterion"] == "docx_chart_request_has_image" and item["passed"] is False
         for item in result["criteria_results"]
     )
     assert any("进入 Word" in item for item in result["remaining"])
@@ -184,7 +185,9 @@ def test_file_task_runtime_repairs_docx_image_path_from_generated_artifact(tmp_p
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 

@@ -37,9 +37,8 @@ def _safe_resolve_for_compare(path: str) -> str:
     project_candidate = os.path.normpath(os.path.join(project_root, stripped))
     normalized_root = os.path.normpath(root)
     normalized_project = os.path.normpath(project_root)
-    if (
-        workspace_candidate.startswith(normalized_root)
-        and os.path.exists(workspace_candidate)
+    if workspace_candidate.startswith(normalized_root) and os.path.exists(
+        workspace_candidate
     ):
         return workspace_candidate
     if project_candidate.startswith(normalized_project):
@@ -115,7 +114,9 @@ def _verification_summary_from_changes(
         elif rows:
             details.append(f"已写入 {rows} 行")
         if fallback_copy and original_target_name:
-            details.append(f"原目标文件 {original_target_name} 当前不可写，已输出更新副本")
+            details.append(
+                f"原目标文件 {original_target_name} 当前不可写，已输出更新副本"
+            )
     elif operation == "design_pptx_theme_layout":
         slides = int(primary.get("slides_designed") or primary.get("total_slides") or 0)
         theme_name = str(primary.get("theme_name") or "").strip()
@@ -179,7 +180,11 @@ def _verification_summary_from_changes(
     if len(changes) > 1:
         details.append(f"另有 {len(changes) - 1} 个相关文件变更")
 
-    summary = f"已生成更新副本：{file_name}" if fallback_copy else f"文件已成功修改：{file_name}"
+    summary = (
+        f"已生成更新副本：{file_name}"
+        if fallback_copy
+        else f"文件已成功修改：{file_name}"
+    )
     if details:
         summary += "；" + "，".join(details)
     return summary
@@ -344,7 +349,9 @@ def verify_task_completion(
                 if state.get("modified")
             ]
             expected_name = os.path.basename(expected_target) or expected_target
-            actual_text = "、".join(name for name in modified_names if name) or "其他文件"
+            actual_text = (
+                "、".join(name for name in modified_names if name) or "其他文件"
+            )
             return json.dumps(
                 {
                     "completed": False,
@@ -362,8 +369,10 @@ def verify_task_completion(
                 },
                 ensure_ascii=False,
             )
-        if matching_states and not matching_changes and not all(
-            state.get("modified") for state in matching_states
+        if (
+            matching_states
+            and not matching_changes
+            and not all(state.get("modified") for state in matching_states)
         ):
             expected_name = os.path.basename(expected_target) or expected_target
             return json.dumps(
@@ -458,7 +467,9 @@ def verify_task_completion(
                 "completed": False,
                 "confidence": 0.45,
                 "summary": f"{expected_docx} 已插入表格，但任务还要求整理后的文字内容，当前只写入了表格。",
-                "remaining_steps": ["先提炼关键结论，再用 write_docx_content 把摘要/说明写入目标 DOCX"],
+                "remaining_steps": [
+                    "先提炼关键结论，再用 write_docx_content 把摘要/说明写入目标 DOCX"
+                ],
                 "criteria_results": [
                     {
                         "criterion": "docx_table_inserted",

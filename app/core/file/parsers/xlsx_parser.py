@@ -7,7 +7,6 @@ import os
 import uuid
 from typing import Any
 
-
 _UNIVER_TYPE_STRING = 1
 _UNIVER_TYPE_NUMBER = 2
 _UNIVER_TYPE_BOOLEAN = 3
@@ -78,9 +77,14 @@ def openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
                 style["it"] = 1
             if font.size:
                 style["fs"] = int(font.size)
-            if font.color and font.color.type == "rgb" and font.color.rgb not in (
-                "00000000",
-                "FF000000",
+            if (
+                font.color
+                and font.color.type == "rgb"
+                and font.color.rgb
+                not in (
+                    "00000000",
+                    "FF000000",
+                )
             ):
                 style["cl"] = {"rgb": "#" + font.color.rgb[2:]}
         fill = cell.fill

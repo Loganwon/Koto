@@ -6,6 +6,7 @@ RuleRouter — deterministic keyword/pattern based routing rules.
 All pure-logic helpers that do NOT depend on ML models, external I/O, or
 mutable class state live here.  SmartDispatcher delegates to these methods.
 """
+
 from __future__ import annotations
 
 import re
@@ -130,13 +131,13 @@ class RuleRouter:
         text_lower = str(user_input or "").strip().lower()
         if not text_lower:
             return False
-        if any(text_lower.startswith(prefix) for prefix in cls._CAPABILITY_PREFIXES) and any(
-            text_lower.endswith(suffix) for suffix in cls._QUESTION_ENDINGS
-        ):
+        if any(
+            text_lower.startswith(prefix) for prefix in cls._CAPABILITY_PREFIXES
+        ) and any(text_lower.endswith(suffix) for suffix in cls._QUESTION_ENDINGS):
             return True
-        return any(text_lower.startswith(prefix) for prefix in cls._HOWTO_PREFIXES) and any(
-            keyword in text_lower for keyword in cls._ACTION_TOOL_KWS
-        )
+        return any(
+            text_lower.startswith(prefix) for prefix in cls._HOWTO_PREFIXES
+        ) and any(keyword in text_lower for keyword in cls._ACTION_TOOL_KWS)
 
     # ─────────────────────────────────────────────────────────────────────────
     # Quick-task hint (keyword heuristic, no ML)

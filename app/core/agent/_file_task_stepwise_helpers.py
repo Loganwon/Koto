@@ -4,6 +4,7 @@
 These stateless helpers detect stepwise task patterns and extract
 window/page parameters from FileTaskRequest objects.
 """
+
 from __future__ import annotations
 
 import re
@@ -49,7 +50,8 @@ def looks_like_windowed_pdf_task(
     if str(
         resume_control.get("policy") or ""
     ).strip().lower() == "confirm_each_step" and (
-        "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
+        "pdf" in request_file_types(request.files)
+        or resume_source_path.endswith(".pdf")
     ):
         return True
     return bool(
@@ -88,9 +90,10 @@ def should_force_pdf_tool_read(
     recipe_skeleton: Optional[Dict[str, Any]] = None,
 ) -> bool:
     resume_control = _workflow_resume_control(request)
-    should_force = (
-        str(resume_control.get("policy") or "").strip().lower() == "confirm_each_step"
-        or looks_like_windowed_pdf_task(request, recipe_skeleton or {})
+    should_force = str(
+        resume_control.get("policy") or ""
+    ).strip().lower() == "confirm_each_step" or looks_like_windowed_pdf_task(
+        request, recipe_skeleton or {}
     )
     if not should_force:
         return False
@@ -110,9 +113,7 @@ def pdf_context_read_args(
     start_page = step_index * window_pages + 1
     end_page = start_page + window_pages - 1
     source_path = str(
-        resume_control.get("source_path")
-        or getattr(file_info, "path", "")
-        or ""
+        resume_control.get("source_path") or getattr(file_info, "path", "") or ""
     ).strip()
     return {
         "window_pages": window_pages,
@@ -159,7 +160,9 @@ def pdf_text_quality(value: Any) -> Dict[str, Any]:
     alpha_num = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", body))
     cjk_chars = len(re.findall(r"[\u4e00-\u9fff]", body))
     repeated_watermark = bool(
-        re.fullmatch(r"(?:考参通海泰国供仅|仅供国泰海通参考|用使点原禾元供仅荐推苇一|-)+", body)
+        re.fullmatch(
+            r"(?:考参通海泰国供仅|仅供国泰海通参考|用使点原禾元供仅荐推苇一|-)+", body
+        )
     )
     low_density = alpha_num < 80 or unique_chars < 18
     mostly_single_repeats = (

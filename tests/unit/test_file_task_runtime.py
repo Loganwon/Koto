@@ -1,5 +1,5 @@
-import json
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -13,8 +13,8 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamResult,
     event_to_sse,
 )
-from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_model import FileTaskModelClient
+from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_tool_catalog import (
     file_task_tool_specs,
     supported_file_workflows,
@@ -24,7 +24,6 @@ from app.core.agent.file_task_tool_gateway import (
     FileTaskToolGateway,
 )
 from app.core.agent.file_task_workflow_state import build_workflow_state
-
 
 
 def test_file_task_runtime_relays_streaming_tool_events_before_tool_finished():
@@ -118,7 +117,6 @@ def test_file_task_runtime_relays_streaming_tool_events_before_tool_finished():
     assert step_verified.payload["file_changes"][0]["path"] == "draft.docx"
 
 
-
 def test_file_task_runtime_merges_current_file_content_into_target_context():
     runtime = FileTaskRuntime()
     request = FileTaskRequest(
@@ -141,10 +139,6 @@ def test_file_task_runtime_merges_current_file_content_into_target_context():
     assert files[0].content == "当前打开文档正文"
 
 
-
-
-
-
 def test_context_files_resolves_workspace_relative_path_from_task(tmp_path):
     workspace = tmp_path / "workspace"
     target = workspace / "ui_smoke_tests" / "koto_ui_smoke_sales.xlsx"
@@ -163,7 +157,9 @@ def test_context_files_resolves_workspace_relative_path_from_task(tmp_path):
     assert files[0].type == "xlsx"
 
 
-def test_context_files_deduplicates_relative_and_absolute_workspace_paths(tmp_path, monkeypatch):
+def test_context_files_deduplicates_relative_and_absolute_workspace_paths(
+    tmp_path, monkeypatch
+):
     workspace = tmp_path / "workspace"
     target = workspace / "sales.xlsx"
     workspace.mkdir()
@@ -187,7 +183,9 @@ def test_context_files_deduplicates_relative_and_absolute_workspace_paths(tmp_pa
     assert [file_info.name for file_info in files].count("sales.xlsx") == 1
 
 
-def test_context_files_deduplicates_current_file_basename_with_explicit_workspace_match(tmp_path):
+def test_context_files_deduplicates_current_file_basename_with_explicit_workspace_match(
+    tmp_path,
+):
     workspace = tmp_path / "workspace"
     target = workspace / "_test_integration_workspace.txt"
     workspace.mkdir()
@@ -214,8 +212,13 @@ def test_context_files_deduplicates_current_file_basename_with_explicit_workspac
 
     files = runtime._context_files(request)
 
-    assert [file_info.name for file_info in files] == ["_test_integration_workspace.txt"]
-    assert runtime._plan_summary(request, files, write_intent=False) == "准备处理 1 个文件。"
+    assert [file_info.name for file_info in files] == [
+        "_test_integration_workspace.txt"
+    ]
+    assert (
+        runtime._plan_summary(request, files, write_intent=False)
+        == "准备处理 1 个文件。"
+    )
 
 
 def test_context_files_resolves_unique_workspace_basename_from_task(tmp_path):
@@ -324,8 +327,6 @@ def test_readonly_directory_listing_does_not_satisfy_missing_file_reference(tmp_
     assert run_finished.payload["completed_task"] is False
 
 
-
-
 def test_explicit_answer_mode_is_not_overridden_by_docx_review_words():
     runtime = FileTaskRuntime()
     request = FileTaskRequest(
@@ -401,7 +402,6 @@ def test_explicit_writeback_still_controls_file_task_mainline():
     assert "mainline_contract:keyword_write_demoted" not in classification.reason_codes
 
 
-
 def test_readonly_financial_keywords_do_not_preempt_mainline_runner():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",
@@ -429,11 +429,6 @@ def test_readonly_financial_keywords_do_not_preempt_mainline_runner():
     assert run_started.payload["write_intent"] is False
     assert run_started.payload["selected_recipe"] != "financial_xlsx_docx_report"
     assert "mainline_contract:readonly_guard" in run_started.payload["reason_codes"]
-
-
-
-
-
 
 
 def test_file_task_runtime_classifies_two_docx_compare_annotation_as_compare_write():
@@ -586,13 +581,16 @@ def test_file_task_runtime_executes_two_docx_compare_annotation_through_model_lo
         # Adjudicator call: no tools, adjudicator system prompt
         if not kwargs.get("tools") and "任务意图裁判" in str(kwargs.get("system", "")):
             return {
-                "content": json.dumps({
-                    "intent": "edit_file",
-                    "confidence": 0.90,
-                    "should_write": True,
-                    "should_use_annotate_bridge": False,
-                    "reason": "Two-DOCX comparison uses compare tool, not annotation bridge"
-                }, ensure_ascii=False),
+                "content": json.dumps(
+                    {
+                        "intent": "edit_file",
+                        "confidence": 0.90,
+                        "should_write": True,
+                        "should_use_annotate_bridge": False,
+                        "reason": "Two-DOCX comparison uses compare tool, not annotation bridge",
+                    },
+                    ensure_ascii=False,
+                ),
                 "tool_calls": [],
             }
         if len(model_calls) == 2:
@@ -739,13 +737,16 @@ def test_file_task_runtime_contract_compare_returns_risk_summary():
         # Adjudicator call: no tools, adjudicator system prompt
         if not kwargs.get("tools") and "任务意图裁判" in str(kwargs.get("system", "")):
             return {
-                "content": json.dumps({
-                    "intent": "edit_file",
-                    "confidence": 0.90,
-                    "should_write": True,
-                    "should_use_annotate_bridge": False,
-                    "reason": "Two-DOCX comparison uses compare tool, not annotation bridge"
-                }, ensure_ascii=False),
+                "content": json.dumps(
+                    {
+                        "intent": "edit_file",
+                        "confidence": 0.90,
+                        "should_write": True,
+                        "should_use_annotate_bridge": False,
+                        "reason": "Two-DOCX comparison uses compare tool, not annotation bridge",
+                    },
+                    ensure_ascii=False,
+                ),
                 "tool_calls": [],
             }
         if len(model_calls) == 1:
@@ -840,8 +841,6 @@ def test_file_task_runtime_contract_compare_returns_risk_summary():
     # decision_trace mechanism was removed from _classify_request
 
 
-
-
 def test_file_task_runtime_generic_office_quality_gate_rejects_unstructured_docx_write():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",
@@ -910,9 +909,7 @@ def test_file_task_runtime_quality_gate_accepts_docx_template_fill():
         task="Fill the placeholders in this Word contract template.",
         run_id="docx_template_fill_gate",
         target_path="filled.docx",
-        files=[
-            FileTaskFile(path="template.docx", name="template.docx", type="docx")
-        ],
+        files=[FileTaskFile(path="template.docx", name="template.docx", type="docx")],
     )
 
     result = runtime._evaluate_task_quality_gate(
@@ -946,7 +943,9 @@ def test_file_task_runtime_quality_gate_accepts_docx_pdf_export():
         run_id="docx_pdf_export_gate",
         target_path="report.docx",
         files=[
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True)
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            )
         ],
     )
 
@@ -980,9 +979,7 @@ def test_file_task_runtime_quality_gate_accepts_generic_file_convert():
         task="Convert notes.txt to markdown and save it as notes.md.",
         run_id="file_format_convert_gate",
         target_path="notes.md",
-        files=[
-            FileTaskFile(path="notes.txt", name="notes.txt", type="txt")
-        ],
+        files=[FileTaskFile(path="notes.txt", name="notes.txt", type="txt")],
     )
 
     result = runtime._evaluate_task_quality_gate(
@@ -1050,7 +1047,9 @@ def test_file_task_runtime_quality_gate_accepts_local_docx_paragraph_insert():
     assert "docx_table_request_has_table" not in criteria
 
 
-def test_file_task_runtime_quality_gate_rejects_docx_missing_requested_source_content(tmp_path):
+def test_file_task_runtime_quality_gate_rejects_docx_missing_requested_source_content(
+    tmp_path,
+):
     from docx import Document
 
     source_path = tmp_path / "workspace" / "_test_integration_workspace.txt"
@@ -1103,10 +1102,14 @@ def test_file_task_runtime_quality_gate_rejects_docx_missing_requested_source_co
         item["criterion"] == "source_content_included" and not item["passed"]
         for item in result["criteria_results"]
     )
-    assert any("_test_integration_workspace.txt" in item for item in result["remaining"])
+    assert any(
+        "_test_integration_workspace.txt" in item for item in result["remaining"]
+    )
 
 
-def test_file_task_runtime_quality_gate_accepts_docx_with_requested_source_content(tmp_path):
+def test_file_task_runtime_quality_gate_accepts_docx_with_requested_source_content(
+    tmp_path,
+):
     from docx import Document
 
     source_path = tmp_path / "workspace" / "_test_integration_workspace.txt"
@@ -1227,7 +1230,9 @@ def test_file_task_runtime_quality_gate_rejects_unsorted_top_n_docx_table(tmp_pa
         and not item["passed"]
         for item in result["criteria_results"]
     )
-    assert any("Blue Harbor" in item and "Delta Foods" in item for item in result["remaining"])
+    assert any(
+        "Blue Harbor" in item and "Delta Foods" in item for item in result["remaining"]
+    )
 
 
 def test_file_task_runtime_quality_gate_accepts_sorted_top_n_docx_table(tmp_path):
@@ -1292,13 +1297,14 @@ def test_file_task_runtime_quality_gate_accepts_sorted_top_n_docx_table(tmp_path
 
     assert result["passed"] is True
     assert any(
-        item["criterion"] == "top_table_sorted_by_requested_metric"
-        and item["passed"]
+        item["criterion"] == "top_table_sorted_by_requested_metric" and item["passed"]
         for item in result["criteria_results"]
     )
 
 
-def test_file_task_runtime_quality_gate_rejects_extra_columns_when_table_columns_requested(tmp_path):
+def test_file_task_runtime_quality_gate_rejects_extra_columns_when_table_columns_requested(
+    tmp_path,
+):
     import openpyxl
     from docx import Document
 
@@ -1317,7 +1323,9 @@ def test_file_task_runtime_quality_gate_rejects_extra_columns_when_table_columns
     document = Document()
     document.add_paragraph("Top 3 Customers by Revenue")
     table = document.add_table(rows=4, cols=5)
-    for column, header in enumerate(["Customer", "Region", "Revenue", "Margin", "Risk"]):
+    for column, header in enumerate(
+        ["Customer", "Region", "Revenue", "Margin", "Risk"]
+    ):
         table.cell(0, column).text = header
     for row_index, row_values in enumerate(
         [
@@ -1366,7 +1374,9 @@ def test_file_task_runtime_quality_gate_rejects_extra_columns_when_table_columns
     )
 
 
-def test_file_task_runtime_quality_gate_uses_request_source_when_change_has_short_source_path(tmp_path):
+def test_file_task_runtime_quality_gate_uses_request_source_when_change_has_short_source_path(
+    tmp_path,
+):
     import openpyxl
     from docx import Document
 
@@ -1431,7 +1441,9 @@ def test_file_task_runtime_quality_gate_uses_request_source_when_change_has_shor
     )
 
 
-def test_file_task_runtime_quality_gate_rejects_duplicate_top_table_rows_in_paragraphs(tmp_path):
+def test_file_task_runtime_quality_gate_rejects_duplicate_top_table_rows_in_paragraphs(
+    tmp_path,
+):
     import openpyxl
     from docx import Document
 
@@ -1448,8 +1460,12 @@ def test_file_task_runtime_quality_gate_rejects_duplicate_top_table_rows_in_para
 
     document = Document()
     document.add_paragraph("Top Three Customers by Revenue")
-    document.add_paragraph("Customer: Blue Harbor | Region: APAC | Revenue: 142000 | Margin: 0.31")
-    document.add_paragraph("Customer: Northwind Labs | Region: NA | Revenue: 128000 | Margin: 0.34")
+    document.add_paragraph(
+        "Customer: Blue Harbor | Region: APAC | Revenue: 142000 | Margin: 0.31"
+    )
+    document.add_paragraph(
+        "Customer: Northwind Labs | Region: NA | Revenue: 128000 | Margin: 0.34"
+    )
     table = document.add_table(rows=4, cols=4)
     for column, header in enumerate(["Customer", "Region", "Revenue", "Margin"]):
         table.cell(0, column).text = header
@@ -1703,9 +1719,7 @@ def test_file_task_runtime_quality_gate_accepts_text_selection_replace():
         task="Rewrite the selected text and write it back to this Markdown file.",
         run_id="text_selection_replace_gate",
         target_path="notes.md",
-        files=[
-            FileTaskFile(path="notes.md", name="notes.md", type="md", target=True)
-        ],
+        files=[FileTaskFile(path="notes.md", name="notes.md", type="md", target=True)],
     )
 
     result = runtime._evaluate_task_quality_gate(
@@ -1738,9 +1752,7 @@ def test_file_task_runtime_quality_gate_accepts_workspace_file_copy():
         task="Copy this PDF file to archive.pdf.",
         run_id="workspace_file_copy_gate",
         target_path="archive.pdf",
-        files=[
-            FileTaskFile(path="source.pdf", name="source.pdf", type="pdf")
-        ],
+        files=[FileTaskFile(path="source.pdf", name="source.pdf", type="pdf")],
     )
 
     result = runtime._evaluate_task_quality_gate(
@@ -1772,9 +1784,7 @@ def test_file_task_runtime_quality_gate_accepts_cross_file_extract_to_file():
         task="Extract the action items from notes.pdf into action_items.md.",
         run_id="cross_file_extract_gate",
         target_path="action_items.md",
-        files=[
-            FileTaskFile(path="notes.pdf", name="notes.pdf", type="pdf")
-        ],
+        files=[FileTaskFile(path="notes.pdf", name="notes.pdf", type="pdf")],
     )
 
     result = runtime._evaluate_task_quality_gate(
@@ -1873,22 +1883,6 @@ def test_file_task_runtime_emits_typed_event_sequence_with_monotonic_seq():
     assert "check" in step_result_ids
     assert execute_result.payload["summary"] == "已总结：alpha beta gamma"
     assert check_result.payload["passed"] is True
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_file_task_runtime_rolls_up_step_results_for_generic_write_tasks():
@@ -1992,17 +1986,16 @@ def test_file_task_runtime_rolls_up_step_results_for_generic_write_tasks():
     assert check_result.payload["status"] == "completed"
 
 
-
-
-
-
-
 def test_insert_docx_paragraph_append_request_clears_heading_anchors():
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
         task="只追加一句到目标 DOCX 末尾，保留已有表格不变。",
         target_path="report.docx",
-        files=[FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True)],
+        files=[
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            )
+        ],
     )
 
     repaired = runtime._repair_tool_args_for_context(
@@ -2019,7 +2012,6 @@ def test_insert_docx_paragraph_append_request_clears_heading_anchors():
     assert repaired["path"] == "report.docx"
     assert "before_heading" not in repaired
     assert "after_heading" not in repaired
-
 
 
 def test_file_task_runtime_readonly_negation_overrides_write_word_in_task():
@@ -2164,7 +2156,6 @@ def test_file_task_runtime_create_new_docx_allows_source_file_protection():
     assert classification.operation_kind != "read", details
     assert "write_intent" in classification.reason_codes, details
     assert "readonly_write_negation" not in classification.reason_codes, details
-
 
 
 def test_file_task_runtime_same_file_protection_still_blocks_write():
@@ -2367,7 +2358,10 @@ def test_file_task_runtime_blocks_python_file_writes_when_task_is_explicitly_rea
 
     assert called_tools == ["parse_file_to_text"]
     assert blocked.payload["blocked"] is True
-    assert "已拦截 run_python_code 中的文件写入/保存代码" in blocked.payload["result_preview"]
+    assert (
+        "已拦截 run_python_code 中的文件写入/保存代码"
+        in blocked.payload["result_preview"]
+    )
     assert run_finished.payload["summary"] == "已改为只给只读分析。"
     assert run_finished.payload["file_changes"] == []
     assert run_finished.payload["completed_task"] is True
@@ -2644,7 +2638,9 @@ def test_file_task_runtime_emits_model_confirmed_plan_before_tools():
 
     assert plan_index < first_tool_index
     assert confirmed.step_id == "execute"
-    assert confirmed.payload["summary"] == "我会先读取表格，再把表格写入 Word 并核验结果。"
+    assert (
+        confirmed.payload["summary"] == "我会先读取表格，再把表格写入 Word 并核验结果。"
+    )
     assert [step["title"] for step in confirmed.payload["steps"]] == [
         "读取 Excel 表格",
         "写入 Word 表格",
@@ -2652,8 +2648,6 @@ def test_file_task_runtime_emits_model_confirmed_plan_before_tools():
     ]
     assert "sales.xlsx" in confirmed.payload["steps"][0]["description"]
     assert "report.docx" in confirmed.payload["steps"][1]["description"]
-
-
 
 
 def test_file_task_runtime_explicit_write_beats_advisory_analysis_words():
@@ -3085,7 +3079,6 @@ def test_file_task_runtime_quality_gate_rejects_ppt_beautify_without_design_pass
     )
 
 
-
 def test_file_task_runtime_repairs_missing_docx_write_path_for_single_target(tmp_path):
     from docx import Document
 
@@ -3119,7 +3112,11 @@ def test_file_task_runtime_repairs_missing_docx_write_path_for_single_target(tmp
     )
 
     events = list(
-        FileTaskRuntime(model_client=lambda **kwargs: next(responses, {"content": "", "tool_calls": []})).run(request)
+        FileTaskRuntime(
+            model_client=lambda **kwargs: next(
+                responses, {"content": "", "tool_calls": []}
+            )
+        ).run(request)
     )
 
     file_changed = next(event for event in events if event.type == "file.changed")
@@ -3536,7 +3533,9 @@ def test_file_task_runtime_system_prompt_mentions_execution_brief_protocol():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
     )
-    request = FileTaskRequest(task="整理文件并写回目标文档", run_id="execution_brief_prompt_demo")
+    request = FileTaskRequest(
+        task="整理文件并写回目标文档", run_id="execution_brief_prompt_demo"
+    )
 
     system = runtime._build_system_prompt(request, [])
 
@@ -3744,13 +3743,18 @@ def test_file_task_runtime_run_uses_custom_intent_planner_steps_and_payload():
     run_started = events[0]
     plan_created = next(event for event in events if event.type == "plan.created")
 
-    assert run_started.payload["intent_plan"]["goal_statement"] == "先分析风险，再等待确认应用。"
+    assert (
+        run_started.payload["intent_plan"]["goal_statement"]
+        == "先分析风险，再等待确认应用。"
+    )
     assert (
         run_started.payload["intent_plan"]["recommended_strategy"]
         == "analyze_then_confirm"
     )
     assert plan_created.payload["intent_plan"]["can_apply"] is True
-    assert plan_created.payload["steps"][1]["description"] == "先做局部分析，再等待确认。"
+    assert (
+        plan_created.payload["steps"][1]["description"] == "先做局部分析，再等待确认。"
+    )
 
 
 def test_file_task_runtime_surfaces_tool_gap_without_retrying_write_guard():
@@ -4312,17 +4316,6 @@ def test_file_task_runtime_messages_include_capability_profiles():
     assert '"write_support": "native"' in content
 
 
-
-
-
-
-
-
-
-
-
-
-
 def test_file_task_runtime_repairs_after_failed_verification(tmp_path):
     target_path = tmp_path / "report.docx"
     target_path.write_text("placeholder", encoding="utf-8")
@@ -4387,7 +4380,9 @@ def test_file_task_runtime_repairs_after_failed_verification(tmp_path):
                     {
                         "completed": False,
                         "summary": "正文还没有写到目标位置。",
-                        "remaining_steps": ["把正文结论写到目标段落，而不是停留在草稿区"],
+                        "remaining_steps": [
+                            "把正文结论写到目标段落，而不是停留在草稿区"
+                        ],
                     },
                     ensure_ascii=False,
                 )
@@ -4546,7 +4541,9 @@ def test_file_task_runtime_preserves_write_blocked_status_in_immediate_verify(tm
 
     assert check_finished.payload["status"] == "write_blocked"
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["remaining"] == ["关闭占用目标文件的程序或页签后重试。"]
+    assert check_finished.payload["remaining"] == [
+        "关闭占用目标文件的程序或页签后重试。"
+    ]
     assert run_finished.payload["completed_task"] is False
     assert run_finished.payload["runtime"]["terminal_status"] == "write_blocked"
 
@@ -4737,7 +4734,9 @@ def test_file_task_runtime_blocks_python_pdf_text_extraction_and_guides_native_r
     )
     assert blocked.payload["tool_name"] == "run_python_code"
     assert blocked.payload["success"] is False
-    assert "不要用 run_python_code 直接读取 PDF 文本" in blocked.payload["result_preview"]
+    assert (
+        "不要用 run_python_code 直接读取 PDF 文本" in blocked.payload["result_preview"]
+    )
     assert "parse_file_to_text" in blocked.payload["result_preview"]
 
 
@@ -4769,7 +4768,9 @@ def test_file_task_runtime_surfaces_python_image_artifacts_in_tool_finished():
             "_koto_modified": [],
         }
 
-    request = FileTaskRequest(task="基于当前数据生成图表", run_id="python_chart_artifact_demo")
+    request = FileTaskRequest(
+        task="基于当前数据生成图表", run_id="python_chart_artifact_demo"
+    )
     events = list(
         FileTaskRuntime(
             tool_executor=fake_executor, model_client=fake_model, max_rounds=2
@@ -4894,7 +4895,6 @@ def test_file_task_runtime_supervisor_redirects_duplicate_read_before_write():
     )
     assert events[-1].payload["completed_task"] is False
     assert events[-1].payload["runtime"]["terminal_status"] == "awaiting_confirmation"
-
 
 
 def test_file_task_runtime_treats_add_into_docx_as_write_intent():
@@ -5719,9 +5719,9 @@ def test_file_task_model_client_routes_local_and_cloud():
 
 
 def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
-    from app.core.agent import file_task_model as file_task_model_module
     import app.core.llm.model_fallback as fallback_module
     import app.core.llm.provider_factory as provider_factory
+    from app.core.agent import file_task_model as file_task_model_module
 
     captured = {}
 
@@ -5767,8 +5767,8 @@ def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
 
 
 def test_file_task_model_client_passes_file_task_timeout_to_local_provider(monkeypatch):
-    from app.core.agent import file_task_model as file_task_model_module
     import app.core.llm.ollama_llm_provider as ollama_module
+    from app.core.agent import file_task_model as file_task_model_module
 
     captured = {}
 
@@ -5820,9 +5820,6 @@ def test_file_task_model_client_prefers_file_task_model_route(monkeypatch):
     )
 
 
-
-
-
 def test_file_task_runtime_accepts_short_summary_plus_real_table_for_docx_report():
     runtime = FileTaskRuntime()
     request = FileTaskRequest(
@@ -5858,8 +5855,9 @@ def test_file_task_runtime_accepts_short_summary_plus_real_table_for_docx_report
     assert result["passed"] is True
 
 
-
-def test_file_task_runtime_infers_new_artifact_target_without_marking_source_target(tmp_path):
+def test_file_task_runtime_infers_new_artifact_target_without_marking_source_target(
+    tmp_path,
+):
     source_path = tmp_path / "workspace" / "_test_integration_workspace.txt"
     source_path.parent.mkdir()
     source_path.write_text("workspace file content", encoding="utf-8")
@@ -5909,14 +5907,21 @@ def test_file_task_runtime_infers_new_artifact_target_without_marking_source_tar
         ],
     )
     normalized_ui_request = runtime._request_with_inferred_target_path(ui_request)
-    assert normalized_ui_request.target_path == "workspace/koto_ai_assistant_eval_generated.docx"
+    assert (
+        normalized_ui_request.target_path
+        == "workspace/koto_ai_assistant_eval_generated.docx"
+    )
 
 
 def test_file_task_runtime_explicit_output_overrides_open_source_target(tmp_path):
-    source_path = tmp_path / "workspace" / "_codex_frontend_task_tests" / "koto_task_smoke.txt"
+    source_path = (
+        tmp_path / "workspace" / "_codex_frontend_task_tests" / "koto_task_smoke.txt"
+    )
     source_path.parent.mkdir(parents=True)
     source_path.write_text("Koto task smoke fixture", encoding="utf-8")
-    output_path = "workspace/_codex_frontend_task_tests/koto_complex_task_report_20260617_1345.md"
+    output_path = (
+        "workspace/_codex_frontend_task_tests/koto_complex_task_report_20260617_1345.md"
+    )
     runtime = FileTaskRuntime(workspace_root=str(tmp_path))
     request = FileTaskRequest(
         task=(
@@ -5951,12 +5956,21 @@ def test_file_task_runtime_explicit_output_overrides_open_source_target(tmp_path
     assert normalized.target_path == output_path
     assert summary == "准备生成 koto_complex_task_report_20260617_1345.md。"
     assert verify_target == output_path
-    assert any(file_info.path == output_path and file_info.target for file_info in context_files)
-    source_context = next(file_info for file_info in context_files if file_info.name == "koto_task_smoke.txt")
+    assert any(
+        file_info.path == output_path and file_info.target
+        for file_info in context_files
+    )
+    source_context = next(
+        file_info
+        for file_info in context_files
+        if file_info.name == "koto_task_smoke.txt"
+    )
     assert source_context.target is False
 
 
-def test_file_task_runtime_blocks_model_write_to_protected_source_when_creating_artifact(tmp_path):
+def test_file_task_runtime_blocks_model_write_to_protected_source_when_creating_artifact(
+    tmp_path,
+):
     source_path = tmp_path / "workspace" / "_test_integration_workspace.txt"
     source_path.parent.mkdir()
     source_path.write_text("workspace file content", encoding="utf-8")
@@ -6057,10 +6071,10 @@ def test_file_task_runtime_blocks_model_write_to_protected_source_when_creating_
     changed = [event.payload for event in events if event.type == "file.changed"]
     run_started = next(event for event in events if event.type == "run.started")
 
-    assert "不能写入 _test_integration_workspace.txt" in blocked.payload["result_preview"]
-    write_calls = [
-        args for name, args in called_tools if name == "write_docx_content"
-    ]
+    assert (
+        "不能写入 _test_integration_workspace.txt" in blocked.payload["result_preview"]
+    )
+    write_calls = [args for name, args in called_tools if name == "write_docx_content"]
     assert write_calls == [
         {
             "path": target_path,

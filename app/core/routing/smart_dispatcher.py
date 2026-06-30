@@ -7,9 +7,9 @@ from typing import Optional
 
 from app.core.routing.routing_config import (
     TASK_CORPUS,
+    TRIVIAL_EXCLUDE,
     TRIVIAL_GREETINGS,
     TRIVIAL_IDENTITY,
-    TRIVIAL_EXCLUDE,
 )
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ def _get_task_classifier():
 
 
 from app.core.routing.rule_router import RuleRouter  # noqa: E402
+
 
 class SmartDispatcher:
     """
@@ -107,13 +108,16 @@ class SmartDispatcher:
             cls._task_vectors[task] = avg_vector
 
     @classmethod
-    def _compute_similarity_scores(cls, user_input: str, task_candidates: Optional[list] = None) -> dict:
+    def _compute_similarity_scores(
+        cls, user_input: str, task_candidates: Optional[list] = None
+    ) -> dict:
         """Compute semantic similarity using TaskClassifier embeddings (ML fallback)."""
         if not user_input or not user_input.strip():
             return {}
         scores = {}
         try:
             from app.core.routing.task_classifier import TaskClassifier
+
             emb_scores = TaskClassifier.compute_similarities(user_input.strip())
             if emb_scores:
                 scores = {k: v for k, v in emb_scores.items() if k in cls.TASK_CORPUS}
@@ -282,6 +286,7 @@ class SmartDispatcher:
         # --- Cloud AI Router (primary, fastest cloud model) ---
         if cls._dependencies and cls._dependencies.get("client"):
             from app.core.routing.ai_router import AIRouter
+
             try:
                 _ai_type, _ai_conf, _ai_source = AIRouter.classify(
                     cls._dependencies["client"],
@@ -290,13 +295,18 @@ class SmartDispatcher:
                 )
                 if _ai_type and _ai_conf:
                     _ai_type = cls._apply_routing_safety(
-                        _ai_type, user_input, user_lower,
-                        file_context, LocalExecutor, WebSearcher,
+                        _ai_type,
+                        user_input,
+                        user_lower,
+                        file_context,
+                        LocalExecutor,
+                        WebSearcher,
                     )
                     _ai_conf_label = f"{_ai_conf} ({_ai_source})"
                     logger.info(
                         "[SmartDispatcher] ☁️ AIRouter PRIMARY → %s (%s)",
-                        _ai_type, _ai_conf_label,
+                        _ai_type,
+                        _ai_conf_label,
                     )
                     return ((_ai_type, _ai_conf_label, {}), None)
             except Exception as _air_err:
@@ -330,15 +340,21 @@ class SmartDispatcher:
                         task,
                         confidence_value,
                     )
-                    return (task, f"🚀 ModelPrimary(TaskClassifier) {confidence_value:.2f}", context_info), early_model_result
+                    return (
+                        task,
+                        f"🚀 ModelPrimary(TaskClassifier) {confidence_value:.2f}",
+                        context_info,
+                    ), early_model_result
         except Exception as exc:
-            logger.warning("[SmartDispatcher] ⚠️ 模型主判 TaskClassifier 异常（跳过）: %s", exc)
+            logger.warning(
+                "[SmartDispatcher] ⚠️ 模型主判 TaskClassifier 异常（跳过）: %s", exc
+            )
 
         try:
             local_model_router = _get_local_model_router()
             if local_model_router.is_ollama_available():
-                task, confidence_text, _, hint, complexity = local_model_router.classify_with_hint(
-                    user_input, timeout=3.5
+                task, confidence_text, _, hint, complexity = (
+                    local_model_router.classify_with_hint(user_input, timeout=3.5)
                 )
                 confidence_value = cls._confidence_float(confidence_text)
                 early_model_result = (
@@ -375,7 +391,11 @@ class SmartDispatcher:
                         task,
                         confidence_value,
                     )
-                    return (task, f"🤖 ModelPrimary(Local) {confidence_value:.2f}", context_info), early_model_result
+                    return (
+                        task,
+                        f"🤖 ModelPrimary(Local) {confidence_value:.2f}",
+                        context_info,
+                    ), early_model_result
         except Exception as exc:
             logger.warning("[SmartDispatcher] ⚠️ 模型主判本地模型异常（跳过）: %s", exc)
 
@@ -396,7 +416,9 @@ class SmartDispatcher:
 
         # Cache lookup — skip for requests with file_context (state may differ)
         if not file_context:
-            cache_key = _hashlib.md5(user_input.encode(), usedforsecurity=False).hexdigest()[:16]
+            cache_key = _hashlib.md5(
+                user_input.encode(), usedforsecurity=False
+            ).hexdigest()[:16]
             cache, lock = cls._get_route_cache()
             with lock:
                 if cache_key in cache:
@@ -537,8 +559,12 @@ class SmartDispatcher:
                 _tc2_task, _tc2_conf = _TC2.classify(user_input)
                 if _tc2_conf >= _SEC_THRESH:
                     _tc2_task = cls._apply_routing_safety(
-                        _tc2_task, user_input, user_lower,
-                        file_context, LocalExecutor, WebSearcher,
+                        _tc2_task,
+                        user_input,
+                        user_lower,
+                        file_context,
+                        LocalExecutor,
+                        WebSearcher,
                     )
                     context_info = context_info or {}
                     context_info["routing_list"] = cls._build_routing_list(
@@ -548,18 +574,30 @@ class SmartDispatcher:
                     )
                     logger.info(
                         "[SmartDispatcher] 🚀 TC二次兜底: '%s' → %s (%.2f)",
-                        user_input[:30], _tc2_task, _tc2_conf,
+                        user_input[:30],
+                        _tc2_task,
+                        _tc2_conf,
                     )
-                    return _tc2_task, f"🚀 TaskClassifier(2) {_tc2_conf:.2f}", context_info
+                    return (
+                        _tc2_task,
+                        f"🚀 TaskClassifier(2) {_tc2_conf:.2f}",
+                        context_info,
+                    )
         except Exception:
-            logger.warning("[SmartDispatcher] TaskClassifier 2nd chance failed", exc_info=True)
+            logger.warning(
+                "[SmartDispatcher] TaskClassifier 2nd chance failed", exc_info=True
+            )
 
         if _early_model_result is not None:
             _em_task, _em_conf, _em_cs, _em_hint, _em_cplx = _early_model_result
             if _em_task and _em_conf >= _SEC_THRESH:
                 _em_task = cls._apply_routing_safety(
-                    _em_task, user_input, user_lower,
-                    file_context, LocalExecutor, WebSearcher,
+                    _em_task,
+                    user_input,
+                    user_lower,
+                    file_context,
+                    LocalExecutor,
+                    WebSearcher,
                 )
                 context_info = context_info or {}
                 context_info["routing_list"] = cls._build_routing_list(
@@ -573,7 +611,9 @@ class SmartDispatcher:
                     context_info["complexity"] = "complex"
                 logger.info(
                     "[SmartDispatcher] 🤖 Ollama二次兜底: '%s' → %s (%.2f)",
-                    user_input[:30], _em_task, _em_conf,
+                    user_input[:30],
+                    _em_task,
+                    _em_conf,
                 )
                 return _em_task, f"🤖 LocalModel(2) {_em_conf:.2f}", context_info
         else:
@@ -590,8 +630,12 @@ class SmartDispatcher:
                             _r2_conf = float(_mm2.group(1))
                     if _r2_task and _r2_conf >= _SEC_THRESH:
                         _r2_task = cls._apply_routing_safety(
-                            _r2_task, user_input, user_lower,
-                            file_context, LocalExecutor, WebSearcher,
+                            _r2_task,
+                            user_input,
+                            user_lower,
+                            file_context,
+                            LocalExecutor,
+                            WebSearcher,
                         )
                         context_info = context_info or {}
                         context_info["routing_list"] = cls._build_routing_list(
@@ -605,11 +649,19 @@ class SmartDispatcher:
                             context_info["complexity"] = "complex"
                         logger.info(
                             "[SmartDispatcher] 🤖 Ollama延迟起动: '%s' → %s (%.2f)",
-                            user_input[:30], _r2_task, _r2_conf,
+                            user_input[:30],
+                            _r2_task,
+                            _r2_conf,
                         )
-                        return _r2_task, f"🤖 LocalModel(late) {_r2_conf:.2f}", context_info
+                        return (
+                            _r2_task,
+                            f"🤖 LocalModel(late) {_r2_conf:.2f}",
+                            context_info,
+                        )
             except Exception:
-                logger.warning("[SmartDispatcher] Ollama late retry failed", exc_info=True)
+                logger.warning(
+                    "[SmartDispatcher] Ollama late retry failed", exc_info=True
+                )
 
         # ── 5. Keyword Fallback Rules (all models failed) ────────────────────
         logger.debug(
@@ -639,18 +691,29 @@ class SmartDispatcher:
                             boosts={"DOC_ANNOTATE": 1.0},
                             reasons={"DOC_ANNOTATE": ["fallback:annotation_with_file"]},
                         )
-                        _kw_result = ("DOC_ANNOTATE", "📄 Fallback-Annotation", context_info)
+                        _kw_result = (
+                            "DOC_ANNOTATE",
+                            "📄 Fallback-Annotation",
+                            context_info,
+                        )
                 except Exception:
-                    logger.warning("[SmartDispatcher] annotation fallback failed", exc_info=True)
+                    logger.warning(
+                        "[SmartDispatcher] annotation fallback failed", exc_info=True
+                    )
 
         # PPT / DocGen / FileSearch / System / MultiStep / Compound / RAG / WebSearch
 
         # PPT direct
         from app.core.routing.routing_config import (
-            PPT_DIRECT_KEYWORDS, PPT_ACTION_WORDS, PPT_QUESTION_GUARDS,
-            DOC_GEN_OUTPUT_KEYWORDS, DOC_GEN_ACTION_KEYWORDS, DOC_GEN_QUESTION_GUARDS,
+            DOC_GEN_ACTION_KEYWORDS,
+            DOC_GEN_OUTPUT_KEYWORDS,
+            DOC_GEN_QUESTION_GUARDS,
             FILE_SEARCH_PATTERNS,
+            PPT_ACTION_WORDS,
+            PPT_DIRECT_KEYWORDS,
+            PPT_QUESTION_GUARDS,
         )
+
         if _kw_result is None and (
             any(k in user_lower for k in PPT_DIRECT_KEYWORDS)
             and any(a in user_lower for a in PPT_ACTION_WORDS)
@@ -682,7 +745,9 @@ class SmartDispatcher:
             _kw_result = ("FILE_GEN", "📄 DocGen-Direct", context_info)
 
         # File search (global)
-        if _kw_result is None and any(re.search(p, user_input) for p in FILE_SEARCH_PATTERNS):
+        if _kw_result is None and any(
+            re.search(p, user_input) for p in FILE_SEARCH_PATTERNS
+        ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -693,7 +758,11 @@ class SmartDispatcher:
             _kw_result = ("FILE_SEARCH", "🔍 FileSearch-Direct", context_info)
 
         # System command
-        if _kw_result is None and LocalExecutor and LocalExecutor.is_system_command(user_input):
+        if (
+            _kw_result is None
+            and LocalExecutor
+            and LocalExecutor.is_system_command(user_input)
+        ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -717,10 +786,18 @@ class SmartDispatcher:
                         boosts={"WEB_SEARCH": 0.9},
                         reasons={"WEB_SEARCH": ["fallback:search_followup"]},
                     )
-                    _kw_result = ("WEB_SEARCH", "🌐 Fallback-SearchFollowup", context_info)
+                    _kw_result = (
+                        "WEB_SEARCH",
+                        "🌐 Fallback-SearchFollowup",
+                        context_info,
+                    )
 
         # Web search detection
-        if _kw_result is None and WebSearcher and WebSearcher.needs_web_search(user_input):
+        if (
+            _kw_result is None
+            and WebSearcher
+            and WebSearcher.needs_web_search(user_input)
+        ):
             context_info = context_info or {}
             context_info["routing_list"] = cls._build_routing_list(
                 similarity_scores,
@@ -744,7 +821,11 @@ class SmartDispatcher:
                         boosts={related_task: 0.88},
                         reasons={related_task: [f"fallback:rag_{continuation_type}"]},
                     )
-                    _kw_result = (related_task, f"🔗 Fallback-RAG-{continuation_type}", context_info)
+                    _kw_result = (
+                        related_task,
+                        f"🔗 Fallback-RAG-{continuation_type}",
+                        context_info,
+                    )
 
         if _kw_result:
             if not file_context and cache is not None and lock is not None:
@@ -841,9 +922,7 @@ class SmartDispatcher:
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
-            return MODEL_MAP.get(
-                "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro")
-            )
+            return MODEL_MAP.get("MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro"))
 
         # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
         if task_type == "CHAT":
@@ -867,7 +946,9 @@ class SmartDispatcher:
                     )
                     _chat_candidate = _FLASH_FALLBACK
             except Exception:
-                logger.warning("[SmartDispatcher] CHAT tier check failed", exc_info=True)
+                logger.warning(
+                    "[SmartDispatcher] CHAT tier check failed", exc_info=True
+                )
             return _avail(_chat_candidate)
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型

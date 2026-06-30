@@ -60,6 +60,7 @@ import threading
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
+
 from web.settings import settings as user_settings
 
 logger = logging.getLogger(__name__)
@@ -464,9 +465,20 @@ def archive_files():
                     target = target_dir / f"{stem}_{idx}{suffix}"
                     idx += 1
 
-            shutil.copy2(str(fp), str(target)) if action == "copy" else shutil.move(str(fp), str(target))
+            (
+                shutil.copy2(str(fp), str(target))
+                if action == "copy"
+                else shutil.move(str(fp), str(target))
+            )
             copied += 1
-            report.append({"src": str(fp), "dest": str(target), "folder": folder, "action": action})
+            report.append(
+                {
+                    "src": str(fp),
+                    "dest": str(target),
+                    "folder": folder,
+                    "action": action,
+                }
+            )
         except Exception as exc:
             errors.append(f"{fp.name}: {exc}")
             skipped += 1
@@ -487,7 +499,10 @@ def archive_files():
 
 @file_hub_bp.route("/open", methods=["POST"])
 def removed_native_open_file():
-    return jsonify({"error": "该文件原生打开接口已移除，请使用工作区文件助手打开文件"}), 404
+    return (
+        jsonify({"error": "该文件原生打开接口已移除，请使用工作区文件助手打开文件"}),
+        404,
+    )
 
 
 @file_hub_bp.route("/<file_id>", methods=["GET"])
@@ -990,10 +1005,16 @@ def list_favorites():
             files.append(d)
         else:
             name = path.replace("\\", "/").rsplit("/", 1)[-1]
-            files.append({
-                "path": path, "name": name, "category": "其他",
-                "source": "favorites", "favorited": True, "tags": [],
-            })
+            files.append(
+                {
+                    "path": path,
+                    "name": name,
+                    "category": "其他",
+                    "source": "favorites",
+                    "favorited": True,
+                    "tags": [],
+                }
+            )
     return jsonify({"total": len(files), "favorites": paths, "files": files})
 
 
@@ -1045,9 +1066,11 @@ def _read_user_settings() -> dict:
     """Read settings via SettingsManager (thread-safe)."""
     try:
         from web.settings import SettingsManager
+
         return SettingsManager().get_all()
     except Exception:
         import json as _json
+
         try:
             with open(_WATCH_SETTINGS_PATH, "r", encoding="utf-8-sig") as f:
                 return _json.load(f)
@@ -1062,6 +1085,7 @@ def _write_user_settings(data: dict) -> None:
     settings that may have been changed concurrently.
     """
     from web.settings import SettingsManager
+
     sm = SettingsManager()
     fw = data.get("file_watcher", {})
     sm.update("file_watcher", fw)
@@ -1072,12 +1096,14 @@ def get_watch_settings():
     """获取文件监控目录配置。"""
     data = _read_user_settings()
     cfg = data.get("file_watcher", {})
-    return jsonify({
-        "enabled": cfg.get("enabled", False),
-        "watch_dirs": cfg.get("watch_dirs", []),
-        "interval_seconds": cfg.get("interval_seconds", 30),
-        "max_file_size_mb": cfg.get("max_file_size_mb", 50),
-    })
+    return jsonify(
+        {
+            "enabled": cfg.get("enabled", False),
+            "watch_dirs": cfg.get("watch_dirs", []),
+            "interval_seconds": cfg.get("interval_seconds", 30),
+            "max_file_size_mb": cfg.get("max_file_size_mb", 50),
+        }
+    )
 
 
 @file_hub_bp.route("/watch-settings", methods=["POST"])
@@ -1177,6 +1203,7 @@ def batch_ai():
                 safe_content = content
                 try:
                     from app.core.security.pii_filter import PIIFilter
+
                     _mask_result = PIIFilter.mask(content)
                     if _mask_result.has_pii:
                         safe_content = _mask_result.masked_text
@@ -1196,8 +1223,12 @@ def batch_ai():
                 text = ""
                 if isinstance(resp, dict):
                     text = (
-                        resp.get("text") or resp.get("content")
-                        or resp.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+                        resp.get("text")
+                        or resp.get("content")
+                        or resp.get("candidates", [{}])[0]
+                        .get("content", {})
+                        .get("parts", [{}])[0]
+                        .get("text", "")
                     )
                 if not text:
                     text = str(resp)
@@ -1205,11 +1236,16 @@ def batch_ai():
                 # Output validation
                 try:
                     from app.core.security.output_validator import OutputValidator
+
                     _val = OutputValidator.validate(text=text)
                     if _val.is_blocked:
                         # Disabled — log only, don't replace content
                         import logging as _logging
-                        _logging.getLogger(__name__).warning("[file_hub] OutputValidator BLOCK (ignored): %s", _val.reasons)
+
+                        _logging.getLogger(__name__).warning(
+                            "[file_hub] OutputValidator BLOCK (ignored): %s",
+                            _val.reasons,
+                        )
                     else:
                         text = _val.text
                 except Exception:
@@ -1233,8 +1269,11 @@ def batch_ai():
 
         yield f"data: {_json.dumps({'type': 'done'}, ensure_ascii=False)}\n\n"
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream",
-                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+    return Response(
+        stream_with_context(generate()),
+        mimetype="text/event-stream",
+        headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"},
+    )
 
 
 @file_hub_bp.route("/op-log", methods=["GET"])
@@ -1513,5 +1552,3 @@ def read_file_content():
     except Exception as exc:
         logger.warning(f"[FileHub] read_file_content 失败: {exc}")
         return jsonify({"error": "读取失败"}), 500
-
-

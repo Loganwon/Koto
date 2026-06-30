@@ -11,8 +11,8 @@ Validates:
 """
 
 import importlib
-import json
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -92,12 +92,12 @@ def app_client():
         # We need to patch the client object in web.app
         try:
             import app.core.agent.agent_loop as agent_loop_module
-            from app.core.security.output_validator import OutputValidator
             from app.core.agent.lifecycle import (
                 evt_error,
                 evt_stream_chunk,
                 evt_task_complete,
             )
+            from app.core.security.output_validator import OutputValidator
             from web.app import app
 
             app.config["TESTING"] = True
@@ -229,7 +229,9 @@ class TestEditorAIStream:
         events = parse_sse_events(resp.get_data())
 
         assert resp.status_code == 200
-        assert captured["request"].task == "对比这两份docx，并在原文上标注出两者不同的地方"
+        assert (
+            captured["request"].task == "对比这两份docx，并在原文上标注出两者不同的地方"
+        )
         assert captured["request"].model_mode == "local"
         assert captured["request"].target_path == "workspace/humanise!.docx"
         assert captured["request"].files[0].target is True
@@ -363,8 +365,8 @@ class TestEditorAIStream:
         tmp_path,
         monkeypatch,
     ):
-        from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.task_tools as task_tools
+        from app.core.agent.file_task_runtime import FileTaskRuntime
 
         monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
         monkeypatch.setattr(
@@ -778,9 +780,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -904,9 +906,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_routes_single_docx_annotation_to_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         docx_path = tmp_path / "interview.docx"
         docx_path.write_bytes(b"PK\x03\x04")
@@ -1016,9 +1018,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge_in_local_mode(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1101,9 +1103,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_followup_feedback_bypasses_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1179,9 +1181,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_followup_improve_routes_back_to_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1286,9 +1288,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_forwards_review_and_write_progress(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1409,9 +1411,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_handles_single_docx_annotation_requests(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         docx_path = tmp_path / "interview.docx"
         docx_path.write_bytes(b"PK\x03\x04")
@@ -1509,9 +1511,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_merges_followup_improve_requirement(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest, FileTaskFile
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1591,9 +1593,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_emits_confirmed_batch_plan_for_large_files(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", "6")
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", "4000")
@@ -1685,9 +1687,9 @@ class TestEditorAIStream:
     def test_large_translation_review_uses_finer_batches_in_local_mode(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         monkeypatch.setenv("KOTO_DOC_REVIEW_LOCAL_BATCH_TARGET_MINUTES", "5")
         monkeypatch.setenv("KOTO_DOC_REVIEW_LOCAL_BATCH_CHARS_PER_MINUTE", "2400")
@@ -1779,9 +1781,9 @@ class TestEditorAIStream:
     def test_local_docx_review_bridge_uses_local_model_identity(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         docx_path = tmp_path / "humanise!.docx"
         docx_path.write_bytes(b"PK\x03\x04")
@@ -1848,9 +1850,9 @@ class TestEditorAIStream:
     def test_large_translation_review_cloud_mode_batches_by_char_budget(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", "6")
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", "4000")
@@ -2006,9 +2008,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_keeps_finished_run_runtime_only(
         self, app_client, monkeypatch
     ):
+        import web.app as web_app_module
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import web.app as web_app_module
 
         calls = {"save": 0, "extract": 0}
 
@@ -2058,9 +2060,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_uses_request_history_only(
         self, app_client, monkeypatch
     ):
+        import web.app as web_app_module
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import web.app as web_app_module
 
         captured = {"loaded": []}
 
@@ -2109,9 +2111,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_does_not_inject_memory_router_context(
         self, app_client, monkeypatch
     ):
+        import web.app as web_app_module
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import web.app as web_app_module
 
         captured = {}
 
@@ -2523,7 +2525,7 @@ class TestLocalModelMode:
 
     def test_local_mode_uses_ollama_when_alive(self, app_client):
         """model_mode=local + Ollama alive → response comes from Ollama, not cloud."""
-        from unittest.mock import patch, MagicMock
+        from unittest.mock import MagicMock, patch
 
         # Mock Ollama provider to return a known response
         mock_provider = MagicMock()
@@ -2659,7 +2661,10 @@ class TestLocalModelMode:
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         transport = _read_frontend_source("web/src/workspace/transport.ts")
         assert "export function sendQuickAction(action: string): void" in src
-        assert "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher" in quick_actions
+        assert (
+            "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher"
+            in quick_actions
+        )
         assert "attachDispatcher" in quick_actions
         assert (
             "return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));"
@@ -2675,13 +2680,19 @@ class TestLocalModelMode:
         assert "editorAction" not in quick_actions
         assert "streamEventBlocks({" not in quick_actions
         assert "const requestBody = typeof opts.body === 'string'" in transport
-        assert "async function streamEventBlocks(opts: StreamOptions): Promise<void>" in transport
+        assert (
+            "async function streamEventBlocks(opts: StreamOptions): Promise<void>"
+            in transport
+        )
 
     def test_workspace_readonly_quick_actions_can_use_simple_whitebox(self):
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
 
         assert "taskFlowMode: 'simple'" in quick_actions
-        assert "function usesSimpleTaskFlow(action?: QuickActionDefinition): boolean" in quick_actions
+        assert (
+            "function usesSimpleTaskFlow(action?: QuickActionDefinition): boolean"
+            in quick_actions
+        )
         assert (
             "function sendSimpleTaskFlowAction(payload: QuickActionContext, providedAction?: QuickActionDefinition): Promise<any>"
             in quick_actions
@@ -2693,8 +2704,14 @@ class TestLocalModelMode:
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
 
         assert "taskFlowMode: 'proposal'" in quick_actions
-        assert "function usesProposalTaskFlow(action?: QuickActionDefinition): boolean" in quick_actions
-        assert "function buildProposalTaskFlowTask(payload: QuickActionContext, action?: QuickActionDefinition): string" in quick_actions
+        assert (
+            "function usesProposalTaskFlow(action?: QuickActionDefinition): boolean"
+            in quick_actions
+        )
+        assert (
+            "function buildProposalTaskFlowTask(payload: QuickActionContext, action?: QuickActionDefinition): string"
+            in quick_actions
+        )
         assert (
             "function sendProposalTaskFlowAction(payload: QuickActionContext, providedAction?: QuickActionDefinition): Promise<any>"
             in quick_actions
@@ -2746,7 +2763,10 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_supports_python_artifacts(self):
         """The whitebox task renderer should render image artifacts emitted by run_python_code."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        assert "function appendToolArtifacts(row: HTMLElement, payload: Record<string, any>): void" in renderer
+        assert (
+            "function appendToolArtifacts(row: HTMLElement, payload: Record<string, any>): void"
+            in renderer
+        )
         assert "payload.artifacts" in renderer
         assert "wa-task-artifact-image" in renderer
 
@@ -2761,19 +2781,28 @@ class TestLocalModelMode:
         """Segmented file tasks should try to refresh the edited document as soon as file.changed arrives."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         refresh = _read_frontend_source("web/src/workspace/task-refresh.ts")
-        assert "WA.createFileTaskRefreshController = createFileTaskRefreshController" in refresh
+        assert (
+            "WA.createFileTaskRefreshController = createFileTaskRefreshController"
+            in refresh
+        )
         assert "card._fileRefreshPromise" in refresh
         assert "void flush(card).catch" in refresh
         assert (
             "if (!((card._pendingFileRefreshes && card._pendingFileRefreshes.size) || card._fileRefreshPromise))"
             in refresh
         )
-        assert "function upsertEntry(card: TaskCard, item: RefreshEntry & Partial<RefreshPayload>): RefreshEntry | null" in refresh
+        assert (
+            "function upsertEntry(card: TaskCard, item: RefreshEntry & Partial<RefreshPayload>): RefreshEntry | null"
+            in refresh
+        )
         assert "status: supported ? 'pending' : 'unsupported'" in refresh
         assert "status: 'refreshing'" in refresh
         assert "status: 'reloaded'" in refresh
         assert "status: 'failed'" in refresh
-        assert "function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
+        assert (
+            "function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
         assert "controller.queue(card, data, {" in renderer
         assert "controller.trigger(card, {" in renderer
 
@@ -2786,7 +2815,10 @@ class TestLocalModelMode:
         assert "'repair_guard'" in renderer
         assert "'readonly_answer_guard'" in renderer
         assert "return false;" in renderer
-        assert "function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
+        assert (
+            "function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
         assert (
             "const kind = data.blocked || data.tool_name === 'ask_user' ? 'warn'"
             in renderer
@@ -2799,7 +2831,10 @@ class TestLocalModelMode:
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         refresh = _read_frontend_source("web/src/workspace/task-refresh.ts")
 
-        assert "async function finalize(card: TaskCard, payload: any, finalizeOptions: RefreshOptions = {}): Promise<boolean>" in refresh
+        assert (
+            "async function finalize(card: TaskCard, payload: any, finalizeOptions: RefreshOptions = {}): Promise<boolean>"
+            in refresh
+        )
         assert "finalizeOptions.showRefreshingStatus" in refresh
         assert "finalizeOptions.restoreFinalStatus" in refresh
         assert "summaryHtml(card)" not in renderer
@@ -2809,7 +2844,10 @@ class TestLocalModelMode:
         """Dropped or out-of-order SSE events should be surfaced to users as whitebox visibility warnings."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "function noteStreamIssue(card: TaskCardElement, key: string, text: string): void" in renderer
+        assert (
+            "function noteStreamIssue(card: TaskCardElement, key: string, text: string): void"
+            in renderer
+        )
         assert "state.streamIssueKeys" in renderer
         assert "state.lastEventSeq" in renderer
         assert "state.lastEventSeq" in renderer
@@ -2819,7 +2857,10 @@ class TestLocalModelMode:
         """The renderer should display backend step.result rollups for major whitebox phases."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "function handleEvent_step_result(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
+        assert (
+            "function handleEvent_step_result(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
         assert "'step.result': handleEvent_step_result" in renderer
         assert "appendToolArtifacts(step, data);" in renderer
 
@@ -2827,7 +2868,10 @@ class TestLocalModelMode:
         """The whitebox task renderer should keep the current step alive with incremental progress updates."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "function handleEvent_progress(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
+        assert (
+            "function handleEvent_progress(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
         assert "'progress': handleEvent_progress" in renderer
         assert "state.progressExplicit = true;" in renderer
 
@@ -2836,9 +2880,13 @@ class TestLocalModelMode:
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "function makeTaskError(message: string): Error & { waTaskError: boolean }" in renderer
         assert (
-            "card._fatalErrorText = String(data.error || data.text || data.message || payload).trim();" in renderer
+            "function makeTaskError(message: string): Error & { waTaskError: boolean }"
+            in renderer
+        )
+        assert (
+            "card._fatalErrorText = String(data.error || data.text || data.message || payload).trim();"
+            in renderer
         )
         assert "card._fatalErrorText" in renderer
         assert (
@@ -2852,23 +2900,38 @@ class TestLocalModelMode:
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "const runtime = data.runtime && typeof data.runtime === 'object' ? data.runtime : {};" in renderer
-        assert "const terminalStatus = String(runtime.terminal_status || '').trim();" in renderer
+        assert (
+            "const runtime = data.runtime && typeof data.runtime === 'object' ? data.runtime : {};"
+            in renderer
+        )
+        assert (
+            "const terminalStatus = String(runtime.terminal_status || '').trim();"
+            in renderer
+        )
         assert "terminal_status: terminalStatus" in renderer
-        assert "fatal_error_text: String((element as any)._fatalErrorText || '')" in dispatcher
+        assert (
+            "fatal_error_text: String((element as any)._fatalErrorText || '')"
+            in dispatcher
+        )
 
     def test_workspace_task_renderer_surfaces_task_classification_metadata(self):
         """The whitebox task renderer should persist classification metadata from run lifecycle events."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "function normalizedTaskLifecyclePayload(payload: any): Record<string, any>" in renderer
+        assert (
+            "function normalizedTaskLifecyclePayload(payload: any): Record<string, any>"
+            in renderer
+        )
         assert (
             "const classification = data.classification && typeof data.classification === 'object'"
             in renderer
         )
         assert "'task.classified': handleEvent_task_classified" in renderer
-        assert "function taskRecognitionText(data: Record<string, any>): string" in renderer
+        assert (
+            "function taskRecognitionText(data: Record<string, any>): string"
+            in renderer
+        )
         assert "const data = normalizedTaskLifecyclePayload(payload);" in renderer
         assert (
             "card.dataset.taskRequestKind = String(data.request_kind || '').trim();"
@@ -2951,10 +3014,7 @@ class TestLocalModelMode:
         assert "if (quickActionMode === 'hybrid')" in renderer
         assert 'data-task-followup-action="apply"' in renderer
         assert "应用建议" in renderer
-        assert (
-            "} else if (outputMode && outputMode !== 'write')"
-            in renderer
-        )
+        assert "} else if (outputMode && outputMode !== 'write')" in renderer
         assert (
             "const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);"
             in dispatcher
@@ -2986,15 +3046,17 @@ class TestLocalModelMode:
             in dispatcher
         )
         assert (
-            "context.previous_task_output_mode = previousTaskOutputMode;"
-            in dispatcher
+            "context.previous_task_output_mode = previousTaskOutputMode;" in dispatcher
         )
 
     def test_workspace_task_renderer_hides_placeholder_classification_metadata(self):
         """Default whitebox classification placeholders should stay internal unless they add user-facing meaning."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "function classificationValueLabel(kind: string, value: unknown): string" in renderer
+        assert (
+            "function classificationValueLabel(kind: string, value: unknown): string"
+            in renderer
+        )
         assert "if (!normalized) return '';" in renderer
         assert "if (normalized === 'answer') return '只给答案';" in renderer
         assert "taskRecognitionText(data)" in renderer
@@ -3005,15 +3067,15 @@ class TestLocalModelMode:
 
         assert "'plan.created': handleEvent_plan" in renderer
         assert "'plan.proposed': handleEvent_plan" in renderer
-        assert (
-            "renderPlanIntoCard(card, data);"
-            in renderer
-        )
+        assert "renderPlanIntoCard(card, data);" in renderer
 
     def test_workspace_task_renderer_surfaces_whitebox_plan_gate(self):
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "function handleEvent_plan_gated(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
+        assert (
+            "function handleEvent_plan_gated(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
         assert "'plan.gated': handleEvent_plan_gated" in renderer
         assert "planGateIssueHtml(data)" in renderer
         assert "passed && item === 'model_execution_plan_missing'" in renderer
@@ -3021,10 +3083,21 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_surfaces_supervision_and_workflow_state(self):
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "function handleEvent_workflow_state(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
-        assert "function handleEvent_decision_made(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
-        assert "function handleEvent_supervisor_intervention(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
-        assert "'supervisor.intervention': handleEvent_supervisor_intervention" in renderer
+        assert (
+            "function handleEvent_workflow_state(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
+        assert (
+            "function handleEvent_decision_made(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
+        assert (
+            "function handleEvent_supervisor_intervention(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
+            in renderer
+        )
+        assert (
+            "'supervisor.intervention': handleEvent_supervisor_intervention" in renderer
+        )
         assert "'decision.made': handleEvent_decision_made" in renderer
         assert "large_file_windows" in renderer
         assert "workflow.state" in renderer
@@ -3041,7 +3114,10 @@ class TestLocalModelMode:
     def test_workspace_model_selector_fetches_dynamic_catalog(self):
         """Workspace assistant should fetch the dynamic model catalog instead of relying on hardcoded options."""
         src = _read_frontend_source("web/src/workspace/model-settings.ts")
-        assert "export function _refreshModelCatalog(force: boolean = false): Promise<any>" in src
+        assert (
+            "export function _refreshModelCatalog(force: boolean = false): Promise<any>"
+            in src
+        )
         assert "fetch('/api/v1/models', { cache: 'no-store' })" in src
         assert "_syncModelStatusUi();" in src
 
@@ -3086,7 +3162,10 @@ class TestLocalModelMode:
 
         assert "export function sendSelectionToAI(): void" in src
         assert "const payload = _selectionPayloadForToolbar" in src
-        assert "const liveSelection = (!pinnedSel && !state._selectionDismissed) ? _getLiveEditorSelectionForAI() : null;" in assistant
+        assert (
+            "const liveSelection = (!pinnedSel && !state._selectionDismissed) ? _getLiveEditorSelectionForAI() : null;"
+            in assistant
+        )
 
     def test_workspace_task_dispatcher_does_not_keep_current_file_heuristics(self):
         """Current-file heuristics should stay removed from the whitebox dispatcher."""
@@ -3124,7 +3203,9 @@ class TestLocalModelMode:
         """Workspace templates should share provider/local model controls without exposing a redundant model picker."""
         standalone_html = _read_frontend_source("web/templates/index.html")
         index_html = _read_frontend_source("web/templates/index.html")
-        partial_html = _read_frontend_source("web/templates/_workspace_model_controls.html")
+        partial_html = _read_frontend_source(
+            "web/templates/_workspace_model_controls.html"
+        )
         assert "{% include '_workspace_model_controls.html' %}" in standalone_html
         assert "{% include '_workspace_model_controls.html' %}" in index_html
         assert 'id="wa-model-mode-toggle"' in partial_html
@@ -3144,10 +3225,7 @@ class TestLocalModelMode:
             ]
         )
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
-        assert (
-            "const _WA_MODEL_MODES = new Set(['cloud', 'deepseek', 'local']);"
-            in js
-        )
+        assert "const _WA_MODEL_MODES = new Set(['cloud', 'deepseek', 'local']);" in js
         assert (
             "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek')"
             in js
@@ -3155,13 +3233,12 @@ class TestLocalModelMode:
         assert (
             "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
         )
-        assert "const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');" in js
+        assert (
+            "const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');" in js
+        )
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
-        assert (
-            "(window as any).WA.setLockedModel = setLockedModel;"
-            in js
-        )
+        assert "(window as any).WA.setLockedModel = setLockedModel;" in js
         assert "body: JSON.stringify({ mode: newModel })," in js
 
     def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(
@@ -3212,6 +3289,7 @@ class TestLegacyDocumentCompatRoutes:
     @staticmethod
     def _make_document_client(monkeypatch, workspace_root):
         from flask import Flask
+
         import web.blueprints.document as document_routes
 
         app = Flask(__name__)
@@ -4548,7 +4626,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         src = _read_frontend_source("web/src/workspace/ai-review.ts")
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
         bundle_entry = _read_frontend_source("web/src/bundles/workspace.ts")
-        asset_scripts = _read_frontend_source("web/templates/_workspace_asset_scripts.html")
+        asset_scripts = _read_frontend_source(
+            "web/templates/_workspace_asset_scripts.html"
+        )
         retired_external_name = "Open" + "Claw"
         combined = "\n".join([src, dispatcher])
         assert f"_waSendTo{retired_external_name}Task" not in combined
@@ -4632,12 +4712,27 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "const COMPARE_TASK_HINTS" in dispatcher
         assert "const ANNOTATION_TASK_HINTS" in dispatcher
         assert "const REVISED_TARGET_NAME_HINTS" in dispatcher
-        assert "function inferCompareTargetFromRoleHint(text: string, files: TaskFileInfo[]): TaskFileInfo | null" in dispatcher
-        assert "function inferCompareAnnotatedTargetFile(text: string, files: TaskFileInfo[]): TaskFileInfo | null" in dispatcher
-        assert "const explicitTextTargetPath = explicitWriteTargetPathFromText(text);" in dispatcher
-        assert "const inferredAttachedTargetFile = !targetFile ? inferAttachedWriteTargetFile(text, rawFiles) : null;" in dispatcher
+        assert (
+            "function inferCompareTargetFromRoleHint(text: string, files: TaskFileInfo[]): TaskFileInfo | null"
+            in dispatcher
+        )
+        assert (
+            "function inferCompareAnnotatedTargetFile(text: string, files: TaskFileInfo[]): TaskFileInfo | null"
+            in dispatcher
+        )
+        assert (
+            "const explicitTextTargetPath = explicitWriteTargetPathFromText(text);"
+            in dispatcher
+        )
+        assert (
+            "const inferredAttachedTargetFile = !targetFile ? inferAttachedWriteTargetFile(text, rawFiles) : null;"
+            in dispatcher
+        )
         assert "target_path: inferredTargetPath," in dispatcher
-        assert "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto'," in dispatcher
+        assert (
+            "model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',"
+            in dispatcher
+        )
 
     def test_workspace_dispatcher_records_current_open_file_for_chat_and_annotation(
         self,
@@ -4645,7 +4740,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
         assert "function currentOpenTaskFile(): TaskFileInfo | null" in dispatcher
-        assert "current_file: compactFollowupTaskFile(currentOpenTaskFile())," in dispatcher
+        assert (
+            "current_file: compactFollowupTaskFile(currentOpenTaskFile()),"
+            in dispatcher
+        )
         assert "const currentFile = currentOpenTaskFile();" in dispatcher
         assert "let targetFile = rawFiles.find((f) => f.target) || null;" in dispatcher
         assert "task_context" in dispatcher
@@ -4655,12 +4753,18 @@ class TestWorkspaceAssistantTaskRemovalRegression:
     def test_workspace_dispatcher_does_not_mark_bare_source_reference_as_target(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "function explicitWriteTargetPathFromText(text: string): string" in dispatcher
+        assert (
+            "function explicitWriteTargetPathFromText(text: string): string"
+            in dispatcher
+        )
         assert "function hasReadOnlyHint(text: string): boolean" in dispatcher
         assert "const readSourcePattern" in dispatcher
         assert "const explicitOutputBeforePattern" in dispatcher
         assert "overrideOptions.enable_ai_intent_adjudicator = true;" in dispatcher
-        assert "overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';" in dispatcher
+        assert (
+            "overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';"
+            in dispatcher
+        )
 
     def test_workspace_dispatcher_marks_short_task_critiques_as_followup_context(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
@@ -4668,7 +4772,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "function latestCompletedFileTaskTurn()" in dispatcher
         assert "function looksLikeDiagnosticLead(text: string): boolean" in dispatcher
         assert "function looksLikeTaskCritique(text: string): boolean" in dispatcher
-        assert "function buildTaskFollowupContext(text: string): Record<string, any> | null" in dispatcher
+        assert (
+            "function buildTaskFollowupContext(text: string): Record<string, any> | null"
+            in dispatcher
+        )
         assert "kind: 'review_last_task'" in dispatcher
         assert "followup_action:" in dispatcher
         assert "overrideOptions.followup_context = followupContext;" in dispatcher
@@ -4691,8 +4798,13 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert "export function beginTaskResultFollowup(details: any): void" in assistant
-        assert "(window as any).WA.beginTaskResultFollowup = beginTaskResultFollowup" in assistant
+        assert (
+            "export function beginTaskResultFollowup(details: any): void" in assistant
+        )
+        assert (
+            "(window as any).WA.beginTaskResultFollowup = beginTaskResultFollowup"
+            in assistant
+        )
         assert "state._pendingTaskFollowupContext = followupContext;" in assistant
         assert (
             "options: pendingTaskFollowupContext ? { followup_context: pendingTaskFollowupContext } : {},"
@@ -4714,7 +4826,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         )
         assert "previous_task_intent_can_apply" in assistant
         assert "previous_task_intent_requires_confirmation" in assistant
-        assert "function taskResultActionsHtml(card: TaskCardElement): string" in task_renderer
+        assert (
+            "function taskResultActionsHtml(card: TaskCardElement): string"
+            in task_renderer
+        )
         assert 'data-task-followup-action="apply"' in task_renderer
         assert 'data-task-followup-action="question"' in task_renderer
         assert 'data-task-followup-action="improve"' in task_renderer
@@ -4751,41 +4866,68 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
         standalone = _read_frontend_source("web/templates/index.html")
         main = _read_frontend_source("web/templates/index.html")
-        asset_scripts = _read_frontend_source("web/templates/_workspace_asset_scripts.html")
+        asset_scripts = _read_frontend_source(
+            "web/templates/_workspace_asset_scripts.html"
+        )
         workspace_bundle_entry = _read_frontend_source("web/src/bundles/workspace.ts")
 
         assert "WA.streamTaskFlow = streamTaskFlow" in renderer
         assert "csrfFetch('/api/editor/ai/task-stream'" in renderer
-        assert "WA.createWorkspaceAiTransport = createWorkspaceAiTransport" in ai_transport
-        assert "WA.createWorkspaceAiResultsRuntime = createWorkspaceAiResultsRuntime" in ai_results
-        assert "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher" in quick_actions
-        assert "(window as any).WA.createWorkspaceAiConversation = createWorkspaceAiConversation" in conversation
+        assert (
+            "WA.createWorkspaceAiTransport = createWorkspaceAiTransport" in ai_transport
+        )
+        assert (
+            "WA.createWorkspaceAiResultsRuntime = createWorkspaceAiResultsRuntime"
+            in ai_results
+        )
+        assert (
+            "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher"
+            in quick_actions
+        )
+        assert (
+            "(window as any).WA.createWorkspaceAiConversation = createWorkspaceAiConversation"
+            in conversation
+        )
         assert "model' || value === 'ai'" in conversation
         assert "export function installWorkspaceNotebookTools" in notebook
-        assert "WA.installWorkspaceNotebookTools = installWorkspaceNotebookTools" in notebook
+        assert (
+            "WA.installWorkspaceNotebookTools = installWorkspaceNotebookTools"
+            in notebook
+        )
         assert "export function installWorkspaceFindReplace" in find_replace
-        assert "WA.installWorkspaceFindReplace = installWorkspaceFindReplace" in find_replace
+        assert (
+            "WA.installWorkspaceFindReplace = installWorkspaceFindReplace"
+            in find_replace
+        )
         assert "WA.createTaskDispatcher = createTaskDispatcher" in dispatcher
         assert (
             "typeof (window as any).WA.createWorkspaceAiResultsRuntime === 'function'"
             in runtime_init
         )
         assert (
-            "typeof (window as any).WA.createWorkspaceAiConversation === 'function'" in runtime_init
+            "typeof (window as any).WA.createWorkspaceAiConversation === 'function'"
+            in runtime_init
         )
         assert "(window as any).WA.hydrateAiHistory" in runtime_init
         assert (
             "typeof (window as any).WA.createWorkspaceQuickActionRuntime === 'function'"
             in runtime_init
         )
-        assert "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in runtime_init
-        assert "typeof (window as any).WA.createTaskDispatcher === 'function'" in runtime_init
+        assert (
+            "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in runtime_init
+        )
+        assert (
+            "typeof (window as any).WA.createTaskDispatcher === 'function'"
+            in runtime_init
+        )
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
         assert "{% include '_workspace_asset_scripts.html' %}" in standalone
         assert "{% include '_workspace_asset_scripts.html' %}" in main
         assert "workspace-bundle.js" in asset_scripts
         assert "review-bundle.js" in asset_scripts
-        assert asset_scripts.index("workspace-bundle.js") < asset_scripts.index("review-bundle.js")
+        assert asset_scripts.index("workspace-bundle.js") < asset_scripts.index(
+            "review-bundle.js"
+        )
         assert "workspace-task-workbench.js" not in asset_scripts
         assert "workspace-assistant.js" not in asset_scripts
         assert "workspace-ai-task.js" not in asset_scripts
@@ -4815,14 +4957,26 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "registerMessageRoute" in dispatcher
         assert "registerQuickActionHandler" in dispatcher
         assert "registerAction(definition: QuickActionDefinition)" in quick_actions
-        assert "(window as any).WA.registerTaskQuickAction = registerTaskQuickAction" in runtime_init
-        assert "(window as any).WA.registerTaskEntryRoute = registerTaskEntryRoute" in runtime_init
-        assert "(window as any).WA.registerTaskActionHandler = registerTaskActionHandler" in runtime_init
+        assert (
+            "(window as any).WA.registerTaskQuickAction = registerTaskQuickAction"
+            in runtime_init
+        )
+        assert (
+            "(window as any).WA.registerTaskEntryRoute = registerTaskEntryRoute"
+            in runtime_init
+        )
+        assert (
+            "(window as any).WA.registerTaskActionHandler = registerTaskActionHandler"
+            in runtime_init
+        )
 
     def test_workspace_dispatcher_records_assistant_turns_for_task_history(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
-        assert "function appendAssistantConversationTurn(text: string, metadata: Record<string, any>): void" in dispatcher
+        assert (
+            "function appendAssistantConversationTurn(text: string, metadata: Record<string, any>): void"
+            in dispatcher
+        )
         assert "options.appendAssistantTurn(content" in dispatcher
         assert "options.getConversationHistory()" in dispatcher
         assert ".then((streamResult: any) =>" in dispatcher
@@ -4846,13 +5000,25 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in conversation
         )
         assert "const sessionStore = new Map<string, WATurn[]>();" in conversation
-        assert "function normalizedSessionId(rawSessionId?: string): string" in conversation
-        assert "async function hydrate(params?: { sessionId?: string; force?: boolean }): Promise<WATurn[]>" in conversation
+        assert (
+            "function normalizedSessionId(rawSessionId?: string): string"
+            in conversation
+        )
+        assert (
+            "async function hydrate(params?: { sessionId?: string; force?: boolean }): Promise<WATurn[]>"
+            in conversation
+        )
         assert "renderHistory(turns);" in conversation
         assert "query.set('session_id', sessionId);" not in conversation
         assert "renderHistory(history.map" not in conversation
-        assert "function getHistoryForModel(limit?: number): Array<{ role: string; content: string }>" in conversation
-        assert "turn!.status !== 'error' && turn!.skip_model_context !== true" in conversation
+        assert (
+            "function getHistoryForModel(limit?: number): Array<{ role: string; content: string }>"
+            in conversation
+        )
+        assert (
+            "turn!.status !== 'error' && turn!.skip_model_context !== true"
+            in conversation
+        )
 
     def test_workspace_assistant_uses_runtime_scoped_ai_session(self):
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
@@ -4885,8 +5051,14 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in conversation
         )
         assert "task_card_snapshot:" in conversation
-        assert "function beginAssistantTaskTurn(metadata?: Record<string, any>): WATurn | null" in conversation
-        assert "function syncAssistantTaskTurn(turnId: string, metadata?: Record<string, any>): WATurn | null" in conversation
+        assert (
+            "function beginAssistantTaskTurn(metadata?: Record<string, any>): WATurn | null"
+            in conversation
+        )
+        assert (
+            "function syncAssistantTaskTurn(turnId: string, metadata?: Record<string, any>): WATurn | null"
+            in conversation
+        )
         assert "任务处理中…" in conversation
         assert "loadingEl.classList.contains('wa-task-run')" in conversation
         assert "if (loadingEl && loadingEl.isConnected) {" in conversation
@@ -4904,19 +5076,24 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "syncAssistantTaskTurn: (turnId: string, metadata: any) => _waConversationRuntime && typeof _waConversationRuntime.syncAssistantTaskTurn === 'function'"
             in runtime_init
         )
-        assert "function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>" in task_renderer
-        assert "WA.restoreTaskRunCard = restoreTaskRunCard" in task_renderer
-        assert "function isTaskCardElement(value: unknown): value is TaskCardElement" in task_renderer
         assert (
-            "if (!card || !isTaskCardElement(card)) return false;"
+            "function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>"
             in task_renderer
         )
+        assert "WA.restoreTaskRunCard = restoreTaskRunCard" in task_renderer
+        assert (
+            "function isTaskCardElement(value: unknown): value is TaskCardElement"
+            in task_renderer
+        )
+        assert "if (!card || !isTaskCardElement(card)) return false;" in task_renderer
         assert "if (!card || !isTaskCardElement(card)) return null;" in task_renderer
         assert (
             "const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div') as TaskCardElement;"
             in task_renderer
         )
-        assert "if (typeof options.onTaskCardSnapshot === 'function') {" in task_renderer
+        assert (
+            "if (typeof options.onTaskCardSnapshot === 'function') {" in task_renderer
+        )
         assert "const restored = attachRunCardBehavior(card);" in task_renderer
 
     def test_unified_ai_history_does_not_filter_workspace_sessions(self):
@@ -4933,7 +5110,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "_maybeOpenWorkspaceAssistantSession" not in app_js
         assert "_notifyWorkspaceAssistantSessionRenamed" not in app_js
         assert "_notifyWorkspaceAssistantSessionDeleted" not in app_js
-        assert "def _is_workspace_assistant_session(filename: str) -> bool:" not in sessions_bp
+        assert (
+            "def _is_workspace_assistant_session(filename: str) -> bool:"
+            not in sessions_bp
+        )
         assert "if not _is_workspace_assistant_session(session)" not in sessions_bp
         assert "session_files = _get_session_manager().list_sessions()" in sessions_bp
 
@@ -5007,7 +5187,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "state.pinnedSelection = docxSelection" in src
         assert "? _createPinnedSelectionContext(docxSelection)" in src
         assert ": _createPinnedSelectionContext(sel);" in src
-        assert "const docxSelection = liveSelection && typeof liveSelection === 'object' ? liveSelection : null;" in src
+        assert (
+            "const docxSelection = liveSelection && typeof liveSelection === 'object' ? liveSelection : null;"
+            in src
+        )
 
     def test_workspace_scripts_do_not_reference_retired_ai_input_id(self):
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
@@ -5060,19 +5243,32 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         results = _read_frontend_source("web/src/workspace/results.ts")
         assert "function _getProposalRationaleText(proposal: ProposalData)" in assistant
         assert "runtime.getProposalRationaleText(proposal)" in assistant
-        assert "function getProposalRationaleText(proposal: Proposal): string" in results
+        assert (
+            "function getProposalRationaleText(proposal: Proposal): string" in results
+        )
         assert "rationaleKey === originalKey || rationaleKey === proposedKey" in results
 
     def test_workspace_ai_review_tool_calls_route_into_docx_review_surface(self):
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         results = _read_frontend_source("web/src/workspace/results.ts")
-        docx_review_runtime = _read_frontend_source("web/src/workspace/docx-review-runtime.ts")
+        docx_review_runtime = _read_frontend_source(
+            "web/src/workspace/docx-review-runtime.ts"
+        )
         assert "(window as any).WA.applyStructuredDocToolCall" in docx_review_runtime
-        assert "(window as any).WA.applyStructuredReviewChangePayload" in docx_review_runtime
-        assert "(window as any).WA.applyStructuredDocToolCall(proposal.tool_call" in assistant
+        assert (
+            "(window as any).WA.applyStructuredReviewChangePayload"
+            in docx_review_runtime
+        )
+        assert (
+            "(window as any).WA.applyStructuredDocToolCall(proposal.tool_call"
+            in assistant
+        )
         assert "window.WA.applyStructuredDocToolCall(proposal.tool_call" in results
         assert "window.WA.applyStructuredDocToolCall(toolCall" in results
-        assert "(window as any).WA.applyStructuredReviewChangePayload = (payload: any, options: any = {}) =>" in docx_review_runtime
+        assert (
+            "(window as any).WA.applyStructuredReviewChangePayload = (payload: any, options: any = {}) =>"
+            in docx_review_runtime
+        )
 
     def test_workspace_proposal_buttons_stay_single_line_and_equal_width(self):
         """Proposal action buttons should share width and keep labels on one line."""
@@ -5093,9 +5289,21 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         file_open = _read_frontend_source("web/src/workspace/file-open.ts")
         fs_context_menu = _read_frontend_source("web/src/workspace/fs-context-menu.ts")
 
-        assert "function _cloneSerializable(value: any, fallback: any = null): any" in state_src
-        assert "export function _serializeEditorForTab(_tab: TabInfo | null, editor: any): any" in file_open
-        assert "(window as any)._serializeEditorForTab = _serializeEditorForTab" in file_open
-        assert "function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void" in fs_context_menu
+        assert (
+            "function _cloneSerializable(value: any, fallback: any = null): any"
+            in state_src
+        )
+        assert (
+            "export function _serializeEditorForTab(_tab: TabInfo | null, editor: any): any"
+            in file_open
+        )
+        assert (
+            "(window as any)._serializeEditorForTab = _serializeEditorForTab"
+            in file_open
+        )
+        assert (
+            "function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void"
+            in fs_context_menu
+        )
         assert "wa._showBrowserCtx = _showBrowserCtx" in fs_context_menu
         assert "_serializeEditorForTab" not in fs_context_menu

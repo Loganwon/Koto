@@ -38,6 +38,7 @@ from app.core.skills.skill_schema import SkillDefinition
 logger = logging.getLogger(__name__)
 
 from app.core.skills.builtin_skills import BUILTIN_SKILLS  # noqa: E402 — data import
+
 _SKILL_STATE_UNSET = object()
 
 
@@ -303,7 +304,9 @@ class SkillManager:
                         s.get("skill_nature", "domain_skill"),
                     ),
                     "description": getattr(skill_def, "description", s["description"]),
-                    "task_types": list(getattr(skill_def, "task_types", s["task_types"])),
+                    "task_types": list(
+                        getattr(skill_def, "task_types", s["task_types"])
+                    ),
                     "enabled": cls._skill_enabled(sid, skill_def),
                     "has_custom_prompt": prompt != builtin_prompt,
                     "prompt": prompt,
@@ -321,12 +324,16 @@ class SkillManager:
                     "id": skill_id,
                     "name": skill_def.name,
                     "icon": skill_def.icon,
-                    "category": getattr(skill_def.category, "value", skill_def.category),
+                    "category": getattr(
+                        skill_def.category, "value", skill_def.category
+                    ),
                     "description": skill_def.description,
                     "task_types": list(skill_def.task_types or []),
                     "enabled": cls._skill_enabled(skill_id, skill_def),
                     "skill_nature": getattr(
-                        skill_def.skill_nature, "value", s.get("skill_nature", "domain_skill")
+                        skill_def.skill_nature,
+                        "value",
+                        s.get("skill_nature", "domain_skill"),
                     ),
                     "has_custom_prompt": False,
                     "prompt": cls._skill_prompt(skill_id, skill_def),
@@ -366,16 +373,24 @@ class SkillManager:
             runtime_entry = cls._registry.get(sid, {})
             if not cls._skill_enabled(sid, skill_def):
                 continue
-            cfg = runtime_entry.get("ui_config") or getattr(skill_def, "ui_config", None)
-            ext = runtime_entry.get("ui_extensions") or getattr(skill_def, "ui_extensions", None)
+            cfg = runtime_entry.get("ui_config") or getattr(
+                skill_def, "ui_config", None
+            )
+            ext = runtime_entry.get("ui_extensions") or getattr(
+                skill_def, "ui_extensions", None
+            )
             if cfg or ext:
-                enabled_with_ui.append((sid, skill_def, runtime_entry, cfg or {}, ext or {}))
+                enabled_with_ui.append(
+                    (sid, skill_def, runtime_entry, cfg or {}, ext or {})
+                )
 
         if not enabled_with_ui:
             return {"has_ui": False, "config": {}, "extensions": {}, "sources": []}
 
         # 低优先级先合并，高优先级后覆盖
-        enabled_with_ui.sort(key=lambda x: x[2].get("priority", getattr(x[1], "priority", 50)))
+        enabled_with_ui.sort(
+            key=lambda x: x[2].get("priority", getattr(x[1], "priority", 50))
+        )
 
         merged: dict = {}
         merged_ext: dict = {}
@@ -479,7 +494,11 @@ class SkillManager:
         for sid, sdef in cls._def_registry.items():
             if not cls._skill_enabled(sid, sdef):
                 continue
-            if not task_type or not sdef.task_types or task_type.upper() in sdef.task_types:
+            if (
+                not task_type
+                or not sdef.task_types
+                or task_type.upper() in sdef.task_types
+            ):
                 enabled_skills[sid] = sdef
 
         for skill_id, sdef in enabled_skills.items():
@@ -591,7 +610,9 @@ class SkillManager:
     _FILE_ASSISTANT_COVERS = {"CHAT", "FILE_GEN", "DOC_ANNOTATE", "RESEARCH"}
 
     @classmethod
-    def _task_type_matches(cls, task_type: Optional[str], applicable_types: list) -> bool:
+    def _task_type_matches(
+        cls, task_type: Optional[str], applicable_types: list
+    ) -> bool:
         """Return True if the skill should fire for the given task_type."""
         if not applicable_types or not task_type:
             return True

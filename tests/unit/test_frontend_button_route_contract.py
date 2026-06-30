@@ -7,8 +7,7 @@ from pathlib import Path
 
 import pytest
 from flask import Flask
-from werkzeug.routing import RequestRedirect
-from werkzeug.routing import MapAdapter
+from werkzeug.routing import MapAdapter, RequestRedirect
 
 
 class _NullLogger:
@@ -108,7 +107,13 @@ def _route_signature(app: Flask) -> set[tuple[str, tuple[str, ...]]]:
     return {
         (
             rule.rule,
-            tuple(sorted(method for method in rule.methods if method not in {"HEAD", "OPTIONS"})),
+            tuple(
+                sorted(
+                    method
+                    for method in rule.methods
+                    if method not in {"HEAD", "OPTIONS"}
+                )
+            ),
         )
         for rule in app.url_map.iter_rules()
     }
@@ -252,7 +257,13 @@ def _frontend_inline_global_refs() -> set[tuple[str, str]]:
                 scrubbed = re.sub(r"(['\"])(?:\\.|(?!\1).)*\1", "''", handler)
                 for call_match in call_pattern.finditer(scrubbed):
                     name = call_match.group(1)
-                    if name in ignored or name in {"WA", "document", "event", "this", "window"}:
+                    if name in ignored or name in {
+                        "WA",
+                        "document",
+                        "event",
+                        "this",
+                        "window",
+                    }:
                         continue
                     refs.add((str(path), name))
     return refs
@@ -268,7 +279,12 @@ def _frontend_global_function_names() -> set[str]:
         re.compile(r"export\s+(?:async\s+)?function\s+([A-Za-z_$][\w$]*)\s*\("),
     ]
     names: set[str] = set()
-    for root in [Path("web/src"), Path("web/static/js"), Path("web/templates"), Path("web/static")]:
+    for root in [
+        Path("web/src"),
+        Path("web/static/js"),
+        Path("web/templates"),
+        Path("web/static"),
+    ]:
         for path in root.rglob("*"):
             if not path.is_file():
                 continue
@@ -286,7 +302,9 @@ def _frontend_global_function_names() -> set[str]:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("app_factory", [_app_from_deferred_loader, _app_from_service_loader])
+@pytest.mark.parametrize(
+    "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
+)
 def test_frontend_exposed_button_routes_are_registered(app_factory):
     adapter = _adapter(app_factory())
 
@@ -364,7 +382,9 @@ def test_blueprint_loader_wrapper_keeps_route_map_identical():
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("app_factory", [_app_from_deferred_loader, _app_from_service_loader])
+@pytest.mark.parametrize(
+    "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
+)
 def test_frontend_api_string_references_have_backend_routes(app_factory):
     adapter = _adapter(app_factory())
     missing = sorted(
@@ -377,7 +397,9 @@ def test_frontend_api_string_references_have_backend_routes(app_factory):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize("app_factory", [_app_from_deferred_loader, _app_from_service_loader])
+@pytest.mark.parametrize(
+    "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
+)
 def test_frontend_page_links_have_backend_routes(app_factory):
     adapter = _adapter(app_factory())
     missing = sorted(
@@ -452,14 +474,16 @@ def test_frontend_button_sources_keep_matching_backend_clusters():
     )
     job_routes = Path("app/api/job_routes.py").read_text(encoding="utf-8")
     app_blueprints = Path("web/app_blueprints.py").read_text(encoding="utf-8")
-    blueprint_loader = Path("web/services/blueprint_loader.py").read_text(encoding="utf-8")
+    blueprint_loader = Path("web/services/blueprint_loader.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "/api/shadow/" in frontend_sources
     assert "from app.api.shadow_routes import shadow_bp" in app_blueprints
     assert '"web.blueprints.token_stats", "token_stats_bp"' in app_blueprints
-    assert "@job_bp.get(\"/triggers\")" in job_routes
-    assert "@job_bp.post(\"/triggers/bootstrap\")" in job_routes
-    assert "# @job_bp.get(\"/triggers\")" not in job_routes
+    assert '@job_bp.get("/triggers")' in job_routes
+    assert '@job_bp.post("/triggers/bootstrap")' in job_routes
+    assert '# @job_bp.get("/triggers")' not in job_routes
     assert "register_memory_routes" in app_blueprints
     assert "from web.auth import register_auth_routes" in app_blueprints
     assert "from web.app_http import configure_http_wiring" in app_blueprints

@@ -573,7 +573,9 @@ class TestAgentLoop:
 
     @patch("app.core.agent.agent_loop._is_ollama_alive", return_value=True)
     @patch("app.core.agent.agent_loop._get_local_provider")
-    def test_local_mode_provider_exception_returns_local_error(self, mock_provider, _mock_alive):
+    def test_local_mode_provider_exception_returns_local_error(
+        self, mock_provider, _mock_alive
+    ):
         from app.core.agent.agent_loop import KotoAgentLoop
         from app.core.agent.hooks import HookRegistry
         from app.core.agent.lifecycle import AgentRequest, EventType

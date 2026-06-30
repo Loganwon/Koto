@@ -22,7 +22,10 @@ from pathlib import Path
 import psutil
 
 try:
-    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+    from src.runtime_bootstrap import (
+        configure_process_environment,
+        resolve_runtime_roots,
+    )
 except ImportError:
     from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
 
@@ -206,9 +209,7 @@ def _set_window_icon(icon_path=None):
         # Use LoadImageW with IMAGE_ICON (1) | LR_LOADFROMFILE (16)
         LR_LOADFROMFILE = 0x00000010
         IMAGE_ICON = 1
-        hIcon = user32.LoadImageW(
-            None, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE
-        )
+        hIcon = user32.LoadImageW(None, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
         if hIcon:
             WM_SETICON = 0x0080
             ICON_BIG = 1

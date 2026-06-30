@@ -273,6 +273,7 @@ def shadow_tick():
         llm_fn = None
         try:
             from google.genai import types as _types
+
             from web.runtime_context import get_client_proxy
 
             client = get_client_proxy()

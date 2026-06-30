@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import pytest
 
-
 EDITOR_LOAD_TIMEOUT = 60_000
 REVIEW_TIMEOUT = 20_000
 
@@ -47,7 +46,9 @@ def _open_docx_for_review(page, base_url: str, docx_path: str) -> None:
     page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
     page.wait_for_load_state("networkidle", timeout=15_000)
     page.locator("#wa-file-input").set_input_files(docx_path)
-    _wait_until_visible(page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT)
+    _wait_until_visible(
+        page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT
+    )
     page.wait_for_function(
         "() => !!window.WA && typeof window.WA.toggleReviewCommentMode === 'function'",
         timeout=REVIEW_TIMEOUT,
@@ -56,14 +57,12 @@ def _open_docx_for_review(page, base_url: str, docx_path: str) -> None:
 
 
 def _ensure_review_mode_open(page) -> None:
-    is_open = page.evaluate(
-        """() => {
+    is_open = page.evaluate("""() => {
             const shell = document.getElementById('wa-review-shell');
             if (!shell) return false;
             const style = window.getComputedStyle(shell);
             return style.display !== 'none' && style.visibility !== 'hidden';
-        }"""
-    )
+        }""")
     if is_open:
         return
     page.locator(".wa-docx-review-mode").click()
@@ -223,7 +222,9 @@ def _review_geometry(page, card_selector: str, anchor_text: str) -> dict:
     return geometry
 
 
-def _wait_for_review_card_focus(page, review_id: str, timeout: int = REVIEW_TIMEOUT) -> None:
+def _wait_for_review_card_focus(
+    page, review_id: str, timeout: int = REVIEW_TIMEOUT
+) -> None:
     page.wait_for_function(
         """(reviewId) => {
             const card = document.querySelector(`#wa-review-shell [data-review-id="${reviewId}"]`);
@@ -243,7 +244,9 @@ def _create_comment_via_launcher(
     _ensure_review_mode_open(page)
     _select_docx_text(page, anchor_text)
     _wait_until_visible(page, "#wa-review-selection-launcher")
-    _wait_until_text_includes(page, "#wa-review-selection-launcher .wa-review-selection-title", "新建批注")
+    _wait_until_text_includes(
+        page, "#wa-review-selection-launcher .wa-review-selection-title", "新建批注"
+    )
     page.locator("#wa-review-selection-launcher .wa-review-selection-add").click()
     _wait_until_visible(page, "#wa-review-shell .koto-docx-comment-edit")
     textarea = page.locator("#wa-review-shell .koto-docx-comment-edit").last

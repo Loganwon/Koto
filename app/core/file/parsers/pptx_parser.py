@@ -66,4 +66,5 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
 
     return _parse_pptx_geometry(file_path)
 
+
 __all__ = ["parse_pptx", "parse_pptx_geometry"]

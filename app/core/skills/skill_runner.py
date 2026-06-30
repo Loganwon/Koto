@@ -4,6 +4,7 @@ Used by the `call_skill` tool in TaskAgent.  The nested agent gets the skill's
 prompt injected as extra system context and has the `search_skills`/`call_skill`
 tools suppressed (depth guard via ``_inside_skill_call`` option).
 """
+
 from __future__ import annotations
 
 import json
@@ -51,8 +52,8 @@ def run_sync(
 
         {"result": str, "file_changes": list, "error": str | None}
     """
-    from app.core.skills.skill_manager import SkillManager
     from app.core.skills.cloud_skill_registry import CloudSkillRegistry
+    from app.core.skills.skill_manager import SkillManager
 
     sm = SkillManager.instance()
     skill_def = sm.get_definition(skill_id)
@@ -68,10 +69,16 @@ def run_sync(
                 ephemeral_id = skill_id
 
     if skill_def is None:
-        return {"result": "", "file_changes": [], "error": f"Skill not found: {skill_id}"}
+        return {
+            "result": "",
+            "file_changes": [],
+            "error": f"Skill not found: {skill_id}",
+        }
 
     # Build nested options (depth guard)
-    nested_options: Dict[str, Any] = {k: v for k, v in options.items() if k != "_inside_skill_call"}
+    nested_options: Dict[str, Any] = {
+        k: v for k, v in options.items() if k != "_inside_skill_call"
+    }
     nested_options["_inside_skill_call"] = True
 
     skill_prompt = ""
@@ -92,7 +99,9 @@ def run_sync(
         from app.core.agent.task_agent import TaskAgent
 
         agent = TaskAgent(model_id=model_id, api_key=api_key)
-        for event in agent.execute(task=task_with_context, files=files, options=nested_options):
+        for event in agent.execute(
+            task=task_with_context, files=files, options=nested_options
+        ):
             payload = _parse_sse(event)
             if not payload:
                 continue

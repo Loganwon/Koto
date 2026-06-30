@@ -15,7 +15,6 @@ from app.core.agent.file_task_review_intent import (
     looks_like_pdf_docx_review_request,
 )
 
-
 _DOCX_CLEAR_REVIEW_REQUEST_PATTERNS = (
     re.compile(
         r"(?:删除|移除|去掉|清除|清空|取消|消除|remove|delete|clear).{0,12}(?:所有|全部|整篇|整个|全部的)?(?:.{0,8})?(?:批注|标注|评论|注释|评注|修订|审阅标记|修改痕迹|comments?|review marks?|tracked changes?)",
@@ -85,9 +84,10 @@ def should_use_doc_annotate_bridge_execution(request: FileTaskRequest) -> bool:
 
     continue_same_bridge = False
     followup_context = options.get("followup_context")
-    if isinstance(followup_context, dict) and str(
-        followup_context.get("kind") or ""
-    ).strip() == "review_last_task":
+    if (
+        isinstance(followup_context, dict)
+        and str(followup_context.get("kind") or "").strip() == "review_last_task"
+    ):
         continue_same_bridge = _should_continue_same_bridge(
             str(request.task or ""),
             followup_context,
@@ -134,12 +134,10 @@ def _should_continue_same_bridge(
     task_text: str,
     followup_context: dict[str, Any],
 ) -> bool:
-    followup_action = str(
-        followup_context.get("followup_action") or ""
-    ).strip().lower()
-    previous_mode = str(
-        followup_context.get("previous_task_mode") or ""
-    ).strip().lower()
+    followup_action = str(followup_context.get("followup_action") or "").strip().lower()
+    previous_mode = (
+        str(followup_context.get("previous_task_mode") or "").strip().lower()
+    )
     if followup_action != "improve" or previous_mode != "doc_annotate_bridge":
         return False
     previous_request = str(followup_context.get("previous_task_request") or "")
@@ -164,7 +162,9 @@ def _file_type(file_info: FileTaskFile) -> str:
     explicit = str(file_info.type or "").strip().lower().lstrip(".")
     if explicit:
         return explicit
-    suffix = Path(str(file_info.path or file_info.name or "")).suffix.lower().lstrip(".")
+    suffix = (
+        Path(str(file_info.path or file_info.name or "")).suffix.lower().lstrip(".")
+    )
     return suffix
 
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 WEB_APP = ROOT / "web" / "app.py"
 APP_BLUEPRINTS = ROOT / "web" / "app_blueprints.py"
@@ -334,7 +333,10 @@ def test_task_orchestrator_filegen_lives_outside_orchestrator_class():
     orchestrator_source = _read(TASK_ORCHESTRATOR)
     filegen_source = _read(TASK_ORCHESTRATOR_FILEGEN)
 
-    assert "from web.task_orchestrator_filegen import execute_file_gen" in orchestrator_source
+    assert (
+        "from web.task_orchestrator_filegen import execute_file_gen"
+        in orchestrator_source
+    )
     assert "async def execute_file_gen(" in filegen_source
     assert "def _clean_filegen_text(" not in orchestrator_source
     assert "def _extract_markdown_table(" not in orchestrator_source
@@ -346,7 +348,10 @@ def test_task_orchestrator_step_executors_live_outside_orchestrator_class():
     steps_source = _read(TASK_ORCHESTRATOR_STEPS)
 
     for name in ["painter", "research", "coder", "system"]:
-        assert f"from web.task_orchestrator_steps import execute_{name}" in orchestrator_source
+        assert (
+            f"from web.task_orchestrator_steps import execute_{name}"
+            in orchestrator_source
+        )
         assert f"async def execute_{name}(" in steps_source
 
     assert "client.models.generate_images(" not in orchestrator_source
@@ -359,7 +364,10 @@ def test_task_orchestrator_ppt_multi_step_lives_outside_orchestrator_class():
     orchestrator_source = _read(TASK_ORCHESTRATOR)
     ppt_source = _read(TASK_ORCHESTRATOR_PPT)
 
-    assert "from web.task_orchestrator_ppt import execute_ppt_multi_step" in orchestrator_source
+    assert (
+        "from web.task_orchestrator_ppt import execute_ppt_multi_step"
+        in orchestrator_source
+    )
     assert "async def execute_ppt_multi_step(" in ppt_source
     assert "PPTContentPlanner" not in orchestrator_source
     assert "PPTGenerator" not in orchestrator_source
@@ -371,7 +379,10 @@ def test_task_orchestrator_web_search_lives_outside_orchestrator_class():
     orchestrator_source = _read(TASK_ORCHESTRATOR)
     search_source = _read(TASK_ORCHESTRATOR_SEARCH)
 
-    assert "from web.task_orchestrator_search import execute_web_search" in orchestrator_source
+    assert (
+        "from web.task_orchestrator_search import execute_web_search"
+        in orchestrator_source
+    )
     assert "async def execute_web_search(" in search_source
     assert "WebSearcher.search_with_grounding" not in orchestrator_source
     assert "await asyncio.sleep" not in orchestrator_source
@@ -382,7 +393,10 @@ def test_task_orchestrator_quality_scoring_lives_outside_orchestrator_class():
     orchestrator_source = _read(TASK_ORCHESTRATOR)
     quality_source = _read(TASK_ORCHESTRATOR_QUALITY)
 
-    assert "from web.task_orchestrator_quality import validate_quality" in orchestrator_source
+    assert (
+        "from web.task_orchestrator_quality import validate_quality"
+        in orchestrator_source
+    )
     assert "async def validate_quality(" in quality_source
     assert "client.models.generate_content" not in orchestrator_source
     assert "GenerateContentConfig" not in orchestrator_source

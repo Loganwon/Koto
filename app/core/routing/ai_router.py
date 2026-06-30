@@ -171,9 +171,9 @@ class AIRouter:
                 if _intent and _tts:
                     _hints.append(f"- 若用户意图是「{_intent}」→ 优先路由到 {_tts[0]}")
             if _hints:
-                _skill_hint_hash = hashlib.md5("\n".join(_hints).encode(), usedforsecurity=False).hexdigest()[
-                    :8
-                ]
+                _skill_hint_hash = hashlib.md5(
+                    "\n".join(_hints).encode(), usedforsecurity=False
+                ).hexdigest()[:8]
                 _dynamic_instruction = (
                     cls.ROUTER_INSTRUCTION
                     + "\n\n当前用户启用的 Skill 路由提示（优先参考）:\n"
@@ -187,9 +187,9 @@ class AIRouter:
             )
 
         # 检查缓存（加入 skill 状态哈希，技能启用变化时自动失效）
-        cache_key = hashlib.md5((user_input + _skill_hint_hash).encode(), usedforsecurity=False).hexdigest()[
-            :16
-        ]
+        cache_key = hashlib.md5(
+            (user_input + _skill_hint_hash).encode(), usedforsecurity=False
+        ).hexdigest()[:16]
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             print(f"[AIRouter] Cache hit: {cached}")
@@ -315,7 +315,10 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
 
         返回: (task_type, confidence, source, hint_or_None)
         """
-        cache_key = "h:" + hashlib.md5(user_input.encode(), usedforsecurity=False).hexdigest()[:16]
+        cache_key = (
+            "h:"
+            + hashlib.md5(user_input.encode(), usedforsecurity=False).hexdigest()[:16]
+        )
         if cache_key in cls._cache:
             cached = cls._cache[cache_key]
             return cached[0], cached[1], "Cache", cached[2] if len(cached) > 2 else None

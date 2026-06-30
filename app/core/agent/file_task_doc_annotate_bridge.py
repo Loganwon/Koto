@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import inspect
 import logging
 import math
 import os
 import uuid
-import inspect
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, List, Optional, Sequence
 
+from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import (
     FileTaskEvent,
     FileTaskFile,
@@ -17,19 +18,24 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamChunk,
     FileTaskToolStreamResult,
 )
-from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
+from app.core.agent.file_task_doc_annotate_events import (
+    build_live_write_progress_payload as _build_live_write_progress_payload,
+)
+from app.core.agent.file_task_doc_annotate_events import (
+    build_review_progress_payload as _build_review_progress_payload,
+)
+from app.core.agent.file_task_doc_annotate_events import (
+    runtime_payload as _runtime_payload,
+)
+from app.core.agent.file_task_doc_annotate_events import (
+    tool_result_from_bridge_payload as _tool_result_from_bridge_payload,
+)
 from app.core.agent.file_task_doc_annotate_intent import (
     looks_like_direct_docx_rewrite_request,
     looks_like_docx_review_clear_request,
     looks_like_multi_file_compare_request,
     should_route_request,
     should_use_doc_annotate_bridge_execution,
-)
-from app.core.agent.file_task_doc_annotate_events import (
-    build_live_write_progress_payload as _build_live_write_progress_payload,
-    build_review_progress_payload as _build_review_progress_payload,
-    runtime_payload as _runtime_payload,
-    tool_result_from_bridge_payload as _tool_result_from_bridge_payload,
 )
 from app.core.llm.model_mode import normalize_model_mode
 
@@ -101,11 +107,21 @@ class _ProviderClientAdapter:
         self._koto_provider_name = provider_name
 
 
-def _resolve_review_model_id(request: FileTaskRequest, *, gemini_client: Any = None) -> str:
+def _resolve_review_model_id(
+    request: FileTaskRequest, *, gemini_client: Any = None
+) -> str:
     requested_model = str(request.model_id or "").strip()
     normalized_mode = normalize_model_mode(request.model_mode, default="deepseek")
     if normalized_mode != "local":
-        ignored = {"auto", "cloud", "gemini", "deepseek", "openai", "anthropic", "ollama"}
+        ignored = {
+            "auto",
+            "cloud",
+            "gemini",
+            "deepseek",
+            "openai",
+            "anthropic",
+            "ollama",
+        }
         if requested_model and requested_model.lower() not in ignored:
             return requested_model
         try:
@@ -130,7 +146,11 @@ def _resolve_review_model_id(request: FileTaskRequest, *, gemini_client: Any = N
             return requested_model
 
     lowered_requested = requested_model.lower()
-    if lowered_requested and lowered_requested not in {"auto", "cloud", "local"} and not lowered_requested.startswith("gemini"):
+    if (
+        lowered_requested
+        and lowered_requested not in {"auto", "cloud", "local"}
+        and not lowered_requested.startswith("gemini")
+    ):
         return requested_model
 
     options = _request_options(request)
@@ -152,7 +172,9 @@ def _build_feedback_client(request: FileTaskRequest, *, gemini_client: Any = Non
         try:
             from app.core.llm.ollama_provider import OllamaClientProxy
 
-            return OllamaClientProxy(model_tag=None if model_id == "local" else model_id)
+            return OllamaClientProxy(
+                model_tag=None if model_id == "local" else model_id
+            )
         except Exception as exc:
             logger.warning("[doc_annotate_bridge] Ollama client unavailable: %s", exc)
             return gemini_client
@@ -206,16 +228,23 @@ def _extract_workflow_checkpoint(request: FileTaskRequest) -> dict[str, Any]:
     checkpoint = workflow_checkpoint_from_options(_request_options(request))
     if not checkpoint:
         return {}
-    if str(checkpoint.get("adapter") or "doc_annotate_bridge").strip() != "doc_annotate_bridge":
+    if (
+        str(checkpoint.get("adapter") or "doc_annotate_bridge").strip()
+        != "doc_annotate_bridge"
+    ):
         return {}
     return dict(checkpoint)
 
 
-def _build_resume_files(request: FileTaskRequest, *, source_pdf: str, target_docx: str) -> list[dict[str, Any]]:
+def _build_resume_files(
+    request: FileTaskRequest, *, source_pdf: str, target_docx: str
+) -> list[dict[str, Any]]:
     files: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
 
-    def _append(path: str, file_type: str, *, target: bool = False, name: str = "") -> None:
+    def _append(
+        path: str, file_type: str, *, target: bool = False, name: str = ""
+    ) -> None:
         normalized = str(path or "").strip()
         if not normalized or normalized in seen_paths:
             return
@@ -237,13 +266,19 @@ def _build_resume_files(request: FileTaskRequest, *, source_pdf: str, target_doc
         if not path:
             continue
         file_type = _file_type(file_info)
-        if file_type == "docx" and bool(file_info.target) and os.path.normcase(path) != os.path.normcase(target_docx):
+        if (
+            file_type == "docx"
+            and bool(file_info.target)
+            and os.path.normcase(path) != os.path.normcase(target_docx)
+        ):
             continue
         _append(
             path,
             file_type,
-            target=bool(file_info.target) or os.path.normcase(path) == os.path.normcase(target_docx),
-            name=str(file_info.name or os.path.basename(path)).strip() or os.path.basename(path),
+            target=bool(file_info.target)
+            or os.path.normcase(path) == os.path.normcase(target_docx),
+            name=str(file_info.name or os.path.basename(path)).strip()
+            or os.path.basename(path),
         )
 
     return files
@@ -272,7 +307,9 @@ def _build_batch_resume_request(
     payload: dict[str, Any] = {
         "task": request.task,
         "target_path": target_docx,
-        "files": _build_resume_files(request, source_pdf=source_pdf, target_docx=target_docx),
+        "files": _build_resume_files(
+            request, source_pdf=source_pdf, target_docx=target_docx
+        ),
         "model_mode": request.model_mode,
         "model_id": request.model_id,
         "options": options,
@@ -290,7 +327,11 @@ def _build_batch_confirmation_artifact(
     large_file_plan: dict[str, Any],
     batch_index: int,
 ) -> dict[str, Any]:
-    batches = large_file_plan.get("batches") if isinstance(large_file_plan.get("batches"), list) else []
+    batches = (
+        large_file_plan.get("batches")
+        if isinstance(large_file_plan.get("batches"), list)
+        else []
+    )
     total_batches = len(batches)
     batch = batches[batch_index - 1] if 1 <= batch_index <= total_batches else {}
     chunk_start = int(batch.get("chunk_start") or 0)
@@ -300,7 +341,9 @@ def _build_batch_confirmation_artifact(
         "artifact_type": _BATCH_RESUME_ARTIFACT_TYPE,
         "category": _BATCH_RESUME_ARTIFACT_CATEGORY,
         "title": f"继续执行第 {batch_index}/{total_batches} 批",
-        "summary": str(batch.get("description") or large_file_plan.get("summary") or "").strip(),
+        "summary": str(
+            batch.get("description") or large_file_plan.get("summary") or ""
+        ).strip(),
         "suggested_next_step": f"确认后继续执行第 {batch_index}/{total_batches} 批审校。",
         "source_task": request.task,
         "target_path": target_docx,
@@ -320,11 +363,17 @@ def _build_batch_confirmation_artifact(
     }
 
 
-def _batch_state_from_plan(request: FileTaskRequest, large_file_plan: Optional[dict[str, Any]]) -> dict[str, Any]:
+def _batch_state_from_plan(
+    request: FileTaskRequest, large_file_plan: Optional[dict[str, Any]]
+) -> dict[str, Any]:
     if not isinstance(large_file_plan, dict):
         return {}
 
-    batches = large_file_plan.get("batches") if isinstance(large_file_plan.get("batches"), list) else []
+    batches = (
+        large_file_plan.get("batches")
+        if isinstance(large_file_plan.get("batches"), list)
+        else []
+    )
     total_batches = len(batches)
     if total_batches <= 0:
         return {}
@@ -430,9 +479,10 @@ def _stream_single_docx_request(
     )
 
     feedback = _build_feedback_system(request, gemini_client=gemini_client)
-    model_id = _resolve_review_model_id(request, gemini_client=gemini_client) or str(
-        getattr(feedback, "default_model_id", "") or ""
-    ).strip()
+    model_id = (
+        _resolve_review_model_id(request, gemini_client=gemini_client)
+        or str(getattr(feedback, "default_model_id", "") or "").strip()
+    )
     user_requirement = _merged_followup_requirement(request)
 
     review_finished = False
@@ -449,8 +499,12 @@ def _stream_single_docx_request(
         detail = str(progress_event.get("detail") or "").strip()
 
         if stage in {"reading", "analyzing", "info", "warning"}:
-            progress_payload = _build_review_progress_payload(progress_event, default_path=target_docx)
-            progress_detail = str(progress_payload.get("detail") or progress_payload.get("message") or "").strip()
+            progress_payload = _build_review_progress_payload(
+                progress_event, default_path=target_docx
+            )
+            progress_detail = str(
+                progress_payload.get("detail") or progress_payload.get("message") or ""
+            ).strip()
             if progress_detail:
                 yield ledger.event(
                     "step_progress",
@@ -467,7 +521,9 @@ def _stream_single_docx_request(
                     "success": True,
                     "path": target_docx,
                     "tool_args": {"path": target_docx},
-                    "result_preview": detail or message or f"已读取 {os.path.basename(target_docx)}",
+                    "result_preview": detail
+                    or message
+                    or f"已读取 {os.path.basename(target_docx)}",
                 },
                 step_id="review",
             )
@@ -504,14 +560,18 @@ def _stream_single_docx_request(
                     "step.started",
                     {
                         "title": "写回 Word 修订",
-                        "detail": detail or message or "将审校修订直接写回当前 DOCX 文件。",
+                        "detail": detail
+                        or message
+                        or "将审校修订直接写回当前 DOCX 文件。",
                     },
                     step_id="write",
                 )
                 write_started = True
             yield ledger.event(
                 "step_progress",
-                _build_live_write_progress_payload(progress_event, default_path=target_docx),
+                _build_live_write_progress_payload(
+                    progress_event, default_path=target_docx
+                ),
                 step_id="write",
             )
             continue
@@ -624,7 +684,9 @@ def stream_request(
     workspace_root: str = "",
     gemini_client: Any = None,
 ) -> Iterable[FileTaskEvent]:
-    target_docx = _resolve_existing_path(_find_target_docx_path(request), workspace_root)
+    target_docx = _resolve_existing_path(
+        _find_target_docx_path(request), workspace_root
+    )
     source_pdf = _resolve_existing_path(_find_pdf_file(request), workspace_root)
 
     if not source_pdf:
@@ -753,9 +815,10 @@ def stream_request(
         model_mode=request.model_mode,
     )
     batch_state = _batch_state_from_plan(request, large_file_plan)
-    model_id = _resolve_review_model_id(request, gemini_client=gemini_client) or str(
-        getattr(feedback, "default_model_id", "") or ""
-    ).strip()
+    model_id = (
+        _resolve_review_model_id(request, gemini_client=gemini_client)
+        or str(getattr(feedback, "default_model_id", "") or "").strip()
+    )
     user_requirement = _merged_followup_requirement(request)
 
     if large_file_plan:
@@ -801,8 +864,14 @@ def stream_request(
 
     current_batch_index = int(batch_state.get("batch_index") or 0)
     total_batches = int(batch_state.get("total_batches") or 0)
-    current_batch = batch_state.get("batch") if isinstance(batch_state.get("batch"), dict) else {}
-    chunk_range = batch_state.get("chunk_range") if isinstance(batch_state.get("chunk_range"), tuple) else None
+    current_batch = (
+        batch_state.get("batch") if isinstance(batch_state.get("batch"), dict) else {}
+    )
+    chunk_range = (
+        batch_state.get("chunk_range")
+        if isinstance(batch_state.get("chunk_range"), tuple)
+        else None
+    )
     review_title = (
         f"执行第 {current_batch_index}/{total_batches} 批审校"
         if current_batch_index > 0 and total_batches > 0
@@ -841,8 +910,12 @@ def stream_request(
         detail = str(progress_event.get("detail") or "").strip()
 
         if stage in {"reading", "analyzing", "info", "warning"}:
-            progress_payload = _build_review_progress_payload(progress_event, default_path=target_docx)
-            progress_detail = str(progress_payload.get("detail") or progress_payload.get("message") or "").strip()
+            progress_payload = _build_review_progress_payload(
+                progress_event, default_path=target_docx
+            )
+            progress_detail = str(
+                progress_payload.get("detail") or progress_payload.get("message") or ""
+            ).strip()
             if progress_detail:
                 yield ledger.event(
                     "step_progress",
@@ -859,7 +932,9 @@ def stream_request(
                     "success": True,
                     "path": target_docx,
                     "tool_args": {"path": target_docx},
-                    "result_preview": detail or message or f"已读取 {os.path.basename(target_docx)}",
+                    "result_preview": detail
+                    or message
+                    or f"已读取 {os.path.basename(target_docx)}",
                 },
                 step_id="review",
             )
@@ -896,14 +971,18 @@ def stream_request(
                     "step.started",
                     {
                         "title": "写回 Word 修订",
-                        "detail": detail or message or "将审校修订直接写回当前 DOCX 文件。",
+                        "detail": detail
+                        or message
+                        or "将审校修订直接写回当前 DOCX 文件。",
                     },
                     step_id="write",
                 )
                 write_started = True
             yield ledger.event(
                 "step_progress",
-                _build_live_write_progress_payload(progress_event, default_path=target_docx),
+                _build_live_write_progress_payload(
+                    progress_event, default_path=target_docx
+                ),
                 step_id="write",
             )
             continue
@@ -987,7 +1066,11 @@ def stream_request(
         step_id="check",
     )
 
-    if passed and batch_state.get("has_next_batch") and isinstance(large_file_plan, dict):
+    if (
+        passed
+        and batch_state.get("has_next_batch")
+        and isinstance(large_file_plan, dict)
+    ):
         next_batch_index = int(batch_state.get("next_batch_index") or 0)
         next_target_docx = revised_file or target_docx
         yield ledger.event(
@@ -1049,7 +1132,9 @@ def _normalized_path_key(path: Any) -> str:
     return os.path.normcase(os.path.normpath(text))
 
 
-def _build_request_path_aliases(request: FileTaskRequest, workspace_root: str) -> dict[str, str]:
+def _build_request_path_aliases(
+    request: FileTaskRequest, workspace_root: str
+) -> dict[str, str]:
     aliases: dict[str, str] = {}
     seen: set[str] = set()
     for file_info in _request_files(request):
@@ -1072,9 +1157,18 @@ def _build_request_path_aliases(request: FileTaskRequest, workspace_root: str) -
     return aliases
 
 
-def _rewrite_tool_payload_paths(payload: dict[str, Any], aliases: dict[str, str]) -> dict[str, Any]:
+def _rewrite_tool_payload_paths(
+    payload: dict[str, Any], aliases: dict[str, str]
+) -> dict[str, Any]:
     rewritten = dict(payload or {})
-    for key in ("path", "file_path", "source_path", "target_path", "revised_file", "output_path"):
+    for key in (
+        "path",
+        "file_path",
+        "source_path",
+        "target_path",
+        "revised_file",
+        "output_path",
+    ):
         value = str(rewritten.get(key) or "").strip()
         if not value:
             continue
@@ -1102,17 +1196,27 @@ def stream_request_as_tool(
                 payload = dict(event.payload or {})
                 if event.type == "step_progress":
                     payload = _rewrite_tool_payload_paths(payload, path_aliases)
-                yield FileTaskToolStreamChunk(kind="event", event_type=event.type, payload=payload)
+                yield FileTaskToolStreamChunk(
+                    kind="event", event_type=event.type, payload=payload
+                )
                 continue
             if event.type == "file.changed" and isinstance(event.payload, dict):
-                last_change = _rewrite_tool_payload_paths(dict(event.payload), path_aliases)
+                last_change = _rewrite_tool_payload_paths(
+                    dict(event.payload), path_aliases
+                )
                 continue
             if event.type == "run.error":
-                text = str(event.payload.get("text") or "文档审校失败。") if isinstance(event.payload, dict) else "文档审校失败。"
+                text = (
+                    str(event.payload.get("text") or "文档审校失败。")
+                    if isinstance(event.payload, dict)
+                    else "文档审校失败。"
+                )
                 yield FileTaskToolStreamChunk(kind="result", payload={"error": text})
                 return
             if event.type == "run.finished" and isinstance(event.payload, dict):
-                payload = _tool_result_from_bridge_payload(dict(event.payload), last_change=last_change)
+                payload = _tool_result_from_bridge_payload(
+                    dict(event.payload), last_change=last_change
+                )
                 payload = _rewrite_tool_payload_paths(payload, path_aliases)
                 yield FileTaskToolStreamChunk(
                     kind="result",
@@ -1120,7 +1224,9 @@ def stream_request_as_tool(
                 )
                 return
 
-        yield FileTaskToolStreamChunk(kind="result", payload={"error": "文档审校流程未返回结束事件。"})
+        yield FileTaskToolStreamChunk(
+            kind="result", payload={"error": "文档审校流程未返回结束事件。"}
+        )
 
     return FileTaskToolStreamResult(chunks=_chunks())
 
@@ -1137,7 +1243,9 @@ def _file_type(file_info: FileTaskFile) -> str:
     explicit = str(file_info.type or "").strip().lower().lstrip(".")
     if explicit:
         return explicit
-    suffix = Path(str(file_info.path or file_info.name or "")).suffix.lower().lstrip(".")
+    suffix = (
+        Path(str(file_info.path or file_info.name or "")).suffix.lower().lstrip(".")
+    )
     return suffix
 
 
@@ -1238,7 +1346,11 @@ def _build_pdf_reference_windows(
     else:
         text = str((parsed or {}).get("text") or "").strip()
         if text:
-            limit = len(text) if not window_limit else min(len(text), per_window_chars * window_limit)
+            limit = (
+                len(text)
+                if not window_limit
+                else min(len(text), per_window_chars * window_limit)
+            )
             for offset in range(0, limit, per_window_chars):
                 windows.append(text[offset : offset + per_window_chars])
             pages_with_text = page_count
@@ -1346,19 +1458,29 @@ def _positive_int_env(name: str, default: int) -> int:
         return max(1, int(default or 1))
 
 
-def _doc_review_batch_budget(model_mode: str, *, chunk_size: int = 0) -> dict[str, int | str]:
+def _doc_review_batch_budget(
+    model_mode: str, *, chunk_size: int = 0
+) -> dict[str, int | str]:
     normalized_model_mode = str(model_mode or "deepseek").strip().lower() or "deepseek"
     is_local_mode = normalized_model_mode == "local"
 
     if is_local_mode:
-        target_minutes = _positive_int_env("KOTO_DOC_REVIEW_LOCAL_BATCH_TARGET_MINUTES", 5)
-        approx_chars_per_minute = _positive_int_env("KOTO_DOC_REVIEW_LOCAL_BATCH_CHARS_PER_MINUTE", 2400)
+        target_minutes = _positive_int_env(
+            "KOTO_DOC_REVIEW_LOCAL_BATCH_TARGET_MINUTES", 5
+        )
+        approx_chars_per_minute = _positive_int_env(
+            "KOTO_DOC_REVIEW_LOCAL_BATCH_CHARS_PER_MINUTE", 2400
+        )
         max_chunks_per_batch = 3
         max_windows_per_batch = 12
         mode_label = "本地模型"
     else:
-        target_minutes = _positive_int_env("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", 6)
-        approx_chars_per_minute = _positive_int_env("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", 4000)
+        target_minutes = _positive_int_env(
+            "KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", 6
+        )
+        approx_chars_per_minute = _positive_int_env(
+            "KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", 4000
+        )
         max_chunks_per_batch = 6
         max_windows_per_batch = 20
         mode_label = "云端模型"
@@ -1418,7 +1540,9 @@ def _chunk_ranges_for_char_budget(
     current_chunk_count = 0
 
     for index, chunk_chars in enumerate(normalized_counts, start=1):
-        exceeds_char_budget = current_chunk_count > 0 and (current_chars + chunk_chars) > target_chars
+        exceeds_char_budget = (
+            current_chunk_count > 0 and (current_chars + chunk_chars) > target_chars
+        )
         exceeds_chunk_budget = current_chunk_count >= max_chunks
         if exceeds_char_budget or exceeds_chunk_budget:
             ranges.append((start_index, index - 1))
@@ -1437,7 +1561,9 @@ def _chunk_ranges_for_char_budget(
     return ranges, batch_char_counts
 
 
-def _window_ranges_for_batch_loads(window_count: int, batch_char_counts: Sequence[int]) -> list[tuple[int, int]]:
+def _window_ranges_for_batch_loads(
+    window_count: int, batch_char_counts: Sequence[int]
+) -> list[tuple[int, int]]:
     normalized_window_count = max(0, int(window_count or 0))
     if normalized_window_count <= 0 or not batch_char_counts:
         return []
@@ -1454,7 +1580,9 @@ def _window_ranges_for_batch_loads(window_count: int, batch_char_counts: Sequenc
             end = normalized_window_count
         else:
             consumed_weight += weight
-            proportional_end = int(round((consumed_weight / total_weight) * normalized_window_count))
+            proportional_end = int(
+                round((consumed_weight / total_weight) * normalized_window_count)
+            )
             min_end = start
             max_end = max(min_end, normalized_window_count - remaining_batches)
             end = max(min_end, min(max_end, proportional_end))
@@ -1513,7 +1641,9 @@ def _build_large_file_plan(
     )
     if not chunk_ranges:
         chunk_ranges = _partition_ranges(chunk_count, batch_count)
-        batch_char_counts = [math.ceil(max(1, content_chars) / max(1, len(chunk_ranges)))] * len(chunk_ranges)
+        batch_char_counts = [
+            math.ceil(max(1, content_chars) / max(1, len(chunk_ranges)))
+        ] * len(chunk_ranges)
 
     window_ranges = _window_ranges_for_batch_loads(window_count, batch_char_counts)
     window_pages = max(1, int(reference_meta.get("window_pages") or 4))
@@ -1524,7 +1654,9 @@ def _build_large_file_plan(
         chunk_start, chunk_end = chunk_range
         batch_chars = batch_char_counts[idx] if idx < len(batch_char_counts) else 0
         batch_chars_label = _format_large_count(batch_chars, "字")
-        estimated_minutes = max(1, math.ceil(batch_chars / max(1, approx_chars_per_minute)))
+        estimated_minutes = max(
+            1, math.ceil(batch_chars / max(1, approx_chars_per_minute))
+        )
         description_parts = [
             f"处理译稿分段 {chunk_start}-{chunk_end}/{chunk_count}",
             batch_chars_label,

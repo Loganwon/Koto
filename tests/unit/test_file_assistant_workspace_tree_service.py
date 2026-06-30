@@ -32,7 +32,9 @@ def test_workspace_tree_skips_hidden_and_runtime_dirs(tmp_path: Path):
     assert docs["children"][0]["name"] == "memo.docx"
 
 
-def test_workspace_tree_file_entry_contains_category_support_size_and_mtime(tmp_path: Path):
+def test_workspace_tree_file_entry_contains_category_support_size_and_mtime(
+    tmp_path: Path,
+):
     target = tmp_path / "sheet.xlsx"
     target.write_bytes(b"x" * 2048)
 

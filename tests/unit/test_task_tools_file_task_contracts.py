@@ -310,9 +310,7 @@ def test_file_task_change_tracker_mirrors_list_appends_to_coordinator():
     assert coordinator_changes[0]["modified"] == "new"
 
 
-def test_fill_docx_template_replaces_placeholders_and_emits_diff(
-    tmp_path, monkeypatch
-):
+def test_fill_docx_template_replaces_placeholders_and_emits_diff(tmp_path, monkeypatch):
     from docx import Document
 
     import app.core.agent.task_tools as task_tools
@@ -327,7 +325,9 @@ def test_fill_docx_template_replaces_placeholders_and_emits_diff(
 
     result_text = task_tools.fill_docx_template(
         "template.docx",
-        data=json.dumps({"party_a": "杭州公司", "amount": "100万元"}, ensure_ascii=False),
+        data=json.dumps(
+            {"party_a": "杭州公司", "amount": "100万元"}, ensure_ascii=False
+        ),
         target_path="filled.docx",
     )
     result = json.loads(result_text)
@@ -350,9 +350,7 @@ def test_fill_docx_template_replaces_placeholders_and_emits_diff(
     ]
 
 
-def test_convert_docx_to_pdf_emits_file_change_with_converter(
-    tmp_path, monkeypatch
-):
+def test_convert_docx_to_pdf_emits_file_change_with_converter(tmp_path, monkeypatch):
     from docx import Document
 
     import app.core.agent.task_tools as task_tools
@@ -370,7 +368,9 @@ def test_convert_docx_to_pdf_emits_file_change_with_converter(
             fh.write(b"%PDF-1.4\n% koto test\n")
         return "fake_converter"
 
-    monkeypatch.setattr(task_tools, "_convert_docx_to_pdf_with_docx2pdf", fake_converter)
+    monkeypatch.setattr(
+        task_tools, "_convert_docx_to_pdf_with_docx2pdf", fake_converter
+    )
 
     result_text = task_tools.convert_docx_to_pdf("report.docx", "report.pdf")
     result = json.loads(result_text)
@@ -448,7 +448,9 @@ def test_create_file_pptx_emits_slide_metrics_and_valid_deck(tmp_path, monkeypat
 
     monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
 
-    result = json.loads(task_tools.create_file("deck.pptx", "# 汇报标题\n- 关键发现\n- 后续行动"))
+    result = json.loads(
+        task_tools.create_file("deck.pptx", "# 汇报标题\n- 关键发现\n- 后续行动")
+    )
 
     assert result["success"] is True
     assert result["operation"] == "add_pptx_slides"
@@ -1007,7 +1009,11 @@ def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(
 
     result = gateway.execute(
         "annotate_file",
-        {"path": "draft.docx", "annotations": "[]", "requirement": "请批注不通顺的地方"},
+        {
+            "path": "draft.docx",
+            "annotations": "[]",
+            "requirement": "请批注不通顺的地方",
+        },
     )
 
     assert isinstance(result, FileTaskToolStreamResult)
@@ -1057,7 +1063,13 @@ def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change
     editor = TrackChangesEditor(author="Koto Test")
     applied = editor.apply_comment_changes(
         str(docx_path),
-        [{"原文片段": "第一段用于清除批注测试。", "修改后文本": "建议改写", "修改原因": "测试"}],
+        [
+            {
+                "原文片段": "第一段用于清除批注测试。",
+                "修改后文本": "建议改写",
+                "修改原因": "测试",
+            }
+        ],
     )
 
     assert applied["applied"] == 1
@@ -1387,9 +1399,7 @@ def test_write_docx_comments_appends_after_existing_comments(tmp_path, monkeypat
     first = json.loads(
         task_tools.write_docx_comments(
             "contract_comments.docx",
-            comments_json=[
-                {"原文片段": "付款期限为30日", "批注内容": "旧批注"}
-            ],
+            comments_json=[{"原文片段": "付款期限为30日", "批注内容": "旧批注"}],
         )
     )
     second = json.loads(
@@ -1491,7 +1501,11 @@ def test_annotate_file_pdf_docx_requirement_uses_bridge_streaming_tool_result(
 
     result = gateway.execute(
         "annotate_file",
-        {"path": str(docx_path), "annotations": "[]", "requirement": "根据原文审校译稿并拆分执行"},
+        {
+            "path": str(docx_path),
+            "annotations": "[]",
+            "requirement": "根据原文审校译稿并拆分执行",
+        },
     )
 
     assert isinstance(result, FileTaskToolStreamResult)

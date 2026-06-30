@@ -227,6 +227,7 @@ def _local_model_fallback(user_message: str, history: list = None) -> tuple:
         content = (resp.json().get("message", {}) or {}).get("content", "") or ""
         # Strip <think>...</think> blocks (qwen3 thinking mode output)
         import re as _re
+
         content = _re.sub(r"<think>.*?</think>", "", content, flags=_re.DOTALL).strip()
         return (content if content else None), model_name
 
@@ -573,6 +574,7 @@ def _run_agent_collect(
 
 # ── ChatPipeline helper ──────────────────────────────────────────────────
 
+
 def _build_chat_pipeline():
     """Assemble a ChatPipeline with the agent and all guard modules."""
     from app.core.agent.chat_pipeline import ChatPipeline
@@ -594,6 +596,7 @@ def _build_chat_pipeline():
 def _lazy_skill_suggester():
     try:
         from app.core.skills.skill_suggester import SkillSuggester
+
         return SkillSuggester
     except Exception:
         return None
@@ -613,12 +616,14 @@ def _make_self_eval_fn():
                 session_name=session_name,
                 llm_fn=_make_eval_llm_fn(),
             )
+
         return _fn
     except Exception:
         return None
 
 
 # ── Context-building helpers ────────────────────────────────────────────
+
 
 def _build_chat_system_context(
     message: str,
@@ -633,6 +638,7 @@ def _build_chat_system_context(
 
     try:
         from app.core.memory.conversation_tracker import ConversationTracker
+
         _tracker_path = _get_tracker_path(session_id)
         _tracker = ConversationTracker.load(_tracker_path)
     except Exception as e:
@@ -641,10 +647,13 @@ def _build_chat_system_context(
     _rewritten = message
     try:
         from app.core.routing.intent_analyzer import IntentAnalyzer
+
         if IntentAnalyzer.should_analyze(message):
             rw = IntentAnalyzer.rewrite_intent(message, history, _tracker)
             if rw and rw != message:
-                logger.info("[chat] Intent rewritten: '%s' -> '%s'", message[:40], rw[:60])
+                logger.info(
+                    "[chat] Intent rewritten: '%s' -> '%s'", message[:40], rw[:60]
+                )
                 _rewritten = rw
     except Exception as e:
         logger.debug("[chat] IntentAnalyzer skip: %s", e)
@@ -652,8 +661,10 @@ def _build_chat_system_context(
     _cw_paged = ""
     try:
         from app.core.memory.context_window_manager import ContextWindowManager
+
         out = ContextWindowManager.manage(
-            history=history, query=_rewritten,
+            history=history,
+            query=_rewritten,
             session_name=(session_id or "").replace(".json", ""),
             get_memory_fn=lambda: None,
         )
@@ -673,14 +684,20 @@ def _build_chat_system_context(
     if context_files:
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             blocks = []
             for p in context_files[:5]:
                 entry = reg.get_by_path(str(p))
                 if entry and entry.content_preview:
-                    blocks.append(f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}")
+                    blocks.append(
+                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
+                    )
             if blocks:
-                parts.append("用户在对话中引用了以下本地文件，请结合其内容回答：\n\n" + "\n\n---\n\n".join(blocks))
+                parts.append(
+                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
+                    + "\n\n---\n\n".join(blocks)
+                )
                 logger.info("[chat] Injected %d @file context(s)", len(blocks))
         except Exception as e:
             logger.debug("[chat] @file context skip: %s", e)
@@ -688,7 +705,9 @@ def _build_chat_system_context(
     sys_ctx = "\n\n".join(parts) if parts else None
 
     try:
-        ws_root = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace")
+        ws_root = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "workspace"
+        )
         boot_parts = []
         for bf in ("KOTO.md", "TOOLS_GUIDE.md"):
             bp = os.path.join(ws_root, bf)
@@ -698,7 +717,9 @@ def _build_chat_system_context(
                         bc = f.read(4000)
                     if bc.strip():
                         boot_parts.append(f"【{bf}】\n{bc}")
-                        logger.debug("[chat] Bootstrap injected: %s (%d chars)", bf, len(bc))
+                        logger.debug(
+                            "[chat] Bootstrap injected: %s (%d chars)", bf, len(bc)
+                        )
                 except Exception as be:
                     logger.debug("[chat] Bootstrap read fail %s: %s", bf, be)
         if boot_parts:
@@ -711,15 +732,22 @@ def _build_chat_system_context(
         fc_parts = []
         fc_file = file_context.get("file_path") or file_context.get("file_name", "")
         if fc_file:
-            fc_parts.append(f"当前打开文件: {fc_file} (类型: {file_context.get('file_type', 'unknown')})")
+            fc_parts.append(
+                f"当前打开文件: {fc_file} (类型: {file_context.get('file_type', 'unknown')})"
+            )
         tabs = file_context.get("open_tabs") or []
         if tabs:
-            fc_parts.append(f"工作区打开的标签页: {', '.join(str(t) for t in tabs[:10])}")
+            fc_parts.append(
+                f"工作区打开的标签页: {', '.join(str(t) for t in tabs[:10])}"
+            )
         sel = file_context.get("selection", "")
         if sel:
             fc_parts.append(f"用户选中的文本:\n{str(sel)[:2000]}")
         if fc_parts:
-            fc_block = "【文件助手上下文】\n用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n" + "\n".join(fc_parts)
+            fc_block = (
+                "【文件助手上下文】\n用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n"
+                + "\n".join(fc_parts)
+            )
             sys_ctx = (sys_ctx + "\n\n" + fc_block) if sys_ctx else fc_block
             logger.info("[chat] File assistant context injected: %s", fc_file)
 
@@ -733,7 +761,9 @@ def chat():
     session_id = data.get("session_id") or data.get("session", "")
     history = data.get("history") or _load_history(session_id)
     model_id = data.get("model", "gemini-2.5-flash")
-    locked_model = data.get("locked_model") or ("local" if model_id == "local" else "auto")
+    locked_model = data.get("locked_model") or (
+        "local" if model_id == "local" else "auto"
+    )
     user_chose_local = locked_model == "local"
     skill_id = data.get("skill_id")
     task_type = data.get("task_type")
@@ -746,7 +776,9 @@ def chat():
         return jsonify({"error": "Message is required"}), 400
 
     rewritten_message, system_context, tracker, tracker_path, history, _ = (
-        _build_chat_system_context(message, history, session_id, context_files, file_context)
+        _build_chat_system_context(
+            message, history, session_id, context_files, file_context
+        )
     )
 
     session_state = _load_session_state(session_id)
@@ -754,7 +786,9 @@ def chat():
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
 
-    skill_id, auto_skill_ids = _resolve_runtime_skill(rewritten_message, skill_id, task_type)
+    skill_id, auto_skill_ids = _resolve_runtime_skill(
+        rewritten_message, skill_id, task_type
+    )
 
     pipeline = _build_chat_pipeline()
     pipeline.tracker = tracker
@@ -864,7 +898,9 @@ def process_stream_compat():
     task_type = data.get("task_type")
     context = data.get("context", {})
     context_files = data.get("context_files") or []
-    history = (context.get("history", []) if isinstance(context, dict) else []) or _load_history(session_id)
+    history = (
+        context.get("history", []) if isinstance(context, dict) else []
+    ) or _load_history(session_id)
 
     session_state = _load_session_state(session_id)
     snapshot_ctx = _build_snapshot_context_text(session_state)
@@ -874,14 +910,20 @@ def process_stream_compat():
     if context_files:
         try:
             from app.core.file.file_registry import get_file_registry
+
             reg = get_file_registry()
             blocks = []
             for p in context_files[:5]:
                 entry = reg.get_by_path(str(p))
                 if entry and entry.content_preview:
-                    blocks.append(f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}")
+                    blocks.append(
+                        f"【参考文件：{entry.name}】\n{entry.content_preview[:2000]}"
+                    )
             if blocks:
-                ctx = "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n" + "\n\n---\n\n".join(blocks)
+                ctx = (
+                    "用户在对话中引用了以下本地文件，请结合其内容回答：\n\n"
+                    + "\n\n---\n\n".join(blocks)
+                )
                 history = (history or []) + [{"role": "model", "content": ctx}]
         except Exception as e:
             logger.debug("[process-stream] @file context skip: %s", e)
@@ -915,18 +957,21 @@ def agent_resume():
 
     try:
         import json as _json
+
         state = _json.loads(resume_token)
         # Reconstruct the pipeline from executed + remaining steps
-        from app.core.skills.skill_pipeline import SkillPipeline, PipelineStep
+        from app.core.skills.skill_pipeline import PipelineStep, SkillPipeline
 
         # The token is self-contained — we re-run from resume_idx
         # For now, return success acknowledgement; full re-execution
         # requires the pipeline definition which the caller should cache.
-        return jsonify({
-            "success": True,
-            "result": f"Pipeline resumed from step {state.get('resume_idx', '?')}",
-            "status": "resumed",
-        })
+        return jsonify(
+            {
+                "success": True,
+                "result": f"Pipeline resumed from step {state.get('resume_idx', '?')}",
+                "status": "resumed",
+            }
+        )
     except Exception as exc:
         return jsonify({"success": False, "error": str(exc)}), 500
 

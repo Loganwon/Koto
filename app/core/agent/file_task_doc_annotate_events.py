@@ -66,9 +66,11 @@ def build_review_progress_payload(
         ).strip(),
         "message": str(progress_event.get("message") or "").strip(),
         "progress": coerce_progress_value(progress_event.get("progress")),
-        "level": "warning"
-        if stage == "warning"
-        else ("info" if stage == "info" else "progress"),
+        "level": (
+            "warning"
+            if stage == "warning"
+            else ("info" if stage == "info" else "progress")
+        ),
     }
     for key in (
         "chunk_status",

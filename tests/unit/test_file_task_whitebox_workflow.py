@@ -1,12 +1,12 @@
 import json
 
+from app.core.agent.file_task_completion_contract import build_completion_contract
 from app.core.agent.file_task_contract import (
     FileTaskClassification,
     FileTaskFile,
     FileTaskIntentPlan,
     FileTaskRequest,
 )
-from app.core.agent.file_task_completion_contract import build_completion_contract
 from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_supervisor_audit import build_supervisor_audit
 from app.core.agent.file_task_validation import (
@@ -175,7 +175,8 @@ def test_completion_contract_unifies_complex_task_decomposition_and_gates():
     assert "write_docx_content" in payload["required_operations"]
     assert "insert_image_into_docx" in payload["required_operations"]
     assert any(
-        checkpoint["id"] == "write_output" and "file.changed" in checkpoint["must_observe"]
+        checkpoint["id"] == "write_output"
+        and "file.changed" in checkpoint["must_observe"]
         for checkpoint in payload["checkpoints"]
     )
     assert "最终质量门必须全部通过" in contract.success_criteria()
@@ -265,7 +266,11 @@ def test_file_task_runtime_continues_after_local_execution_plan_and_audits_decis
         def call(self, **kwargs):
             self.calls += 1
             messages = kwargs["messages"]
-            if any(message.get("role") == "function" and message.get("name") == "write_docx_content" for message in messages):
+            if any(
+                message.get("role") == "function"
+                and message.get("name") == "write_docx_content"
+                for message in messages
+            ):
                 return {"content": "已完成写入。", "tool_calls": []}
             if "已收到 execution_plan" in str(messages[-1].get("content")):
                 return {
@@ -279,7 +284,9 @@ def test_file_task_runtime_continues_after_local_execution_plan_and_audits_decis
                                 "paragraphs": json.dumps(
                                     [
                                         {"text": "本地模型按白盒计划写入。"},
-                                        {"text": "第二段用于满足报告型 DOCX 的质量门。"},
+                                        {
+                                            "text": "第二段用于满足报告型 DOCX 的质量门。"
+                                        },
                                         {"text": "第三段记录完成检查依据。"},
                                     ],
                                     ensure_ascii=False,
@@ -323,23 +330,34 @@ def test_file_task_runtime_continues_after_local_execution_plan_and_audits_decis
                 ensure_ascii=False,
             )
         if tool_name == "verify_task_completion":
-            return json.dumps({"completed": True, "summary": "report.docx 已完成更新。"}, ensure_ascii=False)
+            return json.dumps(
+                {"completed": True, "summary": "report.docx 已完成更新。"},
+                ensure_ascii=False,
+            )
         raise AssertionError(f"unexpected tool call: {tool_name}")
 
     events = list(
-        FileTaskRuntime(tool_executor=fake_executor, model_client=FakeModelClient(), max_rounds=4).run(
+        FileTaskRuntime(
+            tool_executor=fake_executor, model_client=FakeModelClient(), max_rounds=4
+        ).run(
             FileTaskRequest(
                 task="把总结写入 report.docx",
                 run_id="whitebox_local_once",
                 target_path="report.docx",
                 model_mode="local",
-                files=[FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True)],
+                files=[
+                    FileTaskFile(
+                        path="report.docx", name="report.docx", type="docx", target=True
+                    )
+                ],
             )
         )
     )
 
     assert any(event.type == "plan.proposed" for event in events)
-    assert any(event.type == "plan.gated" and event.payload["passed"] for event in events)
+    assert any(
+        event.type == "plan.gated" and event.payload["passed"] for event in events
+    )
     model_started = [event for event in events if event.type == "model.call.started"]
     model_finished = [event for event in events if event.type == "model.call.finished"]
     assert model_started

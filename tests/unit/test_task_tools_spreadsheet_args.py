@@ -1,7 +1,7 @@
+import base64
 import json
 import os
 import stat
-import base64
 from pathlib import Path
 
 
@@ -25,7 +25,9 @@ def test_read_sheet_data_accepts_string_max_rows(tmp_path):
     assert payload["rows"][0][0] == "杭州新汇鑫光电有限公司"
 
 
-def test_read_sheet_data_falls_back_from_generic_sheet1_for_single_sheet_workbook(tmp_path):
+def test_read_sheet_data_falls_back_from_generic_sheet1_for_single_sheet_workbook(
+    tmp_path,
+):
     import openpyxl
 
     from app.core.agent.task_tools import read_sheet_data
@@ -38,7 +40,9 @@ def test_read_sheet_data_falls_back_from_generic_sheet1_for_single_sheet_workboo
     sheet.append(["杭州新汇鑫光电有限公司", "LASER", 1])
     workbook.save(workbook_path)
 
-    payload = json.loads(read_sheet_data(str(workbook_path), sheet_name="Sheet1", max_rows="1"))
+    payload = json.loads(
+        read_sheet_data(str(workbook_path), sheet_name="Sheet1", max_rows="1")
+    )
 
     assert payload["sheet"] == "汇总表"
     assert payload["requested_sheet"] == "Sheet1"
@@ -46,7 +50,9 @@ def test_read_sheet_data_falls_back_from_generic_sheet1_for_single_sheet_workboo
     assert payload["row_count"] == 1
 
 
-def test_read_sheet_data_reports_available_sheets_when_requested_sheet_is_missing(tmp_path):
+def test_read_sheet_data_reports_available_sheets_when_requested_sheet_is_missing(
+    tmp_path,
+):
     import openpyxl
 
     from app.core.agent.task_tools import read_sheet_data
@@ -67,7 +73,9 @@ def test_read_sheet_data_reports_available_sheets_when_requested_sheet_is_missin
     capex_sheet.append(["资本开支", 800])
     workbook.save(workbook_path)
 
-    payload = json.loads(read_sheet_data(str(workbook_path), sheet_name="Balance Sheet", max_rows="1"))
+    payload = json.loads(
+        read_sheet_data(str(workbook_path), sheet_name="Balance Sheet", max_rows="1")
+    )
 
     assert payload["sheet"] == ""
     assert payload["headers"] == []
@@ -102,13 +110,15 @@ def test_insert_excel_as_docx_table_accepts_string_max_rows(tmp_path):
     document.add_paragraph("雷鸟访谈问题")
     document.save(target_path)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="销售台账",
-        table_title="销售台账数据",
-        max_rows="1",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="销售台账",
+            table_title="销售台账数据",
+            max_rows="1",
+        )
+    )
 
     assert payload["success"] is True
     assert payload["rows_written"] == 1
@@ -138,16 +148,18 @@ def test_insert_excel_as_docx_table_sorts_and_selects_columns_for_top_n(tmp_path
     sheet.append(["Delta Foods", "EU", 118000, 0.37, "Upsell"])
     workbook.save(workbook_path)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="Sales",
-        table_title="Top 3 Customers by Revenue",
-        max_rows="3",
-        sort_by="Revenue",
-        sort_order="desc",
-        columns='["Customer", "Region", "Revenue", "Margin"]',
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="Sales",
+            table_title="Top 3 Customers by Revenue",
+            max_rows="3",
+            sort_by="Revenue",
+            sort_order="desc",
+            columns='["Customer", "Region", "Revenue", "Margin"]',
+        )
+    )
 
     assert payload["success"] is True
     assert payload["rows_written"] == 3
@@ -165,7 +177,9 @@ def test_insert_excel_as_docx_table_sorts_and_selects_columns_for_top_n(tmp_path
     assert len(table.columns) == 4
 
 
-def test_insert_excel_as_docx_table_falls_back_from_generic_sheet1_for_single_sheet_workbook(tmp_path):
+def test_insert_excel_as_docx_table_falls_back_from_generic_sheet1_for_single_sheet_workbook(
+    tmp_path,
+):
     import openpyxl
     from docx import Document
 
@@ -185,13 +199,15 @@ def test_insert_excel_as_docx_table_falls_back_from_generic_sheet1_for_single_sh
     document.add_paragraph("雷鸟访谈问题")
     document.save(target_path)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="Sheet1",
-        table_title="销售台账数据",
-        max_rows="100",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="Sheet1",
+            table_title="销售台账数据",
+            max_rows="100",
+        )
+    )
 
     assert payload["success"] is True
     assert payload["sheet"] == "汇总表"
@@ -200,7 +216,9 @@ def test_insert_excel_as_docx_table_falls_back_from_generic_sheet1_for_single_sh
     assert payload["rows_written"] == 1
 
 
-def test_insert_excel_as_docx_table_continues_when_backup_creation_is_denied(tmp_path, monkeypatch):
+def test_insert_excel_as_docx_table_continues_when_backup_creation_is_denied(
+    tmp_path, monkeypatch
+):
     import openpyxl
     from docx import Document
 
@@ -230,13 +248,15 @@ def test_insert_excel_as_docx_table_continues_when_backup_creation_is_denied(tmp
 
     monkeypatch.setattr(task_tools.shutil, "copy2", deny_backup_copy)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="P&L",
-        table_title="财务预测 - 利润表",
-        max_rows="10",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="财务预测 - 利润表",
+            max_rows="10",
+        )
+    )
 
     assert payload["success"] is True
     assert payload["sheet"] == "P&L"
@@ -247,7 +267,9 @@ def test_insert_excel_as_docx_table_continues_when_backup_creation_is_denied(tmp
     assert saved.tables[0].cell(1, 0).text == "收入合计"
 
 
-def test_insert_excel_as_docx_table_falls_back_to_unique_backup_when_primary_backup_path_is_locked(tmp_path, monkeypatch):
+def test_insert_excel_as_docx_table_falls_back_to_unique_backup_when_primary_backup_path_is_locked(
+    tmp_path, monkeypatch
+):
     import openpyxl
     from docx import Document
 
@@ -278,18 +300,26 @@ def test_insert_excel_as_docx_table_falls_back_to_unique_backup_when_primary_bac
 
     monkeypatch.setattr(task_tools.shutil, "copy2", deny_only_canonical_backup)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="P&L",
-        table_title="财务预测 - 利润表",
-        max_rows="10",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="财务预测 - 利润表",
+            max_rows="10",
+        )
+    )
 
     assert payload["success"] is True
-    assert "warning" not in payload or "无法创建备份" not in str(payload.get("warning") or "")
+    assert "warning" not in payload or "无法创建备份" not in str(
+        payload.get("warning") or ""
+    )
 
-    backup_candidates = [path for path in tmp_path.glob("target.docx*.bak") if path.name != canonical_backup_path.name]
+    backup_candidates = [
+        path
+        for path in tmp_path.glob("target.docx*.bak")
+        if path.name != canonical_backup_path.name
+    ]
     assert backup_candidates
 
     saved = Document(str(target_path))
@@ -297,7 +327,9 @@ def test_insert_excel_as_docx_table_falls_back_to_unique_backup_when_primary_bac
     assert saved.tables[0].cell(1, 0).text == "收入合计"
 
 
-def test_insert_excel_as_docx_table_clears_readonly_existing_backup_before_copy(tmp_path, monkeypatch):
+def test_insert_excel_as_docx_table_clears_readonly_existing_backup_before_copy(
+    tmp_path, monkeypatch
+):
     import openpyxl
     from docx import Document
 
@@ -330,13 +362,15 @@ def test_insert_excel_as_docx_table_clears_readonly_existing_backup_before_copy(
 
     monkeypatch.setattr(task_tools.shutil, "copy2", guarded_copy2)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="P&L",
-        table_title="财务预测 - 利润表",
-        max_rows="10",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="财务预测 - 利润表",
+            max_rows="10",
+        )
+    )
 
     assert payload["success"] is True
     assert str(payload["path"]).endswith("target.docx")
@@ -363,13 +397,15 @@ def test_insert_excel_as_docx_table_clears_readonly_target_before_replace(tmp_pa
     document.save(target_path)
     target_path.chmod(stat.S_IREAD)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="P&L",
-        table_title="财务预测 - 利润表",
-        max_rows="10",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="财务预测 - 利润表",
+            max_rows="10",
+        )
+    )
 
     assert payload["success"] is True
     assert str(payload["path"]).endswith("target.docx")
@@ -393,11 +429,13 @@ def test_write_sheet_data_clears_readonly_target_before_save(tmp_path):
     workbook.save(workbook_path)
     workbook_path.chmod(stat.S_IREAD)
 
-    payload = json.loads(write_sheet_data(
-        str(workbook_path),
-        sheet_name="汇总表",
-        updates=[{"row": 2, "col": 2, "value": 3}],
-    ))
+    payload = json.loads(
+        write_sheet_data(
+            str(workbook_path),
+            sheet_name="汇总表",
+            updates=[{"row": 2, "col": 2, "value": 3}],
+        )
+    )
 
     assert payload["success"] is True
     assert payload["cells_written"] == 1
@@ -419,10 +457,12 @@ def test_write_docx_content_clears_readonly_target_before_save(tmp_path):
     document.save(target_path)
     target_path.chmod(stat.S_IREAD)
 
-    payload = json.loads(write_docx_content(
-        str(target_path),
-        paragraphs=[{"text": "新增段落"}],
-    ))
+    payload = json.loads(
+        write_docx_content(
+            str(target_path),
+            paragraphs=[{"text": "新增段落"}],
+        )
+    )
 
     assert payload["success"] is True
     assert payload["paragraphs_written"] == 1
@@ -445,15 +485,21 @@ def test_insert_image_into_docx_appends_picture_and_caption(tmp_path):
     document = Document()
     document.add_paragraph("原始段落")
     document.save(target_path)
-    image_path.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="))
+    image_path.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
+        )
+    )
 
-    payload = json.loads(insert_image_into_docx(
-        str(target_path),
-        str(image_path),
-        title="财务预测图表",
-        caption="收入与利润趋势",
-        width_inches="5.5",
-    ))
+    payload = json.loads(
+        insert_image_into_docx(
+            str(target_path),
+            str(image_path),
+            title="财务预测图表",
+            caption="收入与利润趋势",
+            width_inches="5.5",
+        )
+    )
 
     assert payload["success"] is True
     assert payload["image_name"] == "chart.png"
@@ -470,9 +516,7 @@ def test_insert_image_into_docx_appends_picture_and_caption(tmp_path):
 def test_run_python_code_materializes_sandbox_image_artifacts():
     from app.core.agent.task_tools import run_python_in_sandbox
 
-    png_b64 = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
-    )
+    png_b64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
     result = run_python_in_sandbox(
         "import base64, pathlib\n"
         f"pathlib.Path('chart_expense_structure.png').write_bytes(base64.b64decode('{png_b64}'))\n"
@@ -482,11 +526,16 @@ def test_run_python_code_materializes_sandbox_image_artifacts():
     generated_paths = result["generated_file_paths"]
     assert "chart_expense_structure.png" in generated_paths
     assert Path(generated_paths["chart_expense_structure.png"]).exists()
-    assert result["generated_files"][0]["path"] == generated_paths["chart_expense_structure.png"]
+    assert (
+        result["generated_files"][0]["path"]
+        == generated_paths["chart_expense_structure.png"]
+    )
     assert "chart_expense_structure.png" in result["files"]
 
 
-def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(tmp_path, monkeypatch):
+def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(
+    tmp_path, monkeypatch
+):
     import openpyxl
     from docx import Document
 
@@ -518,13 +567,15 @@ def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(t
 
     monkeypatch.setattr(task_tools.os, "replace", deny_target_replace)
 
-    payload = json.loads(insert_excel_as_docx_table(
-        str(workbook_path),
-        str(target_path),
-        sheet_name="P&L",
-        table_title="财务预测 - 利润表",
-        max_rows="10",
-    ))
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="财务预测 - 利润表",
+            max_rows="10",
+        )
+    )
 
     assert payload["success"] is False
     assert payload["status"] == "write_blocked"
@@ -540,7 +591,9 @@ def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(t
     assert saved.tables[0].cell(1, 0).text == "收入合计"
 
 
-def test_save_docx_via_temp_file_reports_locked_target_with_actionable_message(tmp_path, monkeypatch):
+def test_save_docx_via_temp_file_reports_locked_target_with_actionable_message(
+    tmp_path, monkeypatch
+):
     import pytest
 
     from app.core.agent import task_tools
@@ -579,7 +632,13 @@ def test_inspect_workbook_structure_reports_formula_headers_and_samples(tmp_path
     expenses.append(["销售费用", 20, 24])
     workbook.save(workbook_path)
 
-    payload = json.loads(inspect_workbook_structure(str(workbook_path), sample_rows_per_sheet=2, max_formula_examples_per_sheet=3))
+    payload = json.loads(
+        inspect_workbook_structure(
+            str(workbook_path),
+            sample_rows_per_sheet=2,
+            max_formula_examples_per_sheet=3,
+        )
+    )
 
     assert payload["sheet_count"] == 2
     assert payload["sheet_names"] == ["P&L", "Expenses"]
@@ -587,12 +646,25 @@ def test_inspect_workbook_structure_reports_formula_headers_and_samples(tmp_path
     assert first_sheet["name"] == "P&L"
     assert first_sheet["formula_count"] == 3
     assert first_sheet["year_header"]["row"] == 1
-    assert [item["header"] for item in first_sheet["year_header"]["columns"]] == ["2025E", "2026E", "2027E", "2028E"]
-    assert first_sheet["sample_rows"][0]["values"] == ["科目", "2025E", "2026E", "2027E", "2028E"]
+    assert [item["header"] for item in first_sheet["year_header"]["columns"]] == [
+        "2025E",
+        "2026E",
+        "2027E",
+        "2028E",
+    ]
+    assert first_sheet["sample_rows"][0]["values"] == [
+        "科目",
+        "2025E",
+        "2026E",
+        "2027E",
+        "2028E",
+    ]
     assert first_sheet["formula_examples"][0]["cell"] == "C3"
 
 
-def test_audit_financial_workbook_flags_missing_statements_external_refs_and_series_gaps(tmp_path):
+def test_audit_financial_workbook_flags_missing_statements_external_refs_and_series_gaps(
+    tmp_path,
+):
     import openpyxl
 
     from app.core.agent.task_tools import audit_financial_workbook
@@ -615,8 +687,12 @@ def test_audit_financial_workbook_flags_missing_statements_external_refs_and_ser
     assert payload["statement_presence"]["profit_and_loss"]["present"] is True
     assert payload["statement_presence"]["balance_sheet"]["present"] is False
     assert payload["statement_presence"]["cash_flow"]["present"] is False
-    assert {"missing_statement", "external_dependency", "year_series_gap"}.issubset(finding_types)
-    gap = next(item for item in payload["findings"] if item["type"] == "year_series_gap")
+    assert {"missing_statement", "external_dependency", "year_series_gap"}.issubset(
+        finding_types
+    )
+    gap = next(
+        item for item in payload["findings"] if item["type"] == "year_series_gap"
+    )
     assert gap["sheet"] == "P&L"
     assert gap["label"] == "所得税费用"
     assert "2027E" in gap["message"]

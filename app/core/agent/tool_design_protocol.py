@@ -5,7 +5,6 @@ from typing import Any, Dict, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskRequest
 
-
 TOOL_DESIGN_PROTOCOL = "koto_tool_design_v1"
 NEXT_ACTION_ARTIFACT_TYPE = "koto_next_action_v1"
 NEXT_ACTION_ARTIFACT_CATEGORY = "missing_native_tool"
@@ -71,8 +70,7 @@ def planner_response_shape() -> Dict[str, Any]:
 
 def external_planner_protocol_text() -> str:
     numbered_rules = "\n".join(
-        f"{index}. {rule}"
-        for index, rule in enumerate(_TOOL_DESIGN_RULES, start=1)
+        f"{index}. {rule}" for index, rule in enumerate(_TOOL_DESIGN_RULES, start=1)
     )
     return (
         f"Follow Koto Tool Design Protocol {TOOL_DESIGN_PROTOCOL} when native capability is missing.\n"
@@ -82,16 +80,15 @@ def external_planner_protocol_text() -> str:
 
 def tool_design_prompt_text() -> str:
     numbered_rules = "\n".join(
-        f"   {index}. {rule}"
-        for index, rule in enumerate(_TOOL_DESIGN_RULES, start=1)
+        f"   {index}. {rule}" for index, rule in enumerate(_TOOL_DESIGN_RULES, start=1)
     )
     return (
         f"Koto Tool Design Protocol（{TOOL_DESIGN_PROTOCOL}）：\n"
         f"{numbered_rules}\n"
-        "   返回格式示例：{\"tool_gap\":{\"summary\":\"...\",\"missing_capability\":\"snake_case\","
-        "\"why_missing\":\"...\",\"suggested_next_step\":\"...\",\"proposed_tool\":{\"name\":\"snake_case\","
-        "\"description\":\"...\",\"parameters\":{\"type\":\"object\",\"properties\":{}},"
-        "\"returns\":\"标准 file-change payload\",\"rationale\":\"...\"}}}\n"
+        '   返回格式示例：{"tool_gap":{"summary":"...","missing_capability":"snake_case",'
+        '"why_missing":"...","suggested_next_step":"...","proposed_tool":{"name":"snake_case",'
+        '"description":"...","parameters":{"type":"object","properties":{}},'
+        '"returns":"标准 file-change payload","rationale":"..."}}}\n'
         "   proposed_tool 可选补充 implementation_notes、safety_constraints、acceptance_tests、"
         "integration_points、dependencies、file_types、output_contract、read_only、tool_family。"
     )
@@ -126,7 +123,11 @@ def normalize_proposed_tool(
     proposed_tool: Dict[str, Any] = {
         "name": str(value.get("name") or "").strip(),
         "description": str(value.get("description") or "").strip(),
-        "parameters": dict(value.get("parameters") or {}) if isinstance(value.get("parameters"), dict) else {},
+        "parameters": (
+            dict(value.get("parameters") or {})
+            if isinstance(value.get("parameters"), dict)
+            else {}
+        ),
         "returns": str(value.get("returns") or "").strip(),
         "rationale": str(value.get("rationale") or "").strip(),
     }
@@ -140,9 +141,7 @@ def normalize_proposed_tool(
 
     if not include_empty_contract_fields:
         proposed_tool = {
-            key: item
-            for key, item in proposed_tool.items()
-            if _is_nonempty(item)
+            key: item for key, item in proposed_tool.items() if _is_nonempty(item)
         }
 
     if not proposed_tool:
@@ -158,12 +157,20 @@ def normalize_tool_gap(
     if not isinstance(candidate, dict):
         return None
 
-    if "proposed_tool" not in candidate and any(key in candidate for key in ("name", "description", "parameters")):
+    if "proposed_tool" not in candidate and any(
+        key in candidate for key in ("name", "description", "parameters")
+    ):
         candidate = {
             "summary": candidate.get("summary") or DEFAULT_TOOL_GAP_SUMMARY,
-            "missing_capability": candidate.get("missing_capability") or candidate.get("name") or "",
-            "why_missing": candidate.get("why_missing") or candidate.get("reason") or "",
-            "suggested_next_step": candidate.get("suggested_next_step") or candidate.get("next_step") or "",
+            "missing_capability": candidate.get("missing_capability")
+            or candidate.get("name")
+            or "",
+            "why_missing": candidate.get("why_missing")
+            or candidate.get("reason")
+            or "",
+            "suggested_next_step": candidate.get("suggested_next_step")
+            or candidate.get("next_step")
+            or "",
             "proposed_tool": candidate,
         }
 
@@ -180,9 +187,7 @@ def normalize_tool_gap(
         or ""
     ).strip()
     why_missing = str(
-        candidate.get("why_missing")
-        or candidate.get("reason")
-        or ""
+        candidate.get("why_missing") or candidate.get("reason") or ""
     ).strip()
     suggested_next_step = str(
         candidate.get("suggested_next_step")
@@ -193,7 +198,11 @@ def normalize_tool_gap(
 
     proposed_tool_raw = candidate.get("proposed_tool")
     if not isinstance(proposed_tool_raw, dict):
-        proposed_tool_raw = candidate.get("tool_proposal") if isinstance(candidate.get("tool_proposal"), dict) else None
+        proposed_tool_raw = (
+            candidate.get("tool_proposal")
+            if isinstance(candidate.get("tool_proposal"), dict)
+            else None
+        )
     proposed_tool = normalize_proposed_tool(
         proposed_tool_raw,
         include_empty_contract_fields=include_empty_contract_fields,
@@ -221,10 +230,20 @@ def extract_tool_gap_from_response(
     if isinstance(response, dict):
         candidate = response.get("tool_gap")
         if not isinstance(candidate, dict):
-            candidate = response.get("capability_gap") if isinstance(response.get("capability_gap"), dict) else None
+            candidate = (
+                response.get("capability_gap")
+                if isinstance(response.get("capability_gap"), dict)
+                else None
+            )
         if not isinstance(candidate, dict):
-            candidate = response.get("tool_proposal") if isinstance(response.get("tool_proposal"), dict) else None
-        if not isinstance(candidate, dict) and any(key in response for key in _DIRECT_TOOL_GAP_KEYS):
+            candidate = (
+                response.get("tool_proposal")
+                if isinstance(response.get("tool_proposal"), dict)
+                else None
+            )
+        if not isinstance(candidate, dict) and any(
+            key in response for key in _DIRECT_TOOL_GAP_KEYS
+        ):
             candidate = response
         if isinstance(candidate, dict):
             return normalize_tool_gap(
@@ -288,13 +307,25 @@ def merge_tool_gaps(
         )
 
     merged = dict(known_tool_gap)
-    merged.update({key: value for key, value in tool_gap.items() if _is_nonempty(value)})
+    merged.update(
+        {key: value for key, value in tool_gap.items() if _is_nonempty(value)}
+    )
 
-    known_proposed = known_tool_gap.get("proposed_tool") if isinstance(known_tool_gap.get("proposed_tool"), dict) else {}
-    model_proposed = tool_gap.get("proposed_tool") if isinstance(tool_gap.get("proposed_tool"), dict) else {}
+    known_proposed = (
+        known_tool_gap.get("proposed_tool")
+        if isinstance(known_tool_gap.get("proposed_tool"), dict)
+        else {}
+    )
+    model_proposed = (
+        tool_gap.get("proposed_tool")
+        if isinstance(tool_gap.get("proposed_tool"), dict)
+        else {}
+    )
     if known_proposed or model_proposed:
         proposed_tool = dict(known_proposed)
-        proposed_tool.update({key: value for key, value in model_proposed.items() if _is_nonempty(value)})
+        proposed_tool.update(
+            {key: value for key, value in model_proposed.items() if _is_nonempty(value)}
+        )
         normalized = normalize_proposed_tool(
             proposed_tool,
             include_empty_contract_fields=include_empty_contract_fields,
@@ -323,7 +354,11 @@ def build_next_action_artifact(
         return None
 
     proposed_tool = normalize_proposed_tool(
-        normalized_gap.get("proposed_tool") if isinstance(normalized_gap.get("proposed_tool"), dict) else None,
+        (
+            normalized_gap.get("proposed_tool")
+            if isinstance(normalized_gap.get("proposed_tool"), dict)
+            else None
+        ),
         include_empty_contract_fields=True,
     )
     summary = str(normalized_gap.get("summary") or DEFAULT_TOOL_GAP_SUMMARY).strip()
@@ -334,11 +369,15 @@ def build_next_action_artifact(
     ).strip()
     why_missing = str(normalized_gap.get("why_missing") or "").strip()
     suggested_next_step = str(normalized_gap.get("suggested_next_step") or "").strip()
-    title_subject = str((proposed_tool or {}).get("name") or missing_capability or "补齐缺失能力").strip()
+    title_subject = str(
+        (proposed_tool or {}).get("name") or missing_capability or "补齐缺失能力"
+    ).strip()
 
     acceptance_criteria: List[str] = []
     if missing_capability:
-        acceptance_criteria.append(f"为 {missing_capability} 提供稳定的 Koto 原生工具入口")
+        acceptance_criteria.append(
+            f"为 {missing_capability} 提供稳定的 Koto 原生工具入口"
+        )
     else:
         acceptance_criteria.append("为当前缺失能力提供稳定的 Koto 原生工具入口")
     acceptance_criteria.append("工具返回结构需要可被 file-task 规划器直接消费")

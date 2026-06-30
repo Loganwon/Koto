@@ -972,7 +972,9 @@ class TestOpenAbsFile:
     """POST /open_abs_file — parse a supported file by absolute path."""
 
     def test_raw_absolute_file_route_removed(self, client):
-        r = client.get("/api/v1/workspace/" + "serve_" + "abs", query_string={"path": ""})
+        r = client.get(
+            "/api/v1/workspace/" + "serve_" + "abs", query_string={"path": ""}
+        )
         assert r.status_code == 404
 
     def test_open_abs_file_valid_file(self, client, workspace_dir: Path):
@@ -1520,8 +1522,12 @@ class TestJavaScriptSourceChecks:
         root = Path(__file__).resolve().parents[2]
         self.js = "\n".join(
             [
-                (root / "web" / "src" / "workspace" / "save.ts").read_text(encoding="utf-8"),
-                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(encoding="utf-8"),
+                (root / "web" / "src" / "workspace" / "save.ts").read_text(
+                    encoding="utf-8"
+                ),
+                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(
+                    encoding="utf-8"
+                ),
             ]
         )
 
@@ -1535,7 +1541,9 @@ class TestJavaScriptSourceChecks:
         # Find the keydown listener that contains the Ctrl+S handler
         import re
 
-        pattern = r"addEventListener\('keydown'.*?toLowerCase\(\)\s*===\s*'s'.*?\},\s*true\)"
+        pattern = (
+            r"addEventListener\('keydown'.*?toLowerCase\(\)\s*===\s*'s'.*?\},\s*true\)"
+        )
         assert re.search(
             pattern, self.js, re.DOTALL
         ), "Ctrl+S handler should use capture: true"

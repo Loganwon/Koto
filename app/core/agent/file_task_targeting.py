@@ -20,7 +20,6 @@ from app.core.agent.file_task_runtime_patterns import (
 from app.core.agent.file_task_tool_catalog import is_write_tool, write_target_for_tool
 from app.core.agent.file_task_workflow_state import workflow_resume_control
 
-
 logger = logging.getLogger(__name__)
 
 BoolPredicate = Callable[[str], bool]
@@ -192,7 +191,9 @@ def _readonly_attached_source_reference(task: str, near: str, before: str) -> bo
     if any(pattern.search(before) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS):
         return False
     readonly = (
-        re.search(r"(?:只读|只分析|只读取|只给答案|只做只读分析)", task_text, re.IGNORECASE)
+        re.search(
+            r"(?:只读|只分析|只读取|只给答案|只做只读分析)", task_text, re.IGNORECASE
+        )
         or re.search(
             r"(?:不要|不用|无需|不需要|不必|别|不).{0,12}"
             r"(?:修改|改动|编辑|写入|写回|更新|保存|插入|删除|替换|应用)",
@@ -350,7 +351,9 @@ def _is_weak_context_path(file_info: FileTaskFile) -> bool:
 
 def _context_file_basename_key(file_info: FileTaskFile) -> str:
     path_text = str(file_info.path or "").strip().replace("\\", "/").rstrip("/")
-    name = str(file_info.name or "").strip() or (Path(path_text).name if path_text else "")
+    name = str(file_info.name or "").strip() or (
+        Path(path_text).name if path_text else ""
+    )
     if not name:
         return ""
     return "basename:" + name.casefold()
@@ -360,7 +363,9 @@ def _context_file_key(file_info: FileTaskFile) -> str:
     path_text = str(file_info.path or file_info.name or "").strip()
     if path_text:
         try:
-            return os.path.normcase(str(Path(path_text).expanduser().resolve(strict=False)))
+            return os.path.normcase(
+                str(Path(path_text).expanduser().resolve(strict=False))
+            )
         except OSError:
             return path_text.replace("\\", "/").rstrip("/").casefold()
     return str(file_info.content[:80] or "").strip().casefold()

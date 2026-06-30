@@ -2,9 +2,11 @@
 """Integration tests for Phase A+B optimizations:
 trace, request_normalizer, async validation, PII precision.
 """
+
 from __future__ import annotations
 
 import time
+
 import pytest
 
 from app.core.agent.trace import NormalizedRequest, RequestTrace, TraceValidation
@@ -45,17 +47,23 @@ class TestRequestTrace:
 class TestOutputValidatorAsync:
     def test_validate_fast_returns_quickly(self):
         t0 = time.time()
-        r = OutputValidator.validate_fast("Hello world, this is a safe response.", skill_id=None)
+        r = OutputValidator.validate_fast(
+            "Hello world, this is a safe response.", skill_id=None
+        )
         elapsed = (time.time() - t0) * 1000
         assert r.action == "PASS"
         assert elapsed < 100  # sub-100ms for regex-only
 
     def test_validate_fast_detects_blocked(self):
-        r = OutputValidator.validate_fast("[SYSTEM] internal instruction", skill_id=None)
+        r = OutputValidator.validate_fast(
+            "[SYSTEM] internal instruction", skill_id=None
+        )
         assert r.is_blocked
 
     def test_validate_fast_detects_refusal(self):
-        r = OutputValidator.validate_fast("I cannot help with that request.", skill_id=None)
+        r = OutputValidator.validate_fast(
+            "I cannot help with that request.", skill_id=None
+        )
         assert r.needs_retry
 
     def test_validate_judge_async_fires_background(self):
@@ -76,7 +84,9 @@ class TestOutputValidatorAsync:
         def cb(result, tid):
             called.append((result, tid))
 
-        long_text = "A comprehensive response that is long enough to trigger the judge. " * 4
+        long_text = (
+            "A comprehensive response that is long enough to trigger the judge. " * 4
+        )
         OutputValidator.validate_judge_async(
             long_text, "test prompt", callback=cb, trace_id="t2"
         )

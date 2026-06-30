@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -12,18 +11,28 @@ def _read(rel_path: str) -> str:
     return (ROOT / rel_path).read_text(encoding="utf-8")
 
 
-def test_workspace_template_uses_bottom_model_toggle_and_keeps_files_above_input() -> None:
+def test_workspace_template_uses_bottom_model_toggle_and_keeps_files_above_input() -> (
+    None
+):
     html = _read("web/templates/index.html")
     model_controls = _read("web/templates/_workspace_model_controls.html")
     settings_panel = _read("web/templates/_settings_panel.html")
 
     assert not (ROOT / "web/templates/workspace_assistant.html").exists()
     assert "{% include '_workspace_model_controls.html' %}" in html
-    assert html.index('<div id="wa-ai-file-chips"') < html.index('<div class="wa-input-box">')
-    composer = html[html.index('<div class="wa-input-box">'):]
-    assert composer.index('<div class="wa-input-box-footer">') < composer.index("{% include '_workspace_model_controls.html' %}")
-    assert composer.index("{% include '_workspace_model_controls.html' %}") < composer.index('<div class="wa-footer-actions">')
-    assert composer.index('<div class="wa-footer-actions">') < composer.index('id="wa-send-btn"')
+    assert html.index('<div id="wa-ai-file-chips"') < html.index(
+        '<div class="wa-input-box">'
+    )
+    composer = html[html.index('<div class="wa-input-box">') :]
+    assert composer.index('<div class="wa-input-box-footer">') < composer.index(
+        "{% include '_workspace_model_controls.html' %}"
+    )
+    assert composer.index(
+        "{% include '_workspace_model_controls.html' %}"
+    ) < composer.index('<div class="wa-footer-actions">')
+    assert composer.index('<div class="wa-footer-actions">') < composer.index(
+        'id="wa-send-btn"'
+    )
 
     assert 'id="wa-model-mode-toggle"' in model_controls
     assert 'id="wa-model-mode-deepseek-btn"' in model_controls
@@ -84,6 +93,7 @@ def test_workspace_has_single_unified_frontend_entry() -> None:
 
 def test_workspace_subject_bar_and_action_row_styles_support_restored_layout() -> None:
     css = _read("web/static/css/workspace.css")
+    ai_panel_css = _read("web/static/css/workspace-ai-panel.css")
     task_dispatcher = _read("web/src/workspace/task-dispatcher.ts")
     model_settings = _read("web/src/workspace/model-settings.ts")
 
@@ -96,13 +106,13 @@ def test_workspace_subject_bar_and_action_row_styles_support_restored_layout() -
     assert "#wa-subject-bar { display: none !important;" not in css
     assert "#wa-actions-bar" not in css
     assert ".wa-quick-btn" not in css
-    assert ".wa-input-box-footer" in css
-    assert ".wa-footer-meta" in css
-    assert ".wa-footer-actions" in css
-    assert ".wa-model-mode-toggle" in css
-    assert ".wa-model-mode-toggle-btn" in css
-    assert ".wa-model-mode-sub[hidden]" in css
-    assert ".wa-model-mode-sub::before" in css
-    assert ".wa-attach-file-btn" in css
-    assert ".wa-wf-active-chip" in css
-    assert "content: attr(data-label);" in css
+    assert ".wa-input-box-footer" in ai_panel_css
+    assert ".wa-footer-meta" in ai_panel_css
+    assert ".wa-footer-actions" in ai_panel_css
+    assert ".wa-model-mode-toggle" in ai_panel_css
+    assert ".wa-model-mode-toggle-btn" in ai_panel_css
+    assert ".wa-model-mode-sub[hidden]" in ai_panel_css
+    assert ".wa-model-mode-sub::before" in ai_panel_css
+    assert ".wa-attach-file-btn" in ai_panel_css
+    assert ".wa-wf-active-chip" in ai_panel_css
+    assert "content: '·';" in ai_panel_css

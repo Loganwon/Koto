@@ -26,12 +26,12 @@ import logging
 import re
 from typing import Any, Dict, Generator, List, Optional
 
-from app.core.agent.hooks import HookContext, HookPoint, HookRegistry, get_default_registry
-from app.core.llm.model_mode import normalize_model_mode
-from app.core.shared.tool_parser import parse_tool_calls
-from app.core.shared.llm_helpers import is_online_failure, is_ollama_alive, get_local_provider
-from app.core.agent.request_validator import RequestValidator
-from app.core.agent.response_formatter import ResponseFormatter
+from app.core.agent.hooks import (
+    HookContext,
+    HookPoint,
+    HookRegistry,
+    get_default_registry,
+)
 from app.core.agent.lifecycle import (
     AgentEvent,
     AgentRequest,
@@ -44,26 +44,40 @@ from app.core.agent.lifecycle import (
     evt_lifecycle_end,
     evt_lifecycle_error,
     evt_lifecycle_start,
+    evt_live_doc_commit,
     evt_phase,
+    evt_plan,
     evt_proposal,
     evt_rag_info,
     evt_skill_suggestions,
-    evt_plan,
+    evt_status_message,
     evt_step_done,
     evt_step_error,
     evt_step_progress,
     evt_step_start,
-    evt_status_message,
     evt_stream_block,
     evt_stream_chunk,
     evt_task_complete,
-    evt_live_doc_commit,
 )
+from app.core.agent.request_validator import RequestValidator
+from app.core.agent.response_formatter import ResponseFormatter
+from app.core.llm.model_mode import normalize_model_mode
+from app.core.shared.llm_helpers import (
+    get_local_provider,
+    is_ollama_alive,
+    is_online_failure,
+)
+from app.core.shared.tool_parser import parse_tool_calls
 
 logger = logging.getLogger(__name__)
 
 _INSERT_TRIGGERS = (
-    "在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容", "写入文档",
+    "在光标处插入",
+    "插入文档",
+    "插入到文档",
+    "请插入",
+    "插入内容",
+    "写入文档",
 )
 
 
@@ -102,8 +116,8 @@ class KotoAgentLoop:
         meta = RunMetadata(session_id=request.session_id)
         meta.start()
         # Capture live-doc flags for this run
-        self._live_doc = getattr(request, 'live_doc', False)
-        self._live_mode = getattr(request, 'live_mode', 'replace')
+        self._live_doc = getattr(request, "live_doc", False)
+        self._live_mode = getattr(request, "live_mode", "replace")
         self._live_request_id = meta.run_id
         yield evt_lifecycle_start(meta.run_id, meta.session_id)
 
@@ -148,7 +162,9 @@ class KotoAgentLoop:
         if phase_steps:
             yield evt_plan(phase_steps)
 
-        analyze_phase = phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        analyze_phase = (
+            phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        )
         analyze_step_id = analyze_phase.get("id", "understand")
 
         yield evt_step_start(analyze_step_id, analyze_phase.get("label", "理解需求"))
@@ -186,7 +202,9 @@ class KotoAgentLoop:
             return
 
         # Apply hook mutations
-        system_instruction = hook_ctx.metadata.get("system_instruction", system_instruction)
+        system_instruction = hook_ctx.metadata.get(
+            "system_instruction", system_instruction
+        )
         prompt = hook_ctx.metadata.get("prompt", prompt)
         pipeline_skill_ids = hook_ctx.metadata.get("skill_ids", [])
         pipeline_mask_result = hook_ctx.metadata.get("mask_result")
@@ -201,10 +219,15 @@ class KotoAgentLoop:
         meta.model = model_name
 
         # ── Phase transition: generating ──────────────────────────────
-        yield evt_step_done(analyze_step_id, f"{analyze_phase.get('label', '理解需求')}完成")
+        yield evt_step_done(
+            analyze_step_id, f"{analyze_phase.get('label', '理解需求')}完成"
+        )
         yield evt_phase(phases, analyze_step_id, "done")
         gen_phase = phases[-1]["id"] if len(phases) <= 2 else phases[1]["id"]
-        gen_label = next((p.get("label", gen_phase) for p in phases if p.get("id") == gen_phase), gen_phase)
+        gen_label = next(
+            (p.get("label", gen_phase) for p in phases if p.get("id") == gen_phase),
+            gen_phase,
+        )
         yield evt_step_start(gen_phase, gen_label)
         yield evt_phase(phases, gen_phase, "running")
         yield evt_step_progress(gen_phase, "正在生成回复…")
@@ -212,13 +235,19 @@ class KotoAgentLoop:
 
         # ── Stream LLM response ───────────────────────────────────────
         result_text = yield from self._stream_llm(
-            full_prompt, system_instruction, use_local, meta, request,
+            full_prompt,
+            system_instruction,
+            use_local,
+            meta,
+            request,
         )
 
         if result_text is None:
             meta.finish(RunState.FAILED, "LLM returned empty")
             yield evt_step_error(gen_phase, "未能生成有效回复")
-            yield evt_task_complete(error=self._build_model_unavailable_error(request, use_local))
+            yield evt_task_complete(
+                error=self._build_model_unavailable_error(request, use_local)
+            )
             return
 
         yield evt_step_done(gen_phase, f"{gen_label}完成")
@@ -264,7 +293,9 @@ class KotoAgentLoop:
         has_proposals = False
         if request.output_mode != "chat":
             if request.selection and tool_calls:
-                proposals = self._build_proposals(request.selection, tool_calls, clean_text)
+                proposals = self._build_proposals(
+                    request.selection, tool_calls, clean_text
+                )
                 if proposals:
                     proposal_summary = proposals[0].get("rationale", "")
                     has_proposals = True
@@ -278,7 +309,9 @@ class KotoAgentLoop:
                 doc_tool_step_open = False
                 for tc in tool_calls:
                     if not doc_tool_step_open:
-                        yield evt_step_start("prepare_doc_tool_calls", "生成文档变更指令")
+                        yield evt_step_start(
+                            "prepare_doc_tool_calls", "生成文档变更指令"
+                        )
                         doc_tool_step_open = True
                     yield evt_doc_tool_call(tc)
                 if doc_tool_step_open:
@@ -312,14 +345,22 @@ class KotoAgentLoop:
         try:
             from app.core.sandbox import run_python, run_r
         except ImportError as e:
-            yield evt_code_result({
-                "error": f"Sandbox 模块加载失败: {e}",
-                "stdout": "", "stderr": "", "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": f"Sandbox 模块加载失败: {e}",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             meta.finish(RunState.FAILED, str(e))
             return
 
-        lang_label = "Python (matplotlib/pandas)" if request.language == "python" else "R (ggplot2)"
+        lang_label = (
+            "Python (matplotlib/pandas)"
+            if request.language == "python"
+            else "R (ggplot2)"
+        )
         gen_prompt = (
             f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
             "要求：\n"
@@ -337,12 +378,18 @@ class KotoAgentLoop:
 
         yield evt_stream_chunk(f"🤖 正在为你生成 {request.language.upper()} 代码…\n")
 
-        code = _call_llm_sync(gen_prompt, use_local_only=(request.model_mode == "local"))
+        code = _call_llm_sync(
+            gen_prompt, use_local_only=(request.model_mode == "local")
+        )
         if not code:
-            yield evt_code_result({
-                "error": "AI 代码生成失败，请检查 API Key 配置。",
-                "stdout": "", "stderr": "", "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": "AI 代码生成失败，请检查 API Key 配置。",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             meta.finish(RunState.FAILED, "code gen failed")
             return
 
@@ -383,18 +430,26 @@ class KotoAgentLoop:
 
         if use_local:
             try:
-                result_text = yield from self._try_local(full_prompt, system_instruction, request)
+                result_text = yield from self._try_local(
+                    full_prompt, system_instruction, request
+                )
             except Exception as exc:
-                logger.warning("[AgentLoop] Local LLM failed: %s: %s", type(exc).__name__, exc)
+                logger.warning(
+                    "[AgentLoop] Local LLM failed: %s: %s", type(exc).__name__, exc
+                )
                 result_text = None
             if not result_text:
                 return None
         else:
             # Try online first, fall back to local
             try:
-                result_text = yield from self._try_online(full_prompt, system_instruction, request)
+                result_text = yield from self._try_online(
+                    full_prompt, system_instruction, request
+                )
             except Exception as exc:
-                logger.warning("[AgentLoop] Online LLM failed: %s: %s", type(exc).__name__, exc)
+                logger.warning(
+                    "[AgentLoop] Online LLM failed: %s: %s", type(exc).__name__, exc
+                )
                 if _is_online_failure(exc):
                     result_text = None
                 else:
@@ -406,7 +461,9 @@ class KotoAgentLoop:
                     "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。"
                 )
                 try:
-                    result_text = yield from self._try_local(full_prompt, system_instruction, request)
+                    result_text = yield from self._try_local(
+                        full_prompt, system_instruction, request
+                    )
                 except Exception as exc2:
                     logger.error("[AgentLoop] Local fallback failed: %s", exc2)
                     result_text = None
@@ -414,11 +471,16 @@ class KotoAgentLoop:
         return result_text
 
     def _try_online(
-        self, full_prompt: str, system_instruction: str, request: Optional[AgentRequest] = None
+        self,
+        full_prompt: str,
+        system_instruction: str,
+        request: Optional[AgentRequest] = None,
     ) -> Generator[AgentEvent, None, Optional[str]]:
         """Stream from online provider. Yields stream_chunk events."""
         model = self._pick_model(False, request)
-        provider = _get_provider(model=model, model_mode=request.model_mode if request else "")
+        provider = _get_provider(
+            model=model, model_mode=request.model_mode if request else ""
+        )
         gen = provider.generate_content(
             prompt=full_prompt,
             model=model,
@@ -430,13 +492,19 @@ class KotoAgentLoop:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=self._live_doc,
-                                       live_mode=self._live_mode,
-                                       request_id=self._live_request_id)
+                yield evt_stream_chunk(
+                    part,
+                    live_doc=self._live_doc,
+                    live_mode=self._live_mode,
+                    request_id=self._live_request_id,
+                )
         return "".join(parts) or None
 
     def _try_local(
-        self, full_prompt: str, system_instruction: str, request: Optional[AgentRequest] = None
+        self,
+        full_prompt: str,
+        system_instruction: str,
+        request: Optional[AgentRequest] = None,
     ) -> Generator[AgentEvent, None, Optional[str]]:
         """Stream from local Ollama. Yields stream_chunk events."""
         if not _is_ollama_alive():
@@ -449,9 +517,12 @@ class KotoAgentLoop:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=self._live_doc,
-                                       live_mode=self._live_mode,
-                                       request_id=self._live_request_id)
+                yield evt_stream_chunk(
+                    part,
+                    live_doc=self._live_doc,
+                    live_mode=self._live_mode,
+                    request_id=self._live_request_id,
+                )
         return "".join(parts) or None
 
     # ══════════════════════════════════════════════════════════════
@@ -462,6 +533,7 @@ class KotoAgentLoop:
         """Resolve UI phase indicators for the action type."""
         try:
             from app.core.editor_skills import get_phases
+
             action_hint = request.action_type or ""
             return get_phases(action_hint) if action_hint else get_phases("")
         except Exception:
@@ -470,9 +542,7 @@ class KotoAgentLoop:
                 {"id": "generate", "label": "生成回复"},
             ]
 
-    def _apply_rag_chunking(
-        self, request: AgentRequest, prompt: str
-    ) -> str:
+    def _apply_rag_chunking(self, request: AgentRequest, prompt: str) -> str:
         """Apply RAG chunking if document context is long."""
         context = request.context
         if not context:
@@ -480,6 +550,7 @@ class KotoAgentLoop:
 
         try:
             from app.core.file.doc_chunker import DocChunker as _DC
+
             if len(context) > _DC.CHUNK_THRESHOLD:
                 chunks = _DC.chunk(context)
                 query = request.selection if request.selection else prompt
@@ -503,7 +574,9 @@ class KotoAgentLoop:
         """Assemble the full prompt with history, selection, CSV data."""
         return RequestValidator.assemble_prompt(request, prompt)
 
-    def _should_use_local(self, request: AgentRequest, force_local: bool = False) -> bool:
+    def _should_use_local(
+        self, request: AgentRequest, force_local: bool = False
+    ) -> bool:
         """Determine whether to use local model."""
         normalized_mode = normalize_model_mode(request.model_mode, default="auto")
         if normalized_mode == "local":
@@ -514,13 +587,16 @@ class KotoAgentLoop:
             return True
         try:
             from web.settings import SettingsManager as _SM
+
             if bool(_SM().get("ai", "use_local_only")):
                 return True
         except Exception:
             pass
         return False
 
-    def _pick_model(self, use_local: bool, request: Optional[AgentRequest] = None) -> str:
+    def _pick_model(
+        self, use_local: bool, request: Optional[AgentRequest] = None
+    ) -> str:
         if use_local:
             return "ollama-local"
         preferred_model = ""
@@ -535,12 +611,18 @@ class KotoAgentLoop:
     def _pick_local_model(self, request: Optional[AgentRequest] = None) -> str:
         if request and isinstance(request.extra, dict):
             preferred_model = str(request.extra.get("local_model") or "").strip()
-            if preferred_model.lower() in {"auto", "cloud", "local"} or preferred_model.lower().startswith("gemini"):
+            if preferred_model.lower() in {
+                "auto",
+                "cloud",
+                "local",
+            } or preferred_model.lower().startswith("gemini"):
                 return ""
             return preferred_model
         return ""
 
-    def _build_model_unavailable_error(self, request: AgentRequest, use_local: bool) -> str:
+    def _build_model_unavailable_error(
+        self, request: AgentRequest, use_local: bool
+    ) -> str:
         """Return an availability error that matches the request's routing mode."""
         normalized_mode = normalize_model_mode(request.model_mode, default="auto")
         if use_local or normalized_mode == "local":
@@ -574,6 +656,7 @@ class KotoAgentLoop:
 
         # Find last assistant turn with substantive content
         import html as _html
+
         last_ai = ""
         for turn in reversed(request.history or []):
             if turn.get("role") == "assistant":
@@ -614,6 +697,7 @@ _get_local_provider = get_local_provider
 
 # ── LLM helpers (delegate to existing provider infrastructure) ─────────
 
+
 def _pick_online_model(request: Optional[AgentRequest] = None) -> str:
     preferred_model = ""
     if request and isinstance(request.extra, dict):
@@ -634,11 +718,13 @@ def _pick_online_model(request: Optional[AgentRequest] = None) -> str:
 
 
 def _get_provider(model: str = "", model_mode: str = ""):
-    from app.core.llm.provider_factory import get_llm_provider
     from app.core.llm.model_selection import get_provider_for_model_mode
+    from app.core.llm.provider_factory import get_llm_provider
 
     provider_name = get_provider_for_model_mode(model_mode)
-    return get_llm_provider(provider=provider_name, model=model, allow_local_fallback=False)
+    return get_llm_provider(
+        provider=provider_name, model=model, allow_local_fallback=False
+    )
 
 
 def _call_llm_sync(prompt: str, use_local_only: bool = False) -> Optional[str]:
@@ -673,5 +759,3 @@ def _call_llm_sync(prompt: str, use_local_only: bool = False) -> Optional[str]:
             except Exception:
                 pass
         return None
-
-

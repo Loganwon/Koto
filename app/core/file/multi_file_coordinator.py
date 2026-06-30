@@ -98,7 +98,9 @@ class FileSnapshot:
         """Create snapshot from file on disk."""
         content = ""
         if not os.path.exists(path):
-            content_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+            content_hash = hashlib.md5(
+                content.encode(), usedforsecurity=False
+            ).hexdigest()
             return cls(path=path, content=content, content_hash=content_hash)
         try:
             if path.endswith((".xlsx", ".xls")):

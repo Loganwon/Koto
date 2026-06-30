@@ -4,11 +4,11 @@ from types import SimpleNamespace
 
 
 def test_doc_annotate_bridge_uses_deepseek_provider_client(monkeypatch):
-    from app.core.agent.file_task_contract import FileTaskRequest
     import app.core.agent.file_task_doc_annotate_bridge as bridge
     import app.core.llm.model_selection as model_selection
     import app.core.llm.provider_factory as provider_factory
     import web.document_feedback as feedback_module
+    from app.core.agent.file_task_contract import FileTaskRequest
 
     captured = {}
 
@@ -71,10 +71,10 @@ def test_doc_annotate_bridge_uses_deepseek_provider_client(monkeypatch):
 
 
 def test_file_task_model_client_deepseek_mode_uses_deepseek_provider(monkeypatch):
-    from app.core.agent.file_task_contract import FileTaskRequest
     import app.core.agent.file_task_model as file_task_model
     import app.core.llm.model_fallback as model_fallback
     import app.core.llm.provider_factory as provider_factory
+    from app.core.agent.file_task_contract import FileTaskRequest
 
     captured = {}
 
@@ -131,19 +131,22 @@ def test_file_task_model_client_deepseek_mode_uses_deepseek_provider(monkeypatch
 
 
 def test_file_task_request_defaults_to_deepseek_when_mode_omitted(monkeypatch):
-    from app.core.agent.file_task_contract import FileTaskRequest
     import app.core.agent.file_task_model as file_task_model
+    from app.core.agent.file_task_contract import FileTaskRequest
 
     request = FileTaskRequest.from_mapping({"task": "整理这个文件"})
 
     assert request.model_mode == "deepseek"
-    assert file_task_model.FileTaskModelClient()._cloud_model_id(request) == "deepseek-v4-pro"
+    assert (
+        file_task_model.FileTaskModelClient()._cloud_model_id(request)
+        == "deepseek-v4-pro"
+    )
 
 
 def test_doc_annotate_bridge_local_mode_builds_ollama_client(monkeypatch):
-    from app.core.agent.file_task_contract import FileTaskRequest
     import app.core.agent.file_task_doc_annotate_bridge as bridge
     import app.core.llm.ollama_provider as ollama_provider
+    from app.core.agent.file_task_contract import FileTaskRequest
 
     captured = {}
 

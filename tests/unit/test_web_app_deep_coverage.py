@@ -363,14 +363,14 @@ class TestInteractionsChecks:
         assert app._is_interactions_only("deep-research-pro-preview-12-2025") is True
 
     def test_is_interactions_only_gemini3_flash_prefix(self):
-        """gemini-3-flash-preview must use the Interactions API path."""
+        """gemini-3-flash-preview uses the normal generate_content path."""
         app = _import_app()
-        assert app._is_interactions_only("gemini-3-flash-preview") is True
+        assert app._is_interactions_only("gemini-3-flash-preview") is False
 
     def test_is_interactions_only_gemini3_pro_prefix(self):
-        """gemini-3-pro-preview must use the Interactions API path."""
+        """gemini-3-pro-preview uses the normal generate_content path."""
         app = _import_app()
-        assert app._is_interactions_only("gemini-3-pro-preview") is True
+        assert app._is_interactions_only("gemini-3-pro-preview") is False
 
     def test_is_interactions_only_regular_model_false(self):
         app = _import_app()
@@ -954,9 +954,7 @@ class TestGetMemoryManager:
 
             with patch.dict(
                 sys.modules, {"app.core.app_context": ctx_mod}
-            ), patch.object(
-                memory_runtime, "_inject_memory_adapters"
-            ):
+            ), patch.object(memory_runtime, "_inject_memory_adapters"):
                 mgr = app.get_memory_manager()
                 assert mgr is mock_mgr
                 # Second call returns same instance

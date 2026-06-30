@@ -10,6 +10,7 @@ Integration tests for workspace-related endpoints in web/app.py:
 from __future__ import annotations
 
 import os
+
 import pytest
 
 

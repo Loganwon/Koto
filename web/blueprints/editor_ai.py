@@ -22,7 +22,6 @@ from web.runtime_context import (
     get_web_searcher,
 )
 
-
 editor_ai_bp = Blueprint("editor_ai", __name__)
 _logger = logging.getLogger("koto.routes.editor_ai")
 
@@ -97,6 +96,14 @@ def _safe_sse(payload: dict) -> str:
     return safe_editor_sse(payload)
 
 
+def _sse_response(stream):
+    return Response(
+        stream_with_context(stream),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 def _compact_route_text(value, limit: int = 1200) -> str:
     text = str(value or "").strip()
     if len(text) <= limit:
@@ -115,9 +122,13 @@ def _compact_workspace_route_payload(data: dict) -> dict:
             {
                 "name": _compact_route_text(item.get("name"), 160),
                 "path": _compact_route_text(item.get("path"), 240),
-                "type": _compact_route_text(item.get("type") or item.get("file_type"), 40),
+                "type": _compact_route_text(
+                    item.get("type") or item.get("file_type"), 40
+                ),
                 "target": bool(item.get("target")),
-                "content_preview": _compact_route_text(item.get("content") or item.get("content_preview"), 600),
+                "content_preview": _compact_route_text(
+                    item.get("content") or item.get("content_preview"), 600
+                ),
             }
         )
 
@@ -128,23 +139,31 @@ def _compact_workspace_route_payload(data: dict) -> dict:
         compact_history.append(
             {
                 "role": _compact_route_text(turn.get("role"), 24),
-                "content": _compact_route_text(turn.get("content") or turn.get("text"), 900),
+                "content": _compact_route_text(
+                    turn.get("content") or turn.get("text"), 900
+                ),
             }
         )
 
-    current_file = data.get("current_file") if isinstance(data.get("current_file"), dict) else None
+    current_file = (
+        data.get("current_file") if isinstance(data.get("current_file"), dict) else None
+    )
     return {
         "message": _compact_route_text(data.get("text") or data.get("message"), 2000),
         "has_selection": bool(data.get("has_selection")),
         "selection_preview": _compact_route_text(data.get("selection_preview"), 800),
         "files": compact_files,
-        "current_file": {
-            "name": _compact_route_text(current_file.get("name"), 160),
-            "path": _compact_route_text(current_file.get("path"), 240),
-            "type": _compact_route_text(current_file.get("type") or current_file.get("file_type"), 40),
-        }
-        if current_file
-        else None,
+        "current_file": (
+            {
+                "name": _compact_route_text(current_file.get("name"), 160),
+                "path": _compact_route_text(current_file.get("path"), 240),
+                "type": _compact_route_text(
+                    current_file.get("type") or current_file.get("file_type"), 40
+                ),
+            }
+            if current_file
+            else None
+        ),
         "history": compact_history,
     }
 
@@ -187,13 +206,17 @@ def _parse_route_json(raw: str) -> dict | None:
         return None
 
 
-def _normalize_workspace_route(data: dict | None, *, source: str, fallback_task_type: str = "") -> dict | None:
+def _normalize_workspace_route(
+    data: dict | None, *, source: str, fallback_task_type: str = ""
+) -> dict | None:
     if not isinstance(data, dict):
         return None
     route = str(data.get("route") or "").strip().lower()
     if route not in _WORKSPACE_ROUTE_NAMES:
         return None
-    raw_task_type = str(data.get("task_type") or fallback_task_type or "").strip().upper()
+    raw_task_type = (
+        str(data.get("task_type") or fallback_task_type or "").strip().upper()
+    )
     target_path = str(data.get("target_path") or "").strip()
     if route == "open_file" and not target_path:
         route = "file_task"
@@ -207,10 +230,14 @@ def _normalize_workspace_route(data: dict | None, *, source: str, fallback_task_
     return {
         "ok": True,
         "route_kind": route_kind,
-        "base_task_type": "DIRECT_RESPONSE" if route_kind == "direct_response" else "COMPLEX_TASK",
+        "base_task_type": (
+            "DIRECT_RESPONSE" if route_kind == "direct_response" else "COMPLEX_TASK"
+        ),
         "route": route,
         "task_type": task_type,
-        "source_task_type": raw_task_type if raw_task_type and raw_task_type != task_type else "",
+        "source_task_type": (
+            raw_task_type if raw_task_type and raw_task_type != task_type else ""
+        ),
         "confidence": confidence,
         "reason": _compact_route_text(data.get("reason"), 280),
         "target_path": target_path,
@@ -226,7 +253,10 @@ def _canonical_workspace_route_kind(route: str, route_kind: str = "") -> str:
     if normalized_kind in {"direct_response", "complex_task"}:
         if normalized_kind == "direct_response" and normalized_route == "file_task":
             return "complex_task"
-        if normalized_kind == "complex_task" and normalized_route in _WORKSPACE_DIRECT_RESPONSE_ROUTES:
+        if (
+            normalized_kind == "complex_task"
+            and normalized_route in _WORKSPACE_DIRECT_RESPONSE_ROUTES
+        ):
             return "direct_response"
         return normalized_kind
     if normalized_route in _WORKSPACE_DIRECT_RESPONSE_ROUTES:
@@ -265,7 +295,9 @@ def _fallback_workspace_route(data: dict) -> dict:
     text = str(data.get("text") or data.get("message") or "").strip()
     history = data.get("history") if isinstance(data.get("history"), list) else []
     files = data.get("files") if isinstance(data.get("files"), list) else []
-    current_file = data.get("current_file") if isinstance(data.get("current_file"), dict) else None
+    current_file = (
+        data.get("current_file") if isinstance(data.get("current_file"), dict) else None
+    )
     file_type = ""
     for item in files:
         if isinstance(item, dict) and (item.get("type") or item.get("file_type")):
@@ -293,18 +325,26 @@ def _fallback_workspace_route(data: dict) -> dict:
         return {
             "ok": True,
             "route_kind": _canonical_workspace_route_kind(route),
-            "base_task_type": "DIRECT_RESPONSE"
-            if _canonical_workspace_route_kind(route) == "direct_response"
-            else "COMPLEX_TASK",
+            "base_task_type": (
+                "DIRECT_RESPONSE"
+                if _canonical_workspace_route_kind(route) == "direct_response"
+                else "COMPLEX_TASK"
+            ),
             "route": route,
             "task_type": canonical_task_type,
-            "source_task_type": str(task_type or "").strip().upper()
-            if str(task_type or "").strip().upper() != canonical_task_type
-            else "",
+            "source_task_type": (
+                str(task_type or "").strip().upper()
+                if str(task_type or "").strip().upper() != canonical_task_type
+                else ""
+            ),
             "confidence": 0.0,
             "reason": "模型路由不可用，已使用后端 SmartDispatcher 兜底。",
             "target_path": "",
-            "hint": (context_info or {}).get("skill_prompt") if isinstance(context_info, dict) else None,
+            "hint": (
+                (context_info or {}).get("skill_prompt")
+                if isinstance(context_info, dict)
+                else None
+            ),
             "route_source": str(route_method or "smart_dispatcher_fallback"),
             "keyword_policy": "hint_only",
         }
@@ -329,12 +369,16 @@ def _model_workspace_route(data: dict) -> dict | None:
     requested_model = str(data.get("model_id") or "").strip()
     requested_mode = normalize_model_mode(data.get("model_mode"), default="deepseek")
     payload = _compact_workspace_route_payload(data)
-    prompt = "请判断以下 Koto 工作区消息应该进入哪条路径。\n\n上下文 JSON:\n" + json.dumps(
-        payload,
-        ensure_ascii=False,
+    prompt = (
+        "请判断以下 Koto 工作区消息应该进入哪条路径。\n\n上下文 JSON:\n"
+        + json.dumps(
+            payload,
+            ensure_ascii=False,
+        )
     )
     try:
         from app.core.llm.model_selection import get_provider_for_model_mode
+
         route_provider = get_provider_for_model_mode(requested_mode)
     except Exception:
         route_provider = "deepseek" if requested_mode == "deepseek" else "gemini"
@@ -392,7 +436,9 @@ def _model_workspace_route(data: dict) -> dict | None:
         create_client = get_create_client()
         if not callable(create_client):
             raise
-        cloud_model_id = model_id if model_id.startswith("gemini-") else "gemini-2.5-flash"
+        cloud_model_id = (
+            model_id if model_id.startswith("gemini-") else "gemini-2.5-flash"
+        )
         source_model_id = cloud_model_id
         response = create_client().models.generate_content(
             model=cloud_model_id,
@@ -507,9 +553,17 @@ def _agent_event_payload(event) -> dict:
     data = dict(getattr(event, "data", {}) or {})
 
     if event_type == "stream_chunk":
-        return {"type": "token", "content": data.get("chunk", ""), "text": data.get("chunk", "")}
+        return {
+            "type": "token",
+            "content": data.get("chunk", ""),
+            "text": data.get("chunk", ""),
+        }
     if event_type == "stream_block":
-        return {"type": "token", "content": data.get("text", ""), "text": data.get("text", "")}
+        return {
+            "type": "token",
+            "content": data.get("text", ""),
+            "text": data.get("text", ""),
+        }
     if event_type == "task_complete":
         payload = {"type": "done", **data}
         if "result" not in payload and "text" in payload:
@@ -518,7 +572,11 @@ def _agent_event_payload(event) -> dict:
     if event_type == "error":
         return {"type": "error", "text": data.get("text", "AI 处理失败，请稍后重试。")}
     if event_type == "status_message":
-        return {"type": "info", "text": data.get("text", ""), "is_error": data.get("is_error", False)}
+        return {
+            "type": "info",
+            "text": data.get("text", ""),
+            "is_error": data.get("is_error", False),
+        }
     if event_type == "code_result":
         return {"type": "code_result", **data}
     return {"type": event_type, **data}
@@ -551,7 +609,11 @@ def _agent_step_events(step) -> list[dict]:
         observation = str(getattr(step, "observation", "") or content)
         return [
             {"type": "tool_result", "content": observation, "text": observation},
-            {"type": "step_done", "step_id": "action", "text": observation or "工具执行完成"},
+            {
+                "type": "step_done",
+                "step_id": "action",
+                "text": observation or "工具执行完成",
+            },
         ]
     if "ANSWER" in step_type or step_type == "answer":
         return [
@@ -566,6 +628,7 @@ def editor_ai_history():
     """Return editor AI conversation history for the current session."""
     try:
         from flask import session
+
         chat_history = session.get("koto_editor_chat_history", [])
         session_id = session.get("koto_session_id", "")
         return jsonify({"history": chat_history, "session_id": session_id})
@@ -659,24 +722,28 @@ def workspace_ai_direct_response():
 def editor_ai_agent():
     """SSE wrapper for the structured editor agent route."""
     data = request.get_json(silent=True) or {}
-    query = str(data.get("query") or data.get("task") or data.get("prompt") or "").strip()
+    query = str(
+        data.get("query") or data.get("task") or data.get("prompt") or ""
+    ).strip()
     full_text = str(data.get("full_text") or data.get("context") or "").strip()
     session_id = str(data.get("session_id") or "").strip()
 
     def generate():
-      try:
-          from app.api.agent_routes import get_agent
+        try:
+            from app.api.agent_routes import get_agent
 
-          agent = get_agent()
-          system_context = full_text if full_text else None
-          for step in agent.run(query, session_id=session_id or None, system_context=system_context):
-              for payload in _agent_step_events(step):
-                  yield _safe_sse(payload)
-      except Exception as exc:
-          _logger.exception("[editor-ai] structured agent failed")
-          yield _safe_sse({"type": "error", "text": f"Agent 处理失败：{exc}"})
+            agent = get_agent()
+            system_context = full_text if full_text else None
+            for step in agent.run(
+                query, session_id=session_id or None, system_context=system_context
+            ):
+                for payload in _agent_step_events(step):
+                    yield _safe_sse(payload)
+        except Exception as exc:
+            _logger.exception("[editor-ai] structured agent failed")
+            yield _safe_sse({"type": "error", "text": f"Agent 处理失败：{exc}"})
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _sse_response(generate())
 
 
 @editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])
@@ -692,14 +759,12 @@ def editor_ai_stream():
     instruction = str(data.get("instruction") or "").strip()
     if action in {"polish", "translate", "summary", "check", "rewrite", "continue"}:
         if not selection and not full_text:
-            return Response(
-                stream_with_context(iter([_safe_sse({"type": "error", "text": "没有选中文本或全文上下文"})])),
-                mimetype="text/event-stream",
+            return _sse_response(
+                iter([_safe_sse({"type": "error", "text": "没有选中文本或全文上下文"})])
             )
     if action == "custom_instruction" and not (selection or full_text or instruction):
-        return Response(
-            stream_with_context(iter([_safe_sse({"type": "error", "text": "请输入指令或选择文本"})])),
-            mimetype="text/event-stream",
+        return _sse_response(
+            iter([_safe_sse({"type": "error", "text": "请输入指令或选择文本"})])
         )
 
     def generate():
@@ -713,7 +778,7 @@ def editor_ai_stream():
             _logger.exception("[editor-ai] stream failed")
             yield _safe_sse({"type": "error", "text": f"AI 处理失败：{exc}"})
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _sse_response(generate())
 
 
 @editor_ai_bp.route("/api/editor/ai/task-stream", methods=["POST"])
@@ -724,10 +789,7 @@ def editor_ai_task_stream():
     if not task:
         return jsonify({"error": "Missing 'task' parameter"}), 400
     data["task"] = task
-    return Response(
-        stream_with_context(stream_file_task_request(data)),
-        mimetype="text/event-stream",
-    )
+    return _sse_response(stream_file_task_request(data))
 
 
 @editor_ai_bp.route("/api/editor/ai/task-stream/cancel", methods=["POST"])
@@ -747,15 +809,16 @@ def editor_ai_task_stream_cancel():
 def editor_ai_chart():
     """Generate and execute chart code with structured progress events."""
     data = request.get_json(silent=True) or {}
-    data_context = str(data.get("data_context") or data.get("csv_data") or data.get("selection") or "").strip()
+    data_context = str(
+        data.get("data_context") or data.get("csv_data") or data.get("selection") or ""
+    ).strip()
     instruction = str(data.get("instruction") or "生成图表").strip()
     lang = str(data.get("lang") or data.get("language") or "python").strip().lower()
     if lang not in {"python", "r"}:
         lang = "python"
     if not data_context:
-        return Response(
-            stream_with_context(iter([_safe_sse({"type": "error", "text": "缺少数据内容"})])),
-            mimetype="text/event-stream",
+        return _sse_response(
+            iter([_safe_sse({"type": "error", "text": "缺少数据内容"})])
         )
 
     def _default_python_code() -> str:
@@ -778,11 +841,21 @@ def editor_ai_chart():
 
     def generate():
         try:
-            yield _safe_sse({"type": "step_start", "step_id": "generate_code", "text": "生成图表代码"})
+            yield _safe_sse(
+                {
+                    "type": "step_start",
+                    "step_id": "generate_code",
+                    "text": "生成图表代码",
+                }
+            )
             code = str(data.get("code") or "").strip() or _default_python_code()
             yield _safe_sse({"type": "code", "lang": lang, "code": code})
-            yield _safe_sse({"type": "step_done", "step_id": "generate_code", "text": "代码已生成"})
-            yield _safe_sse({"type": "step_start", "step_id": "execute_code", "text": "执行代码"})
+            yield _safe_sse(
+                {"type": "step_done", "step_id": "generate_code", "text": "代码已生成"}
+            )
+            yield _safe_sse(
+                {"type": "step_start", "step_id": "execute_code", "text": "执行代码"}
+            )
 
             if lang == "r":
                 from app.core.sandbox import run_r
@@ -800,15 +873,23 @@ def editor_ai_chart():
             for name, content in (result.get("files") or {}).items():
                 yield _safe_sse({"type": "image", "name": name, "data": content})
             if result.get("error"):
-                yield _safe_sse({"type": "step_error", "step_id": "execute_code", "error": result.get("error")})
+                yield _safe_sse(
+                    {
+                        "type": "step_error",
+                        "step_id": "execute_code",
+                        "error": result.get("error"),
+                    }
+                )
             else:
-                yield _safe_sse({"type": "step_done", "step_id": "execute_code", "text": "执行完成"})
+                yield _safe_sse(
+                    {"type": "step_done", "step_id": "execute_code", "text": "执行完成"}
+                )
             yield _safe_sse({"type": "done", "result": result})
         except Exception as exc:
             _logger.exception("[editor-ai] chart failed")
             yield _safe_sse({"type": "error", "text": f"图表生成失败：{exc}"})
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _sse_response(generate())
 
 
 @editor_ai_bp.route("/api/editor/ai/chart-rerun", methods=["POST"])
@@ -818,7 +899,9 @@ def editor_ai_chart_rerun():
     code = str(data.get("code") or "").strip()
     lang = str(data.get("lang") or data.get("language") or "python").strip().lower()
     if not code:
-        return jsonify({"stdout": "", "stderr": "", "files": {}, "error": "缺少代码内容"})
+        return jsonify(
+            {"stdout": "", "stderr": "", "files": {}, "error": "缺少代码内容"}
+        )
     if lang not in {"python", "r"}:
         lang = "python"
     try:
@@ -833,7 +916,14 @@ def editor_ai_chart_rerun():
         return jsonify(result)
     except Exception as exc:
         _logger.exception("[editor-ai] chart rerun failed")
-        return jsonify({"stdout": "", "stderr": "", "files": {}, "error": f"图表代码执行失败：{exc}"})
+        return jsonify(
+            {
+                "stdout": "",
+                "stderr": "",
+                "files": {},
+                "error": f"图表代码执行失败：{exc}",
+            }
+        )
 
 
 @editor_ai_bp.route("/api/editor/ai/skill-list", methods=["GET"])
@@ -841,11 +931,16 @@ def editor_skill_list():
     """Return editor toolbar skills backed by the native runtime."""
     try:
         from app.core.skills.registry import SkillRegistry
+
         file_type = request.args.get("file_type", "").strip().lower()
         all_skills = SkillRegistry.list_all()
         enabled = [s for s in all_skills if s.get("enabled", True)]
         if file_type:
-            enabled = [s for s in enabled if file_type in (s.get("file_types") or s.get("tags") or [])]
+            enabled = [
+                s
+                for s in enabled
+                if file_type in (s.get("file_types") or s.get("tags") or [])
+            ]
         return jsonify({"skills": enabled})
     except Exception:
         _logger.exception("[editor-ai] skill-list failed")

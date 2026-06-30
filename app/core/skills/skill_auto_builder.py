@@ -1233,7 +1233,10 @@ def _make_skill_id(name: str) -> str:
 
     slug = re.sub(r"[^\w\u4e00-\u9fff]", "_", name.lower().strip())
     slug = re.sub(r"_+", "_", slug).strip("_")
-    return slug or f"skill_{hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()[:8]}"
+    return (
+        slug
+        or f"skill_{hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()[:8]}"
+    )
 
 
 def _normalize_turns(history: List[Dict]) -> List[Dict[str, str]]:

@@ -34,7 +34,9 @@ def test_apply_file_json_initializes_tabentry_before_sync_primary_save_buttons()
     mount_call = "await _mountEditor(tabEntry, json.data)"
     first_state = body.find(state_call)
     first_mount = body.find(mount_call)
-    assert first_state != -1, "_applyFileJson must apply tab state for the initialized tabEntry."
+    assert (
+        first_state != -1
+    ), "_applyFileJson must apply tab state for the initialized tabEntry."
     assert first_mount != -1, "_applyFileJson must mount the initialized tabEntry."
     assert first_state > decl_idx
     assert first_mount > decl_idx

@@ -47,7 +47,7 @@ class LLMJudge:
 
     _VERDICT_PARSER_PROMPT = (
         "请从以下文本中提取 JSON 对象（只输出 JSON，不要其他内容）。\n"
-        "如果文本中没有合法的 JSON，输出 {{\"pass\": false, \"score\": 0.0, \"reason\": \"不能解析\", \"issues\": [\"无法解析评判输出\"]}}"
+        '如果文本中没有合法的 JSON，输出 {{"pass": false, "score": 0.0, "reason": "不能解析", "issues": ["无法解析评判输出"]}}'
     )
 
     def __init__(self, provider, model_id: str = "gemini-3-flash-preview"):
@@ -145,8 +145,6 @@ class LLMJudge:
             pass_=bool(data.get("pass", False)),
             score=max(0.0, min(1.0, float(data.get("score", 0.0)))),
             reason=str(data.get("reason", "") or ""),
-            issues=[
-                str(i) for i in (data.get("issues") or []) if i
-            ],
+            issues=[str(i) for i in (data.get("issues") or []) if i],
             raw_response=raw,
         )

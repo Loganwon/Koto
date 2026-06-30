@@ -93,7 +93,9 @@ class ChatPipeline:
         try:
             # ── User explicitly chose local model ────────────────────────
             if user_chose_local:
-                logger.info("[ChatPipeline] User chose local, using local model directly")
+                logger.info(
+                    "[ChatPipeline] User chose local, using local model directly"
+                )
                 ans, mod = self._do_local_fallback(safe_message, history)
                 if ans:
                     used_local_fallback = True
@@ -197,14 +199,24 @@ class ChatPipeline:
             if self.tracker and self.tracker_path and display_answer:
                 self.tracker.update_async(message, display_answer, self.tracker_path)
 
-            self._run_self_eval(message, display_answer, task_type, session_id, used_local_fallback)
+            self._run_self_eval(
+                message, display_answer, task_type, session_id, used_local_fallback
+            )
 
         except Exception as e:
             logger.exception("[ChatPipeline] stream failed")
             err_str = str(e)
-            if self.is_service_unavailable_fn and self.is_service_unavailable_fn(err_str):
+            if self.is_service_unavailable_fn and self.is_service_unavailable_fn(
+                err_str
+            ):
                 yield from self._exception_local_fallback(
-                    safe_message, history, mask_result, session_id, message, skill_id, task_type
+                    safe_message,
+                    history,
+                    mask_result,
+                    session_id,
+                    message,
+                    skill_id,
+                    task_type,
                 )
                 return
             yield self._sse("error", {"error": err_str})
@@ -262,9 +274,13 @@ class ChatPipeline:
             used_local_fallback = True
             local_fallback_model = mod
             local_use_reason = "cloud_fallback"
-            logger.info("[ChatPipeline] Local fallback success (%s), len=%d", mod, len(ans))
+            logger.info(
+                "[ChatPipeline] Local fallback success (%s), len=%d", mod, len(ans)
+            )
         else:
-            final_answer = "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
+            final_answer = (
+                "⚠️ 云端服务暂时不可用（503），本地模型也无法访问，请稍后重试。"
+            )
         return (
             final_answer,
             used_local_fallback,
@@ -299,17 +315,26 @@ class ChatPipeline:
             )
             action = val.action
             if val.is_blocked:
-                logger.warning("[ChatPipeline] Output blocked (ignored): %s", val.reasons)
+                logger.warning(
+                    "[ChatPipeline] Output blocked (ignored): %s", val.reasons
+                )
                 validated = final_answer
             elif val.needs_retry and not used_local_fallback:
                 logger.warning("[ChatPipeline] Output retry triggered: %s", val.reasons)
                 retry_input = val.text if val.text != final_answer else safe_message
                 retry_answer = self._run_retry(
-                    retry_input, history, session_id, skill_id, task_type, system_context
+                    retry_input,
+                    history,
+                    session_id,
+                    skill_id,
+                    task_type,
+                    system_context,
                 )
                 validated = retry_answer or final_answer
                 if not retry_answer:
-                    logger.warning("[ChatPipeline] Retry returned empty, keeping original")
+                    logger.warning(
+                        "[ChatPipeline] Retry returned empty, keeping original"
+                    )
             else:
                 validated = val.text
         except Exception as e:
@@ -467,39 +492,52 @@ class ChatPipeline:
         skill_id: str | None,
         task_type: str | None,
     ):
-        logger.warning("[ChatPipeline] Streaming exception with 503, trying local fallback")
-        yield self._sse("agent_step", {
-            "step_type": "thought",
-            "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
-            "metadata": {"source": "local_fallback"},
-        })
+        logger.warning(
+            "[ChatPipeline] Streaming exception with 503, trying local fallback"
+        )
+        yield self._sse(
+            "agent_step",
+            {
+                "step_type": "thought",
+                "content": "⚠️ 云端服务暂时不可用，正在切换到本地模型处理您的请求...",
+                "metadata": {"source": "local_fallback"},
+            },
+        )
         ans, mod = self._do_local_fallback(safe_message, history)
         if ans:
             try:
                 if self.output_validator:
                     val = self.output_validator.validate(text=ans)
                     if val.is_blocked:
-                        logger.warning("[ChatPipeline] Local fallback output blocked: %s", val.reasons)
+                        logger.warning(
+                            "[ChatPipeline] Local fallback output blocked: %s",
+                            val.reasons,
+                        )
                     ans = val.text
             except Exception:
-                logger.debug("[ChatPipeline] Local fallback validation skipped", exc_info=True)
+                logger.debug(
+                    "[ChatPipeline] Local fallback validation skipped", exc_info=True
+                )
             ans = self._restore_pii(ans, mask_result)
             lm = mod or "本地模型"
             display = (
                 f"🔄 **[本地模型回复]** 云端服务不可用，"
                 f"以下由本地 AI（`{lm}`）提供：\n\n{ans}"
             )
-            yield self._sse("task_final", {
-                "id": f"task_{int(time.time() * 1000)}",
-                "status": "success",
-                "result": display,
-                "steps": self._collected_steps,
-                "meta": {
-                    "session_id": session_id,
-                    "skill_id": skill_id,
-                    "task_type": task_type,
-                    "model": lm,
-                    "local_fallback": True,
+            yield self._sse(
+                "task_final",
+                {
+                    "id": f"task_{int(time.time() * 1000)}",
+                    "status": "success",
+                    "result": display,
+                    "steps": self._collected_steps,
+                    "meta": {
+                        "session_id": session_id,
+                        "skill_id": skill_id,
+                        "task_type": task_type,
+                        "model": lm,
+                        "local_fallback": True,
+                    },
                 },
-            })
+            )
             self._persist(session_id, original_message, ans)

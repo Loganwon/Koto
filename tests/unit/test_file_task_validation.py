@@ -18,7 +18,9 @@ def test_build_file_task_requirements_marks_docx_clear_review_request_as_clear_r
     request = FileTaskRequest(
         task="将 docx 里面的标注都移除",
         target_path="draft.docx",
-        files=[FileTaskFile(path="draft.docx", name="draft.docx", type="docx", target=True)],
+        files=[
+            FileTaskFile(path="draft.docx", name="draft.docx", type="docx", target=True)
+        ],
     )
     classification = FileTaskClassification(
         operation_kind="write",
@@ -65,22 +67,34 @@ def test_validate_file_task_plan_flags_clear_review_annotation_mismatch():
 
 
 def test_file_task_runtime_emits_plan_checked_before_plan_created():
-    responses = iter([
-        {
-            "content": "已总结当前文档重点。",
-            "tool_calls": [],
-        }
-    ])
+    responses = iter(
+        [
+            {
+                "content": "已总结当前文档重点。",
+                "tool_calls": [],
+            }
+        ]
+    )
 
     def fake_model(**kwargs):
         return next(responses)
 
     events = list(
-        FileTaskRuntime(tool_executor=lambda name, args: "", model_client=fake_model).run(
+        FileTaskRuntime(
+            tool_executor=lambda name, args: "", model_client=fake_model
+        ).run(
             FileTaskRequest(
                 task="总结这个文件",
                 run_id="plan_checked_demo",
-                files=[FileTaskFile(path="notes.md", name="notes.md", type="md", content="alpha beta", target=True)],
+                files=[
+                    FileTaskFile(
+                        path="notes.md",
+                        name="notes.md",
+                        type="md",
+                        content="alpha beta",
+                        target=True,
+                    )
+                ],
             )
         )
     )
@@ -106,14 +120,26 @@ def test_file_task_runtime_stops_when_plan_check_fails(monkeypatch):
             violations=["forced_test_failure"],
         )
 
-    monkeypatch.setattr("app.core.agent.file_task_runtime.validate_file_task_plan", fake_plan_check)
+    monkeypatch.setattr(
+        "app.core.agent.file_task_runtime.validate_file_task_plan", fake_plan_check
+    )
 
     events = list(
-        FileTaskRuntime(tool_executor=lambda name, args: "", model_client=fake_model).run(
+        FileTaskRuntime(
+            tool_executor=lambda name, args: "", model_client=fake_model
+        ).run(
             FileTaskRequest(
                 task="总结这个文件",
                 run_id="plan_check_fail_demo",
-                files=[FileTaskFile(path="notes.md", name="notes.md", type="md", content="alpha beta", target=True)],
+                files=[
+                    FileTaskFile(
+                        path="notes.md",
+                        name="notes.md",
+                        type="md",
+                        content="alpha beta",
+                        target=True,
+                    )
+                ],
             )
         )
     )
@@ -136,8 +162,13 @@ def test_file_task_runtime_emits_plan_checked_for_doc_annotate_bridge_path(monke
 
     def fake_stream(request, *, workspace_root="", gemini_client=None):
         ledger = FileTaskLedger(request.run_id)
-        yield ledger.event("run.started", {"task": request.task, "mode": "doc_annotate_bridge"})
-        yield ledger.event("run.finished", {"summary": "ok", "completed_task": True, "mode": "doc_annotate_bridge"})
+        yield ledger.event(
+            "run.started", {"task": request.task, "mode": "doc_annotate_bridge"}
+        )
+        yield ledger.event(
+            "run.finished",
+            {"summary": "ok", "completed_task": True, "mode": "doc_annotate_bridge"},
+        )
 
     monkeypatch.setattr(bridge, "stream_request", fake_stream)
 
@@ -152,7 +183,11 @@ def test_file_task_runtime_emits_plan_checked_for_doc_annotate_bridge_path(monke
             FileTaskRequest(
                 task="将你觉得写得不好的地方批注出来",
                 run_id="bridge_plan_checked_demo",
-                files=[FileTaskFile(path="doc.docx", name="doc.docx", type="docx", target=True)],
+                files=[
+                    FileTaskFile(
+                        path="doc.docx", name="doc.docx", type="docx", target=True
+                    )
+                ],
             )
         )
     )
@@ -169,12 +204,22 @@ def test_file_task_runtime_emits_plan_checked_for_simple_quick_action_path():
         return {"content": "已总结。", "tool_calls": []}
 
     events = list(
-        FileTaskRuntime(tool_executor=lambda name, args: "", model_client=fake_model).run(
+        FileTaskRuntime(
+            tool_executor=lambda name, args: "", model_client=fake_model
+        ).run(
             FileTaskRequest(
                 task="请总结当前文件内容",
                 run_id="quick_action_plan_checked_demo",
                 options={"quick_action_mode": "simple"},
-                files=[FileTaskFile(path="notes.txt", name="notes.txt", type="txt", content="alpha beta", target=True)],
+                files=[
+                    FileTaskFile(
+                        path="notes.txt",
+                        name="notes.txt",
+                        type="txt",
+                        content="alpha beta",
+                        target=True,
+                    )
+                ],
             )
         )
     )

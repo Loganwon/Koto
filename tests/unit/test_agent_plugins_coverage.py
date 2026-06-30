@@ -873,6 +873,7 @@ class TestSystemToolsPlugin:
         result = SystemToolsPlugin.pip_check("nonexistent_pkg_xyz_42")
         assert "Missing" in result
 
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # 12. SkillToolsPlugin
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -9,19 +9,19 @@
 from __future__ import annotations
 
 import base64
+import filecmp
+import hashlib
 import importlib
 import io
 import json
 import logging
 import os
-import filecmp
-import hashlib
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
-import stat
 import time
 import types
 import zipfile
@@ -29,11 +29,11 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
+from app.core.agent.file_task_completion_verifier import verify_task_completion
 from app.core.agent.file_task_contract import (
     FileTaskToolStreamChunk,
     FileTaskToolStreamResult,
 )
-from app.core.agent.file_task_completion_verifier import verify_task_completion
 from app.core.agent.file_task_result_markers import (
     KOTO_CREATED_FALLBACK_KEY,
     KOTO_CREATED_RESULT_KEY,
@@ -49,11 +49,6 @@ from app.core.agent.task_tools_docx_minimal import (
     _normalize_docx_paragraphs,
     _plain_text_to_docx_paragraphs,
 )
-from app.core.agent.task_tools_pptx_theme import (
-    _hex_to_rgb_color,
-    _pptx_density_settings,
-    _select_pptx_theme,
-)
 from app.core.agent.task_tools_pptx_layout import (
     _add_theme_accent_shapes,
     _add_theme_background_shape,
@@ -65,6 +60,11 @@ from app.core.agent.task_tools_pptx_layout import (
     _pptx_text_lines,
     _remove_koto_theme_shapes,
     _set_slide_background,
+)
+from app.core.agent.task_tools_pptx_theme import (
+    _hex_to_rgb_color,
+    _pptx_density_settings,
+    _select_pptx_theme,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,7 +113,9 @@ def _safe_resolve(relative_path: str) -> Optional[str]:
         resolved = os.path.normpath(os.path.join(root, stripped))
         if not resolved.startswith(os.path.normpath(root)):
             try:
-                project_resolved = os.path.normpath(os.path.join(project_root, stripped))
+                project_resolved = os.path.normpath(
+                    os.path.join(project_root, stripped)
+                )
                 if project_resolved.startswith(os.path.normpath(project_root)):
                     return project_resolved
             except (ValueError, TypeError):
@@ -121,9 +123,12 @@ def _safe_resolve(relative_path: str) -> Optional[str]:
             return None
         if not os.path.exists(resolved):
             try:
-                project_resolved = os.path.normpath(os.path.join(project_root, stripped))
-                if (project_resolved.startswith(os.path.normpath(project_root))
-                        and os.path.exists(project_resolved)):
+                project_resolved = os.path.normpath(
+                    os.path.join(project_root, stripped)
+                )
+                if project_resolved.startswith(
+                    os.path.normpath(project_root)
+                ) and os.path.exists(project_resolved):
                     return project_resolved
             except (ValueError, TypeError):
                 pass
@@ -154,9 +159,12 @@ def _resolve_path(path: str, *, must_exist: bool = True) -> Optional[str]:
     # Try project root as well
     project_root = _get_project_root()
     try:
-        project_candidate = os.path.normpath(os.path.join(project_root, path.replace("\\", "/")))
-        if (project_candidate.startswith(os.path.normpath(project_root))
-                and os.path.exists(project_candidate)):
+        project_candidate = os.path.normpath(
+            os.path.join(project_root, path.replace("\\", "/"))
+        )
+        if project_candidate.startswith(
+            os.path.normpath(project_root)
+        ) and os.path.exists(project_candidate):
             return project_candidate
     except (ValueError, TypeError):
         pass
@@ -172,7 +180,9 @@ def _resolve_path(path: str, *, must_exist: bool = True) -> Optional[str]:
     # For write targets, try project root as a last resort
     if not must_exist:
         try:
-            fallback = os.path.normpath(os.path.join(project_root, path.replace("\\", "/")))
+            fallback = os.path.normpath(
+                os.path.join(project_root, path.replace("\\", "/"))
+            )
             if fallback.startswith(os.path.normpath(project_root)):
                 return fallback
         except (ValueError, TypeError):
@@ -298,7 +308,10 @@ def _nonwritable_target_next_step(target_path: str) -> str:
         or str(target_path or "").strip()
         or "目标文件"
     )
-    return f"检查 {name} 的文件权限；如果文件正在被占用，" "请关闭相关 Koto 页签或其他程序后重新执行写回原文件。"
+    return (
+        f"检查 {name} 的文件权限；如果文件正在被占用，"
+        "请关闭相关 Koto 页签或其他程序后重新执行写回原文件。"
+    )
 
 
 def _ensure_existing_file_writable(path: str, *, label: str = "目标文件") -> str:
@@ -1783,7 +1796,10 @@ def _load_sandbox_run_python():
 
     module = importlib.import_module(module_name)
     run_python = getattr(module, "run_python", None)
-    if not callable(run_python) or getattr(run_python, "__module__", module_name) != module_name:
+    if (
+        not callable(run_python)
+        or getattr(run_python, "__module__", module_name) != module_name
+    ):
         sys.modules.pop(module_name, None)
         module = importlib.import_module(module_name)
         run_python = getattr(module, "run_python", None)
@@ -1798,8 +1814,16 @@ class SandboxRunResult(dict):
 
     def _marker_text(self) -> str:
         parts: List[str] = []
-        created = self.get(KOTO_CREATED_RESULT_KEY) or self.get(KOTO_CREATED_FALLBACK_KEY) or []
-        modified = self.get(KOTO_MODIFIED_RESULT_KEY) or self.get(KOTO_MODIFIED_FALLBACK_KEY) or []
+        created = (
+            self.get(KOTO_CREATED_RESULT_KEY)
+            or self.get(KOTO_CREATED_FALLBACK_KEY)
+            or []
+        )
+        modified = (
+            self.get(KOTO_MODIFIED_RESULT_KEY)
+            or self.get(KOTO_MODIFIED_FALLBACK_KEY)
+            or []
+        )
 
         if isinstance(created, list) and created:
             parts.append(
@@ -2181,6 +2205,7 @@ def _create_docx_file(path: str, resolved: str, content: str) -> str:
 def _create_xlsx_file(path: str, resolved: str, content: str) -> str:
     try:
         import csv
+
         import openpyxl
 
         wb = openpyxl.Workbook()
@@ -2368,7 +2393,10 @@ def llm_extract(text: str, fields: str, instructions: str = "") -> str:
     )
     if instructions:
         prompt += f"额外要求: {instructions}\n\n"
-    prompt += "以 JSON 对象输出，key 为字段名，value 为提取到的值。" "找不到的字段值设为 null。只输出 JSON。"
+    prompt += (
+        "以 JSON 对象输出，key 为字段名，value 为提取到的值。"
+        "找不到的字段值设为 null。只输出 JSON。"
+    )
     try:
         result = call_llm_json(prompt, call_timeout=_TASK_TOOL_LLM_CALL_TIMEOUT)
         if isinstance(result, dict):
@@ -2411,8 +2439,9 @@ def compare_files(file_paths: str, aspect: str = "content") -> str:
     Returns: JSON with similarity scores and differences.
     """
     import asyncio
-    from app.core.file.multi_file_coordinator import get_file_coordinator
+
     from app.core.agent.doc_agent import FileHandle
+    from app.core.file.multi_file_coordinator import get_file_coordinator
 
     paths = [p.strip() for p in file_paths.split(",") if p.strip()]
     if len(paths) < 2:
@@ -2501,12 +2530,29 @@ _CONTRACT_RISK_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         "终止/解除",
-        ("终止", "解除", "到期", "续约", "termination", "terminate", "renewal", "expire"),
+        (
+            "终止",
+            "解除",
+            "到期",
+            "续约",
+            "termination",
+            "terminate",
+            "renewal",
+            "expire",
+        ),
         "终止、解除或续约条款发生变化，需关注退出条件和通知期限。",
     ),
     (
         "责任限制",
-        ("责任限制", "责任上限", "间接损失", "liability", "limitation", "cap", "indirect"),
+        (
+            "责任限制",
+            "责任上限",
+            "间接损失",
+            "liability",
+            "limitation",
+            "cap",
+            "indirect",
+        ),
         "责任限制或损失范围发生变化，可能扩大或缩小一方承担的风险。",
     ),
     (
@@ -2516,12 +2562,28 @@ _CONTRACT_RISK_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
     ),
     (
         "知识产权",
-        ("知识产权", "著作权", "许可", "授权", "ip", "intellectual property", "license"),
+        (
+            "知识产权",
+            "著作权",
+            "许可",
+            "授权",
+            "ip",
+            "intellectual property",
+            "license",
+        ),
         "知识产权或许可安排发生变化，需确认权利归属和使用范围。",
     ),
     (
         "争议解决",
-        ("管辖", "仲裁", "适用法律", "诉讼", "jurisdiction", "arbitration", "governing law"),
+        (
+            "管辖",
+            "仲裁",
+            "适用法律",
+            "诉讼",
+            "jurisdiction",
+            "arbitration",
+            "governing law",
+        ),
         "争议解决或适用法律发生变化，可能影响维权地点、成本和程序。",
     ),
     (
@@ -2541,7 +2603,8 @@ def _contract_risk_summary_from_annotations(
     seen: set[str] = set()
     combined_items = [
         " ".join(
-            str(annotation.get(key) or "") for key in ("原文片段", "批注内容", "修改原因")
+            str(annotation.get(key) or "")
+            for key in ("原文片段", "批注内容", "修改原因")
         ).lower()
         for annotation in annotations
     ]
@@ -2760,9 +2823,13 @@ def plan_docx_compare_annotations(
     original_resolved = _resolve_path(original_path)
     revised_resolved = _resolve_path(revised_path)
     if not original_resolved:
-        return json.dumps({"error": f"原始文件不存在: {original_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"原始文件不存在: {original_path}"}, ensure_ascii=False
+        )
     if not revised_resolved:
-        return json.dumps({"error": f"对比文件不存在: {revised_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"对比文件不存在: {revised_path}"}, ensure_ascii=False
+        )
     if Path(original_resolved).suffix.lstrip(".").lower() != "docx":
         return json.dumps(
             {"error": f"只支持 DOCX 原始文件: {original_path}"}, ensure_ascii=False
@@ -2775,9 +2842,13 @@ def plan_docx_compare_annotations(
     target_raw = str(target_path or original_path or "").strip()
     target_resolved = _resolve_path(target_raw) if target_raw else original_resolved
     if not target_resolved:
-        return json.dumps({"error": f"目标 DOCX 不存在: {target_raw}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"目标 DOCX 不存在: {target_raw}"}, ensure_ascii=False
+        )
     if Path(target_resolved).suffix.lstrip(".").lower() != "docx":
-        return json.dumps({"error": f"目标文件必须是 DOCX: {target_raw}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"目标文件必须是 DOCX: {target_raw}"}, ensure_ascii=False
+        )
 
     try:
         max_items = _normalize_positive_int(max_differences, default=80, upper=200)
@@ -2849,8 +2920,12 @@ def write_docx_comments(
             {
                 "原文片段": anchor,
                 "批注内容": comment,
-                "批注标签": str(item.get("批注标签") or item.get("label") or "").strip(),
-                "修改原因": str(item.get("修改原因") or item.get("reason") or "").strip(),
+                "批注标签": str(
+                    item.get("批注标签") or item.get("label") or ""
+                ).strip(),
+                "修改原因": str(
+                    item.get("修改原因") or item.get("reason") or ""
+                ).strip(),
             }
         )
 
@@ -2927,9 +3002,13 @@ def compare_docx_and_annotate(
     original_resolved = _resolve_path(original_path)
     revised_resolved = _resolve_path(revised_path)
     if not original_resolved:
-        return json.dumps({"error": f"原始文件不存在: {original_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"原始文件不存在: {original_path}"}, ensure_ascii=False
+        )
     if not revised_resolved:
-        return json.dumps({"error": f"对比文件不存在: {revised_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"对比文件不存在: {revised_path}"}, ensure_ascii=False
+        )
     if Path(original_resolved).suffix.lstrip(".").lower() != "docx":
         return json.dumps(
             {"error": f"只支持 DOCX 原始文件: {original_path}"}, ensure_ascii=False
@@ -2942,9 +3021,13 @@ def compare_docx_and_annotate(
     target_raw = str(target_path or revised_path or "").strip()
     target_resolved = _resolve_path(target_raw) if target_raw else revised_resolved
     if not target_resolved:
-        return json.dumps({"error": f"目标 DOCX 不存在: {target_raw}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"目标 DOCX 不存在: {target_raw}"}, ensure_ascii=False
+        )
     if Path(target_resolved).suffix.lstrip(".").lower() != "docx":
-        return json.dumps({"error": f"目标文件必须是 DOCX: {target_raw}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"目标文件必须是 DOCX: {target_raw}"}, ensure_ascii=False
+        )
 
     try:
         from web.track_changes_editor import TrackChangesEditor
@@ -2994,9 +3077,11 @@ def compare_docx_and_annotate(
             preview_lines.append(f"未能定位：{failed}")
         if annotations:
             preview_lines.append(
-                str(annotations[0].get("批注内容") or annotations[0].get("修改后文本") or "")[
-                    :160
-                ]
+                str(
+                    annotations[0].get("批注内容")
+                    or annotations[0].get("修改后文本")
+                    or ""
+                )[:160]
             )
         return _success_result(
             _result_path(target_raw, target_resolved),
@@ -3043,8 +3128,9 @@ def extract_to_file(
     Returns: JSON with operation result and change details.
     """
     import asyncio
-    from app.core.file.multi_file_coordinator import get_file_coordinator
+
     from app.core.agent.doc_agent import FileHandle
+    from app.core.file.multi_file_coordinator import get_file_coordinator
 
     src = _resolve_path(source_path)
     if not src:
@@ -3055,7 +3141,9 @@ def extract_to_file(
         # Target can be new file
         tgt = _safe_resolve(target_path)
         if not tgt:
-            return json.dumps({"error": f"目标路径无效: {target_path}"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"目标路径无效: {target_path}"}, ensure_ascii=False
+            )
 
     try:
         source = FileHandle(path=src)
@@ -3242,6 +3330,7 @@ def annotate_file(
     Returns: JSON with annotation results.
     """
     import asyncio
+
     from app.core.file.multi_file_coordinator import get_file_coordinator
 
     resolved = _resolve_path(path)
@@ -3536,7 +3625,9 @@ def clear_docx_review_marks(path: str, scope: str = "comments") -> str:
     try:
         document_root = etree.fromstring(document_xml)
     except Exception as exc:
-        return json.dumps({"error": f"无法解析 DOCX 正文 XML: {exc}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"无法解析 DOCX 正文 XML: {exc}"}, ensure_ascii=False
+        )
 
     changed = False
     comments_removed = 0
@@ -3962,9 +4053,7 @@ def insert_excel_as_docx_table(
             )
 
         result_warning = "；".join(
-            part
-            for part in (sheet_warning, sort_warning, selected_warning)
-            if part
+            part for part in (sheet_warning, sort_warning, selected_warning) if part
         )
         if backup_warning:
             result_warning = "；".join(
@@ -4624,10 +4713,14 @@ def convert_docx_to_pdf(path: str, target_path: str = "") -> str:
     if not resolved:
         return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
     if Path(resolved).suffix.lower() not in {".docx", ".doc"}:
-        return json.dumps({"error": "Only DOCX/DOC inputs are supported"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": "Only DOCX/DOC inputs are supported"}, ensure_ascii=False
+        )
     target = _resolve_output_path(path, resolved, target_path, ".pdf")
     if not target:
-        return json.dumps({"error": f"Invalid target path: {target_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"Invalid target path: {target_path}"}, ensure_ascii=False
+        )
     os.makedirs(os.path.dirname(target), exist_ok=True)
     target_exists_before = os.path.exists(target)
 
@@ -4642,7 +4735,9 @@ def convert_docx_to_pdf(path: str, target_path: str = "") -> str:
             if not os.path.exists(target):
                 raise RuntimeError("converter reported success but PDF was not created")
             return _success_result(
-                _result_path(target_path or str(Path(path).with_suffix(".pdf")), target),
+                _result_path(
+                    target_path or str(Path(path).with_suffix(".pdf")), target
+                ),
                 operation="convert_docx_to_pdf",
                 summary=f"已将 Word 文档转换为 PDF：{Path(target).name}",
                 file_type="pdf",
@@ -4692,7 +4787,9 @@ def convert_file(file_path: str, target_format: str, output_path: str = "") -> s
 
     target = _resolve_output_path(file_path, resolved, output_path, target_ext)
     if not target:
-        return json.dumps({"error": f"Invalid output path: {output_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"Invalid output path: {output_path}"}, ensure_ascii=False
+        )
     os.makedirs(os.path.dirname(target), exist_ok=True)
     target_exists_before = os.path.exists(target)
 
@@ -4706,7 +4803,9 @@ def convert_file(file_path: str, target_format: str, output_path: str = "") -> s
         )
     except Exception as exc:
         return _blocked_write_result(
-            _result_path(output_path or str(Path(str(file_path)).with_suffix(target_ext)), target),
+            _result_path(
+                output_path or str(Path(str(file_path)).with_suffix(target_ext)), target
+            ),
             summary=f"转换失败：{str(exc).strip()}",
             suggested_next_step="确认源文件格式受支持，并安装本地转换依赖后重试。",
             operation="convert_file",
@@ -4718,7 +4817,9 @@ def convert_file(file_path: str, target_format: str, output_path: str = "") -> s
 
     if not isinstance(result, dict):
         return _blocked_write_result(
-            _result_path(output_path or str(Path(str(file_path)).with_suffix(target_ext)), target),
+            _result_path(
+                output_path or str(Path(str(file_path)).with_suffix(target_ext)), target
+            ),
             summary="转换器没有返回结构化结果。",
             suggested_next_step="请重试或改用专门的格式转换工具。",
             operation="convert_file",
@@ -4730,14 +4831,23 @@ def convert_file(file_path: str, target_format: str, output_path: str = "") -> s
 
     output = os.path.normpath(str(result.get("output_path") or target))
     to_format = str(result.get("to_format") or target_ext.lstrip(".")).strip().lower()
-    from_format = str(result.get("from_format") or Path(resolved).suffix.lstrip(".")).strip().lower()
-    display_path = output_path or str(Path(str(file_path)).with_suffix(f".{to_format or target_ext.lstrip('.')}"))
+    from_format = (
+        str(result.get("from_format") or Path(resolved).suffix.lstrip("."))
+        .strip()
+        .lower()
+    )
+    display_path = output_path or str(
+        Path(str(file_path)).with_suffix(f".{to_format or target_ext.lstrip('.')}")
+    )
     warning = str(result.get("warning") or "").strip()
     if result.get("success") and os.path.exists(output):
         return _success_result(
             _result_path(display_path, output),
             operation="convert_file",
-            summary=str(result.get("message") or f"已转换为 {to_format.upper()}：{Path(output).name}"),
+            summary=str(
+                result.get("message")
+                or f"已转换为 {to_format.upper()}：{Path(output).name}"
+            ),
             file_type=to_format or target_ext.lstrip("."),
             change_type="modify" if target_exists_before else "create",
             summary_code="CONVERT_OK",
@@ -4843,14 +4953,18 @@ def fill_docx_template(
     except json.JSONDecodeError as exc:
         return json.dumps({"error": f"Invalid data JSON: {exc}"}, ensure_ascii=False)
     if not isinstance(values, dict):
-        return json.dumps({"error": "Template data must be a JSON object"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": "Template data must be a JSON object"}, ensure_ascii=False
+        )
 
     try:
         from docx import Document
 
         target = _resolve_output_path(path, resolved, target_path, ".docx")
         if not target:
-            return json.dumps({"error": f"Invalid target path: {target_path}"}, ensure_ascii=False)
+            return json.dumps(
+                {"error": f"Invalid target path: {target_path}"}, ensure_ascii=False
+            )
         file_exists = os.path.exists(target)
         if target != resolved:
             os.makedirs(os.path.dirname(target), exist_ok=True)
@@ -4885,9 +4999,13 @@ def fill_docx_template(
         for table_index, table in enumerate(doc.tables, start=1):
             for row_index, row in enumerate(table.rows, start=1):
                 for col_index, cell in enumerate(row.cells, start=1):
-                    for paragraph_index, paragraph in enumerate(cell.paragraphs, start=1):
-                        changed, before, after = _replace_docx_placeholders_in_paragraph(
-                            paragraph, replacements
+                    for paragraph_index, paragraph in enumerate(
+                        cell.paragraphs, start=1
+                    ):
+                        changed, before, after = (
+                            _replace_docx_placeholders_in_paragraph(
+                                paragraph, replacements
+                            )
                         )
                         if changed:
                             diff_items.append(
@@ -5134,7 +5252,9 @@ def design_pptx_theme_layout(
                 text_shapes_styled += 1
 
             if slide_text_chars > 950:
-                layout_warnings.append(f"第 {slide_index} 页文本较多，建议人工复核拥挤度")
+                layout_warnings.append(
+                    f"第 {slide_index} 页文本较多，建议人工复核拥挤度"
+                )
 
         _save_pptx_via_temp_file(prs, resolved)
         reopened = Presentation(resolved)

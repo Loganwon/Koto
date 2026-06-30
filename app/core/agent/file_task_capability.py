@@ -6,51 +6,89 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Set
 
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
-from app.core.agent.file_task_tool_catalog import file_task_tool_specs, is_file_task_tool, is_write_tool
+from app.core.agent.file_task_tool_catalog import (
+    file_task_tool_specs,
+    is_file_task_tool,
+    is_write_tool,
+)
 from app.core.agent.tool_design_protocol import (
     STANDARD_FILE_CHANGE_RETURNS,
     TOOL_DESIGN_PROTOCOL,
     build_tool_gap,
 )
 
-
 _NATIVE_SUPPORTED_FILE_TYPES: Set[str] = {
     file_type
     for spec in file_task_tool_specs()
     for file_type in spec.file_types
-    if file_type and (spec.name != "read_file_range" or file_type in {"txt", "md", "markdown", "text"})
+    if file_type
+    and (
+        spec.name != "read_file_range" or file_type in {"txt", "md", "markdown", "text"}
+    )
 }
 
 _PPTX_DESIGN_TASK_PATTERNS = (
-    re.compile(r"(?:pptx?|幻灯片|演示文稿|slides?|presentation|deck).{0,32}(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计|漂亮|好看|精美|高级|专业)", re.IGNORECASE),
-    re.compile(r"(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计|漂亮|好看|精美|高级|专业).{0,32}(?:pptx?|幻灯片|演示文稿|slides?|presentation|deck)", re.IGNORECASE),
-    re.compile(r"\b(?:theme|layout|template|slide master|master slide|visual style|deck design|presentation design)\b", re.IGNORECASE),
+    re.compile(
+        r"(?:pptx?|幻灯片|演示文稿|slides?|presentation|deck).{0,32}(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计|漂亮|好看|精美|高级|专业)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:风格|主题|主体|版式|母版|模板|美化|排版|配色|视觉|设计|漂亮|好看|精美|高级|专业).{0,32}(?:pptx?|幻灯片|演示文稿|slides?|presentation|deck)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:theme|layout|template|slide master|master slide|visual style|deck design|presentation design)\b",
+        re.IGNORECASE,
+    ),
 )
 
 _XLSX_TO_DOCX_TASK_PATTERNS = (
-    re.compile(r"(?:excel|xlsx|表格|工作表).{0,24}(?:加入|插入|写入|计入|同步|导入).{0,24}(?:word|docx|文档)", re.IGNORECASE),
-    re.compile(r"(?:word|docx|文档).{0,24}(?:加入|插入|写入|计入|同步|导入).{0,24}(?:excel|xlsx|表格|工作表)", re.IGNORECASE),
-    re.compile(r"\b(?:excel|xlsx|spreadsheet|sheet).{0,32}\b(?:word|docx)\b", re.IGNORECASE),
-    re.compile(r"\b(?:word|docx).{0,32}\b(?:excel|xlsx|spreadsheet|sheet)\b", re.IGNORECASE),
+    re.compile(
+        r"(?:excel|xlsx|表格|工作表).{0,24}(?:加入|插入|写入|计入|同步|导入).{0,24}(?:word|docx|文档)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:word|docx|文档).{0,24}(?:加入|插入|写入|计入|同步|导入).{0,24}(?:excel|xlsx|表格|工作表)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:excel|xlsx|spreadsheet|sheet).{0,32}\b(?:word|docx)\b", re.IGNORECASE
+    ),
+    re.compile(
+        r"\b(?:word|docx).{0,32}\b(?:excel|xlsx|spreadsheet|sheet)\b", re.IGNORECASE
+    ),
 )
 
 _CHART_TO_DOCX_TASK_PATTERNS = (
-    re.compile(r"(?:图表|可视化|绘图|画图|画.{0,4}图|图片|chart|plot|graph|image).{0,32}(?:加入|插入|写入|放入|嵌入).{0,24}(?:word|docx|文档)", re.IGNORECASE),
-    re.compile(r"(?:word|docx|文档).{0,24}(?:加入|插入|写入|放入|嵌入).{0,32}(?:图表|可视化|绘图|画图|画.{0,4}图|图片|chart|plot|graph|image)", re.IGNORECASE),
+    re.compile(
+        r"(?:图表|可视化|绘图|画图|画.{0,4}图|图片|chart|plot|graph|image).{0,32}(?:加入|插入|写入|放入|嵌入).{0,24}(?:word|docx|文档)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:word|docx|文档).{0,24}(?:加入|插入|写入|放入|嵌入).{0,32}(?:图表|可视化|绘图|画图|画.{0,4}图|图片|chart|plot|graph|image)",
+        re.IGNORECASE,
+    ),
 )
 
 _CHART_TASK_PATTERNS = (
     re.compile(r"\b(?:chart|plot|graph|visuali[sz]e|dashboard)\b", re.IGNORECASE),
-    re.compile(r"(?:图表|可视化|绘图|画图|画.{0,4}图|统计图|柱状图|折线图|饼图|仪表盘)", re.IGNORECASE),
+    re.compile(
+        r"(?:图表|可视化|绘图|画图|画.{0,4}图|统计图|柱状图|折线图|饼图|仪表盘)",
+        re.IGNORECASE,
+    ),
 )
 
 _COMPARE_TASK_PATTERNS = (
-    re.compile(r"\b(?:compare|comparison|diff|difference|merge review)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:compare|comparison|diff|difference|merge review)\b", re.IGNORECASE
+    ),
     re.compile(r"(?:对比|比较|差异|不同点|相同点|比对)", re.IGNORECASE),
 )
 
 _ANNOTATE_TASK_PATTERNS = (
-    re.compile(r"\b(?:annotate|annotation|comment|review note|markup)\b", re.IGNORECASE),
+    re.compile(
+        r"\b(?:annotate|annotation|comment|review note|markup)\b", re.IGNORECASE
+    ),
     re.compile(r"(?:批注|注释|评论|审阅意见|标注)", re.IGNORECASE),
 )
 
@@ -81,15 +119,33 @@ _CLEAR_DOCX_REVIEW_TASK_PATTERNS = (
 )
 
 _PPTX_ADD_SLIDES_TASK_PATTERNS = (
-    re.compile(r"(?:pptx?|slides?|幻灯片|演示文稿).{0,24}(?:新增|添加|补充|生成|插入).{0,12}(?:页|slide|slides?)", re.IGNORECASE),
-    re.compile(r"(?:总结|概述|结论).{0,18}(?:新增|添加|补充).{0,12}(?:页|slide|slides?)", re.IGNORECASE),
+    re.compile(
+        r"(?:pptx?|slides?|幻灯片|演示文稿).{0,24}(?:新增|添加|补充|生成|插入).{0,12}(?:页|slide|slides?)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:总结|概述|结论).{0,18}(?:新增|添加|补充).{0,12}(?:页|slide|slides?)",
+        re.IGNORECASE,
+    ),
 )
 
 _PPTX_UPDATE_SLIDES_TASK_PATTERNS = (
-    re.compile(r"(?:pptx?|slides?|幻灯片|演示文稿).{0,24}(?:修改|更新|改写|替换|润色).{0,18}(?:内容|文字|文本|slide)", re.IGNORECASE),
-    re.compile(r"(?:修改|更新|改写|替换|润色).{0,24}(?:pptx?|slides?|幻灯片|演示文稿)", re.IGNORECASE),
-    re.compile(r"(?:pptx?|slides?|幻灯片|演示文稿).{0,24}(?:补充|充实|扩写|完善).{0,18}(?:内容|文字|文本|slide|页)", re.IGNORECASE),
-    re.compile(r"(?:每一页|每页|逐页|各页).{0,24}(?:补充|充实|扩写|完善).{0,18}(?:内容|文字|文本)?", re.IGNORECASE),
+    re.compile(
+        r"(?:pptx?|slides?|幻灯片|演示文稿).{0,24}(?:修改|更新|改写|替换|润色).{0,18}(?:内容|文字|文本|slide)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:修改|更新|改写|替换|润色).{0,24}(?:pptx?|slides?|幻灯片|演示文稿)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:pptx?|slides?|幻灯片|演示文稿).{0,24}(?:补充|充实|扩写|完善).{0,18}(?:内容|文字|文本|slide|页)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:每一页|每页|逐页|各页).{0,24}(?:补充|充实|扩写|完善).{0,18}(?:内容|文字|文本)?",
+        re.IGNORECASE,
+    ),
 )
 
 _CAPABILITY_PROFILE_VERSION = "koto_file_capability_v1"
@@ -99,12 +155,63 @@ _PRESENTATION_FORMATS = {"pptx"}
 _IMAGE_FORMATS = {"png", "jpg", "jpeg", "gif", "bmp", "webp", "svg", "image"}
 _TEXT_FORMATS = {"txt", "md", "markdown", "text"}
 _CODE_FORMATS = {
-    "py", "js", "ts", "json", "html", "css", "xml", "sh", "bash", "yaml", "yml",
-    "c", "cpp", "h", "hpp", "java", "rb", "go", "rs", "cs", "php", "swift",
-    "kt", "r", "sql", "toml", "ini", "cfg", "conf", "code",
+    "py",
+    "js",
+    "ts",
+    "json",
+    "html",
+    "css",
+    "xml",
+    "sh",
+    "bash",
+    "yaml",
+    "yml",
+    "c",
+    "cpp",
+    "h",
+    "hpp",
+    "java",
+    "rb",
+    "go",
+    "rs",
+    "cs",
+    "php",
+    "swift",
+    "kt",
+    "r",
+    "sql",
+    "toml",
+    "ini",
+    "cfg",
+    "conf",
+    "code",
 }
-_AUDIO_FORMATS = {"mp3", "wav", "flac", "aac", "ogg", "m4a", "wma", "opus", "ape", "audio"}
-_VIDEO_FORMATS = {"mp4", "mov", "wmv", "avi", "m4v", "mkv", "flv", "webm", "asf", "mpg", "mpeg", "video"}
+_AUDIO_FORMATS = {
+    "mp3",
+    "wav",
+    "flac",
+    "aac",
+    "ogg",
+    "m4a",
+    "wma",
+    "opus",
+    "ape",
+    "audio",
+}
+_VIDEO_FORMATS = {
+    "mp4",
+    "mov",
+    "wmv",
+    "avi",
+    "m4v",
+    "mkv",
+    "flv",
+    "webm",
+    "asf",
+    "mpg",
+    "mpeg",
+    "video",
+}
 _FORMAT_ALIASES = {
     "markdown": "md",
     "jpeg": "jpg",
@@ -158,7 +265,10 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
                 "image_path": {"type": "string", "description": "来源图片路径"},
                 "title": {"type": "string", "description": "可选图题"},
                 "caption": {"type": "string", "description": "可选图注"},
-                "width_inches": {"type": "number", "description": "可选插图宽度（英寸）"},
+                "width_inches": {
+                    "type": "number",
+                    "description": "可选插图宽度（英寸）",
+                },
             },
             "required": ["path", "image_path"],
         },
@@ -175,8 +285,14 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
         parameters={
             "type": "object",
             "properties": {
-                "source_path": {"type": "string", "description": "来源 Excel/XLSX 文件路径"},
-                "target_path": {"type": "string", "description": "目标 Word/DOCX 文件路径"},
+                "source_path": {
+                    "type": "string",
+                    "description": "来源 Excel/XLSX 文件路径",
+                },
+                "target_path": {
+                    "type": "string",
+                    "description": "目标 Word/DOCX 文件路径",
+                },
                 "sheet_name": {"type": "string", "description": "可选工作表名"},
                 "table_title": {"type": "string", "description": "可选表题"},
             },
@@ -196,9 +312,19 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "目标 PPTX 文件路径"},
-                "style_brief": {"type": "string", "description": "用户希望的视觉风格或业务场景"},
-                "palette": {"type": "array", "items": {"type": "string"}, "description": "可选品牌色或主题色"},
-                "density": {"type": "string", "description": "内容密度：compact / balanced / spacious"},
+                "style_brief": {
+                    "type": "string",
+                    "description": "用户希望的视觉风格或业务场景",
+                },
+                "palette": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "可选品牌色或主题色",
+                },
+                "density": {
+                    "type": "string",
+                    "description": "内容密度：compact / balanced / spacious",
+                },
             },
             "required": ["path"],
         },
@@ -251,10 +377,22 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
         parameters={
             "type": "object",
             "properties": {
-                "original_path": {"type": "string", "description": "基准 DOCX 文件路径"},
-                "revised_path": {"type": "string", "description": "待标注文档 DOCX 文件路径"},
-                "target_path": {"type": "string", "description": "实际写入批注的 DOCX；用户说原文/当前文档时必须传该文件"},
-                "max_differences": {"type": "integer", "description": "最多标注多少处差异"},
+                "original_path": {
+                    "type": "string",
+                    "description": "基准 DOCX 文件路径",
+                },
+                "revised_path": {
+                    "type": "string",
+                    "description": "待标注文档 DOCX 文件路径",
+                },
+                "target_path": {
+                    "type": "string",
+                    "description": "实际写入批注的 DOCX；用户说原文/当前文档时必须传该文件",
+                },
+                "max_differences": {
+                    "type": "integer",
+                    "description": "最多标注多少处差异",
+                },
             },
             "required": ["original_path", "revised_path"],
         },
@@ -272,8 +410,15 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
         parameters={
             "type": "object",
             "properties": {
-                "file_paths": {"type": "array", "items": {"type": "string"}, "description": "待比较文件路径列表"},
-                "aspect": {"type": "string", "description": "比较维度，如 content/structure/style"},
+                "file_paths": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "待比较文件路径列表",
+                },
+                "aspect": {
+                    "type": "string",
+                    "description": "比较维度，如 content/structure/style",
+                },
             },
             "required": ["file_paths"],
         },
@@ -291,7 +436,10 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "目标 DOCX 文件路径"},
-                "scope": {"type": "string", "description": "清理范围：comments / revisions / all；默认 comments"},
+                "scope": {
+                    "type": "string",
+                    "description": "清理范围：comments / revisions / all；默认 comments",
+                },
             },
             "required": ["path"],
         },
@@ -396,7 +544,9 @@ def build_request_capability_profiles(request: FileTaskRequest) -> List[Dict[str
             existing["target"] = bool(existing.get("target") or target)
             return
 
-        profile = build_file_capability_profile(file_type=raw_type, path=raw_path, name=raw_name)
+        profile = build_file_capability_profile(
+            file_type=raw_type, path=raw_path, name=raw_name
+        )
         profile["path"] = raw_path
         profile["name"] = raw_name
         profile["roles"] = [role]
@@ -408,7 +558,10 @@ def build_request_capability_profiles(request: FileTaskRequest) -> List[Dict[str
         _upsert_profile(
             "current_file",
             file_info=request.current_file,
-            target=bool(request.current_file.target or request.current_file.path == request.target_path),
+            target=bool(
+                request.current_file.target
+                or request.current_file.path == request.target_path
+            ),
         )
 
     for file_info in request.files:
@@ -443,13 +596,17 @@ def _has_native_tool(tool_name: str) -> bool:
     return is_file_task_tool(tool_name)
 
 
-def matched_native_capability_specs(request: FileTaskRequest) -> List[NativeCapabilitySpec]:
+def matched_native_capability_specs(
+    request: FileTaskRequest,
+) -> List[NativeCapabilitySpec]:
     task_text = str(request.task or "").strip()
     file_types = _request_file_types(request)
     file_count = _request_file_count(request)
     matched: List[NativeCapabilitySpec] = []
     for capability in _NATIVE_CAPABILITY_MATRIX:
-        if not _capability_matches_request(capability, task_text, file_types, file_count):
+        if not _capability_matches_request(
+            capability, task_text, file_types, file_count
+        ):
             continue
         matched.append(capability)
     return matched
@@ -472,11 +629,17 @@ def _capability_matches_request(
             task_text
         ):
             return False
-    if capability.task_patterns and not any(pattern.search(task_text) for pattern in capability.task_patterns):
+    if capability.task_patterns and not any(
+        pattern.search(task_text) for pattern in capability.task_patterns
+    ):
         return False
-    if capability.all_file_types and not set(capability.all_file_types).issubset(file_types):
+    if capability.all_file_types and not set(capability.all_file_types).issubset(
+        file_types
+    ):
         return False
-    if capability.any_file_types and not set(capability.any_file_types).intersection(file_types):
+    if capability.any_file_types and not set(capability.any_file_types).intersection(
+        file_types
+    ):
         return False
     if not capability.allow_without_files and not file_types:
         return False
@@ -616,7 +779,10 @@ def _capability_tool_names(format_name: str, family: str) -> List[str]:
         for spec in file_task_tool_specs()
         if spec.file_types and format_name in spec.file_types
     }
-    if family in {"document", "spreadsheet", "presentation", "text", "code"} or format_name == "pdf":
+    if (
+        family in {"document", "spreadsheet", "presentation", "text", "code"}
+        or format_name == "pdf"
+    ):
         names.add("run_python_code")
     return sorted(names)
 
@@ -691,7 +857,9 @@ def _task_capability_surface(
         if spec.read_only and spec.file_types and format_name in spec.file_types
     ]
     file_specific_write_tools = [
-        tool_name for tool_name in write_tool_names if tool_name not in _DERIVED_ONLY_WRITE_TOOLS
+        tool_name
+        for tool_name in write_tool_names
+        if tool_name not in _DERIVED_ONLY_WRITE_TOOLS
     ]
     read_support = "native" if read_tool_names else "none"
     if file_specific_write_tools:
@@ -747,15 +915,23 @@ def _capability_notes(format_name: str, family: str) -> List[str]:
     if format_name == "pptx":
         notes.append("含嵌入视频的 PPTX 当前会在打开前直接拒绝。")
     if format_name == "csv":
-        notes.append("CSV 目前在 file-task 工具层可读写，但 workspace 直接打开仍未纳入主编辑器路径。")
+        notes.append(
+            "CSV 目前在 file-task 工具层可读写，但 workspace 直接打开仍未纳入主编辑器路径。"
+        )
     if family == "image":
-        notes.append("图片 OCR 当前仍通过截图/剪贴板侧路能力提供，尚未统一接入文件任务主路径。")
+        notes.append(
+            "图片 OCR 当前仍通过截图/剪贴板侧路能力提供，尚未统一接入文件任务主路径。"
+        )
     if family in {"audio", "video"}:
-        notes.append("音视频目前更适合走元信息、转录或摘要能力，尚未纳入主文件编辑路径。")
+        notes.append(
+            "音视频目前更适合走元信息、转录或摘要能力，尚未纳入主文件编辑路径。"
+        )
     return notes
 
 
-def _primary_actions(workspace: Dict[str, Any], task: Dict[str, Any], ocr_mode: str) -> List[str]:
+def _primary_actions(
+    workspace: Dict[str, Any], task: Dict[str, Any], ocr_mode: str
+) -> List[str]:
     actions: List[str] = []
     if workspace.get("open_mode") != "unsupported":
         actions.append("preview")
@@ -765,7 +941,10 @@ def _primary_actions(workspace: Dict[str, Any], task: Dict[str, Any], ocr_mode: 
         actions.append("analyze")
     if task.get("compare_support") == "native":
         actions.append("compare")
-    if task.get("annotation_support") != "none" or workspace.get("edit_mode") == "annotate_only":
+    if (
+        task.get("annotation_support") != "none"
+        or workspace.get("edit_mode") == "annotate_only"
+    ):
         actions.append("annotate")
     if ocr_mode == "first_class":
         actions.append("ocr")

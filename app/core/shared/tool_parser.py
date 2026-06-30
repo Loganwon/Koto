@@ -89,9 +89,7 @@ def _coerce_task_tool_calls(
     allowed_tool_names: Collection[str] | None = None,
 ) -> List[Dict[str, Any]]:
     allowed = {
-        str(name).strip()
-        for name in (allowed_tool_names or [])
-        if str(name).strip()
+        str(name).strip() for name in (allowed_tool_names or []) if str(name).strip()
     }
     items = candidate if isinstance(candidate, list) else [candidate]
     tool_calls: List[Dict[str, Any]] = []
@@ -100,7 +98,9 @@ def _coerce_task_tool_calls(
         if not isinstance(item, dict):
             return []
 
-        function_payload = item.get("function") if isinstance(item.get("function"), dict) else {}
+        function_payload = (
+            item.get("function") if isinstance(item.get("function"), dict) else {}
+        )
         tool_name = str(
             item.get("name")
             or item.get("tool_name")

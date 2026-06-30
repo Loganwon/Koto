@@ -238,7 +238,9 @@ def create_agent(
     # ── 尝试 LangGraph 路径 ──────────────────────────────────────────────────
     # LangGraph adapter is currently Gemini-oriented. OpenAI-compatible cloud
     # providers use UnifiedAgent so the shared provider_factory path is honored.
-    _want_lg = use_langgraph if use_langgraph is not None else (provider_name == "gemini")
+    _want_lg = (
+        use_langgraph if use_langgraph is not None else (provider_name == "gemini")
+    )
     if _want_lg:
         try:
             from app.core.agent.langgraph_agent import _LG_AVAILABLE, LangGraphAgent

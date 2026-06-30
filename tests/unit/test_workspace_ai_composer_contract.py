@@ -2,8 +2,8 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 from __future__ import annotations
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 def _repo_root() -> Path:
@@ -74,7 +74,7 @@ def test_workspace_ai_panel_does_not_embed_legacy_skill_workflow_systems() -> No
         'id="wa-skill-exec-body"',
         'id="wa-skill-exec-title"',
         'id="wa-workflow-panel"',
-        "data-retained-legacy=\"skill-exec\"",
+        'data-retained-legacy="skill-exec"',
     )
     for fragment in legacy_fragments:
         assert fragment not in html

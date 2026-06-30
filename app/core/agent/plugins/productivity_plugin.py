@@ -24,6 +24,7 @@ _WORKSPACE = os.environ.get(
 )
 _WORKSPACE = os.path.abspath(_WORKSPACE)
 
+
 class ProductivityPlugin(AgentPlugin):
 
     @property

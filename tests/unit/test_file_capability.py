@@ -4,6 +4,7 @@ Tests for file_task_capability functions that drive the native-only runtime.
 All external-planner tests have been removed — Koto no longer supports external
 retired external planner backends.
 """
+
 from app.core.agent import file_task_capability
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 
@@ -16,23 +17,36 @@ def test_capability_matrix_matches_excel_to_docx_write_flow():
         target_path="report.docx",
     )
 
-    assert "insert_excel_as_docx_table" in file_task_capability.matched_native_capability_names(request)
+    assert (
+        "insert_excel_as_docx_table"
+        in file_task_capability.matched_native_capability_names(request)
+    )
 
 
 def test_capability_matrix_matches_chart_task_to_sandbox_python():
     request = FileTaskRequest(
         task="根据当前表格生成一个柱状图并输出结果",
-        current_file=FileTaskFile(path="metrics.xlsx", name="metrics.xlsx", type="xlsx"),
+        current_file=FileTaskFile(
+            path="metrics.xlsx", name="metrics.xlsx", type="xlsx"
+        ),
     )
 
-    assert "run_python_code" in file_task_capability.matched_native_capability_names(request)
+    assert "run_python_code" in file_task_capability.matched_native_capability_names(
+        request
+    )
 
 
 def test_capability_matrix_matches_chart_into_docx_write_flow():
     request = FileTaskRequest(
         task="把当前表格画成图并加入到 report.docx",
-        current_file=FileTaskFile(path="finance.xlsx", name="finance.xlsx", type="xlsx"),
-        files=[FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True)],
+        current_file=FileTaskFile(
+            path="finance.xlsx", name="finance.xlsx", type="xlsx"
+        ),
+        files=[
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            )
+        ],
         target_path="report.docx",
     )
 
@@ -48,7 +62,9 @@ def test_capability_matrix_does_not_match_annotation_without_file_context():
     assert file_task_capability.matched_native_capability_names(request) == []
 
 
-def test_native_tool_gap_for_request_uses_capability_matrix_for_excel_to_docx_flow(monkeypatch):
+def test_native_tool_gap_for_request_uses_capability_matrix_for_excel_to_docx_flow(
+    monkeypatch,
+):
     request = FileTaskRequest(
         task="把这个 Excel 表格加入到当前 Word 文档里",
         current_file=FileTaskFile(path="report.docx", name="report.docx", type="docx"),
@@ -70,7 +86,9 @@ def test_native_tool_gap_for_request_uses_capability_matrix_for_excel_to_docx_fl
 
 
 def test_build_file_capability_profile_marks_pdf_ocr_and_annotation_as_best_effort():
-    profile = file_task_capability.build_file_capability_profile(file_type="pdf", path="scan.pdf")
+    profile = file_task_capability.build_file_capability_profile(
+        file_type="pdf", path="scan.pdf"
+    )
 
     assert profile["format"] == "pdf"
     assert profile["workspace"]["edit_mode"] == "annotate_only"
@@ -82,7 +100,9 @@ def test_build_file_capability_profile_marks_pdf_ocr_and_annotation_as_best_effo
 def test_build_request_capability_profiles_includes_target_path_contract():
     request = FileTaskRequest(
         task="把汇总写到新的文档里",
-        current_file=FileTaskFile(path="metrics.xlsx", name="metrics.xlsx", type="xlsx"),
+        current_file=FileTaskFile(
+            path="metrics.xlsx", name="metrics.xlsx", type="xlsx"
+        ),
         target_path="summary.docx",
     )
 

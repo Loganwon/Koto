@@ -31,7 +31,10 @@ def test_file_task_followup_store_upserts_by_stable_artifact_identity(tmp_path):
     assert first["id"] == second["id"]
     assert second["occurrences"] == 2
     assert second["run_id"] == "run_2"
-    assert store.list(status="open")[0]["artifact"]["missing_capability"] == "read_cad_file"
+    assert (
+        store.list(status="open")[0]["artifact"]["missing_capability"]
+        == "read_cad_file"
+    )
 
     raw = json.loads((tmp_path / "followups.json").read_text(encoding="utf-8"))
     assert len(raw) == 1

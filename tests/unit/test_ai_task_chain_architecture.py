@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -83,7 +82,10 @@ def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> 
     assert "route_source: routeSource" in source
     assert "keyword_policy: 'hint_only'" in source
     assert "fileTaskRouteDecision('explicit_task_payload')" in route_body
-    assert "fileTaskRouteDecision('frontend_file_context_guard', routeDecision)" in route_body
+    assert (
+        "fileTaskRouteDecision('frontend_file_context_guard', routeDecision)"
+        in route_body
+    )
     assert "overrideOptions.enable_ai_intent_adjudicator = true;" in payload_body
     assert (
         "overrideOptions.router_policy = overrideOptions.router_policy || "
@@ -189,11 +191,17 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "(window as any)._waRenderMarkdown" in task_runner
     assert "wa-task-final-report" in task_runner
     assert "const auditHtml = supervisorAuditHtml(data);" in task_runner
-    assert "taskResultActionsHtml(card) + auditHtml + '<div class=\"wa-task-final-report\">' + renderTaskFinalReport(visibleSummary)" in task_runner
+    assert (
+        "taskResultActionsHtml(card) + auditHtml + '<div class=\"wa-task-final-report\">' + renderTaskFinalReport(visibleSummary)"
+        in task_runner
+    )
     assert "wa-task-step-detail" in task_runner
-    assert "data-role=\"process\"" in task_runner
+    assert 'data-role="process"' in task_runner
     assert "handleEvent_supervisor_step_verified" in task_runner
-    assert "'supervisor.step_verified': handleEvent_supervisor_step_verified" in task_runner
+    assert (
+        "'supervisor.step_verified': handleEvent_supervisor_step_verified"
+        in task_runner
+    )
 
 
 def test_compact_task_card_keeps_process_steps_visible_before_summary() -> None:

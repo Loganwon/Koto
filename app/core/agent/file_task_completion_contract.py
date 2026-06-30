@@ -10,8 +10,8 @@ from app.core.agent.file_task_contract import (
     FileTaskCompletionContract,
     FileTaskFile,
     FileTaskIntentPlan,
-    FileTaskRequirementSet,
     FileTaskRequest,
+    FileTaskRequirementSet,
 )
 
 
@@ -115,16 +115,22 @@ def _target_file_type(
     for file_info in files:
         if not file_info.target:
             continue
-        candidate = str(
-            file_info.type
-            or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
-        ).strip().lower()
+        candidate = (
+            str(
+                file_info.type
+                or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
+            )
+            .strip()
+            .lower()
+        )
         if candidate:
             return candidate
     return ""
 
 
-def _operations_from_quality_gates(quality_gates: Sequence[Dict[str, Any]]) -> List[str]:
+def _operations_from_quality_gates(
+    quality_gates: Sequence[Dict[str, Any]],
+) -> List[str]:
     operations: List[str] = []
     for gate in quality_gates:
         if not isinstance(gate, dict):
@@ -145,7 +151,9 @@ def _complexity(
     recipe_skeleton: Dict[str, Any],
 ) -> str:
     required_steps = [
-        item for item in recipe_skeleton.get("required_steps") or [] if isinstance(item, dict)
+        item
+        for item in recipe_skeleton.get("required_steps") or []
+        if isinstance(item, dict)
     ]
     has_windows = bool(
         str(request.options.get("workflow_checkpoint") or "").strip()
@@ -173,7 +181,10 @@ def _decomposition_strategy(
     complexity: str,
 ) -> str:
     file_types = {
-        str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip("."))
+        str(
+            file_info.type
+            or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
+        )
         .strip()
         .lower()
         for file_info in files

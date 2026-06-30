@@ -119,7 +119,11 @@ def _resolve_cell_style(data: dict, sheet_idx_or_id, row: int, col: int) -> dict
     cd = data["sheets"][sid_key]["cellData"]
     # cellData keys can be int (parse_xlsx direct) or str (API JSON response)
     rk = str(row) if str(row) in cd else row
-    ck = str(col) if (rk in cd and isinstance(cd[rk], dict) and str(col) in cd[rk]) else col
+    ck = (
+        str(col)
+        if (rk in cd and isinstance(cd[rk], dict) and str(col) in cd[rk])
+        else col
+    )
     cell = cd[rk][ck]
     s = cell.get("s")
     if isinstance(s, str):

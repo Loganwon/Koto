@@ -69,8 +69,12 @@ def _workflow_checkpoint(
         "adapter": str(resume_control.get("adapter") or "").strip(),
         "step_index": _int_or_zero(resume_control.get("step_index")),
         "source_path": str(resume_control.get("source_path") or "").strip(),
-        "target_path": str(resume_control.get("target_path") or request.target_path or "").strip(),
-        "original_task": str(resume_control.get("original_task") or request.task or "").strip(),
+        "target_path": str(
+            resume_control.get("target_path") or request.target_path or ""
+        ).strip(),
+        "original_task": str(
+            resume_control.get("original_task") or request.task or ""
+        ).strip(),
         "request_kind": classification.request_kind,
     }
     for key in ("batch_index", "total_batches"):
@@ -85,7 +89,9 @@ def _workflow_checkpoint(
             checkpoint["completed_window"] = str(
                 stepwise.get("completed_page_range") or ""
             ).strip()
-            checkpoint["next_window"] = str(stepwise.get("next_page_range") or "").strip()
+            checkpoint["next_window"] = str(
+                stepwise.get("next_page_range") or ""
+            ).strip()
     if not checkpoint["policy"] and not checkpoint["adapter"]:
         checkpoint["status"] = "stateless"
     return {key: value for key, value in checkpoint.items() if value not in ("", None)}
@@ -180,7 +186,8 @@ def large_file_windows(
     for file_info in files:
         suffix = _file_type(file_info)
         if suffix == "pdf" and (
-            has_resume_control or looks_like_windowed_pdf_task(request, dict(recipe_skeleton))
+            has_resume_control
+            or looks_like_windowed_pdf_task(request, dict(recipe_skeleton))
         ):
             windows.append(_pdf_window(request, file_info))
         elif suffix in {"doc", "docx"} and (
@@ -209,7 +216,11 @@ def _step_id(value: Any, fallback: str) -> str:
 
 def _stage_for_tool(tool_name: str, *, write_intent: bool) -> str:
     tool = str(tool_name or "").strip()
-    if tool == "parse_file_to_text" or tool.startswith("read_") or tool.startswith("inspect_"):
+    if (
+        tool == "parse_file_to_text"
+        or tool.startswith("read_")
+        or tool.startswith("inspect_")
+    ):
         return "reading"
     if tool == "verify_task_completion":
         return "verifying"
@@ -228,7 +239,13 @@ def _allowed_tools_for_stage(
         if str(item or "").strip()
     ]
     if stage == "reading":
-        return [item for item in allowed if item == "parse_file_to_text" or item.startswith("read_") or item.startswith("inspect_")]
+        return [
+            item
+            for item in allowed
+            if item == "parse_file_to_text"
+            or item.startswith("read_")
+            or item.startswith("inspect_")
+        ]
     if stage == "writing":
         write_tools = [item for item in allowed if is_write_tool(item)]
         return write_tools or [
@@ -260,7 +277,9 @@ def _append_plan_step(
         "required": bool(required),
         "status": "pending",
     }
-    tools = [str(item).strip() for item in (allowed_tools or []) if str(item or "").strip()]
+    tools = [
+        str(item).strip() for item in (allowed_tools or []) if str(item or "").strip()
+    ]
     if tools:
         step["allowed_tools"] = tools[:12]
     if expected_result:
@@ -318,7 +337,9 @@ def build_task_plan(
             expected_result=_clean_text(
                 raw_step.get("expected_result") or raw_step.get("expected"), 360
             ),
-            allowed_tools=[tool] if tool else _allowed_tools_for_stage(stage, recipe_skeleton),
+            allowed_tools=(
+                [tool] if tool else _allowed_tools_for_stage(stage, recipe_skeleton)
+            ),
         )
     _append_plan_step(
         steps,
@@ -462,9 +483,11 @@ def supervisor_status_payload(
     audit_payload = (
         dict(supervisor_audit)
         if isinstance(supervisor_audit, Mapping)
-        else dict(workflow_state.get("supervisor_audit") or {})
-        if isinstance(workflow_state.get("supervisor_audit"), Mapping)
-        else {}
+        else (
+            dict(workflow_state.get("supervisor_audit") or {})
+            if isinstance(workflow_state.get("supervisor_audit"), Mapping)
+            else {}
+        )
     )
     return {
         "stage": _clean_text(stage, 40) or "planned",
@@ -495,7 +518,9 @@ def attach_workflow_checkpoint(
             checkpoint,
         )
     if isinstance(windows, list) and windows:
-        payload["large_file_windows"] = [dict(item) for item in windows if isinstance(item, dict)]
+        payload["large_file_windows"] = [
+            dict(item) for item in windows if isinstance(item, dict)
+        ]
     return payload
 
 
@@ -552,9 +577,7 @@ def _resume_checkpoint_from_artifact(
             checkpoint[key] = artifact.get(key)
     checkpoint["status"] = "awaiting_resume"
     checkpoint["source"] = "workflow_checkpoint"
-    return {
-        key: value for key, value in checkpoint.items() if value not in ("", None)
-    }
+    return {key: value for key, value in checkpoint.items() if value not in ("", None)}
 
 
 def _checkpoint_from_options(options: Mapping[str, Any]) -> Dict[str, Any]:
@@ -651,7 +674,9 @@ def window_read_args_for_file(
         if not window_path or window_path != normalized_path:
             continue
         unit = str(item.get("unit") or "").strip().lower()
-        current = item.get("current") if isinstance(item.get("current"), Mapping) else {}
+        current = (
+            item.get("current") if isinstance(item.get("current"), Mapping) else {}
+        )
         if unit == "page":
             return {
                 "path": path,

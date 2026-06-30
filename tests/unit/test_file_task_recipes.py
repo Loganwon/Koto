@@ -1,5 +1,10 @@
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
-from app.core.agent.file_task_recipes import TASK_RECIPES, recipe_matches, select_task_recipe, semantic_markers
+from app.core.agent.file_task_recipes import (
+    TASK_RECIPES,
+    recipe_matches,
+    select_task_recipe,
+    semantic_markers,
+)
 
 
 def test_recipe_selects_financial_xlsx_docx_report_over_generic_docx_chart():
@@ -8,7 +13,9 @@ def test_recipe_selects_financial_xlsx_docx_report_over_generic_docx_chart():
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -26,9 +33,13 @@ def test_recipe_selects_financial_report_for_sales_ledger_followup():
         task="将新的销售台账也加入分析，并且做成图，内容也加入docx",
         target_path="report.docx",
         files=[
-            FileTaskFile(path="financial.xlsx", name="雷鸟创新-financial model.xlsx", type="xlsx"),
+            FileTaskFile(
+                path="financial.xlsx", name="雷鸟创新-financial model.xlsx", type="xlsx"
+            ),
             FileTaskFile(path="sales.xlsx", name="销售台账.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="雷鸟访谈问题.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="雷鸟访谈问题.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -44,7 +55,9 @@ def test_recipe_selects_excel_table_transfer_when_no_analysis_or_chart_requested
         target_path="report.docx",
         files=[
             FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -64,7 +77,9 @@ def test_recipe_selects_docx_template_fill():
         ],
     )
 
-    markers = semantic_markers(request.task, file_types={"docx"}, target_file_type="docx")
+    markers = semantic_markers(
+        request.task, file_types={"docx"}, target_file_type="docx"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["docx_template_fill_request"] is True
@@ -95,11 +110,15 @@ def test_recipe_selects_docx_pdf_export_even_when_source_docx_is_current_target(
         task="把当前 Word 文档导出为 PDF",
         target_path="report.docx",
         files=[
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
-    markers = semantic_markers(request.task, file_types={"docx"}, target_file_type="docx")
+    markers = semantic_markers(
+        request.task, file_types={"docx"}, target_file_type="docx"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["docx_pdf_export_request"] is True
@@ -131,11 +150,15 @@ def test_recipe_selects_docx_clear_review_marks_without_annotation_bridge():
         task="清除这个 Word 文档里的所有批注和修订",
         target_path="reviewed.docx",
         files=[
-            FileTaskFile(path="reviewed.docx", name="reviewed.docx", type="docx", target=True),
+            FileTaskFile(
+                path="reviewed.docx", name="reviewed.docx", type="docx", target=True
+            ),
         ],
     )
 
-    markers = semantic_markers(request.task, file_types={"docx"}, target_file_type="docx")
+    markers = semantic_markers(
+        request.task, file_types={"docx"}, target_file_type="docx"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["docx_clear_review_request"] is True
@@ -149,11 +172,15 @@ def test_recipe_selects_spreadsheet_cell_write():
         task="Update cell B2 in the Excel worksheet with the sales amount.",
         target_path="sales.xlsx",
         files=[
-            FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx", target=True),
+            FileTaskFile(
+                path="sales.xlsx", name="sales.xlsx", type="xlsx", target=True
+            ),
         ],
     )
 
-    markers = semantic_markers(request.task, file_types={"xlsx"}, target_file_type="xlsx")
+    markers = semantic_markers(
+        request.task, file_types={"xlsx"}, target_file_type="xlsx"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["spreadsheet_write_request"] is True
@@ -207,7 +234,9 @@ def test_recipe_selects_cross_file_extract_to_file():
         target_path="action_items.md",
     )
 
-    markers = semantic_markers(request.task, file_types={"pdf", "md"}, target_file_type="md")
+    markers = semantic_markers(
+        request.task, file_types={"pdf", "md"}, target_file_type="md"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["cross_file_extract_request"] is True
@@ -222,7 +251,9 @@ def test_preserve_existing_table_does_not_route_to_excel_table_transfer():
         target_path="report.docx",
         files=[
             FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -251,7 +282,9 @@ def test_meta_keyword_mentions_do_not_route_to_polish_or_report_recipe():
         files=[
             FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
             FileTaskFile(path="notes.docx", name="notes.docx", type="docx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -279,7 +312,9 @@ def test_excel_table_transfer_does_not_pick_generic_docx_report_gate():
         target_path="report.docx",
         files=[
             FileTaskFile(path="sales.xlsx", name="sales.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -349,7 +384,9 @@ def test_recipe_selects_contract_compare_review_over_plain_docx_compare():
         task="对比这两份合同，找出变化并标注出来，同时总结风险点",
         target_path="new_contract.docx",
         files=[
-            FileTaskFile(path="old_contract.docx", name="old_contract.docx", type="docx"),
+            FileTaskFile(
+                path="old_contract.docx", name="old_contract.docx", type="docx"
+            ),
             FileTaskFile(
                 path="new_contract.docx",
                 name="new_contract.docx",
@@ -378,10 +415,14 @@ def test_recipe_selects_high_quality_pptx_design_for_beautify_request():
     request = FileTaskRequest(
         task="把这个 PPT 编辑得好看一点，做成专业高级的汇报风格",
         target_path="deck.pptx",
-        files=[FileTaskFile(path="deck.pptx", name="deck.pptx", type="pptx", target=True)],
+        files=[
+            FileTaskFile(path="deck.pptx", name="deck.pptx", type="pptx", target=True)
+        ],
     )
 
-    markers = semantic_markers(request.task, file_types={"pptx"}, target_file_type="pptx")
+    markers = semantic_markers(
+        request.task, file_types={"pptx"}, target_file_type="pptx"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["ppt_request"] is True
@@ -398,7 +439,10 @@ def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
         "docx_contract_compare_review": {"docx_contract_compare_has_annotations"},
         "docx_compare_annotation": {"docx_compare_has_difference_annotations"},
         "long_pdf_stepwise_docx_summary": {"stepwise_docx_has_step_notes"},
-        "financial_xlsx_docx_report": {"financial_report_has_narrative", "financial_report_has_real_chart_image"},
+        "financial_xlsx_docx_report": {
+            "financial_report_has_narrative",
+            "financial_report_has_real_chart_image",
+        },
         "xlsx_table_to_docx": {"docx_table_request_has_table"},
         "docx_template_fill": {"docx_template_fill_replaces_placeholders"},
         "docx_pdf_export": {"docx_pdf_export_uses_converter"},
@@ -408,7 +452,10 @@ def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
         "spreadsheet_cell_write": {"spreadsheet_write_has_cells"},
         "workspace_file_copy": {"workspace_file_copy_uses_copy_tool"},
         "cross_file_extract_to_file": {"cross_file_extract_uses_write_tool"},
-        "pptx_design_edit_high_quality": {"pptx_design_has_real_design_pass", "pptx_design_styles_text_shapes"},
+        "pptx_design_edit_high_quality": {
+            "pptx_design_has_real_design_pass",
+            "pptx_design_styles_text_shapes",
+        },
         "ppt_slide_write": {"ppt_request_has_slide_write"},
         "text_selection_replace": {"text_selection_replace_has_replacement"},
     }

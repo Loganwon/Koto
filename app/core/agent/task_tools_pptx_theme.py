@@ -6,7 +6,6 @@ from __future__ import annotations
 import json
 from typing import Any, Dict
 
-
 _PPTX_THEME_PRESETS: Dict[str, Dict[str, Any]] = {
     "executive": {
         "name": "executive",

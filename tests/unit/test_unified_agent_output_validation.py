@@ -1,8 +1,8 @@
 import sys
 import types
 
-from app.core.agent.types import AgentStepType
 import app.core.agent.unified_agent as unified_agent_module
+from app.core.agent.types import AgentStepType
 from app.core.agent.unified_agent import UnifiedAgent
 from app.core.llm.base import LLMProvider
 
@@ -18,7 +18,9 @@ class _PlaceholderProvider(LLMProvider):
         return 1
 
 
-def test_unified_agent_sanitizes_blocked_placeholder_text_before_user_visible_steps(monkeypatch):
+def test_unified_agent_sanitizes_blocked_placeholder_text_before_user_visible_steps(
+    monkeypatch,
+):
     class _FakeLedger:
         def create(self, **kwargs):
             return types.SimpleNamespace(task_id="task-1")
@@ -107,7 +109,11 @@ def test_unified_agent_sanitizes_blocked_placeholder_text_before_user_visible_st
 
     assert thought_steps, step_dump
     assert answer_steps, step_dump
-    assert all("<<姓名-1>>" not in (step.content or "") for step in thought_steps), step_dump
-    assert all("<<姓名-1>>" not in (step.content or "") for step in answer_steps), step_dump
+    assert all(
+        "<<姓名-1>>" not in (step.content or "") for step in thought_steps
+    ), step_dump
+    assert all(
+        "<<姓名-1>>" not in (step.content or "") for step in answer_steps
+    ), step_dump
     assert answer_steps[-1].content.startswith("抱歉"), step_dump
     assert answer_steps[-1].metadata["validation_action"] == "WARN"

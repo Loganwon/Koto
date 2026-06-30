@@ -118,10 +118,11 @@ def _get_embeddings(prefer_local: bool = False):
         )
         if api_key:
             try:
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
                 from app.core.llm.embedding_model_selector import (
                     resolve_gemini_embedding_model,
                 )
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
                 embedding_model = resolve_gemini_embedding_model(api_key)
                 emb = GoogleGenerativeAIEmbeddings(

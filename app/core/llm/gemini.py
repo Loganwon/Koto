@@ -29,12 +29,17 @@ def _ensure_gemini_env_loaded() -> None:
 
 
 def _ensure_gemini_proxy_configured() -> Optional[str]:
-    from app.core.utils.proxy_utils import collect_proxy_candidates, detect_live_proxy, set_env_proxy
+    from app.core.utils.proxy_utils import (
+        collect_proxy_candidates,
+        detect_live_proxy,
+        set_env_proxy,
+    )
 
     proxy = detect_live_proxy(collect_proxy_candidates(), timeout=0.1)
     if proxy:
         set_env_proxy(proxy)
     return proxy
+
 
 # model_capabilities.is_interactions_only_model() is evaluated per-call (not baked
 # at import time), so env overrides (KOTO_INTERACTIONS_ONLY_MODELS) are always live.
@@ -105,15 +110,21 @@ class GeminiProvider(LLMProvider):
                 verify=True,
             )
             opts_kwargs["httpx_client"] = _httpx_client
-            return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
+            return genai.Client(
+                api_key=api_key, http_options=_HttpOptions(**opts_kwargs)
+            )
         except Exception as exc:
             logger.warning("[GeminiProvider] httpx timeout client init failed: %s", exc)
             try:
                 from google.genai._api_client import HttpOptions as _HttpOptions
 
-                return genai.Client(api_key=api_key, http_options=_HttpOptions(**opts_kwargs))
+                return genai.Client(
+                    api_key=api_key, http_options=_HttpOptions(**opts_kwargs)
+                )
             except Exception:
-                logger.warning("[GeminiProvider] HttpOptions init failed, using default client")
+                logger.warning(
+                    "[GeminiProvider] HttpOptions init failed, using default client"
+                )
                 return genai.Client(api_key=api_key)
 
     def _get_client(self):
@@ -303,7 +314,9 @@ class GeminiProvider(LLMProvider):
                 time.sleep(delay)
 
     @staticmethod
-    def _run_call_with_hard_timeout(callable_fn, timeout_seconds: float, timeout_message: str):
+    def _run_call_with_hard_timeout(
+        callable_fn, timeout_seconds: float, timeout_message: str
+    ):
         """Run callable in a daemon thread and fail fast on timeout.
 
         Daemon thread ensures timed-out SDK calls never block process shutdown.
@@ -606,12 +619,17 @@ class GeminiProvider(LLMProvider):
             flat = f"[系统指令]\n{sys_instruction}\n\n[用户输入]\n{flat}"
         flat = flat[:80000]
 
-        rc = self._make_interactions_client(timeout=timeout, is_sync=not is_deep_research)
+        rc = self._make_interactions_client(
+            timeout=timeout, is_sync=not is_deep_research
+        )
 
         if background:
             # Async: create() returns immediately, poll until done
             interaction = rc.interactions.create(
-                agent=model_id, input=flat, background=True, stream=False,
+                agent=model_id,
+                input=flat,
+                background=True,
+                stream=False,
             )
             start = time.time()
             iid = getattr(interaction, "id", None)
@@ -637,7 +655,10 @@ class GeminiProvider(LLMProvider):
             # hard timeout fires even when httpx chunked-transfer keeps the socket open.
             interaction = self._run_call_with_hard_timeout(
                 lambda: rc.interactions.create(
-                    model=model_id, input=flat, background=False, stream=False,
+                    model=model_id,
+                    input=flat,
+                    background=False,
+                    stream=False,
                 ),
                 timeout_seconds=timeout,
                 timeout_message=f"Interactions API sync timeout ({timeout}s) model={model_id}",
@@ -646,11 +667,17 @@ class GeminiProvider(LLMProvider):
         text = self._extract_interactions_text(interaction).strip()
 
         if stream:
+
             def _single_chunk():
                 yield {"content": text, "finish_reason": "stop"}
+
             return _single_chunk()
 
-        return {"content": text, "tool_calls": [], "usage": self._normalize_usage(interaction)}
+        return {
+            "content": text,
+            "tool_calls": [],
+            "usage": self._normalize_usage(interaction),
+        }
 
     def _make_interactions_client(self, timeout: float, is_sync: bool):
         """Build a genai.Client tuned for Interactions API calls.
@@ -666,8 +693,10 @@ class GeminiProvider(LLMProvider):
             connect_t = float(os.getenv("GEMINI_CONNECT_TIMEOUT", "10"))
             # Sync: daemon-thread enforces wall-clock timeout; httpx is a secondary
             # guard.  Async: poll requests are tiny, 45 s is plenty.
-            read_t = timeout if is_sync else float(
-                os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45")
+            read_t = (
+                timeout
+                if is_sync
+                else float(os.getenv("GEMINI_INTERACTIONS_HTTP_TIMEOUT", "45"))
             )
             hc = httpx.Client(
                 timeout=httpx.Timeout(read_t, connect=connect_t), verify=True

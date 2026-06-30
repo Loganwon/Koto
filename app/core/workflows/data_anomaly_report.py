@@ -186,7 +186,9 @@ class DataAnomalyReport(WorkflowExecutor):
         hashes: dict[str, list[int]] = defaultdict(list)
 
         for ri, r in enumerate(rows):
-            h = hashlib.md5("|".join(str(c) for c in r).encode(), usedforsecurity=False).hexdigest()
+            h = hashlib.md5(
+                "|".join(str(c) for c in r).encode(), usedforsecurity=False
+            ).hexdigest()
             hashes[h].append(ri)
 
         dup_groups = {h: idxs for h, idxs in hashes.items() if len(idxs) > 1}

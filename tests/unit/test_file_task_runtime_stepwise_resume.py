@@ -20,9 +20,7 @@ def test_workflow_state_uses_unified_windows_for_large_file_batches():
         files=[
             FileTaskFile(path="draft.docx", name="draft.docx", type="docx"),
             FileTaskFile(path="model.xlsx", name="model.xlsx", type="xlsx"),
-            FileTaskFile(
-                path="deck.pptx", name="deck.pptx", type="pptx", target=True
-            ),
+            FileTaskFile(path="deck.pptx", name="deck.pptx", type="pptx", target=True),
         ],
         options={
             "workflow_checkpoint": {
@@ -84,9 +82,7 @@ def test_runtime_context_reads_large_file_windows_from_workflow_state():
         files=[
             FileTaskFile(path="draft.docx", name="draft.docx", type="docx"),
             FileTaskFile(path="model.xlsx", name="model.xlsx", type="xlsx"),
-            FileTaskFile(
-                path="deck.pptx", name="deck.pptx", type="pptx", target=True
-            ),
+            FileTaskFile(path="deck.pptx", name="deck.pptx", type="pptx", target=True),
         ],
         options={
             "workflow_checkpoint": {
@@ -242,8 +238,12 @@ def test_file_task_runtime_forces_windowed_pdf_read_for_stepwise_docx_summary():
                                 {
                                     "text": "文档识别：当前页窗来自中国博物馆数字技术应用年度报告，呈现数智化建设背景、编写组织和研究对象。"
                                 },
-                                {"text": "段落主题：本页窗用于建立报告开篇背景和目录框架，说明数字技术如何进入博物馆业务。"},
-                                {"text": "结构线索：报告先交代数字化建设背景，再通过综述篇和案例篇展开理论方向与实践项目。"},
+                                {
+                                    "text": "段落主题：本页窗用于建立报告开篇背景和目录框架，说明数字技术如何进入博物馆业务。"
+                                },
+                                {
+                                    "text": "结构线索：报告先交代数字化建设背景，再通过综述篇和案例篇展开理论方向与实践项目。"
+                                },
                                 {
                                     "text": "内容线索：模型从当前页窗提炼出藏品管理、观众服务、展览展示、数字敦煌、知识图谱和沉浸式展览等关键词。"
                                 },
@@ -313,7 +313,10 @@ def test_file_task_runtime_forces_windowed_pdf_read_for_stepwise_docx_summary():
     assert parse_call["end_page"] == 3
     workflow_state = run_started.payload["workflow_state"]
     assert workflow_state["version"] == "file_task_workflow_state_v1"
-    assert workflow_state["mainline"]["selected_recipe"] == "long_pdf_stepwise_docx_summary"
+    assert (
+        workflow_state["mainline"]["selected_recipe"]
+        == "long_pdf_stepwise_docx_summary"
+    )
     assert workflow_state["large_file_windows"][0]["unit"] == "page"
     assert workflow_state["large_file_windows"][0]["current"] == {"start": 1, "end": 3}
     assert not any(
@@ -342,26 +345,18 @@ def test_file_task_runtime_forces_windowed_pdf_read_for_stepwise_docx_summary():
         == 1
     )
     assert (
-        check_finished.payload["next_action_artifact"]["workflow_checkpoint"][
-            "source"
-        ]
+        check_finished.payload["next_action_artifact"]["workflow_checkpoint"]["source"]
         == "workflow_checkpoint"
     )
-    assert (
-        check_finished.payload["next_action_artifact"]["large_file_windows"][0][
-            "next"
-        ]
-        == {"start": 4, "end": 6}
-    )
+    assert check_finished.payload["next_action_artifact"]["large_file_windows"][0][
+        "next"
+    ] == {"start": 4, "end": 6}
     assert check_finished.payload["next_action_artifact"]["next_page_range"] == "4-6"
-    resume_options = check_finished.payload["next_action_artifact"][
-        "resume_request"
-    ]["options"]
+    resume_options = check_finished.payload["next_action_artifact"]["resume_request"][
+        "options"
+    ]
     assert "batch_control" not in resume_options
-    assert (
-        resume_options["workflow_checkpoint"]["step_index"]
-        == 1
-    )
+    assert resume_options["workflow_checkpoint"]["step_index"] == 1
     assert run_finished.payload["completed_task"] is False
     assert run_finished.payload["runtime"]["terminal_status"] == "awaiting_confirmation"
 
@@ -433,7 +428,9 @@ def test_file_task_runtime_resumes_from_workflow_checkpoint_without_compat_batch
         task="继续",
         run_id="workflow_checkpoint_resume_demo",
         files=[
-            FileTaskFile(path="museum-report.pdf", name="museum-report.pdf", type="pdf"),
+            FileTaskFile(
+                path="museum-report.pdf", name="museum-report.pdf", type="pdf"
+            ),
             FileTaskFile(
                 path="museum-summary.docx",
                 name="museum-summary.docx",
@@ -503,7 +500,9 @@ def test_file_task_runtime_uses_model_docx_write_for_stepwise_pdf_summary(
                                 {
                                     "text": "文档识别：当前页窗来自 The Global Rules of Art，主要呈现书籍出版信息和目录框架。"
                                 },
-                                {"text": "段落主题：本页窗用于定位全书结构，说明 Part I 关注当代视觉艺术全球场域的形成。"},
+                                {
+                                    "text": "段落主题：本页窗用于定位全书结构，说明 Part I 关注当代视觉艺术全球场域的形成。"
+                                },
                                 {
                                     "text": "结构线索：目录从全球艺术场域的理论入口展开，随后进入生成机制、分化结构和文化世界经济中的位置分析。"
                                 },
@@ -711,8 +710,12 @@ def test_file_task_runtime_stepwise_resume_reads_next_pdf_window():
                                     "text": "当前页窗摘要（第 4-6 页）",
                                     "style": "Heading 1",
                                 },
-                                {"text": "文档识别：当前页窗继续处理中国博物馆数字技术应用年度报告，覆盖目录收束和引言开端。"},
-                                {"text": "段落主题：本段说明报告如何从目录框架进入文化遗产数字化保护的发展背景。"},
+                                {
+                                    "text": "文档识别：当前页窗继续处理中国博物馆数字技术应用年度报告，覆盖目录收束和引言开端。"
+                                },
+                                {
+                                    "text": "段落主题：本段说明报告如何从目录框架进入文化遗产数字化保护的发展背景。"
+                                },
                                 {
                                     "text": "结构线索：页窗先列出引言、综述篇、案例篇等组成部分，再转入上世纪八十年代以来的行业演进。"
                                 },
@@ -797,14 +800,11 @@ def test_file_task_runtime_stepwise_resume_reads_next_pdf_window():
         check_finished.payload["next_action_artifact"]["completed_page_range"] == "4-6"
     )
     assert check_finished.payload["next_action_artifact"]["next_page_range"] == "7-9"
-    resume_options = check_finished.payload["next_action_artifact"][
-        "resume_request"
-    ]["options"]
+    resume_options = check_finished.payload["next_action_artifact"]["resume_request"][
+        "options"
+    ]
     assert "batch_control" not in resume_options
-    assert (
-        resume_options["workflow_checkpoint"]["step_index"]
-        == 2
-    )
+    assert resume_options["workflow_checkpoint"]["step_index"] == 2
 
 
 def test_file_task_runtime_stepwise_resume_rehydrates_files_and_falls_back_when_model_deviates():
@@ -907,9 +907,7 @@ def test_file_task_runtime_blocks_stepwise_docx_write_when_pdf_text_is_watermark
 
     def fake_executor(tool_name, args):
         if tool_name == "parse_file_to_text":
-            return (
-                "[Page 1]\n考\n参\n通\n海\n泰\n国\n供\n仅\n\n[Page 2]\n考\n参\n通\n海\n泰\n国\n供\n仅"
-            )
+            return "[Page 1]\n考\n参\n通\n海\n泰\n国\n供\n仅\n\n[Page 2]\n考\n参\n通\n海\n泰\n国\n供\n仅"
         raise AssertionError(f"unexpected tool call: {tool_name}")
 
     events = list(
@@ -958,7 +956,8 @@ def test_file_task_runtime_native_stepwise_docx_write_bypasses_frontend_progress
         if tool_name == "write_docx_content":
             paragraphs = json.loads(args["paragraphs"])
             assert not any(
-                "下一步计划" in item.get("text", "") or "当前进度" in item.get("text", "")
+                "下一步计划" in item.get("text", "")
+                or "当前进度" in item.get("text", "")
                 for item in paragraphs
             )
             return json.dumps(
@@ -1206,8 +1205,12 @@ def test_file_task_runtime_allows_stepwise_docx_write_with_probe_style_structure
                                     "text": "当前页窗摘要（第 10-12 页）",
                                     "style": "Heading 1",
                                 },
-                                {"text": "文档识别：当前页窗来自《中国博物馆数字技术应用及案例研究年度报告》。"},
-                                {"text": "段落主题：藏品数据与场馆数据在博物馆数字化转型中的利用方式。"},
+                                {
+                                    "text": "文档识别：当前页窗来自《中国博物馆数字技术应用及案例研究年度报告》。"
+                                },
+                                {
+                                    "text": "段落主题：藏品数据与场馆数据在博物馆数字化转型中的利用方式。"
+                                },
                                 {
                                     "text": "结构线索：先讨论展览展示中的“一物一展”和“主题式展览”，再转向场馆运营、数字资产和数字孪生管理。"
                                 },
@@ -1368,7 +1371,11 @@ def test_meta_keyword_mentions_do_not_trigger_stepwise_docx_polish_recipe():
             "但不要触发快捷动作关键词路由。"
         ),
         target_path="report.docx",
-        files=[FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True)],
+        files=[
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            )
+        ],
     )
 
     classification = runtime._normalize_mainline_contract(
@@ -1564,7 +1571,10 @@ def test_file_task_runtime_routes_long_docx_stepwise_polish_writeback(tmp_path):
             )
         ],
         options={
-            "workflow_checkpoint": {"policy": "confirm_each_step", "window_paragraphs": 2}
+            "workflow_checkpoint": {
+                "policy": "confirm_each_step",
+                "window_paragraphs": 2,
+            }
         },
     )
     events = list(FileTaskRuntime(model_client=fake_model, max_rounds=2).run(request))
@@ -1593,7 +1603,9 @@ def test_file_task_runtime_routes_long_docx_stepwise_polish_writeback(tmp_path):
     assert updated.paragraphs[0].text == "第1段的表达已润色得更加顺畅。"
     assert updated.paragraphs[1].text == "第2段的表达已润色得更加顺畅。"
     assert updated.paragraphs[2].text.startswith("第3段")
-    assert any("只返回 JSON 字符串数组" in call["messages"][-1]["content"] for call in calls)
+    assert any(
+        "只返回 JSON 字符串数组" in call["messages"][-1]["content"] for call in calls
+    )
 
 
 def test_file_task_runtime_stepwise_pdf_falls_back_when_model_never_writes(tmp_path):

@@ -33,12 +33,13 @@ TRANSLATION_DOCX_PATH = os.path.join(_REPO_ROOT, "workspace", "2.1书稿翻译2.
 WORD_PAGE_COUNT = 72
 
 # TipTap/Koto rendering constants (must match koto-docx-editor.js)
-_PAD_V = 176           # ProseMirror padding: top(96) + bottom(80)
+_PAD_V = 176  # ProseMirror padding: top(96) + bottom(80)
 _CONTENT_PAGE_H = 880  # usable content height per page (1056 - 176)
 
 # ---------------------------------------------------------------------------
 # Shared fixture — parse the DOCX once for the whole module
 # ---------------------------------------------------------------------------
+
 
 @pytest.fixture(scope="module")
 def docx_html() -> str:
@@ -53,9 +54,9 @@ def docx_html() -> str:
     assert "html" in result, "parse_docx() result must contain 'html' key"
 
     html = result["html"]
-    assert isinstance(html, str) and len(html) > 1_000, (
-        f"HTML output suspiciously short ({len(html)} chars); parser likely failed"
-    )
+    assert (
+        isinstance(html, str) and len(html) > 1_000
+    ), f"HTML output suspiciously short ({len(html)} chars); parser likely failed"
     return html
 
 
@@ -155,9 +156,7 @@ def _write_outline_only_short_body_sentence_fixture_docx(path) -> None:
     from docx.oxml.ns import qn  # noqa: PLC0415
 
     doc = Document()
-    para = doc.add_paragraph(
-        "在会议场景中，AI眼镜利用多模态能力提升协作效率"
-    )
+    para = doc.add_paragraph("在会议场景中，AI眼镜利用多模态能力提升协作效率")
     p_pr = para._p.get_or_add_pPr()
     outline_lvl = p_pr.find(qn("w:outlineLvl"))
     if outline_lvl is None:
@@ -412,7 +411,9 @@ def _write_exact_row_height_table_fixture_docx(path) -> None:
     doc = Document()
     table = doc.add_table(rows=2, cols=1)
     table.style = "Table Grid"
-    table.cell(0, 0).text = "这是一段故意较长的单元格文本，用于验证精确行高不会被导出成浏览器固定高度。"
+    table.cell(0, 0).text = (
+        "这是一段故意较长的单元格文本，用于验证精确行高不会被导出成浏览器固定高度。"
+    )
     table.cell(1, 0).text = "第二行内容"
 
     first_row = table.rows[0]
@@ -672,6 +673,7 @@ def table_inline_image_html(tmp_path) -> str:
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.integration
 class TestDocxHtmlStructure:
     """Structural checks on the HTML produced by parse_docx()."""
@@ -685,9 +687,9 @@ class TestDocxHtmlStructure:
 
     def test_has_block_elements(self, docx_html: str) -> None:
         """Output must contain paragraph or div elements."""
-        assert re.search(r'<(p|div)\b', docx_html, re.IGNORECASE), (
-            "No <p> or <div> elements found in HTML output"
-        )
+        assert re.search(
+            r"<(p|div)\b", docx_html, re.IGNORECASE
+        ), "No <p> or <div> elements found in HTML output"
 
 
 @pytest.mark.integration
@@ -727,8 +729,10 @@ class TestHeaderFooter:
             re.IGNORECASE | re.DOTALL,
         )
         if not match:
-            pytest.skip("koto-header class not found — covered by test_header_class_present")
-        text = re.sub(r'<[^>]+>', '', match.group(1)).strip()
+            pytest.skip(
+                "koto-header class not found — covered by test_header_class_present"
+            )
+        text = re.sub(r"<[^>]+>", "", match.group(1)).strip()
         assert text, "koto-header paragraph is empty (no visible text)"
 
 
@@ -744,34 +748,44 @@ class TestTypography:
         Normal style fallback when setting the block font size, and body text
         must not inherit a phantom bold weight at the paragraph level.
         """
-        blocks = re.findall(r'<p\b([^>]*)>(.*?)</p>', typography_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<p\b([^>]*)>(.*?)</p>", typography_html, re.IGNORECASE | re.DOTALL
+        )
         target_attrs = None
         for attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text == "企业介绍正文段落，用于验证段落默认字号与粗细继承。":
                 target_attrs = attrs
                 break
 
-        assert target_attrs is not None, "Target body paragraph not found in parsed HTML"
+        assert (
+            target_attrs is not None
+        ), "Target body paragraph not found in parsed HTML"
         style_match = re.search(r'style="([^"]*)"', target_attrs)
         assert style_match, "Target body paragraph missing inline style"
         style = style_match.group(1)
         assert "font-size:12.0pt" in style
         assert "font-weight:bold" not in style
 
-    def test_section_heading_keeps_larger_style_level_font_size(self, typography_html: str) -> None:
+    def test_section_heading_keeps_larger_style_level_font_size(
+        self, typography_html: str
+    ) -> None:
         """Section headings should retain their heading style font size."""
-        blocks = re.findall(r'<(h[1-6])\b([^>]*)>(.*?)</\1>', typography_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<(h[1-6])\b([^>]*)>(.*?)</\1>", typography_html, re.IGNORECASE | re.DOTALL
+        )
         target_attrs = None
         for _tag, attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text == "一、企业简介":
                 target_attrs = attrs
                 break
 
-        assert target_attrs is not None, "Target section heading not found in parsed HTML"
+        assert (
+            target_attrs is not None
+        ), "Target section heading not found in parsed HTML"
         style_match = re.search(r'style="([^"]*)"', target_attrs)
         assert style_match, "Target heading missing inline style"
         style = style_match.group(1)
@@ -781,16 +795,20 @@ class TestTypography:
         self, docx_html: str
     ) -> None:
         """Paragraph-mark rPr bold must not make ordinary sample body prose render bold."""
-        blocks = re.findall(r'<p\b([^>]*)>(.*?)</p>', docx_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<p\b([^>]*)>(.*?)</p>", docx_html, re.IGNORECASE | re.DOTALL
+        )
         target_attrs = None
         for attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text.startswith("2024年，AI眼镜在海外市场实现了指数级增长"):
                 target_attrs = attrs
                 break
 
-        assert target_attrs is not None, "Sample body paragraph not found in parsed HTML"
+        assert (
+            target_attrs is not None
+        ), "Sample body paragraph not found in parsed HTML"
         style_match = re.search(r'style="([^"]*)"', target_attrs)
         assert style_match, "Sample body paragraph missing inline style"
         style = style_match.group(1)
@@ -801,12 +819,16 @@ class TestTypography:
         self, outline_heading_fallback_html: str
     ) -> None:
         """Outline-only headings should still render with a readable heading size/weight."""
-        blocks = re.findall(r'<(h[1-6])\b([^>]*)>(.*?)</\1>', outline_heading_fallback_html, re.IGNORECASE | re.DOTALL)
+        blocks = re.findall(
+            r"<(h[1-6])\b([^>]*)>(.*?)</\1>",
+            outline_heading_fallback_html,
+            re.IGNORECASE | re.DOTALL,
+        )
         target_tag = None
         target_attrs = None
         for tag, attrs, inner in blocks:
-            text = re.sub(r'<[^>]+>', '', inner).replace("\xa0", " ")
-            text = re.sub(r'\s+', ' ', text).strip()
+            text = re.sub(r"<[^>]+>", "", inner).replace("\xa0", " ")
+            text = re.sub(r"\s+", " ", text).strip()
             if text == "执行概要":
                 target_tag = tag.lower()
                 target_attrs = attrs
@@ -840,7 +862,10 @@ class TestTypography:
         self, outline_short_body_sentence_html: str
     ) -> None:
         """Outline-only short clause sentences should stay paragraphs, not navigation headings."""
-        assert "在会议场景中，AI眼镜利用多模态能力提升协作效率" in outline_short_body_sentence_html
+        assert (
+            "在会议场景中，AI眼镜利用多模态能力提升协作效率"
+            in outline_short_body_sentence_html
+        )
         assert not re.search(
             r"<h[1-6]\b[^>]*>\s*在会议场景中，AI眼镜利用多模态能力提升协作效率\s*</h[1-6]>",
             outline_short_body_sentence_html,
@@ -856,7 +881,10 @@ class TestTypography:
         self, outline_date_body_sentence_html: str
     ) -> None:
         """Outline-only date-led prose should stay body text, not navigation headings."""
-        assert "2022年9月20日，深圳市市场监督管理局完成本次股权转让备案。" in outline_date_body_sentence_html
+        assert (
+            "2022年9月20日，深圳市市场监督管理局完成本次股权转让备案。"
+            in outline_date_body_sentence_html
+        )
         assert not re.search(
             r"<h[1-6]\b[^>]*>\s*2022年9月20日，深圳市市场监督管理局完成本次股权转让备案。\s*</h[1-6]>",
             outline_date_body_sentence_html,
@@ -880,7 +908,7 @@ class TestTypography:
     ) -> None:
         """Paragraph-mark rPr bold should not leak into run text; explicit run values still apply."""
         paragraph_match = re.search(
-            r'<p\b([^>]*)>(.*?)</p>',
+            r"<p\b([^>]*)>(.*?)</p>",
             paragraph_bold_run_semantics_html,
             re.IGNORECASE | re.DOTALL,
         )
@@ -890,12 +918,16 @@ class TestTypography:
             assert "font-weight:bold" not in paragraph_style_match.group(1)
 
         inner_html = paragraph_match.group(2)
-        explicit_off = re.search(r'<span\b([^>]*)>\s*显式取消</span>', inner_html, re.IGNORECASE)
+        explicit_off = re.search(
+            r"<span\b([^>]*)>\s*显式取消</span>", inner_html, re.IGNORECASE
+        )
         assert explicit_off, "Explicit-off run was not rendered as a styled span"
         explicit_style = re.search(r'style="([^"]*)"', explicit_off.group(1))
         assert explicit_style and "font-weight:normal" in explicit_style.group(1)
 
-        toggle_on = re.search(r'<span\b([^>]*)>\s*切换取消</span>', inner_html, re.IGNORECASE)
+        toggle_on = re.search(
+            r"<span\b([^>]*)>\s*切换取消</span>", inner_html, re.IGNORECASE
+        )
         assert toggle_on, "Toggle-on run was not rendered as a styled span"
         toggle_style = re.search(r'style="([^"]*)"', toggle_on.group(1))
         assert toggle_style and "font-weight:bold" in toggle_style.group(1)
@@ -917,7 +949,7 @@ class TestTypography:
         )
 
         paragraph_match = re.search(
-            r'<p\b([^>]*)>\s*封面标题\s*</p>',
+            r"<p\b([^>]*)>\s*封面标题\s*</p>",
             localized_title_style_html,
             re.IGNORECASE,
         )
@@ -935,7 +967,7 @@ class TestTypography:
     ) -> None:
         """Localized DOCX fonts should keep both the original family name and its ASCII alias."""
         span_match = re.search(
-            r'<span\b([^>]*)>华文字体回归</span>',
+            r"<span\b([^>]*)>华文字体回归</span>",
             localized_font_family_html,
             re.IGNORECASE | re.DOTALL,
         )
@@ -949,7 +981,9 @@ class TestTypography:
 
 @pytest.mark.integration
 class TestHeadingManifest:
-    def test_section_break_markers_include_prev_and_next_section_indices(self, tmp_path) -> None:
+    def test_section_break_markers_include_prev_and_next_section_indices(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "section-break-marker.docx"
@@ -966,7 +1000,9 @@ class TestHeadingManifest:
         )
         assert len(result.get("sections", [])) >= 2
 
-    def test_all_word_heading_styles_are_emitted_in_parser_manifest(self, tmp_path) -> None:
+    def test_all_word_heading_styles_are_emitted_in_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "all-heading-levels.docx"
@@ -994,7 +1030,9 @@ class TestHeadingManifest:
                 re.IGNORECASE,
             )
 
-    def test_paragraph_layout_semantics_are_emitted_as_data_attrs(self, tmp_path) -> None:
+    def test_paragraph_layout_semantics_are_emitted_as_data_attrs(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "paragraph-layout-semantics.docx"
@@ -1009,7 +1047,9 @@ class TestHeadingManifest:
             re.IGNORECASE | re.DOTALL,
         )
 
-        assert paragraph_match, "Paragraph with layout semantics not found in parsed HTML"
+        assert (
+            paragraph_match
+        ), "Paragraph with layout semantics not found in parsed HTML"
         attrs = paragraph_match.group(1)
         assert 'data-koto-space-before-twips="240"' in attrs
         assert 'data-koto-space-after-twips="120"' in attrs
@@ -1022,7 +1062,9 @@ class TestHeadingManifest:
         assert 'data-koto-page-break-before="1"' in attrs
         assert 'data-koto-widow-control="0"' in attrs
 
-    def test_title_style_based_on_heading_is_excluded_from_parser_manifest(self, tmp_path) -> None:
+    def test_title_style_based_on_heading_is_excluded_from_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "title-style-based-on-heading.docx"
@@ -1045,7 +1087,9 @@ class TestHeadingManifest:
             re.IGNORECASE,
         )
 
-    def test_custom_style_based_on_title_chain_is_excluded_from_parser_manifest(self, tmp_path) -> None:
+    def test_custom_style_based_on_title_chain_is_excluded_from_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "custom-visual-title-chain.docx"
@@ -1068,7 +1112,9 @@ class TestHeadingManifest:
             re.IGNORECASE,
         )
 
-    def test_outline_level_heading_is_not_emitted_in_parser_manifest(self, tmp_path) -> None:
+    def test_outline_level_heading_is_not_emitted_in_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "outline-heading-manifest.docx"
@@ -1081,7 +1127,9 @@ class TestHeadingManifest:
         assert 'id="koto-heading-执行概要"' in result["html"]
         assert 'data-koto-role="structural_heading"' in result["html"]
 
-    def test_outline_level_prefixed_heading_is_emitted_in_parser_manifest(self, tmp_path) -> None:
+    def test_outline_level_prefixed_heading_is_emitted_in_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "outline-prefixed-heading-manifest.docx"
@@ -1091,12 +1139,18 @@ class TestHeadingManifest:
 
         result = parse_docx(str(docx_path))
         assert result["headings"] == [
-            {"level": 1, "text": "第一章 公司基本信息", "id": "koto-heading-第一章-公司基本信息"},
+            {
+                "level": 1,
+                "text": "第一章 公司基本信息",
+                "id": "koto-heading-第一章-公司基本信息",
+            },
         ]
         assert 'id="koto-heading-第一章-公司基本信息"' in result["html"]
         assert 'data-koto-role="structural_heading"' in result["html"]
 
-    def test_table_cell_heading_is_excluded_from_parser_manifest(self, tmp_path) -> None:
+    def test_table_cell_heading_is_excluded_from_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "table-cell-heading.docx"
@@ -1109,9 +1163,13 @@ class TestHeadingManifest:
             {"level": 1, "text": "正文标题", "id": "koto-heading-正文标题"},
         ]
         assert "表格里的标题" in result["html"]
-        assert not re.search(r"<h[1-6]\b[^>]*>\s*表格里的标题\s*</h[1-6]>", result["html"], re.IGNORECASE)
+        assert not re.search(
+            r"<h[1-6]\b[^>]*>\s*表格里的标题\s*</h[1-6]>", result["html"], re.IGNORECASE
+        )
 
-    def test_outline_level_short_clause_sentence_is_excluded_from_parser_manifest(self, tmp_path) -> None:
+    def test_outline_level_short_clause_sentence_is_excluded_from_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "outline-short-body-sentence-manifest.docx"
@@ -1128,7 +1186,9 @@ class TestHeadingManifest:
             re.IGNORECASE,
         )
 
-    def test_outline_level_date_prose_is_excluded_from_parser_manifest(self, tmp_path) -> None:
+    def test_outline_level_date_prose_is_excluded_from_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "outline-date-body-sentence-manifest.docx"
@@ -1138,14 +1198,19 @@ class TestHeadingManifest:
 
         result = parse_docx(str(docx_path))
         assert result["headings"] == []
-        assert "2022年9月20日，深圳市市场监督管理局完成本次股权转让备案。" in result["html"]
+        assert (
+            "2022年9月20日，深圳市市场监督管理局完成本次股权转让备案。"
+            in result["html"]
+        )
         assert not re.search(
             r"<h[1-6]\b[^>]*>\s*2022年9月20日，深圳市市场监督管理局完成本次股权转让备案。\s*</h[1-6]>",
             result["html"],
             re.IGNORECASE,
         )
 
-    def test_normal_body_after_headings_is_excluded_from_parser_manifest(self, tmp_path) -> None:
+    def test_normal_body_after_headings_is_excluded_from_parser_manifest(
+        self, tmp_path
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         docx_path = tmp_path / "heading-style-cache-regression.docx"
@@ -1164,7 +1229,9 @@ class TestHeadingManifest:
             re.IGNORECASE,
         )
 
-    def test_real_translation_body_paragraphs_are_excluded_from_heading_manifest(self) -> None:
+    def test_real_translation_body_paragraphs_are_excluded_from_heading_manifest(
+        self,
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         if not os.path.exists(TRANSLATION_DOCX_PATH):
@@ -1191,7 +1258,9 @@ class TestHeadingManifest:
         assert compact_target not in heading_texts
         assert compact_target not in heading_blocks
 
-    def test_real_translation_neighboring_subheading_stays_in_heading_manifest(self) -> None:
+    def test_real_translation_neighboring_subheading_stays_in_heading_manifest(
+        self,
+    ) -> None:
         pytest.importorskip("docx", reason="python-docx 未安装")
 
         if not os.path.exists(TRANSLATION_DOCX_PATH):
@@ -1227,7 +1296,10 @@ class TestHeadingManifest:
         assert isinstance(sections, list) and sections
         assert all(isinstance(section.get("doc_grid"), dict) for section in sections)
         assert all(section.get("doc_grid", {}).get("enabled") for section in sections)
-        assert all(section.get("doc_grid", {}).get("line_pitch_twips", 0) > 0 for section in sections)
+        assert all(
+            section.get("doc_grid", {}).get("line_pitch_twips", 0) > 0
+            for section in sections
+        )
         assert result.get("doc_grid", {}).get("enabled")
         assert result.get("doc_grid", {}).get("line_pitch_twips", 0) > 0
 
@@ -1244,7 +1316,11 @@ class TestHeadingManifest:
 
         assert isinstance(footnotes, list) and footnotes
         assert result.get("footnote_reference_count", 0) > 0
-        assert any(str(item.get("text") or "").strip() for item in footnotes if isinstance(item, dict))
+        assert any(
+            str(item.get("text") or "").strip()
+            for item in footnotes
+            if isinstance(item, dict)
+        )
         assert sum(
             int(item.get("reference_count") or 0)
             for item in footnotes
@@ -1267,13 +1343,12 @@ class TestImages:
         the browser can display it at the correct size.  Without explicit height,
         CSS 'height:auto' stretches images to occupy the full container width.
         """
-        img_tags = re.findall(r'<img\b[^>]+>', docx_html, re.IGNORECASE)
+        img_tags = re.findall(r"<img\b[^>]+>", docx_html, re.IGNORECASE)
         if not img_tags:
             pytest.skip("No <img> tags in document")
 
         imgs_missing_height = [
-            tag for tag in img_tags
-            if not re.search(r'height\s*:\s*\d', tag)
+            tag for tag in img_tags if not re.search(r"height\s*:\s*\d", tag)
         ]
         assert not imgs_missing_height, (
             f"{len(imgs_missing_height)}/{len(img_tags)} <img> tags lack an "
@@ -1283,38 +1358,52 @@ class TestImages:
 
     def test_images_carry_width(self, docx_html: str) -> None:
         """Every <img> must also have an explicit width."""
-        img_tags = re.findall(r'<img\b[^>]+>', docx_html, re.IGNORECASE)
+        img_tags = re.findall(r"<img\b[^>]+>", docx_html, re.IGNORECASE)
         if not img_tags:
             pytest.skip("No <img> tags in document")
 
         imgs_missing_width = [
-            tag for tag in img_tags
-            if not re.search(r'width\s*:\s*\d', tag)
+            tag for tag in img_tags if not re.search(r"width\s*:\s*\d", tag)
         ]
-        assert not imgs_missing_width, (
-            f"{len(imgs_missing_width)}/{len(img_tags)} <img> tags lack explicit width"
-        )
+        assert (
+            not imgs_missing_width
+        ), f"{len(imgs_missing_width)}/{len(img_tags)} <img> tags lack explicit width"
 
     def test_table_cell_inline_images_remain_inline_in_paragraph(
         self, table_inline_image_html: str
     ) -> None:
         """Inline pictures inside table-cell paragraphs should stay inline with surrounding text."""
-        bs4 = pytest.importorskip("bs4", reason="BeautifulSoup is required for DOCX image-row checks")
+        bs4 = pytest.importorskip(
+            "bs4", reason="BeautifulSoup is required for DOCX image-row checks"
+        )
 
         soup = bs4.BeautifulSoup(table_inline_image_html, "html.parser")
         table_cell = soup.find("td")
-        assert table_cell is not None, "Expected a rendered table cell in the fixture HTML"
+        assert (
+            table_cell is not None
+        ), "Expected a rendered table cell in the fixture HTML"
 
-        child_tags = [child.name for child in table_cell.children if getattr(child, "name", None)]
-        assert child_tags[:2] == ["p", "p"], "Expected the fixture cell to keep its two paragraph children"
+        child_tags = [
+            child.name for child in table_cell.children if getattr(child, "name", None)
+        ]
+        assert child_tags[:2] == [
+            "p",
+            "p",
+        ], "Expected the fixture cell to keep its two paragraph children"
 
         first_para = table_cell.find("p")
-        assert first_para is not None, "Expected the first table-cell paragraph to be present"
+        assert (
+            first_para is not None
+        ), "Expected the first table-cell paragraph to be present"
 
         image = first_para.find("img")
-        assert image is not None, "Expected the inline image to remain inside the first table-cell paragraph"
+        assert (
+            image is not None
+        ), "Expected the inline image to remain inside the first table-cell paragraph"
         assert image.get("data-koto-layout") != "top-bottom"
-        assert "邮箱" in first_para.get_text(), "Expected the surrounding inline text to remain in the same paragraph"
+        assert (
+            "邮箱" in first_para.get_text()
+        ), "Expected the surrounding inline text to remain in the same paragraph"
 
 
 @pytest.mark.integration
@@ -1323,16 +1412,16 @@ class TestTableFormatting:
 
     def test_table_cells_exist(self, docx_html: str) -> None:
         """The document has tables — at least one <td> must be present."""
-        assert re.search(r'<td\b', docx_html, re.IGNORECASE), (
-            "No <td> elements found; table parsing may have failed"
-        )
+        assert re.search(
+            r"<td\b", docx_html, re.IGNORECASE
+        ), "No <td> elements found; table parsing may have failed"
 
     def test_table_cells_have_border_inline_styles(self, docx_html: str) -> None:
         """
         Every <td> must carry explicit border-top/bottom/left/right in inline styles
         so the CSS fallback (1px solid #a0a4b8) never fires.
         """
-        td_tags = re.findall(r'<td\b[^>]+>', docx_html, re.IGNORECASE)
+        td_tags = re.findall(r"<td\b[^>]+>", docx_html, re.IGNORECASE)
         if not td_tags:
             pytest.skip("No <td> tags — covered by test_table_cells_exist")
 
@@ -1347,7 +1436,7 @@ class TestTableFormatting:
         Tinted table cells must carry background-color in their inline style.
         The 投资建议书 document has a styled cover table with coloured cells.
         """
-        td_tags = re.findall(r'<td\b[^>]+>', docx_html, re.IGNORECASE)
+        td_tags = re.findall(r"<td\b[^>]+>", docx_html, re.IGNORECASE)
         assert td_tags, pytest.skip("No <td> tags — covered by test_table_cells_exist")
 
         tinted = [t for t in td_tags if "background-color" in t]
@@ -1356,21 +1445,24 @@ class TestTableFormatting:
             "Table shading will be invisible in the editor."
         )
 
-    def test_exact_row_height_rows_keep_metadata_without_fixed_css(self, exact_row_height_table_html: str) -> None:
+    def test_exact_row_height_rows_keep_metadata_without_fixed_css(
+        self, exact_row_height_table_html: str
+    ) -> None:
         """
         Word exact row heights cannot be emitted as fixed browser <tr> heights,
         otherwise wrapped text overflows and visually overlaps adjacent rows.
         Keep the original height as metadata only.
         """
-        tr_tags = re.findall(r'<tr\b[^>]*>', exact_row_height_table_html, re.IGNORECASE)
+        tr_tags = re.findall(r"<tr\b[^>]*>", exact_row_height_table_html, re.IGNORECASE)
         assert tr_tags, "No <tr> tags found in exact-row-height fixture"
 
-        assert any("data-koto-row-height=" in tag for tag in tr_tags), (
-            "Exact-height DOCX rows should preserve their source height as metadata"
-        )
-        assert not any(re.search(r'style="[^"]*\bheight\s*:', tag, re.IGNORECASE) for tag in tr_tags), (
-            "Exact-height DOCX rows must not emit fixed browser row heights"
-        )
+        assert any(
+            "data-koto-row-height=" in tag for tag in tr_tags
+        ), "Exact-height DOCX rows should preserve their source height as metadata"
+        assert not any(
+            re.search(r'style="[^"]*\bheight\s*:', tag, re.IGNORECASE)
+            for tag in tr_tags
+        ), "Exact-height DOCX rows must not emit fixed browser row heights"
 
     def test_small_multiple_line_spacing_is_clamped_for_browser_preview(
         self, small_multiple_line_spacing_html: str
@@ -1384,7 +1476,9 @@ class TestTableFormatting:
             r'style="[^"]*line-height:0\.25(?=[;\"])',
             small_multiple_line_spacing_html,
         )
-        assert re.search(r"line-height:1(?:\.0+)?(?=[;\"])", small_multiple_line_spacing_html)
+        assert re.search(
+            r"line-height:1(?:\.0+)?(?=[;\"])", small_multiple_line_spacing_html
+        )
 
 
 @pytest.mark.integration
@@ -1406,9 +1500,9 @@ class TestPageCount:
 
     def test_page_count_estimate_in_range(self, docx_html: str) -> None:
         """Estimated page count should be within 50% of Word's 72 pages."""
-        text_only = re.sub(r'<[^>]+>', ' ', docx_html)
+        text_only = re.sub(r"<[^>]+>", " ", docx_html)
         # Count CJK + Latin printable chars (ignore whitespace)
-        char_count = len(re.sub(r'\s', '', text_only))
+        char_count = len(re.sub(r"\s", "", text_only))
 
         chars_per_line = 35
         px_per_line = 27.2  # 16px × 1.7
@@ -1427,7 +1521,7 @@ class TestPageCount:
 
     def test_paragraph_count_reasonable(self, docx_html: str) -> None:
         """A 72-page document must have many paragraphs."""
-        p_count = len(re.findall(r'<p\b', docx_html, re.IGNORECASE))
+        p_count = len(re.findall(r"<p\b", docx_html, re.IGNORECASE))
         assert p_count >= 50, (
             f"Only {p_count} <p> elements found; expected ≥50 for a "
             f"{WORD_PAGE_COUNT}-page document"

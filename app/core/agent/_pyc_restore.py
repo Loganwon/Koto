@@ -6,7 +6,9 @@ from pathlib import Path
 from typing import Any, MutableMapping
 
 
-def restore_current_module(module_file: str, namespace: MutableMapping[str, Any]) -> None:
+def restore_current_module(
+    module_file: str, namespace: MutableMapping[str, Any]
+) -> None:
     """Execute the sibling .pyc for a missing source module into the current namespace."""
     pyc_path = Path(importlib.util.cache_from_source(module_file))
     if not pyc_path.exists():

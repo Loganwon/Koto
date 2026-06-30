@@ -21,7 +21,9 @@ _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"
 def _runtime_model_map() -> Dict[str, Any]:
     candidates = []
     web_pkg = sys.modules.get("web")
-    package_runtime = getattr(web_pkg, "runtime_context", None) if web_pkg is not None else None
+    package_runtime = (
+        getattr(web_pkg, "runtime_context", None) if web_pkg is not None else None
+    )
     if package_runtime is not None:
         candidates.append(package_runtime)
     runtime_module = sys.modules.get("web.runtime_context")
@@ -76,7 +78,9 @@ class FileTaskModelClient:
         system: str,
         tools: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        return self._call_native(request=request, messages=messages, system=system, tools=tools)
+        return self._call_native(
+            request=request, messages=messages, system=system, tools=tools
+        )
 
     def _call_native(
         self,
@@ -88,10 +92,14 @@ class FileTaskModelClient:
     ) -> Dict[str, Any]:
         mode = normalize_model_mode(request.model_mode, default="deepseek")
         if mode == "local":
-            return self._call_local(request=request, messages=messages, system=system, tools=tools)
+            return self._call_local(
+                request=request, messages=messages, system=system, tools=tools
+            )
 
         try:
-            return self._call_cloud(request=request, messages=messages, system=system, tools=tools)
+            return self._call_cloud(
+                request=request, messages=messages, system=system, tools=tools
+            )
         except Exception as exc:
             if not bool(request.options.get("allow_local_fallback", True)):
                 raise
@@ -105,7 +113,9 @@ class FileTaskModelClient:
                 "[FileTaskModelClient] cloud call failed (network/timeout), falling back to local model: %s",
                 exc,
             )
-            return self._call_local(request=request, messages=messages, system=system, tools=tools)
+            return self._call_local(
+                request=request, messages=messages, system=system, tools=tools
+            )
 
     @staticmethod
     def _is_api_layer_error(exc: Exception) -> bool:
@@ -113,7 +123,15 @@ class FileTaskModelClient:
         refusing the request (e.g. invalid key, quota exceeded, bad request).
         These should NOT trigger a local-model fallback."""
         msg = str(exc).lower()
-        api_signals = ("401", "403", "429", "invalid api key", "permission denied", "quota exceeded", "rate limit")
+        api_signals = (
+            "401",
+            "403",
+            "429",
+            "invalid api key",
+            "permission denied",
+            "quota exceeded",
+            "rate limit",
+        )
         return any(s in msg for s in api_signals)
 
     def _call_cloud(
@@ -196,7 +214,16 @@ class FileTaskModelClient:
         requested = str(request.model_id or "").strip()
         mode = normalize_model_mode(request.model_mode, default="deepseek")
         provider = get_provider_for_model_mode(mode)
-        ignored = {"auto", "cloud", "local", "gemini", "deepseek", "openai", "anthropic", "ollama"}
+        ignored = {
+            "auto",
+            "cloud",
+            "local",
+            "gemini",
+            "deepseek",
+            "openai",
+            "anthropic",
+            "ollama",
+        }
         if requested and requested.lower() not in ignored:
             return requested
         model_map = _runtime_model_map()
@@ -213,8 +240,18 @@ class FileTaskModelClient:
         return self._default_model
 
     def _local_model_id(self, request: FileTaskRequest) -> str:
-        configured = str(request.options.get("local_model") or request.model_id or "").strip()
-        if configured.lower().startswith("gemini") or configured.lower() in {"auto", "cloud", "local", "deepseek", "openai", "anthropic", "ollama"}:
+        configured = str(
+            request.options.get("local_model") or request.model_id or ""
+        ).strip()
+        if configured.lower().startswith("gemini") or configured.lower() in {
+            "auto",
+            "cloud",
+            "local",
+            "deepseek",
+            "openai",
+            "anthropic",
+            "ollama",
+        }:
             return ""
         return configured
 

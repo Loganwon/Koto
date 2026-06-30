@@ -45,16 +45,13 @@ def apply_terminal_check_overrides(
         ]
         return payload
 
-    if (
-        not write_intent
-        and not file_changes
-        and check_passed
-        and missing_read_refs
-    ):
+    if not write_intent and not file_changes and check_passed and missing_read_refs:
         refs_text = "、".join(missing_read_refs[:3])
         payload["passed"] = False
         payload["status"] = "needs_attention"
-        payload["summary"] = f"任务明确要求读取文件，但没有成功读取目标文件：{refs_text}。"
+        payload["summary"] = (
+            f"任务明确要求读取文件，但没有成功读取目标文件：{refs_text}。"
+        )
         payload["remaining"] = [
             "确认文件名和路径是否正确，或将目标文件加入临时工作区后重试。"
         ]

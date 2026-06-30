@@ -15,7 +15,6 @@ from app.core.agent.file_task_contract import (
     FileTaskSupervisorAudit,
 )
 
-
 _LOW_CONFIDENCE_THRESHOLD = 0.58
 _OFFICE_TARGET_TYPES = {"doc", "docx", "ppt", "pptx", "xls", "xlsx", "xlsm", "pdf"}
 
@@ -40,14 +39,12 @@ def _target_candidates(
 ) -> list[FileTaskFile]:
     if not target_type:
         return []
-    return [
-        file_info
-        for file_info in files
-        if _file_type(file_info) == target_type
-    ]
+    return [file_info for file_info in files if _file_type(file_info) == target_type]
 
 
-def _has_explicit_target(request: FileTaskRequest, files: Sequence[FileTaskFile]) -> bool:
+def _has_explicit_target(
+    request: FileTaskRequest, files: Sequence[FileTaskFile]
+) -> bool:
     if str(request.target_path or "").strip():
         return True
     return any(bool(getattr(file_info, "target", False)) for file_info in files)
@@ -106,9 +103,11 @@ def build_supervisor_audit(
         required_actions.append("先澄清目标文件、输出方式或允许的写入范围。")
         reason_codes.extend(f"constraint_conflict:{item}" for item in conflicts[:6])
 
-    target_type = str(
-        requirements.target_file_type or classification.target_file_type or ""
-    ).strip().lower()
+    target_type = (
+        str(requirements.target_file_type or classification.target_file_type or "")
+        .strip()
+        .lower()
+    )
     target_candidates = _target_candidates(files, target_type)
     if (
         requirements.write_required
@@ -117,7 +116,9 @@ def build_supervisor_audit(
         and not _has_explicit_target(request, files)
     ):
         blocked = True
-        warnings.append(f"发现多个 {target_type.upper()} 候选文件，但没有明确写入目标。")
+        warnings.append(
+            f"发现多个 {target_type.upper()} 候选文件，但没有明确写入目标。"
+        )
         required_actions.append("请指定要修改或生成的目标文件。")
         reason_codes.append(f"ambiguous_write_target:{target_type}")
 

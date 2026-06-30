@@ -134,8 +134,8 @@ class TestStreamInterruptManager:
 @pytest.mark.unit
 class TestLoadUserSettings:
     def test_returns_dict_from_file(self, tmp_path):
-        from web import app as webapp
         import web.config as webcfg
+        from web import app as webapp
 
         settings_path = tmp_path / "config" / "user_settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -150,8 +150,8 @@ class TestLoadUserSettings:
         webcfg._user_settings_cache.clear()
 
     def test_returns_empty_dict_on_missing_file(self, tmp_path):
-        from web import app as webapp
         import web.config as webcfg
+        from web import app as webapp
 
         settings_path = tmp_path / "config" / "user_settings.json"
         webcfg._user_settings_cache.clear()
@@ -161,8 +161,8 @@ class TestLoadUserSettings:
         webcfg._user_settings_cache.clear()
 
     def test_caches_result(self, tmp_path):
-        from web import app as webapp
         import web.config as webcfg
+        from web import app as webapp
 
         webcfg._user_settings_cache.clear()
         webcfg._user_settings_cache["data"] = {"cached": True}
@@ -177,8 +177,8 @@ class TestLoadUserSettings:
 @pytest.mark.unit
 class TestStorageHelpers:
     def _with_settings(self, settings_dict):
-        from web import app as webapp
         import web.config as webcfg
+        from web import app as webapp
 
         webcfg._user_settings_cache.clear()
         webcfg._user_settings_cache["data"] = settings_dict

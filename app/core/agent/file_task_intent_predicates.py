@@ -27,7 +27,6 @@ from app.core.agent.file_task_runtime_patterns import (
     _WRITE_TARGET_HINT_WORDS,
 )
 
-
 _TARGETED_FILE_WRITE_CONTEXT_PATTERN = re.compile(
     r"(?:继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|"
     r"continue|improve|modify|edit|update|save|write|append|insert|copy|put|place)",
@@ -146,7 +145,9 @@ def has_readonly_write_negation(task: str) -> bool:
         return False
     if has_global_readonly_write_negation(task_text):
         return True
-    return any(pattern.search(task_text) for pattern in _READONLY_WRITE_NEGATION_PATTERNS)
+    return any(
+        pattern.search(task_text) for pattern in _READONLY_WRITE_NEGATION_PATTERNS
+    )
 
 
 def has_global_readonly_write_negation(task: str) -> bool:
@@ -164,8 +165,7 @@ def has_source_scoped_write_negation(task: str) -> bool:
     if not task_text:
         return False
     return any(
-        pattern.search(task_text)
-        for pattern in _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS
+        pattern.search(task_text) for pattern in _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS
     )
 
 
@@ -219,9 +219,7 @@ def is_advisory_analysis_request(task: str) -> bool:
     has_analysis_cue = any(word in lowered for word in _ANALYSIS_CUE_WORDS)
     has_advice_cue = any(word in lowered for word in _ADVICE_CUE_WORDS)
     return (
-        has_analysis_cue
-        and has_advice_cue
-        and not has_explicit_write_intent(task_text)
+        has_analysis_cue and has_advice_cue and not has_explicit_write_intent(task_text)
     )
 
 

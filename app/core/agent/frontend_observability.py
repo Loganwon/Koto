@@ -57,7 +57,9 @@ def _trim(value: Any, max_chars: int = _MAX_FIELD_CHARS) -> Any:
         for key, item in list(value.items())[:80]:
             safe_key = str(key)[:120]
             trimmed[safe_key] = (
-                _redacted_value(item) if _is_sensitive_key(key) else _trim(item, max_chars)
+                _redacted_value(item)
+                if _is_sensitive_key(key)
+                else _trim(item, max_chars)
             )
         return trimmed
     return value
@@ -88,7 +90,9 @@ def _append_file(events: Iterable[Dict[str, Any]]) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         with path.open("a", encoding="utf-8") as fh:
             for event in events:
-                fh.write(json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n")
+                fh.write(
+                    json.dumps(event, ensure_ascii=False, separators=(",", ":")) + "\n"
+                )
     except Exception:
         return
 
@@ -102,7 +106,7 @@ def _load_recent_from_file(limit: int) -> List[Dict[str, Any]]:
     except Exception:
         return []
     events: List[Dict[str, Any]] = []
-    for line in lines[-min(_MAX_FILE_LINES, max(limit * 4, limit)):]:
+    for line in lines[-min(_MAX_FILE_LINES, max(limit * 4, limit)) :]:
         try:
             events.append(json.loads(line))
         except Exception:
@@ -147,11 +151,17 @@ def recent_frontend_events(
         known = {item.get("id") for item in events}
         events = [item for item in merged if item.get("id") not in known] + events
     if event_type:
-        events = [item for item in events if str(item.get("type", "")).lower() == event_type]
+        events = [
+            item for item in events if str(item.get("type", "")).lower() == event_type
+        ]
     if session_id:
-        events = [item for item in events if str(item.get("session_id", "")) == session_id]
+        events = [
+            item for item in events if str(item.get("session_id", "")) == session_id
+        ]
     if level:
-        events = [item for item in events if str(item.get("level", "")).lower() == level]
+        events = [
+            item for item in events if str(item.get("level", "")).lower() == level
+        ]
     events = sorted(events, key=lambda item: item.get("server_ts") or 0, reverse=True)
     return {"success": True, "count": len(events), "events": events[:limit]}
 
@@ -165,7 +175,9 @@ def frontend_snapshot(limit: int = 80, **_: Any) -> Dict[str, Any]:
     events = data.get("events", [])
     by_type = Counter(str(item.get("type") or "event") for item in events)
     by_level = Counter(str(item.get("level") or "info") for item in events)
-    latest_snapshot = next((item for item in events if item.get("type") == "snapshot"), None)
+    latest_snapshot = next(
+        (item for item in events if item.get("type") == "snapshot"), None
+    )
     problem_types = {"console", "runtime_error", "unhandled_rejection", "network"}
     problems = [
         item
@@ -228,7 +240,9 @@ def _latest_frontend_session_id() -> str:
         priority = 2 if visibility == "visible" else 1
         if item.get("type") == "snapshot":
             priority += 1
-        candidates.append((priority, float(item.get("server_ts") or 0), index, session_id))
+        candidates.append(
+            (priority, float(item.get("server_ts") or 0), index, session_id)
+        )
     if not candidates:
         return ""
     candidates.sort(reverse=True)
@@ -312,7 +326,9 @@ def enqueue_frontend_action(
     return {"success": True, "action": item}
 
 
-def next_frontend_action(session_id: str = "", timeout_ms: int = 0, **_: Any) -> Dict[str, Any]:
+def next_frontend_action(
+    session_id: str = "", timeout_ms: int = 0, **_: Any
+) -> Dict[str, Any]:
     session_id = str(session_id or "").strip()
     deadline = time.time() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
     with _ACTION_CONDITION:
@@ -369,7 +385,9 @@ def frontend_action_status(action_id: str = "", **_: Any) -> Dict[str, Any]:
     return {"success": True, "actions": actions[-20:]}
 
 
-def wait_frontend_action(action_id: str = "", timeout_ms: int = 5000, **_: Any) -> Dict[str, Any]:
+def wait_frontend_action(
+    action_id: str = "", timeout_ms: int = 5000, **_: Any
+) -> Dict[str, Any]:
     deadline = time.time() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
     with _ACTION_CONDITION:
         while True:
@@ -390,13 +408,17 @@ def frontend_surface_inventory(
     **_: Any,
 ) -> Dict[str, Any]:
     if not wait_ms:
-        events = recent_frontend_events(limit=200, session_id=session_id).get("events", [])
+        events = recent_frontend_events(limit=200, session_id=session_id).get(
+            "events", []
+        )
         sessions: Dict[str, Dict[str, Any]] = {}
         for event in events:
             sid = str(event.get("session_id") or "")
             if not sid:
                 continue
-            details = event.get("details") if isinstance(event.get("details"), dict) else {}
+            details = (
+                event.get("details") if isinstance(event.get("details"), dict) else {}
+            )
             item = sessions.setdefault(sid, {"session_id": sid, "event_count": 0})
             item["event_count"] += 1
             item["last_event_type"] = event.get("type")

@@ -239,6 +239,7 @@ class TestFilehubLegacyUISource:
     @pytest.fixture(scope="class")
     def frontend_sources(self):
         from pathlib import Path
+
         root = Path(__file__).resolve().parents[2]
         src_parts = []
         for path in [
@@ -252,6 +253,7 @@ class TestFilehubLegacyUISource:
 
     def test_legacy_app_js_removed(self):
         from pathlib import Path
+
         root = Path(__file__).resolve().parents[2]
         assert not (root / "web" / "static" / "js" / "app.js").exists()
 
@@ -264,7 +266,9 @@ class TestFilehubLegacyUISource:
         import re
 
         bad = re.search(r'onclick="\$\{[^}]*JSON\.stringify', frontend_sources)
-        assert bad is None, f"Found unescaped JSON.stringify in inline onclick: {bad.group()}"
+        assert (
+            bad is None
+        ), f"Found unescaped JSON.stringify in inline onclick: {bad.group()}"
 
     def test_filehub_no_univer_import_fallback(self, frontend_sources):
         assert "/api/editor/docs/import_path" not in frontend_sources
@@ -276,6 +280,7 @@ class TestFilehubHTMLSource:
     @pytest.fixture(scope="class")
     def index_html(self):
         from pathlib import Path
+
         root = Path(__file__).resolve().parents[2]
         html_path = root / "web" / "templates" / "index.html"
         css_path = root / "web" / "static" / "css" / "inline-extracted.css"
@@ -292,4 +297,4 @@ class TestFilehubHTMLSource:
         assert "filehubModal" not in index_html
 
     def test_general_modal_overlay_still_centers(self, index_html):
-        assert 'align-items: center' in index_html or 'align-items:center' in index_html
+        assert "align-items: center" in index_html or "align-items:center" in index_html

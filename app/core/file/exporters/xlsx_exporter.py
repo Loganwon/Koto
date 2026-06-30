@@ -52,7 +52,8 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
         return None
 
     def _apply_style(oc, style: dict) -> None:
-        from openpyxl.styles import Alignment as XlAlignment, Font, PatternFill
+        from openpyxl.styles import Alignment as XlAlignment
+        from openpyxl.styles import Font, PatternFill
 
         font_kw: dict[str, Any] = {}
         if style.get("bl"):
@@ -148,4 +149,9 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
     buf.seek(0)
     return buf.read()
 
-__all__ = ["export_workbook_payload", "export_xlsx", "normalize_workbook_export_payload"]
+
+__all__ = [
+    "export_workbook_payload",
+    "export_xlsx",
+    "normalize_workbook_export_payload",
+]

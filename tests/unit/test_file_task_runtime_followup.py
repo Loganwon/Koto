@@ -42,7 +42,10 @@ def test_file_task_runtime_followup_existing_docx_write_allows_source_file_prote
     classification = runtime._classify_request(normalized, context_files)
     details = classification.public_dict()
 
-    assert normalized.target_path == "workspace/koto_frontend_fulltest_report_20260614.docx"
+    assert (
+        normalized.target_path
+        == "workspace/koto_frontend_fulltest_report_20260614.docx"
+    )
     assert classification.output_mode == "write", details
     assert classification.write_intent is True, details
     assert classification.target_file_type == "docx", details
@@ -108,9 +111,14 @@ def test_file_task_runtime_followup_question_can_create_new_artifact():
     )
 
     normalized = runtime._request_with_inferred_target_path(request)
-    classification = runtime._classify_request(normalized, runtime._context_files(normalized))
+    classification = runtime._classify_request(
+        normalized, runtime._context_files(normalized)
+    )
 
-    assert normalized.target_path == "workspace/_codex_frontend_task_tests/koto_target_metadata_smoke_20260617_c.md"
+    assert (
+        normalized.target_path
+        == "workspace/_codex_frontend_task_tests/koto_target_metadata_smoke_20260617_c.md"
+    )
     assert classification.write_intent is True
     assert classification.output_mode == "write"
     assert "followup_question_new_artifact" in classification.reason_codes

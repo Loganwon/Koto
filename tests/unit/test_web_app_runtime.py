@@ -32,7 +32,9 @@ def test_start_background_runtime_is_idempotent(monkeypatch):
 
 
 @pytest.mark.unit
-def test_initialize_background_runtime_skips_disabled_workspace_watcher(monkeypatch, tmp_path):
+def test_initialize_background_runtime_skips_disabled_workspace_watcher(
+    monkeypatch, tmp_path
+):
     import web.app_runtime as mod
 
     workspace_dir = tmp_path / "workspace"
@@ -87,7 +89,9 @@ def test_initialize_background_runtime_skips_disabled_workspace_watcher(monkeypa
     distill_manager_mod.DistillManager = _FakeDistillManager
     shadow_tracer_mod = types.ModuleType("app.core.learning.shadow_tracer")
     shadow_tracer_mod.ShadowTracer = fake_shadow_tracer
-    shadow_tracer_mod.TraceEvent = types.SimpleNamespace(TRAINING_READY="training_ready")
+    shadow_tracer_mod.TraceEvent = types.SimpleNamespace(
+        TRAINING_READY="training_ready"
+    )
     telegram_bot_mod = types.ModuleType("web.telegram_bot")
     telegram_bot_mod.get_telegram_bot = lambda: None
     morning_brief_mod = types.ModuleType("app.core.services.morning_brief")
@@ -98,18 +102,32 @@ def test_initialize_background_runtime_skips_disabled_workspace_watcher(monkeypa
     work_file_library_mod.get_work_file_library = lambda: fake_work_file_library
 
     monkeypatch.setitem(sys.modules, "app.core.jobs.job_runner", job_runner_mod)
-    monkeypatch.setitem(sys.modules, "app.core.jobs.trigger_registry", trigger_registry_mod)
+    monkeypatch.setitem(
+        sys.modules, "app.core.jobs.trigger_registry", trigger_registry_mod
+    )
     monkeypatch.setitem(sys.modules, "app.core.ops.ops_event_bus", ops_bus_mod)
-    monkeypatch.setitem(sys.modules, "app.core.skills.skill_trigger_binding", skill_bindings_mod)
+    monkeypatch.setitem(
+        sys.modules, "app.core.skills.skill_trigger_binding", skill_bindings_mod
+    )
     monkeypatch.setitem(sys.modules, "app.core.file.file_registry", file_registry_mod)
     monkeypatch.setitem(sys.modules, "app.core.file.file_watcher", file_watcher_mod)
-    monkeypatch.setitem(sys.modules, "app.core.goal.goal_job_handler", goal_job_handler_mod)
+    monkeypatch.setitem(
+        sys.modules, "app.core.goal.goal_job_handler", goal_job_handler_mod
+    )
     monkeypatch.setitem(sys.modules, "app.core.goal.goal_manager", goal_manager_mod)
-    monkeypatch.setitem(sys.modules, "app.core.learning.distill_manager", distill_manager_mod)
-    monkeypatch.setitem(sys.modules, "app.core.learning.shadow_tracer", shadow_tracer_mod)
+    monkeypatch.setitem(
+        sys.modules, "app.core.learning.distill_manager", distill_manager_mod
+    )
+    monkeypatch.setitem(
+        sys.modules, "app.core.learning.shadow_tracer", shadow_tracer_mod
+    )
     monkeypatch.setitem(sys.modules, "web.telegram_bot", telegram_bot_mod)
-    monkeypatch.setitem(sys.modules, "app.core.services.morning_brief", morning_brief_mod)
-    monkeypatch.setitem(sys.modules, "app.core.memory.contact_manager", contact_manager_mod)
+    monkeypatch.setitem(
+        sys.modules, "app.core.services.morning_brief", morning_brief_mod
+    )
+    monkeypatch.setitem(
+        sys.modules, "app.core.memory.contact_manager", contact_manager_mod
+    )
     monkeypatch.setitem(sys.modules, "web.work_file_library", work_file_library_mod)
 
     logger = MagicMock()
