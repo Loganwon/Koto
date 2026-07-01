@@ -24,6 +24,13 @@ let _waConversationRuntime: any = (window as any)._waConversationRuntime || null
 let _waTaskDispatcher: any = (window as any)._waTaskDispatcher || null;
 let _waQuickActionDispatcherAttached: boolean = Boolean((window as any)._waQuickActionDispatcherAttached);
 let _hostSessionId: string = String((window as any)._hostSessionId || '').trim();
+let _workspaceTurnPersistQueue: Promise<any> = Promise.resolve();
+let _workspaceTurnRetryTimer: number | null = null;
+let _workspaceTurnRetrying = false;
+
+const WORKSPACE_TURN_RETRY_KEY = 'wa_workspace_turn_retry_queue_v1';
+const WORKSPACE_TURN_RETRY_LIMIT = 20;
+const WORKSPACE_TURN_RETRY_SNAPSHOT_LIMIT = 120000;
 
 function _syncRuntimeGlobals(): void {
   (window as any)._waAiResultsRuntime = _waAiResultsRuntime;
@@ -71,6 +78,87 @@ export function _waSession(): string {
   return _hostChatSession() || _WA_RUNTIME_SESSION_ID;
 }
 
+function _safeJsonClone(value: any): any {
+  try { return JSON.parse(JSON.stringify(value || null)); } catch (_) { return null; }
+}
+
+function _workspaceTurnPersistKey(payload: Record<string, any>): string {
+  const metadata = payload && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const explicit = String(metadata.turn_id || metadata.run_id || metadata.task_id || '').trim();
+  if (explicit) return explicit;
+  return [
+    String(payload.user || '').slice(0, 120),
+    String(payload.assistant || '').slice(0, 120),
+  ].join('|');
+}
+
+function _compactRetryPayload(payload: Record<string, any>): Record<string, any> | null {
+  const cloned = _safeJsonClone(payload);
+  if (!cloned || typeof cloned !== 'object') return null;
+  const snapshot = cloned.task_card_snapshot;
+  if (snapshot && typeof snapshot === 'object' && typeof snapshot.html === 'string') {
+    snapshot.html = snapshot.html.slice(0, WORKSPACE_TURN_RETRY_SNAPSHOT_LIMIT);
+  }
+  return cloned;
+}
+
+function _loadWorkspaceTurnRetryQueue(): Array<Record<string, any>> {
+  try {
+    const raw = window.localStorage.getItem(WORKSPACE_TURN_RETRY_KEY);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === 'object') : [];
+  } catch (_) {
+    return [];
+  }
+}
+
+function _saveWorkspaceTurnRetryQueue(queue: Array<Record<string, any>>): boolean {
+  try {
+    window.localStorage.setItem(WORKSPACE_TURN_RETRY_KEY, JSON.stringify(queue.slice(-WORKSPACE_TURN_RETRY_LIMIT)));
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+function _removeWorkspaceTurnRetry(payload: Record<string, any>): void {
+  const key = _workspaceTurnPersistKey(payload);
+  if (!key) return;
+  const queue = _loadWorkspaceTurnRetryQueue().filter((item) => String(item.key || '') !== key);
+  _saveWorkspaceTurnRetryQueue(queue);
+}
+
+function _scheduleWorkspaceTurnRetry(delay = 5000): void {
+  if (_workspaceTurnRetryTimer !== null) return;
+  _workspaceTurnRetryTimer = window.setTimeout(() => {
+    _workspaceTurnRetryTimer = null;
+    retryWorkspaceConversationPersistence(false).catch((error) => {
+      console.warn('[WA] workspace turn retry failed:', error);
+    });
+  }, Math.max(0, delay));
+}
+
+function _queueWorkspaceTurnRetry(payload: Record<string, any>, error?: any): void {
+  const retryPayload = _compactRetryPayload(payload);
+  if (!retryPayload) return;
+  const key = _workspaceTurnPersistKey(retryPayload);
+  const queue = _loadWorkspaceTurnRetryQueue().filter((item) => String(item.key || '') !== key);
+  queue.push({
+    key,
+    payload: retryPayload,
+    attempts: 0,
+    queued_at: new Date().toISOString(),
+    last_error: String(error && error.message ? error.message : error || '').slice(0, 240),
+  });
+  if (!_saveWorkspaceTurnRetryQueue(queue)) {
+    console.warn('[WA] workspace turn retry queue storage failed');
+    showToast('对话保存失败，本地重试队列空间不足', 'error', 4200);
+    return;
+  }
+  showToast('对话保存失败，已暂存并自动重试', 'warning', 4200);
+  _scheduleWorkspaceTurnRetry(2500);
+}
+
 export function _waQuickActionModelMode(): string {
   const value = String(state.lockedModel || '').trim().toLowerCase();
   return ['cloud', 'deepseek', 'local'].includes(value) ? value : 'cloud';
@@ -106,41 +194,243 @@ export function _hydrateAiConversation(force: boolean = false): Promise<any[]> {
   });
 }
 
+async function _sendWorkspaceConversationTurn(sessionId: string, payload: Record<string, any>): Promise<any> {
+  const response = await _csrfFetch(`/api/sessions/${encodeURIComponent(sessionId)}/workspace-turn`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) return null;
+  const data = await response.json().catch(() => null);
+  _applyPersistedTaskMetadata(data, payload);
+  const bridge = (window as any).KotoSessionBridge;
+  if (bridge && typeof bridge.refreshSessions === 'function') {
+    Promise.resolve(bridge.refreshSessions()).catch(() => {});
+  }
+  const refreshAiSessions = (window as any).WA && (window as any).WA.refreshAiSessions;
+  if (typeof refreshAiSessions === 'function') {
+    Promise.resolve(refreshAiSessions({ silent: true })).catch(() => {});
+  }
+  return data;
+}
+
+function _sendWorkspaceConversationTurnBeacon(sessionId: string, payload: Record<string, any>): boolean {
+  const beacon = typeof navigator !== 'undefined' ? navigator.sendBeacon : null;
+  if (typeof beacon !== 'function') return false;
+  try {
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' });
+    return beacon.call(navigator, `/api/sessions/${encodeURIComponent(sessionId)}/workspace-turn`, blob);
+  } catch (_) {
+    return false;
+  }
+}
+
+function _isStructuredTerminalWorkspaceTurn(payload: Record<string, any>): boolean {
+  const metadata = payload && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const partial = String(metadata.partial || '').trim().toLowerCase();
+  return !!metadata.test_structure && partial !== 'true' && partial !== '1' && partial !== 'yes';
+}
+
+function _cssEscape(value: string): string {
+  const css = (window as any).CSS;
+  if (css && typeof css.escape === 'function') return css.escape(value);
+  return String(value || '').replace(/["\\]/g, '\\$&');
+}
+
+function _applyPersistedTaskMetadata(data: any, payload: Record<string, any>): void {
+  const taskTitle = String(data && data.task_title || '').trim();
+  const memorySummary = String(data && (data.memory_summary || data.model_context_text) || '').trim();
+  if (!taskTitle && !memorySummary) return;
+  const metadata = payload && payload.metadata && typeof payload.metadata === 'object' ? payload.metadata : {};
+  const turnId = String(metadata.turn_id || payload.turn_id || '').trim();
+  const runId = String(metadata.run_id || '').trim();
+  const selectors = [
+    turnId ? `[data-turn-id="${_cssEscape(turnId)}"]` : '',
+    runId ? `.wa-task-run[data-task-run-id="${_cssEscape(runId)}"]` : '',
+  ].filter(Boolean);
+  const card = selectors.length ? document.querySelector(selectors.join(',')) as HTMLElement | null : null;
+  if (!card) return;
+  if (taskTitle) {
+    card.dataset.taskTitle = taskTitle;
+    const titleEl = card.querySelector('.wa-task-title');
+    if (titleEl) titleEl.textContent = taskTitle;
+  }
+  if (memorySummary) card.dataset.taskMemorySummary = memorySummary;
+  const WA = (window as any).WA;
+  if (WA && typeof WA.syncTaskInteractionSummary === 'function') {
+    try { WA.syncTaskInteractionSummary(card); } catch (_) { /* noop */ }
+  }
+}
+
+async function _ensureWorkspacePersistenceSession(): Promise<string> {
+  const existing = _hostChatSession();
+  if (existing && !/^workspace_runtime_/i.test(existing)) return existing;
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 12);
+  const response = await _csrfFetch('/api/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: `对话_${stamp}` }),
+  });
+  if (!response.ok) return '';
+  const data = await response.json().catch(() => null);
+  const sessionId = String(data && data.session || '').trim();
+  if (!sessionId) return '';
+  _hostSessionId = sessionId;
+  _syncRuntimeGlobals();
+  return sessionId;
+}
+
 export async function _persistWorkspaceConversationTurn(record: any): Promise<any> {
-  const sessionId = _hostChatSession();
-  if (!sessionId || /^workspace_runtime_/i.test(sessionId)) return null;
   const payload = record && typeof record === 'object' ? record : {};
   const userText = String(payload.user || payload.user_text || '').trim();
   const assistantText = String(payload.assistant || payload.assistant_text || '').trim();
   if (!userText || !assistantText) return null;
-  try {
-    const response = await _csrfFetch(`/api/sessions/${encodeURIComponent(sessionId)}/workspace-turn`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        user: userText,
-        assistant: assistantText,
-        attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
-        task_card_snapshot: payload.task_card_snapshot && typeof payload.task_card_snapshot === 'object'
-          ? payload.task_card_snapshot
-          : null,
-        metadata: Object.assign({ source: 'workspace' }, payload.metadata || {}),
-      }),
+  const requestPayload = {
+    user: userText,
+    assistant: assistantText,
+    attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+    task_card_snapshot: payload.task_card_snapshot && typeof payload.task_card_snapshot === 'object'
+      ? payload.task_card_snapshot
+      : null,
+    metadata: Object.assign({ source: 'workspace' }, payload.metadata || {}),
+  };
+  _workspaceTurnPersistQueue = _workspaceTurnPersistQueue
+    .catch(() => null)
+    .then(async () => {
+      try {
+        const sessionId = await _ensureWorkspacePersistenceSession();
+        if (!sessionId) {
+          _queueWorkspaceTurnRetry(requestPayload, 'missing session');
+          return null;
+        }
+        const first = await _sendWorkspaceConversationTurn(sessionId, requestPayload);
+        if (first) {
+          _removeWorkspaceTurnRetry(requestPayload);
+          return first;
+        }
+        const second = await _sendWorkspaceConversationTurn(sessionId, requestPayload);
+        if (second) {
+          _removeWorkspaceTurnRetry(requestPayload);
+          return second;
+        }
+        _queueWorkspaceTurnRetry(requestPayload, 'empty response');
+        return null;
+      } catch (error) {
+        console.warn('[WA] workspace turn persistence failed:', error);
+        _queueWorkspaceTurnRetry(requestPayload, error);
+        return null;
+      }
     });
-    if (!response.ok) return null;
-    const data = await response.json().catch(() => null);
-    const bridge = (window as any).KotoSessionBridge;
-    if (bridge && typeof bridge.refreshSessions === 'function') {
-      Promise.resolve(bridge.refreshSessions()).catch(() => {});
-    }
-    const refreshAiSessions = (window as any).WA && (window as any).WA.refreshAiSessions;
-    if (typeof refreshAiSessions === 'function') {
-      Promise.resolve(refreshAiSessions({ silent: true })).catch(() => {});
-    }
-    return data;
-  } catch (error) {
-    console.warn('[WA] workspace turn persistence failed:', error);
+  return _workspaceTurnPersistQueue;
+}
+
+function _decodeTaskPayload(value: string): Record<string, any> | null {
+  const text = String(value || '').trim();
+  if (!text) return null;
+  try {
+    const decoded = decodeURIComponent(text);
+    const parsed = JSON.parse(decoded);
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
     return null;
+  }
+}
+
+export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<any> {
+  if (!card || !(card as any).dataset) return Promise.resolve(null);
+  const dataset = (card as HTMLElement).dataset;
+  if (dataset.taskTerminalPersisted === 'true') return Promise.resolve(null);
+  if (dataset.taskTerminalPersisting === 'true') return Promise.resolve(null);
+  const taskPayload = _decodeTaskPayload(dataset.taskFollowupPayload || '') || {};
+  const userText = String(dataset.taskRequest || taskPayload.task || '').trim();
+  const assistantText = String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim();
+  if (!userText || !assistantText) return Promise.resolve(null);
+  dataset.taskTerminalPersisting = 'true';
+  const WA = (window as any).WA || {};
+  const metadata: Record<string, any> = {
+    turn_id: String(dataset.turnId || '').trim(),
+    task_kind: 'file_task',
+    partial: false,
+    skip_model_context: false,
+    task_title: String(dataset.taskTitle || '').trim() || '文件任务结果',
+    task_request: userText,
+    status: String(dataset.taskTerminalStatus || 'done').trim() || 'done',
+    task_terminal_status: String(dataset.taskTerminalStatus || 'completed').trim() || 'completed',
+    completed_task: String(dataset.taskCompleted || '').trim().toLowerCase() !== 'false',
+  };
+  if (taskPayload && Object.keys(taskPayload).length) {
+    metadata.task_request_payload = taskPayload;
+    if (taskPayload.task_context && typeof taskPayload.task_context === 'object') {
+      metadata.task_context = taskPayload.task_context;
+    }
+  }
+  if (typeof WA.taskCardTestStructure === 'function') {
+    try {
+      const structure = WA.taskCardTestStructure(card);
+      if (structure) metadata.test_structure = structure;
+    } catch (_) { /* noop */ }
+  }
+  const includeSnapshot = !metadata.test_structure;
+  const snapshot = includeSnapshot && card.classList && card.classList.contains('wa-task-run')
+    ? {
+        html: card.outerHTML,
+        fatal_error_text: String((card as any)._fatalErrorText || ''),
+      }
+    : null;
+  return _persistWorkspaceConversationTurn({
+    user: userText,
+    assistant: assistantText,
+    metadata,
+    task_card_snapshot: snapshot,
+  }).then((result) => {
+    if (result) {
+      dataset.taskTerminalPersisted = 'true';
+      delete dataset.taskTerminalPersisting;
+    } else {
+      delete dataset.taskTerminalPersisting;
+    }
+    return result;
+  }).catch((error) => {
+    delete dataset.taskTerminalPersisting;
+    throw error;
+  });
+}
+
+export async function retryWorkspaceConversationPersistence(notify = true): Promise<number> {
+  if (_workspaceTurnRetrying) return 0;
+  const queue = _loadWorkspaceTurnRetryQueue();
+  if (!queue.length) {
+    if (notify) showToast('没有待补保存的对话', 'info', 1800);
+    return 0;
+  }
+  _workspaceTurnRetrying = true;
+  let saved = 0;
+  const remaining: Array<Record<string, any>> = [];
+  try {
+    const sessionId = await _ensureWorkspacePersistenceSession();
+    if (!sessionId) {
+      _scheduleWorkspaceTurnRetry(10000);
+      return 0;
+    }
+    for (const item of queue) {
+      const payload = item && item.payload && typeof item.payload === 'object' ? item.payload : null;
+      if (!payload) continue;
+      const ok = await _sendWorkspaceConversationTurn(sessionId, payload);
+      if (ok) {
+        saved += 1;
+      } else {
+        remaining.push(Object.assign({}, item, {
+          attempts: Number(item.attempts || 0) + 1,
+          last_error: 'retry failed',
+        }));
+      }
+    }
+    _saveWorkspaceTurnRetryQueue(remaining);
+    if (saved && (notify || !remaining.length)) showToast(`已补保存 ${saved} 条对话`, 'success', 2600);
+    if (remaining.length) _scheduleWorkspaceTurnRetry(15000);
+    return saved;
+  } finally {
+    _workspaceTurnRetrying = false;
   }
 }
 
@@ -236,6 +526,7 @@ export function _initWorkspaceAiRuntimes(): void {
         : '',
       sampleTaskContext: _waSampleTaskContext,
       getSessionId: _waSession,
+      ensureSessionId: _ensureWorkspacePersistenceSession,
       getModelMode: _waQuickActionModelMode,
       getSelectedCloudModelId: _selectedCloudModelId,
       getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'
@@ -332,6 +623,8 @@ if (typeof window !== 'undefined') {
   (window as any).WA.registerTaskEntryRoute = registerTaskEntryRoute;
   (window as any).WA.registerTaskActionHandler = registerTaskActionHandler;
   (window as any).WA._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes;
+  (window as any).WA.retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence;
+  (window as any).WA.persistTerminalTaskRunCard = _persistTerminalTaskRunCard;
   (window as any)._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes;
   (window as any)._hydrateAiConversation = _hydrateAiConversation;
   (window as any)._waSession = _waSession;
@@ -339,5 +632,12 @@ if (typeof window !== 'undefined') {
   (window as any)._waQuickActionModelMode = _waQuickActionModelMode;
   (window as any)._waSampleTaskContext = _waSampleTaskContext;
   (window as any)._persistWorkspaceConversationTurn = _persistWorkspaceConversationTurn;
+  (window as any)._persistTerminalTaskRunCard = _persistTerminalTaskRunCard;
+  (window as any)._retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence;
+  window.addEventListener('online', () => _scheduleWorkspaceTurnRetry(1000));
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) _scheduleWorkspaceTurnRetry(1000);
+  });
+  if (_loadWorkspaceTurnRetryQueue().length) _scheduleWorkspaceTurnRetry(1500);
   _syncRuntimeGlobals();
 }

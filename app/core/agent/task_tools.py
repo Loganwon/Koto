@@ -1587,9 +1587,6 @@ def _stage_task_files_for_sandbox(
 
 def _prepend_task_file_context(code: str, staged_entries: List[Dict[str, str]]) -> str:
     """Expose task file paths to sandbox code and keep basename access working."""
-    if not staged_entries:
-        return code
-
     absolute_paths = {
         entry["display_name"]: entry["source_path"] for entry in staged_entries
     }
@@ -1614,6 +1611,205 @@ def _prepend_task_file_context(code: str, staged_entries: List[Dict[str, str]]) 
         "# e.g. print('KOTO_CREATED:' + output_path)\n\n"
     )
     return preamble + code
+
+
+def _normalize_workspace_relative_path(path: str) -> str:
+    candidate = str(path or "").strip().replace("\\", "/")
+    if not candidate:
+        return ""
+    if os.path.isabs(candidate):
+        try:
+            candidate = str(
+                Path(candidate).resolve().relative_to(Path(_get_workspace_root()).resolve())
+            ).replace("\\", "/")
+        except (OSError, ValueError):
+            return ""
+    candidate = candidate.lstrip("/")
+    if candidate.startswith("workspace/"):
+        candidate = candidate[len("workspace/") :]
+    parts = [part for part in candidate.split("/") if part and part not in {".", ".."}]
+    if not parts:
+        return ""
+    return "/".join(parts)
+
+
+def _target_output_candidates(sandbox_dir: str, target_path: str) -> List[Path]:
+    rel_target = _normalize_workspace_relative_path(target_path)
+    if not rel_target:
+        return []
+    sandbox_root = Path(sandbox_dir)
+    target_rel_path = Path(*rel_target.split("/"))
+    candidates = [
+        sandbox_root / target_rel_path,
+        sandbox_root / "workspace" / target_rel_path,
+        sandbox_root / target_rel_path.name,
+    ]
+    unique: List[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = os.path.normcase(str(candidate.resolve(strict=False)))
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def _workspace_target_path(target_path: str) -> Optional[Path]:
+    rel_target = _normalize_workspace_relative_path(target_path)
+    if not rel_target:
+        return None
+    workspace_root = Path(_get_workspace_root()).resolve()
+    real_target = (workspace_root / Path(*rel_target.split("/"))).resolve()
+    try:
+        real_target.relative_to(workspace_root)
+    except ValueError:
+        return None
+    return real_target
+
+
+def _prepare_sandbox_target_paths(sandbox_dir: str, target_path: str) -> None:
+    for candidate in _target_output_candidates(sandbox_dir, target_path):
+        try:
+            candidate.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            continue
+
+
+def _sync_target_outputs_from_sandbox(
+    sandbox_dir: str,
+    result: Dict[str, Any],
+    *,
+    target_path: str,
+    target_existed: bool,
+) -> Dict[str, Any]:
+    rel_target = _normalize_workspace_relative_path(target_path)
+    if not rel_target:
+        return result
+    real_target = _workspace_target_path(rel_target)
+    if real_target is None:
+        return result
+
+    source: Optional[Path] = None
+    for candidate in _target_output_candidates(sandbox_dir, rel_target):
+        try:
+            if candidate.is_file():
+                source = candidate
+                break
+        except OSError:
+            continue
+    if source is None:
+        return result
+
+    try:
+        if real_target.exists() and filecmp.cmp(str(source), str(real_target), shallow=False):
+            copied = False
+        else:
+            real_target.parent.mkdir(parents=True, exist_ok=True)
+            if real_target.exists():
+                _clear_readonly_attribute(str(real_target))
+            shutil.copy2(source, real_target)
+            copied = True
+    except OSError:
+        return result
+
+    updated = dict(result)
+    stdout = str(updated.get("stdout") or "")
+    markers = _parse_koto_file_markers(stdout)
+    marker_kind = "modified" if target_existed else "created"
+    existing = {
+        os.path.normcase(os.path.abspath(path))
+        for path in markers.get(marker_kind, [])
+    }
+    norm_target = os.path.normcase(os.path.abspath(str(real_target)))
+    if copied and norm_target not in existing:
+        marker_name = "KOTO_MODIFIED" if target_existed else "KOTO_CREATED"
+        if stdout and not stdout.endswith("\n"):
+            stdout += "\n"
+        stdout += f"{marker_name}:{real_target}"
+        updated["stdout"] = stdout
+    return updated
+
+
+_WORKSPACE_CREATED_FILE_EXTS = {
+    ".csv",
+    ".doc",
+    ".docx",
+    ".gif",
+    ".jpeg",
+    ".jpg",
+    ".json",
+    ".md",
+    ".pdf",
+    ".png",
+    ".ppt",
+    ".pptx",
+    ".svg",
+    ".txt",
+    ".webp",
+    ".xls",
+    ".xlsm",
+    ".xlsx",
+}
+
+
+def _copy_sandbox_workspace_file_to_workspace(path: Path, workspace_tmp: Path) -> str:
+    """Copy sandbox/workspace/... output back to the real workspace root."""
+    try:
+        source = path.resolve()
+        rel_path = source.relative_to(workspace_tmp.resolve())
+    except (OSError, ValueError):
+        return ""
+    if not rel_path.parts or ".." in rel_path.parts:
+        return ""
+    target = (Path(_get_workspace_root()) / rel_path).resolve()
+    try:
+        target.relative_to(Path(_get_workspace_root()).resolve())
+    except ValueError:
+        return ""
+    target.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(source, target)
+    return str(target)
+
+
+def _sync_created_workspace_files_from_sandbox(
+    sandbox_dir: str,
+    result: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Preserve files created under sandbox/workspace/... before temp cleanup."""
+    workspace_tmp = Path(sandbox_dir) / "workspace"
+    if not workspace_tmp.is_dir():
+        return result
+
+    discovered: List[str] = []
+    for path in workspace_tmp.rglob("*"):
+        if not path.is_file():
+            continue
+        if path.suffix.lower() not in _WORKSPACE_CREATED_FILE_EXTS:
+            continue
+        copied = _copy_sandbox_workspace_file_to_workspace(path, workspace_tmp)
+        if copied:
+            discovered.append(copied)
+
+    if not discovered:
+        return result
+
+    updated = dict(result)
+    stdout = str(updated.get("stdout") or "")
+    existing = {
+        os.path.normcase(os.path.abspath(path))
+        for path in _parse_koto_file_markers(stdout).get("created", [])
+    }
+    marker_lines = []
+    for path in discovered:
+        key = os.path.normcase(os.path.abspath(path))
+        if key not in existing:
+            marker_lines.append(f"KOTO_CREATED:{path}")
+            existing.add(key)
+    if marker_lines:
+        updated["stdout"] = "\n".join(
+            part for part in [stdout.rstrip(), *marker_lines] if part
+        )
+    return updated
 
 
 def _parse_koto_file_markers(stdout: str) -> Dict[str, List[str]]:
@@ -1838,7 +2034,10 @@ class SandboxRunResult(dict):
 
 
 def run_python_in_sandbox(
-    code: str, timeout: int = 30, task_files: Optional[List[Dict[str, str]]] = None
+    code: str,
+    timeout: int = 30,
+    task_files: Optional[List[Dict[str, str]]] = None,
+    target_path: str = "",
 ) -> Dict[str, Any]:
     """Execute Python code in the sandbox. Returns structured stdout/stderr/files.
 
@@ -1851,17 +2050,24 @@ def run_python_in_sandbox(
     try:
         run_python = _load_sandbox_run_python()
         resolved_task_files = _resolve_task_file_entries(task_files)
+        tmpdir = tempfile.mkdtemp(prefix="koto-task-")
+        staged_entries: List[Dict[str, str]] = []
         if resolved_task_files:
-            tmpdir = tempfile.mkdtemp(prefix="koto-task-")
             staged_entries = _stage_task_files_for_sandbox(resolved_task_files, tmpdir)
-            prepared_code = _prepend_task_file_context(code, staged_entries)
-            result = run_python(
-                prepared_code, timeout=normalized_timeout, work_dir=tmpdir
-            )
+        resolved_target = _workspace_target_path(target_path)
+        target_existed = bool(resolved_target and resolved_target.is_file())
+        _prepare_sandbox_target_paths(tmpdir, target_path)
+        prepared_code = _prepend_task_file_context(code, staged_entries)
+        result = run_python(prepared_code, timeout=normalized_timeout, work_dir=tmpdir)
+        result = _sync_target_outputs_from_sandbox(
+            tmpdir,
+            result,
+            target_path=target_path,
+            target_existed=target_existed,
+        )
+        result = _sync_created_workspace_files_from_sandbox(tmpdir, result)
+        if staged_entries:
             result = _sync_staged_files_to_source(staged_entries, result)
-            return _wrap_sandbox_result(result)
-
-        result = run_python(code, timeout=normalized_timeout)
         return _wrap_sandbox_result(result)
     except Exception as e:
         return SandboxRunResult(
@@ -5327,7 +5533,12 @@ class TaskToolsPlugin(AgentPlugin):
         self._request_context = dict(request_context or {})
 
     def _run_python_code(self, code: str, timeout: int = 30) -> str:
-        return run_python_in_sandbox(code, timeout=timeout, task_files=self._task_files)
+        return run_python_in_sandbox(
+            code,
+            timeout=timeout,
+            task_files=self._task_files,
+            target_path=str(self._request_context.get("target_path") or ""),
+        )
 
     def _annotate_file(
         self,

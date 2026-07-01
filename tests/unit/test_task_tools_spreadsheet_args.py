@@ -486,6 +486,58 @@ def test_run_python_code_materializes_sandbox_image_artifacts():
     assert "chart_expense_structure.png" in result["files"]
 
 
+def test_run_python_code_syncs_relative_workspace_outputs_without_target_path(tmp_path, monkeypatch):
+    from app.core.agent import task_tools
+    from app.core.agent.task_tools import run_python_in_sandbox
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result = run_python_in_sandbox(
+        "from pathlib import Path\n"
+        "import openpyxl\n"
+        "output = Path('workspace/_codex_frontend_task_tests/real_frontend_ai_chain_validation.xlsx')\n"
+        "output.parent.mkdir(parents=True, exist_ok=True)\n"
+        "workbook = openpyxl.Workbook()\n"
+        "sheet = workbook.active\n"
+        "sheet.append(['品类', '数值'])\n"
+        "sheet.append(['黄金', 680])\n"
+        "sheet.append(['白银', 8])\n"
+        "sheet.append(['铂金', 230])\n"
+        "workbook.save(output)\n"
+        "print('saved ' + str(output))\n",
+        timeout=30,
+    )
+
+    expected = tmp_path / "_codex_frontend_task_tests" / "real_frontend_ai_chain_validation.xlsx"
+    assert result.get("error") == ""
+    assert expected.exists()
+    assert str(expected) in result["__koto_created__"]
+
+
+def test_run_python_code_strips_workspace_prefix_for_explicit_target_path(tmp_path, monkeypatch):
+    from app.core.agent import task_tools
+    from app.core.agent.task_tools import run_python_in_sandbox
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+
+    result = run_python_in_sandbox(
+        "from pathlib import Path\n"
+        "import openpyxl\n"
+        "output = Path('workspace/reports/explicit_target.xlsx')\n"
+        "output.parent.mkdir(parents=True, exist_ok=True)\n"
+        "workbook = openpyxl.Workbook()\n"
+        "workbook.active.append(['ok'])\n"
+        "workbook.save(output)\n",
+        timeout=30,
+        target_path="workspace/reports/explicit_target.xlsx",
+    )
+
+    expected = tmp_path / "reports" / "explicit_target.xlsx"
+    assert result.get("error") == ""
+    assert expected.exists()
+    assert str(expected) in result["__koto_created__"]
+
+
 def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(tmp_path, monkeypatch):
     import openpyxl
     from docx import Document

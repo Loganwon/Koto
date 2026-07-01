@@ -287,7 +287,7 @@
   function _selectedTexts(selector, limit = 10) {
     return Array.from(document.querySelectorAll(selector)).slice(0, limit).map((item) => _visibleText(item, 200)).filter(Boolean);
   }
-  function _safeJsonClone(value, fallback = null) {
+  function _safeJsonClone$1(value, fallback = null) {
     try {
       return JSON.parse(JSON.stringify(value));
     } catch (_) {
@@ -362,7 +362,7 @@
         fileId: activeTab.fileId || "",
         filePath: activeTab.filePath || "",
         modified: Boolean(activeTab.modified),
-        capabilityProfile: _safeJsonClone(activeTab.capabilityProfile || null)
+        capabilityProfile: _safeJsonClone$1(activeTab.capabilityProfile || null)
       } : null,
       openTabs: openTabs.slice(0, 20).map((tab) => ({
         path: tab?.path || "",
@@ -776,7 +776,7 @@
         documentText = String(editor.getContent() || "");
       }
       if (typeof wa2._getDocxSelectionPayload === "function") {
-        selection = _safeJsonClone(wa2._getDocxSelectionPayload({
+        selection = _safeJsonClone$1(wa2._getDocxSelectionPayload({
           allowStaleFallback: false,
           includeAnchorMeta: true
         }), null);
@@ -832,7 +832,7 @@
       selectedShapeId,
       selectedShape: selectedShape ? _shapeSummary(selectedShape) : null,
       selectedText: _limitString(selectedText, Number(action.options?.maxChars || 4e3)),
-      tableSelection: _safeJsonClone(tableSelection, null),
+      tableSelection: _safeJsonClone$1(tableSelection, null),
       slideContent: _limitString(slideContent, Number(action.options?.maxChars || 12e3)),
       shapes: shapes.slice(0, Number(action.options?.shapeLimit || action.options?.shape_limit || 80)).map(_shapeSummary)
     };
@@ -975,11 +975,11 @@
       const state2 = _workspaceStateDetails();
       const activeTab = state2.activeTab;
       if (activeTab && activeTab.modified === false) {
-        return { saved: true, before, state: state2, saveResult: _safeJsonClone(result, {}) };
+        return { saved: true, before, state: state2, saveResult: _safeJsonClone$1(result, {}) };
       }
       await new Promise((resolve) => window.setTimeout(resolve, 100));
     }
-    return { saved: false, timedOut: true, before, state: _workspaceStateDetails(), saveResult: _safeJsonClone(result, {}) };
+    return { saved: false, timedOut: true, before, state: _workspaceStateDetails(), saveResult: _safeJsonClone$1(result, {}) };
   }
   function _flattenWorkspaceTree(value, limit = 500) {
     const out = [];
@@ -1320,6 +1320,21 @@
         promptLength: prompt.length,
         submitted: true
       };
+    }
+    if (action.action === "attach_task_file") {
+      const rawPath = String(action.path || action.value || action.text || "").trim();
+      const rawPaths = Array.isArray(action.options?.paths) ? action.options.paths : [];
+      const paths = rawPaths.length ? rawPaths.map((item) => String(item || "").trim()).filter(Boolean) : [rawPath].filter(Boolean);
+      if (!paths.length) throw new Error("Task file path is required");
+      const attachFilesToTask = window.WA?.attachFilesToTask;
+      if (typeof attachFilesToTask !== "function") throw new Error("WA.attachFilesToTask is not available");
+      const result = await attachFilesToTask(paths, {
+        source: "frontend_action",
+        expandPanel: action.options?.expandPanel !== false,
+        focusInput: action.options?.focusInput !== false,
+        duplicateToast: false
+      });
+      return { attached: true, paths, result: _safeJsonClone$1(result, {}) };
     }
     const target = await _waitForTarget(action);
     if (action.action === "click") {
@@ -1771,7 +1786,6 @@
     selectedFiles: /* @__PURE__ */ new Set(),
     openTabs: [..._WA_EMPTY_WORKSPACE_LAYOUT.open_tabs],
     activeTabPath: _WA_EMPTY_WORKSPACE_LAYOUT.active_tab_path,
-    aiOutputMode: "inline",
     lockedModel: _normalizeWorkspaceModelMode$1(localStorage.getItem("wa_locked_model") || "", "deepseek"),
     _reviewCenterOpen: localStorage.getItem("wa_review_center_open") !== "0",
     _reviewMode: ["all", "comments", "proposals"].includes(localStorage.getItem("wa_review_mode") || "") ? localStorage.getItem("wa_review_mode") || "all" : "all",
@@ -1960,11 +1974,35 @@
       "wa-docx-editor",
       "wa-xlsx-editor",
       "wa-pptx-editor",
+      "wa-pdf-editor",
       "wa-pdf-viewer",
       "wa-image-viewer",
       "wa-text-editor"
     ].forEach((id) => document.getElementById(id)?.classList.remove("active"));
     _syncWorkspaceSurfaces();
+  }
+  async function _removeOpenTabAfterFileDeleted(path) {
+    const idx = state$1.openTabs.findIndex((tab) => tab.path === path);
+    if (idx < 0) return false;
+    const wasActive = state$1.openTabs[idx].path === state$1.activeTabPath;
+    if (wasActive) {
+      _destroyActiveEditorForClosedFile();
+      _clearActiveFileState();
+      _deactivateWorkspaceEditors();
+    }
+    state$1.openTabs.splice(idx, 1);
+    if (wasActive) {
+      if (state$1.openTabs.length > 0) {
+        const neighborIdx = Math.min(idx, state$1.openTabs.length - 1);
+        await _switchToTab$1(state$1.openTabs[neighborIdx].path);
+      } else {
+        toggleWorkspace(false);
+        _renderTabs$1();
+      }
+    } else {
+      _renderTabs$1();
+    }
+    return true;
   }
   function _renderTabs$1() {
     const bar = document.getElementById("wa-tab-bar");
@@ -2001,13 +2039,14 @@
     _renderTabs$1();
   }
   function _editorLayoutContainerId(fileType) {
-    return fileType === "xlsx" ? "wa-xlsx-editor" : fileType === "pptx" ? "wa-pptx-editor" : null;
+    return fileType === "xlsx" ? "wa-xlsx-editor" : fileType === "pptx" ? "wa-pptx-editor" : fileType === "pdf" ? "wa-pdf-editor" : null;
   }
   const _WORKSPACE_SURFACE_IDS = [
     "wa-drop-zone",
     "wa-docx-editor",
     "wa-xlsx-editor",
     "wa-pptx-editor",
+    "wa-pdf-editor",
     "wa-pdf-viewer",
     "wa-image-viewer",
     "wa-text-editor"
@@ -2031,6 +2070,9 @@
     if (!containerId) return;
     const el = document.getElementById(containerId);
     if (el) el.classList.add("active");
+    if (fileType === "pdf") {
+      document.getElementById("wa-pdf-viewer")?.classList.add("active");
+    }
     _syncWorkspaceSurfaces();
   }
   function _waitForEditorLayout(fileType, timeoutMs = 800) {
@@ -2391,6 +2433,7 @@
   window._normalizeWorkspaceModelMode = _normalizeWorkspaceModelMode$1;
   window._cloneSerializable = _cloneSerializable$1;
   wa$5._renderTabs = _renderTabs$1;
+  wa$5._removeOpenTabAfterFileDeleted = _removeOpenTabAfterFileDeleted;
   wa$5._tabClick = async (path) => {
     await _switchToTab$1(path);
   };
@@ -2535,9 +2578,565 @@
     _renderTempWorkspace();
     showToast$1("临时工作区已清空", "info");
   };
+  const _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS = 3e4;
+  const _WA_AI_LOCAL_SAVE_TIMEOUT_MS = 6e4;
+  function _isSupportedExt$1(ext) {
+    const s = /* @__PURE__ */ new Set([
+      "docx",
+      "xlsx",
+      "pptx",
+      "pdf",
+      "txt",
+      "md",
+      "markdown",
+      "csv",
+      "py",
+      "js",
+      "ts",
+      "json",
+      "html",
+      "css",
+      "xml",
+      "sh",
+      "bash",
+      "yaml",
+      "yml",
+      "c",
+      "cpp",
+      "h",
+      "hpp",
+      "java",
+      "rb",
+      "go",
+      "rs",
+      "cs",
+      "php",
+      "swift",
+      "kt",
+      "r",
+      "sql",
+      "toml",
+      "ini",
+      "cfg",
+      "conf",
+      "png",
+      "jpg",
+      "jpeg",
+      "gif",
+      "bmp",
+      "webp",
+      "svg"
+    ]);
+    return s.has((ext || "").toLowerCase().replace(/^\./, ""));
+  }
+  function _safeJson$3(res) {
+    return res.json().catch(() => ({}));
+  }
+  function _waSampleTaskContext$1(content) {
+    return String(content || "");
+  }
+  function _waInferFileType(path) {
+    const ext = (path || "").split(".").pop()?.toLowerCase() || "";
+    const extMap = {
+      docx: "docx",
+      xlsx: "xlsx",
+      pptx: "pptx",
+      pdf: "pdf",
+      png: "image",
+      jpg: "image",
+      jpeg: "image",
+      gif: "image",
+      bmp: "image",
+      webp: "image",
+      svg: "image",
+      txt: "text",
+      md: "text",
+      markdown: "text",
+      csv: "text",
+      py: "code",
+      js: "code",
+      ts: "code",
+      json: "code",
+      html: "code",
+      css: "code",
+      xml: "code",
+      yaml: "code",
+      yml: "code",
+      sh: "code",
+      bash: "code",
+      c: "code",
+      cpp: "code",
+      h: "code",
+      hpp: "code",
+      java: "code",
+      rb: "code",
+      go: "code",
+      rs: "code",
+      cs: "code",
+      php: "code",
+      swift: "code",
+      kt: "code",
+      r: "code",
+      sql: "code",
+      toml: "code",
+      ini: "code",
+      cfg: "code",
+      conf: "code"
+    };
+    return extMap[ext] || "unknown";
+  }
+  function _csrfFetch$5(url, options = {}) {
+    if (typeof window.WA?._csrfFetch === "function") {
+      return window.WA._csrfFetch(url, options);
+    }
+    return fetch(url, options);
+  }
+  async function _fetchJsonWithTimeout(url, options = {}, timeoutMs = 45e3, timeoutMessage = "请求超时，请稍后重试") {
+    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const fetchOptions = Object.assign({}, options);
+    if (controller) fetchOptions.signal = controller.signal;
+    let timer = null;
+    try {
+      const timeoutPromise = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          if (controller) {
+            try {
+              controller.abort();
+            } catch (_2) {
+            }
+          }
+          reject(new Error(timeoutMessage));
+        }, timeoutMs);
+      });
+      const requestPromise = (async () => {
+        const res = await _csrfFetch$5(url, fetchOptions);
+        const data = await _safeJson$3(res);
+        return { res, data };
+      })();
+      return await Promise.race([requestPromise, timeoutPromise]);
+    } catch (error) {
+      if (error && error.name === "AbortError") {
+        throw new Error(timeoutMessage);
+      }
+      throw error;
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+  function _readFileAsBase64(file, timeoutMs = _WA_AI_LOCAL_SAVE_TIMEOUT_MS) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      const timer = setTimeout(() => {
+        try {
+          reader.abort();
+        } catch (_) {
+        }
+        reject(new Error("本地文件读取超时，请重试或选择较小文件"));
+      }, timeoutMs);
+      reader.onload = () => {
+        clearTimeout(timer);
+        const dataUrl = String(reader.result || "");
+        const commaIdx = dataUrl.indexOf(",");
+        resolve(commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : "");
+      };
+      reader.onerror = () => {
+        clearTimeout(timer);
+        reject(reader.error || new Error("读取文件失败"));
+      };
+      reader.onabort = () => {
+        clearTimeout(timer);
+        reject(new Error("本地文件读取已取消"));
+      };
+      reader.readAsDataURL(file);
+    });
+  }
+  async function _saveLocalFileToWorkspaceForAI(file) {
+    const ext = (file?.name ? file.name.split(".").pop() : "").toLowerCase();
+    if (!_isSupportedExt$1(ext)) {
+      throw new Error("不支持的文件格式");
+    }
+    const fileData = await _readFileAsBase64(file, _WA_AI_LOCAL_SAVE_TIMEOUT_MS);
+    const { res: saveRes, data: saveData } = await _fetchJsonWithTimeout(
+      "/api/v1/workspace/save_to_workspace",
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "file",
+          filename: file.name,
+          data: fileData
+        })
+      },
+      _WA_AI_LOCAL_SAVE_TIMEOUT_MS,
+      "保存到工作区超时，请重试或选择较小文件"
+    );
+    if (!saveRes.ok) throw new Error(saveData.error || `HTTP ${saveRes.status}`);
+    return String(saveData.ws_path || file.name);
+  }
+  function _normalizeTaskFilePaths(paths) {
+    const out = [];
+    const seen = /* @__PURE__ */ new Set();
+    (Array.isArray(paths) ? paths : [paths]).forEach((path) => {
+      const value = String(path || "").trim();
+      const key = value.toLowerCase();
+      if (!value || seen.has(key)) return;
+      seen.add(key);
+      out.push(value);
+    });
+    return out;
+  }
+  function _markAIContextFileFailed(path, requestId, message) {
+    const file = (state$1._aiFileContext || []).find((item) => item.path === path);
+    if (!file || file.requestId !== requestId || !file.loading) return false;
+    file.loading = false;
+    file.error = message || "读取失败";
+    delete file.requestId;
+    _renderAIFileChips();
+    return true;
+  }
+  function _startAIContextWatchdog(path, requestId, timeoutMs) {
+    return setTimeout(() => {
+      const name = String(path || "").split(/[\\/]/).pop() || path;
+      const msg = "文件读取超时，请重试或选择较小文件";
+      if (_markAIContextFileFailed(path, requestId, msg)) {
+        showToast$1(`无法读取 "${name}": ${msg}`, "error");
+      }
+    }, timeoutMs);
+  }
+  async function _addFileToAIContext(absPath) {
+    const name = absPath.split(/[\\/]/).pop() || absPath;
+    const existingIdx = state$1._aiFileContext.findIndex((f) => f.path === absPath);
+    if (existingIdx >= 0) {
+      const existing = state$1._aiFileContext[existingIdx];
+      if (existing && existing.error && !existing.loading) {
+        window.WA?.retryAIFileContext(existingIdx);
+        return;
+      }
+      showToast$1(`"${name}" 已在分析列表中`, "info");
+      return;
+    }
+    const requestId = `ai_ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    state$1._aiFileContext.push({ path: absPath, name, content: null, loading: true, requestId });
+    _renderAIFileChips();
+    const watchdog = _startAIContextWatchdog(absPath, requestId, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS);
+    try {
+      const { res: previewRes, data } = await _fetchJsonWithTimeout(
+        "/api/v1/workspace/ai_context_preview",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: absPath })
+        },
+        _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS,
+        "文件读取超时，请重试或选择较小文件"
+      );
+      if (!previewRes.ok) throw new Error(data.error || `HTTP ${previewRes.status}`);
+      let content = _waSampleTaskContext$1(String(data.content_preview || ""));
+      const originalChars = Number.isFinite(Number(data.original_chars)) ? Number(data.original_chars) : content.replace(/\s/g, "").length;
+      const placeholder = state$1._aiFileContext.find((f) => f.path === absPath);
+      if (placeholder && placeholder.requestId === requestId) {
+        placeholder.content = content;
+        placeholder.originalChars = originalChars;
+        placeholder.type = String(data.file_type || _waInferFileType(absPath));
+        if (data.preview_error) placeholder.warning = String(data.preview_error || "");
+        else delete placeholder.warning;
+        delete placeholder.loading;
+        delete placeholder.error;
+        delete placeholder.requestId;
+      }
+      _renderAIFileChips();
+      if (placeholder && !placeholder.error) {
+        if (placeholder.warning) showToast$1(`"${name}" 已添加，但预览受限`, "warning");
+        else showToast$1(`"${name}" 已添加到 AI 分析`, "success");
+      }
+    } catch (e) {
+      const msg = e && e.message ? e.message : String(e || "读取失败");
+      if (_markAIContextFileFailed(absPath, requestId, msg)) {
+        showToast$1(`无法读取 "${name}": ${msg}`, "error");
+      }
+    } finally {
+      clearTimeout(watchdog);
+    }
+  }
+  function _expandWAPanel$2() {
+    const WA2 = window.WA || {};
+    if (typeof WA2.openInMainView === "function") {
+      try {
+        WA2.openInMainView();
+      } catch (_) {
+      }
+    }
+    const aiPanel = document.getElementById("wa-ai");
+    if (aiPanel) aiPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    const input = document.getElementById("wa-user-input");
+    if (input && input.offsetParent !== null) return;
+    if (typeof WA2.newAiSession === "function") {
+      try {
+        WA2.newAiSession({ toast: false, focus: false });
+      } catch (_) {
+      }
+    }
+  }
+  function _hideWelcome$2() {
+    const welcome = document.getElementById("wa-welcome");
+    if (welcome) welcome.style.display = "none";
+  }
+  function _updateContextBar$2(ctx) {
+    const update = window.WA && window.WA._updateContextBar;
+    if (typeof update === "function") update(ctx);
+  }
+  function _updateSubjectBar(_name, _type) {
+    const update = window.WA && window.WA._updateSubjectBar;
+    if (typeof update === "function") update(_name, _type);
+  }
+  function _softRefreshBrowser$1() {
+    if (typeof window.WA?._softRefreshBrowser === "function") {
+      return window.WA._softRefreshBrowser();
+    }
+    return Promise.resolve();
+  }
+  async function _attachFilesToTask(paths, options = {}) {
+    const filePaths = _normalizeTaskFilePaths(paths);
+    const duplicateToast = options.duplicateToast !== false && filePaths.length === 1;
+    let added = 0;
+    let skipped = 0;
+    for (const path of filePaths) {
+      const name = path.split(/[\\/]/).pop() || path;
+      const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
+      if (!_isSupportedExt$1(ext)) {
+        skipped++;
+        continue;
+      }
+      const existing = state$1._aiFileContext.find((file) => file.path === path);
+      if (existing && !existing.error && !existing.loading) {
+        skipped++;
+        if (duplicateToast) showToast$1(`"${name}" 已在分析列表中`, "info");
+        continue;
+      }
+      await _addFileToAIContext(path);
+      const attached = state$1._aiFileContext.find((file) => file.path === path);
+      if (attached && !attached.error) added++;
+      else skipped++;
+    }
+    if (added > 0 && options.expandPanel !== false) _expandWAPanel$2();
+    if (added > 0 && options.focusInput !== false) {
+      const input = document.getElementById("wa-user-input");
+      if (input) setTimeout(() => input.focus(), 150);
+    }
+    return { added, skipped, total: filePaths.length, source: options.source || "" };
+  }
+  async function _addLocalFilesToAIContext(files) {
+    const candidates = Array.from(files || []).filter((file) => {
+      const ext = (file?.name ? file.name.split(".").pop() : "").toLowerCase();
+      return _isSupportedExt$1(ext);
+    });
+    if (!candidates.length) {
+      showToast$1("未找到可附加的支持文件", "error");
+      return;
+    }
+    const uploadedPaths = [];
+    for (const file of candidates) {
+      try {
+        const wsPath = await _saveLocalFileToWorkspaceForAI(file);
+        uploadedPaths.push(wsPath);
+      } catch (e) {
+        const msg = e && e.message ? e.message : String(e || "添加失败");
+        showToast$1(`无法添加 "${file.name}": ${msg}`, "error");
+      }
+    }
+    const result = await _attachFilesToTask(uploadedPaths, { source: "local_files" });
+    if (result.added > 0) {
+      await _softRefreshBrowser$1();
+    }
+  }
+  async function _pickAIContextFiles() {
+    const fallbackInput = document.getElementById("wa-ai-context-file-input");
+    if (window.showOpenFilePicker) {
+      try {
+        const handles = await window.showOpenFilePicker({
+          multiple: true,
+          types: [
+            {
+              description: "AI Attachments",
+              accept: {
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+                "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
+                "application/pdf": [".pdf"],
+                "text/plain": [
+                  ".txt",
+                  ".md",
+                  ".markdown",
+                  ".csv",
+                  ".py",
+                  ".js",
+                  ".ts",
+                  ".html",
+                  ".css",
+                  ".xml",
+                  ".sh",
+                  ".bash",
+                  ".yaml",
+                  ".yml",
+                  ".c",
+                  ".cpp",
+                  ".h",
+                  ".hpp",
+                  ".java",
+                  ".rb",
+                  ".go",
+                  ".rs",
+                  ".cs",
+                  ".php",
+                  ".swift",
+                  ".kt",
+                  ".r",
+                  ".sql",
+                  ".toml",
+                  ".ini",
+                  ".cfg",
+                  ".conf"
+                ],
+                "application/json": [".json"],
+                "image/*": [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"]
+              }
+            }
+          ]
+        });
+        if (!handles.length) return;
+        const files = [];
+        for (const handle of handles) {
+          files.push(await handle.getFile());
+        }
+        await _addLocalFilesToAIContext(files);
+      } catch (e) {
+        if (e.name !== "AbortError") showToast$1("无法添加补充文件: " + e.message, "error");
+      }
+      return;
+    }
+    if (fallbackInput) fallbackInput.click();
+  }
+  function _renderAIFileChips() {
+    const targets = [
+      {
+        wrap: document.getElementById("wa-ai-file-chips"),
+        list: document.getElementById("wa-ai-file-chip-list")
+      }
+    ].filter((target) => target.wrap && target.list);
+    if (!targets.length) return;
+    const n = state$1._aiFileContext.length;
+    const tIdx = state$1._aiTargetFileIdx;
+    const targetFile = tIdx >= 0 && tIdx < n ? state$1._aiFileContext[tIdx] : null;
+    if (!n) {
+      targets.forEach(({ wrap, list }) => {
+        wrap.style.display = "none";
+        list.innerHTML = "";
+      });
+      document.querySelectorAll(".wa-file-item.ai-queued").forEach((el) => el.classList.remove("ai-queued"));
+      _updateContextBar$2();
+      _updateSubjectBar(state$1.fileName, state$1.fileType);
+      return;
+    }
+    _hideWelcome$2();
+    const rowsHtml = state$1._aiFileContext.map((f, i) => {
+      const isTarget = i === tIdx;
+      const isLoading = !!f.loading;
+      const hasError = !!f.error;
+      const hasWarning = !!f.warning;
+      const icon = _fileIcon(f.name.split(".").pop() || "");
+      const chars = f.originalChars != null ? f.originalChars : (f.content || "").length;
+      const sizeLabel = isLoading ? "读取中…" : hasError ? "读取失败" : hasWarning ? "预览受限" : chars < 1e3 ? "约" + chars + " 字" : "约" + (chars / 1e3).toFixed(1) + "k字";
+      const pinTitle = isTarget ? "取消目标文件" : "设为修改目标文件";
+      const rowTitle = hasError ? `${f.path}
+${f.error}` : hasWarning ? `${f.path}
+${f.warning}` : f.path;
+      return `<div class="wa-ctx-file-row${isTarget ? " ai-target" : ""}${isLoading ? " loading" : ""}${hasError ? " error" : ""}${hasWarning ? " warning" : ""}" title="${_escHtml$1(rowTitle)}"><span class="ctx-row-icon">${icon}</span><span class="ctx-row-name">${_escHtml$1(f.name)}</span><span class="ctx-row-size">${sizeLabel}</span>` + (isLoading || hasError ? "" : `<button class="ctx-row-pin${isTarget ? " active" : ""}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) + (hasError ? `<button type="button" class="ctx-row-retry" onclick="event.stopPropagation(); WA.retryAIFileContext(${i})" title="重试">重试</button>` : "") + (isLoading ? "" : `<button type="button" class="ctx-row-remove" onclick="event.stopPropagation(); WA.removeAIFileContext(${i})" title="移除附加文件" aria-label="移除 ${_escHtml$1(f.name)}">×</button>`) + `</div>`;
+    }).join("");
+    targets.forEach(({ wrap, list }) => {
+      const headerEl = wrap.querySelector(".wa-ai-file-chips-header");
+      if (headerEl) {
+        const targetHint = targetFile ? `<span class="wa-target-hint"> · 目标: ${_escHtml$1(targetFile.name)}</span>` : "";
+        headerEl.innerHTML = `<div class="wa-multidoc-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div><div class="wa-multidoc-actions"><button type="button" onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button></div>`;
+      }
+      wrap.style.display = "";
+      list.innerHTML = rowsHtml;
+    });
+    _updateContextBar$2({ files: n });
+    document.querySelectorAll(".wa-file-item.ai-queued").forEach((el) => el.classList.remove("ai-queued"));
+    state$1._aiFileContext.forEach((f) => {
+      const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(f.path)}"]`);
+      if (el) el.classList.add("ai-queued");
+    });
+    _updateSubjectBar(state$1.fileName, state$1.fileType);
+  }
+  const wa$4 = window.WA || {};
+  window.WA = wa$4;
+  function removeAIFileContext(idx) {
+    const index = Number(idx);
+    if (!Number.isInteger(index) || index < 0 || index >= state$1._aiFileContext.length) {
+      showToast$1("未找到要移除的附加文件", "warning");
+      _renderAIFileChips();
+      return false;
+    }
+    const removed = state$1._aiFileContext.splice(index, 1)[0];
+    if (state$1._aiTargetFileIdx === index) state$1._aiTargetFileIdx = -1;
+    else if (state$1._aiTargetFileIdx > index) state$1._aiTargetFileIdx--;
+    _renderAIFileChips();
+    if (removed && removed.name) showToast$1(`已移除附加文件：${removed.name}`, "info");
+    return true;
+  }
+  function clearAIFileContext() {
+    const hadFiles = !!(state$1._aiFileContext && state$1._aiFileContext.length);
+    state$1._aiFileContext = [];
+    state$1._aiTargetFileIdx = -1;
+    _renderAIFileChips();
+    if (hadFiles) showToast$1("已清除全部附加文件", "info");
+  }
+  wa$4.removeAIFileContext = removeAIFileContext;
+  wa$4.clearAIFileContext = clearAIFileContext;
+  wa$4.retryAIFileContext = (idx) => {
+    const file = state$1._aiFileContext[idx];
+    if (!file || file.loading) return;
+    const path = file.path || file.name;
+    state$1._aiFileContext.splice(idx, 1);
+    if (state$1._aiTargetFileIdx === idx) state$1._aiTargetFileIdx = -1;
+    else if (state$1._aiTargetFileIdx > idx) state$1._aiTargetFileIdx--;
+    _renderAIFileChips();
+    _attachFilesToTask([path], { source: "retry", expandPanel: false, focusInput: false });
+  };
+  wa$4.setAITargetFile = (idx) => {
+    state$1._aiTargetFileIdx = state$1._aiTargetFileIdx === idx ? -1 : idx;
+    _renderAIFileChips();
+    const f = state$1._aiTargetFileIdx >= 0 ? state$1._aiFileContext[state$1._aiTargetFileIdx] : null;
+    if (f) showToast$1(`"${f.name}" 已设为修改目标文件`, "success");
+    else showToast$1("已取消目标文件设置", "info");
+  };
+  wa$4.attachFilesToTask = _attachFilesToTask;
+  wa$4.pickAIContextFiles = _pickAIContextFiles;
+  wa$4.addLocalFilesToAIContext = _addLocalFilesToAIContext;
+  const pendingBrowserFilesToAI = Array.isArray(wa$4._pendingSendBrowserFilesToAI) ? wa$4._pendingSendBrowserFilesToAI.splice(0) : [];
+  if (pendingBrowserFilesToAI.length) {
+    setTimeout(() => {
+      _attachFilesToTask(pendingBrowserFilesToAI, {
+        source: "file_tree_inline_action",
+        focusInput: true,
+        duplicateToast: false
+      }).catch((error) => {
+        console.warn("[WA] drain pending browser files to AI failed:", error);
+      });
+    }, 0);
+  }
+  const aiContextFileInput = document.getElementById("wa-ai-context-file-input");
+  if (aiContextFileInput) {
+    aiContextFileInput.addEventListener("change", async (event) => {
+      const target = event.target;
+      if (target.files && target.files.length) await _addLocalFilesToAIContext(target.files);
+      target.value = "";
+    });
+  }
   const _MORE_BTN_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="2.5" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13.5" r="1.5"/></svg>`;
   const _SEND_AI_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2l.9 2.5 2.6.9-2.6.9L8 9l-.9-2.5-2.6-.9 2.6-.9L8 2.2z"/><path d="M12.3 9.7l.45 1.2 1.25.45-1.25.45-.45 1.2-.45-1.2-1.25-.45 1.25-.45.45-1.2z"/></svg>`;
-  function _isSupportedExt$1(ext) {
+  function _isSupportedExt(ext) {
     const s = /* @__PURE__ */ new Set([
       "docx",
       "xlsx",
@@ -2592,13 +3191,13 @@
     if (bytes < 1048576) return (bytes / 1024).toFixed(1) + " KB";
     return (bytes / 1048576).toFixed(1) + " MB";
   }
-  function _csrfFetch$5(url, options = {}) {
+  function _csrfFetch$4(url, options = {}) {
     if (typeof window.WA?._csrfFetch === "function") {
       return window.WA._csrfFetch(url, options);
     }
     return fetch(url, options);
   }
-  function _safeJson$3(res) {
+  function _safeJson$2(res) {
     return res.json().catch(() => ({}));
   }
   function _applyBrowserSort(entries) {
@@ -2658,7 +3257,7 @@
     if (workspaceRoot && (normalized === workspaceRoot || normalized.startsWith(workspaceRoot + "/"))) {
       return normalized.slice(workspaceRoot.length).replace(/^\/+/, "");
     }
-    return normalized.replace(/^\/+/, "");
+    return normalized.replace(/^\/+/, "").replace(/^workspace\//i, "");
   }
   function _mergeSearchResults(indexedResults, liveResults, limit = 60) {
     const seen = /* @__PURE__ */ new Set();
@@ -2687,8 +3286,10 @@
     return `draggable="true" onpointerdown="WA._browserFileRowPointerDown(event,this.closest('.wa-file-item'))" ondragstart="WA._browserFileDragStart(event,this.closest('.wa-file-item'))" ondragend="WA._browserFileDragEnd(event,this.closest('.wa-file-item'))"`;
   }
   function _fileActionButtons(supported) {
-    const sendButton = supported ? `<button type="button" class="wa-file-send-ai" onclick="event.preventDefault();event.stopPropagation();WA.sendBrowserFileToAI(this.closest('.wa-file-item').dataset.path)" title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>` : "";
-    return `<div class="wa-file-actions">` + sendButton + `<button type="button" class="wa-file-more" onclick="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button></div>`;
+    const isolatedPressAttrs = 'draggable="false" onpointerdown="event.stopPropagation()" onmousedown="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()"';
+    const sendPressAttrs = 'draggable="false" onpointerdown="window.WA._sendBrowserFileButton(event,this)" onmousedown="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()"';
+    const sendButton = supported ? `<button type="button" class="wa-file-send-ai" data-wa-file-action="send-ai" ${sendPressAttrs} onclick="window.WA._sendBrowserFileButton(event,this)" title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>` : "";
+    return `<div class="wa-file-actions">` + sendButton + `<button type="button" class="wa-file-more" ${isolatedPressAttrs} onclick="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button></div>`;
   }
   function _browserFileDragStart(event, el) {
     const path = String(el && el.dataset && el.dataset.path || "").trim();
@@ -2719,6 +3320,39 @@
       console.warn("[WA] send browser file to AI failed:", error);
       showToast$1(error && error.message ? error.message : "发送给 AI 失败", "error");
     }
+  }
+  let _lastBrowserFileSendPath = "";
+  let _lastBrowserFileSendAt = 0;
+  function _sendBrowserFileButtonToAI(event, button) {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    const row = button ? button.closest(".wa-file-item") : null;
+    const path = String(row && row.dataset ? row.dataset.path || "" : "").trim();
+    if (!path) {
+      showToast$1("缺少文件路径，无法发送给 AI", "error");
+      return;
+    }
+    const now = Date.now();
+    if (path === _lastBrowserFileSendPath && now - _lastBrowserFileSendAt < 700) return;
+    _lastBrowserFileSendPath = path;
+    _lastBrowserFileSendAt = now;
+    _sendBrowserFileToAI(path).catch((error) => {
+      console.warn("[WA] send browser file button to AI failed:", error);
+      showToast$1(error && error.message ? error.message : "发送给 AI 失败", "error");
+    });
+  }
+  let _browserFileActionDelegationInstalled = false;
+  function _installBrowserFileActionDelegation() {
+    if (_browserFileActionDelegationInstalled) return;
+    _browserFileActionDelegationInstalled = true;
+    document.addEventListener("click", (event) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const sendButton = target ? target.closest('.wa-file-send-ai[data-wa-file-action="send-ai"]') : null;
+      if (!sendButton) return;
+      _sendBrowserFileButtonToAI(event, sendButton);
+    }, true);
   }
   function _browserFileDragEnd(event, el) {
     const path = String(el && el.dataset && el.dataset.path || "").trim();
@@ -2755,8 +3389,13 @@
     _browserPointerDrag = null;
     document.body.classList.remove("wa-file-dragging");
   }
+  function _isBrowserFileActionTarget(target) {
+    const el = target instanceof Element ? target : null;
+    return !!(el && el.closest(".wa-file-actions, .wa-file-check, input, select, textarea, a"));
+  }
   function _startBrowserPointerDrag(event, el) {
     if (!el || event.button !== 0 || state$1.selectMode) return;
+    if (_isBrowserFileActionTarget(event.target)) return;
     const path = String(el.dataset.path || "").trim();
     if (!path) return;
     _browserPointerDrag = {
@@ -2931,7 +3570,7 @@
       const dir = path.replace(/[\\/][^\\/]+$/, "");
       const cat = f.category || "";
       const size = f.size_bytes ? _formatSize(f.size_bytes) : "";
-      const supported = _isSupportedExt$1(ext);
+      const supported = _isSupportedExt(ext);
       const unsupported = supported ? "" : " wa-unsupported";
       const checkHtml = state$1.selectMode ? '<input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleBrowserCheck(this)">' : "";
       return `<div class="wa-file-item file${unsupported}" style="padding-left:8px" data-path="${_escHtml$1(path)}" data-supported="${supported}" ${_fileDragAttrs()} onmousedown="WA._browserFileRowMouseDown(event,this)" onclick="WA._browserFileRowClick(event,this)" oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)" title="${_escHtml$1(path)}"><button type="button" class="wa-file-open-hit" ${_fileOpenHitDragAttrs()} aria-label="打开 ${_escHtml$1(name)}" onclick="event.preventDefault();event.stopPropagation();WA.openBrowserFile(this.closest('.wa-file-item').dataset.path,true)"></button>${checkHtml}${_fileIcon(ext, cat)}<span class="wa-file-label">${_escHtml$1(name)}</span><span class="wa-search-dir" title="${_escHtml$1(dir)}">${_escHtml$1(dir)}</span>${size ? `<span class="wa-recent-date">${size}</span>` : ""}` + _fileActionButtons(supported) + "</div>";
@@ -3029,7 +3668,7 @@
   function _supportedFolderFiles(files) {
     return Array.from(files || []).filter((file) => {
       const ext = (file.name.split(".").pop() || "").toLowerCase();
-      return _isSupportedExt$1(ext);
+      return _isSupportedExt(ext);
     });
   }
   function _showFolderFilePicker(files) {
@@ -3134,7 +3773,7 @@
     void loadFileBrowser();
     void loadRecentFiles();
   }
-  async function _softRefreshBrowser$1() {
+  async function _softRefreshBrowser() {
     const list = document.getElementById("wa-files-list");
     const savedScroll = list ? list.scrollTop : 0;
     const expanded = Array.from(state$1._browserExpanded);
@@ -3291,7 +3930,7 @@
     const srcPath = event.dataTransfer.getData("application/wa-file-path");
     if (srcPath) {
       try {
-        const r = await _csrfFetch$5("/api/v1/workspace/fs_copy", {
+        const r = await _csrfFetch$4("/api/v1/workspace/fs_copy", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ src: srcPath, dst_dir: destPath, move: false })
@@ -3313,7 +3952,7 @@
         fd.append("file", event.dataTransfer.files[i]);
       }
       try {
-        const r = await _csrfFetch$5("/api/v1/workspace/upload-to-folder", { method: "POST", body: fd });
+        const r = await _csrfFetch$4("/api/v1/workspace/upload-to-folder", { method: "POST", body: fd });
         const d = await r.json();
         if (!r.ok) {
           showToast$1(d.error || "上传失败", "error");
@@ -3331,7 +3970,7 @@
     const destKey = _browserPathKey(destPath);
     delete state$1._browserCache[destKey];
     state$1._browserExpanded.add(destKey);
-    await _softRefreshBrowser$1();
+    await _softRefreshBrowser();
   }
   function _createFallbackWorkspaceFileLoader() {
     const setLoadingFn = (show, msg) => {
@@ -3363,12 +4002,12 @@
       }
       setLoadingFn(true, "正在打开文件...");
       try {
-        const res = await _csrfFetch$5("/api/v1/workspace/open_file_by_path", {
+        const res = await _csrfFetch$4("/api/v1/workspace/open_file_by_path", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path: requestPath })
         });
-        const data = await _safeJson$3(res);
+        const data = await _safeJson$2(res);
         if (!res.ok) throw new Error(data.error || "打开文件失败");
         return await openParsedFile(data, requestPath, null);
       } catch (error) {
@@ -3388,12 +4027,12 @@
         setLoadingFn(true, "正在打开文件...");
         let missingExternalFile = false;
         try {
-          const res = await _csrfFetch$5("/api/v1/workspace/open_abs_file", {
+          const res = await _csrfFetch$4("/api/v1/workspace/open_abs_file", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ path: absPath })
           });
-          const data = await _safeJson$3(res);
+          const data = await _safeJson$2(res);
           if (!res.ok) {
             missingExternalFile = res.status === 404;
             if (missingExternalFile) {
@@ -3428,11 +4067,11 @@
       try {
         const formData = new FormData();
         formData.append("file", file);
-        const res = await _csrfFetch$5("/api/v1/workspace/open_file", {
+        const res = await _csrfFetch$4("/api/v1/workspace/open_file", {
           method: "POST",
           body: formData
         });
-        const data = await _safeJson$3(res);
+        const data = await _safeJson$2(res);
         if (!res.ok) throw new Error(data.error || "打开文件失败");
         return await openParsedFile(data, data.ws_source_path || file.name, file._fsHandle || null);
       } catch (error) {
@@ -3453,7 +4092,7 @@
     trackUserOpen: _trackUserOpen,
     switchToTab: void 0,
     // filled by actual _switchToTab
-    safeJson: _safeJson$3,
+    safeJson: _safeJson$2,
     applyFileJson: void 0,
     // filled by actual _applyFileJson
     loadRecentFiles: void 0,
@@ -3467,30 +4106,31 @@
     if (_waSharedFileLoader) return _waSharedFileLoader;
     throw new Error("workspace file loader unavailable");
   }
-  const wa$4 = window.WA || {};
-  window.WA = wa$4;
-  wa$4._renderBrowserTree = _renderBrowserTree;
-  wa$4._softRefreshBrowser = _softRefreshBrowser$1;
-  wa$4._doSearch = _doSearch;
-  wa$4.toggleBrowserFolder = toggleBrowserFolder;
-  wa$4.handleBrowserFolderClick = handleBrowserFolderClick;
-  wa$4._dropOntoFolder = _dropOntoFolder;
-  wa$4._browserFileDragStart = _browserFileDragStart;
-  wa$4._browserFileDragEnd = _browserFileDragEnd;
-  wa$4._browserFileRowPointerDown = (event, el) => {
+  const wa$3 = window.WA || {};
+  window.WA = wa$3;
+  wa$3._renderBrowserTree = _renderBrowserTree;
+  wa$3._softRefreshBrowser = _softRefreshBrowser;
+  wa$3._doSearch = _doSearch;
+  wa$3.toggleBrowserFolder = toggleBrowserFolder;
+  wa$3.handleBrowserFolderClick = handleBrowserFolderClick;
+  wa$3._dropOntoFolder = _dropOntoFolder;
+  wa$3._browserFileDragStart = _browserFileDragStart;
+  wa$3._browserFileDragEnd = _browserFileDragEnd;
+  wa$3._browserFileRowPointerDown = (event, el) => {
     _startBrowserPointerDrag(event, el);
   };
-  wa$4.sendBrowserFileToAI = _sendBrowserFileToAI;
-  wa$4._browserFileRowMouseDown = (event, el) => {
+  wa$3.sendBrowserFileToAI = _sendBrowserFileToAI;
+  wa$3._sendBrowserFileButton = _sendBrowserFileButtonToAI;
+  wa$3._browserFileRowMouseDown = (event, el) => {
     if (!el) return;
     _startBrowserPointerDrag(event, el);
     if (!state$1.selectMode) return;
     if (event && event.button !== 0) return;
     if (event && event.target && event.target.closest(".wa-file-check")) return;
     el.dataset.selectMouseHandled = "1";
-    wa$4._browserFileRowClick(event, el);
+    wa$3._browserFileRowClick(event, el);
   };
-  wa$4._browserFileRowClick = (event, el) => {
+  wa$3._browserFileRowClick = (event, el) => {
     if (!el) return;
     if (Date.now() < _suppressBrowserRowClickUntil) {
       event.preventDefault();
@@ -3510,24 +4150,24 @@
       const cb = el.querySelector(".wa-file-check");
       if (cb) {
         cb.checked = !cb.checked;
-        if (typeof wa$4._toggleBrowserCheck === "function") wa$4._toggleBrowserCheck(cb);
+        if (typeof wa$3._toggleBrowserCheck === "function") wa$3._toggleBrowserCheck(cb);
       }
       return;
     }
     if (el.dataset.supported !== "false") {
-      wa$4.openBrowserFile(el.dataset.path, true);
+      wa$3.openBrowserFile(el.dataset.path, true);
     } else {
       showToast$1("此格式暂不支持在线编辑：" + (el.dataset.path || "").split(/[\\/]/).pop(), "info");
     }
   };
-  wa$4.loadFileBrowser = loadFileBrowser;
-  wa$4._openLocalFile = () => _openFilePicker({ multiple: true, fallbackInputId: "wa-local-file-input" });
-  wa$4._openLocalFolder = () => {
+  wa$3.loadFileBrowser = loadFileBrowser;
+  wa$3._openLocalFile = () => _openFilePicker({ multiple: true, fallbackInputId: "wa-local-file-input" });
+  wa$3._openLocalFolder = () => {
     const input = document.getElementById("wa-local-folder-input");
     if (input) input.click();
   };
-  wa$4.openSystemFileList = () => _openFilePicker({ multiple: true, fallbackInputId: "wa-file-input-left" });
-  wa$4.cycleBrowserSort = () => {
+  wa$3.openSystemFileList = () => _openFilePicker({ multiple: true, fallbackInputId: "wa-file-input-left" });
+  wa$3.cycleBrowserSort = () => {
     const order = ["name", "date", "type"];
     const labels = { name: "名称", date: "日期", type: "类型" };
     const idx = order.indexOf(state$1._browserSort);
@@ -3541,43 +4181,45 @@
     }
     _renderBrowserTree();
   };
-  wa$4.openBrowserFile = async (absPath, supported = true) => {
+  wa$3.openBrowserFile = async (absPath, supported = true) => {
     return _requireWorkspaceFileLoader().openBrowserFile(absPath, supported);
   };
-  wa$4.openWorkspaceFile = async (path) => {
+  wa$3.openWorkspaceFile = async (path) => {
     return _requireWorkspaceFileLoader().openWorkspaceFile(path);
   };
-  wa$4.reloadFileByPath = async (filePath, supported = true) => {
+  wa$3.reloadFileByPath = async (filePath, supported = true) => {
     return _requireWorkspaceFileLoader().reloadFileByPath(filePath, supported);
   };
-  wa$4._openParsedFile = async (d, wsPath) => {
+  wa$3._openParsedFile = async (d, wsPath) => {
     return _requireWorkspaceFileLoader().openParsedFile(d, wsPath);
   };
-  wa$4.openRecentFile = async (filePath) => {
+  wa$3.openRecentFile = async (filePath) => {
     if (!filePath) return;
     const rawPath = String(filePath);
     const normalizedPath = rawPath.replace(/\\/g, "/");
     const workspacePath = (state$1._workspacePath || "").replace(/\\/g, "/");
     const ext = normalizedPath.includes(".") ? normalizedPath.split(".").pop().toLowerCase() : "";
-    const supported = _isSupportedExt$1(ext);
+    const supported = _isSupportedExt(ext);
     const looksAbsolute = /^(?:[a-zA-Z]:\/|\/|\/\/)/.test(normalizedPath);
     if (workspacePath && looksAbsolute && (normalizedPath === workspacePath || normalizedPath.startsWith(workspacePath + "/"))) {
       const relativePath = normalizedPath.slice(workspacePath.length).replace(/^\//, "");
-      return wa$4.openWorkspaceFile(relativePath);
+      return wa$3.openWorkspaceFile(relativePath);
     }
     if (!looksAbsolute) {
-      return wa$4.openWorkspaceFile(normalizedPath.replace(/^\//, ""));
+      return wa$3.openWorkspaceFile(normalizedPath.replace(/^\//, ""));
     }
-    return wa$4.openBrowserFile(rawPath, supported);
+    return wa$3.openBrowserFile(rawPath, supported);
   };
   window.loadFileBrowser = loadFileBrowser;
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", () => {
+      _installBrowserFileActionDelegation();
       _installBrowserPointerDragFallback();
       _bindLocalFilePickers();
       _autoLoadStandaloneFileBrowser();
     }, { once: true });
   } else {
+    _installBrowserFileActionDelegation();
     _installBrowserPointerDragFallback();
     _bindLocalFilePickers();
     _autoLoadStandaloneFileBrowser();
@@ -3599,7 +4241,7 @@
   }
   let _fsBrowserCtxTarget$1 = { path: "", name: "", isFolder: false, supported: true };
   let _ctxTarget = { path: null, name: null };
-  function _csrfFetch$4(url, options = {}) {
+  function _csrfFetch$3(url, options = {}) {
     if (typeof window.WA?._csrfFetch === "function") {
       return window.WA._csrfFetch(url, options);
     }
@@ -3807,7 +4449,7 @@
     const { path: target, isFolder } = _fsBrowserCtxTarget$1;
     const dstDir = isFolder ? target : target.replace(/[\\/][^\\/]+$/, "");
     try {
-      const res = await _csrfFetch$4("/api/v1/workspace/fs_copy", {
+      const res = await _csrfFetch$3("/api/v1/workspace/fs_copy", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ src: clip.path, dst_dir: dstDir, move: clip.mode === "cut" })
@@ -3852,7 +4494,7 @@
         return;
       }
       try {
-        const res = await _csrfFetch$4("/api/v1/workspace/fs_rename", {
+        const res = await _csrfFetch$3("/api/v1/workspace/fs_rename", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path, name: newName })
@@ -3886,7 +4528,7 @@
     const msg = isFolder ? `确定要删除文件夹 "${name}" 及其所有内容吗？此操作不可撤销。` : `确定要删除 "${name}" 吗？`;
     if (!confirm(msg)) return;
     try {
-      const res = await _csrfFetch$4("/api/v1/workspace/fs_delete?path=" + encodeURIComponent(path), { method: "DELETE" });
+      const res = await _csrfFetch$3("/api/v1/workspace/fs_delete?path=" + encodeURIComponent(path), { method: "DELETE" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "删除失败");
       showToast$1('已删除 "' + name + '"', "success");
@@ -3951,7 +4593,7 @@
         return;
       }
       try {
-        const res = await _csrfFetch$4("/api/v1/workspace/rename", {
+        const res = await _csrfFetch$3("/api/v1/workspace/rename", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path, name: newName })
@@ -3980,7 +4622,7 @@
   async function deleteWorkspaceFile(filepath) {
     if (!confirm(`确定要将 "${filepath.split("/").pop()}" 移入回收站吗？`)) return;
     try {
-      const res = await _csrfFetch$4("/api/v1/workspace/file?path=" + encodeURIComponent(filepath), { method: "DELETE" });
+      const res = await _csrfFetch$3("/api/v1/workspace/file?path=" + encodeURIComponent(filepath), { method: "DELETE" });
       const json = await res.json();
       if (!res.ok) {
         if (res.status === 404) {
@@ -4007,7 +4649,7 @@
     const name = folderName || folderPath.split("/").pop() || "";
     if (!confirm(`确定要将文件夹 "${name}" 及其所有内容移入回收站吗？`)) return;
     try {
-      const res = await _csrfFetch$4("/api/v1/workspace/folder?path=" + encodeURIComponent(folderPath), { method: "DELETE" });
+      const res = await _csrfFetch$3("/api/v1/workspace/folder?path=" + encodeURIComponent(folderPath), { method: "DELETE" });
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || "删除失败");
       showToast$1(`已将文件夹 "${name}" 移入回收站`, "success");
@@ -4036,7 +4678,7 @@
         return;
       }
       try {
-        const res = await _csrfFetch$4("/api/v1/workspace/rename", {
+        const res = await _csrfFetch$3("/api/v1/workspace/rename", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ path, name: newName })
@@ -4160,39 +4802,39 @@
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") _closeCtxMenu();
   });
-  const wa$3 = window.WA || {};
-  window.WA = wa$3;
-  wa$3._showBrowserCtx = _showBrowserCtx;
-  wa$3._showCtxMenu = _showCtxMenu;
-  wa$3._showFolderCtxMenu = _showFolderCtxMenu;
-  wa$3._closeCtxMenu = _closeCtxMenu;
-  wa$3._fsBrowserOpen = _fsBrowserOpen;
-  wa$3._fsBrowserAddToWorkspace = _fsBrowserAddToWorkspace;
-  wa$3._fsBrowserAddToTempWorkspace = _fsBrowserAddToTempWorkspace;
-  wa$3._fsBrowserSendToAI = _fsBrowserSendToAI;
-  wa$3._fsBrowserCopy = _fsBrowserCopy;
-  wa$3._fsBrowserCut = _fsBrowserCut;
-  wa$3._fsBrowserPaste = _fsBrowserPaste;
-  wa$3._fsBrowserCopyPath = _fsBrowserCopyPath;
-  wa$3._fsBrowserRename = _fsBrowserRename;
-  wa$3._fsBrowserDelete = _fsBrowserDelete;
-  wa$3._fsBrowserNewFile = _fsBrowserNewFile;
-  wa$3._fsBrowserNewFolder = _fsBrowserNewFolder;
-  wa$3._fsBrowserAISummary = _fsBrowserAISummary;
-  wa$3.renameWorkspaceFile = renameWorkspaceFile;
-  wa$3.deleteWorkspaceFile = deleteWorkspaceFile;
-  wa$3.deleteFolderWorkspace = deleteFolderWorkspace;
-  wa$3.renameFolderWorkspace = renameFolderWorkspace;
-  wa$3._ctxOpen = _ctxOpen;
-  wa$3._ctxRename = _ctxRename;
-  wa$3._ctxCopyPath = _ctxCopyPath;
-  wa$3._ctxDelete = _ctxDelete;
-  wa$3._ctxFolderRename = _ctxFolderRename;
-  wa$3._ctxFolderDelete = _ctxFolderDelete;
+  const wa$2 = window.WA || {};
+  window.WA = wa$2;
+  wa$2._showBrowserCtx = _showBrowserCtx;
+  wa$2._showCtxMenu = _showCtxMenu;
+  wa$2._showFolderCtxMenu = _showFolderCtxMenu;
+  wa$2._closeCtxMenu = _closeCtxMenu;
+  wa$2._fsBrowserOpen = _fsBrowserOpen;
+  wa$2._fsBrowserAddToWorkspace = _fsBrowserAddToWorkspace;
+  wa$2._fsBrowserAddToTempWorkspace = _fsBrowserAddToTempWorkspace;
+  wa$2._fsBrowserSendToAI = _fsBrowserSendToAI;
+  wa$2._fsBrowserCopy = _fsBrowserCopy;
+  wa$2._fsBrowserCut = _fsBrowserCut;
+  wa$2._fsBrowserPaste = _fsBrowserPaste;
+  wa$2._fsBrowserCopyPath = _fsBrowserCopyPath;
+  wa$2._fsBrowserRename = _fsBrowserRename;
+  wa$2._fsBrowserDelete = _fsBrowserDelete;
+  wa$2._fsBrowserNewFile = _fsBrowserNewFile;
+  wa$2._fsBrowserNewFolder = _fsBrowserNewFolder;
+  wa$2._fsBrowserAISummary = _fsBrowserAISummary;
+  wa$2.renameWorkspaceFile = renameWorkspaceFile;
+  wa$2.deleteWorkspaceFile = deleteWorkspaceFile;
+  wa$2.deleteFolderWorkspace = deleteFolderWorkspace;
+  wa$2.renameFolderWorkspace = renameFolderWorkspace;
+  wa$2._ctxOpen = _ctxOpen;
+  wa$2._ctxRename = _ctxRename;
+  wa$2._ctxCopyPath = _ctxCopyPath;
+  wa$2._ctxDelete = _ctxDelete;
+  wa$2._ctxFolderRename = _ctxFolderRename;
+  wa$2._ctxFolderDelete = _ctxFolderDelete;
   function _isAbsolutePath(rawPath) {
     return /^(?:[a-zA-Z]:[\\/]|\/|\\\\)/.test(String(rawPath || "").trim());
   }
-  function _csrfFetch$3(url, options = {}) {
+  function _csrfFetch$2(url, options = {}) {
     if (typeof window.WA?._csrfFetch === "function") {
       return window.WA._csrfFetch(url, options);
     }
@@ -4343,7 +4985,7 @@
           skippedExternal++;
           continue;
         }
-        const res = await _csrfFetch$3("/api/v1/workspace/file?path=" + encodeURIComponent(p), { method: "DELETE" });
+        const res = await _csrfFetch$2("/api/v1/workspace/file?path=" + encodeURIComponent(p), { method: "DELETE" });
         if (!res.ok) failed++;
         else {
           if (typeof window.WA?._removeOpenTabAfterFileDeleted === "function") {
@@ -4436,7 +5078,7 @@
         const isBrowserPath = parentPath && _isAbsolutePath(parentPath);
         const endpoint = isBrowserPath ? kind === "folder" ? "/api/v1/fs/create_folder" : "/api/v1/fs/create_file" : kind === "folder" ? "/api/v1/workspace/create_folder" : "/api/v1/workspace/create_file";
         const body = isBrowserPath ? { parent: parentPath, name } : kind === "folder" ? { parent: parentPath || "", name } : { folder: parentPath || "", name };
-        const res = await _csrfFetch$3(endpoint, {
+        const res = await _csrfFetch$2(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(body)
@@ -4500,7 +5142,7 @@
     const path = input.value.trim();
     if (!path) return;
     try {
-      const res = await _csrfFetch$3("/api/v1/workspace/set_workspace_dir", {
+      const res = await _csrfFetch$2("/api/v1/workspace/set_workspace_dir", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ path })
@@ -4686,561 +5328,29 @@
       }
     }
   }
-  const wa$2 = window.WA || {};
-  window.WA = wa$2;
-  wa$2._fileRowClick = _fileRowClick;
-  wa$2._toggleFileCheck = _toggleFileCheck;
-  wa$2._toggleBrowserCheck = _toggleBrowserCheck;
-  if (typeof wa$2._browserFileRowMouseDown !== "function") wa$2._browserFileRowMouseDown = _browserFileRowMouseDown;
-  if (typeof wa$2._browserFileRowClick !== "function") wa$2._browserFileRowClick = _browserFileRowClick;
-  wa$2._updateSelectBar = _updateSelectBar;
-  wa$2.toggleSelectMode = toggleSelectMode;
-  wa$2.selectAll = selectAll;
-  wa$2.deleteSelected = deleteSelected;
-  wa$2.sendSelectedToAI = sendSelectedToAI;
-  wa$2.startNewFile = startNewFile;
-  wa$2.startNewFolder = startNewFolder;
-  wa$2.openFolderAsWorkspace = openFolderAsWorkspace;
-  wa$2.closeFolderOverlay = closeFolderOverlay;
-  wa$2.confirmOpenFolder = confirmOpenFolder;
-  wa$2.browseForFolder = browseForFolder;
-  wa$2.toggleFolder = toggleFolder;
+  const wa$1 = window.WA || {};
+  window.WA = wa$1;
+  wa$1._fileRowClick = _fileRowClick;
+  wa$1._toggleFileCheck = _toggleFileCheck;
+  wa$1._toggleBrowserCheck = _toggleBrowserCheck;
+  if (typeof wa$1._browserFileRowMouseDown !== "function") wa$1._browserFileRowMouseDown = _browserFileRowMouseDown;
+  if (typeof wa$1._browserFileRowClick !== "function") wa$1._browserFileRowClick = _browserFileRowClick;
+  wa$1._updateSelectBar = _updateSelectBar;
+  wa$1.toggleSelectMode = toggleSelectMode;
+  wa$1.selectAll = selectAll;
+  wa$1.deleteSelected = deleteSelected;
+  wa$1.sendSelectedToAI = sendSelectedToAI;
+  wa$1.startNewFile = startNewFile;
+  wa$1.startNewFolder = startNewFolder;
+  wa$1.openFolderAsWorkspace = openFolderAsWorkspace;
+  wa$1.closeFolderOverlay = closeFolderOverlay;
+  wa$1.confirmOpenFolder = confirmOpenFolder;
+  wa$1.browseForFolder = browseForFolder;
+  wa$1.toggleFolder = toggleFolder;
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", _installBrowserFileRowDelegation, { once: true });
   } else {
     _installBrowserFileRowDelegation();
-  }
-  const _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS = 3e4;
-  const _WA_AI_LOCAL_SAVE_TIMEOUT_MS = 6e4;
-  function _isSupportedExt(ext) {
-    const s = /* @__PURE__ */ new Set([
-      "docx",
-      "xlsx",
-      "pptx",
-      "pdf",
-      "txt",
-      "md",
-      "markdown",
-      "csv",
-      "py",
-      "js",
-      "ts",
-      "json",
-      "html",
-      "css",
-      "xml",
-      "sh",
-      "bash",
-      "yaml",
-      "yml",
-      "c",
-      "cpp",
-      "h",
-      "hpp",
-      "java",
-      "rb",
-      "go",
-      "rs",
-      "cs",
-      "php",
-      "swift",
-      "kt",
-      "r",
-      "sql",
-      "toml",
-      "ini",
-      "cfg",
-      "conf",
-      "png",
-      "jpg",
-      "jpeg",
-      "gif",
-      "bmp",
-      "webp",
-      "svg"
-    ]);
-    return s.has((ext || "").toLowerCase().replace(/^\./, ""));
-  }
-  function _safeJson$2(res) {
-    return res.json().catch(() => ({}));
-  }
-  function _waSampleTaskContext$1(content) {
-    return String(content || "");
-  }
-  function _waInferFileType(path) {
-    const ext = (path || "").split(".").pop()?.toLowerCase() || "";
-    const extMap = {
-      docx: "docx",
-      xlsx: "xlsx",
-      pptx: "pptx",
-      pdf: "pdf",
-      png: "image",
-      jpg: "image",
-      jpeg: "image",
-      gif: "image",
-      bmp: "image",
-      webp: "image",
-      svg: "image",
-      txt: "text",
-      md: "text",
-      markdown: "text",
-      csv: "text",
-      py: "code",
-      js: "code",
-      ts: "code",
-      json: "code",
-      html: "code",
-      css: "code",
-      xml: "code",
-      yaml: "code",
-      yml: "code",
-      sh: "code",
-      bash: "code",
-      c: "code",
-      cpp: "code",
-      h: "code",
-      hpp: "code",
-      java: "code",
-      rb: "code",
-      go: "code",
-      rs: "code",
-      cs: "code",
-      php: "code",
-      swift: "code",
-      kt: "code",
-      r: "code",
-      sql: "code",
-      toml: "code",
-      ini: "code",
-      cfg: "code",
-      conf: "code"
-    };
-    return extMap[ext] || "unknown";
-  }
-  function _csrfFetch$2(url, options = {}) {
-    if (typeof window.WA?._csrfFetch === "function") {
-      return window.WA._csrfFetch(url, options);
-    }
-    return fetch(url, options);
-  }
-  async function _fetchJsonWithTimeout(url, options = {}, timeoutMs = 45e3, timeoutMessage = "请求超时，请稍后重试") {
-    const controller = typeof AbortController !== "undefined" ? new AbortController() : null;
-    const fetchOptions = Object.assign({}, options);
-    if (controller) fetchOptions.signal = controller.signal;
-    let timer = null;
-    try {
-      const timeoutPromise = new Promise((_, reject) => {
-        timer = setTimeout(() => {
-          if (controller) {
-            try {
-              controller.abort();
-            } catch (_2) {
-            }
-          }
-          reject(new Error(timeoutMessage));
-        }, timeoutMs);
-      });
-      const requestPromise = (async () => {
-        const res = await _csrfFetch$2(url, fetchOptions);
-        const data = await _safeJson$2(res);
-        return { res, data };
-      })();
-      return await Promise.race([requestPromise, timeoutPromise]);
-    } catch (error) {
-      if (error && error.name === "AbortError") {
-        throw new Error(timeoutMessage);
-      }
-      throw error;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  }
-  function _readFileAsBase64(file, timeoutMs = _WA_AI_LOCAL_SAVE_TIMEOUT_MS) {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      const timer = setTimeout(() => {
-        try {
-          reader.abort();
-        } catch (_) {
-        }
-        reject(new Error("本地文件读取超时，请重试或选择较小文件"));
-      }, timeoutMs);
-      reader.onload = () => {
-        clearTimeout(timer);
-        const dataUrl = String(reader.result || "");
-        const commaIdx = dataUrl.indexOf(",");
-        resolve(commaIdx >= 0 ? dataUrl.slice(commaIdx + 1) : "");
-      };
-      reader.onerror = () => {
-        clearTimeout(timer);
-        reject(reader.error || new Error("读取文件失败"));
-      };
-      reader.onabort = () => {
-        clearTimeout(timer);
-        reject(new Error("本地文件读取已取消"));
-      };
-      reader.readAsDataURL(file);
-    });
-  }
-  async function _saveLocalFileToWorkspaceForAI(file) {
-    const ext = (file?.name ? file.name.split(".").pop() : "").toLowerCase();
-    if (!_isSupportedExt(ext)) {
-      throw new Error("不支持的文件格式");
-    }
-    const fileData = await _readFileAsBase64(file, _WA_AI_LOCAL_SAVE_TIMEOUT_MS);
-    const { res: saveRes, data: saveData } = await _fetchJsonWithTimeout(
-      "/api/v1/workspace/save_to_workspace",
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "file",
-          filename: file.name,
-          data: fileData
-        })
-      },
-      _WA_AI_LOCAL_SAVE_TIMEOUT_MS,
-      "保存到工作区超时，请重试或选择较小文件"
-    );
-    if (!saveRes.ok) throw new Error(saveData.error || `HTTP ${saveRes.status}`);
-    return String(saveData.ws_path || file.name);
-  }
-  function _normalizeTaskFilePaths(paths) {
-    const out = [];
-    const seen = /* @__PURE__ */ new Set();
-    (Array.isArray(paths) ? paths : [paths]).forEach((path) => {
-      const value = String(path || "").trim();
-      const key = value.toLowerCase();
-      if (!value || seen.has(key)) return;
-      seen.add(key);
-      out.push(value);
-    });
-    return out;
-  }
-  function _markAIContextFileFailed(path, requestId, message) {
-    const file = (state$1._aiFileContext || []).find((item) => item.path === path);
-    if (!file || file.requestId !== requestId || !file.loading) return false;
-    file.loading = false;
-    file.error = message || "读取失败";
-    delete file.requestId;
-    _renderAIFileChips();
-    return true;
-  }
-  function _startAIContextWatchdog(path, requestId, timeoutMs) {
-    return setTimeout(() => {
-      const name = String(path || "").split(/[\\/]/).pop() || path;
-      const msg = "文件读取超时，请重试或选择较小文件";
-      if (_markAIContextFileFailed(path, requestId, msg)) {
-        showToast$1(`无法读取 "${name}": ${msg}`, "error");
-      }
-    }, timeoutMs);
-  }
-  async function _addFileToAIContext(absPath) {
-    const name = absPath.split(/[\\/]/).pop() || absPath;
-    const existingIdx = state$1._aiFileContext.findIndex((f) => f.path === absPath);
-    if (existingIdx >= 0) {
-      const existing = state$1._aiFileContext[existingIdx];
-      if (existing && existing.error && !existing.loading) {
-        window.WA?.retryAIFileContext(existingIdx);
-        return;
-      }
-      showToast$1(`"${name}" 已在分析列表中`, "info");
-      return;
-    }
-    const requestId = `ai_ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-    state$1._aiFileContext.push({ path: absPath, name, content: null, loading: true, requestId });
-    _renderAIFileChips();
-    const watchdog = _startAIContextWatchdog(absPath, requestId, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS);
-    try {
-      const { res: previewRes, data } = await _fetchJsonWithTimeout(
-        "/api/v1/workspace/ai_context_preview",
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ path: absPath })
-        },
-        _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS,
-        "文件读取超时，请重试或选择较小文件"
-      );
-      if (!previewRes.ok) throw new Error(data.error || `HTTP ${previewRes.status}`);
-      let content = _waSampleTaskContext$1(String(data.content_preview || ""));
-      const originalChars = Number.isFinite(Number(data.original_chars)) ? Number(data.original_chars) : content.replace(/\s/g, "").length;
-      const placeholder = state$1._aiFileContext.find((f) => f.path === absPath);
-      if (placeholder && placeholder.requestId === requestId) {
-        placeholder.content = content;
-        placeholder.originalChars = originalChars;
-        placeholder.type = String(data.file_type || _waInferFileType(absPath));
-        if (data.preview_error) placeholder.warning = String(data.preview_error || "");
-        else delete placeholder.warning;
-        delete placeholder.loading;
-        delete placeholder.error;
-        delete placeholder.requestId;
-      }
-      _renderAIFileChips();
-      if (placeholder && !placeholder.error) {
-        if (placeholder.warning) showToast$1(`"${name}" 已添加，但预览受限`, "warning");
-        else showToast$1(`"${name}" 已添加到 AI 分析`, "success");
-      }
-    } catch (e) {
-      const msg = e && e.message ? e.message : String(e || "读取失败");
-      if (_markAIContextFileFailed(absPath, requestId, msg)) {
-        showToast$1(`无法读取 "${name}": ${msg}`, "error");
-      }
-    } finally {
-      clearTimeout(watchdog);
-    }
-  }
-  function _expandWAPanel$2() {
-    const WA2 = window.WA || {};
-    if (typeof WA2.openInMainView === "function") {
-      try {
-        WA2.openInMainView();
-      } catch (_) {
-      }
-    }
-    const aiPanel = document.getElementById("wa-ai");
-    if (aiPanel) aiPanel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    const input = document.getElementById("wa-user-input");
-    if (input && input.offsetParent !== null) return;
-    if (typeof WA2.newAiSession === "function") {
-      try {
-        WA2.newAiSession({ toast: false, focus: false });
-      } catch (_) {
-      }
-    }
-  }
-  function _hideWelcome$2() {
-    const welcome = document.getElementById("wa-welcome");
-    if (welcome) welcome.style.display = "none";
-  }
-  function _updateContextBar$2(ctx) {
-    const update = window.WA && window.WA._updateContextBar;
-    if (typeof update === "function") update(ctx);
-  }
-  function _updateSubjectBar(_name, _type) {
-    const update = window.WA && window.WA._updateSubjectBar;
-    if (typeof update === "function") update(_name, _type);
-  }
-  function _softRefreshBrowser() {
-    if (typeof window.WA?._softRefreshBrowser === "function") {
-      return window.WA._softRefreshBrowser();
-    }
-    return Promise.resolve();
-  }
-  async function _attachFilesToTask(paths, options = {}) {
-    const filePaths = _normalizeTaskFilePaths(paths);
-    const duplicateToast = options.duplicateToast !== false && filePaths.length === 1;
-    let added = 0;
-    let skipped = 0;
-    for (const path of filePaths) {
-      const name = path.split(/[\\/]/).pop() || path;
-      const ext = name.includes(".") ? name.split(".").pop().toLowerCase() : "";
-      if (!_isSupportedExt(ext)) {
-        skipped++;
-        continue;
-      }
-      const existing = state$1._aiFileContext.find((file) => file.path === path);
-      if (existing && !existing.error && !existing.loading) {
-        skipped++;
-        if (duplicateToast) showToast$1(`"${name}" 已在分析列表中`, "info");
-        continue;
-      }
-      await _addFileToAIContext(path);
-      const attached = state$1._aiFileContext.find((file) => file.path === path);
-      if (attached && !attached.error) added++;
-      else skipped++;
-    }
-    if (added > 0 && options.expandPanel !== false) _expandWAPanel$2();
-    if (added > 0 && options.focusInput !== false) {
-      const input = document.getElementById("wa-user-input");
-      if (input) setTimeout(() => input.focus(), 150);
-    }
-    return { added, skipped, total: filePaths.length, source: options.source || "" };
-  }
-  async function _addLocalFilesToAIContext(files) {
-    const candidates = Array.from(files || []).filter((file) => {
-      const ext = (file?.name ? file.name.split(".").pop() : "").toLowerCase();
-      return _isSupportedExt(ext);
-    });
-    if (!candidates.length) {
-      showToast$1("未找到可附加的支持文件", "error");
-      return;
-    }
-    const uploadedPaths = [];
-    for (const file of candidates) {
-      try {
-        const wsPath = await _saveLocalFileToWorkspaceForAI(file);
-        uploadedPaths.push(wsPath);
-      } catch (e) {
-        const msg = e && e.message ? e.message : String(e || "添加失败");
-        showToast$1(`无法添加 "${file.name}": ${msg}`, "error");
-      }
-    }
-    const result = await _attachFilesToTask(uploadedPaths, { source: "local_files" });
-    if (result.added > 0) {
-      await _softRefreshBrowser();
-    }
-  }
-  async function _pickAIContextFiles() {
-    const fallbackInput = document.getElementById("wa-ai-context-file-input");
-    if (window.showOpenFilePicker) {
-      try {
-        const handles = await window.showOpenFilePicker({
-          multiple: true,
-          types: [
-            {
-              description: "AI Attachments",
-              accept: {
-                "application/vnd.openxmlformats-officedocument.wordprocessingml.document": [".docx"],
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
-                "application/vnd.openxmlformats-officedocument.presentationml.presentation": [".pptx"],
-                "application/pdf": [".pdf"],
-                "text/plain": [
-                  ".txt",
-                  ".md",
-                  ".markdown",
-                  ".csv",
-                  ".py",
-                  ".js",
-                  ".ts",
-                  ".html",
-                  ".css",
-                  ".xml",
-                  ".sh",
-                  ".bash",
-                  ".yaml",
-                  ".yml",
-                  ".c",
-                  ".cpp",
-                  ".h",
-                  ".hpp",
-                  ".java",
-                  ".rb",
-                  ".go",
-                  ".rs",
-                  ".cs",
-                  ".php",
-                  ".swift",
-                  ".kt",
-                  ".r",
-                  ".sql",
-                  ".toml",
-                  ".ini",
-                  ".cfg",
-                  ".conf"
-                ],
-                "application/json": [".json"],
-                "image/*": [".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"]
-              }
-            }
-          ]
-        });
-        if (!handles.length) return;
-        const files = [];
-        for (const handle of handles) {
-          files.push(await handle.getFile());
-        }
-        await _addLocalFilesToAIContext(files);
-      } catch (e) {
-        if (e.name !== "AbortError") showToast$1("无法添加补充文件: " + e.message, "error");
-      }
-      return;
-    }
-    if (fallbackInput) fallbackInput.click();
-  }
-  function _renderAIFileChips() {
-    const targets = [
-      {
-        wrap: document.getElementById("wa-ai-file-chips"),
-        list: document.getElementById("wa-ai-file-chip-list")
-      }
-    ].filter((target) => target.wrap && target.list);
-    if (!targets.length) return;
-    const n = state$1._aiFileContext.length;
-    const tIdx = state$1._aiTargetFileIdx;
-    const targetFile = tIdx >= 0 && tIdx < n ? state$1._aiFileContext[tIdx] : null;
-    if (!n) {
-      targets.forEach(({ wrap, list }) => {
-        wrap.style.display = "none";
-        list.innerHTML = "";
-      });
-      document.querySelectorAll(".wa-file-item.ai-queued").forEach((el) => el.classList.remove("ai-queued"));
-      _updateContextBar$2();
-      _updateSubjectBar(state$1.fileName, state$1.fileType);
-      return;
-    }
-    _hideWelcome$2();
-    const rowsHtml = state$1._aiFileContext.map((f, i) => {
-      const isTarget = i === tIdx;
-      const isLoading = !!f.loading;
-      const hasError = !!f.error;
-      const hasWarning = !!f.warning;
-      const icon = _fileIcon(f.name.split(".").pop() || "");
-      const chars = f.originalChars != null ? f.originalChars : (f.content || "").length;
-      const sizeLabel = isLoading ? "读取中…" : hasError ? "读取失败" : hasWarning ? "预览受限" : chars < 1e3 ? "约" + chars + " 字" : "约" + (chars / 1e3).toFixed(1) + "k字";
-      const pinTitle = isTarget ? "取消目标文件" : "设为修改目标文件";
-      const rowTitle = hasError ? `${f.path}
-${f.error}` : hasWarning ? `${f.path}
-${f.warning}` : f.path;
-      return `<div class="wa-ctx-file-row${isTarget ? " ai-target" : ""}${isLoading ? " loading" : ""}${hasError ? " error" : ""}${hasWarning ? " warning" : ""}" title="${_escHtml$1(rowTitle)}"><span class="ctx-row-icon">${icon}</span><span class="ctx-row-name">${_escHtml$1(f.name)}</span><span class="ctx-row-size">${sizeLabel}</span>` + (isLoading || hasError ? "" : `<button class="ctx-row-pin${isTarget ? " active" : ""}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) + (hasError ? `<button class="ctx-row-retry" onclick="WA.retryAIFileContext(${i})" title="重试">重试</button>` : "") + (isLoading ? "" : `<span class="ctx-row-remove" onclick="WA.removeAIFileContext(${i})" title="移除">×</span>`) + `</div>`;
-    }).join("");
-    targets.forEach(({ wrap, list }) => {
-      const headerEl = wrap.querySelector(".wa-ai-file-chips-header");
-      if (headerEl) {
-        const targetHint = targetFile ? `<span class="wa-target-hint"> · 目标: ${_escHtml$1(targetFile.name)}</span>` : "";
-        headerEl.innerHTML = `<div class="wa-multidoc-title"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg><span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div><div class="wa-multidoc-actions"><button onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button></div>`;
-      }
-      wrap.style.display = "";
-      list.innerHTML = rowsHtml;
-    });
-    _updateContextBar$2({ files: n });
-    document.querySelectorAll(".wa-file-item.ai-queued").forEach((el) => el.classList.remove("ai-queued"));
-    state$1._aiFileContext.forEach((f) => {
-      const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(f.path)}"]`);
-      if (el) el.classList.add("ai-queued");
-    });
-    _updateSubjectBar(state$1.fileName, state$1.fileType);
-  }
-  const wa$1 = window.WA || {};
-  window.WA = wa$1;
-  wa$1.removeAIFileContext = (idx) => {
-    state$1._aiFileContext.splice(idx, 1);
-    if (state$1._aiTargetFileIdx === idx) state$1._aiTargetFileIdx = -1;
-    else if (state$1._aiTargetFileIdx > idx) state$1._aiTargetFileIdx--;
-    _renderAIFileChips();
-  };
-  wa$1.clearAIFileContext = () => {
-    state$1._aiFileContext = [];
-    state$1._aiTargetFileIdx = -1;
-    _renderAIFileChips();
-  };
-  wa$1.retryAIFileContext = (idx) => {
-    const file = state$1._aiFileContext[idx];
-    if (!file || file.loading) return;
-    const path = file.path || file.name;
-    state$1._aiFileContext.splice(idx, 1);
-    if (state$1._aiTargetFileIdx === idx) state$1._aiTargetFileIdx = -1;
-    else if (state$1._aiTargetFileIdx > idx) state$1._aiTargetFileIdx--;
-    _renderAIFileChips();
-    _attachFilesToTask([path], { source: "retry", expandPanel: false, focusInput: false });
-  };
-  wa$1.setAITargetFile = (idx) => {
-    state$1._aiTargetFileIdx = state$1._aiTargetFileIdx === idx ? -1 : idx;
-    _renderAIFileChips();
-    const f = state$1._aiTargetFileIdx >= 0 ? state$1._aiFileContext[state$1._aiTargetFileIdx] : null;
-    if (f) showToast$1(`"${f.name}" 已设为修改目标文件`, "success");
-    else showToast$1("已取消目标文件设置", "info");
-  };
-  wa$1.attachFilesToTask = _attachFilesToTask;
-  wa$1.pickAIContextFiles = _pickAIContextFiles;
-  wa$1.addLocalFilesToAIContext = _addLocalFilesToAIContext;
-  const aiContextFileInput = document.getElementById("wa-ai-context-file-input");
-  if (aiContextFileInput) {
-    aiContextFileInput.addEventListener("change", async (event) => {
-      const target = event.target;
-      if (target.files && target.files.length) await _addLocalFilesToAIContext(target.files);
-      target.value = "";
-    });
   }
   const COMPOSERS = {
     chat: {
@@ -5441,6 +5551,22 @@ ${f.warning}` : f.path;
     sendBtn.setAttribute("aria-label", streaming ? "停止当前任务" : "发送");
     sendBtn.innerHTML = streaming ? _PAUSE_SVG : _SEND_SVG;
     sendBtn.onclick = streaming ? () => window.WA && window.WA.stopStream && window.WA.stopStream() : () => window.WA && window.WA.sendMessage && window.WA.sendMessage();
+  }
+  function stopStream() {
+    const ctrl = state._streamAbortCtrl;
+    if (ctrl && typeof ctrl.abort === "function" && !(ctrl.signal && ctrl.signal.aborted)) {
+      ctrl.abort();
+      showToast("正在停止当前任务...", "info");
+      return true;
+    }
+    if (state.isLoading) {
+      state.isLoading = false;
+      state._streamAbortCtrl = null;
+      _setStreamBtn$1(false);
+      showToast("当前任务已停止", "info");
+      return true;
+    }
+    return false;
   }
   function _computeInlineDiff(original, proposed) {
     const stripHtml = (s) => s.replace(/<[^>]+>/g, "").trim();
@@ -6108,6 +6234,7 @@ ${defaultPrompt}`;
       text,
       pinnedSelText,
       pinnedSelSource,
+      selectionContext: explicitSelection || null,
       msgs,
       loadingEl,
       taskPayload: pendingTaskPayload,
@@ -6119,6 +6246,17 @@ ${defaultPrompt}`;
       _setStreamBtn$1(false);
     });
     _clearPendingTaskResultFollowupBinding();
+  }
+  function sendCustomMessage(text) {
+    const input = $("wa-user-input");
+    if (!input) {
+      showToast("AI 输入框未加载，请刷新后重试。", "warning");
+      return;
+    }
+    input.value = String(text || "").trim();
+    input.focus();
+    autoResize(input);
+    sendMessage();
   }
   function sendQuickAction(action) {
     if (state.isLoading) {
@@ -6206,6 +6344,7 @@ ${defaultPrompt}`;
       selectionText: sel,
       selectionSource: _selectionContextSourceLabel$1(state.pinnedSelection),
       pinnedSelSource: _selectionContextSourceLabel$1(state.pinnedSelection),
+      selectionContext: state.pinnedSelection || null,
       fullDocText,
       hasSelection,
       loadingEl,
@@ -6236,6 +6375,8 @@ ${defaultPrompt}`;
     window.WA.resumeTaskArtifact = resumeTaskArtifact;
     window.WA.resumePersistedTaskArtifact = resumePersistedTaskArtifact;
     window.WA.sendMessage = sendMessage;
+    window.WA.sendCustomMessage = sendCustomMessage;
+    window.WA.stopStream = stopStream;
     window.WA.handleInputKeydown = handleInputKeydown;
     window.WA.closeReviewCenter = closeReviewCenter;
     window.WA.setReviewMode = setReviewMode;
@@ -6501,7 +6642,6 @@ ${defaultPrompt}`;
       localStorage.setItem("wa_locked_model", state.lockedModel);
       _clearActiveRoute();
     }
-    state.aiOutputMode = "inline";
     localStorage.removeItem("wa_ai_output_mode");
     _syncModelStatusUi();
     _refreshModelCatalog();
@@ -6551,6 +6691,103 @@ ${defaultPrompt}`;
     window.initSocket = initSocket;
   }
   initSocket();
+  const FILE_TASK_WAITING_TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+    "awaiting_confirmation",
+    "needs_attention",
+    "pending",
+    "waiting"
+  ]);
+  const FILE_TASK_CONFIRMATION_TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+    "awaiting_confirmation"
+  ]);
+  const FILE_TASK_FAILED_TERMINAL_STATUSES = /* @__PURE__ */ new Set([
+    "blocked",
+    "failed",
+    "error",
+    "write_blocked",
+    "tool_gap",
+    "no_file_change",
+    "model_unavailable",
+    "quality_gate_failed"
+  ]);
+  function normalizeFileTaskTerminalStatus(value) {
+    const status = String(value || "").trim().toLowerCase();
+    if (status === "canceled") return "cancelled";
+    if (status === "complete" || status === "success" || status === "succeeded" || status === "verified") return "completed";
+    if (status === "failure") return "failed";
+    return status;
+  }
+  function isFileTaskWaitingStatus(status) {
+    return FILE_TASK_WAITING_TERMINAL_STATUSES.has(normalizeFileTaskTerminalStatus(status));
+  }
+  function isFileTaskConfirmationStatus(status) {
+    return FILE_TASK_CONFIRMATION_TERMINAL_STATUSES.has(normalizeFileTaskTerminalStatus(status));
+  }
+  function isFileTaskFailureStatus(status) {
+    return FILE_TASK_FAILED_TERMINAL_STATUSES.has(normalizeFileTaskTerminalStatus(status));
+  }
+  function isFileTaskIncompleteBlockedStatus(status, completedTask) {
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(status);
+    return terminalStatus2 === "plan_checked" && !completedTask || isFileTaskFailureStatus(terminalStatus2);
+  }
+  function fileTaskTerminalUiStatus(status, completedTask, fatalSummary = "") {
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(status);
+    if (String(fatalSummary || "").trim()) return "error";
+    if (terminalStatus2 === "cancelled") return "cancelled";
+    if (isFileTaskConfirmationStatus(terminalStatus2)) return "pending";
+    if (isFileTaskIncompleteBlockedStatus(terminalStatus2, completedTask)) return "error";
+    if (!completedTask) return "pending";
+    return "done";
+  }
+  function normalizedResumeStatus(status) {
+    const value = normalizeFileTaskTerminalStatus(status);
+    if (["completed", "done"].includes(value)) return "completed";
+    if (isFileTaskFailureStatus(value)) return "failed";
+    if (value === "cancelled") return "cancelled";
+    if (isFileTaskConfirmationStatus(value)) return "waiting";
+    if (value === "running" || value === "streaming") return "running";
+    return value;
+  }
+  function parseSseEvents(buffer, flush) {
+    const source = String(buffer || "").replace(/\r\n/g, "\n");
+    const frames = source.split("\n\n");
+    const remainder = flush ? "" : frames.pop() || "";
+    const completeFrames = flush ? frames.filter((frame) => frame.trim()) : frames;
+    const events = [];
+    completeFrames.forEach((frame) => {
+      const dataLines = String(frame || "").split("\n").filter((line) => line.startsWith("data:")).map((line) => line.replace(/^data:\s?/, ""));
+      if (!dataLines.length) return;
+      try {
+        events.push(JSON.parse(dataLines.join("\n")));
+      } catch {
+      }
+    });
+    return { events, remainder };
+  }
+  function dispatchFileTaskEvent(card, event, options) {
+    if (!card || !event || typeof event !== "object") return false;
+    const eventType = String(event.type || "").trim().toLowerCase();
+    const handler = eventType ? options.handlers[eventType] : void 0;
+    if (!handler) return false;
+    const payload = event.payload || event;
+    const state2 = options.getState(card);
+    const runId = String(event.run_id || payload.run_id || "").trim();
+    const seq = Number(event.seq || payload.seq || 0);
+    const eventKey = `${runId}:${eventType}:${seq}`;
+    if (runId && state2.lastEventRunId && state2.lastEventRunId !== runId) {
+      state2.processedEventKeys.clear();
+      state2.lastEventSeq = 0;
+    }
+    state2.lastEventRunId = runId;
+    if (runId && seq > 0 && state2.lastEventSeq >= seq && state2.processedEventKeys.has(eventKey)) {
+      return false;
+    }
+    state2.lastEventSeq = Math.max(state2.lastEventSeq, seq);
+    state2.processedEventKeys.add(eventKey);
+    handler(card, event, payload);
+    options.afterDispatch?.(card);
+    return true;
+  }
   const FILE_TASK_LOG_PREFIX = "[WA fileTask]";
   const FILE_TASK_IDLE_NOTICE_MS = 25e3;
   const FILE_TASK_IDLE_WARN_MS = 6e4;
@@ -6662,26 +6899,61 @@ ${defaultPrompt}`;
   }
   function normalizedTaskLifecyclePayload(payload) {
     const data = payload && typeof payload === "object" ? payload : {};
-    const classification = data.classification && typeof data.classification === "object" ? data.classification : null;
+    const decisionContext = data.decision_context && typeof data.decision_context === "object" ? data.decision_context : null;
+    const classification = decisionContext && decisionContext.classification && typeof decisionContext.classification === "object" ? decisionContext.classification : data.classification && typeof data.classification === "object" ? data.classification : null;
     if (!classification) return data;
     const normalized = Object.assign({}, classification);
-    if (data.intent_plan && typeof data.intent_plan === "object") normalized.intent_plan = data.intent_plan;
+    if (decisionContext) normalized.decision_context = decisionContext;
+    const intentPlan = decisionContext && decisionContext.intent_plan && typeof decisionContext.intent_plan === "object" ? decisionContext.intent_plan : data.intent_plan && typeof data.intent_plan === "object" ? data.intent_plan : null;
+    const requirements = decisionContext && decisionContext.requirements && typeof decisionContext.requirements === "object" ? decisionContext.requirements : data.requirements && typeof data.requirements === "object" ? data.requirements : null;
+    const planCheck = decisionContext && decisionContext.plan_check && typeof decisionContext.plan_check === "object" ? decisionContext.plan_check : data.plan_check && typeof data.plan_check === "object" ? data.plan_check : null;
+    const routingDecision = decisionContext && decisionContext.routing_decision && typeof decisionContext.routing_decision === "object" ? decisionContext.routing_decision : data.routing_decision && typeof data.routing_decision === "object" ? data.routing_decision : null;
+    if (intentPlan) normalized.intent_plan = intentPlan;
+    if (requirements) normalized.requirements = requirements;
+    if (planCheck) normalized.plan_check = planCheck;
+    if (routingDecision) normalized.routing_decision = routingDecision;
     if (data.runtime && typeof data.runtime === "object") normalized.runtime = data.runtime;
     if (data.next_action_artifact && typeof data.next_action_artifact === "object") normalized.next_action_artifact = data.next_action_artifact;
     if (data.artifact_result && typeof data.artifact_result === "object") normalized.artifact_result = data.artifact_result;
     if (data.followup_record && typeof data.followup_record === "object") normalized.followup_record = data.followup_record;
-    if (data.requirements && typeof data.requirements === "object") normalized.requirements = data.requirements;
-    if (data.plan_check && typeof data.plan_check === "object") normalized.plan_check = data.plan_check;
+    if (decisionContext && decisionContext.intent_adjudication && typeof decisionContext.intent_adjudication === "object") normalized.intent_adjudication = decisionContext.intent_adjudication;
+    if (decisionContext && decisionContext.effective_planner && typeof decisionContext.effective_planner === "object") normalized.effective_planner = decisionContext.effective_planner;
     if (data.constraint_audit && typeof data.constraint_audit === "object") normalized.constraint_audit = data.constraint_audit;
     if (data.workflow_state && typeof data.workflow_state === "object") normalized.workflow_state = data.workflow_state;
     if (data.supervisor_audit && typeof data.supervisor_audit === "object") normalized.supervisor_audit = data.supervisor_audit;
+    if (data.task_context && typeof data.task_context === "object") normalized.task_context = data.task_context;
+    if (data.task_request_payload && typeof data.task_request_payload === "object") normalized.task_request_payload = data.task_request_payload;
     if (data.quick_action_mode) normalized.quick_action_mode = data.quick_action_mode;
     if (data.task_id) normalized.task_id = data.task_id;
     if (data.run_id) normalized.run_id = data.run_id;
     if (data.task) normalized.task = data.task;
+    if (data.task_title) normalized.task_title = data.task_title;
+    if (data.title) normalized.title = data.title;
     if (data.summary) normalized.summary = data.summary;
+    if (data.memory_summary) normalized.memory_summary = data.memory_summary;
+    if (data.model_context_text) normalized.model_context_text = data.model_context_text;
     if (data.text || data.error) normalized.text = data.text || data.error;
+    [
+      "final_answer",
+      "finalAnswer",
+      "answer",
+      "result",
+      "output",
+      "output_text",
+      "content",
+      "message",
+      "data",
+      "payload"
+    ].forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(data, key)) normalized[key] = data[key];
+    });
     if (Object.prototype.hasOwnProperty.call(data, "completed_task")) normalized.completed_task = data.completed_task;
+    return normalized;
+  }
+  function normalizeQuickActionMode(value) {
+    const normalized = String(value || "").trim().toLowerCase();
+    if (normalized === "simple") return "answer";
+    if (normalized === "proposal") return "hybrid";
     return normalized;
   }
   function makeTaskError(message) {
@@ -6741,11 +7013,62 @@ ${defaultPrompt}`;
     if (text.length > 260) return true;
     return /(^|\n)\s*#{1,6}\s|\*\*|```|(^|\n)\s*[-*]\s+\S/u.test(text);
   }
-  function compactFlowSummary(value, fallback = "完整结果见对话汇报。") {
+  function compactFlowSummary(value, fallback = "完整结果见总结与回答。") {
     const text = String(value || "").trim();
     if (!text) return fallback;
     if (looksLikeFullAnswerText(text)) return fallback;
     return previewText(text.replace(/\s+/g, " "), 160);
+  }
+  function terminalTextValue(value, depth = 0) {
+    if (typeof value === "string") return value.trim();
+    if (!value || depth > 3) return "";
+    if (Array.isArray(value)) {
+      return value.map((item) => terminalTextValue(item, depth + 1)).filter(Boolean).join("\n").trim();
+    }
+    if (typeof value !== "object") return "";
+    const keys = [
+      "final_answer",
+      "finalAnswer",
+      "answer",
+      "summary",
+      "text",
+      "content",
+      "output_text",
+      "output",
+      "result",
+      "message",
+      "error"
+    ];
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      const text = terminalTextValue(value[key], depth + 1);
+      if (text) return text;
+    }
+    return "";
+  }
+  function terminalAnswerText(payload, fallback = "") {
+    const data = payload && typeof payload === "object" ? payload : {};
+    const candidates = [
+      data.final_answer,
+      data.finalAnswer,
+      data.answer,
+      data.output_text,
+      data.output,
+      data.result,
+      data.summary,
+      data.text,
+      data.content,
+      data.message,
+      data.error,
+      data.data,
+      data.payload,
+      fallback
+    ];
+    for (const candidate of candidates) {
+      const text = terminalTextValue(candidate);
+      if (text) return text;
+    }
+    return "";
   }
   function renderTaskFinalReport(value) {
     const text = String(value || "").trim();
@@ -6766,6 +7089,82 @@ ${defaultPrompt}`;
       }
     }
     return esc$1(text).replace(/\n/g, "<br>");
+  }
+  function firstContextText(source, keys) {
+    if (!source || typeof source !== "object") return "";
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(source, key)) continue;
+      const value = source[key];
+      if (typeof value === "string") {
+        const text = value.trim();
+        if (text) return text;
+      }
+    }
+    return "";
+  }
+  function taskContextSummaryText(context) {
+    const data = context && typeof context === "object" ? context : {};
+    const lines = [];
+    const file = firstContextText(data, ["active_file", "activeFile", "file_name", "fileName", "file", "path"]);
+    const range = firstContextText(data, ["rangeA1", "range", "selection_range", "selectedRange"]);
+    const selection = firstContextText(data, ["selection", "selected_text", "selectedText", "text"]);
+    if (file) lines.push("文件: " + previewText(basename$2(file) || file, 80));
+    if (range) lines.push("范围: " + previewText(range, 80));
+    if (selection) lines.push("选中内容: " + previewText(selection.replace(/\s+/g, " "), 140));
+    const files = Array.isArray(data.files) ? data.files : Array.isArray(data.attachments) ? data.attachments : [];
+    const names = files.map((item) => readableResultItem(item)).filter(Boolean).slice(0, 3);
+    if (names.length) lines.push("附件: " + names.join("、") + (files.length > names.length ? " 等" : ""));
+    if (!lines.length) {
+      const keys = Object.keys(data).filter((key) => data[key] != null && data[key] !== "").slice(0, 4);
+      if (keys.length) lines.push("上下文字段: " + keys.join("、"));
+    }
+    return lines.join("\n");
+  }
+  function renderTaskInteractionLine(label, text) {
+    const value = String(text || "").trim();
+    if (!value) return "";
+    return '<div class="wa-task-interaction-line"><span>' + esc$1(label) + "</span><p>" + esc$1(value).replace(/\n/g, "<br>") + "</p></div>";
+  }
+  function renderTaskUnderstandingCard(card) {
+    const request = String(card && card.dataset && card.dataset.taskRequest || "").trim();
+    const context = String(card && card.dataset && card.dataset.taskContextSummary || "").trim();
+    if (!request && !context) return "";
+    const rows = [
+      renderTaskInteractionLine("我理解的任务", request ? previewText(request.replace(/\s+/g, " "), 180) : "按当前上下文继续处理文件任务。"),
+      renderTaskInteractionLine("使用的上下文", context)
+    ].filter(Boolean).join("");
+    if (!rows) return "";
+    return '<div class="wa-task-interaction-card" data-role="task-understanding"><div class="wa-task-interaction-title">任务理解</div>' + rows + "</div>";
+  }
+  function renderTaskMemoryCard(card) {
+    const memory = String(card && card.dataset && card.dataset.taskMemorySummary || "").trim();
+    if (!memory) return "";
+    return '<div class="wa-task-interaction-card wa-task-memory-card" data-role="task-memory-summary"><div class="wa-task-interaction-title">已写入任务记忆</div>' + renderTaskInteractionLine("记忆摘要", previewText(memory.replace(/\s+/g, " "), 260)) + "</div>";
+  }
+  function syncTaskInteractionSummary(card) {
+    if (!isTaskCardElement(card)) return;
+    ensureTaskReportAfterProcess(card);
+    const summary = card.querySelector('[data-role="summary"]');
+    if (!summary) return;
+    const pairs = [
+      { role: "task-understanding", html: renderTaskUnderstandingCard(card) },
+      { role: "task-memory-summary", html: renderTaskMemoryCard(card) }
+    ];
+    pairs.forEach((pair) => {
+      const existing = summary.querySelector('[data-role="' + pair.role + '"]');
+      if (!pair.html) {
+        if (existing) existing.remove();
+        return;
+      }
+      if (existing) {
+        existing.outerHTML = pair.html;
+        return;
+      }
+      const anchor = summary.querySelector('[data-role="final-report"]');
+      if (anchor) anchor.insertAdjacentHTML("beforebegin", pair.html);
+      else summary.insertAdjacentHTML("beforeend", pair.html);
+    });
+    if (String(summary.textContent || "").trim()) summary.hidden = false;
   }
   function tryParseJson(value) {
     const text = String(value || "").trim();
@@ -6859,7 +7258,7 @@ ${defaultPrompt}`;
     if (toolName === "provided_file_context" || toolName === "selection_context") return "";
     if (toolName === "parse_file_to_text" && payload.success !== false) return "";
     if (looksLikeFullAnswerText(preview)) {
-      return '<div class="wa-task-result-text">' + esc$1("结果已生成，完整内容见对话汇报。") + "</div>";
+      return '<div class="wa-task-result-text">' + esc$1("结果已生成，完整内容见总结与回答。") + "</div>";
     }
     const summary = toolPreviewSummary(toolName, preview);
     if (!summary) return "";
@@ -6876,22 +7275,6 @@ ${defaultPrompt}`;
     if (isInternalTool(name) && payload.success !== false && !payload.blocked) return true;
     if (payload.skipped) return true;
     return false;
-  }
-  function parseSseEvents(buffer, flush) {
-    const source = String(buffer || "").replace(/\r\n/g, "\n");
-    const frames = source.split("\n\n");
-    const remainder = flush ? "" : frames.pop() || "";
-    const completeFrames = flush ? frames.filter((f) => f.trim()) : frames;
-    const events = [];
-    completeFrames.forEach((frame) => {
-      const dataLines = String(frame || "").split("\n").filter((l) => l.startsWith("data:")).map((l) => l.replace(/^data:\s?/, ""));
-      if (!dataLines.length) return;
-      try {
-        events.push(JSON.parse(dataLines.join("\n")));
-      } catch {
-      }
-    });
-    return { events, remainder };
   }
   function ensureTaskUiState(card) {
     if (!isTaskCardElement(card)) {
@@ -7024,21 +7407,50 @@ ${defaultPrompt}`;
     row.innerHTML = html;
     return row;
   }
+  function noteStreamIssue(card, key, text) {
+    if (!card) return;
+    const state2 = ensureTaskUiState(card);
+    if (state2.streamIssueKeys.has(key)) return;
+    state2.streamIssueKeys.add(key);
+    const issues = Number(card.dataset.taskStreamIssueCount || "0") || 0;
+    card.dataset.taskStreamIssueCount = String(issues + 1);
+    if (typeof console !== "undefined" && typeof console.debug === "function") {
+      console.debug("[FileTaskStream]", text || "stream event issue", key);
+    }
+  }
   function setTaskRunContext(card, evt, payload) {
     if (!card || !card.dataset) return;
     const eventData = evt || {};
     const data = normalizedTaskLifecyclePayload(payload);
     const taskContract = data.task_contract && typeof data.task_contract === "object" ? data.task_contract : null;
     const artifactResult = data.artifact_result && typeof data.artifact_result === "object" ? data.artifact_result : null;
+    const taskRequestPayload = data.task_request_payload && typeof data.task_request_payload === "object" ? data.task_request_payload : null;
+    const taskContext = data.task_context && typeof data.task_context === "object" ? data.task_context : taskRequestPayload && taskRequestPayload.task_context && typeof taskRequestPayload.task_context === "object" ? taskRequestPayload.task_context : null;
     const taskId = String(eventData.task_id || data.task_id || artifactResult && artifactResult.task_id || "").trim();
     const runId = String(eventData.run_id || data.run_id || "").trim();
     if (taskId) card.dataset.taskId = taskId;
     if (runId) card.dataset.taskRunId = runId;
+    const taskTitle2 = String(data.task_title || data.title || "").trim();
+    if (taskTitle2) {
+      card.dataset.taskTitle = taskTitle2;
+      const titleEl = card.querySelector(".wa-task-title");
+      if (titleEl) titleEl.textContent = taskTitle2;
+    }
     if (data.task) card.dataset.taskRequest = String(data.task || "").trim();
+    const contextSummary = taskContextSummaryText(taskContext);
+    if (contextSummary) card.dataset.taskContextSummary = contextSummary;
+    const memorySummary = String(data.memory_summary || data.model_context_text || "").trim();
+    if (memorySummary) card.dataset.taskMemorySummary = memorySummary;
     if (data.mode) card.dataset.taskMode = String(data.mode || "").trim();
-    if (data.summary) card.dataset.taskSummary = compactFlowSummary(String(data.summary || "").trim(), "任务已完成，完整结果见对话汇报。");
-    if (data.text || data.error) card.dataset.taskSummary = compactFlowSummary(String(data.text || data.error || "").trim(), "任务已完成，完整结果见对话汇报。");
-    if (data.quick_action_mode) card.dataset.taskQuickActionMode = String(data.quick_action_mode || "").trim();
+    const eventAnswer = terminalAnswerText(data);
+    if (eventAnswer) {
+      card.dataset.taskSummary = compactFlowSummary(eventAnswer, "任务已完成，完整结果见总结与回答。");
+      card.dataset.taskFinalAnswer = eventAnswer;
+    }
+    if (data.quick_action_mode) {
+      const quickActionMode = normalizeQuickActionMode(String(data.quick_action_mode || "").trim());
+      card.dataset.taskQuickActionMode = quickActionMode;
+    }
     if (Object.prototype.hasOwnProperty.call(data, "completed_task")) card.dataset.taskCompleted = data.completed_task ? "true" : "false";
     if (data.request_kind) card.dataset.taskRequestKind = String(data.request_kind || "").trim();
     if (data.task_family) card.dataset.taskFamily = String(data.task_family || "").trim();
@@ -7047,6 +7459,16 @@ ${defaultPrompt}`;
     if (data.selected_recipe) card.dataset.taskSelectedRecipe = String(data.selected_recipe || "").trim();
     if (data.output_mode) card.dataset.taskOutputMode = String(data.output_mode || "").trim();
     if (data.target_file_type) card.dataset.taskTargetFileType = String(data.target_file_type || "").trim();
+    const routingDecision = data.routing_decision && typeof data.routing_decision === "object" ? data.routing_decision : null;
+    if (routingDecision) {
+      if (routingDecision.route) card.dataset.taskRoute = String(routingDecision.route || "").trim();
+      if (routingDecision.route_source) card.dataset.taskRouteSource = String(routingDecision.route_source || "").trim();
+      try {
+        card.dataset.taskRoutingDecision = encodeURIComponent(JSON.stringify(routingDecision));
+      } catch {
+        delete card.dataset.taskRoutingDecision;
+      }
+    }
     if (Object.prototype.hasOwnProperty.call(data, "confidence")) {
       const c = Number(data.confidence);
       if (Number.isFinite(c) && c >= 0) card.dataset.taskClassificationConfidence = String(c);
@@ -7070,7 +7492,7 @@ ${defaultPrompt}`;
     if (Object.prototype.hasOwnProperty.call(intentPlan, "requires_confirmation")) card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation ? "true" : "false";
     else delete card.dataset.taskIntentRequiresConfirmation;
     const runtime = data.runtime && typeof data.runtime === "object" ? data.runtime : {};
-    const terminalStatus2 = String(runtime.terminal_status || "").trim();
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(runtime.terminal_status || "");
     if (terminalStatus2) card.dataset.taskTerminalStatus = terminalStatus2;
     const nextActionArtifact = data.next_action_artifact && typeof data.next_action_artifact === "object" ? data.next_action_artifact : null;
     const resumeRequest = nextActionArtifact && nextActionArtifact.resume_request && typeof nextActionArtifact.resume_request === "object" ? nextActionArtifact.resume_request : null;
@@ -7089,41 +7511,71 @@ ${defaultPrompt}`;
         delete card.dataset.taskPendingResumeLabel;
       }
     }
+    syncTaskInteractionSummary(card);
   }
   function taskTerminalResult(card, fallbackSummary) {
     const dataset = card && card.dataset ? card.dataset : {};
-    const terminalStatus2 = String(dataset.taskTerminalStatus || "").trim().toLowerCase();
-    const explicitSummary = String(dataset.taskSummary || fallbackSummary || "").trim();
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || "");
+    const explicitSummary = String(fallbackSummary || dataset.taskFinalAnswer || dataset.taskSummary || "").trim();
     const fatalSummary = String(card && card._fatalErrorText || "").trim();
     const completedTask = Object.prototype.hasOwnProperty.call(dataset, "taskCompleted") ? boolAttr(dataset.taskCompleted) : true;
-    let status = "done";
-    if (fatalSummary) status = "error";
-    else if (terminalStatus2 === "cancelled") status = "cancelled";
-    else if (terminalStatus2 === "awaiting_confirmation" || terminalStatus2 === "needs_attention" || terminalStatus2 === "pending") status = "pending";
-    else if (terminalStatus2 === "failed" || terminalStatus2 === "blocked" || terminalStatus2 === "write_blocked" || terminalStatus2 === "tool_gap" || terminalStatus2 === "no_file_change" || terminalStatus2 === "model_unavailable" || terminalStatus2 === "quality_gate_failed") status = "error";
-    else if (!completedTask) status = "pending";
+    const status = fileTaskTerminalUiStatus(terminalStatus2, completedTask, fatalSummary);
     return { summary: explicitSummary || fatalSummary || "文件任务流已完成。", status, task_id: String(dataset.taskId || "").trim(), run_id: String(dataset.taskRunId || "").trim(), loadingEl: card || null, terminal_status: terminalStatus2, completed_task: completedTask };
   }
+  function taskResultRequiresUserConfirmation(result) {
+    return !!result && isFileTaskConfirmationStatus(result.terminal_status);
+  }
   function terminalStepSummary(result) {
-    if (!result) return "最终汇报已生成。";
-    if (result.status === "error") return "执行失败，错误信息已写入最终汇报。";
+    if (!result) return "总结与回答已生成。";
+    if (result.status === "error") return "执行失败，错误信息已写入总结与回答。";
     if (result.status === "cancelled") return "任务已取消。";
-    if (result.status === "pending") return "任务等待确认。";
-    return "最终汇报已生成。";
+    if (result.status === "pending") return taskResultRequiresUserConfirmation(result) ? "任务等待确认。" : "任务仍在处理中或等待同步。";
+    return "总结与回答已生成。";
+  }
+  function taskCompletionBannerHtml(result) {
+    const status = result && result.status ? result.status : "done";
+    const pendingLabel = taskResultRequiresUserConfirmation(result) ? { title: "等待确认", detail: "请确认下一步操作，任务随后会继续执行。" } : { title: "任务未完成", detail: "当前进度已保留，可查看过程并继续处理。" };
+    const labels = {
+      done: { title: "任务完成", detail: "总结与回答已生成，显示在执行步骤下方。" },
+      error: { title: "任务未完成", detail: "失败原因和可继续处理的建议已整理在下方。" },
+      cancelled: { title: "任务已取消", detail: "已保留本轮执行记录和当前结果。" },
+      pending: pendingLabel
+    };
+    const label = labels[status] || labels.done;
+    return '<div class="wa-task-completion-banner" data-status="' + escAttr(status) + '" role="status" aria-live="polite"><span class="wa-task-completion-icon" aria-hidden="true"></span><span class="wa-task-completion-copy"><strong>' + esc$1(label.title) + "</strong><span>" + esc$1(label.detail) + "</span></span></div>";
+  }
+  function announceTaskCompletion(card, result, report) {
+    if (!card || card.dataset.historySnapshot === "true" || !card.isConnected) return;
+    const status = String(result && result.status || "done").trim() || "done";
+    if (card.dataset.taskCompletionAnnounced === status) return;
+    card.dataset.taskCompletionAnnounced = status;
+    if (status === "done") showToast$1("任务已完成，结果已显示在步骤下方", "success", 3200);
+    else if (status === "error") showToast$1("任务未完成，请查看下方原因与建议", "error", 3600);
+    else if (status === "pending") showToast$1(taskResultRequiresUserConfirmation(result) ? "任务正在等待你的确认" : "任务仍在处理中或等待同步", "info", 3e3);
+    window.requestAnimationFrame(() => {
+      if (!report || !report.isConnected) return;
+      report.classList.add("is-revealed");
+      if (typeof report.scrollIntoView === "function") {
+        report.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      }
+    });
   }
   function taskResultActionsHtml(card) {
     const dataset = card && card.dataset ? card.dataset : {};
-    const terminal = String(dataset.taskTerminalStatus || "").trim().toLowerCase();
+    const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || "");
     const pendingResumePayload = String(dataset.taskPendingResumePayload || "").trim();
-    const completed = String(dataset.taskCompleted || "").trim().toLowerCase() !== "false" && !["failed", "blocked", "write_blocked", "tool_gap", "no_file_change", "model_unavailable", "quality_gate_failed", "cancelled"].includes(terminal);
+    const completedTask = String(dataset.taskCompleted || "").trim().toLowerCase() !== "false";
+    const uiStatus = fileTaskTerminalUiStatus(terminal, completedTask);
+    const completed = uiStatus === "done";
+    const incompleteBlocked = isFileTaskIncompleteBlockedStatus(terminal, completedTask);
     const request = String(dataset.taskRequest || "").trim();
     const pendingLabel = String(dataset.taskPendingResumeLabel || "").trim();
-    const quickActionMode = String(dataset.taskQuickActionMode || "").trim();
+    const quickActionMode = normalizeQuickActionMode(String(dataset.taskQuickActionMode || "").trim());
     const canApply = String(dataset.taskIntentCanApply || "").trim().toLowerCase() === "true";
     const requiresConfirmation = String(dataset.taskIntentRequiresConfirmation || "").trim().toLowerCase() === "true";
     const outputMode = String(dataset.taskOutputMode || "").trim().toLowerCase();
-    const waitingForContinuation = terminal === "awaiting_confirmation" || terminal === "needs_attention" || terminal === "pending" || !completed;
-    if (pendingResumePayload && terminal === "awaiting_confirmation" && waitingForContinuation) {
+    const waitingForConfirmation = isFileTaskConfirmationStatus(terminal);
+    if (pendingResumePayload && waitingForConfirmation) {
       const actionLabel = pendingLabel || "继续下一步";
       return [
         '<div class="wa-task-actions">',
@@ -7135,25 +7587,31 @@ ${defaultPrompt}`;
         "</div>"
       ].join("");
     }
-    let improveText = completed ? "继续优化" : "继续修复";
+    let questionText = completed ? "询问结果" : "追问原因";
+    let improveText = completed ? "继续处理" : "继续修复";
+    let actionHint = completed ? "任务已完成，后续操作会作为新请求发送。" : "可继续补充要求或重新处理。";
     let applyActionHtml = "";
+    if (incompleteBlocked) improveText = "重新发起";
     if (quickActionMode === "answer") {
-      improveText = "继续分析";
+      if (!incompleteBlocked) improveText = "继续分析";
     } else if (quickActionMode === "hybrid") {
-      if (canApply) {
-        improveText = "继续细化方案";
-        applyActionHtml = `    <button type="button" class="wa-task-followup-action primary" data-task-followup-action="apply">${esc$1(requiresConfirmation ? "应用建议" : "应用到文件")}</button>`;
-      } else if (outputMode && outputMode !== "write") {
-        improveText = "继续细化";
+      if (!incompleteBlocked) {
+        if (canApply) {
+          improveText = "继续细化方案";
+          applyActionHtml = `    <button type="button" class="wa-task-followup-action primary" data-task-followup-action="apply">${esc$1(requiresConfirmation ? "应用建议" : "应用到文件")}</button>`;
+        } else if (outputMode && outputMode !== "write") {
+          improveText = "继续细化";
+        }
       }
-    } else if (pendingLabel) {
+    } else if (pendingLabel && !incompleteBlocked) {
       improveText = pendingLabel;
     }
     return [
       '<div class="wa-task-actions">',
+      `  <span class="wa-task-action-hint">${esc$1(actionHint)}</span>`,
       '  <div class="wa-task-action-buttons">',
       applyActionHtml,
-      '    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">追问</button>',
+      `    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">${esc$1(questionText)}</button>`,
       `    <button type="button" class="wa-task-followup-action" data-task-followup-action="improve" data-task-followup-request="${escAttr(request || "")}">${esc$1(improveText)}</button>`,
       "  </div>",
       "</div>"
@@ -7162,8 +7620,8 @@ ${defaultPrompt}`;
   function scheduleTaskLiveProgressCollapse(card) {
     const host = document.getElementById("wa-task-live-progress");
     if (!host) return;
-    const terminalStatus2 = String(card && card.dataset && card.dataset.taskTerminalStatus || "").trim().toLowerCase();
-    if (terminalStatus2 === "awaiting_confirmation" || terminalStatus2 === "needs_attention" || terminalStatus2 === "pending") return;
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(card && card.dataset && card.dataset.taskTerminalStatus || "");
+    if (isFileTaskConfirmationStatus(terminalStatus2)) return;
     const currentTimer = host._waCollapseTimer;
     if (currentTimer) window.clearTimeout(currentTimer);
     host._waCollapseTimer = window.setTimeout(() => {
@@ -7175,16 +7633,19 @@ ${defaultPrompt}`;
     const settings = opts && typeof opts === "object" ? opts : {};
     if (!card) return null;
     card.classList.add("streaming");
+    const waiting = isFileTaskWaitingStatus(settings.initialStatus);
+    const confirmation = isFileTaskConfirmationStatus(settings.initialStatus);
     if (card.dataset) {
       if (settings.taskId) card.dataset.taskId = String(settings.taskId || "").trim();
       if (settings.runId) card.dataset.taskRunId = String(settings.runId || "").trim();
-      if (settings.initialStatus === "waiting") card.dataset.taskTerminalStatus = "awaiting_confirmation";
+      if (confirmation) card.dataset.taskTerminalStatus = "awaiting_confirmation";
+      else if (waiting) card.dataset.taskTerminalStatus = normalizeFileTaskTerminalStatus(settings.initialStatus);
     }
     const statusEl = card.querySelector('[data-role="status"]');
-    if (statusEl) statusEl.textContent = settings.initialStatus === "waiting" ? "待确认" : "恢复中";
+    if (statusEl) statusEl.textContent = confirmation ? "待确认" : waiting ? "待处理" : "恢复中";
     const summaryEl = card.querySelector('[data-role="summary"]');
     if (summaryEl && !String(summaryEl.textContent || "").trim()) {
-      summaryEl.innerHTML = '<div class="wa-task-plan-summary wa-task-outcome">' + esc$1(settings.initialStatus === "waiting" ? "已恢复等待确认的后台任务，正在同步最新进度…" : "已恢复后台任务，正在同步最新进度…") + "</div>";
+      summaryEl.innerHTML = '<div class="wa-task-plan-summary wa-task-outcome">' + esc$1(confirmation ? "已恢复等待确认的后台任务，正在同步最新进度…" : waiting ? "已恢复待处理的后台任务，正在同步最新进度…" : "已恢复后台任务，正在同步最新进度…") + "</div>";
     }
     return card;
   }
@@ -7316,11 +7777,28 @@ ${defaultPrompt}`;
     }
     return card;
   }
+  function ensureTaskReportAfterProcess(card) {
+    if (!card || !isTaskCardElement(card)) return card;
+    const process = card.querySelector('[data-role="process"]');
+    let summary = card.querySelector('[data-role="summary"]');
+    if (!summary) {
+      summary = document.createElement("div");
+      summary.className = "wa-task-summary";
+      summary.dataset.role = "summary";
+    }
+    if (process && process.nextElementSibling !== summary) {
+      process.insertAdjacentElement("afterend", summary);
+    } else if (!process && summary.parentElement !== card) {
+      card.appendChild(summary);
+    }
+    return card;
+  }
   function makeRunCard(loadingEl) {
     const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement("div");
     card.className = "wa-msg ai wa-task-run is-compact";
     card._fatalErrorText = "";
     card.innerHTML = '<div class="wa-task-header"><div class="wa-task-title-wrap"><div class="wa-task-title">文件任务</div><div class="wa-task-progress" data-role="ui-progress" data-status="running"><div class="wa-task-progress-meta"><span data-role="ui-phase">执行任务</span><span data-role="ui-progress-value">准备识别任务</span></div><div class="wa-task-progress-track"><i data-role="ui-progress-fill"></i></div></div></div><div class="wa-task-status" data-role="status">处理中</div><button type="button" class="wa-task-cancel-btn" data-role="cancel" title="取消任务">取消</button></div><details class="wa-task-process" data-role="process" open><summary><span data-role="process-title">执行过程</span><span data-role="process-state">进行中</span></summary><div class="wa-task-plan" data-role="plan"></div><div class="wa-task-steps" data-role="steps"></div></details><div class="wa-task-summary" data-role="summary"></div>';
+    ensureTaskReportAfterProcess(card);
     const attached = attachRunCardBehavior(card);
     syncTaskLiveProgress(attached);
     return attached;
@@ -7358,9 +7836,10 @@ ${defaultPrompt}`;
     const valueEl = card.querySelector('[data-role="ui-progress-value"]');
     const fillEl = card.querySelector('[data-role="ui-progress-fill"]');
     const statusRaw = String(statusEl && statusEl.dataset ? statusEl.dataset.status || (progressEl && progressEl.dataset ? progressEl.dataset.status || "" : "") : "").trim().toLowerCase() || "running";
+    const normalizedStatus = normalizeFileTaskTerminalStatus(statusRaw);
     const explicit = state2.progressExplicit === true || String(progressEl && progressEl.dataset ? progressEl.dataset.explicit || "" : "").trim().toLowerCase() === "true";
     const plan = taskPlanProgress(card);
-    const terminal = ["failed", "succeeded", "success", "cancelled", "waiting", "awaiting_confirmation"].includes(statusRaw) || String(card.dataset.taskTerminalStatus || "").trim() !== "";
+    const terminal = ["completed", "failed", "cancelled"].includes(normalizedResumeStatus(normalizedStatus)) || isFileTaskConfirmationStatus(normalizedStatus) || String(card.dataset.taskTerminalStatus || "").trim() !== "";
     const basis = explicit ? "explicit" : plan.total ? "planned" : "estimated";
     let percent = Number(state2.uiProgress || 0);
     let valueText = valueEl ? String(valueEl.textContent || "").trim() : "";
@@ -7438,8 +7917,10 @@ ${defaultPrompt}`;
       return normalized;
     }
     if (kind === "output") {
+      if (normalized === "simple") return "只给答案";
       if (normalized === "answer") return "只给答案";
       if (normalized === "write") return "写入文件";
+      if (normalized === "proposal") return "先分析后决定";
       if (normalized === "hybrid") return "先分析后决定";
       return normalized;
     }
@@ -7487,20 +7968,28 @@ ${defaultPrompt}`;
     if (value === "clear") return "通过";
     return value || "检查";
   }
-  function supervisorAuditHtml(data) {
+  function supervisorAuditHtml(data, options = {}) {
     const audit = supervisorAuditFromPayload(data);
     if (!audit) return "";
     const status = String(audit.status || "").trim().toLowerCase();
     const chipClass = status === "blocked" || status === "warning" ? "warn" : "success";
     const summary = String(audit.summary || "").trim();
     const warnings = Array.isArray(audit.warnings) ? audit.warnings.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4) : [];
-    const actions = Array.isArray(audit.required_actions) ? audit.required_actions.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3) : [];
+    const constraints = Array.isArray(audit.execution_constraints) ? audit.execution_constraints.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 4) : [];
+    const userActions = Array.isArray(audit.user_actions) ? audit.user_actions.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3) : [];
+    const legacyActions = !constraints.length && !userActions.length && Array.isArray(audit.required_actions) ? audit.required_actions.map((item) => String(item || "").trim()).filter(Boolean).slice(0, 3) : [];
     const confidence = Number(audit.confidence);
     const meta = [
       Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? `置信度 ${Math.round(confidence * 100)}%` : "",
       audit.risk_level ? `风险 ${audit.risk_level}` : ""
     ].filter(Boolean);
-    const details = uniqueTextParts([...warnings, ...actions.map((item) => `要求：${item}`)]);
+    const showDetails = !options.compact || status === "blocked";
+    const details = showDetails ? uniqueTextParts([
+      ...warnings,
+      ...constraints.map((item) => `执行约束：${item}`),
+      ...userActions.map((item) => `需要补充：${item}`),
+      ...legacyActions.map((item) => `执行约束：${item}`)
+    ]) : [];
     return '<div class="wa-task-result-text"><span class="wa-task-chip ' + chipClass + '">监管' + esc$1(supervisorAuditStatusLabel(status)) + "</span>" + esc$1(summary) + "</div>" + (meta.length ? '<div class="wa-task-meta">' + meta.map((item) => '<span class="wa-task-meta-item">' + esc$1(item) + "</span>").join("") + "</div>" : "") + (details.length ? '<ul class="wa-task-plan-violations">' + details.map((item) => "<li>" + esc$1(item) + "</li>").join("") + "</ul>" : "");
   }
   function modelLabel(mode, modelId) {
@@ -7515,7 +8004,7 @@ ${defaultPrompt}`;
     if (!isTaskCardElement(card) || !payload || typeof payload !== "object") return;
     if (payload.task && !card.dataset.taskRequest) card.dataset.taskRequest = String(payload.task || "").trim();
     const options = payload.options && typeof payload.options === "object" ? payload.options : {};
-    const routeIntent = options.workspace_route_intent && typeof options.workspace_route_intent === "object" ? options.workspace_route_intent : null;
+    const routeIntent = payload.routing_decision && typeof payload.routing_decision === "object" ? payload.routing_decision : options.workspace_route_intent && typeof options.workspace_route_intent === "object" ? options.workspace_route_intent : null;
     const route = String(routeIntent && routeIntent.route || "").trim();
     const mode = String(payload.model_mode || "").trim();
     const model = modelLabel(mode, payload.model_id);
@@ -7559,12 +8048,16 @@ ${defaultPrompt}`;
   }
   function terminalStepCompactText(card, stepId, title, result) {
     if (result && result.status === "error") {
-      if (stepId === "check") return "已记录失败原因，详见底部答复。";
+      if (stepId === "check") return "已记录失败原因，详见下方总结与回答。";
       if (stepId === "execute") return "执行未完成，已停止继续处理。";
     }
     if (result && result.status === "pending") {
-      if (stepId === "check") return "等待用户确认后继续。";
-      return "已暂停，等待下一步确认。";
+      if (taskResultRequiresUserConfirmation(result)) {
+        if (stepId === "check") return "等待用户确认后继续。";
+        return "已暂停，等待下一步确认。";
+      }
+      if (stepId === "check") return "当前任务尚未完成，进度已保留。";
+      return "仍在处理中或等待同步。";
     }
     if (stepId === "route") return "已识别任务目标和文件上下文。";
     if (stepId === "plan") return "已确认执行方案和约束。";
@@ -7575,7 +8068,7 @@ ${defaultPrompt}`;
       if (names.length) return `已完成处理：${names.join("、")}。`;
       return "已完成文件处理或分析。";
     }
-    if (stepId === "check") return "已完成核验，答复见底部。";
+    if (stepId === "check") return "已完成核验，总结与回答见下方。";
     return title ? `${title}已完成。` : "已完成。";
   }
   function compactTerminalProcess(card, result) {
@@ -7592,8 +8085,9 @@ ${defaultPrompt}`;
       const stepId = String(step.dataset.stepId || "").trim();
       const title = String(step.querySelector(".wa-task-step-title")?.textContent || "").trim();
       const failed = step.classList.contains("failed");
-      const pending = step.classList.contains("running") || result.status === "pending";
-      const chip = failed ? "异常" : pending ? "待确认" : "完成";
+      const pending = result.status === "pending";
+      const confirmationPending = pending && taskResultRequiresUserConfirmation(result);
+      const chip = failed ? "异常" : pending ? confirmationPending ? "待确认" : "进行中" : "完成";
       const kind = failed ? "warn" : pending ? "progress" : "success";
       body.innerHTML = '<div class="wa-task-row ' + kind + '" data-role="compact-terminal"><span class="wa-task-chip ' + (failed ? "warn" : !pending ? "success" : "") + '">' + esc$1(chip) + "</span>" + esc$1(terminalStepCompactText(card, stepId, title, result)) + "</div>";
       step._singletonRows = /* @__PURE__ */ new Map([["compact-terminal", body.firstElementChild]]);
@@ -7606,7 +8100,7 @@ ${defaultPrompt}`;
     const recognition = taskRecognitionText(data);
     const confidence = Number(data.confidence);
     const confidenceText = Number.isFinite(confidence) && confidence > 0 ? ` · 置信度 ${Math.round(confidence * 100)}%` : "";
-    upsertStepSingletonRow(step, "task.classified", "plan", '<span class="wa-task-chip success">识别</span>' + esc$1((recognition || "已完成任务识别") + confidenceText) + supervisorAuditHtml(data));
+    upsertStepSingletonRow(step, "task.classified", "plan", '<span class="wa-task-chip success">识别</span>' + esc$1((recognition || "已完成任务识别") + confidenceText) + supervisorAuditHtml(data, { compact: true }));
     markStepDone(step);
     setStatus(card, "已识别");
     syncTaskLiveProgress(card);
@@ -7639,7 +8133,7 @@ ${defaultPrompt}`;
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
     const detail = [...violations, ...warnings].slice(0, 5).map((item) => planViolationLabel(String(item || "")) || String(item || "")).filter(Boolean).join("；");
     const summary = passed ? planCheckSummaryText(data, true) : detail || planCheckSummaryText(data, false);
-    upsertStepSingletonRow(step, "plan.checked", passed ? "success" : "warn", '<span class="wa-task-chip ' + (passed ? "success" : "warn") + '">' + esc$1(passed ? "监管" : "需调整") + "</span>" + esc$1(summary) + supervisorAuditHtml(data));
+    upsertStepSingletonRow(step, "plan.checked", passed ? "success" : "warn", '<span class="wa-task-chip ' + (passed ? "success" : "warn") + '">' + esc$1(passed ? "监管" : "需调整") + "</span>" + esc$1(summary) + supervisorAuditHtml(data, { compact: true }));
     if (passed) markStepDone(step);
     else markStepRunning(step);
     syncTaskLiveProgress(card);
@@ -7672,7 +8166,7 @@ ${defaultPrompt}`;
     const summary = String(data.summary || supervisorAuditFromPayload(data)?.summary || "监管检查已更新。").trim();
     const audit = supervisorAuditFromPayload(data);
     const auditStatus = audit ? ` · 监管${supervisorAuditStatusLabel(audit.status)}` : "";
-    upsertStepSingletonRow(step, "supervisor.status:" + stage, "plan", '<span class="wa-task-chip success">监管</span>' + esc$1((stage || "检查") + auditStatus + " · " + summary) + supervisorAuditHtml(data));
+    upsertStepSingletonRow(step, "supervisor.status:" + stage, "plan", '<span class="wa-task-chip success">监管</span>' + esc$1((stage || "检查") + auditStatus + " · " + summary) + supervisorAuditHtml(data, { compact: true }));
     markStepRunning(step);
     syncTaskLiveProgress(card);
   }
@@ -7686,7 +8180,7 @@ ${defaultPrompt}`;
       step,
       "supervisor.intervention:" + (reason || "default"),
       "warn",
-      '<span class="wa-task-chip warn">监管纠偏</span>' + esc$1(reason ? `${reason} · ${summary}` : summary) + supervisorAuditHtml(data)
+      '<span class="wa-task-chip warn">监管纠偏</span>' + esc$1(reason ? `${reason} · ${summary}` : summary) + supervisorAuditHtml(data, { compact: true })
     );
     markStepRunning(step);
     syncTaskLiveProgress(card);
@@ -7800,13 +8294,15 @@ ${defaultPrompt}`;
   }
   function handleEvent_run_finished(card, evt, payload) {
     const data = normalizedTaskLifecyclePayload(payload);
+    ensureTaskReportAfterProcess(card);
     setTaskRunContext(card, evt, payload);
     stopTaskHeartbeat(card);
     const executeStep = taskStageStep(card, "execute");
     const planStep = card.querySelector('[data-role="steps"] .wa-task-step[data-step-id="plan"]');
     if (planStep && !planStep.classList.contains("failed")) markStepDone(planStep);
     const step = taskStageStep(card, "check");
-    const result = taskTerminalResult(card, data.summary || data.text || data.error || "文件任务已完成。");
+    const terminalAnswer = terminalAnswerText(data, terminalAnswerText(payload, ""));
+    const result = taskTerminalResult(card, terminalAnswer || "文件任务已完成。");
     if (result.status === "error") markStepFailed(executeStep);
     else if (result.status === "pending") markStepRunning(executeStep);
     else markStepDone(executeStep);
@@ -7824,14 +8320,16 @@ ${defaultPrompt}`;
       card.dataset.taskTerminalStatus = result.terminal_status;
     } else if (result.status === "pending") {
       markStepRunning(step);
-      setStatus(card, "待确认");
+      setStatus(card, taskResultRequiresUserConfirmation(result) ? "待确认" : "处理中");
     } else {
       markStepDone(step);
       setStatus(card, "已完成");
     }
     const titleEl = card.querySelector(".wa-task-title");
     if (titleEl) {
-      if (result.status === "pending") titleEl.textContent = "等待确认";
+      const semanticTitle = String(card.dataset.taskTitle || "").trim();
+      if (semanticTitle) titleEl.textContent = semanticTitle;
+      else if (result.status === "pending") titleEl.textContent = taskResultRequiresUserConfirmation(result) ? "等待确认" : "任务进行中";
       else if (result.status === "error") titleEl.textContent = "任务未完成";
       else if (result.status === "cancelled") titleEl.textContent = "任务已取消";
       else titleEl.textContent = "任务完成";
@@ -7847,12 +8345,16 @@ ${defaultPrompt}`;
     else if (result.status === "cancelled") card.classList.add("cancelled");
     else card.classList.add("done");
     const summaryContainer = card.querySelector('[data-role="summary"]');
+    let finalReportEl = null;
     if (summaryContainer) {
-      const finalReport = String(data.summary || data.text || data.error || result.summary || "").trim();
+      const finalReport = terminalAnswerText(data, result.summary);
       const visibleSummary = finalReport || terminalStepSummary(result);
       const auditHtml = supervisorAuditHtml(data);
-      summaryContainer.innerHTML = taskResultActionsHtml(card) + auditHtml + '<div class="wa-task-final-report">' + renderTaskFinalReport(visibleSummary) + "</div>";
+      summaryContainer.innerHTML = taskCompletionBannerHtml(result) + renderTaskUnderstandingCard(card) + renderTaskMemoryCard(card) + auditHtml + taskResultActionsHtml(card) + '<div class="wa-task-final-report" data-role="final-report" tabindex="-1"><div class="wa-task-final-report-title">总结与回答</div><div class="wa-task-final-report-content">' + renderTaskFinalReport(visibleSummary) + "</div></div>";
       summaryContainer.hidden = false;
+      finalReportEl = summaryContainer.querySelector('[data-role="final-report"]');
+      card.dataset.taskSummary = visibleSummary;
+      card.dataset.taskFinalAnswer = visibleSummary;
     }
     const process = card.querySelector('[data-role="process"]');
     if (process) {
@@ -7860,10 +8362,11 @@ ${defaultPrompt}`;
       const title = process.querySelector('[data-role="process-title"]');
       const state2 = process.querySelector('[data-role="process-state"]');
       if (title) title.textContent = "执行过程";
-      if (state2) state2.textContent = result.status === "error" ? "未完成" : result.status === "pending" ? "待确认" : "已完成";
+      if (state2) state2.textContent = result.status === "error" ? "未完成" : result.status === "pending" ? taskResultRequiresUserConfirmation(result) ? "待确认" : "进行中" : "已完成";
     }
-    const loadedSummary = data.summary || data.text || data.error || "";
-    card.dataset.taskSummary = loadedSummary || result.summary || card.dataset.taskSummary || "";
+    const loadedSummary = terminalAnswerText(data, result.summary);
+    card.dataset.taskSummary = loadedSummary || card.dataset.taskSummary || "";
+    card.dataset.taskFinalAnswer = loadedSummary || card.dataset.taskFinalAnswer || card.dataset.taskSummary || "";
     const cancelBtn = card.querySelector('[data-role="cancel"]');
     if (cancelBtn) {
       cancelBtn.textContent = "关闭";
@@ -7871,6 +8374,27 @@ ${defaultPrompt}`;
     }
     syncTaskLiveProgress(card);
     scheduleTaskLiveProgressCollapse(card);
+    announceTaskCompletion(card, result, finalReportEl);
+    if (typeof card._terminalSnapshotHandler === "function") {
+      try {
+        card._terminalSnapshotHandler(card);
+      } catch (_) {
+      }
+      window.setTimeout(() => {
+        if (!card || !card.dataset || card.dataset.taskTerminalPersisted === "true" || card.dataset.historySnapshot === "true") return;
+        const persistTerminalCard = window.WA && window.WA.persistTerminalTaskRunCard;
+        if (typeof persistTerminalCard === "function") {
+          Promise.resolve(persistTerminalCard(card)).catch(() => {
+          });
+        }
+      }, 1e3);
+    } else {
+      const persistTerminalCard = window.WA && window.WA.persistTerminalTaskRunCard;
+      if (typeof persistTerminalCard === "function") {
+        Promise.resolve(persistTerminalCard(card)).catch(() => {
+        });
+      }
+    }
     notifyTaskWorkbenchForCard(card, { delayed: true });
   }
   function handleEvent_run_cancelled(card, evt, payload) {
@@ -7915,7 +8439,7 @@ ${defaultPrompt}`;
     const content = '<span class="wa-task-chip ' + (data.blocked ? "warn" : finished ? "success" : "") + '">' + esc$1(icon) + " " + esc$1(toolTitle) + "</span>" + (preview || esc$1(fallbackText));
     if (data.blocked) {
       upsertStepSingletonRow(step, tag, "warn", content);
-      setStatus(card, "待确认");
+      setStatus(card, data.tool_name === "ask_user" || isFileTaskConfirmationStatus(data.status || data.terminal_status || "") ? "待确认" : "已阻止");
     } else {
       upsertStepSingletonRow(step, tag, kind, content);
     }
@@ -7934,6 +8458,9 @@ ${defaultPrompt}`;
     if (data.prefix && !path.includes("/")) {
       path = data.prefix.replace(/\/+$/, "") + "/" + path;
     }
+    const WA2 = window.WA || {};
+    const refreshPath = typeof WA2.normalizeWorkspaceFilePath === "function" ? String(WA2.normalizeWorkspaceFilePath(path) || path).trim() : path;
+    if (typeof WA2.markExternalFileChange === "function") WA2.markExternalFileChange(refreshPath || path);
     const state2 = ensureTaskUiState(card);
     const key = changeType + ":" + path;
     if (state2.fileChangeKeys.has(key)) return;
@@ -7944,9 +8471,9 @@ ${defaultPrompt}`;
     appendRow(step, "tool-finished", content);
     if (data.supported !== false && data.refresh_supported !== false) {
       window.setTimeout(() => {
-        const reload = window.WA && window.WA.reloadFileByPath;
+        const reload = WA2 && WA2.reloadFileByPath;
         if (typeof reload !== "function") return;
-        Promise.resolve(reload(path, true)).catch((error) => {
+        Promise.resolve(reload(refreshPath || path, true)).catch((error) => {
           console.warn("[FileTask] refresh after file.changed failed:", error);
         });
       }, 200);
@@ -8061,14 +8588,14 @@ ${defaultPrompt}`;
     const data = normalizedTaskLifecyclePayload(payload);
     const stepId = stepIdFromEvent(evt, data);
     const step = taskStageStep(card, stepId);
-    const status = String(data.status || "").trim().toLowerCase();
-    const failed = status === "failed" || status === "error" || status === "needs_attention";
-    const pending = status === "pending" || status === "awaiting_confirmation";
+    const status = normalizeFileTaskTerminalStatus(data.status || "");
+    const pending = isFileTaskWaitingStatus(status);
+    const failed = !pending && isFileTaskFailureStatus(status);
     if (failed) markStepFailed(step);
     else if (pending) markStepRunning(step);
     else markStepDone(step);
     const title = String(data.title || evt.step_id || stepId || "任务步骤").trim();
-    const summary = compactFlowSummary(String(data.summary || data.text || data.message || "").trim(), "步骤已完成，结果见对话汇报。");
+    const summary = compactFlowSummary(String(data.summary || data.text || data.message || "").trim(), "步骤已完成，结果见总结与回答。");
     const chip = failed ? "需处理" : pending ? "待处理" : "完成";
     const kind = failed ? "warn" : pending ? "progress" : "success";
     upsertStepSingletonRow(
@@ -8121,7 +8648,11 @@ ${defaultPrompt}`;
     const data = normalizedTaskLifecyclePayload(payload);
     const path = String(data.path || data.file_path || "").trim();
     if (!path) return;
-    const normalizedPath = String(path || "").replace(/\\/g, "/").toLowerCase();
+    const WA2 = window.WA || {};
+    const refreshPath = typeof WA2.normalizeWorkspaceFilePath === "function" ? String(WA2.normalizeWorkspaceFilePath(path) || path).trim() : path;
+    if (typeof WA2.markExternalFileChange === "function") WA2.markExternalFileChange(refreshPath || path);
+    const normalizedPath = String(refreshPath || path || "").replace(/\\/g, "/").toLowerCase();
+    data.path = refreshPath || path;
     const fileRefreshHash = data.file_refresh_hash || "";
     const hashStore = card._fileRefreshHashes || /* @__PURE__ */ new Map();
     card._fileRefreshHashes = hashStore;
@@ -8174,29 +8705,40 @@ ${defaultPrompt}`;
   function getEventHandlers() {
     return EVENT_HANDLERS;
   }
-  function dispatchEventToCard(card, evt) {
-    if (!card || !evt || typeof evt !== "object") return;
-    const etype = String(evt.type || "").trim().toLowerCase();
-    if (!etype) return;
-    const handler = EVENT_HANDLERS[etype];
-    if (!handler) return;
+  function streamEventSeq(evt, payload) {
+    const raw = evt.seq || evt.event_seq || payload.seq || payload.event_seq || 0;
+    const seq = Number(raw);
+    return Number.isFinite(seq) ? seq : 0;
+  }
+  function shouldDispatchStreamEvent(card, evt) {
+    if (!card || !evt || typeof evt !== "object") return false;
+    const eventType = String(evt.type || "").trim().toLowerCase();
+    if (!eventType) return false;
     const payload = evt.payload || evt;
     const state2 = ensureTaskUiState(card);
     const runId = String(evt.run_id || payload.run_id || "").trim();
-    const seq = Number(evt.seq || payload.seq || 0);
-    const eventKey = runId + ":" + etype + ":" + seq;
-    if (runId && state2.lastEventRunId && state2.lastEventRunId !== runId) {
-      state2.processedEventKeys.clear();
-      state2.lastEventSeq = 0;
+    const seq = streamEventSeq(evt, payload);
+    const eventKey = `${runId}:${eventType}:${seq}`;
+    if (!runId || seq <= 0) return true;
+    if (runId && state2.lastEventRunId && state2.lastEventRunId !== runId) return true;
+    if (state2.processedEventKeys.has(eventKey)) {
+      noteStreamIssue(card, "duplicate-event-" + eventKey, "Duplicate progress event merged.");
+      return false;
     }
-    state2.lastEventRunId = runId;
-    if (runId && seq > 0 && state2.lastEventSeq >= seq) {
-      if (state2.processedEventKeys.has(eventKey)) return;
+    if (state2.lastEventSeq > 0 && seq <= state2.lastEventSeq) {
+      noteStreamIssue(card, "out-of-order-event-" + runId + "-" + seq, "Progress event arrived out of order.");
+    } else if (state2.lastEventSeq > 0 && seq > state2.lastEventSeq + 1) {
+      noteStreamIssue(card, "missing-event-" + runId + "-" + state2.lastEventSeq + "-" + seq, "Progress event sequence has a gap.");
     }
-    state2.lastEventSeq = Math.max(state2.lastEventSeq, seq);
-    state2.processedEventKeys.add(eventKey);
-    handler(card, evt, payload);
-    notifyTaskWorkbenchForCard(card);
+    return true;
+  }
+  function dispatchEventToCard(card, evt) {
+    if (!shouldDispatchStreamEvent(card, evt)) return;
+    dispatchFileTaskEvent(card, evt, {
+      handlers: EVENT_HANDLERS,
+      getState: ensureTaskUiState,
+      afterDispatch: notifyTaskWorkbenchForCard
+    });
   }
   function processFileTaskStreamEvent(card, evt) {
     if (!card || !evt || typeof evt !== "object") return;
@@ -8205,6 +8747,10 @@ ${defaultPrompt}`;
       startTaskHeartbeat(card);
     }
     dispatchEventToCard(card, evt);
+  }
+  function isTaskStreamTerminalEvent(evt) {
+    const type = String(evt && evt.type || "").trim();
+    return type === "run.finished" || type === "run.cancelled" || type === "run.error" || type === "error";
   }
   function handleEvent(card, evt) {
     processFileTaskStreamEvent(card, evt);
@@ -8416,20 +8962,37 @@ ${defaultPrompt}`;
   }
   function markTaskRunCardAsHistory(card, options) {
     const settings = options && typeof options === "object" ? options : {};
+    ensureTaskReportAfterProcess(card);
     const label = String(settings.history_label || "历史任务记录").trim() || "历史任务记录";
     const note = String(settings.history_note || "这是一条历史运行记录，不代表当前文件状态。").trim();
+    const historyStatus = normalizedResumeStatus(settings.initialStatus || card.dataset.taskTerminalStatus || "");
+    const statusText = historyStatus === "failed" ? "执行失败" : historyStatus === "cancelled" ? "已取消" : historyStatus === "completed" ? "已完成" : "历史记录";
     card.classList.remove("streaming", "pending");
     card.classList.add("is-history-snapshot");
     card.dataset.historySnapshot = "true";
     card.dataset.taskCurrentRun = "false";
+    card.dataset.historyStatus = historyStatus || "history";
     card.setAttribute("aria-label", label);
     card.querySelector('[data-role="cancel"]')?.remove();
     card.querySelectorAll(".wa-task-actions").forEach((node) => node.remove());
+    const statusEl = card.querySelector('[data-role="status"]');
+    if (statusEl) {
+      statusEl.textContent = statusText;
+      statusEl.dataset.status = historyStatus || "history";
+    }
+    const process = card.querySelector('[data-role="process"]');
+    if (process && typeof process.removeAttribute === "function") {
+      process.removeAttribute("open");
+      process.dataset.historyCollapsed = "true";
+      const state2 = process.querySelector('[data-role="process-state"]');
+      if (state2) state2.textContent = "可展开";
+    }
     const titleWrap = card.querySelector(".wa-task-title-wrap");
     if (titleWrap && !titleWrap.querySelector('[data-role="history-badge"]')) {
       const badge = document.createElement("span");
       badge.className = "wa-task-history-badge";
       badge.dataset.role = "history-badge";
+      badge.dataset.status = historyStatus || "history";
       badge.textContent = label;
       titleWrap.appendChild(badge);
     }
@@ -8453,18 +9016,20 @@ ${defaultPrompt}`;
       const card = wrapper.firstElementChild;
       if (!card || !isTaskCardElement(card)) return null;
       card._fatalErrorText = String(cardOrSnapshot.fatal_error_text || "");
+      ensureTaskReportAfterProcess(card);
       const restored = attachRunCardBehavior(card);
       const options = initialSummary && typeof initialSummary === "object" ? initialSummary : {};
       return options.history ? markTaskRunCardAsHistory(restored, options) : restored;
     }
     const cardEl = cardOrSnapshot;
     if (!cardEl || !isTaskCardElement(cardEl)) return null;
+    ensureTaskReportAfterProcess(cardEl);
     const settings = {
       taskId: String(cardEl.dataset.taskId || "").trim(),
       runId: String(cardEl.dataset.taskRunId || "").trim(),
-      initialStatus: String(initialStatus || cardEl.dataset.taskTerminalStatus || "").trim()
+      initialStatus: normalizeFileTaskTerminalStatus(initialStatus || cardEl.dataset.taskTerminalStatus || "")
     };
-    if (settings.initialStatus === "waiting" || settings.initialStatus === "awaiting_confirmation") {
+    if (isFileTaskWaitingStatus(settings.initialStatus)) {
       initializeRecoveredRunCard(cardEl, settings);
     }
     const summaryText = typeof initialSummary === "string" ? initialSummary : "";
@@ -8476,7 +9041,7 @@ ${defaultPrompt}`;
       stepsHost.innerHTML = '<div class="wa-task-step pending" data-step-id="run"><details class="wa-task-step-detail" open><summary class="wa-task-step-head"><span class="wa-task-step-dot"></span><span class="wa-task-step-title">任务状态</span></summary><div class="wa-task-step-body"></div></details></div>';
     }
     cardEl.classList.remove("streaming", "pending");
-    if (settings.initialStatus === "waiting" || settings.initialStatus === "awaiting_confirmation") {
+    if (isFileTaskWaitingStatus(settings.initialStatus)) {
       cardEl.classList.add("pending");
     } else if (settings.initialStatus === "running" || !settings.initialStatus) {
       cardEl.classList.add("streaming");
@@ -8486,15 +9051,6 @@ ${defaultPrompt}`;
     }
     syncTaskLiveProgress(cardEl);
     return cardEl;
-  }
-  function normalizedResumeStatus(status) {
-    const value = String(status || "").trim().toLowerCase();
-    if (["completed", "complete", "success", "succeeded", "done", "verified"].includes(value)) return "completed";
-    if (["failed", "failure", "error"].includes(value)) return "failed";
-    if (value === "cancelled" || value === "canceled") return "cancelled";
-    if (value === "waiting" || value === "awaiting_confirmation") return "waiting";
-    if (value === "running" || value === "streaming") return "running";
-    return value;
   }
   function isTerminalResumeStatus(status) {
     return ["completed", "failed", "cancelled"].includes(normalizedResumeStatus(status));
@@ -8556,12 +9112,14 @@ ${defaultPrompt}`;
     }
     card.dataset.taskRunId = String(payload.run_id || "").trim();
     seedRouteModelContext(card, payload);
-    const quickActionMode = payload.options && typeof payload.options === "object" ? String(payload.options.quick_action_mode || "").trim() : "";
+    let quickActionMode = payload.options && typeof payload.options === "object" ? String(payload.options.quick_action_mode || "").trim() : "";
+    quickActionMode = normalizeQuickActionMode(quickActionMode);
     if (quickActionMode) card.dataset.taskQuickActionMode = quickActionMode;
     if (!options.loadingEl && msgs) msgs.appendChild(card);
     card.classList.add("streaming");
     startTaskHeartbeat(card);
     revealTaskWorkbenchForCard(card, { scroll: true });
+    card._terminalSnapshotHandler = typeof options.onTaskCardSnapshot === "function" ? options.onTaskCardSnapshot : void 0;
     if (typeof options.onTaskCardSnapshot === "function") {
       try {
         options.onTaskCardSnapshot(card);
@@ -8607,9 +9165,23 @@ ${defaultPrompt}`;
           }
         }
         scrollToBottom(msgs);
+        if (parsed.events.some(isTaskStreamTerminalEvent)) {
+          try {
+            Promise.resolve(reader.cancel()).catch(() => {
+            });
+          } catch (_) {
+          }
+          break;
+        }
       }
       const trailing = parseSseEvents(buffer, true);
       trailing.events.forEach((evt) => processFileTaskStreamEvent(card, evt));
+      if (trailing.events.length && typeof options.onTaskCardSnapshot === "function") {
+        try {
+          options.onTaskCardSnapshot(card);
+        } catch (_) {
+        }
+      }
     } catch (error) {
       if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);
       throw error;
@@ -8623,6 +9195,7 @@ ${defaultPrompt}`;
         }
       }
       if (card._abortFileTaskStream) delete card._abortFileTaskStream;
+      if (card._terminalSnapshotHandler) delete card._terminalSnapshotHandler;
     }
     const terminalResult = taskTerminalResult(card, "");
     if (card._fatalErrorText) throw makeTaskError(terminalResult.summary);
@@ -8639,6 +9212,7 @@ ${defaultPrompt}`;
   WA$7.resumePersistedFileTask = resumePersistedFileTask;
   WA$7.ensureTaskUiState = ensureTaskUiState;
   WA$7.syncTaskLiveProgress = syncTaskLiveProgress;
+  WA$7.syncTaskInteractionSummary = syncTaskInteractionSummary;
   WA$7.processFileTaskStreamEvent = processFileTaskStreamEvent;
   WA$7.getEventHandlers = getEventHandlers;
   WA$7.parseSseEvents = parseSseEvents;
@@ -8654,10 +9228,41 @@ ${defaultPrompt}`;
   WA$7.TaskStatus = TaskStatus;
   window.WA = WA$7;
   window.WA.parseSseEvents = parseSseEvents;
+  const TASK_REPORT_LABELS = {
+    processTitle: "执行过程",
+    finalTitle: "总结与回答"
+  };
+  const TASK_REPORT_STAGE_DEFS = [
+    { id: "route", title: "任务识别", hint: "判断用户意图、目标文件和处理类型" },
+    { id: "plan", title: "执行方案", hint: "确定处理路线、工具选择和质量要求" },
+    { id: "execute", title: "执行进度", hint: "读取、分析、生成、写入或调用模型" },
+    { id: "check", title: "完成核验", hint: "检查结果、变更和可继续处理项" }
+  ];
+  const TASK_REPORT_STAGE_DONE_TEXT = {
+    route: "已确认任务目标、处理类型和文件上下文。",
+    plan: "已确定执行方式和输出要求。",
+    execute: "已按方案完成处理，结果已同步到总结与回答。",
+    check: "已核验结果并同步到总结与回答。"
+  };
+  const TASK_REPORT_STAGE_RUNNING_TEXT = {
+    route: "正在确认任务目标和文件上下文。",
+    plan: "正在整理执行方案和输出要求。",
+    execute: "正在读取文件并整理结果。",
+    check: "正在检查结果文件和任务完成状态。"
+  };
+  const TASK_REPORT_STAGE_PENDING_TEXT = {
+    route: "等待开始识别任务。",
+    plan: "等待生成执行方案。",
+    execute: "等待开始处理文件。",
+    check: "等待完成后核验。"
+  };
+  function taskReportStageDef(stageId) {
+    return TASK_REPORT_STAGE_DEFS.find((item) => item.id === stageId) || TASK_REPORT_STAGE_DEFS[2];
+  }
   const STATUS_LABELS = {
     pending: "排队",
     running: "进行中",
-    waiting: "待确认",
+    waiting: "待处理",
     completed: "已完成",
     failed: "失败",
     cancelled: "已取消",
@@ -8696,30 +9301,10 @@ ${defaultPrompt}`;
     generate_preview: "生成预览",
     run_python_code: "执行代码"
   };
-  const FLOW_STAGE_DEFS = [
-    { id: "route", title: "任务识别", hint: "判断用户意图、目标文件和处理类型" },
-    { id: "plan", title: "执行方案", hint: "确定处理路线、工具选择和质量要求" },
-    { id: "execute", title: "执行进度", hint: "读取、分析、生成、写入或调用模型" },
-    { id: "check", title: "完成核验", hint: "检查结果、变更和可继续处理项" }
-  ];
-  const FLOW_STAGE_DONE_TEXT = {
-    route: "已确认任务目标、处理类型和文件上下文。",
-    plan: "已确定执行方式和输出要求。",
-    execute: "已按方案完成处理，结果已同步到对话。",
-    check: "已核验结果并同步到对话汇报。"
-  };
-  const FLOW_STAGE_RUNNING_TEXT = {
-    route: "正在确认任务目标和文件上下文。",
-    plan: "正在整理执行方案和输出要求。",
-    execute: "正在读取文件并整理结果。",
-    check: "正在检查结果文件和任务完成状态。"
-  };
-  const FLOW_STAGE_PENDING_TEXT = {
-    route: "等待开始识别任务。",
-    plan: "等待生成执行方案。",
-    execute: "等待开始处理文件。",
-    check: "等待完成后核验。"
-  };
+  const FLOW_STAGE_DEFS = TASK_REPORT_STAGE_DEFS;
+  const FLOW_STAGE_DONE_TEXT = TASK_REPORT_STAGE_DONE_TEXT;
+  const FLOW_STAGE_RUNNING_TEXT = TASK_REPORT_STAGE_RUNNING_TEXT;
+  const FLOW_STAGE_PENDING_TEXT = TASK_REPORT_STAGE_PENDING_TEXT;
   const INTERNAL_PROGRESS_PATTERNS = [
     /你还没有/,
     /下一轮必须/,
@@ -8761,7 +9346,7 @@ ${defaultPrompt}`;
     return `${text.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
   }
   function stageDef(stageId) {
-    return FLOW_STAGE_DEFS.find((item) => item.id === stageId) || FLOW_STAGE_DEFS[2];
+    return taskReportStageDef(String(stageId || ""));
   }
   function stageFromStep(step, fallbackStage) {
     const id = String(step && (step.id || step.step_id || step.stage || "") || "").trim().toLowerCase();
@@ -9095,6 +9680,19 @@ ${defaultPrompt}`;
     if (summary) return summary;
     return compactText(firstPayloadText(taskPayload(task), SUMMARY_KEYS), 180);
   }
+  function taskCompletionSummary(task) {
+    const text = String(task && (task.result_summary || task.error) || "").trim();
+    if (text) {
+      const parsed = safeJsonObject(text);
+      if (parsed) {
+        const payloadText = firstPayloadText(parsed, SUMMARY_KEYS);
+        if (payloadText) return compactText(payloadText, 8e3);
+      } else if (text[0] !== "[" && text[0] !== "{") {
+        return compactText(text, 8e3);
+      }
+    }
+    return compactText(firstPayloadText(taskPayload(task), SUMMARY_KEYS), 8e3);
+  }
   function taskMetaLine(task) {
     const parts = [
       timeLabel(task && task.created_at),
@@ -9169,7 +9767,7 @@ ${defaultPrompt}`;
       files: Array.isArray(requestPayload.files) ? requestPayload.files : [],
       task_request_payload: requestPayload
     };
-    const routeIntent = requestPayload.options && typeof requestPayload.options === "object" ? requestPayload.options.workspace_route_intent : null;
+    const routeIntent = requestPayload.routing_decision && typeof requestPayload.routing_decision === "object" ? requestPayload.routing_decision : requestPayload.options && typeof requestPayload.options === "object" ? requestPayload.options.workspace_route_intent : null;
     if (routeIntent && typeof routeIntent === "object") metadata.route_intent = routeIntent;
     if (requestPayload.model_mode) metadata.model_mode = requestPayload.model_mode;
     if (requestPayload.model_id) metadata.model_id = requestPayload.model_id;
@@ -9526,33 +10124,27 @@ ${defaultPrompt}`;
       "</div>"
     ].join("");
   }
-  function renderWorkbenchStep(step, index) {
-    const stage = stageFromStep(step);
-    const def = stageDef(stage);
-    const status = String(step.status || "").trim();
-    const text = String(step.text || "").trim();
-    return [
-      `<div class="wa-task-workbench-step ${esc(step.tone)}" data-stage="${attr(stage)}">`,
-      `  <div class="wa-task-workbench-step-index">${index + 1}</div>`,
-      '  <div class="wa-task-workbench-step-main">',
-      '    <div class="wa-task-workbench-step-headline">',
-      `      <strong>${esc(def.title)}</strong>`,
-      `      <span>${esc(status || "过程")}</span>`,
-      "    </div>",
-      text ? `    <div class="wa-task-workbench-step-text">${esc(text)}</div>` : "",
-      "  </div>",
-      "</div>"
-    ].join("");
-  }
   function renderSteps(steps, task) {
     const visibleSteps = normalizedWorkbenchSteps(steps, task);
     if (!visibleSteps.length) {
       return '<div class="wa-task-workbench-empty">暂无步骤</div>';
     }
     return [
-      renderStageOverview(visibleSteps),
-      '<div class="wa-task-workbench-section-title">任务步骤</div>',
-      visibleSteps.map((step, index) => renderWorkbenchStep(step, index)).join("")
+      `<div class="wa-task-workbench-section-title">${esc(TASK_REPORT_LABELS.processTitle)}</div>`,
+      renderStageOverview(visibleSteps)
+    ].join("");
+  }
+  function renderCompletionReport(task, summary, artifactButton) {
+    const stats = renderArtifactStats(task.artifact_result);
+    const body = summary ? `<div class="wa-task-workbench-summary">${esc(summary)}</div>` : '<div class="wa-task-workbench-summary is-empty">暂无总结与回答。</div>';
+    const actions = artifactButton ? `<div class="wa-task-workbench-detail-actions">${artifactButton}</div>` : "";
+    return [
+      `<div class="wa-task-workbench-section-title">${esc(TASK_REPORT_LABELS.finalTitle)}</div>`,
+      '<div class="wa-task-workbench-completion">',
+      body,
+      stats,
+      actions,
+      "</div>"
     ].join("");
   }
   function renderTaskFiles(files) {
@@ -9593,7 +10185,7 @@ ${defaultPrompt}`;
       renderEmptyDetail(detail);
       return;
     }
-    const summary = taskSummary(task);
+    const summary = taskCompletionSummary(task);
     const files = taskFiles(task);
     const artifactButton = task.artifact_result ? '<button type="button" data-task-detail-action="artifact">结果</button>' : "";
     const canResume = typeof window.WA.resumePersistedFileTask === "function";
@@ -9611,10 +10203,8 @@ ${defaultPrompt}`;
       "</div>",
       '<div class="wa-task-workbench-detail-actions">',
       processButton,
-      artifactButton,
       "</div>",
-      renderArtifactStats(task.artifact_result),
-      summary ? `<div class="wa-task-workbench-summary">${esc(summary)}</div>` : ""
+      renderCompletionReport(task, summary, artifactButton)
     ].join("");
   }
   async function fetchJson(url) {
@@ -9803,6 +10393,43 @@ ${defaultPrompt}`;
   WA$6.notifyTaskFlowChanged = notifyTaskFlowChanged;
   WA$6.openTaskWorkbenchForCurrentRun = openTaskWorkbenchForCurrentRun;
   window.WA = WA$6;
+  function terminalTaskTextValue(value, depth = 0) {
+    if (typeof value === "string") return value.trim();
+    if (!value || depth > 3) return "";
+    if (Array.isArray(value)) {
+      return value.map((item) => terminalTaskTextValue(item, depth + 1)).filter(Boolean).join("\n").trim();
+    }
+    if (typeof value !== "object") return "";
+    for (const key of ["final_answer", "finalAnswer", "answer", "summary", "text", "content", "output_text", "output", "result", "message", "error"]) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      const text = terminalTaskTextValue(value[key], depth + 1);
+      if (text) return text;
+    }
+    return "";
+  }
+  function terminalTaskAnswer(payload, fallback = "") {
+    const data = payload && typeof payload === "object" ? payload : {};
+    for (const candidate of [
+      data.final_answer,
+      data.finalAnswer,
+      data.answer,
+      data.output_text,
+      data.output,
+      data.result,
+      data.summary,
+      data.text,
+      data.content,
+      data.message,
+      data.error,
+      data.data,
+      data.payload,
+      fallback
+    ]) {
+      const text = terminalTaskTextValue(candidate);
+      if (text) return text;
+    }
+    return "";
+  }
   function createTaskDispatcher(deps = {}) {
     const options = deps || {};
     const state2 = options.state || {};
@@ -10083,6 +10710,37 @@ ${defaultPrompt}`;
         target: false
       };
     }
+    function buildWorkspaceChatFileContext(context) {
+      const currentFile = currentOpenTaskFile();
+      const selectionText = String(context && context.pinnedSelText || "").trim();
+      const selectionContext = context && context.selectionContext && typeof context.selectionContext === "object" ? context.selectionContext : null;
+      const readyFiles = workspaceRouteFiles();
+      if (!currentFile && !selectionText && !readyFiles.length) return null;
+      const openTabs = Array.isArray(state2.openTabs) ? state2.openTabs.slice(0, 10).map((tab) => tab && (tab.path || tab.name)).filter(Boolean) : [];
+      const selectionMeta = {};
+      if (selectionContext) {
+        ["kind", "sourceType", "sheetName", "rangeA1", "rows", "cols", "rawText"].forEach((key) => {
+          const value = selectionContext[key];
+          if (value !== void 0 && value !== null && String(value).trim() !== "") selectionMeta[key] = value;
+        });
+      }
+      return {
+        file_path: currentFile ? currentFile.path || "" : "",
+        file_name: currentFile ? currentFile.name || "" : "",
+        file_type: currentFile ? currentFile.type || currentFile.file_type || "" : "",
+        open_tabs: openTabs,
+        attached_files: readyFiles.map((file) => ({
+          path: file.path || "",
+          name: file.name || "",
+          type: file.type || file.file_type || ""
+        })),
+        selection: selectionText,
+        selection_source: String(context && context.pinnedSelSource || "").trim(),
+        selection_preview: previewText2(selectionContext && selectionContext.previewText ? selectionContext.previewText : selectionText, 800),
+        selection_kind: String(selectionMeta.kind || selectionMeta.sourceType || "").trim(),
+        selection_meta: selectionMeta
+      };
+    }
     function mentionsAttachedFileContext(text) {
       const source = String(text || "").trim();
       if (!source) return false;
@@ -10137,6 +10795,50 @@ ${defaultPrompt}`;
         route_source: previewText2(payload.route_source || "", 160),
         keyword_policy: String(payload.keyword_policy || "").trim() || "hint_only"
       };
+    }
+    function normalizeFileTaskRoutingDecision(value) {
+      const source = value && typeof value === "object" ? value : null;
+      if (!source) return null;
+      const route = String(source.route || "").trim().toLowerCase();
+      if (!route) return null;
+      const routeKind = canonicalWorkspaceRouteKind(route, source.route_kind);
+      const taskType = canonicalWorkspaceTaskType(route, source.task_type);
+      const normalized = {
+        route_kind: routeKind,
+        route,
+        task_type: taskType,
+        source_task_type: String(source.source_task_type || "").trim().toUpperCase(),
+        confidence: Math.max(0, Math.min(1, Number(source.confidence || 0) || 0)),
+        reason: previewText2(source.reason || "", 500),
+        route_source: previewText2(source.route_source || "", 160),
+        router_policy: previewText2(source.router_policy || source.route_policy || "", 120),
+        keyword_policy: previewText2(source.keyword_policy || "", 120),
+        target_path: previewText2(source.target_path || "", 260)
+      };
+      const candidateWorkflows = Array.isArray(source.candidate_workflows || source.workflow_candidates) ? (source.candidate_workflows || source.workflow_candidates).slice(0, 8).map((item) => previewText2(item || "", 160)).filter(Boolean) : [];
+      if (candidateWorkflows.length) normalized.candidate_workflows = candidateWorkflows;
+      if (Object.prototype.hasOwnProperty.call(source, "requires_adjudication")) {
+        normalized.requires_adjudication = !!source.requires_adjudication;
+      }
+      const finalToolPath = previewText2(source.final_tool_path || source.tool_path || "", 240);
+      if (finalToolPath) normalized.final_tool_path = finalToolPath;
+      const frontendLabel = previewText2(source.frontend_label || source.display_label || "", 160);
+      if (frontendLabel) normalized.frontend_label = frontendLabel;
+      const planSteps = Array.isArray(source.plan_steps || source.steps) ? (source.plan_steps || source.steps).slice(0, 8).map((item, index) => {
+        const step = item && typeof item === "object" ? item : { label: item };
+        const normalizedStep = {
+          id: previewText2(step.id || `route_step_${index + 1}`, 64),
+          label: previewText2(step.label || step.title || step.step || "", 160),
+          description: previewText2(step.description || step.detail || "", 320),
+          tool: previewText2(step.tool || step.tool_name || "", 120)
+        };
+        Object.keys(normalizedStep).forEach((key) => {
+          if (!normalizedStep[key]) delete normalizedStep[key];
+        });
+        return normalizedStep;
+      }).filter((item) => item.label || item.description || item.tool) : [];
+      if (planSteps.length) normalized.plan_steps = planSteps;
+      return normalized;
     }
     function canonicalWorkspaceRouteKind(route, routeKind) {
       const normalizedRoute = String(route || "").trim().toLowerCase();
@@ -10241,16 +10943,18 @@ ${defaultPrompt}`;
         loadingEl.dataset.workspaceRouteSource = String(routeDecision.route_source || "");
       }
       try {
+        const sessionId = typeof options.ensureSessionId === "function" ? await options.ensureSessionId() : typeof options.getSessionId === "function" ? options.getSessionId() : "workspace_default";
         const response = await _csrfFetch$6("/api/chat/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            session: typeof options.getSessionId === "function" ? options.getSessionId() : "workspace_default",
+            session: sessionId || "workspace_default",
             message: context.text,
             locked_task: lockedTask,
             locked_model: chatStreamLockedModel(),
             skills_enabled: false,
-            workspace_route_intent: routeDecision
+            workspace_route_intent: routeDecision,
+            file_context: buildWorkspaceChatFileContext(context)
           }),
           signal: ctrl.signal
         });
@@ -10333,7 +11037,7 @@ ${defaultPrompt}`;
       }
       const ctrl = new AbortController();
       const taskTurn = typeof options.beginAssistantTaskTurn === "function" ? options.beginAssistantTaskTurn({ content: "文件任务已启动，正在建立执行流…", task_kind: "file_task", status: "streaming", skip_model_context: true, render: false }) : null;
-      const taskTurnId = taskTurn && taskTurn.id ? taskTurn.id : "";
+      const taskTurnId = taskTurn && taskTurn.id ? taskTurn.id : `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
       state2._streamAbortCtrl = ctrl;
       state2.isLoading = true;
       if (typeof options.setStreamButton === "function") options.setStreamButton(true);
@@ -10348,6 +11052,51 @@ ${defaultPrompt}`;
         setTaskFollowupPayload(loadingEl, payload);
         setPendingTaskResumePayload(loadingEl, payload);
       }
+      let terminalTaskPersisted = false;
+      let activeTaskCard = loadingEl || void 0;
+      let terminalPersistDelayTimer = null;
+      const basePersistMetadata = (card, extra) => Object.assign({
+        turn_id: taskTurnId,
+        task_kind: "file_task",
+        status: "streaming",
+        task_terminal_status: "running",
+        partial: true,
+        skip_model_context: true
+      }, {}, taskTurnMetadataFromLoadingEl(card));
+      const taskCardHasTerminalResult = (card) => {
+        if (!card || !card.dataset) return false;
+        const dataset = card.dataset;
+        const status = String(dataset.taskTerminalStatus || "").trim().toLowerCase();
+        const hasFinalText = !!String(dataset.taskFinalAnswer || dataset.taskSummary || "").trim();
+        if (card.classList.contains("done") || card.classList.contains("failed") || card.classList.contains("cancelled")) return hasFinalText || status !== "";
+        if (["completed", "done", "verified", "failed", "error", "cancelled", "canceled", "awaiting_confirmation", "blocked"].includes(status)) return true;
+        return String(dataset.taskCompleted || "").trim().toLowerCase() === "true" && hasFinalText;
+      };
+      const persistTerminalTaskCard = (card, streamResult, fallbackStatus = "done") => {
+        const targetCard = card || loadingEl;
+        const assistantText = finalizeWhiteboxTaskTurn(taskTurnId, targetCard, streamResult || {
+          summary: String(targetCard && targetCard.dataset && (targetCard.dataset.taskFinalAnswer || targetCard.dataset.taskSummary) || "").trim(),
+          status: fallbackStatus
+        }, fallbackStatus, false);
+        if (!terminalTaskPersisted) {
+          terminalTaskPersisted = true;
+          persistTaskTurn(context.text, assistantText, Object.assign({
+            turn_id: taskTurnId,
+            task_kind: "file_task",
+            task_title: "文件任务结果",
+            partial: false,
+            skip_model_context: false
+          }, taskTurnMetadataFromLoadingEl(targetCard)), payload.files || [], void 0);
+        }
+        return assistantText;
+      };
+      const stopTerminalPersistWatch = () => {
+        if (terminalPersistDelayTimer !== null) {
+          window.clearTimeout(terminalPersistDelayTimer);
+          terminalPersistDelayTimer = null;
+        }
+      };
+      persistTaskTurn(context.text, "文件任务已启动，正在执行…", basePersistMetadata(loadingEl), payload.files || [], loadingEl);
       return Promise.resolve(streamTaskFlow2({
         payload,
         msgs: context.msgs,
@@ -10355,14 +11104,20 @@ ${defaultPrompt}`;
         signal: ctrl.signal,
         abortController: ctrl,
         onTaskCardSnapshot: (card) => {
+          activeTaskCard = card;
           setTaskFollowupPayload(card, payload);
           setPendingTaskResumePayload(card, payload);
+          if (!terminalTaskPersisted && taskCardHasTerminalResult(card) && terminalPersistDelayTimer === null) {
+            terminalPersistDelayTimer = window.setTimeout(() => {
+              terminalPersistDelayTimer = null;
+              if (!terminalTaskPersisted) persistTerminalTaskCard(activeTaskCard || card);
+            }, 600);
+          }
           if (!taskTurnId || typeof options.syncAssistantTaskTurn !== "function") return;
           options.syncAssistantTaskTurn(taskTurnId, Object.assign({ loadingEl: card, task_kind: "file_task", status: "streaming", skip_model_context: true }, taskTurnMetadataFromLoadingEl(card)));
         }
       })).then((streamResult) => {
-        const assistantText = finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, streamResult, "done", false);
-        persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || [], loadingEl);
+        const assistantText = persistTerminalTaskCard(activeTaskCard || loadingEl, streamResult, "done");
         return { routeId: "task-flow", assistantText, payload, result: streamResult, routeDecision };
       }).catch((error) => {
         const aborted = error && error.name === "AbortError";
@@ -10374,10 +11129,15 @@ ${defaultPrompt}`;
         }
         finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, { summary: assistantText, status: aborted ? "cancelled" : "error" }, aborted ? "cancelled" : "error", true);
         persistTaskTurn(context.text, assistantText, Object.assign({
-          status: aborted ? "cancelled" : "error"
+          turn_id: taskTurnId,
+          task_kind: "file_task",
+          partial: false,
+          status: aborted ? "cancelled" : "error",
+          skip_model_context: aborted
         }, taskTurnMetadataFromLoadingEl(loadingEl)), [], loadingEl);
         return { routeId: "task-flow", assistantText, error, routeDecision };
       }).finally(() => {
+        stopTerminalPersistWatch();
         if (state2._streamAbortCtrl === ctrl) state2._streamAbortCtrl = null;
         state2.isLoading = false;
         if (typeof options.setStreamButton === "function") options.setStreamButton(false);
@@ -10453,6 +11213,7 @@ ${defaultPrompt}`;
       if (!dataset) return {};
       const metadata = {};
       const taskUiState = loadingEl && loadingEl._taskUiState && typeof loadingEl._taskUiState === "object" ? loadingEl._taskUiState : null;
+      if (dataset.taskTitle) metadata.task_title = String(dataset.taskTitle || "").trim();
       if (dataset.taskId) metadata.task_id = String(dataset.taskId || "").trim();
       if (dataset.taskRunId) metadata.run_id = String(dataset.taskRunId || "").trim();
       if (dataset.taskRequest) metadata.task_request = String(dataset.taskRequest || "").trim();
@@ -10463,6 +11224,14 @@ ${defaultPrompt}`;
       if (dataset.taskExecutionMode) metadata.task_execution_mode = String(dataset.taskExecutionMode || "").trim();
       if (dataset.taskSelectedRecipe) metadata.task_selected_recipe = String(dataset.taskSelectedRecipe || "").trim();
       if (dataset.taskOutputMode) metadata.task_output_mode = String(dataset.taskOutputMode || "").trim();
+      if (dataset.taskRoute) metadata.task_route = String(dataset.taskRoute || "").trim();
+      if (dataset.taskRouteSource) metadata.task_route_source = String(dataset.taskRouteSource || "").trim();
+      if (dataset.taskRoutingDecision) {
+        try {
+          metadata.route_intent = JSON.parse(decodeURIComponent(String(dataset.taskRoutingDecision || "").trim()));
+        } catch {
+        }
+      }
       if (dataset.taskIntentStrategy) metadata.task_intent_strategy = String(dataset.taskIntentStrategy || "").trim();
       if (Object.prototype.hasOwnProperty.call(dataset, "taskIntentCanApply")) {
         metadata.task_intent_can_apply = String(dataset.taskIntentCanApply || "").trim().toLowerCase() === "true";
@@ -10518,7 +11287,7 @@ ${defaultPrompt}`;
     function taskCardCheckLine(value) {
       let text = String(value || "").replace(/\s+/g, " ").trim();
       if (!text) return "";
-      if (/完整结果见对话汇报|结果见对话汇报|任务已完成，?完整结果/u.test(text)) return "";
+      if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return "";
       text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, "").trim();
       if (/whitebox_v1.*开始执行任务/u.test(text)) return "任务流已启动";
       if (/决策已完成执行决策/u.test(text)) return "模型决策已完成";
@@ -10548,7 +11317,7 @@ ${defaultPrompt}`;
       const summaryEl = loadingEl.querySelector('[data-role="summary"]');
       const finalSummary = previewText2(
         String(dataset.taskSummary || summaryEl && (summaryEl.innerText || summaryEl.textContent) || "").replace(/\s+/g, " ").trim(),
-        900
+        220
       );
       return {
         schema: "koto_ai_task_chain_test_v1",
@@ -10574,6 +11343,9 @@ ${defaultPrompt}`;
         steps
       };
     }
+    const runtimeWa = window.WA || {};
+    runtimeWa.taskCardTestStructure = taskCardTestStructure;
+    window.WA = runtimeWa;
     function taskCardVisibleTrace(loadingEl) {
       if (!loadingEl || !loadingEl.querySelector) return "";
       const parts = [];
@@ -10595,7 +11367,11 @@ ${defaultPrompt}`;
     }
     function finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, result, fallbackStatus, skipModelContext) {
       const payload = result && typeof result === "object" ? result : { summary: result };
-      const assistantText = String(payload.summary || "").trim() || "文件任务流已完成。";
+      const dataset = loadingEl && loadingEl.dataset ? loadingEl.dataset : {};
+      const assistantText = terminalTaskAnswer(
+        payload,
+        String(dataset.taskFinalAnswer || dataset.taskSummary || "").trim()
+      ) || "文件任务流已完成。";
       if (loadingEl && loadingEl.dataset) loadingEl.dataset.rawText = assistantText;
       const turnMetadata = Object.assign({
         content: assistantText,
@@ -10619,12 +11395,21 @@ ${defaultPrompt}`;
         overrideOptions.enable_ai_intent_adjudicator = true;
       }
       overrideOptions.router_policy = overrideOptions.router_policy || "model_primary_intent";
+      if (!overrideOptions.selection_context && requestOverrides.selectionContext && typeof requestOverrides.selectionContext === "object") {
+        overrideOptions.selection_context = compactJsonValue(requestOverrides.selectionContext, 0, 1200);
+      }
+      const routingDecision = normalizeFileTaskRoutingDecision(
+        requestOverrides.routing_decision || requestOverrides.workspace_route_intent || overrideOptions.workspace_route_intent
+      );
+      if (routingDecision && !routingDecision.router_policy) {
+        routingDecision.router_policy = String(overrideOptions.router_policy || "").trim();
+      }
       if (explicitTaskPayload) {
-        return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides);
+        return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision);
       }
       const resumedTaskPayload = implicitResumeTaskPayload(text);
       if (resumedTaskPayload) {
-        return finalizeExplicitTaskPayload(resumedTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides);
+        return finalizeExplicitTaskPayload(resumedTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision);
       }
       const rawFiles = Array.isArray(state2._aiFileContext) ? state2._aiFileContext.filter((f) => f && !f.loading).map((file, idx) => ({
         path: file.path || "",
@@ -10687,6 +11472,7 @@ ${defaultPrompt}`;
         file_name: inferredFileName,
         file_type: inferredFileType,
         current_file: currentFile,
+        routing_decision: routingDecision,
         task_context: taskContext,
         model_mode: typeof options.getModelMode === "function" ? options.getModelMode() : "auto",
         model_id: typeof options.getSelectedCloudModelId === "function" ? options.getSelectedCloudModelId() : "",
@@ -10701,7 +11487,7 @@ ${defaultPrompt}`;
       }
       return payload;
     }
-    function finalizeExplicitTaskPayload(taskPayload2, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides) {
+    function finalizeExplicitTaskPayload(taskPayload2, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision) {
       const explicitTaskPayload = cloneTaskPayload(taskPayload2);
       if (!explicitTaskPayload) return null;
       const explicitOptions = explicitTaskPayload.options && typeof explicitTaskPayload.options === "object" ? Object.assign({}, explicitTaskPayload.options) : {};
@@ -10712,6 +11498,10 @@ ${defaultPrompt}`;
       explicitTaskPayload.file_type = explicitTaskPayload.file_type || state2.fileType || "";
       explicitTaskPayload.session_id = explicitTaskPayload.session_id || (typeof options.getSessionId === "function" ? options.getSessionId() : "");
       explicitTaskPayload.options = Object.assign({}, explicitOptions, overrideOptions);
+      const explicitRoutingDecision = normalizeFileTaskRoutingDecision(
+        explicitTaskPayload.routing_decision || routingDecision || explicitTaskPayload.options.workspace_route_intent
+      );
+      if (explicitRoutingDecision) explicitTaskPayload.routing_decision = explicitRoutingDecision;
       if (!Array.isArray(explicitTaskPayload.history)) {
         explicitTaskPayload.history = typeof options.getConversationHistory === "function" ? options.getConversationHistory() : Array.isArray(state2.conversation) ? state2.conversation.slice(-12) : [];
       }
@@ -11035,8 +11825,9 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       const writePattern = /(继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|continue|improve|modify|edit|update|save|write|append|insert)/i;
       const protectPattern = /(不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without).{0,24}(修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)/i;
       const readSourcePattern = /(读取|阅读|查看|分析|基于|来自|原文|原文件|源文件|输入文件|已添加|source|input|read)/i;
-      const explicitOutputBeforePattern = /(保存为|另存为|输出到|写入到|导出到|save as|export to|write to).{0,80}$/i;
+      const explicitOutputBeforePattern = /(保存为|另存为|保存在|保存到|保存至|输出到|输出至|写入到|导出到|save as|export to|write to).{0,80}$/i;
       const sourceBeforePattern = /(读取|阅读|查看|分析|基于|来自|当前打开|当前文件|原文|原文件|源文件|输入文件|已添加|source|input|read).{0,36}$/i;
+      const filenameLabelBeforePattern = /(文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*$/i;
       const candidates = [];
       let match;
       while ((match = filePattern.exec(source)) !== null) {
@@ -11045,6 +11836,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         const end = start + rawPath.length;
         const before = source.slice(Math.max(0, start - 80), start);
         const near = source.slice(Math.max(0, start - 80), Math.min(source.length, end + 80));
+        const targetPath = joinSplitDirectoryTargetPath(source, rawPath, start, end);
         if (hasReadOnlyHint(source) && mentionsAttachedFileContext(near) && !explicitOutputBeforePattern.test(before)) {
           continue;
         }
@@ -11056,10 +11848,35 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         if (/(同一个|当前|目标).{0,16}(docx|word|xlsx|excel|pptx|ppt|pdf|文档|表格|幻灯片|文件)/i.test(near)) score += 5;
         if (readSourcePattern.test(near)) score -= 2;
         if (protectPattern.test(before)) score -= 8;
-        if (score > 0) candidates.push({ path: rawPath, score, index: start });
+        if (targetPath !== rawPath) score += 8;
+        if (filenameLabelBeforePattern.test(before)) score += 6;
+        if (score > 0) candidates.push({ path: targetPath, score, index: start });
       }
       candidates.sort((a, b) => b.score - a.score || a.index - b.index);
       return candidates.length ? candidates[0].path : "";
+    }
+    function joinSplitDirectoryTargetPath(source, rawPath, start, end) {
+      const normalizedPath = String(rawPath || "").trim().replace(/\\/g, "/");
+      if (!normalizedPath || normalizedPath.replace(/^\/+|\/+$/g, "").includes("/")) return rawPath;
+      const before = String(source || "").slice(Math.max(0, start - 140), start);
+      const after = String(source || "").slice(end, Math.min(String(source || "").length, end + 140));
+      const directory = splitOutputDirectoryAfterFile(after) || splitOutputDirectoryBeforeFile(before);
+      const fileName = baseNameFromPath(rawPath);
+      if (!directory || !fileName) return rawPath;
+      return `${directory.replace(/\\/g, "/").replace(/\/+$/g, "")}/${fileName}`;
+    }
+    function splitOutputDirectoryAfterFile(after) {
+      const match = /^[\s,，。；;、]*(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)\s*((?:[A-Za-z]:[\\/])?[^\s"'<>|,，。；;、!?！？()[\]【】]+)\s*(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory)/i.exec(String(after || ""));
+      return cleanSplitOutputDirectory(match ? match[1] : "");
+    }
+    function splitOutputDirectoryBeforeFile(before) {
+      const match = /(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)\s*((?:[A-Za-z]:[\\/])?[^\s"'<>|,，。；;、!?！？()[\]【】]+)\s*(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory).{0,80}(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)?\s*$/i.exec(String(before || ""));
+      return cleanSplitOutputDirectory(match ? match[1] : "");
+    }
+    function cleanSplitOutputDirectory(value) {
+      const clean = String(value || "").trim().replace(/^[\s,，。；;、!?！？()[\]【】"']+|[\s,，。；;、!?！？()[\]【】"']+$/g, "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+      if (!clean || /\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?)$/i.test(clean)) return "";
+      return clean;
     }
     function normalizeTaskPath(value) {
       return String(value || "").trim().replace(/\\/g, "/").toLowerCase();
@@ -11119,7 +11936,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     }
     function queue(card, payload, queueOptions = {}) {
       if (!card || !payload) return null;
-      const path = payload.path || payload.file_path || payload.output_path || payload.target_path;
+      const rawPath = payload.path || payload.file_path || payload.output_path || payload.target_path;
+      const path = normalizePath(rawPath || "") || rawPath;
       if (!path) return null;
       const supported = payload.supported !== false && payload.refresh_supported !== false;
       const entry = upsertEntry(card, {
@@ -11206,6 +12024,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   const WA$4 = window.WA || {};
   WA$4.createFileTaskRefreshController = createFileTaskRefreshController;
   window.WA = WA$4;
+  const WA_HISTORY_SCHEMA_VERSION = 2;
   function escapeHtml(text) {
     return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -11220,6 +12039,20 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const first = parts[0];
     if (first && typeof first === "object") return first.text || first.content || "";
     return String(first);
+  }
+  function migrateLegacyTurn(raw) {
+    const turn = Object.assign({}, raw || {});
+    const schemaVersion = Number(turn.schema_version || turn.history_schema_version || 0);
+    const content = String(turn.content || turn.text || firstPart(turn.parts) || "").trim();
+    if (content && !turn.content) turn.content = content;
+    if ((turn.task || turn.task_kind) && !turn.task_kind) turn.task_kind = turn.task;
+    if (turn.task_card_snapshot && !turn.task_kind) turn.task_kind = "file_task";
+    if (turn.test_structure && typeof turn.test_structure === "object" && !turn.task_terminal_status) {
+      turn.task_terminal_status = String(turn.test_structure.terminal_status || "").trim();
+    }
+    turn.legacy_schema = schemaVersion > 0 && schemaVersion < WA_HISTORY_SCHEMA_VERSION;
+    turn.schema_version = WA_HISTORY_SCHEMA_VERSION;
+    return turn;
   }
   function stableTurnId(turn) {
     const explicit = turn && (turn.id || turn.turn_id || turn.run_id);
@@ -11242,6 +12075,29 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       history_label: "历史任务记录",
       history_note: "这是一条历史运行记录，不代表当前文件状态。"
     };
+  }
+  function taskHistoryTitle(turn) {
+    return String(turn && (turn.task_title || turn.title || "") || "").trim();
+  }
+  function applyTaskHistoryTitle(element, title) {
+    const clean = String(title || "").trim();
+    if (!element || !clean) return;
+    element.dataset.taskTitle = clean;
+    const titleEl = element.querySelector(".wa-task-title");
+    if (titleEl) titleEl.textContent = clean;
+  }
+  function applyTaskHistoryMetadata(element, turn) {
+    if (!element || !turn) return;
+    applyTaskHistoryTitle(element, taskHistoryTitle(turn));
+    const memorySummary = String(turn.memory_summary || turn.model_context_text || "").trim();
+    if (memorySummary) element.dataset.taskMemorySummary = memorySummary;
+    const WA2 = window.WA;
+    if (WA2 && typeof WA2.syncTaskInteractionSummary === "function") {
+      try {
+        WA2.syncTaskInteractionSummary(element);
+      } catch (_) {
+      }
+    }
   }
   function testStructureText(value, limit) {
     const text = String(value || "").replace(/\s+/g, " ").trim();
@@ -11275,7 +12131,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   function testStructureCheckText(value) {
     let text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text) return "";
-    if (/完整结果见对话汇报|结果见对话汇报|任务已完成，?完整结果/u.test(text)) return "";
+    if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return "";
     text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, "").trim();
     if (/whitebox_v1.*开始执行任务/u.test(text)) return "任务流已启动";
     if (/决策已完成执行决策/u.test(text)) return "模型决策已完成";
@@ -11389,16 +12245,18 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     }
     function normalizeTurn(raw, defaults) {
       if (!raw || typeof raw !== "object") return null;
-      const role = normalizeRole(raw.role || defaults && defaults.role);
+      const migrated = migrateLegacyTurn(raw);
+      const role = normalizeRole(migrated.role || defaults && defaults.role);
       if (!role) return null;
-      const content = String(raw.content || raw.text || firstPart(raw.parts) || "").trim();
+      const content = String(migrated.content || migrated.text || firstPart(migrated.parts) || "").trim();
       if (!content) return null;
-      const turn = Object.assign({}, raw, defaults || {}, {
-        id: String(raw.id || raw.turn_id || raw.run_id || ""),
+      const turn = Object.assign({}, migrated, defaults || {}, {
+        id: String(migrated.id || migrated.turn_id || migrated.run_id || ""),
         role,
         content,
-        timestamp: raw.timestamp || raw.created_at || "",
-        session_id: raw.session_id || defaults && defaults.session_id || activeSessionId || getSessionId()
+        timestamp: migrated.timestamp || migrated.created_at || "",
+        session_id: migrated.session_id || defaults && defaults.session_id || activeSessionId || getSessionId(),
+        schema_version: WA_HISTORY_SCHEMA_VERSION
       });
       if (!turn.id) turn.id = stableTurnId(turn);
       return turn;
@@ -11510,11 +12368,13 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     function renderAssistantTurn(turn, msgs) {
       const host = msgs || getMessagesElement();
       if (!host || !turn) return null;
-      if (turn.task_card_snapshot && !taskTurnIsTerminal(turn) && window.WA && typeof window.WA.restoreTaskRunCard === "function") {
+      const shouldRenderStructuredTaskReport = !!turn.test_structure && taskTurnIsTerminal(turn);
+      if (!shouldRenderStructuredTaskReport && turn.task_card_snapshot && window.WA && typeof window.WA.restoreTaskRunCard === "function") {
         const restored = window.WA.restoreTaskRunCard(turn.task_card_snapshot, historyTaskSnapshotOptions());
         if (restored) {
           restored.dataset.turnId = turn.id;
           restored.dataset.rawText = turn.content;
+          applyTaskHistoryMetadata(restored, turn);
           const structure2 = renderTestStructure(turn.test_structure);
           if (structure2) restored.appendChild(structure2);
           host.appendChild(restored);
@@ -11531,7 +12391,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         el.appendChild(structure);
         const answer = document.createElement("div");
         answer.className = "wa-task-final-answer";
-        answer.innerHTML = renderMarkdown(turn.content);
+        answer.innerHTML = '<div class="wa-task-final-answer-title">总结与回答</div><div class="wa-task-final-answer-content">' + renderMarkdown(turn.content) + "</div>";
         el.appendChild(answer);
       } else {
         el.innerHTML = renderMarkdown(turn.content);
@@ -12001,8 +12861,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       if (!bar) return;
       execWriteToDoc(mode, {
         pinnedSel: state2.lastPinnedSel,
-        toolCall: state2.pendingToolCall || void 0,
-        outputMode: state2.aiOutputMode
+        toolCall: state2.pendingToolCall || void 0
       }, bar);
       state2.pendingToolCall = null;
       state2.lastPinnedSel = null;
@@ -12025,7 +12884,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     function statusLabel2(status) {
       const value = String(status || "").toLowerCase();
       if (value === "completed") return "已完成";
-      if (value === "needs_review") return "待确认";
+      if (value === "needs_review") return "需复核";
       if (value === "failed") return "失败";
       return "进行中";
     }
@@ -12387,6 +13246,24 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   const WA$3 = window.WA || {};
   WA$3.createWorkspaceAiTransport = createWorkspaceAiTransport;
   window.WA = WA$3;
+  const QUICK_ACTION_ALIASES = {
+    polish: "润色",
+    translate: "翻译",
+    explain: "解释",
+    chart: "可视化",
+    visualize: "可视化",
+    visualise: "可视化",
+    summarize: "总结",
+    summary: "总结",
+    continue: "续写",
+    rewrite: "改写",
+    check: "检查"
+  };
+  function normalizeQuickActionId(actionId) {
+    const source = String(actionId || "").trim();
+    if (!source) return "";
+    return QUICK_ACTION_ALIASES[source.toLowerCase()] || source;
+  }
   const BUILTIN_ACTIONS = [
     { action: "润色", keywords: ["润色"], label: "润色优化", route: "editor", taskFlowMode: "proposal" },
     { action: "翻译", keywords: ["翻译"], label: "翻译（中英互译）", route: "editor", readOnly: true, taskFlowMode: "simple" },
@@ -12400,6 +13277,10 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   function normalizeKeywords(keywords, actionId) {
     const values = Array.isArray(keywords) ? keywords : [keywords || actionId];
     return Array.from(new Set(values.map((k) => String(k || "").trim()).filter(Boolean)));
+  }
+  function aliasesForAction(actionId) {
+    const canonical = normalizeQuickActionId(actionId);
+    return Object.entries(QUICK_ACTION_ALIASES).filter(([, target]) => target === canonical).map(([alias]) => alias);
   }
   function createQuickActionDispatcher(deps = {}) {
     const options = deps || {};
@@ -12416,7 +13297,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       return typeof options.getSelectedCloudModelId === "function" ? options.getSelectedCloudModelId() || "" : "";
     }
     function getAction(actionId) {
-      return actions.get(String(actionId || "").trim()) || null;
+      return actions.get(normalizeQuickActionId(actionId)) || null;
     }
     function registerAction(definition) {
       const actionId = String(definition && (definition.action || definition.id) || "").trim();
@@ -12440,7 +13321,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       return Array.from(actions.values());
     }
     function matchAction(text) {
-      const source = String(text || "").trim();
+      const source = normalizeQuickActionId(text);
       return actions.has(source) ? source : "";
     }
     function canUseFullDocument(actionId, fileType) {
@@ -12523,6 +13404,9 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       if (!attachedDispatcher || !action) return action;
       if (typeof attachedDispatcher.registerQuickActionHandler === "function") {
         attachedDispatcher.registerQuickActionHandler(action.action, (context) => sendAction(action.action, context));
+        aliasesForAction(action.action).forEach((alias) => {
+          attachedDispatcher.registerQuickActionHandler(alias, (context) => sendAction(action.action, Object.assign({}, context, { action: action.action })));
+        });
       }
       return action;
     }
@@ -12533,11 +13417,13 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       return attachedDispatcher;
     }
     function sendAction(actionId, context) {
-      const action = getAction(actionId);
+      const canonicalActionId = normalizeQuickActionId(actionId);
+      const action = getAction(canonicalActionId);
       if (!action) return Promise.reject(new Error(`未注册任务动作：${actionId}`));
-      if (action.route === "chart") return sendChartAction(Object.assign({ action: actionId }, context), action);
-      if (usesProposalTaskFlow(action)) return sendProposalTaskFlowAction(Object.assign({ action: actionId }, context), action);
-      if (usesSimpleTaskFlow(action)) return sendSimpleTaskFlowAction(Object.assign({ action: actionId }, context), action);
+      const payload = Object.assign({}, context, { action: canonicalActionId });
+      if (action.route === "chart") return sendChartAction(payload, action);
+      if (usesProposalTaskFlow(action)) return sendProposalTaskFlowAction(payload, action);
+      if (usesSimpleTaskFlow(action)) return sendSimpleTaskFlowAction(payload, action);
       return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));
     }
     function sendSimpleTaskFlowAction(payload, providedAction) {
@@ -12553,6 +13439,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         text: taskText,
         pinnedSelText: payload.selectionText || "",
         pinnedSelSource: payload.selectionSource || payload.pinnedSelSource || "",
+        selectionContext: payload.selectionContext || null,
         model_mode: payload.model_mode || getModelMode(),
         model_id: payload.model_id || getSelectedCloudModelId(),
         msgs,
@@ -12575,6 +13462,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         text: taskText,
         pinnedSelText: payload.selectionText || "",
         pinnedSelSource: payload.selectionSource || payload.pinnedSelSource || "",
+        selectionContext: payload.selectionContext || null,
         model_mode: payload.model_mode || getModelMode(),
         model_id: payload.model_id || getSelectedCloudModelId(),
         msgs,
@@ -12609,6 +13497,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         text: chartTaskText,
         pinnedSelText: payload.csv_data || payload.selectionText || "",
         pinnedSelSource: payload.csv_data ? "chart_csv" : payload.selectionSource || payload.pinnedSelSource || "chart_request",
+        selectionContext: payload.selectionContext || null,
         model_mode: modelMode,
         model_id: modelId,
         msgs,
@@ -12642,6 +13531,12 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   let _waTaskDispatcher$1 = window._waTaskDispatcher || null;
   let _waQuickActionDispatcherAttached = Boolean(window._waQuickActionDispatcherAttached);
   let _hostSessionId = String(window._hostSessionId || "").trim();
+  let _workspaceTurnPersistQueue = Promise.resolve();
+  let _workspaceTurnRetryTimer = null;
+  let _workspaceTurnRetrying = false;
+  const WORKSPACE_TURN_RETRY_KEY = "wa_workspace_turn_retry_queue_v1";
+  const WORKSPACE_TURN_RETRY_LIMIT = 20;
+  const WORKSPACE_TURN_RETRY_SNAPSHOT_LIMIT = 12e4;
   function _syncRuntimeGlobals() {
     window._waAiResultsRuntime = _waAiResultsRuntime;
     window._waQuickActionRuntime = _waQuickActionRuntime;
@@ -12680,6 +13575,83 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   function _waSession() {
     return _hostChatSession() || _WA_RUNTIME_SESSION_ID;
   }
+  function _safeJsonClone(value) {
+    try {
+      return JSON.parse(JSON.stringify(value || null));
+    } catch (_) {
+      return null;
+    }
+  }
+  function _workspaceTurnPersistKey(payload) {
+    const metadata = payload && typeof payload.metadata === "object" ? payload.metadata : {};
+    const explicit = String(metadata.turn_id || metadata.run_id || metadata.task_id || "").trim();
+    if (explicit) return explicit;
+    return [
+      String(payload.user || "").slice(0, 120),
+      String(payload.assistant || "").slice(0, 120)
+    ].join("|");
+  }
+  function _compactRetryPayload(payload) {
+    const cloned = _safeJsonClone(payload);
+    if (!cloned || typeof cloned !== "object") return null;
+    const snapshot = cloned.task_card_snapshot;
+    if (snapshot && typeof snapshot === "object" && typeof snapshot.html === "string") {
+      snapshot.html = snapshot.html.slice(0, WORKSPACE_TURN_RETRY_SNAPSHOT_LIMIT);
+    }
+    return cloned;
+  }
+  function _loadWorkspaceTurnRetryQueue() {
+    try {
+      const raw = window.localStorage.getItem(WORKSPACE_TURN_RETRY_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item === "object") : [];
+    } catch (_) {
+      return [];
+    }
+  }
+  function _saveWorkspaceTurnRetryQueue(queue) {
+    try {
+      window.localStorage.setItem(WORKSPACE_TURN_RETRY_KEY, JSON.stringify(queue.slice(-WORKSPACE_TURN_RETRY_LIMIT)));
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+  function _removeWorkspaceTurnRetry(payload) {
+    const key = _workspaceTurnPersistKey(payload);
+    if (!key) return;
+    const queue = _loadWorkspaceTurnRetryQueue().filter((item) => String(item.key || "") !== key);
+    _saveWorkspaceTurnRetryQueue(queue);
+  }
+  function _scheduleWorkspaceTurnRetry(delay = 5e3) {
+    if (_workspaceTurnRetryTimer !== null) return;
+    _workspaceTurnRetryTimer = window.setTimeout(() => {
+      _workspaceTurnRetryTimer = null;
+      retryWorkspaceConversationPersistence(false).catch((error) => {
+        console.warn("[WA] workspace turn retry failed:", error);
+      });
+    }, Math.max(0, delay));
+  }
+  function _queueWorkspaceTurnRetry(payload, error) {
+    const retryPayload = _compactRetryPayload(payload);
+    if (!retryPayload) return;
+    const key = _workspaceTurnPersistKey(retryPayload);
+    const queue = _loadWorkspaceTurnRetryQueue().filter((item) => String(item.key || "") !== key);
+    queue.push({
+      key,
+      payload: retryPayload,
+      attempts: 0,
+      queued_at: (/* @__PURE__ */ new Date()).toISOString(),
+      last_error: String(error && error.message ? error.message : error || "").slice(0, 240)
+    });
+    if (!_saveWorkspaceTurnRetryQueue(queue)) {
+      console.warn("[WA] workspace turn retry queue storage failed");
+      showToast$1("对话保存失败，本地重试队列空间不足", "error", 4200);
+      return;
+    }
+    showToast$1("对话保存失败，已暂存并自动重试", "warning", 4200);
+    _scheduleWorkspaceTurnRetry(2500);
+  }
   function _waQuickActionModelMode() {
     const value = String(state$1.lockedModel || "").trim().toLowerCase();
     return ["cloud", "deepseek", "local"].includes(value) ? value : "cloud";
@@ -12711,41 +13683,219 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       return Promise.resolve(restore(force)).then(() => turns);
     });
   }
+  async function _sendWorkspaceConversationTurn(sessionId, payload) {
+    const response = await _csrfFetch$6(`/api/sessions/${encodeURIComponent(sessionId)}/workspace-turn`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!response.ok) return null;
+    const data = await response.json().catch(() => null);
+    _applyPersistedTaskMetadata(data, payload);
+    const bridge = window.KotoSessionBridge;
+    if (bridge && typeof bridge.refreshSessions === "function") {
+      Promise.resolve(bridge.refreshSessions()).catch(() => {
+      });
+    }
+    const refreshAiSessions2 = window.WA && window.WA.refreshAiSessions;
+    if (typeof refreshAiSessions2 === "function") {
+      Promise.resolve(refreshAiSessions2({ silent: true })).catch(() => {
+      });
+    }
+    return data;
+  }
+  function _cssEscape(value) {
+    const css = window.CSS;
+    if (css && typeof css.escape === "function") return css.escape(value);
+    return String(value || "").replace(/["\\]/g, "\\$&");
+  }
+  function _applyPersistedTaskMetadata(data, payload) {
+    const taskTitle2 = String(data && data.task_title || "").trim();
+    const memorySummary = String(data && (data.memory_summary || data.model_context_text) || "").trim();
+    if (!taskTitle2 && !memorySummary) return;
+    const metadata = payload && payload.metadata && typeof payload.metadata === "object" ? payload.metadata : {};
+    const turnId = String(metadata.turn_id || payload.turn_id || "").trim();
+    const runId = String(metadata.run_id || "").trim();
+    const selectors = [
+      turnId ? `[data-turn-id="${_cssEscape(turnId)}"]` : "",
+      runId ? `.wa-task-run[data-task-run-id="${_cssEscape(runId)}"]` : ""
+    ].filter(Boolean);
+    const card = selectors.length ? document.querySelector(selectors.join(",")) : null;
+    if (!card) return;
+    if (taskTitle2) {
+      card.dataset.taskTitle = taskTitle2;
+      const titleEl = card.querySelector(".wa-task-title");
+      if (titleEl) titleEl.textContent = taskTitle2;
+    }
+    if (memorySummary) card.dataset.taskMemorySummary = memorySummary;
+    const WA2 = window.WA;
+    if (WA2 && typeof WA2.syncTaskInteractionSummary === "function") {
+      try {
+        WA2.syncTaskInteractionSummary(card);
+      } catch (_) {
+      }
+    }
+  }
+  async function _ensureWorkspacePersistenceSession() {
+    const existing = _hostChatSession();
+    if (existing && !/^workspace_runtime_/i.test(existing)) return existing;
+    const stamp = (/* @__PURE__ */ new Date()).toISOString().replace(/[-:T]/g, "").slice(0, 12);
+    const response = await _csrfFetch$6("/api/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `对话_${stamp}` })
+    });
+    if (!response.ok) return "";
+    const data = await response.json().catch(() => null);
+    const sessionId = String(data && data.session || "").trim();
+    if (!sessionId) return "";
+    _hostSessionId = sessionId;
+    _syncRuntimeGlobals();
+    return sessionId;
+  }
   async function _persistWorkspaceConversationTurn(record) {
-    const sessionId = _hostChatSession();
-    if (!sessionId || /^workspace_runtime_/i.test(sessionId)) return null;
     const payload = record && typeof record === "object" ? record : {};
     const userText = String(payload.user || payload.user_text || "").trim();
     const assistantText = String(payload.assistant || payload.assistant_text || "").trim();
     if (!userText || !assistantText) return null;
+    const requestPayload = {
+      user: userText,
+      assistant: assistantText,
+      attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
+      task_card_snapshot: payload.task_card_snapshot && typeof payload.task_card_snapshot === "object" ? payload.task_card_snapshot : null,
+      metadata: Object.assign({ source: "workspace" }, payload.metadata || {})
+    };
+    _workspaceTurnPersistQueue = _workspaceTurnPersistQueue.catch(() => null).then(async () => {
+      try {
+        const sessionId = await _ensureWorkspacePersistenceSession();
+        if (!sessionId) {
+          _queueWorkspaceTurnRetry(requestPayload, "missing session");
+          return null;
+        }
+        const first = await _sendWorkspaceConversationTurn(sessionId, requestPayload);
+        if (first) {
+          _removeWorkspaceTurnRetry(requestPayload);
+          return first;
+        }
+        const second = await _sendWorkspaceConversationTurn(sessionId, requestPayload);
+        if (second) {
+          _removeWorkspaceTurnRetry(requestPayload);
+          return second;
+        }
+        _queueWorkspaceTurnRetry(requestPayload, "empty response");
+        return null;
+      } catch (error) {
+        console.warn("[WA] workspace turn persistence failed:", error);
+        _queueWorkspaceTurnRetry(requestPayload, error);
+        return null;
+      }
+    });
+    return _workspaceTurnPersistQueue;
+  }
+  function _decodeTaskPayload(value) {
+    const text = String(value || "").trim();
+    if (!text) return null;
     try {
-      const response = await _csrfFetch$6(`/api/sessions/${encodeURIComponent(sessionId)}/workspace-turn`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          user: userText,
-          assistant: assistantText,
-          attachments: Array.isArray(payload.attachments) ? payload.attachments : [],
-          task_card_snapshot: payload.task_card_snapshot && typeof payload.task_card_snapshot === "object" ? payload.task_card_snapshot : null,
-          metadata: Object.assign({ source: "workspace" }, payload.metadata || {})
-        })
-      });
-      if (!response.ok) return null;
-      const data = await response.json().catch(() => null);
-      const bridge = window.KotoSessionBridge;
-      if (bridge && typeof bridge.refreshSessions === "function") {
-        Promise.resolve(bridge.refreshSessions()).catch(() => {
-        });
-      }
-      const refreshAiSessions2 = window.WA && window.WA.refreshAiSessions;
-      if (typeof refreshAiSessions2 === "function") {
-        Promise.resolve(refreshAiSessions2({ silent: true })).catch(() => {
-        });
-      }
-      return data;
-    } catch (error) {
-      console.warn("[WA] workspace turn persistence failed:", error);
+      const decoded = decodeURIComponent(text);
+      const parsed = JSON.parse(decoded);
+      return parsed && typeof parsed === "object" ? parsed : null;
+    } catch (_) {
       return null;
+    }
+  }
+  function _persistTerminalTaskRunCard(card) {
+    if (!card || !card.dataset) return Promise.resolve(null);
+    const dataset = card.dataset;
+    if (dataset.taskTerminalPersisted === "true") return Promise.resolve(null);
+    if (dataset.taskTerminalPersisting === "true") return Promise.resolve(null);
+    const taskPayload2 = _decodeTaskPayload(dataset.taskFollowupPayload || "") || {};
+    const userText = String(dataset.taskRequest || taskPayload2.task || "").trim();
+    const assistantText = String(dataset.taskFinalAnswer || dataset.taskSummary || "").trim();
+    if (!userText || !assistantText) return Promise.resolve(null);
+    dataset.taskTerminalPersisting = "true";
+    const WA2 = window.WA || {};
+    const metadata = {
+      turn_id: String(dataset.turnId || "").trim(),
+      task_kind: "file_task",
+      partial: false,
+      skip_model_context: false,
+      task_title: String(dataset.taskTitle || "").trim() || "文件任务结果",
+      task_request: userText,
+      status: String(dataset.taskTerminalStatus || "done").trim() || "done",
+      task_terminal_status: String(dataset.taskTerminalStatus || "completed").trim() || "completed",
+      completed_task: String(dataset.taskCompleted || "").trim().toLowerCase() !== "false"
+    };
+    if (taskPayload2 && Object.keys(taskPayload2).length) {
+      metadata.task_request_payload = taskPayload2;
+      if (taskPayload2.task_context && typeof taskPayload2.task_context === "object") {
+        metadata.task_context = taskPayload2.task_context;
+      }
+    }
+    if (typeof WA2.taskCardTestStructure === "function") {
+      try {
+        const structure = WA2.taskCardTestStructure(card);
+        if (structure) metadata.test_structure = structure;
+      } catch (_) {
+      }
+    }
+    const includeSnapshot = !metadata.test_structure;
+    const snapshot = includeSnapshot && card.classList && card.classList.contains("wa-task-run") ? {
+      html: card.outerHTML,
+      fatal_error_text: String(card._fatalErrorText || "")
+    } : null;
+    return _persistWorkspaceConversationTurn({
+      user: userText,
+      assistant: assistantText,
+      metadata,
+      task_card_snapshot: snapshot
+    }).then((result) => {
+      if (result) {
+        dataset.taskTerminalPersisted = "true";
+        delete dataset.taskTerminalPersisting;
+      } else {
+        delete dataset.taskTerminalPersisting;
+      }
+      return result;
+    }).catch((error) => {
+      delete dataset.taskTerminalPersisting;
+      throw error;
+    });
+  }
+  async function retryWorkspaceConversationPersistence(notify = true) {
+    if (_workspaceTurnRetrying) return 0;
+    const queue = _loadWorkspaceTurnRetryQueue();
+    if (!queue.length) {
+      if (notify) showToast$1("没有待补保存的对话", "info", 1800);
+      return 0;
+    }
+    _workspaceTurnRetrying = true;
+    let saved = 0;
+    const remaining = [];
+    try {
+      const sessionId = await _ensureWorkspacePersistenceSession();
+      if (!sessionId) {
+        _scheduleWorkspaceTurnRetry(1e4);
+        return 0;
+      }
+      for (const item of queue) {
+        const payload = item && item.payload && typeof item.payload === "object" ? item.payload : null;
+        if (!payload) continue;
+        const ok = await _sendWorkspaceConversationTurn(sessionId, payload);
+        if (ok) {
+          saved += 1;
+        } else {
+          remaining.push(Object.assign({}, item, {
+            attempts: Number(item.attempts || 0) + 1,
+            last_error: "retry failed"
+          }));
+        }
+      }
+      _saveWorkspaceTurnRetryQueue(remaining);
+      if (saved && (notify || !remaining.length)) showToast$1(`已补保存 ${saved} 条对话`, "success", 2600);
+      if (remaining.length) _scheduleWorkspaceTurnRetry(15e3);
+      return saved;
+    } finally {
+      _workspaceTurnRetrying = false;
     }
   }
   function _initWorkspaceAiRuntimes$1() {
@@ -12796,6 +13946,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         getActiveEditorContent: () => state$1.activeEditor && typeof state$1.activeEditor.getContent === "function" ? state$1.activeEditor.getContent() || "" : "",
         sampleTaskContext: _waSampleTaskContext,
         getSessionId: _waSession,
+        ensureSessionId: _ensureWorkspacePersistenceSession,
         getModelMode: _waQuickActionModelMode,
         getSelectedCloudModelId: _selectedCloudModelId,
         getConversationHistory: () => _waConversationRuntime$1 && typeof _waConversationRuntime$1.getHistoryForModel === "function" ? _waConversationRuntime$1.getHistoryForModel(12) : Array.isArray(state$1.conversation) ? state$1.conversation.slice(-12) : [],
@@ -12870,6 +14021,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     window.WA.registerTaskEntryRoute = registerTaskEntryRoute;
     window.WA.registerTaskActionHandler = registerTaskActionHandler;
     window.WA._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes$1;
+    window.WA.retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence;
+    window.WA.persistTerminalTaskRunCard = _persistTerminalTaskRunCard;
     window._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes$1;
     window._hydrateAiConversation = _hydrateAiConversation;
     window._waSession = _waSession;
@@ -12877,6 +14030,13 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     window._waQuickActionModelMode = _waQuickActionModelMode;
     window._waSampleTaskContext = _waSampleTaskContext;
     window._persistWorkspaceConversationTurn = _persistWorkspaceConversationTurn;
+    window._persistTerminalTaskRunCard = _persistTerminalTaskRunCard;
+    window._retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence;
+    window.addEventListener("online", () => _scheduleWorkspaceTurnRetry(1e3));
+    document.addEventListener("visibilitychange", () => {
+      if (!document.hidden) _scheduleWorkspaceTurnRetry(1e3);
+    });
+    if (_loadWorkspaceTurnRetryQueue().length) _scheduleWorkspaceTurnRetry(1500);
     _syncRuntimeGlobals();
   }
   function normalizeSessionId(value) {
@@ -12894,6 +14054,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     return sessionId.replace(/^chat_/, "对话 ").replace(/_/g, " ");
   }
   function sessionTitle(session, fallbackSessionId = "") {
+    const taskTitle2 = String(session && session.latest_task_title || "").trim();
+    if (taskTitle2) return taskTitle2;
     const title = String(session && session.title || "").trim();
     if (title && title !== session?.id) return title;
     const id = session ? session.id : fallbackSessionId;
@@ -12917,6 +14079,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const normalized = String(status || "").trim().toLowerCase();
     if (normalized === "completed") return "已完成";
     if (normalized === "running") return "进行中";
+    if (normalized === "awaiting_confirmation") return "等待确认";
+    if (normalized === "waiting") return "待处理";
     if (normalized === "failed") return "失败";
     if (normalized === "cancelled") return "已取消";
     return "任务";
@@ -12940,6 +14104,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       mtime: Number(record.mtime || 0),
       task_count: Number(record.task_count || 0),
       has_task_flow: Boolean(record.has_task_flow || Number(record.task_count || 0)),
+      latest_task_title: String(record.latest_task_title || "").trim(),
       latest_task_status: String(record.latest_task_status || "").trim(),
       latest_task_id: String(record.latest_task_id || "").trim(),
       latest_task_run_id: String(record.latest_task_run_id || "").trim()
@@ -12984,6 +14149,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   let _refreshPromise = null;
   let _bound = false;
   let _sessionsExpanded = false;
+  let _sessionActionsBusy = false;
   const _SESSION_PREVIEW_LIMIT = 5;
   function _activeSessionMeta() {
     const id = normalizeSessionId(_activeAiSessionId);
@@ -13026,6 +14192,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const list = $$6("wa-ai-session-list");
     if (!list) return;
     list.innerHTML = '<div class="wa-ai-session-state">正在读取对话...</div>';
+    _syncSessionActionState();
   }
   function _renderEmpty(message = "暂无对话与任务") {
     const list = $$6("wa-ai-session-list");
@@ -13035,6 +14202,24 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       <strong>${_escHtml$1(message)}</strong>
       <span>在底部输入即可开始新对话；附加文件后会进入文件任务流程。</span>
     </div>`;
+    _syncSessionActionState();
+  }
+  function _syncSessionActionState() {
+    const clearButton = $$6("wa-ai-session-clear");
+    const refreshButton = $$6("wa-ai-session-refresh");
+    const summary = $$6("wa-ai-session-summary");
+    const totalTasks = _sessions.reduce((sum, session) => sum + Math.max(0, Number(session.task_count || 0)), 0);
+    if (summary) {
+      summary.textContent = _sessions.length ? `${_sessions.length} 条对话${totalTasks ? ` · ${totalTasks} 个任务` : ""}` : "AI 工作区";
+    }
+    if (clearButton) {
+      clearButton.disabled = _sessionActionsBusy || !_sessions.length;
+      clearButton.classList.toggle("is-busy", _sessionActionsBusy);
+    }
+    if (refreshButton) {
+      refreshButton.disabled = _sessionActionsBusy;
+      refreshButton.classList.toggle("is-busy", !!_refreshPromise);
+    }
   }
   function _renderSessions() {
     const list = $$6("wa-ai-session-list");
@@ -13047,7 +14232,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const hiddenCount = Math.max(0, _sessions.length - visibleSessions.length);
     const sessionHtml = visibleSessions.map((session) => {
       const active = session.id === _activeAiSessionId ? " is-active" : "";
-      const title = sessionTitle(session, _activeAiSessionId);
+      const taskTitle2 = String(session.latest_task_title || "").trim();
+      const title = taskTitle2 || sessionTitle(session, _activeAiSessionId);
       const preview = session.preview || "暂无消息";
       const time = formatSessionTime(session);
       const count = Number(session.message_count || 0);
@@ -13057,7 +14243,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       const taskStatus = String(session.latest_task_status || "").trim().toLowerCase();
       const taskBadge = hasTaskFlow ? `<span class="wa-ai-session-task-badge" data-status="${_escHtml$1(taskStatus || "task")}">${_escHtml$1(taskCount > 1 ? `任务 ${taskCount} · ${taskStatusLabel(taskStatus)}` : taskStatusLabel(taskStatus))}</span>` : "";
       return `
-      <div role="button" tabindex="0" class="wa-ai-session-item${hasTaskFlow ? " has-task-flow" : ""}${active}" data-ai-session-id="${_escHtml$1(session.id)}" data-task-count="${_escHtml$1(String(taskCount))}" data-latest-task-status="${_escHtml$1(taskStatus)}" title="${_escHtml$1(title)}">
+      <div role="button" tabindex="0" class="wa-ai-session-item${hasTaskFlow ? " has-task-flow" : ""}${active}" data-ai-session-id="${_escHtml$1(session.id)}" data-task-count="${_escHtml$1(String(taskCount))}" data-latest-task-title="${_escHtml$1(taskTitle2)}" data-latest-task-status="${_escHtml$1(taskStatus)}" title="${_escHtml$1(title)}">
         <span class="wa-ai-session-icon">${_CHAT_SVG}</span>
         <span class="wa-ai-session-main">
           <span class="wa-ai-session-top">
@@ -13075,6 +14261,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     }).join("");
     const expandHtml = _sessions.length > _SESSION_PREVIEW_LIMIT ? `<button type="button" class="wa-ai-session-expand" data-ai-session-expand="${_sessionsExpanded ? "0" : "1"}">${_escHtml$1(_sessionsExpanded ? "收起历史" : `展开 ${hiddenCount} 条历史`)}</button>` : "";
     list.innerHTML = sessionHtml + expandHtml;
+    _syncSessionActionState();
     _setChatHeader();
   }
   function _openLatestTaskFlowForSession(sessionId) {
@@ -13139,6 +14326,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     if (_refreshPromise) return _refreshPromise;
     const list = $$6("wa-ai-session-list");
     if (list && (!options.silent || !list.children.length)) _renderLoading();
+    _syncSessionActionState();
     _refreshPromise = fetchAiSessionPreviews().then((sessions) => {
       _sessions = sessions;
       _renderSessions();
@@ -13149,6 +14337,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       return _sessions;
     }).finally(() => {
       _refreshPromise = null;
+      _syncSessionActionState();
     });
     return _refreshPromise;
   }
@@ -13200,6 +14389,47 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     } catch (error) {
       showToast$1(error && error.message ? error.message : "删除对话失败", "error");
       return false;
+    }
+  }
+  async function clearAiSessions() {
+    if (!_sessions.length) {
+      showToast$1("没有可清除的历史对话", "info");
+      return false;
+    }
+    const count = _sessions.length;
+    if (!window.confirm(`确认清除全部 ${count} 条历史对话？此操作不可撤销。`)) return false;
+    const sessionsToDelete = _sessions.map((session) => session.id).filter(Boolean);
+    const clearButton = $$6("wa-ai-session-clear");
+    _sessionActionsBusy = true;
+    if (clearButton) clearButton.disabled = true;
+    _syncSessionActionState();
+    const failedIds = [];
+    try {
+      for (const sessionId of sessionsToDelete) {
+        try {
+          await deleteAiSessionRecord(sessionId);
+        } catch (error) {
+          console.warn("[WA] clear AI session failed:", sessionId, error);
+          failedIds.push(sessionId);
+        }
+      }
+      _sessions = failedIds.length ? _sessions.filter((session) => failedIds.includes(session.id)) : [];
+      if (!failedIds.length) {
+        _activeAiSessionId = "";
+        const runtime = window._waConversationRuntime;
+        if (runtime && typeof runtime.reset === "function") runtime.reset();
+      }
+      showAiSessionList();
+      await refreshAiSessions({ silent: true });
+      if (failedIds.length) {
+        showToast$1(`已清除 ${count - failedIds.length} 条，${failedIds.length} 条失败`, "error");
+        return false;
+      }
+      showToast$1(`已清除 ${count} 条历史对话`, "success");
+      return true;
+    } finally {
+      _sessionActionsBusy = false;
+      _syncSessionActionState();
     }
   }
   async function newAiSession(options = {}) {
@@ -13341,6 +14571,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     window.WA.refreshAiSessions = refreshAiSessions;
     window.WA.openAiSession = openAiSession;
     window.WA.deleteAiSession = deleteAiSession;
+    window.WA.clearAiSessions = clearAiSessions;
     window.WA.newAiSession = newAiSession;
     window.WA.submitUnifiedAiComposer = submitUnifiedAiComposer;
     window.WA.handleUnifiedComposerKeydown = handleUnifiedComposerKeydown;
@@ -14083,13 +15314,18 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   window.WA = window.WA || {};
   window.WA.installWorkspaceFindReplace = installWorkspaceFindReplace;
   let _selChangeTimer = null;
+  function _isDocxMouseDown() {
+    return Boolean(
+      state && state._docxMouseIsDown || window._docxMouseIsDown
+    );
+  }
   document.addEventListener("selectionchange", () => {
     if (state.fileType !== "docx") return;
     clearTimeout(_selChangeTimer);
     _selChangeTimer = setTimeout(() => {
       const _ae = document.activeElement;
       if (_ae && (_ae.closest("#wa-pdf-tooltip") || _ae.closest("#wa-docx-hoverbar") || _ae.closest("#wa-docx-cp") || _ae.closest("#wa-review-shell") || _ae.closest("#wa-review-selection-launcher"))) return;
-      if (_docxMouseIsDown && document.querySelector("#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover")) return;
+      if (_isDocxMouseDown() && document.querySelector("#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover")) return;
       const _ws = window.getSelection();
       if (!_ws || _ws.isCollapsed || !_ws.rangeCount) {
         _resetDocxSelection();
@@ -14355,6 +15591,17 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   }
   _initAIAttachmentDrops();
   !!document.getElementById("workspaceView");
+  function setMainViewActive(view, active) {
+    if (!view) return;
+    view.style.display = active ? "" : "none";
+    view.setAttribute("aria-hidden", active ? "false" : "true");
+    if (active) {
+      view.removeAttribute("inert");
+    } else {
+      view.setAttribute("inert", "");
+    }
+    view.inert = !active;
+  }
   function toggleFileMenu() {
     const dd = $("wa-file-dropdown");
     const btn = $("wa-ribbon-file-btn");
@@ -14417,7 +15664,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const shell = document.querySelector(".app-shell");
     if (shell) shell.classList.add("koto-unified-workspace");
     _setActivityActive("navWorkspaceBtn");
-    if (chatView) chatView.style.display = "none";
+    setMainViewActive(chatView, false);
+    setMainViewActive(wsView, true);
     wsView.style.display = "flex";
     localStorage.setItem("koto.inWorkspace", "1");
     if (window.KotoSessionBridge && typeof window.KotoSessionBridge.getSession === "function") {
@@ -14508,8 +15756,8 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   function closeInMainView() {
     const chatView = document.getElementById("chatView");
     const wsView = document.getElementById("workspaceView");
-    if (wsView) wsView.style.display = "none";
-    if (chatView) chatView.style.display = "";
+    setMainViewActive(wsView, false);
+    setMainViewActive(chatView, true);
     localStorage.removeItem("koto.inWorkspace");
     const navBtn = document.getElementById("navWorkspaceBtn");
     if (navBtn) navBtn.classList.remove("active");
@@ -14703,7 +15951,13 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
         previewText: previewText22,
         sourcePath: sourcePath2,
         sourceName: sourceName2 || (sourcePath2 ? sourcePath2.split(/[\\/]/).pop() || sourcePath2 : ""),
-        sourceType
+        sourceType,
+        kind: String(text.kind || text.selectionKind || "").trim(),
+        rawText: String(text.rawText || text.raw_text || "").trim(),
+        sheetName: String(text.sheetName || text.sheet_name || "").trim(),
+        rangeA1: String(text.rangeA1 || text.range_a1 || "").trim(),
+        rows: Number(text.rows || 0) || 0,
+        cols: Number(text.cols || 0) || 0
       };
     }
     const normalizedText = String(text || "").trim();
@@ -14729,7 +15983,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const tableInfo = opts && opts.table || "";
     const pinnedSelectionText = _selectionContextText(state.pinnedSelection);
     const pinnedSelectionSource = _selectionContextSourceLabel(state.pinnedSelection);
-    const clearSelectionButton = '<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="取消文本注入" aria-label="取消文本注入">&times;</button>';
+    const clearSelectionButton = '<button type="button" class="ctx-bar-clear ctx-bar-clear-selection" onclick="WA.clearSelection()" title="取消选中文本上下文" aria-label="取消选择">取消选择</button>';
     const parts = [];
     if (selText) {
       const preview = selText.length > 60 ? selText.substring(0, 60) + "…" : selText;
@@ -14742,7 +15996,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       parts.push(`<span class="ctx-bar-sel" data-selection-injected="true"><span class="ctx-bar-quote"></span>已注入选中文本：<b>${_escHtml(preview)}</b>${sourceHint}${clearSelectionButton}</span>`);
     }
     if (nFiles > 0) {
-      parts.push(`<span class="ctx-bar-files">已附加 <b>${nFiles} 份文件</b><button class="ctx-bar-clear" onclick="WA.clearAIFileContext()" title="清除文件">&times;</button></span>`);
+      parts.push(`<span class="ctx-bar-files">已附加 <b>${nFiles} 份文件</b><button type="button" class="ctx-bar-clear ctx-bar-clear-files" onclick="WA.clearAIFileContext()" title="清除全部附加文件" aria-label="清除附加文件">清除文件</button></span>`);
     }
     if (parts.length) {
       bar.innerHTML = parts.join('<span class="ctx-bar-sep">·</span>');
@@ -14970,7 +16224,21 @@ ${cellSelectionText}
     const allowStaleFallback = !options || options.allowStaleFallback !== false;
     if (state.fileType === "docx") {
       const docxSelection = _getDocxSelectionPayload$1({ allowStaleFallback });
-      return docxSelection ? { text: docxSelection.aiText, previewText: docxSelection.previewText } : null;
+      return docxSelection ? Object.assign({}, docxSelection, {
+        text: docxSelection.aiText,
+        sourceType: "docx",
+        selectionKind: docxSelection.kind
+      }) : null;
+    }
+    if (state.fileType === "xlsx" && state.activeEditor && typeof state.activeEditor.getSelectionPayload === "function") {
+      const payload = state.activeEditor.getSelectionPayload();
+      if (payload && String(payload.aiText || payload.text || "").trim()) {
+        return Object.assign({}, payload, {
+          text: String(payload.aiText || payload.text || "").trim(),
+          sourceType: "xlsx",
+          selectionKind: payload.kind || "xlsx-range"
+        });
+      }
     }
     let sel = _getActiveTextEditorSelectionForAI();
     if (!sel && allowStaleFallback) sel = lastSelectionText;
@@ -15178,6 +16446,15 @@ ${cellSelectionText}
     const input = $("wa-user-input");
     if (input) input.focus();
   }
+  function closeSelectionToolbar$1() {
+    state._selectionDismissed = true;
+    const tt = $("wa-pdf-tooltip");
+    if (tt) tt.style.display = "none";
+    try {
+      window.getSelection()?.removeAllRanges();
+    } catch (_) {
+    }
+  }
   function clearSelection() {
     state.pinnedSelection = null;
     state.lastPinnedSel = null;
@@ -15309,6 +16586,7 @@ ${cellSelectionText}
     window.WA._clearPinnedHighlight = _clearPinnedHighlight;
     window.WA._applyTemporaryHighlight = _applyTemporaryHighlight;
     window.WA.sendSelectionToAI = sendSelectionToAI;
+    window.WA.closeSelectionToolbar = closeSelectionToolbar$1;
     window.WA.clearSelection = clearSelection;
     window._hideDocxHoverBar = _hideDocxHoverBar$1;
     window._resetDocxSelection = _resetDocxSelection$1;
@@ -16472,11 +17750,35 @@ ${cellSelectionText}
     if (window.pdfjsLib || _libsLoaded.pdfjs) return;
     if (_libLoadPromises.pdfjs) return _libLoadPromises.pdfjs;
     _libLoadPromises.pdfjs = (async () => {
-      await _loadScript("https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js");
-      if (window.pdfjsLib) {
-        window.pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js";
+      const candidates = [
+        {
+          script: "/static/vendor/pdfjs-dist/3.11.174/build/pdf.min.js",
+          worker: "/static/vendor/pdfjs-dist/3.11.174/build/pdf.worker.min.js"
+        },
+        {
+          script: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js",
+          worker: "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
+        },
+        {
+          script: "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js",
+          worker: "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js"
+        }
+      ];
+      const errors = [];
+      for (const candidate of candidates) {
+        try {
+          await _loadScript(candidate.script);
+          if (window.pdfjsLib) {
+            window.pdfjsLib.GlobalWorkerOptions.workerSrc = candidate.worker;
+            _libsLoaded.pdfjs = true;
+            return;
+          }
+          errors.push(`${candidate.script}: pdfjsLib 未注册`);
+        } catch (error) {
+          errors.push(`${candidate.script}: ${error?.message || error}`);
+        }
       }
-      _libsLoaded.pdfjs = true;
+      throw new Error(`PDF.js 加载失败：${errors.join("；")}`);
     })().finally(() => {
       _libLoadPromises.pdfjs = null;
     });
@@ -16485,7 +17787,7 @@ ${cellSelectionText}
   function $$5(id) {
     return document.getElementById(id);
   }
-  function _updatePdfZoomUI$1(pct) {
+  function _updatePdfZoomUI(pct) {
     const label = $$5("wa-pdf-zoom-label");
     const slider = $$5("wa-pdf-zoom");
     if (label) label.textContent = pct + "%";
@@ -16502,7 +17804,11 @@ ${cellSelectionText}
     _ensureUniverSheets,
     _ensurePdfJS,
     _ensureWorkbookDefaults,
-    _updatePdfZoomUI: _updatePdfZoomUI$1,
+    _updatePdfZoomUI,
+    _updateDocxZoomUI: _updateDocxZoomUI$1
+  });
+  Object.assign(window, {
+    _updatePdfZoomUI,
     _updateDocxZoomUI: _updateDocxZoomUI$1
   });
   function $$4(id) {
@@ -16834,6 +18140,21 @@ ${cellSelectionText}
   function $$3(id) {
     return document.getElementById(id);
   }
+  function _xlsxSelectionPayload() {
+    if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return null;
+    if (typeof window.KotoSheetsAPI.getSelectionPayload === "function") {
+      return window.KotoSheetsAPI.getSelectionPayload();
+    }
+    const text = typeof window.KotoSheetsAPI.getSelectionText === "function" ? window.KotoSheetsAPI.getSelectionText() : "";
+    return text ? {
+      kind: "xlsx-range",
+      tsv: text,
+      aiText: `[当前选中表格数据]:
+${text}
+`,
+      previewText: "选中表格区域"
+    } : null;
+  }
   class KotoXlsxEditor {
     constructor() {
       this.containerId = "wa-xlsx-editor";
@@ -16882,13 +18203,20 @@ ${cellSelectionText}
             }
           }, 600);
           window.KotoSheetsAPI.onSelectionChange(() => {
-            const text = window.KotoSheetsAPI.getSelectionText();
-            if (text) {
-              window.lastSelectionText = `[当前选中表格数据]:
-${text}
-`;
+            const payload = _xlsxSelectionPayload();
+            if (payload && payload.aiText) {
+              window.lastSelectionText = payload.aiText;
               if (typeof window._pinSelectionChip === "function") {
-                window._pinSelectionChip(window.lastSelectionText);
+                window._pinSelectionChip({
+                  kind: payload.kind || "xlsx-range",
+                  text: payload.aiText,
+                  previewText: payload.previewText || "选中表格区域",
+                  sourceType: "xlsx",
+                  sheetName: payload.sheetName || "",
+                  rangeA1: payload.rangeA1 || "",
+                  rows: payload.rows || 0,
+                  cols: payload.cols || 0
+                });
               }
             }
           });
@@ -16907,12 +18235,14 @@ ${text}
       }
     }
     getContent() {
-      if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return "";
-      const text = window.KotoSheetsAPI.getSelectionText();
-      if (text && text.trim()) return `[当前选中表格数据]:
-${text}
-`;
+      const payload = this.getSelectionPayload();
+      if (payload && String(payload.aiText || "").trim()) return payload.aiText;
       return "[当前表格未选中区域，请提示用户框选数据]";
+    }
+    getSelectionPayload() {
+      const payload = _xlsxSelectionPayload();
+      if (!payload) return null;
+      return Object.assign({ sourceType: "xlsx" }, payload);
     }
     getCSV() {
       if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return "";
@@ -16977,17 +18307,16 @@ ${text}
       if (editor) editor.classList.add("active");
     }
     render(richData) {
-      if (Array.isArray(richData)) {
-        this.data = this._legacyToRich(richData);
-      } else {
-        this.data = {
-          slideWidthEmu: richData.slideWidthEmu || richData.slide_width_emu || 9144e3,
-          slideHeightEmu: richData.slideHeightEmu || richData.slide_height_emu || 6858e3,
-          defaultFontSizePt: richData.defaultFontSizePt || richData.default_font_size_pt || 18,
-          defaultTitleFontSizePt: richData.defaultTitleFontSizePt || richData.default_title_font_size_pt || 36,
-          slides: richData.slides || []
-        };
+      if (!richData || typeof richData !== "object" || Array.isArray(richData)) {
+        throw new TypeError("PPTX 编辑器需要结构化幻灯片数据");
       }
+      this.data = {
+        slideWidthEmu: richData.slideWidthEmu || richData.slide_width_emu || 9144e3,
+        slideHeightEmu: richData.slideHeightEmu || richData.slide_height_emu || 6858e3,
+        defaultFontSizePt: richData.defaultFontSizePt || richData.default_font_size_pt || 18,
+        defaultTitleFontSizePt: richData.defaultTitleFontSizePt || richData.default_title_font_size_pt || 36,
+        slides: richData.slides || []
+      };
       this.data.slides.forEach((s, i) => {
         if (s.index === void 0) s.index = s.slide_index ?? i;
       });
@@ -19045,29 +20374,6 @@ ${lines.join("\n")}` : `[幻灯片${this._curIdx + 1}无文字内容, slide_inde
       if (u) u.disabled = !this._undoStack.length;
       if (r) r.disabled = !this._redoStack.length;
     }
-    _legacyToRich(arr) {
-      return {
-        slideWidthEmu: 9144e3,
-        slideHeightEmu: 6858e3,
-        slides: arr.map((s) => ({
-          index: s.slide_index,
-          background: "#ffffff",
-          shapes: s.texts.map((t) => ({
-            id: t.shape_id,
-            name: t.shape_name,
-            type: "AUTO_SHAPE",
-            left: 0,
-            top: t.is_title ? 0 : 15e5,
-            width: 8e6,
-            height: 12e5,
-            z_order: 0,
-            has_text: true,
-            fill: null,
-            paragraphs: [{ align: "LEFT", runs: [{ text: t.text }] }]
-          }))
-        }))
-      };
-    }
   }
   window.KotoPptxEditor = KotoPptxEditor;
   class KotoPdfViewer {
@@ -19165,7 +20471,7 @@ ${lines.join("\n")}` : `[幻灯片${this._curIdx + 1}无文字内容, slide_inde
         this._textContent = {};
         const firstPage = await pdf.getPage(1);
         const baseVP = firstPage.getViewport({ scale: 1 });
-        const containerW = (c.clientWidth || 800) - 32;
+        const containerW = Math.max(240, (c.clientWidth || c.getBoundingClientRect?.().width || 800) - 32);
         const dpr = window.devicePixelRatio || 1;
         this._quality = Math.max(2, dpr);
         this._containerW = containerW;
@@ -19187,24 +20493,57 @@ ${lines.join("\n")}` : `[幻灯片${this._curIdx + 1}无文字内容, slide_inde
           c.appendChild(wrap);
         }
         if (this._observer) this._observer.disconnect();
-        this._observer = new IntersectionObserver(
-          (entries) => entries.forEach((en) => {
-            if (en.isIntersecting) {
-              const pg = parseInt(en.target.dataset.page, 10);
-              if (pg && !this._renderedPgs.has(pg)) {
-                this._renderPage(pg);
+        if (typeof IntersectionObserver !== "undefined") {
+          this._observer = new IntersectionObserver(
+            (entries) => entries.forEach((en) => {
+              if (en.isIntersecting) {
+                const pg = parseInt(en.target.dataset.page, 10);
+                if (pg && !this._renderedPgs.has(pg)) {
+                  this._renderPage(pg);
+                }
               }
-            }
-          }),
-          { root: c, rootMargin: "300px 0px 300px 0px", threshold: 0 }
-        );
-        c.querySelectorAll(".wa-pdf-page-wrap").forEach((el) => this._observer.observe(el));
+            }),
+            { root: c, rootMargin: "300px 0px 300px 0px", threshold: 0 }
+          );
+          c.querySelectorAll(".wa-pdf-page-wrap").forEach((el) => this._observer.observe(el));
+        }
+        this._scheduleVisiblePageRenderPasses();
         this._buildThumbs();
         this._buildBookmarks();
         this._updatePageCounter(1);
       } catch (e) {
         console.error("[KotoPdfViewer] render error:", e);
         c.innerHTML = `<div style="color:var(--danger);padding:16px">PDF 渲染报错: ${e.message}</div>`;
+      }
+    }
+    _scheduleVisiblePageRenderPasses() {
+      this._renderVisiblePagesNow();
+      requestAnimationFrame(() => this._renderVisiblePagesNow());
+      setTimeout(() => this._renderVisiblePagesNow(), 120);
+      setTimeout(() => this._renderVisiblePagesNow(), 500);
+    }
+    _renderVisiblePagesNow() {
+      const c = $(this.containerId);
+      if (!c || !this._pdfDoc) return;
+      const wraps = Array.from(c.querySelectorAll(".wa-pdf-page-wrap"));
+      if (!wraps.length) return;
+      const rootRect = c.getBoundingClientRect?.();
+      const hasViewport = rootRect && rootRect.width > 0 && rootRect.height > 0;
+      const margin = 300;
+      let renderedAny = false;
+      wraps.forEach((wrap) => {
+        const pg = parseInt(wrap.dataset.page, 10);
+        if (!pg || this._renderedPgs.has(pg)) return;
+        if (!hasViewport) return;
+        const rect = wrap.getBoundingClientRect();
+        const visible = rect.bottom >= rootRect.top - margin && rect.top <= rootRect.bottom + margin;
+        if (visible) {
+          renderedAny = true;
+          this._renderPage(pg);
+        }
+      });
+      if (!renderedAny && !this._renderedPgs.has(1)) {
+        this._renderPage(1);
       }
     }
     // ─── _renderPage ─────────────────────────────────────────────────────────
@@ -19460,6 +20799,7 @@ ${lines.join("\n")}` : `[幻灯片${this._curIdx + 1}无文字内容, slide_inde
           c.querySelectorAll(".wa-pdf-page-wrap").forEach((el) => this._observer.observe(el));
         }
       }
+      this._scheduleVisiblePageRenderPasses();
     }
     // ─── Sidebar tab switch ───────────────────────────────────────────────────
     sidebarTab(btn) {
@@ -21105,6 +22445,20 @@ ${sel}
     const fileNameEl = document.getElementById("wa-file-name");
     if (fileNameEl) fileNameEl.textContent = name || "未打开文件";
   }
+  function _showPdfOpenError(error) {
+    const outer = document.getElementById("wa-pdf-editor");
+    const viewer = document.getElementById("wa-pdf-viewer");
+    if (outer) outer.classList.add("active");
+    if (viewer) {
+      viewer.classList.add("active");
+      const message = error && error.message ? error.message : String(error || "未知错误");
+      viewer.innerHTML = `
+      <div style="max-width:720px;margin:40px auto;padding:16px 18px;border:1px solid rgba(239,68,68,.45);border-radius:6px;background:#fff;color:#3f1f1f;line-height:1.6;font-size:13px;">
+        <div style="font-weight:700;margin-bottom:6px;color:#b42318;">PDF 加载失败</div>
+        <div>${_escHtml$1(message)}</div>
+      </div>`;
+    }
+  }
   function _syncPrimarySaveButtons(tab) {
     const readonly = !tab || tab.fileType === "pdf" || tab.fileType === "image";
     const saveBtn = document.getElementById("wa-save-btn");
@@ -21158,9 +22512,14 @@ ${sel}
       state$1.activeEditor = new KotoPptxEditor();
       state$1.activeEditor.render(tab.cache !== null && tab.cache !== void 0 ? tab.cache : data);
     } else if (tab.fileType === "pdf") {
-      await _ensurePdfJS();
-      state$1.activeEditor = new KotoPdfViewer();
-      state$1.activeEditor.render(data && data.raw_url, data);
+      try {
+        await _ensurePdfJS();
+        state$1.activeEditor = new KotoPdfViewer();
+        await state$1.activeEditor.render(data && data.raw_url, data);
+      } catch (error) {
+        console.error("[WA] PDF 打开失败:", error);
+        _showPdfOpenError(error);
+      }
     } else if (tab.fileType === "image") {
       state$1.activeEditor = new KotoImageViewer();
       state$1.activeEditor.render(data && data.raw_url);
@@ -21247,6 +22606,9 @@ ${sel}
     else state$1.openTabs.push(tabEntry);
     _applyTabState(tabEntry);
     await _mountEditor(tabEntry, json.data);
+    if (typeof window.WA?.clearExternalFileChange === "function") {
+      window.WA.clearExternalFileChange(resolvedPath);
+    }
     _renderTabs$1();
     _highlightActiveFile(resolvedPath);
     setTimeout(() => {
@@ -21280,6 +22642,7 @@ ${sel}
   let _isSaving = false;
   let _autoSaveTimer = null;
   let _autoSaveEnabled = localStorage.getItem("wa_autosave") === "on";
+  const _externallyChangedPaths = /* @__PURE__ */ new Set();
   async function _safeJson(res) {
     try {
       return await res.json();
@@ -21289,6 +22652,38 @@ ${sel}
   }
   function _activeTab() {
     return state$1.openTabs.find((tab) => tab.path === state$1.activeTabPath) || null;
+  }
+  function _normalizeWorkspaceSavePath(path) {
+    const raw = String(path || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+    if (!raw) return "";
+    const sharedNormalizer = window.WA && window.WA.normalizeWorkspaceFilePath;
+    if (typeof sharedNormalizer === "function") {
+      try {
+        const normalized = String(sharedNormalizer(raw) || "").trim().replace(/\\/g, "/").replace(/^\/+/, "");
+        if (normalized) return normalized;
+      } catch (_) {
+      }
+    }
+    return raw.replace(/^workspace\//i, "");
+  }
+  function markExternalFileChange(path) {
+    const normalized = _normalizeWorkspaceSavePath(path);
+    if (!normalized) return;
+    _externallyChangedPaths.add(normalized.toLowerCase());
+    const tab = state$1.openTabs.find((item) => _normalizeWorkspaceSavePath(item.path || "").toLowerCase() === normalized.toLowerCase());
+    if (tab) tab.externalFileChangePending = true;
+  }
+  function clearExternalFileChange(path) {
+    const normalized = _normalizeWorkspaceSavePath(path);
+    if (!normalized) return;
+    _externallyChangedPaths.delete(normalized.toLowerCase());
+    const tab = state$1.openTabs.find((item) => _normalizeWorkspaceSavePath(item.path || "").toLowerCase() === normalized.toLowerCase());
+    if (tab) delete tab.externalFileChangePending;
+  }
+  function _hasPendingExternalFileChange(tab) {
+    const path = _normalizeWorkspaceSavePath(tab && tab.path || state$1.wsSourcePath || "");
+    if (!path) return false;
+    return !!tab?.externalFileChangePending || _externallyChangedPaths.has(path.toLowerCase());
   }
   function _isReadonlyType() {
     return !state$1.fileType || state$1.fileType === "pdf" || state$1.fileType === "image";
@@ -21328,6 +22723,9 @@ ${sel}
     if (saveAsBtn) saveAsBtn.disabled = busy || readonly;
   }
   async function _postAutoSave(tab, explicit) {
+    if (_hasPendingExternalFileChange(tab)) {
+      throw new Error("文件已被任务更新，请重新打开后再保存，避免覆盖任务结果。");
+    }
     const data = _serializeEditorForTab$1(tab, state$1.activeEditor);
     const res = await _csrfFetch$6("/api/v1/workspace/auto_save", {
       method: "POST",
@@ -21487,6 +22885,8 @@ ${sel}
   window.WA.saveAs = saveAs;
   window.WA.autoSave = autoSave;
   window.WA.scheduleAutoSave = scheduleAutoSave;
+  window.WA.markExternalFileChange = markExternalFileChange;
+  window.WA.clearExternalFileChange = clearExternalFileChange;
   window.WA.toggleAutoSave = toggleAutoSave;
   window.WA.renderAutoSaveToggle = _renderAutoSaveToggle;
   window._safeJson = window._safeJson || _safeJson;
@@ -21880,7 +23280,7 @@ ${normalized.rationale}`;
       const markerIndex = normalizedPath.toLowerCase().lastIndexOf(marker);
       if (markerIndex >= 0) return normalizedPath.slice(markerIndex + marker.length).replace(/^\//, "");
     }
-    return normalizedPath.replace(/^\//, "");
+    return normalizedPath.replace(/^\//, "").replace(/^workspace\//i, "");
   }
   function _reviewPathsMatch(lhs, rhs) {
     const left = _normalizeWorkspaceFilePath(lhs).toLowerCase();

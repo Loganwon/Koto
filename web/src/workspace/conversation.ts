@@ -9,6 +9,8 @@ interface WATurn {
   content: string;
   timestamp: string;
   session_id: string;
+  schema_version?: number;
+  legacy_schema?: boolean;
   task_card_snapshot?: TaskCardSnapshot;
   skip_model_context?: boolean;
   status?: string;
@@ -16,6 +18,11 @@ interface WATurn {
   attachments?: Attachment[];
   selection_preview?: string;
   selection_source?: string;
+  task_title?: string;
+  title?: string;
+  memory_summary?: string;
+  model_context_text?: string;
+  task_context?: Record<string, any>;
   task_kind?: string;
   test_structure?: TaskTestStructure;
   run_id?: string;
@@ -101,6 +108,8 @@ interface ConversationApi {
   normalizeTurn: (raw: any, defaults?: Record<string, any>) => WATurn | null;
 }
 
+const WA_HISTORY_SCHEMA_VERSION = 2;
+
 function escapeHtml(text: unknown): string {
   return String(text || '')
     .replace(/&/g, '&amp;')
@@ -122,6 +131,21 @@ function firstPart(parts: unknown): string {
   const first = parts[0];
   if (first && typeof first === 'object') return (first as Record<string, any>).text || (first as Record<string, any>).content || '';
   return String(first);
+}
+
+function migrateLegacyTurn(raw: any): Record<string, any> {
+  const turn = Object.assign({}, raw || {});
+  const schemaVersion = Number(turn.schema_version || turn.history_schema_version || 0);
+  const content = String(turn.content || turn.text || firstPart(turn.parts) || '').trim();
+  if (content && !turn.content) turn.content = content;
+  if ((turn.task || turn.task_kind) && !turn.task_kind) turn.task_kind = turn.task;
+  if (turn.task_card_snapshot && !turn.task_kind) turn.task_kind = 'file_task';
+  if (turn.test_structure && typeof turn.test_structure === 'object' && !turn.task_terminal_status) {
+    turn.task_terminal_status = String(turn.test_structure.terminal_status || '').trim();
+  }
+  turn.legacy_schema = schemaVersion > 0 && schemaVersion < WA_HISTORY_SCHEMA_VERSION;
+  turn.schema_version = WA_HISTORY_SCHEMA_VERSION;
+  return turn;
 }
 
 function stableTurnId(turn: Record<string, any>): string {
@@ -146,6 +170,29 @@ function historyTaskSnapshotOptions(): Record<string, any> {
     history_label: '历史任务记录',
     history_note: '这是一条历史运行记录，不代表当前文件状态。',
   };
+}
+
+function taskHistoryTitle(turn: WATurn): string {
+  return String(turn && (turn.task_title || turn.title || '') || '').trim();
+}
+
+function applyTaskHistoryTitle(element: HTMLElement | null, title: string): void {
+  const clean = String(title || '').trim();
+  if (!element || !clean) return;
+  element.dataset.taskTitle = clean;
+  const titleEl = element.querySelector('.wa-task-title');
+  if (titleEl) titleEl.textContent = clean;
+}
+
+function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void {
+  if (!element || !turn) return;
+  applyTaskHistoryTitle(element, taskHistoryTitle(turn));
+  const memorySummary = String(turn.memory_summary || turn.model_context_text || '').trim();
+  if (memorySummary) element.dataset.taskMemorySummary = memorySummary;
+  const WA = (window as any).WA;
+  if (WA && typeof WA.syncTaskInteractionSummary === 'function') {
+    try { WA.syncTaskInteractionSummary(element); } catch (_) { /* noop */ }
+  }
 }
 
 function testStructureText(value: unknown, limit: number): string {
@@ -183,7 +230,7 @@ function testStructureStepTitle(value: unknown, fallback?: unknown): string {
 function testStructureCheckText(value: unknown): string {
   let text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
-  if (/完整结果见对话汇报|结果见对话汇报|任务已完成，?完整结果/u.test(text)) return '';
+  if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return '';
   text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
   if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
   if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
@@ -320,16 +367,18 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
 
   function normalizeTurn(raw: any, defaults?: Record<string, any>): WATurn | null {
     if (!raw || typeof raw !== 'object') return null;
-    const role = normalizeRole(raw.role || (defaults && defaults.role));
+    const migrated = migrateLegacyTurn(raw);
+    const role = normalizeRole(migrated.role || (defaults && defaults.role));
     if (!role) return null;
-    const content = String(raw.content || raw.text || firstPart(raw.parts) || '').trim();
+    const content = String(migrated.content || migrated.text || firstPart(migrated.parts) || '').trim();
     if (!content) return null;
-    const turn: WATurn = Object.assign({}, raw, defaults || {}, {
-      id: String(raw.id || raw.turn_id || raw.run_id || ''),
+    const turn: WATurn = Object.assign({}, migrated, defaults || {}, {
+      id: String(migrated.id || migrated.turn_id || migrated.run_id || ''),
       role,
       content,
-      timestamp: raw.timestamp || raw.created_at || '',
-      session_id: raw.session_id || (defaults && defaults.session_id) || activeSessionId || getSessionId(),
+      timestamp: migrated.timestamp || migrated.created_at || '',
+      session_id: migrated.session_id || (defaults && defaults.session_id) || activeSessionId || getSessionId(),
+      schema_version: WA_HISTORY_SCHEMA_VERSION,
     });
     if (!turn.id) turn.id = stableTurnId(turn);
     return turn;
@@ -452,11 +501,13 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
   function renderAssistantTurn(turn: WATurn, msgs?: HTMLElement): HTMLElement | null {
     const host = msgs || getMessagesElement();
     if (!host || !turn) return null;
-    if (turn.task_card_snapshot && !taskTurnIsTerminal(turn) && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function') {
+    const shouldRenderStructuredTaskReport = !!turn.test_structure && taskTurnIsTerminal(turn);
+    if (!shouldRenderStructuredTaskReport && turn.task_card_snapshot && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function') {
       const restored = (window as any).WA.restoreTaskRunCard(turn.task_card_snapshot, historyTaskSnapshotOptions());
       if (restored) {
         restored.dataset.turnId = turn.id;
         restored.dataset.rawText = turn.content;
+        applyTaskHistoryMetadata(restored, turn);
         const structure = renderTestStructure(turn.test_structure);
         if (structure) restored.appendChild(structure);
         host.appendChild(restored);
@@ -473,7 +524,8 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       el.appendChild(structure);
       const answer = document.createElement('div');
       answer.className = 'wa-task-final-answer';
-      answer.innerHTML = renderMarkdown(turn.content);
+      answer.innerHTML = '<div class="wa-task-final-answer-title">总结与回答</div>'
+        + '<div class="wa-task-final-answer-content">' + renderMarkdown(turn.content) + '</div>';
       el.appendChild(answer);
     } else {
       el.innerHTML = renderMarkdown(turn.content);
