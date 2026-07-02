@@ -1,6 +1,15 @@
 import json
 from pathlib import Path
 
+from app.core.agent._file_task_stepwise_helpers import (
+    native_stepwise_pdf_text_quality_guard_payload,
+    stepwise_docx_content_quality_block_message,
+    stepwise_docx_target_path,
+    stepwise_docx_wait_artifact,
+    stepwise_docx_write_block_message,
+    stepwise_pdf_fallback_insights,
+    stepwise_pdf_fallback_paragraphs,
+)
 from app.core.agent.file_task_contract import (
     FileTaskFile,
     FileTaskRequest,
@@ -207,7 +216,9 @@ def test_file_task_runtime_treats_awaiting_confirmation_tool_result_as_paused_st
         ).run(request)
     )
 
-    check_finished = next(event for event in events if event.type == "check.finished")
+    check_finished = [
+        event for event in events if event.type == "check.finished"
+    ][-1]
     run_finished = events[-1]
 
     assert any(event.type == "plan.confirmed" for event in events)
@@ -322,7 +333,9 @@ def test_file_task_runtime_forces_windowed_pdf_read_for_stepwise_docx_summary():
         for event in events
     )
     assert any(event.type == "file.changed" for event in events)
-    check_finished = next(event for event in events if event.type == "check.finished")
+    check_finished = [
+        event for event in events if event.type == "check.finished"
+    ][-1]
     run_finished = next(event for event in events if event.type == "run.finished")
     assert check_finished.payload["status"] == "awaiting_confirmation"
     assert (
@@ -874,7 +887,9 @@ def test_file_task_runtime_stepwise_resume_rehydrates_files_and_falls_back_when_
     )
 
     parse_call = next(args for name, args in tool_calls if name == "parse_file_to_text")
-    check_finished = next(event for event in events if event.type == "check.finished")
+    check_finished = [
+        event for event in events if event.type == "check.finished"
+    ][-1]
 
     assert parse_call["start_page"] == 7
     assert parse_call["end_page"] == 9
@@ -937,6 +952,21 @@ def test_file_task_runtime_blocks_stepwise_docx_write_when_pdf_text_is_watermark
     assert "文本质量不足" in guard.payload["result_preview"]
     assert not any(event.type == "file.changed" for event in events)
     assert check_finished.payload["status"] == "no_file_change"
+
+
+def test_native_stepwise_pdf_text_quality_guard_payload_is_centralized():
+    payload = native_stepwise_pdf_text_quality_guard_payload("watermark_only_pdf_text")
+
+    assert payload == {
+        "tool_name": "supervisor_guard",
+        "success": False,
+        "blocked": True,
+        "native_stepwise": True,
+        "result_preview": (
+            "监管层阻止写入：当前 PDF 页窗文本质量不足"
+            "（watermark_only_pdf_text），不能据此生成分步 DOCX 摘要。"
+        ),
+    }
 
 
 def test_file_task_runtime_native_stepwise_docx_write_bypasses_frontend_progress_model_output():
@@ -1073,7 +1103,12 @@ def test_file_task_runtime_blocks_stepwise_docx_write_with_combined_labels_only(
             "path": "museum.pdf",
             "start_page": 4,
             "end_page": 6,
-            "_raw_text": "有效文本" * 80,
+            "_raw_text": (
+                "Museum digital technology report covers collection data, visitor "
+                "service, exhibition design, knowledge graphs, immersive display, "
+                "governance, education, analytics, archives, and public programs. "
+            )
+            * 8,
         }
     ]
 
@@ -1092,6 +1127,205 @@ def test_file_task_runtime_blocks_stepwise_docx_write_with_combined_labels_only(
     )
 
     assert "合并标签" in block
+
+
+def test_stepwise_docx_content_quality_block_message_accepts_stable_structure():
+    snippets = [
+        {
+            "source": "museum.pdf",
+            "path": "museum.pdf",
+            "start_page": 4,
+            "end_page": 6,
+        }
+    ]
+
+    block = stepwise_docx_content_quality_block_message(
+        snippets,
+        "\n".join(
+            [
+                "当前页窗摘要（第 4-6 页）",
+                "文档识别：当前页窗来自中国博物馆数字技术应用报告。",
+                "段落主题：目录与案例篇框架。",
+                "结构线索：综述篇和案例篇并列展开。",
+                "内容线索：数字敦煌、知识图谱和智慧展陈。",
+                "来源页码：第 4-6 页",
+            ]
+        ),
+    )
+
+    assert block == ""
+
+
+def test_stepwise_docx_write_block_message_handles_route_and_surface_guards():
+    snippets = [
+        {
+            "source": "museum.pdf",
+            "path": "museum.pdf",
+            "start_page": 4,
+            "end_page": 6,
+            "_raw_text": (
+                "Museum digital technology report covers collection data, visitor "
+                "service, exhibition design, knowledge graphs, immersive display, "
+                "governance, education, analytics, archives, and public programs. "
+            )
+            * 8,
+        }
+    ]
+    request = FileTaskRequest(
+        task="这是一篇非常长的pdf，分步总结，创建docx，每一步等我继续。",
+        files=[FileTaskFile(path="museum.pdf", name="museum.pdf", type="pdf")],
+    )
+    recipe = {"recipe_id": "long_pdf_stepwise_docx_summary"}
+
+    assert (
+        stepwise_docx_write_block_message(
+            request=FileTaskRequest(task="普通 DOCX 写入"),
+            snippets=snippets,
+            recipe_skeleton={},
+            tool_name="write_docx_content",
+            tool_args={"paragraphs": json.dumps([{"text": "# 标题"}])},
+        )
+        == ""
+    )
+    markdown_block = stepwise_docx_write_block_message(
+        request=request,
+        snippets=snippets,
+        recipe_skeleton=recipe,
+        tool_name="write_docx_content",
+        tool_args={"paragraphs": json.dumps([{"text": "# 当前页窗摘要"}])},
+    )
+    progress_block = stepwise_docx_write_block_message(
+        request=request,
+        snippets=snippets,
+        recipe_skeleton=recipe,
+        tool_name="write_docx_content",
+        tool_args={"paragraphs": json.dumps([{"text": "file.changed: waiting"}])},
+    )
+
+    assert "Markdown 标题符号" in markdown_block
+    assert "DOCX 正文不能包含任务进度" in progress_block
+
+
+def test_stepwise_docx_wait_artifact_builds_resume_request_contract():
+    request = FileTaskRequest(
+        task="长 PDF 分步总结并写入 DOCX，每步等待确认。",
+        session_id="session-1",
+        model_mode="fast",
+        model_id="model-a",
+        target_path="summary.docx",
+        files=[
+            FileTaskFile(path="source.pdf", name="source.pdf", type="pdf"),
+            FileTaskFile(
+                path="summary.docx", name="summary.docx", type="docx", target=True
+            ),
+        ],
+        options={
+            "workflow_checkpoint": {
+                "policy": "confirm_each_step",
+                "step_index": 1,
+                "window_pages": 3,
+                "original_task": "原始分步任务",
+            }
+        },
+    )
+
+    artifact = stepwise_docx_wait_artifact(
+        request=request,
+        files=request.files,
+        snippets=[
+            {
+                "source": "source.pdf",
+                "path": "source.pdf",
+                "start_page": 4,
+                "end_page": 6,
+            }
+        ],
+        file_changes=[
+            {
+                "operation": "write_docx_content",
+                "path": "summary.docx",
+            }
+        ],
+        recipe_skeleton={"recipe_id": "long_pdf_stepwise_docx_summary"},
+    )
+
+    assert artifact is not None
+    assert artifact["artifact_type"] == "koto_stepwise_resume_v1"
+    assert artifact["completed_page_range"] == "4-6"
+    assert artifact["next_page_range"] == "7-9"
+    assert artifact["source_path"] == "source.pdf"
+    assert artifact["target_path"] == "summary.docx"
+    resume_request = artifact["resume_request"]
+    assert resume_request["session_id"] == "session-1"
+    assert resume_request["model_mode"] == "fast"
+    assert resume_request["model_id"] == "model-a"
+    assert resume_request["options"]["workflow_checkpoint"]["step_index"] == 2
+    assert (
+        resume_request["options"]["followup_context"]["stepwise"][
+            "completed_page_range"
+        ]
+        == "4-6"
+    )
+
+
+def test_stepwise_pdf_fallback_helpers_build_structured_docx_paragraphs():
+    preview = (
+        "[Page 1] Annual Report on Digital Technology Application and Case Study in Chinese Museums\n"
+        "[Page 1] 一、数字技术应用背景\n"
+        "[Page 2] 目录\n"
+        "[Page 2] 综述篇\n"
+        "[Page 3] The report discusses collection data, visitor services, exhibition design, "
+        "knowledge graphs, immersive displays, archives, analytics, and public education."
+    )
+
+    insights = stepwise_pdf_fallback_insights(preview)
+    paragraphs = stepwise_pdf_fallback_paragraphs(
+        {
+            "source": "museum-report.pdf",
+            "path": "museum-report.pdf",
+            "start_page": 1,
+            "end_page": 3,
+            "_raw_text": preview,
+        },
+        RuntimeError("model unavailable"),
+    )
+
+    assert any(item.startswith("文档识别：") for item in insights)
+    assert any(item.startswith("段落主题：") for item in insights)
+    assert paragraphs[0] == {"text": "当前页窗摘要（第 1-3 页）", "style": "Heading 1"}
+    assert [item["text"].split("：", 1)[0] for item in paragraphs[1:]] == [
+        "文档识别",
+        "段落主题",
+        "结构线索",
+        "内容线索",
+        "来源页码",
+    ]
+    assert paragraphs[-1]["text"] == "来源页码：第 1-3 页"
+
+
+def test_stepwise_docx_target_path_prefers_explicit_target_then_context_files():
+    explicit = FileTaskRequest(task="分步总结", target_path="summary.docx")
+    assert stepwise_docx_target_path(explicit, []) == str(Path("summary.docx").resolve())
+
+    target_docx = FileTaskRequest(
+        task="分步总结",
+        files=[
+            FileTaskFile(path="source.pdf", name="source.pdf", type="pdf"),
+            FileTaskFile(path="target.docx", name="target.docx", type="docx", target=True),
+            FileTaskFile(path="other.docx", name="other.docx", type="docx"),
+        ],
+    )
+    assert stepwise_docx_target_path(target_docx, target_docx.files) == "target.docx"
+
+    pdf_only = FileTaskRequest(
+        task="分步总结",
+        files=[FileTaskFile(path="reports/source.pdf", name="source.pdf", type="pdf")],
+    )
+    assert stepwise_docx_target_path(pdf_only, pdf_only.files).endswith(
+        "reports\\source_分步总结.docx"
+    ) or stepwise_docx_target_path(pdf_only, pdf_only.files).endswith(
+        "reports/source_分步总结.docx"
+    )
 
 
 def test_file_task_runtime_blocks_stepwise_docx_write_when_declared_page_range_mismatches_window():

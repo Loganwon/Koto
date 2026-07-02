@@ -28,6 +28,13 @@ logger = logging.getLogger(__name__)
 
 DOCX_STEPWISE_AWAITING_SUMMARY = "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。"
 DOCX_STEPWISE_CHECK_SUMMARY = "当前段落窗口已写回 DOCX，等待用户说“继续”后处理下一段。"
+DOCX_STEPWISE_CONTEXT_STEP_ID = "context"
+DOCX_STEPWISE_EXECUTE_STEP_ID = "execute"
+DOCX_STEPWISE_CHECK_STEP_ID = "check"
+DOCX_STEPWISE_READ_TITLE = "读取当前 DOCX 段落窗口"
+DOCX_STEPWISE_WRITE_TITLE = "润色并写回当前段落"
+DOCX_STEPWISE_READ_DETAIL = "按段落窗口读取 Word 当前步骤内容，不一次性润色全文。"
+DOCX_STEPWISE_WRITE_DETAIL = "只处理当前段落窗口，保留文档其他内容。"
 
 
 @dataclass(frozen=True)
@@ -40,6 +47,20 @@ class DocxStepwisePayloadContext:
     recipe_skeleton: Dict[str, Any]
     constraint_audit: Dict[str, Any]
     classification_payload: Dict[str, Any]
+
+
+@dataclass(frozen=True)
+class DocxStepwiseRunContext:
+    payload_context: DocxStepwisePayloadContext
+    target_path: str | None
+    file_changes: List[Dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class DocxStepwiseReadResult:
+    window: Dict[str, Any] | None
+    events: List[FileTaskEvent]
+    terminal: bool
 
 
 @dataclass(frozen=True)
@@ -109,6 +130,38 @@ def _docx_stepwise_terminal_event(
             context=context,
             runtime_payload=runtime_payload,
         ),
+    )
+
+
+def _docx_stepwise_step_started_payload(title: str, detail: str) -> Dict[str, Any]:
+    return {"title": title, "detail": detail}
+
+
+def _docx_stepwise_run_context(
+    *,
+    request: FileTaskRequest,
+    context_files: List[FileTaskFile],
+    quick_action_mode: str,
+    intent_plan_payload: Dict[str, Any],
+    requirements_payload: Dict[str, Any],
+    plan_check_payload: Dict[str, Any],
+    recipe_skeleton: Dict[str, Any],
+    constraint_audit: Dict[str, Any],
+    classification_payload: Dict[str, Any],
+) -> DocxStepwiseRunContext:
+    return DocxStepwiseRunContext(
+        payload_context=DocxStepwisePayloadContext(
+            request=request,
+            quick_action_mode=quick_action_mode,
+            intent_plan_payload=intent_plan_payload,
+            requirements_payload=requirements_payload,
+            plan_check_payload=plan_check_payload,
+            recipe_skeleton=recipe_skeleton,
+            constraint_audit=constraint_audit,
+            classification_payload=classification_payload,
+        ),
+        target_path=stepwise_docx_polish_target_path(request, context_files),
+        file_changes=[],
     )
 
 
@@ -287,6 +340,101 @@ def _docx_stepwise_write_tool_payload(
     }
 
 
+def _docx_stepwise_read_window(
+    runtime: DocxStepwiseRuntimePort,
+    ledger: FileTaskLedger,
+    *,
+    request: FileTaskRequest,
+    run_context: DocxStepwiseRunContext,
+) -> DocxStepwiseReadResult:
+    events = [
+        ledger.event(
+            "step.started",
+            _docx_stepwise_step_started_payload(
+                DOCX_STEPWISE_READ_TITLE,
+                DOCX_STEPWISE_READ_DETAIL,
+            ),
+            step_id=DOCX_STEPWISE_CONTEXT_STEP_ID,
+        )
+    ]
+    target_path = run_context.target_path
+    if not target_path or not Path(target_path).exists():
+        events.append(
+            _docx_stepwise_terminal_event(
+                runtime,
+                ledger,
+                payload_context=run_context.payload_context,
+                summary="未找到可写回的 DOCX 文件，无法执行分步润色。",
+                terminal_status="failed",
+                completed_task=False,
+            )
+        )
+        return DocxStepwiseReadResult(window=None, events=events, terminal=True)
+
+    try:
+        window = read_docx_paragraph_window(request, target_path)
+    except Exception as exc:
+        summary = f"读取 DOCX 段落失败：{exc}"
+        events.append(
+            ledger.event(
+                "tool.finished",
+                _docx_stepwise_read_failed_tool_payload(
+                    target_path=target_path,
+                    summary=summary,
+                ),
+                step_id=DOCX_STEPWISE_CONTEXT_STEP_ID,
+            )
+        )
+        events.append(
+            _docx_stepwise_terminal_event(
+                runtime,
+                ledger,
+                payload_context=run_context.payload_context,
+                summary=summary,
+                terminal_status="failed",
+                completed_task=False,
+            )
+        )
+        return DocxStepwiseReadResult(window=None, events=events, terminal=True)
+
+    if not window["paragraphs"]:
+        events.append(
+            _docx_stepwise_terminal_event(
+                runtime,
+                ledger,
+                payload_context=run_context.payload_context,
+                summary="当前 DOCX 没有可润色的剩余段落。",
+                terminal_status="verified",
+                completed_task=True,
+                context=[window],
+            )
+        )
+        return DocxStepwiseReadResult(window=window, events=events, terminal=True)
+
+    events.extend(
+        [
+            ledger.event(
+                "tool.finished",
+                _docx_stepwise_read_tool_payload(
+                    target_path=target_path,
+                    window=window,
+                ),
+                step_id=DOCX_STEPWISE_CONTEXT_STEP_ID,
+            ),
+            ledger.event(
+                "step.result",
+                _docx_stepwise_read_step_result_payload(
+                    runtime,
+                    target_path=target_path,
+                    window=window,
+                ),
+                step_id=DOCX_STEPWISE_CONTEXT_STEP_ID,
+            ),
+        ]
+    )
+    return DocxStepwiseReadResult(window=window, events=events, terminal=False)
+
+
 def _docx_stepwise_polished_paragraphs(
     runtime: DocxStepwiseRuntimePort,
     *,
@@ -374,8 +522,9 @@ class FileTaskDocxStepwiseRunner:
     ) -> Iterable[FileTaskEvent]:
         del classification, intent_plan
         runtime = self._runtime
-        payload_context = DocxStepwisePayloadContext(
+        run_context = _docx_stepwise_run_context(
             request=request,
+            context_files=context_files,
             quick_action_mode=quick_action_mode,
             intent_plan_payload=intent_plan_payload,
             requirements_payload=requirements_payload,
@@ -385,91 +534,25 @@ class FileTaskDocxStepwiseRunner:
             classification_payload=classification_payload,
         )
 
-        target_path = stepwise_docx_polish_target_path(request, context_files)
-        context_step_id = "context"
-        execute_step_id = "execute"
-        check_step_id = "check"
-        file_changes: List[Dict[str, Any]] = []
+        read_result = _docx_stepwise_read_window(
+            runtime,
+            ledger,
+            request=request,
+            run_context=run_context,
+        )
+        for event in read_result.events:
+            yield event
+        if read_result.terminal or read_result.window is None:
+            return
+        window = read_result.window
 
         yield ledger.event(
             "step.started",
-            {
-                "title": "读取当前 DOCX 段落窗口",
-                "detail": "按段落窗口读取 Word 当前步骤内容，不一次性润色全文。",
-            },
-            step_id=context_step_id,
-        )
-
-        if not target_path or not Path(target_path).exists():
-            yield _docx_stepwise_terminal_event(
-                runtime,
-                ledger,
-                payload_context=payload_context,
-                summary="未找到可写回的 DOCX 文件，无法执行分步润色。",
-                terminal_status="failed",
-                completed_task=False,
-            )
-            return
-
-        try:
-            window = read_docx_paragraph_window(request, target_path)
-        except Exception as exc:
-            summary = f"读取 DOCX 段落失败：{exc}"
-            yield ledger.event(
-                "tool.finished",
-                _docx_stepwise_read_failed_tool_payload(
-                    target_path=target_path,
-                    summary=summary,
-                ),
-                step_id=context_step_id,
-            )
-            yield _docx_stepwise_terminal_event(
-                runtime,
-                ledger,
-                payload_context=payload_context,
-                summary=summary,
-                terminal_status="failed",
-                completed_task=False,
-            )
-            return
-
-        if not window["paragraphs"]:
-            yield _docx_stepwise_terminal_event(
-                runtime,
-                ledger,
-                payload_context=payload_context,
-                summary="当前 DOCX 没有可润色的剩余段落。",
-                terminal_status="verified",
-                completed_task=True,
-                context=[window],
-            )
-            return
-
-        yield ledger.event(
-            "tool.finished",
-            _docx_stepwise_read_tool_payload(
-                target_path=target_path,
-                window=window,
+            _docx_stepwise_step_started_payload(
+                DOCX_STEPWISE_WRITE_TITLE,
+                DOCX_STEPWISE_WRITE_DETAIL,
             ),
-            step_id=context_step_id,
-        )
-        yield ledger.event(
-            "step.result",
-            _docx_stepwise_read_step_result_payload(
-                runtime,
-                target_path=target_path,
-                window=window,
-            ),
-            step_id=context_step_id,
-        )
-
-        yield ledger.event(
-            "step.started",
-            {
-                "title": "润色并写回当前段落",
-                "detail": "只处理当前段落窗口，保留文档其他内容。",
-            },
-            step_id=execute_step_id,
+            step_id=DOCX_STEPWISE_EXECUTE_STEP_ID,
         )
 
         polish_result = _docx_stepwise_polished_paragraphs(
@@ -479,23 +562,27 @@ class FileTaskDocxStepwiseRunner:
         )
 
         write_result = _docx_stepwise_writeback(
-            target_path=target_path,
+            target_path=run_context.target_path,
             window=window,
             paragraphs=polish_result.paragraphs,
         )
         change = write_result.change
-        file_changes.append(change)
+        run_context.file_changes.append(change)
         yield ledger.event(
             "tool.finished",
             _docx_stepwise_write_tool_payload(
                 change=change,
                 changed_count=write_result.changed_count,
             ),
-            step_id=execute_step_id,
+            step_id=DOCX_STEPWISE_EXECUTE_STEP_ID,
         )
-        yield ledger.event("file.changed", change, step_id=execute_step_id)
+        yield ledger.event(
+            "file.changed", change, step_id=DOCX_STEPWISE_EXECUTE_STEP_ID
+        )
 
-        next_artifact = docx_polish_wait_artifact(request, target_path, window)
+        next_artifact = docx_polish_wait_artifact(
+            request, run_context.target_path, window
+        )
         runtime_payload = runtime._build_runtime_metadata(
             terminal_status="awaiting_confirmation",
             readonly_fallback_used=False,
@@ -504,7 +591,7 @@ class FileTaskDocxStepwiseRunner:
         check_payload = _docx_stepwise_quality_check_payload(
             runtime,
             request=request,
-            file_changes=file_changes,
+            file_changes=run_context.file_changes,
             runtime_payload=runtime_payload,
             next_action_artifact=next_artifact,
         )
@@ -514,32 +601,36 @@ class FileTaskDocxStepwiseRunner:
             _docx_stepwise_write_step_result_payload(
                 runtime,
                 change=change,
-                file_changes=file_changes,
+                file_changes=run_context.file_changes,
                 runtime_payload=runtime_payload,
                 next_action_artifact=next_artifact,
             ),
-            step_id=execute_step_id,
+            step_id=DOCX_STEPWISE_EXECUTE_STEP_ID,
         )
-        yield ledger.event("check.completed", check_payload, step_id=check_step_id)
+        yield ledger.event(
+            "check.completed",
+            check_payload,
+            step_id=DOCX_STEPWISE_CHECK_STEP_ID,
+        )
         yield ledger.event(
             "step.result",
             _docx_stepwise_check_step_result_payload(
                 runtime,
-                file_changes=file_changes,
+                file_changes=run_context.file_changes,
                 runtime_payload=runtime_payload,
                 check_payload=check_payload,
                 next_action_artifact=next_artifact,
             ),
-            step_id=check_step_id,
+            step_id=DOCX_STEPWISE_CHECK_STEP_ID,
         )
         yield ledger.event(
             "run.finished",
             _docx_stepwise_run_finished_payload(
-                payload_context=payload_context,
+                payload_context=run_context.payload_context,
                 summary=DOCX_STEPWISE_AWAITING_SUMMARY,
                 completed_task=True,
                 context=[window],
-                file_changes=file_changes,
+                file_changes=run_context.file_changes,
                 runtime_payload=runtime_payload,
                 next_action_artifact=next_artifact,
             ),
