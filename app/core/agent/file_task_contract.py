@@ -24,6 +24,30 @@ def _clean_str_list(value: Any, *, limit: int = 12, item_limit: int = 240) -> Li
     return cleaned
 
 
+def _clean_plan_steps(value: Any, *, limit: int = 8) -> List[Dict[str, str]]:
+    items = value if isinstance(value, list) else []
+    cleaned: List[Dict[str, str]] = []
+    for index, item in enumerate(items[:limit], start=1):
+        if isinstance(item, Mapping):
+            step = {
+                "id": _clean_str(item.get("id") or f"route_step_{index}", 64),
+                "label": _clean_str(item.get("label") or item.get("title") or item.get("step"), 160),
+                "description": _clean_str(item.get("description") or item.get("detail"), 320),
+                "tool": _clean_str(item.get("tool") or item.get("tool_name"), 120),
+            }
+        else:
+            step = {
+                "id": f"route_step_{index}",
+                "label": _clean_str(item, 160),
+                "description": "",
+                "tool": "",
+            }
+        step = {key: val for key, val in step.items() if val}
+        if step.get("label") or step.get("description") or step.get("tool"):
+            cleaned.append(step)
+    return cleaned
+
+
 @dataclass
 class FileTaskFile:
     path: str = ""
@@ -57,6 +81,69 @@ class FileTaskFile:
 
 
 @dataclass
+class FileTaskRoutingDecision:
+    route_kind: str = ""
+    route: str = ""
+    task_type: str = ""
+    source_task_type: str = ""
+    confidence: float = 0.0
+    reason: str = ""
+    route_source: str = ""
+    router_policy: str = ""
+    keyword_policy: str = ""
+    target_path: str = ""
+    candidate_workflows: List[str] = field(default_factory=list)
+    requires_adjudication: Optional[bool] = None
+    final_tool_path: str = ""
+    frontend_label: str = ""
+    plan_steps: List[Dict[str, str]] = field(default_factory=list)
+
+    @classmethod
+    def from_mapping(cls, data: Mapping[str, Any]) -> "FileTaskRoutingDecision":
+        confidence = 0.0
+        try:
+            confidence = float(data.get("confidence") or 0.0)
+        except (TypeError, ValueError):
+            confidence = 0.0
+        confidence = max(0.0, min(1.0, confidence))
+        return cls(
+            route_kind=_clean_str(data.get("route_kind"), 64).lower(),
+            route=_clean_str(data.get("route"), 64).lower(),
+            task_type=_clean_str(data.get("task_type"), 64).upper(),
+            source_task_type=_clean_str(data.get("source_task_type"), 64).upper(),
+            confidence=confidence,
+            reason=_clean_str(data.get("reason"), 500),
+            route_source=_clean_str(data.get("route_source"), 160),
+            router_policy=_clean_str(
+                data.get("router_policy") or data.get("route_policy"), 120
+            ),
+            keyword_policy=_clean_str(data.get("keyword_policy"), 120),
+            target_path=_clean_str(data.get("target_path"), 1_000),
+            candidate_workflows=_clean_str_list(
+                data.get("candidate_workflows") or data.get("workflow_candidates"),
+                limit=8,
+                item_limit=160,
+            ),
+            requires_adjudication=(
+                bool(data.get("requires_adjudication"))
+                if "requires_adjudication" in data
+                else None
+            ),
+            final_tool_path=_clean_str(
+                data.get("final_tool_path") or data.get("tool_path"), 240
+            ),
+            frontend_label=_clean_str(
+                data.get("frontend_label") or data.get("display_label"), 160
+            ),
+            plan_steps=_clean_plan_steps(data.get("plan_steps") or data.get("steps")),
+        )
+
+    def public_dict(self) -> Dict[str, Any]:
+        data = asdict(self)
+        return {key: value for key, value in data.items() if value not in ("", None, [], {})}
+
+
+@dataclass
 class FileTaskRequest:
     task: str
     run_id: str = ""
@@ -70,10 +157,22 @@ class FileTaskRequest:
     model_id: str = ""
     history: List[Dict[str, Any]] = field(default_factory=list)
     options: Dict[str, Any] = field(default_factory=dict)
+    routing_decision: Optional[FileTaskRoutingDecision] = None
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "FileTaskRequest":
         options = dict(data.get("options") or {}) if isinstance(data.get("options"), Mapping) else {}
+        raw_routing_decision = (
+            data.get("routing_decision")
+            or data.get("route_decision")
+            or data.get("workspace_route_intent")
+            or options.get("workspace_route_intent")
+        )
+        routing_decision = (
+            FileTaskRoutingDecision.from_mapping(raw_routing_decision)
+            if isinstance(raw_routing_decision, Mapping)
+            else None
+        )
         files: List[FileTaskFile] = []
         for item in data.get("files") or []:
             if isinstance(item, Mapping):
@@ -105,6 +204,7 @@ class FileTaskRequest:
             model_id=_clean_str(data.get("model_id"), 160),
             history=history[-20:],
             options=options,
+            routing_decision=routing_decision,
         )
 
 
@@ -393,6 +493,38 @@ class FileTaskExecutionContext:
                 "reason": self.effective_planner_reason,
                 "backend": self.effective_planner_backend,
             }
+        return data
+
+
+@dataclass
+class FileTaskDecisionContext:
+    version: str = "file_task_decision_context_v1"
+    routing_decision: Dict[str, Any] = field(default_factory=dict)
+    classification: FileTaskClassification = field(default_factory=FileTaskClassification)
+    intent_plan: FileTaskIntentPlan = field(default_factory=FileTaskIntentPlan)
+    requirements: FileTaskRequirementSet = field(default_factory=FileTaskRequirementSet)
+    plan_check: FileTaskPlanCheck = field(default_factory=FileTaskPlanCheck)
+    intent_adjudication: Dict[str, Any] = field(default_factory=dict)
+    effective_planner: Dict[str, Any] = field(default_factory=dict)
+    quick_action_mode: str = ""
+    simple_quick_action: bool = False
+
+    def public_dict(self) -> Dict[str, Any]:
+        data: Dict[str, Any] = {
+            "version": self.version,
+            "classification": self.classification.public_dict(),
+            "intent_plan": self.intent_plan.public_dict(),
+            "requirements": self.requirements.public_dict(),
+            "plan_check": self.plan_check.public_dict(),
+            "quick_action_mode": self.quick_action_mode,
+            "simple_quick_action": bool(self.simple_quick_action),
+        }
+        if self.routing_decision:
+            data["routing_decision"] = dict(self.routing_decision)
+        if self.intent_adjudication:
+            data["intent_adjudication"] = dict(self.intent_adjudication)
+        if self.effective_planner:
+            data["effective_planner"] = dict(self.effective_planner)
         return data
 
 
