@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import tempfile
+import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
@@ -27,23 +28,65 @@ from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
 from app.core.agent._file_task_stepwise_helpers import (
     file_task_suffix as _file_task_suffix,
     looks_like_windowed_pdf_task as _looks_like_windowed_pdf_task,
+    native_stepwise_pdf_text_quality_guard_payload as _native_stepwise_pdf_text_quality_guard_payload,
     normalized_pdf_body as _normalized_pdf_body,
     pdf_context_read_args as _pdf_context_read_args,
     pdf_text_quality as _pdf_text_quality,
     should_force_pdf_tool_read as _should_force_pdf_tool_read,
+    stepwise_docx_content_quality_block_message as _stepwise_docx_content_quality_block_message,
+    stepwise_docx_target_path as _stepwise_docx_target_path,
+    stepwise_docx_wait_artifact as _stepwise_docx_wait_artifact,
+    stepwise_docx_write_block_message as _stepwise_docx_write_block_message,
+    stepwise_pdf_fallback_insights as _stepwise_pdf_fallback_insights,
+    stepwise_pdf_fallback_paragraphs as _stepwise_pdf_fallback_paragraphs,
     stepwise_pdf_step_index as _stepwise_pdf_step_index,
     stepwise_pdf_window_pages as _stepwise_pdf_window_pages,
 )
 from app.core.agent.file_task_capability import (
     build_request_capability_profiles,
-    matched_native_capability_names,
     native_tool_gap_for_request,
 )
+from app.core.agent.file_task_classification import (
+    adjudicate_intent_if_needed as _intent_adjudicator_adjudicate_if_needed,
+    apply_classification_intent_overrides,
+    apply_followup_annotation_overrides,
+    apply_intent_adjudication as _classification_contract_apply_intent_adjudication,
+    apply_recipe_classification,
+    apply_write_intent_reason_codes,
+    build_classification_pipeline_state,
+    build_classification_reason_codes,
+    build_decision_context_payload,
+    build_final_classification,
+    build_intent_adjudication_contract_context,
+    build_mainline_contract_context,
+    classification_task_text as _intent_adjudication_classification_task_text,
+    demote_classification_to_read as _classification_contract_demote_to_read,
+    infer_task_family_operation as _classification_semantics_infer_task_family_operation,
+    intent_adjudicator_messages as _intent_adjudication_messages,
+    intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
+    normalize_mainline_contract as _classification_contract_normalize_mainline,
+    refresh_classification_recipe as _classification_contract_refresh_recipe,
+    request_with_task as _intent_adjudication_request_with_task,
+    routing_decision_payload as _decision_context_routing_decision_payload,
+    should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
+)
 from app.core.agent.file_task_completion_contract import build_completion_contract
+from app.core.agent.file_task_doc_annotate_fallback import (
+    apply_doc_annotate_bridge_fallback,
+)
+from app.core.agent.file_task_doc_annotate_request import (
+    docx_annotation_contract_for_request as _doc_annotate_contract_for_request,
+    docx_annotation_has_request_contract as _doc_annotate_has_request_contract,
+    is_docx_annotation_request as _doc_annotate_is_annotation_request,
+    is_docx_clear_review_request as _doc_annotate_is_clear_review_request,
+)
+from app.core.agent.file_task_docx_edit_guard import (
+    local_docx_edit_block_message as _docx_edit_local_block_message,
+    tool_args_docx_paragraph_count as _docx_edit_paragraph_count,
+)
 from app.core.agent.file_task_guard_emission import build_tool_guard_emission
 from app.core.agent.file_task_model import FileTaskModelClient
 from app.core.agent.file_task_review_intent import (
-    has_explicit_docx_review_intent,
     request_has_file_type,
 )
 from app.core.agent.file_task_runtime_patterns import (
@@ -54,12 +97,7 @@ from app.core.agent.file_task_runtime_patterns import (
     _RUN_PYTHON_STRONG_WRITE_PATTERNS,
 )
 from app.core.agent.file_task_recipes import (
-    FileTaskRecipeMatch,
-    recipe_matches,
-    request_file_types,
-    request_target_file_type,
     select_task_recipe,
-    semantic_markers,
 )
 from app.core.agent.file_task_validation import (
     build_file_task_requirements,
@@ -93,6 +131,7 @@ from app.core.agent.file_task_targeting import (
     resolved_workspace_root as _targeting_resolved_workspace_root,
     same_task_path as _targeting_same_task_path,
     should_skip_uncreated_target_context as _targeting_should_skip_uncreated_target_context,
+    target_path_with_file_alias as _targeting_target_path_with_file_alias,
     task_text_mentions_path as _targeting_task_text_mentions_path,
 )
 from app.core.agent.file_task_intent_predicates import (
@@ -117,6 +156,21 @@ from app.core.agent.file_task_readonly_summary import (
     readonly_context_summary as _readonly_context_summary,
     readonly_tool_points as _readonly_tool_points,
     readonly_tool_source_label as _readonly_tool_source_label,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    READONLY_ANSWER_GUARD_PENDING_SUMMARY,
+    READONLY_DUPLICATE_GUARD_SUMMARY,
+    WRITE_DUPLICATE_STOP_SUMMARY,
+    WRITE_DUPLICATE_SUPERVISOR_SUMMARY,
+    answer_only_round as _readonly_answer_only_round,
+    discard_answer_only_tool_calls as _readonly_discard_answer_only_tool_calls,
+    duplicate_guard_tool_payload as _readonly_duplicate_guard_tool_payload,
+    readonly_duplicate_final_summary as _readonly_duplicate_final_summary,
+    readonly_duplicate_guard_reminder as _readonly_duplicate_guard_reminder,
+    should_retry_readonly_answer_guard as _readonly_should_retry_answer_guard,
+    should_retry_readonly_duplicate_guard as _readonly_should_retry_duplicate_guard,
+    should_retry_write_duplicate_guard as _readonly_should_retry_write_duplicate_guard,
+    supervisor_guard_tool_payload as _readonly_supervisor_guard_tool_payload,
 )
 from app.core.agent.file_task_quality_gate import (
     change_operations as _quality_change_operations,
@@ -151,21 +205,12 @@ from app.core.agent.file_task_supervisor_prompts import (
     should_prompt_for_write_after_tool_round as _supervisor_should_prompt_for_write_after_tool_round,
     write_retry_message as _supervisor_write_retry_message,
 )
-from app.core.agent.file_task_prompt_sections import (
-    clear_docx_review_guidance as _prompt_clear_docx_review_guidance,
-    docx_compare_annotate_guidance as _prompt_docx_compare_annotate_guidance,
-    financial_chart_docx_guidance as _prompt_financial_chart_docx_guidance,
-    followup_guidance as _prompt_followup_guidance,
-    single_docx_annotate_guidance as _prompt_single_docx_annotate_guidance,
-)
-from app.core.agent.file_task_messages import (
-    build_file_task_messages as _build_file_task_messages,
-)
+from app.core.agent.file_task_message_payload import build_file_task_runtime_messages
 from app.core.agent.file_task_followup_context import (
     followup_context as _build_followup_context,
 )
-from app.core.agent.file_task_system_prompt import (
-    build_file_task_system_prompt as _build_file_task_system_prompt,
+from app.core.agent.file_task_system_prompt_builder import (
+    build_file_task_runtime_system_prompt,
 )
 from app.core.agent.file_task_terminal_report import (
     apply_terminal_check_overrides,
@@ -196,38 +241,8 @@ from app.core.agent.file_task_step_payload import (
 from app.core.agent.file_task_step_verification import (
     build_supervisor_step_verification_payload as _build_supervisor_step_verification_payload,
 )
-from app.core.agent.file_task_docx_stepwise import (
-    docx_polish_wait_artifact as _docx_stepwise_docx_polish_wait_artifact,
-    docx_polish_window_prompt as _docx_stepwise_docx_polish_window_prompt,
-    parse_polished_docx_paragraphs as _docx_stepwise_parse_polished_docx_paragraphs,
-    read_docx_paragraph_window as _docx_stepwise_read_docx_paragraph_window,
-    rewrite_docx_paragraph_window as _docx_stepwise_rewrite_docx_paragraph_window,
-    simple_polish_docx_paragraph as _docx_stepwise_simple_polish_docx_paragraph,
-    stepwise_docx_polish_target_path as _docx_stepwise_polish_target_path,
-)
 from app.core.agent.file_task_builtin_tool_runner import (
     run_builtin_tool as _builtin_tool_runner_run_builtin_tool,
-)
-from app.core.agent.file_task_intent_adjudication import (
-    classification_task_text as _intent_adjudication_classification_task_text,
-    intent_adjudicator_messages as _intent_adjudication_messages,
-    intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
-    normalize_intent_adjudication_response as _intent_adjudication_normalize_response,
-    request_with_task as _intent_adjudication_request_with_task,
-    should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
-)
-from app.core.agent.file_task_classification_contract import (
-    apply_intent_adjudication as _classification_contract_apply_intent_adjudication,
-    demote_classification_to_read as _classification_contract_demote_to_read,
-    docx_annotation_has_contract as _classification_contract_docx_annotation_has_contract,
-    has_create_or_export_contract as _classification_contract_has_create_or_export_contract,
-    normalize_mainline_contract as _classification_contract_normalize_mainline,
-    refresh_classification_recipe as _classification_contract_refresh_recipe,
-    write_has_contract_anchor as _classification_contract_write_has_contract_anchor,
-)
-from app.core.agent.file_task_classification_semantics import (
-    infer_task_family_operation as _classification_semantics_infer_task_family_operation,
-    semantic_reason_codes as _classification_semantics_reason_codes,
 )
 from app.core.agent.file_task_workflow_state import (
     attach_workflow_checkpoint,
@@ -293,6 +308,7 @@ def is_cancel_requested(run_id: str) -> bool:
 
 _MAX_VERIFY_REPAIR_ATTEMPTS = 2
 _MAX_WRITE_OPS_PER_FILE = 1
+_IMAGE_ARTIFACT_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "bmp", "gif"}
 
 
 class FileTaskRuntime:
@@ -333,6 +349,23 @@ class FileTaskRuntime:
     # Main Entry Point
     # ═══════════════════════════════════════════════════════════════
     def run(self, request: FileTaskRequest) -> Iterable[FileTaskEvent]:
+        run_started_at = time.perf_counter()
+        phase_started_at = run_started_at
+        performance: Dict[str, Any] = {}
+
+        def _mark_phase(name: str) -> None:
+            nonlocal phase_started_at
+            now = time.perf_counter()
+            performance[f"{name}_ms"] = round((now - phase_started_at) * 1000, 2)
+            phase_started_at = now
+
+        def _performance_snapshot(*, total: bool = False) -> Dict[str, Any]:
+            snapshot = dict(performance)
+            snapshot["elapsed_ms"] = round((time.perf_counter() - run_started_at) * 1000, 2)
+            if total:
+                snapshot["total_ms"] = snapshot["elapsed_ms"]
+            return snapshot
+
         request = request_with_workflow_checkpoint(request)
         request = self._request_with_inferred_target_path(request)
         ledger = FileTaskLedger(request.run_id)
@@ -341,16 +374,20 @@ class FileTaskRuntime:
             return
 
         context_files = self._context_files(request)
+        _mark_phase("context_files")
         base_classification = self._classify_request(request, context_files)
+        _mark_phase("classification")
         intent_adjudication = self._adjudicate_intent_if_needed(
             request, context_files, base_classification
         )
+        _mark_phase("intent_adjudication")
         classification = self._apply_intent_adjudication(
             request, context_files, base_classification, intent_adjudication
         )
         classification = self._normalize_mainline_contract(
             request, context_files, classification
         )
+        _mark_phase("classification_normalization")
 
         execution_context = self._build_execution_context(
             request,
@@ -359,6 +396,7 @@ class FileTaskRuntime:
             intent_adjudication=intent_adjudication,
             quick_action_mode=self._quick_action_mode(request),
         )
+        _mark_phase("execution_context")
         known_tool_gap = execution_context.known_tool_gap
         classification = execution_context.classification
         intent_plan = execution_context.intent_plan
@@ -367,33 +405,15 @@ class FileTaskRuntime:
         quick_action_mode = execution_context.quick_action_mode
         simple_quick_action = execution_context.simple_quick_action
         write_intent = execution_context.write_intent
-        if classification.execution_mode != "doc_annotate_bridge":
-            from app.core.agent import file_task_doc_annotate_boundary
-
-            if (
-                file_task_doc_annotate_boundary.should_use_bridge_execution(request)
-                and self._docx_annotation_has_contract(
-                    request, context_files, classification
-                )
-            ):
-                classification.execution_mode = "doc_annotate_bridge"
-                classification.task_family = "annotate"
-                classification.operation_kind = "annotate"
-                classification.output_mode = "write"
-                classification.write_intent = True
-                classification.docx_annotation_request = True
-                if "annotate_file" not in classification.matched_capabilities:
-                    classification.matched_capabilities.append("annotate_file")
-                if "read_docx_content" not in classification.matched_capabilities:
-                    classification.matched_capabilities.append("read_docx_content")
-                if not classification.selected_recipe:
-                    classification.selected_recipe = (
-                        file_task_doc_annotate_boundary.bridge_recipe_id(request)
-                    )
-                classification.reason_codes.append(
-                    "doc_annotate_bridge_execution_fallback"
-                )
-                write_intent = True
+        bridge_fallback = apply_doc_annotate_bridge_fallback(
+            request=request,
+            files=context_files,
+            classification=classification,
+            write_intent=write_intent,
+            docx_annotation_has_contract=_doc_annotate_has_request_contract,
+        )
+        classification = bridge_fallback.classification
+        write_intent = bridge_fallback.write_intent
         bridge_execution_mode = classification.execution_mode == "doc_annotate_bridge"
         if bridge_execution_mode:
             tool_defs = []
@@ -448,11 +468,17 @@ class FileTaskRuntime:
         )
         supervisor_audit_payload = supervisor_audit.public_dict()
         workflow_state["supervisor_audit"] = supervisor_audit_payload
+        _mark_phase("plan_materialization")
 
         classification_payload = classification.public_dict()
         intent_plan_payload = intent_plan.public_dict()
         requirements_payload = requirements.public_dict()
         plan_check_payload = plan_check.public_dict()
+        routing_decision_payload = _decision_context_routing_decision_payload(request)
+        decision_context_payload = build_decision_context_payload(
+            execution_context,
+            routing_decision_payload,
+        )
         plan_runtime = self._build_runtime_metadata(
             terminal_status="plan_checked",
             readonly_fallback_used=False,
@@ -468,6 +494,7 @@ class FileTaskRuntime:
             },
             planner_fallback_payload={},
         )
+        plan_runtime["performance"] = _performance_snapshot()
 
         yield ledger.event(
             "run.started",
@@ -485,8 +512,15 @@ class FileTaskRuntime:
                 "workflow_state": workflow_state,
                 "constraint_audit": constraint_audit,
                 "supervisor_audit": supervisor_audit_payload,
+                "performance": _performance_snapshot(),
                 **classification_payload,
                 "intent_plan": intent_plan_payload,
+                "decision_context": decision_context_payload,
+                **(
+                    {"routing_decision": routing_decision_payload}
+                    if routing_decision_payload
+                    else {}
+                ),
             },
         )
         yield ledger.event(
@@ -510,8 +544,15 @@ class FileTaskRuntime:
                 "task.classified",
                 {
                     **execution_context.public_dict(),
+                    "decision_context": decision_context_payload,
                     "workflow_state": workflow_state,
                     "supervisor_audit": supervisor_audit_payload,
+                    "performance": _performance_snapshot(),
+                    **(
+                        {"routing_decision": routing_decision_payload}
+                        if routing_decision_payload
+                        else {}
+                    ),
                 },
                 step_id="plan",
             )
@@ -522,8 +563,10 @@ class FileTaskRuntime:
                 "requirements": requirements_payload,
                 "completion_contract": completion_contract_payload,
                 "constraint_audit": constraint_audit,
+                "decision_context": decision_context_payload,
                 "workflow_state": workflow_state,
                 "supervisor_audit": supervisor_audit_payload,
+                "performance": _performance_snapshot(),
                 **(
                     {
                         "quick_action_bypass": True,
@@ -536,6 +579,10 @@ class FileTaskRuntime:
         )
 
         if not supervisor_audit.execution_allowed and plan_check.passed:
+            blocked_runtime = {
+                **plan_runtime,
+                "terminal_status": "blocked",
+            }
             yield ledger.event(
                 "supervisor.intervention",
                 {
@@ -553,7 +600,7 @@ class FileTaskRuntime:
                     title="监管检查",
                     summary=supervisor_audit.summary,
                     status="failed",
-                    runtime=plan_runtime,
+                    runtime=blocked_runtime,
                     passed=False,
                     supervisor_audit=supervisor_audit_payload,
                 ),
@@ -568,7 +615,7 @@ class FileTaskRuntime:
                     "completed_task": False,
                     "context": [],
                     "file_changes": [],
-                    "runtime": plan_runtime,
+                    "runtime": blocked_runtime,
                     "quick_action_mode": quick_action_mode,
                     "intent_plan": intent_plan_payload,
                     "requirements": requirements_payload,
@@ -926,6 +973,7 @@ class FileTaskRuntime:
         write_guard_injected = False
         readonly_answer_guard_injected = False
         duplicate_supervisor_guard_injected = False
+        readonly_duplicate_guard_injected = False
         readonly_tool_outputs: List[Dict[str, Any]] = []
         repair_attempts = 0
         last_check_payload: Optional[Dict[str, Any]] = None
@@ -937,19 +985,32 @@ class FileTaskRuntime:
         active_execution_plan: Optional[WhiteboxExecutionPlan] = None
         last_execution_plan_signature = ""
 
-        for round_index in range(1, self._max_rounds + 1):
+        repair_round_limit = self._max_rounds + _MAX_VERIFY_REPAIR_ATTEMPTS
+        for round_index in range(1, repair_round_limit + 1):
             if self._is_cancelled(request):
                 yield self._cancelled_event(ledger, request)
                 return
+            if round_index > self._max_rounds and not pending_repair_check_payload:
+                break
             planner_fallback_runtime_payload = {}
+            answer_only_plan = _readonly_answer_only_round(
+                write_intent=write_intent,
+                readonly_answer_guard_injected=readonly_answer_guard_injected,
+                readonly_duplicate_guard_injected=readonly_duplicate_guard_injected,
+                has_context=bool(snippets or readonly_tool_outputs),
+                tool_defs=tool_defs,
+            )
+            answer_only_round = answer_only_plan.enabled
+            active_tool_defs = answer_only_plan.tool_defs
             yield ledger.event(
                 "model.call.started",
                 {
                     "round": round_index,
                     "model_mode": request.model_mode,
                     "model_id": request.model_id,
-                    "tool_count": len(tool_defs),
+                    "tool_count": len(active_tool_defs),
                     "message_count": len(messages),
+                    "answer_only": answer_only_round,
                 },
                 step_id=execute_step_id,
             )
@@ -958,7 +1019,7 @@ class FileTaskRuntime:
                     request=model_request,
                     messages=messages,
                     system=system,
-                    tools=tool_defs,
+                    tools=active_tool_defs,
                 )
             except Exception as exc:
                 logger.warning("[FileTaskRuntime] model call failed: %s", exc)
@@ -1085,7 +1146,15 @@ class FileTaskRuntime:
             if tool_gap and known_tool_gap:
                 tool_gap = merge_tool_gaps(tool_gap, known_tool_gap)
             content_text, tool_calls = self._normalize_model_response(
-                response, tool_defs
+                response, active_tool_defs
+            )
+            answer_only_tool_calls = _readonly_discard_answer_only_tool_calls(
+                answer_only=answer_only_round,
+                tool_calls=tool_calls,
+            )
+            tool_calls = answer_only_tool_calls.tool_calls
+            discarded_answer_only_tool_calls = (
+                answer_only_tool_calls.discarded_count
             )
             yield ledger.event(
                 "model.call.finished",
@@ -1095,6 +1164,7 @@ class FileTaskRuntime:
                     "model_mode": request.model_mode,
                     "model_id": request.model_id,
                     "tool_call_count": len(tool_calls),
+                    "discarded_tool_call_count": discarded_answer_only_tool_calls,
                     "content_chars": len(content_text or ""),
                     "has_execution_plan": bool(
                         isinstance(response, dict)
@@ -1412,7 +1482,7 @@ class FileTaskRuntime:
                 if (
                     write_intent
                     and pending_repair_check_payload
-                    and round_index < self._max_rounds
+                    and round_index < repair_round_limit
                 ):
                     repair_message = self._repair_retry_message(
                         request,
@@ -1446,6 +1516,37 @@ class FileTaskRuntime:
                     )
                     continue
                 if write_intent:
+                    pending_images = self._pending_generated_docx_images(
+                        request, context_files, generated_artifacts, file_changes
+                    )
+                    if pending_images and round_index < self._max_rounds:
+                        reminder = self._generated_docx_image_insert_guard_message(
+                            request, context_files, pending_images
+                        )
+                        yield ledger.event(
+                            "tool.finished",
+                            {
+                                "tool_name": "image_insert_guard",
+                                "success": False,
+                                "result_preview": reminder,
+                                "pending_image_count": len(pending_images),
+                            },
+                            step_id=execute_step_id,
+                        )
+                        messages.append({"role": "user", "content": reminder})
+                        final_summary = reminder
+                        yield ledger.event(
+                            "step.result",
+                            self._build_step_result_payload(
+                                title="图表写入核验",
+                                summary=reminder,
+                                status="needs_attention",
+                                round_index=round_index,
+                                file_changes=file_changes,
+                            ),
+                            step_id=execute_step_id,
+                        )
+                        continue
                     last_check_payload = self._verify_task(
                         request,
                         executor,
@@ -1564,11 +1665,12 @@ class FileTaskRuntime:
                         step_id=execute_step_id,
                     )
                     break
-                if (
-                    not content_text
-                    and (snippets or readonly_tool_outputs)
-                    and not readonly_answer_guard_injected
-                    and round_index < self._max_rounds
+                if _readonly_should_retry_answer_guard(
+                    content_text=content_text,
+                    has_context=bool(snippets or readonly_tool_outputs),
+                    readonly_answer_guard_injected=readonly_answer_guard_injected,
+                    round_index=round_index,
+                    max_rounds=self._max_rounds,
                 ):
                     readonly_answer_guard_injected = True
                     reminder = self._readonly_answer_required_message(
@@ -1584,7 +1686,7 @@ class FileTaskRuntime:
                         step_id=execute_step_id,
                     )
                     messages.append({"role": "user", "content": reminder})
-                    final_summary = "已读取内容，正在生成可见分析结果。"
+                    final_summary = READONLY_ANSWER_GUARD_PENDING_SUMMARY
                     yield ledger.event(
                         "step.result",
                         self._build_step_result_payload(
@@ -1632,14 +1734,52 @@ class FileTaskRuntime:
 
             batch_signature = self._tool_batch_signature(tool_calls)
             if batch_signature and batch_signature == last_tool_batch_signature:
-                if (
-                    write_intent
-                    and not file_changes
-                    and not duplicate_supervisor_guard_injected
-                    and round_index < self._max_rounds
+                if not write_intent:
+                    guard_summary = READONLY_DUPLICATE_GUARD_SUMMARY
+                    if _readonly_should_retry_duplicate_guard(
+                        readonly_duplicate_guard_injected=readonly_duplicate_guard_injected,
+                        round_index=round_index,
+                        max_rounds=self._max_rounds,
+                    ):
+                        readonly_duplicate_guard_injected = True
+                        source_lines = self._readonly_context_source_lines(
+                            snippets, readonly_tool_outputs, limit=5
+                        )
+                        reminder = _readonly_duplicate_guard_reminder(
+                            task=request.task,
+                            source_lines=source_lines,
+                        )
+                        final_summary = guard_summary
+                        messages.append({"role": "user", "content": reminder})
+                        continue
+                    final_summary = _readonly_duplicate_final_summary(
+                        context_summary=self._readonly_context_summary(
+                            request, snippets, readonly_tool_outputs
+                        ),
+                        content_text=content_text,
+                    )
+                    completed_task = True
+                    yield ledger.event(
+                        "step.result",
+                        self._build_step_result_payload(
+                            title="模型规划并调用工具",
+                            summary=final_summary,
+                            status="success",
+                            round_index=round_index,
+                            file_changes=file_changes,
+                        ),
+                        step_id=execute_step_id,
+                    )
+                    break
+                if _readonly_should_retry_write_duplicate_guard(
+                    write_intent=write_intent,
+                    has_file_changes=bool(file_changes),
+                    duplicate_supervisor_guard_injected=duplicate_supervisor_guard_injected,
+                    round_index=round_index,
+                    max_rounds=self._max_rounds,
                 ):
                     duplicate_supervisor_guard_injected = True
-                    final_summary = "检测到重复读取/重复工具调用，监管层已要求模型回到计划主线继续执行。"
+                    final_summary = WRITE_DUPLICATE_SUPERVISOR_SUMMARY
                     reminder = self._duplicate_supervisor_retry_message(
                         request,
                         context_files,
@@ -1649,12 +1789,7 @@ class FileTaskRuntime:
                     )
                     yield ledger.event(
                         "tool.finished",
-                        {
-                            "tool_name": "supervisor_guard",
-                            "success": False,
-                            "skipped": True,
-                            "result_preview": reminder,
-                        },
+                        _readonly_supervisor_guard_tool_payload(reminder),
                         step_id=execute_step_id,
                     )
                     yield ledger.event(
@@ -1670,15 +1805,10 @@ class FileTaskRuntime:
                     )
                     messages.append({"role": "user", "content": reminder})
                     continue
-                final_summary = "检测到重复工具调用，已自动停止以避免重复写入。"
+                final_summary = WRITE_DUPLICATE_STOP_SUMMARY
                 yield ledger.event(
                     "tool.finished",
-                    {
-                        "tool_name": "duplicate_guard",
-                        "success": True,
-                        "skipped": True,
-                        "result_preview": final_summary,
-                    },
+                    _readonly_duplicate_guard_tool_payload(final_summary),
                     step_id=execute_step_id,
                 )
                 yield ledger.event(
@@ -1973,7 +2103,7 @@ class FileTaskRuntime:
 
                 if is_write_tool(tool_name) and tool_name != "run_python_code":
                     target = write_target_for_tool(tool_name, tool_args)
-                    write_key = f"{tool_name}::{target}"
+                    write_key = self._write_dedupe_key_for_tool(tool_name, tool_args)
                     if completed_write_ops.get(write_key, 0) >= _MAX_WRITE_OPS_PER_FILE:
                         skip_text = (
                             f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
@@ -2206,8 +2336,7 @@ class FileTaskRuntime:
                     and is_write_tool(tool_name)
                     and tool_name != "run_python_code"
                 ):
-                    target = write_target_for_tool(tool_name, tool_args)
-                    write_key = f"{tool_name}::{target}"
+                    write_key = self._write_dedupe_key_for_tool(tool_name, tool_args)
                     completed_write_ops[write_key] = (
                         completed_write_ops.get(write_key, 0) + 1
                     )
@@ -2275,6 +2404,37 @@ class FileTaskRuntime:
                 completed_task = False
                 break
             if write_intent and file_changes and not tool_gap:
+                pending_images = self._pending_generated_docx_images(
+                    request, context_files, generated_artifacts, file_changes
+                )
+                if pending_images and round_index < self._max_rounds:
+                    reminder = self._generated_docx_image_insert_guard_message(
+                        request, context_files, pending_images
+                    )
+                    yield ledger.event(
+                        "tool.finished",
+                        {
+                            "tool_name": "image_insert_guard",
+                            "success": False,
+                            "result_preview": reminder,
+                            "pending_image_count": len(pending_images),
+                        },
+                        step_id=execute_step_id,
+                    )
+                    messages.append({"role": "user", "content": reminder})
+                    final_summary = reminder
+                    yield ledger.event(
+                        "step.result",
+                        self._build_step_result_payload(
+                            title="图表写入核验",
+                            summary=reminder,
+                            status="needs_attention",
+                            round_index=round_index,
+                            file_changes=file_changes,
+                        ),
+                        step_id=execute_step_id,
+                    )
+                    continue
                 last_check_payload = self._verify_task(
                     request,
                     executor,
@@ -2491,6 +2651,14 @@ class FileTaskRuntime:
             ),
             missing_read_refs=missing_read_refs,
         )
+        pending_generated_images = self._pending_generated_docx_images(
+            request, context_files, generated_artifacts, file_changes
+        )
+        if write_intent and pending_generated_images:
+            check_payload = self._generated_docx_image_quality_failure(
+                check_payload,
+                pending_generated_images,
+            )
         stepwise_artifact = self._stepwise_docx_wait_artifact(
             request,
             context_files,
@@ -2517,7 +2685,9 @@ class FileTaskRuntime:
             planner_payload=planner_runtime_payload,
             planner_fallback_payload=planner_fallback_runtime_payload,
         )
+        terminal_runtime["performance"] = _performance_snapshot(total=True)
         check_payload["runtime"] = terminal_runtime
+        check_payload["performance"] = terminal_runtime["performance"]
 
         yield ledger.event("check.finished", check_payload, step_id=check_step_id)
         terminal_completed_steps = list(verification_completed_steps)
@@ -2597,6 +2767,7 @@ class FileTaskRuntime:
             "context": self._public_context_snippets(snippets[:8]),
             "file_changes": file_changes,
             "runtime": terminal_runtime,
+            "performance": terminal_runtime["performance"],
             "quick_action_mode": quick_action_mode,
             "workflow_version": recipe_skeleton.get("version"),
             "workflow_state": workflow_state,
@@ -2737,6 +2908,12 @@ class FileTaskRuntime:
     def _request_with_inferred_target_path(
         self, request: FileTaskRequest
     ) -> FileTaskRequest:
+        aliased_target = _targeting_target_path_with_file_alias(
+            request, request.target_path
+        )
+        if aliased_target and aliased_target != str(request.target_path or "").strip():
+            request = self._request_with_target_path(request, aliased_target)
+
         explicit_output = self._explicit_output_path_from_task(request.task)
         if explicit_output:
             current_target = str(request.target_path or "").strip()
@@ -2794,6 +2971,7 @@ class FileTaskRuntime:
             model_id=updated.model_id,
             history=list(updated.history),
             options=dict(updated.options),
+            routing_decision=updated.routing_decision,
         )
 
     def _request_target_points_to_source(
@@ -2884,7 +3062,7 @@ class FileTaskRuntime:
         return FileTaskToolGateway(
             context=FileTaskToolContext(
                 task_files=[file_info.public_dict() for file_info in context_files],
-                workspace_root=self._workspace_root,
+                workspace_root=str(self._resolved_workspace_root() or self._workspace_root),
                 gemini_client=self._gemini_client,
                 request_context={
                     "task": request.task,
@@ -3000,338 +3178,21 @@ class FileTaskRuntime:
         classification_payload: Dict[str, Any],
         intent_plan_payload: Dict[str, Any],
     ) -> Iterable[FileTaskEvent]:
-        del classification, intent_plan
+        from app.core.agent.file_task_docx_stepwise_runner import FileTaskDocxStepwiseRunner
 
-        target_path = self._stepwise_docx_polish_target_path(request, context_files)
-        context_step_id = "context"
-        execute_step_id = "execute"
-        check_step_id = "check"
-        file_changes: List[Dict[str, Any]] = []
-
-        yield ledger.event(
-            "step.started",
-            {
-                "title": "读取当前 DOCX 段落窗口",
-                "detail": "按段落窗口读取 Word 当前步骤内容，不一次性润色全文。",
-            },
-            step_id=context_step_id,
-        )
-
-        if not target_path or not Path(target_path).exists():
-            summary = "未找到可写回的 DOCX 文件，无法执行分步润色。"
-            runtime = self._build_runtime_metadata(
-                terminal_status="failed",
-                readonly_fallback_used=False,
-                model_failed=False,
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "task": request.task,
-                    "mode": "whitebox_v1",
-                    "summary": summary,
-                    "completed_task": False,
-                    "context": [],
-                    "file_changes": [],
-                    "runtime": runtime,
-                    "quick_action_mode": quick_action_mode,
-                    "intent_plan": intent_plan_payload,
-                    "requirements": requirements_payload,
-                    "plan_check": plan_check_payload,
-                    "recipe_skeleton": recipe_skeleton,
-                    "constraint_audit": constraint_audit,
-                    **classification_payload,
-                },
-            )
-            return
-
-        try:
-            window = self._read_docx_paragraph_window(request, target_path)
-        except Exception as exc:
-            summary = f"读取 DOCX 段落失败：{exc}"
-            runtime = self._build_runtime_metadata(
-                terminal_status="failed",
-                readonly_fallback_used=False,
-                model_failed=False,
-            )
-            yield ledger.event(
-                "tool.finished",
-                {
-                    "tool_name": "read_docx_content",
-                    "success": False,
-                    "path": target_path,
-                    "result_preview": summary,
-                },
-                step_id=context_step_id,
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "task": request.task,
-                    "mode": "whitebox_v1",
-                    "summary": summary,
-                    "completed_task": False,
-                    "context": [],
-                    "file_changes": [],
-                    "runtime": runtime,
-                    "quick_action_mode": quick_action_mode,
-                    "intent_plan": intent_plan_payload,
-                    "requirements": requirements_payload,
-                    "plan_check": plan_check_payload,
-                    "recipe_skeleton": recipe_skeleton,
-                    "constraint_audit": constraint_audit,
-                    **classification_payload,
-                },
-            )
-            return
-
-        if not window["paragraphs"]:
-            summary = "当前 DOCX 没有可润色的剩余段落。"
-            runtime = self._build_runtime_metadata(
-                terminal_status="verified",
-                readonly_fallback_used=False,
-                model_failed=False,
-            )
-            yield ledger.event(
-                "run.finished",
-                {
-                    "task": request.task,
-                    "mode": "whitebox_v1",
-                    "summary": summary,
-                    "completed_task": True,
-                    "context": [window],
-                    "file_changes": [],
-                    "runtime": runtime,
-                    "quick_action_mode": quick_action_mode,
-                    "intent_plan": intent_plan_payload,
-                    "requirements": requirements_payload,
-                    "plan_check": plan_check_payload,
-                    "recipe_skeleton": recipe_skeleton,
-                    "constraint_audit": constraint_audit,
-                    **classification_payload,
-                },
-            )
-            return
-
-        yield ledger.event(
-            "tool.finished",
-            {
-                "tool_name": "read_docx_content",
-                "success": True,
-                "path": target_path,
-                "result_preview": _preview("\n".join(window["paragraphs"]), 900),
-                "paragraph_start": window["start_visible_index"] + 1,
-                "paragraph_end": window["end_visible_index"],
-            },
-            step_id=context_step_id,
-        )
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="读取当前 DOCX 段落窗口",
-                summary=(
-                    f"已读取第 {window['start_visible_index'] + 1}-"
-                    f"{window['end_visible_index']} 个非空段落。"
-                ),
-                status="completed",
-                snippet_count=1,
-                snippets=[
-                    {
-                        "source": Path(target_path).name,
-                        "path": target_path,
-                        "preview": _preview("\n".join(window["paragraphs"]), 500),
-                        "paragraph_start": window["start_visible_index"] + 1,
-                        "paragraph_end": window["end_visible_index"],
-                    }
-                ],
-            ),
-            step_id=context_step_id,
-        )
-
-        yield ledger.event(
-            "step.started",
-            {
-                "title": "润色并写回当前段落",
-                "detail": "只处理当前段落窗口，保留文档其他内容。",
-            },
-            step_id=execute_step_id,
-        )
-
-        model_failed = False
-        polished: List[str] = []
-        try:
-            response = self._call_model(
-                request=request,
-                messages=[
-                    {
-                        "role": "user",
-                        "content": self._docx_polish_window_prompt(
-                            request, window["paragraphs"]
-                        ),
-                    }
-                ],
-                system=("你是严谨的中文文档润色助手。只润色用户给出的段落窗口，" "保持原意、术语和段落数量；不要扩写成总结，不要添加解释。"),
-                tools=[],
-            )
-            content, _tool_calls = self._normalize_model_response(response, [])
-            polished = self._parse_polished_docx_paragraphs(
-                content, expected_count=len(window["paragraphs"])
-            )
-        except Exception as exc:
-            model_failed = True
-            logger.warning(
-                "[FileTaskRuntime] stepwise DOCX polish model failed: %s", exc
-            )
-
-        if not polished:
-            polished = [
-                self._simple_polish_docx_paragraph(text)
-                for text in window["paragraphs"]
-            ]
-
-        changed_count = self._rewrite_docx_paragraph_window(
-            target_path,
-            window["paragraph_indices"],
-            polished,
-        )
-        change = {
-            "path": target_path,
-            "file_type": "docx",
-            "operation": "rewrite_docx_paragraph_window",
-            "summary": (
-                f"已润色并写回第 {window['start_visible_index'] + 1}-"
-                f"{window['end_visible_index']} 个非空段落。"
-            ),
-            "paragraphs_rewritten": changed_count,
-            "paragraph_start": window["start_visible_index"] + 1,
-            "paragraph_end": window["end_visible_index"],
-            "change_type": "modify",
-            "focus": True,
-        }
-        file_changes.append(change)
-        yield ledger.event(
-            "tool.finished",
-            {
-                "tool_name": "rewrite_docx_paragraph_window",
-                "success": changed_count > 0,
-                "path": target_path,
-                "result_preview": change["summary"],
-                "paragraphs_rewritten": changed_count,
-            },
-            step_id=execute_step_id,
-        )
-        yield ledger.event("file.changed", change, step_id=execute_step_id)
-
-        next_artifact = self._docx_polish_wait_artifact(request, target_path, window)
-        runtime = self._build_runtime_metadata(
-            terminal_status="awaiting_confirmation",
-            readonly_fallback_used=False,
-            model_failed=model_failed,
-        )
-        check_payload = self._evaluate_task_quality_gate(
+        yield from FileTaskDocxStepwiseRunner(self).stream_polish_writeback(
+            ledger,
             request,
-            file_changes,
-            write_intent=True,
-            output_mode="write",
-        )
-        check_payload.update(
-            {
-                "status": "awaiting_confirmation",
-                "summary": "当前段落窗口已写回 DOCX，等待用户说“继续”后处理下一段。",
-                "next_action_artifact": next_artifact,
-                "runtime": runtime,
-            }
-        )
-
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="润色并写回当前段落",
-                summary=change["summary"],
-                status="completed",
-                file_changes=file_changes,
-                runtime=runtime,
-                next_action_artifact=next_artifact,
-            ),
-            step_id=execute_step_id,
-        )
-        yield ledger.event("check.completed", check_payload, step_id=check_step_id)
-        yield ledger.event(
-            "step.result",
-            self._build_step_result_payload(
-                title="核验结果",
-                summary="当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。",
-                status="awaiting_confirmation",
-                file_changes=file_changes,
-                runtime=runtime,
-                passed=bool(check_payload.get("passed")),
-                next_action_artifact=next_artifact,
-            ),
-            step_id=check_step_id,
-        )
-        yield ledger.event(
-            "run.finished",
-            {
-                "task": request.task,
-                "mode": "whitebox_v1",
-                "summary": "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。",
-                "completed_task": True,
-                "context": [window],
-                "file_changes": file_changes,
-                "runtime": runtime,
-                "quick_action_mode": quick_action_mode,
-                "intent_plan": intent_plan_payload,
-                "requirements": requirements_payload,
-                "plan_check": plan_check_payload,
-                "recipe_skeleton": recipe_skeleton,
-                "constraint_audit": constraint_audit,
-                "next_action_artifact": next_artifact,
-                **classification_payload,
-            },
-        )
-
-    def _stepwise_docx_polish_target_path(
-        self, request: FileTaskRequest, files: List[FileTaskFile]
-    ) -> str:
-        return _docx_stepwise_polish_target_path(request, files)
-
-    def _read_docx_paragraph_window(
-        self, request: FileTaskRequest, path: str
-    ) -> Dict[str, Any]:
-        return _docx_stepwise_read_docx_paragraph_window(request, path)
-
-    def _docx_polish_window_prompt(
-        self, request: FileTaskRequest, paragraphs: List[str]
-    ) -> str:
-        return _docx_stepwise_docx_polish_window_prompt(request, paragraphs)
-
-    def _parse_polished_docx_paragraphs(
-        self, content: str, *, expected_count: int
-    ) -> List[str]:
-        return _docx_stepwise_parse_polished_docx_paragraphs(
-            content,
-            expected_count=expected_count,
-        )
-
-    def _simple_polish_docx_paragraph(self, text: str) -> str:
-        return _docx_stepwise_simple_polish_docx_paragraph(text)
-
-    def _rewrite_docx_paragraph_window(
-        self, path: str, paragraph_indices: List[int], paragraphs: List[str]
-    ) -> int:
-        return _docx_stepwise_rewrite_docx_paragraph_window(
-            path,
-            paragraph_indices,
-            paragraphs,
-        )
-
-    def _docx_polish_wait_artifact(
-        self, request: FileTaskRequest, target_path: str, window: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        return _docx_stepwise_docx_polish_wait_artifact(
-            request,
-            target_path,
-            window,
+            context_files,
+            classification,
+            intent_plan,
+            requirements_payload,
+            plan_check_payload,
+            recipe_skeleton,
+            constraint_audit,
+            quick_action_mode,
+            classification_payload,
+            intent_plan_payload,
         )
 
     def _run_builtin_tool(
@@ -3356,47 +3217,6 @@ class FileTaskRuntime:
 
     def _request_has_file_type(self, request: FileTaskRequest, file_type: str) -> bool:
         return request_has_file_type(request, file_type)
-
-    def _is_docx_annotation_request(self, request: FileTaskRequest) -> bool:
-        if not self._request_has_file_type(request, "docx"):
-            return False
-        options = request.options if isinstance(request.options, dict) else {}
-        if bool(options.get("skip_doc_annotate_bridge")):
-            return False
-        from app.core.agent import file_task_doc_annotate_boundary
-
-        if file_task_doc_annotate_boundary.looks_like_docx_review_clear_request(
-            request.task
-        ):
-            return False
-        if file_task_doc_annotate_boundary.looks_like_direct_docx_rewrite_request(
-            request.task
-        ):
-            return False
-        if file_task_doc_annotate_boundary.looks_like_multi_file_compare_request(
-            request
-        ):
-            return False
-        task_lower = str(request.task or "").strip().lower()
-        if not task_lower:
-            return False
-        if (
-            self._request_has_file_type(request, "pdf")
-            and any(marker in task_lower for marker in ("翻译", "translation", "译稿"))
-            and any(marker in task_lower for marker in ("原文", "source", "pdf"))
-            and any(marker in task_lower for marker in ("处理", "分段", "拆成", "batch"))
-        ):
-            return True
-        return has_explicit_docx_review_intent(task_lower)
-
-    def _is_docx_clear_review_request(self, request: FileTaskRequest) -> bool:
-        if not self._request_has_file_type(request, "docx"):
-            return False
-        from app.core.agent import file_task_doc_annotate_boundary
-
-        return file_task_doc_annotate_boundary.looks_like_docx_review_clear_request(
-            request.task
-        )
 
     def _consume_streaming_tool_result(
         self,
@@ -3492,294 +3312,155 @@ class FileTaskRuntime:
         resume_control = workflow_resume_control(request)
         classification_task = self._classification_task_text(request, resume_control)
         classification_request = self._request_with_task(request, classification_task)
-        matched_capabilities = matched_native_capability_names(classification_request)
-        advisory_analysis_request = self._is_advisory_analysis_request(
-            classification_task
-        )
-        readonly_write_negation = self._has_readonly_write_negation(classification_task)
-        raw_write_intent = self._has_explicit_write_intent(classification_task)
-        write_intent = self._has_write_intent(classification_task)
-        raw_docx_annotation_request = self._is_docx_annotation_request(
-            classification_request
-        )
-        docx_annotation_request = raw_docx_annotation_request
-        clear_docx_review_request = self._is_docx_clear_review_request(
-            classification_request
-        )
-        docx_compare_annotate_request = (
-            "compare_docx_and_annotate" in matched_capabilities
-        )
-        if docx_compare_annotate_request:
-            if "annotate_file" in matched_capabilities:
-                matched_capabilities = [
-                    name for name in matched_capabilities if name != "annotate_file"
-                ]
-            docx_annotation_request = False
-            raw_docx_annotation_request = False
-        semantic = semantic_markers(
-            classification_task,
-            file_types=request_file_types(files),
-            target_file_type=request_target_file_type(request, files),
-        )
-        chart_request = semantic.get("chart_request", False)
-        table_request = semantic.get("table_request", False)
-        summary_request = semantic.get("summary_request", False)
-        translation_request = semantic.get("translation_request", False)
-        polish_request = semantic.get("polish_request", False)
-        financial_request = semantic.get("financial_request", False)
-        ppt_slide_write_request = semantic.get("ppt_slide_write_request", False)
-        ppt_design_request = semantic.get("ppt_design_request", False)
-        docx_report_request = semantic.get("docx_report_request", False)
-        if clear_docx_review_request and "annotate_file" in matched_capabilities:
-            matched_capabilities = [
-                name for name in matched_capabilities if name != "annotate_file"
-            ]
         planner_policy, planner_reason, planner_backend = self._planner_classification(
             request
         )
-        resume_adapter = str(resume_control.get("adapter") or "").strip().lower()
-        diagnostic_request = self._is_diagnostic_request(classification_task)
-
-        request_kind = "new_task"
-        execution_mode = "generic_tool_loop"
-        reason_codes: List[str] = []
-        stepwise_pdf_docx_resume = False
-        followup_action = (
-            str(followup_context.get("followup_action") or "").strip().lower()
+        classification_state = build_classification_pipeline_state(
+            classification_task=classification_task,
+            classification_request=classification_request,
+            files=files,
+            followup_context=followup_context,
+            resume_control=resume_control,
+            planner_policy=planner_policy,
+            planner_reason=planner_reason,
+            planner_backend=planner_backend,
+            is_docx_annotation_request=_doc_annotate_is_annotation_request,
+            is_docx_clear_review_request=_doc_annotate_is_clear_review_request,
+            is_diagnostic_request=self._is_diagnostic_request,
         )
-        previous_task_family = (
-            str(followup_context.get("previous_task_family") or "").strip().lower()
+        classification_signals = classification_state.signals
+        classification_flow = classification_state.flow
+        matched_capabilities = classification_signals.matched_capabilities
+        advisory_analysis_request = classification_signals.advisory_analysis_request
+        readonly_write_negation = classification_signals.readonly_write_negation
+        raw_write_intent = classification_signals.raw_write_intent
+        write_intent = classification_signals.write_intent
+        raw_docx_annotation_request = (
+            classification_signals.raw_docx_annotation_request
         )
-        previous_task_execution_mode = (
-            str(
-                followup_context.get("previous_task_execution_mode")
-                or followup_context.get("previous_task_mode")
-                or ""
-            )
-            .strip()
-            .lower()
+        docx_annotation_request = classification_signals.docx_annotation_request
+        clear_docx_review_request = classification_signals.clear_docx_review_request
+        docx_compare_annotate_request = (
+            classification_signals.docx_compare_annotate_request
         )
-        previous_task_output_mode = (
-            str(followup_context.get("previous_task_output_mode") or "").strip().lower()
-        )
+        chart_request = classification_signals.chart_request
+        table_request = classification_signals.table_request
+        summary_request = classification_signals.summary_request
+        translation_request = classification_signals.translation_request
+        polish_request = classification_signals.polish_request
+        financial_request = classification_signals.financial_request
+        ppt_slide_write_request = classification_signals.ppt_slide_write_request
+        ppt_design_request = classification_signals.ppt_design_request
+        docx_report_request = classification_signals.docx_report_request
+        diagnostic_request = classification_state.diagnostic_request
+        request_kind = classification_flow.request_kind
+        execution_mode = classification_flow.execution_mode
+        reason_codes: List[str] = list(classification_flow.reason_codes)
+        stepwise_pdf_docx_resume = classification_flow.stepwise_pdf_docx_resume
+        followup_action = classification_flow.followup_action
+        previous_task_family = classification_flow.previous_task_family
+        previous_task_execution_mode = classification_flow.previous_task_execution_mode
+        previous_task_output_mode = classification_flow.previous_task_output_mode
         previous_task_intent_can_apply = (
-            str(followup_context.get("previous_task_intent_can_apply") or "")
-            .strip()
-            .lower()
+            classification_flow.previous_task_intent_can_apply
         )
-        if (
-            semantic.get("pdf_source", False)
-            and semantic.get("summary_request", False)
-            and semantic.get("stepwise_confirmation_request", False)
-            and semantic.get("docx_target", False)
-        ):
-            summary_request = True
-            docx_report_request = True
-            write_intent = True
-            raw_write_intent = True
-            reason_codes.append("long_pdf_stepwise_docx_forced_write_intent")
-        if resume_control:
-            request_kind = "resume"
-            execution_mode = "awaiting_confirmation_resume"
-            reason_codes.append("workflow_checkpoint_resume")
-            if resume_adapter:
-                reason_codes.append(f"workflow_adapter:{resume_adapter}")
-            if (
-                str(resume_control.get("policy") or "").strip().lower()
-                == "confirm_each_step"
-                and "pdf" in request_file_types(files)
-                and request_target_file_type(request, files) in {"docx", "doc"}
-            ):
-                stepwise_pdf_docx_resume = True
-                summary_request = True
-                docx_report_request = True
-                write_intent = True
-                raw_write_intent = True
-                reason_codes.append("stepwise_resume_forced_write_intent")
-        elif followup_context:
-            request_kind = "followup"
-            execution_mode = "followup_contextual"
-            if followup_action:
-                reason_codes.append(f"followup_action:{followup_action}")
-            else:
-                reason_codes.append("followup_context")
-
-        followup_question_is_new_artifact = (
-            request_kind == "followup"
-            and followup_action == "question"
-            and (
-                self._has_artifact_creation_intent(classification_task)
-                or self._has_explicit_write_intent(classification_task)
-                or raw_write_intent
-            )
-        )
-        if (
-            request_kind == "followup"
-            and followup_action == "question"
-            and not followup_question_is_new_artifact
-        ):
-            diagnostic_request = True
-            reason_codes.append("followup_question")
-        elif followup_question_is_new_artifact:
-            reason_codes.append("followup_question_new_artifact")
-
-        if clear_docx_review_request:
-            reason_codes.append("docx_clear_review_request")
-            if not write_intent:
-                write_intent = True
-                reason_codes.append("docx_clear_review_forced_write_intent")
-
-        if docx_compare_annotate_request:
-            reason_codes.append("docx_compare_annotate_request")
-            if not write_intent:
-                write_intent = True
-                reason_codes.append("docx_compare_annotate_forced_write_intent")
-
-        if diagnostic_request:
-            reason_codes.append("diagnostic_request")
-            diagnostic_write_signal = (
-                write_intent
-                or raw_write_intent
-                or clear_docx_review_request
-                or docx_compare_annotate_request
-                or self._has_explicit_write_intent(classification_task)
-                or self._has_strong_write_intent(classification_task)
-            )
-            if write_intent or raw_write_intent:
-                write_intent = False
-            if diagnostic_write_signal:
-                reason_codes.append("diagnostic_overrode_write_intent")
-            if docx_annotation_request or raw_docx_annotation_request:
-                docx_annotation_request = False
-                reason_codes.append("diagnostic_overrode_docx_annotation")
-
-        if readonly_write_negation:
-            reason_codes.append("readonly_write_negation")
-            if write_intent or raw_write_intent:
-                write_intent = False
-                reason_codes.append("readonly_overrode_write_intent")
-            if docx_annotation_request or raw_docx_annotation_request:
-                docx_annotation_request = False
-                reason_codes.append("readonly_overrode_docx_annotation")
-
-        if self._explicit_output_mode(request) == "answer" and not diagnostic_request:
-            if (write_intent or raw_write_intent) and not self._has_strong_write_intent(
+        resume_adapter = classification_flow.resume_adapter
+        override_flags = apply_classification_intent_overrides(
+            request_kind=request_kind,
+            followup_action=followup_action,
+            summary_request=summary_request,
+            docx_report_request=docx_report_request,
+            write_intent=write_intent,
+            raw_write_intent=raw_write_intent,
+            diagnostic_request=diagnostic_request,
+            readonly_write_negation=readonly_write_negation,
+            clear_docx_review_request=clear_docx_review_request,
+            docx_compare_annotate_request=docx_compare_annotate_request,
+            docx_annotation_request=docx_annotation_request,
+            raw_docx_annotation_request=raw_docx_annotation_request,
+            explicit_output_mode=self._explicit_output_mode(request),
+            artifact_creation_intent=self._has_artifact_creation_intent(
                 classification_task
-            ):
-                write_intent = False
-                reason_codes.append("answer_mode_overrode_write_intent")
-            if docx_annotation_request or raw_docx_annotation_request:
-                docx_annotation_request = False
-                reason_codes.append("answer_mode_overrode_docx_annotation")
-
-        if resume_adapter == "doc_annotate_bridge":
-            docx_annotation_request = True
-        if request_kind == "followup" and followup_action == "improve":
-            if previous_task_family == "annotate":
-                reason_codes.append("followup_previous_task_family:annotate")
-                if self._request_has_file_type(classification_request, "docx"):
-                    docx_annotation_request = True
-            if previous_task_execution_mode in {
-                "annotate_tool_loop",
-                "awaiting_confirmation_resume",
-                "doc_annotate_bridge",
-            }:
-                reason_codes.append(
-                    f"followup_previous_execution_mode:{previous_task_execution_mode}"
-                )
-                if self._request_has_file_type(classification_request, "docx"):
-                    docx_annotation_request = True
-        if request_kind == "followup" and followup_action == "apply":
-            if (
-                previous_task_output_mode in {"hybrid", "write"}
-                or previous_task_intent_can_apply == "true"
-            ):
-                write_intent = True
-                reason_codes.append("followup_apply_write_intent")
-
-        if docx_annotation_request:
-            if request_kind == "new_task":
-                execution_mode = "annotate_tool_loop"
-            elif (
-                request_kind == "followup"
-                and followup_action == "improve"
-                and previous_task_execution_mode == "doc_annotate_bridge"
-            ):
-                execution_mode = "doc_annotate_bridge"
-            reason_codes.append("docx_annotation_request")
-            if not write_intent:
-                write_intent = True
-                reason_codes.append("docx_annotation_forced_write_intent")
-
-        if write_intent:
-            reason_codes.append("write_intent")
-            if (
-                str(options.get("output_mode") or "").strip().lower() == "answer"
-                and not diagnostic_request
-            ):
-                output_mode = "write"
-                reason_codes.append("answer_mode_overridden_by_write_intent")
-
-        recipe_match_request = classification_request
-        if stepwise_pdf_docx_resume:
-            recipe_match_request = FileTaskRequest(
-                task=(f"{classification_task}\n" "分步 长PDF DOCX 总结 每一步写入并等待确认"),
-                run_id=classification_request.run_id,
-                session_id=classification_request.session_id,
-                files=classification_request.files,
-                current_file=classification_request.current_file,
-                selection=classification_request.selection,
-                selection_source=classification_request.selection_source,
-                target_path=classification_request.target_path,
-                model_mode=classification_request.model_mode,
-                model_id=classification_request.model_id,
-                history=classification_request.history,
-                options=classification_request.options,
-            )
-        recipe_candidates = recipe_matches(
-            recipe_match_request, files, write_intent=write_intent
+            ),
+            explicit_write_intent=self._has_explicit_write_intent(
+                classification_task
+            ),
+            strong_write_intent=self._has_strong_write_intent(classification_task),
+            force_long_pdf_docx_write=classification_flow.force_long_pdf_docx_write,
+            stepwise_pdf_docx_resume=stepwise_pdf_docx_resume,
+            reason_codes=reason_codes,
         )
-        selected_recipe_match = recipe_candidates[0] if recipe_candidates else None
-        if selected_recipe_match:
-            reason_codes.extend(selected_recipe_match.reason_codes)
-            for capability in selected_recipe_match.recipe.matched_capabilities:
-                if capability not in matched_capabilities:
-                    matched_capabilities.append(capability)
-            if selected_recipe_match.recipe.execution_mode != "generic_tool_loop":
-                execution_mode = selected_recipe_match.recipe.execution_mode
-            if len(recipe_candidates) > 1:
-                reason_codes.extend(
-                    f"recipe_candidate:{item.recipe.id}"
-                    for item in recipe_candidates[1:4]
-                )
+        summary_request = override_flags.summary_request
+        docx_report_request = override_flags.docx_report_request
+        write_intent = override_flags.write_intent
+        raw_write_intent = override_flags.raw_write_intent
+        diagnostic_request = override_flags.diagnostic_request
+        docx_annotation_request = override_flags.docx_annotation_request
+        raw_docx_annotation_request = override_flags.raw_docx_annotation_request
+        reason_codes = override_flags.reason_codes
 
-        if planner_policy:
-            reason_codes.append(f"planner_policy:{planner_policy}")
-        elif planner_reason == "deferred_to_execution_brief":
-            reason_codes.append("planner_deferred:model_first")
-        if planner_backend:
-            reason_codes.append(f"planner_backend:{planner_backend}")
-
-        known_gap_name = ""
-        if isinstance(known_tool_gap, dict):
-            known_gap_name = str(known_tool_gap.get("missing_capability") or "").strip()
-            if known_gap_name:
-                reason_codes.append(f"native_tool_gap:{known_gap_name}")
-
-        reason_codes.extend(f"capability:{name}" for name in matched_capabilities[:4])
-        reason_codes.extend(
-            _classification_semantics_reason_codes(
-                chart_request=chart_request,
-                table_request=table_request,
-                summary_request=summary_request,
-                translation_request=translation_request,
-                polish_request=polish_request,
-                financial_request=financial_request,
-                ppt_slide_write_request=ppt_slide_write_request,
-                ppt_design_request=ppt_design_request,
-                docx_report_request=docx_report_request,
-            )
+        followup_annotation = apply_followup_annotation_overrides(
+            classification_request=classification_request,
+            request_kind=request_kind,
+            followup_action=followup_action,
+            previous_task_family=previous_task_family,
+            previous_task_execution_mode=previous_task_execution_mode,
+            previous_task_output_mode=previous_task_output_mode,
+            previous_task_intent_can_apply=previous_task_intent_can_apply,
+            resume_adapter=resume_adapter,
+            docx_annotation_request=docx_annotation_request,
+            write_intent=write_intent,
+            execution_mode=execution_mode,
+            reason_codes=reason_codes,
         )
+        docx_annotation_request = followup_annotation.docx_annotation_request
+        write_intent = followup_annotation.write_intent
+        execution_mode = followup_annotation.execution_mode
+        reason_codes = followup_annotation.reason_codes
+
+        write_intent_reasons = apply_write_intent_reason_codes(
+            write_intent=write_intent,
+            explicit_output_mode=str(options.get("output_mode") or ""),
+            diagnostic_request=diagnostic_request,
+            reason_codes=reason_codes,
+        )
+        reason_codes = write_intent_reasons.reason_codes
+
+        recipe_classification = apply_recipe_classification(
+            classification_request=classification_request,
+            classification_task=classification_task,
+            files=files,
+            write_intent=write_intent,
+            stepwise_pdf_docx_resume=stepwise_pdf_docx_resume,
+            matched_capabilities=matched_capabilities,
+            execution_mode=execution_mode,
+            reason_codes=reason_codes,
+        )
+        recipe_candidates = recipe_classification.candidates
+        selected_recipe_match = recipe_classification.selected
+        matched_capabilities = recipe_classification.matched_capabilities
+        execution_mode = recipe_classification.execution_mode
+        reason_codes = recipe_classification.reason_codes
+
+        classification_reasons = build_classification_reason_codes(
+            reason_codes=reason_codes,
+            planner_policy=planner_policy,
+            planner_reason=planner_reason,
+            planner_backend=planner_backend,
+            known_tool_gap=known_tool_gap,
+            matched_capabilities=matched_capabilities,
+            chart_request=chart_request,
+            table_request=table_request,
+            summary_request=summary_request,
+            translation_request=translation_request,
+            polish_request=polish_request,
+            financial_request=financial_request,
+            ppt_slide_write_request=ppt_slide_write_request,
+            ppt_design_request=ppt_design_request,
+            docx_report_request=docx_report_request,
+        )
+        reason_codes = classification_reasons.reason_codes
+        known_gap_name = classification_reasons.known_gap_name
 
         (
             task_family,
@@ -3809,66 +3490,36 @@ class FileTaskRuntime:
             execution_mode=execution_mode,
         )
 
-        file_types = sorted(
-            {
-                str(profile.get("format") or "").strip().lower()
-                for profile in build_request_capability_profiles(request)
-                if str(profile.get("format") or "").strip()
-            }
-        )
-        target_file_type = (
-            Path(str(request.target_path or "")).suffix.lstrip(".").lower()
-        )
-        if not target_file_type:
-            for file_info in files:
-                if not file_info.target:
-                    continue
-                target_file_type = (
-                    file_info.type
-                    or Path(file_info.path or file_info.name).suffix.lstrip(".")
-                ).lower()
-                if target_file_type:
-                    break
-
-        output_mode = self._infer_output_mode(
-            request,
-            files,
-            write_intent=write_intent,
-            diagnostic_request=diagnostic_request,
-            docx_annotation_request=docx_annotation_request,
-            advisory_analysis_request=advisory_analysis_request,
-        )
-        if readonly_write_negation:
-            output_mode = "answer"
-
-        confidence = 1.0
-        if diagnostic_request:
-            confidence = (
-                0.7 if (raw_write_intent or raw_docx_annotation_request) else 0.9
-            )
-
-        return FileTaskClassification(
+        return build_final_classification(
+            request=request,
+            files=files,
+            output_mode_resolver=lambda resolved_request, resolved_files: self._infer_output_mode(
+                resolved_request,
+                list(resolved_files),
+                write_intent=write_intent,
+                diagnostic_request=diagnostic_request,
+                docx_annotation_request=docx_annotation_request,
+                advisory_analysis_request=advisory_analysis_request,
+            ),
             request_kind=request_kind,
             task_family=task_family,
             operation_kind=operation_kind,
             execution_mode=execution_mode,
-            output_mode=output_mode,
             write_intent=write_intent,
             diagnostic_request=diagnostic_request,
             docx_annotation_request=docx_annotation_request,
+            advisory_analysis_request=advisory_analysis_request,
+            readonly_write_negation=readonly_write_negation,
+            raw_write_intent=raw_write_intent,
+            raw_docx_annotation_request=raw_docx_annotation_request,
             planner_policy=planner_policy,
             planner_reason=planner_reason,
             planner_backend=planner_backend,
-            target_file_type=target_file_type,
-            known_native_tool_gap=known_gap_name,
-            file_types=file_types,
+            known_gap_name=known_gap_name,
             matched_capabilities=matched_capabilities,
             reason_codes=reason_codes,
-            selected_recipe=(
-                selected_recipe_match.recipe.id if selected_recipe_match else ""
-            ),
-            recipe_candidates=[item.public_dict() for item in recipe_candidates[:5]],
-            confidence=confidence,
+            selected_recipe_match=selected_recipe_match,
+            recipe_candidates=recipe_candidates,
         )
 
     def _effective_planner_classification(
@@ -3924,39 +3575,14 @@ class FileTaskRuntime:
         files: List[FileTaskFile],
         classification: FileTaskClassification,
     ) -> Dict[str, Any]:
-        try:
-            from app.core.routing.task_classifier import TaskClassifier
-
-            tc_type, tc_conf = TaskClassifier.classify(str(request.task)[:500])
-            if tc_conf > 0.80 and tc_type not in ("CHAT",):
-                return {
-                    "source": "task_classifier_fast_path",
-                    "adjudicated_type": tc_type,
-                    "confidence": tc_conf,
-                    "reason": "high-confidence ML classification",
-                }
-        except Exception:
-            pass
-        if not self._should_adjudicate_intent(request, files, classification):
-            return {}
-        try:
-            response = self._call_model(
-                request=request,
-                messages=self._intent_adjudicator_messages(
-                    request, files, classification
-                ),
-                system=self._intent_adjudicator_system_prompt(),
-                tools=[],
-            )
-        except Exception as exc:
-            logger.warning("[FileTaskRuntime] intent adjudicator unavailable: %s", exc)
-            return {
-                "source": "ai_intent_adjudicator",
-                "status": "unavailable",
-                "error": _preview(str(exc), 240),
-            }
-
-        return _intent_adjudication_normalize_response(response)
+        return _intent_adjudicator_adjudicate_if_needed(
+            request=request,
+            files=files,
+            classification=classification,
+            should_adjudicate=self._should_adjudicate_intent,
+            call_model=self._call_model,
+            logger=logger,
+        )
 
     def _apply_intent_adjudication(
         self,
@@ -3965,18 +3591,16 @@ class FileTaskRuntime:
         classification: FileTaskClassification,
         adjudication: Dict[str, Any],
     ) -> FileTaskClassification:
-        task_text = str(request.task or "")
+        contract_context = build_intent_adjudication_contract_context(request.task)
         return _classification_contract_apply_intent_adjudication(
             request,
             files,
             classification,
             adjudication,
-            readonly_write_negation=self._has_readonly_write_negation(task_text),
-            artifact_creation_intent=self._has_artifact_creation_intent(task_text),
-            global_readonly_write_negation=self._has_global_readonly_write_negation(
-                task_text
-            ),
-            strong_write_intent=self._has_strong_write_intent(task_text),
+            readonly_write_negation=contract_context.readonly_write_negation,
+            artifact_creation_intent=contract_context.artifact_creation_intent,
+            global_readonly_write_negation=contract_context.global_readonly_write_negation,
+            strong_write_intent=contract_context.strong_write_intent,
         )
 
     def _normalize_mainline_contract(
@@ -3986,23 +3610,25 @@ class FileTaskRuntime:
         classification: FileTaskClassification,
     ) -> FileTaskClassification:
         task_text = str(request.task or "")
+        contract_context = build_mainline_contract_context(
+            task_text=task_text,
+            explicit_output_mode=self._explicit_output_mode(request),
+            readonly_write_negation=self._has_readonly_write_negation(task_text),
+            has_target_context=self._has_target_context(request, files),
+            docx_annotation_has_contract=_doc_annotate_contract_for_request(
+                request, files
+            ),
+            strong_write_intent=self._has_strong_write_intent(task_text),
+        )
         return _classification_contract_normalize_mainline(
             request,
             files,
             classification=classification,
-            explicit_output_mode=self._explicit_output_mode(request),
-            readonly_write_negation=self._has_readonly_write_negation(task_text),
-            has_target_context=self._has_target_context(request, files),
-            docx_annotation_has_contract=lambda current: self._docx_annotation_has_contract(
-                request,
-                files,
-                current,
-            ),
-            write_has_contract_anchor=lambda current: self._write_has_contract_anchor(
-                request,
-                files,
-                current,
-            ),
+            explicit_output_mode=contract_context.explicit_output_mode,
+            readonly_write_negation=contract_context.readonly_write_negation,
+            has_target_context=contract_context.has_target_context,
+            docx_annotation_has_contract=contract_context.docx_annotation_has_contract,
+            write_has_contract_anchor=contract_context.write_has_contract_anchor,
         )
 
     def _demote_classification_to_read(
@@ -4027,43 +3653,6 @@ class FileTaskRuntime:
         classification: FileTaskClassification,
     ) -> FileTaskClassification:
         return _classification_contract_refresh_recipe(request, files, classification)
-
-    def _write_has_contract_anchor(
-        self,
-        request: FileTaskRequest,
-        files: List[FileTaskFile],
-        classification: FileTaskClassification,
-    ) -> bool:
-        task_text = str(request.task or "")
-        return _classification_contract_write_has_contract_anchor(
-            classification,
-            task_text=task_text,
-            explicit_output_mode=self._explicit_output_mode(request),
-            strong_write_intent=self._has_strong_write_intent(task_text),
-            docx_annotation_has_contract=self._docx_annotation_has_contract(
-                request,
-                files,
-                classification,
-            ),
-            create_or_export_contract=self._has_create_or_export_contract(task_text),
-        )
-
-    def _docx_annotation_has_contract(
-        self,
-        request: FileTaskRequest,
-        files: List[FileTaskFile],
-        classification: FileTaskClassification,
-    ) -> bool:
-        return _classification_contract_docx_annotation_has_contract(
-            classification,
-            request_has_docx=self._request_has_file_type(request, "docx"),
-            direct_docx_annotation_request=self._is_docx_annotation_request(request),
-            followup_context=self._followup_context(request),
-        )
-
-    @staticmethod
-    def _has_create_or_export_contract(task: str) -> bool:
-        return _classification_contract_has_create_or_export_contract(task)
 
     def _build_execution_context(
         self,
@@ -4165,8 +3754,16 @@ class FileTaskRuntime:
         same_type_files = (
             self._context_files_by_type(files, {target_type}) if target_type else []
         )
+        write_target_required = (
+            bool(requirements.write_required)
+            or bool(classification.write_intent)
+            or str(classification.output_mode or "").strip().lower() == "write"
+            or bool(intent_plan.write_intent)
+            or str(intent_plan.output_mode or "").strip().lower() == "write"
+        )
         if (
-            target_type
+            write_target_required
+            and target_type
             and len(same_type_files) > 1
             and not str(request.target_path or "").strip()
         ):
@@ -4210,6 +3807,7 @@ class FileTaskRuntime:
             model_id=request.model_id,
             history=list(request.history),
             options=dict(options),
+            routing_decision=request.routing_decision,
         )
 
     def _initial_model_request(self, request: FileTaskRequest) -> FileTaskRequest:
@@ -4349,14 +3947,17 @@ class FileTaskRuntime:
         output_mode = (
             str(classification.output_mode or "answer").strip().lower() or "answer"
         )
+        requires_confirmation = output_mode == "hybrid" and self._fallback_requires_explicit_confirmation(request)
         recommended_strategy = self._fallback_intent_strategy(
-            classification, output_mode, known_tool_gap
+            classification,
+            output_mode,
+            known_tool_gap,
+            requires_confirmation=requires_confirmation,
         )
         can_apply = output_mode in {
             "write",
             "hybrid",
         } and self._fallback_intent_has_apply_target(request, files)
-        requires_confirmation = output_mode == "hybrid"
         reason_codes = [item for item in classification.reason_codes if item]
         reason_codes.extend(
             [
@@ -4403,7 +4004,9 @@ class FileTaskRuntime:
         if output_mode == "write":
             return f"完成真实文件修改并交付结果：{task_text}"
         if output_mode == "hybrid":
-            return f"先分析并整理可应用建议，再等待确认：{task_text}"
+            if self._fallback_requires_explicit_confirmation(request):
+                return f"先分析并整理可应用建议，再等待确认：{task_text}"
+            return f"先分析并整理可应用建议，后续可按用户要求应用：{task_text}"
         return f"基于显式上下文给出结论或答复：{task_text}"
 
     def _fallback_intent_strategy(
@@ -4411,6 +4014,8 @@ class FileTaskRuntime:
         classification: FileTaskClassification,
         output_mode: str,
         known_tool_gap: Optional[Dict[str, Any]] = None,
+        *,
+        requires_confirmation: bool = False,
     ) -> str:
         if known_tool_gap:
             return "design_new_tool"
@@ -4419,8 +4024,22 @@ class FileTaskRuntime:
         if output_mode == "write":
             return "write_through"
         if output_mode == "hybrid":
-            return "analyze_then_confirm"
+            return "analyze_then_confirm" if requires_confirmation else "analyze_then_optional_apply"
         return "answer_only"
+
+    def _fallback_requires_explicit_confirmation(self, request: FileTaskRequest) -> bool:
+        task_text = str(request.task or "").strip()
+        if re.search(
+            r"(?:确认后|等(?:我|用户)?确认|等待(?:我|用户)?确认|我确认后|用户确认后|"
+            r"确认(?:了|完)?再|先.{0,24}(?:等|等待).{0,12}确认|"
+            r"等(?:我|用户)?(?:说)?继续|回复继续|说继续|"
+            r"wait for (?:my |user )?confirmation|confirm(?:ation)? before (?:apply|applying|write|writing))",
+            task_text,
+            re.IGNORECASE,
+        ):
+            return True
+        options = request.options if isinstance(request.options, dict) else {}
+        return bool(options.get("requires_confirmation") or options.get("confirm_before_apply"))
 
     def _fallback_intent_has_apply_target(
         self, request: FileTaskRequest, files: List[FileTaskFile]
@@ -4488,7 +4107,7 @@ class FileTaskRuntime:
             f"- 策略：{str(intent_plan.recommended_strategy or 'answer_only').strip() or 'answer_only'}"
         )
         lines.append(f"- 可应用：{'是' if intent_plan.can_apply else '否'}")
-        lines.append(f"- 写回前需要确认：{'是' if intent_plan.requires_confirmation else '否'}")
+        lines.append(f"- 当前轮会暂停等待确认：{'是' if intent_plan.requires_confirmation else '否'}")
         if intent_plan.dynamic_steps:
             lines.append("- 计划步骤：")
             for index, step in enumerate(intent_plan.dynamic_steps[:8], start=1):
@@ -5158,6 +4777,160 @@ class FileTaskRuntime:
                     return artifact_path
         return str(images[-1].get("path") or "").strip()
 
+    def _write_dedupe_key_for_tool(
+        self, tool_name: str, tool_args: Dict[str, Any]
+    ) -> str:
+        target = write_target_for_tool(tool_name, tool_args)
+        if tool_name != "insert_image_into_docx":
+            return f"{tool_name}::{target}"
+        image_path = str(tool_args.get("image_path") or "").strip()
+        resolved_image = self._resolve_task_file_path(image_path) or image_path
+        image_key = os.path.normcase(os.path.normpath(resolved_image)) if resolved_image else ""
+        if not image_key:
+            image_key = Path(image_path.replace("\\", "/")).name.lower()
+        return f"{tool_name}::{target}::{image_key}"
+
+    def _is_docx_chart_write_request(
+        self, request: FileTaskRequest, files: List[FileTaskFile]
+    ) -> bool:
+        target = self._single_target_path_for_types(request, files, {"docx", "doc"})
+        target_type = Path(str(request.target_path or target or "")).suffix.lstrip(".").lower()
+        return bool(
+            target_type in {"docx", "doc"}
+            and (
+                self._looks_like_chart_request(request.task)
+                or self._looks_like_financial_xlsx_docx_chart_report_task(request, files)
+            )
+        )
+
+    def _generated_image_artifact_key(self, value: Any) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        resolved = self._resolve_task_file_path(text) or text
+        try:
+            return os.path.normcase(os.path.normpath(resolved))
+        except Exception:
+            return resolved.lower()
+
+    def _generated_image_artifact_name(self, artifact: Dict[str, Any]) -> str:
+        name = str(artifact.get("name") or "").strip()
+        if name:
+            return name
+        path = str(artifact.get("path") or "").strip()
+        return Path(path.replace("\\", "/")).name if path else "图表图片"
+
+    def _pending_generated_docx_images(
+        self,
+        request: FileTaskRequest,
+        files: List[FileTaskFile],
+        generated_artifacts: List[Dict[str, Any]],
+        file_changes: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        if not generated_artifacts or not self._is_docx_chart_write_request(request, files):
+            return []
+
+        inserted_keys: set[str] = set()
+        inserted_names: set[str] = set()
+        for change in file_changes or []:
+            if not isinstance(change, dict):
+                continue
+            if str(change.get("operation") or "").strip() != "insert_image_into_docx":
+                continue
+            image_path = str(change.get("image_path") or "").strip()
+            image_name = str(change.get("image_name") or "").strip()
+            if image_path:
+                inserted_keys.add(self._generated_image_artifact_key(image_path))
+                inserted_names.add(Path(image_path.replace("\\", "/")).name.lower())
+            if image_name:
+                inserted_names.add(image_name.lower())
+
+        pending: List[Dict[str, Any]] = []
+        seen: set[str] = set()
+        for artifact in generated_artifacts or []:
+            if not isinstance(artifact, dict):
+                continue
+            kind = str(artifact.get("kind") or "").strip().lower()
+            path = str(artifact.get("path") or "").strip()
+            name = self._generated_image_artifact_name(artifact)
+            ext = Path(name or path).suffix.lstrip(".").lower()
+            if kind != "image" or ext not in _IMAGE_ARTIFACT_EXTENSIONS:
+                continue
+            if path and not os.path.exists(path):
+                continue
+            key = self._generated_image_artifact_key(path or name)
+            name_key = name.lower()
+            if key in inserted_keys or name_key in inserted_names:
+                continue
+            if key in seen or name_key in seen:
+                continue
+            seen.add(key or name_key)
+            pending.append(dict(artifact))
+        return pending
+
+    def _generated_docx_image_insert_guard_message(
+        self,
+        request: FileTaskRequest,
+        files: List[FileTaskFile],
+        pending_images: List[Dict[str, Any]],
+    ) -> str:
+        target = (
+            self._single_target_path_for_types(request, files, {"docx", "doc"})
+            or str(request.target_path or "").strip()
+            or "目标 DOCX"
+        )
+        names = [
+            self._generated_image_artifact_name(item)
+            for item in pending_images[:8]
+            if isinstance(item, dict)
+        ]
+        name_text = "、".join(name for name in names if name)
+        return (
+            "已生成图表图片，但尚未全部作为真实 Word 图片插入目标 DOCX。"
+            f"请继续调用 insert_image_into_docx，path 使用 {target}，"
+            f"逐张插入这些剩余图片：{name_text or '所有剩余图表图片'}。"
+            "不要只在总结中描述图片，也不要只打开图片预览。"
+        )
+
+    def _generated_docx_image_quality_failure(
+        self,
+        check_payload: Dict[str, Any],
+        pending_images: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        if not pending_images:
+            return check_payload
+        names = [
+            self._generated_image_artifact_name(item)
+            for item in pending_images[:8]
+            if isinstance(item, dict)
+        ]
+        remaining_text = (
+            "仍有生成图表未插入 DOCX："
+            + ("、".join(name for name in names if name) or "剩余图表图片")
+        )
+        payload = dict(check_payload or {})
+        criteria = list(payload.get("criteria_results") or [])
+        criteria.append(
+            self._quality_gate_result(
+                criterion="generated_chart_images_inserted_into_docx",
+                passed=False,
+                detail=remaining_text,
+                priority="critical",
+            )
+        )
+        remaining = list(payload.get("remaining") or [])
+        remaining.insert(0, remaining_text)
+        payload.update(
+            {
+                "passed": False,
+                "status": "quality_gate_failed",
+                "summary": "文件已有变更，但生成的图表图片没有全部写入目标 DOCX。",
+                "remaining": remaining,
+                "criteria_results": criteria,
+            }
+        )
+        return payload
+
     def _task_requests_docx_append_end(self, task: Any) -> bool:
         text = str(task or "")
         return bool(
@@ -5303,13 +5076,7 @@ class FileTaskRuntime:
             reason_text = str(text_quality.get("reason") or "low_quality_pdf_text")
             yield ledger.event(
                 "tool.finished",
-                {
-                    "tool_name": "supervisor_guard",
-                    "success": False,
-                    "blocked": True,
-                    "native_stepwise": True,
-                    "result_preview": f"监管层阻止写入：当前 PDF 页窗文本质量不足（{reason_text}），不能据此生成分步 DOCX 摘要。",
-                },
+                _native_stepwise_pdf_text_quality_guard_payload(reason_text),
                 step_id=step_id,
             )
             return None
@@ -5361,84 +5128,10 @@ class FileTaskRuntime:
     def _stepwise_docx_target_path(
         self, request: FileTaskRequest, files: List[FileTaskFile]
     ) -> str:
-        raw_target = str(request.target_path or "").strip()
-        if raw_target:
-            return (
-                raw_target
-                if os.path.isabs(raw_target)
-                else str(Path(raw_target).resolve())
-            )
-        docx_file = self._first_context_file(
-            files, {"docx"}, target=True
-        ) or self._first_context_file(files, {"docx"})
-        if docx_file and docx_file.path:
-            return docx_file.path
-        pdf_file = self._first_context_file(files, {"pdf"})
-        if pdf_file and pdf_file.path:
-            pdf_path = Path(pdf_file.path)
-            return str(pdf_path.with_name(f"{pdf_path.stem}_分步总结.docx"))
-        return ""
-
-    def _latest_pdf_snippet_quality(
-        self, snippets: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        pdf_snippets = [
-            item
-            for item in snippets
-            if isinstance(item, dict)
-            and (
-                str(item.get("source") or item.get("path") or "")
-                .lower()
-                .endswith(".pdf")
-                or str(item.get("path") or "").lower().endswith(".pdf")
-            )
-        ]
-        if not pdf_snippets:
-            return {
-                "usable": False,
-                "reason": "missing_pdf_context",
-                "char_count": 0,
-                "unique_chars": 0,
-            }
-        text = str(
-            pdf_snippets[-1].get("_raw_text") or pdf_snippets[-1].get("preview") or ""
-        )
-        return _pdf_text_quality(text)
-
-    def _tool_args_docx_paragraph_text(self, tool_args: Dict[str, Any]) -> str:
-        raw_paragraphs = tool_args.get("paragraphs")
-        items: Any = []
-        if isinstance(raw_paragraphs, str) and raw_paragraphs.strip():
-            try:
-                items = json.loads(raw_paragraphs)
-            except Exception:
-                items = []
-        elif isinstance(raw_paragraphs, list):
-            items = raw_paragraphs
-        texts: List[str] = []
-        if isinstance(items, list):
-            for item in items:
-                if isinstance(item, dict):
-                    texts.append(str(item.get("text") or ""))
-                elif item is not None:
-                    texts.append(str(item))
-        content = str(tool_args.get("content") or "").strip()
-        if content:
-            texts.append(content)
-        return "\n".join(text for text in texts if text.strip())
+        return _stepwise_docx_target_path(request, files)
 
     def _tool_args_docx_paragraph_count(self, tool_args: Dict[str, Any]) -> int:
-        raw_paragraphs = tool_args.get("paragraphs")
-        if isinstance(raw_paragraphs, str) and raw_paragraphs.strip():
-            try:
-                items = json.loads(raw_paragraphs)
-            except Exception:
-                return 1
-        elif isinstance(raw_paragraphs, list):
-            items = raw_paragraphs
-        else:
-            return 1 if str(tool_args.get("content") or "").strip() else 0
-        return len(items) if isinstance(items, list) else 1
+        return _docx_edit_paragraph_count(tool_args)
 
     def _local_docx_edit_block_message(
         self,
@@ -5446,22 +5139,10 @@ class FileTaskRuntime:
         tool_name: str,
         tool_args: Dict[str, Any],
     ) -> str:
-        if tool_name != "write_docx_content":
-            return ""
-        task_text = str(request.task or "")
-        if not re.search(
-            r"(?:只追加|只加|追加一句|加一句|插入一句|保留已有表格|保留.*表格|append one|add one|insert one|preserve.*table|keep.*table)",
-            task_text,
-            re.IGNORECASE,
-        ):
-            return ""
-        if self._tool_args_docx_paragraph_count(tool_args) <= 1:
-            return ""
-        return (
-            "监管层阻止写入：当前任务是 DOCX 局部编辑，用户要求只追加少量内容并保留已有表格，"
-            "不能用 write_docx_content 把多段正文重新追加到文末。"
-            "请改用 insert_docx_paragraph(path=目标 DOCX, text=要追加的句子, "
-            "before_heading=下一章节标题，如 Next Actions；如没有下一章节，再使用 after_heading)。"
+        return _docx_edit_local_block_message(
+            task_text=str(request.task or ""),
+            tool_name=tool_name,
+            tool_args=tool_args,
         )
 
     def _stepwise_docx_write_block_message(
@@ -5472,178 +5153,18 @@ class FileTaskRuntime:
         tool_name: str,
         tool_args: Dict[str, Any],
     ) -> str:
-        if not _looks_like_windowed_pdf_task(request, recipe_skeleton):
-            return ""
-        if tool_name == "create_file":
-            target = str(tool_args.get("path") or "").strip().lower()
-            if not target.endswith(".docx"):
-                return ""
-        elif tool_name != "write_docx_content":
-            return ""
-        quality = self._latest_pdf_snippet_quality(snippets)
-        if not quality.get("usable"):
-            return (
-                "监管层阻止写入：当前 PDF 页窗的可提取文本质量不足，不能把水印、乱码或空内容写成总结。"
-                f" 质量原因：{quality.get('reason') or 'unknown'}；"
-                f"可用字符数：{quality.get('alpha_num_chars') or quality.get('char_count') or 0}；"
-                f"唯一字符数：{quality.get('unique_chars') or 0}。"
-                " 下一轮请改用新的 start_page/end_page 读取后续页窗；如果连续页窗仍不可读，应停止写入并提示需要 OCR/视觉解析。"
-            )
-
-        text = self._tool_args_docx_paragraph_text(tool_args)
-        if tool_name != "create_file" and re.search(
-            r"^\s*#{1,6}\s+", text, re.MULTILINE
-        ):
-            return (
-                "监管层阻止写入：write_docx_content 的 paragraphs 不能包含 Markdown 标题符号 #。"
-                " 请使用 paragraph.style='Heading 1' 这类 Word 段落样式。"
-            )
-        progress_patterns = (
-            r"^\s*步骤\s*\d+\s*[：:]",
-            r"当前进度\s*[：:]",
-            r"下一步(?:计划|继续|处理)",
-            r"等待(?:用户|我|确认|继续)",
-            r"请回复\s*[\"“]?继续",
-            r"当前步骤已(?:成功)?(?:完成|写入)",
-            r"状态\s*[：:]",
-            r"file\.changed",
-            r"目标\s*DOCX\s*文件已成功更新",
+        return _stepwise_docx_write_block_message(
+            request=request,
+            snippets=snippets,
+            recipe_skeleton=recipe_skeleton,
+            tool_name=tool_name,
+            tool_args=tool_args,
         )
-        if any(
-            re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
-            for pattern in progress_patterns
-        ):
-            return (
-                "监管层阻止写入：DOCX 正文不能包含任务进度、等待确认、下一步计划或 file.changed 这类前端提示。"
-                " 请重写 paragraphs：只写当前页窗的实质内容摘要、关键发现、证据/主题；"
-                "页码只可作为“来源页码：第 x-y 页”这样的简短来源说明，不要写等待继续或下一步计划。"
-            )
-        quality_block = self._stepwise_docx_content_quality_block_message(
-            snippets, text
-        )
-        if quality_block:
-            return quality_block
-        return ""
 
     def _stepwise_docx_content_quality_block_message(
         self, snippets: List[Dict[str, Any]], text: str
     ) -> str:
-        latest_pdf_snippet = next(
-            (
-                item
-                for item in reversed(snippets or [])
-                if isinstance(item, dict)
-                and (
-                    str(item.get("source") or item.get("path") or "")
-                    .lower()
-                    .endswith(".pdf")
-                    or str(item.get("path") or "").lower().endswith(".pdf")
-                )
-            ),
-            {},
-        )
-        expected_start = int(latest_pdf_snippet.get("start_page") or 0)
-        expected_end = int(latest_pdf_snippet.get("end_page") or 0)
-        expected_range = (
-            (expected_start, expected_end) if expected_start and expected_end else None
-        )
-        body = str(text or "").strip()
-        if not body:
-            return "监管层阻止写入：当前分步 DOCX 正文为空。请写入当前页窗的摘要、关键发现、结构/内容线索和来源页码。"
-        if re.search(r"(^|\s)(?:\*\*[^*\n]+\*\*|__[^_\n]+__|[-*_]{3,})(\s|$)", body):
-            return (
-                "监管层阻止写入：分步 DOCX 正文不能包含 Markdown 标记（如 **加粗**、---）。"
-                " 请用 Word 段落样式和纯文本标签写入。"
-            )
-
-        combined_label_patterns = (
-            r"文档识别\s*/\s*核心要点",
-            r"段落主题\s*/\s*关键发现",
-            r"内容线索\s*/\s*案例线索",
-        )
-        if any(re.search(pattern, body) for pattern in combined_label_patterns):
-            return (
-                "监管层阻止写入：分步 DOCX 正文不能使用“文档识别/核心要点”这类合并标签。"
-                " 请改用固定独立标签：文档识别、段落主题、结构线索、内容线索、来源页码。"
-            )
-
-        section_ranges: List[tuple[int, int]] = []
-        declared_page_ranges: List[tuple[int, int]] = []
-        for line in body.splitlines():
-            match = re.match(
-                r"^\s*【?\s*第\s*(\d+)\s*[-－—~至]\s*(\d+)\s*页[^。\n]{0,40}(?:】|[:：])",
-                line,
-            )
-            if match:
-                section_ranges.append((int(match.group(1)), int(match.group(2))))
-            if re.search(r"(?:当前页窗摘要|来源页码)", line):
-                for range_match in re.finditer(
-                    r"第\s*(\d+)\s*[-－—~至]\s*(\d+)\s*页",
-                    line,
-                ):
-                    declared_page_ranges.append(
-                        (int(range_match.group(1)), int(range_match.group(2)))
-                    )
-        unique_section_ranges = list(dict.fromkeys(section_ranges))
-        unique_declared_ranges = list(dict.fromkeys(declared_page_ranges))
-        if len(unique_section_ranges) > 1:
-            ranges = "、".join(
-                f"第 {start}-{end} 页" for start, end in unique_section_ranges[:4]
-            )
-            return (
-                "监管层阻止写入：单个分步窗口的 DOCX 正文不能同时覆盖多个页窗标题。"
-                f" 检测到：{ranges}。请只写当前页窗内容，上一页窗内容不要重复写入。"
-            )
-        if section_ranges and section_ranges.count(section_ranges[0]) > 1:
-            start, end = section_ranges[0]
-            return f"监管层阻止写入：第 {start}-{end} 页在本次写入中出现了重复小节标题。" " 请合并为一个小节，删除重复标题和重复要点。"
-        if (
-            expected_range
-            and unique_section_ranges
-            and unique_section_ranges[0] != expected_range
-        ):
-            expected_label = f"第 {expected_start}-{expected_end} 页"
-            actual_start, actual_end = unique_section_ranges[0]
-            return (
-                "监管层阻止写入：DOCX 小节页码与当前读取窗口不一致。"
-                f" 当前窗口应为 {expected_label}，但正文标题写成第 {actual_start}-{actual_end} 页。"
-            )
-        if expected_range and unique_declared_ranges:
-            mismatched = [
-                item for item in unique_declared_ranges if item != expected_range
-            ]
-            if mismatched:
-                expected_label = f"第 {expected_start}-{expected_end} 页"
-                actual_start, actual_end = mismatched[0]
-                return (
-                    "监管层阻止写入：DOCX 页窗标签与当前读取窗口不一致。"
-                    f" 当前窗口应为 {expected_label}，但正文写成第 {actual_start}-{actual_end} 页。"
-                )
-
-        normalized_blocks: List[str] = []
-        for line in body.splitlines():
-            cleaned = re.sub(r"\s+", "", line)
-            cleaned = re.sub(r"^[\-*•\d.、（）()]+", "", cleaned)
-            if len(cleaned) >= 16:
-                normalized_blocks.append(cleaned.lower())
-        seen_blocks: set[str] = set()
-        repeated_blocks: List[str] = []
-        for block in normalized_blocks:
-            if block in seen_blocks:
-                repeated_blocks.append(block)
-            seen_blocks.add(block)
-        if repeated_blocks:
-            return "监管层阻止写入：当前分步 DOCX 正文存在重复段落。请去重后再写入。"
-
-        label_hits = sum(
-            1 for label in ("文档识别", "段落主题", "结构线索", "内容线索", "来源页码") if label in body
-        )
-        if label_hits < 4:
-            return (
-                "监管层阻止写入：当前分步摘要缺少稳定结构。"
-                " 请按“当前页窗摘要 / 文档识别 / 段落主题 / 结构线索 / 内容线索 / 来源页码”重写。"
-            )
-        return ""
+        return _stepwise_docx_content_quality_block_message(snippets, text)
 
     def _stepwise_docx_wait_artifact(
         self,
@@ -5653,122 +5174,14 @@ class FileTaskRuntime:
         file_changes: List[Dict[str, Any]],
         recipe_skeleton: Dict[str, Any],
     ) -> Optional[Dict[str, Any]]:
-        if not _looks_like_windowed_pdf_task(request, recipe_skeleton):
-            return None
-        docx_change = next(
-            (
-                change
-                for change in file_changes
-                if str(change.get("operation") or "") == "write_docx_content"
-                and str(change.get("path") or change.get("file_path") or "")
-                .lower()
-                .endswith(".docx")
-            ),
-            None,
+        return _stepwise_docx_wait_artifact(
+            request=request,
+            files=files,
+            snippets=snippets,
+            file_changes=file_changes,
+            recipe_skeleton=recipe_skeleton,
+            target_path_fallback=self._stepwise_docx_target_path(request, files),
         )
-        if not docx_change:
-            return None
-        target_path = str(
-            docx_change.get("path")
-            or docx_change.get("file_path")
-            or request.target_path
-            or self._stepwise_docx_target_path(request, files)
-            or ""
-        ).strip()
-        pdf_file = self._first_context_file(files, {"pdf"})
-        latest_pdf_snippet = next(
-            (
-                item
-                for item in reversed(snippets or [])
-                if isinstance(item, dict)
-                and (
-                    str(item.get("source") or item.get("path") or "")
-                    .lower()
-                    .endswith(".pdf")
-                    or str(item.get("path") or "").lower().endswith(".pdf")
-                )
-            ),
-            {},
-        )
-        window_pages = _stepwise_pdf_window_pages(request)
-        current_step_index = _stepwise_pdf_step_index(request)
-        current_start = int(
-            latest_pdf_snippet.get("start_page")
-            or (1 + current_step_index * window_pages)
-        )
-        current_end = int(
-            latest_pdf_snippet.get("end_page") or (current_start + window_pages - 1)
-        )
-        next_step_index = current_step_index + 1
-        next_start = current_end + 1
-        next_end = next_start + window_pages - 1
-
-        resume_files = [
-            file_info.public_dict()
-            for file_info in files
-            if file_info and (file_info.path or file_info.name)
-        ]
-        for item in resume_files:
-            if target_path and str(item.get("path") or "") == target_path:
-                item["target"] = True
-        original_task = (
-            str(workflow_resume_control(request).get("original_task") or "").strip()
-            or str(request.task or "").strip()
-        )
-        resume_request = {
-            "task": f"继续当前分步文件任务的下一步：处理 PDF 第 {next_start}-{next_end} 页，并把本段实质分析追加到同一个 DOCX。",
-            "session_id": request.session_id,
-            "model_mode": request.model_mode,
-            "model_id": request.model_id,
-            "target_path": target_path,
-            "files": resume_files,
-            "options": {
-                "workflow_checkpoint": {
-                    "adapter": "generic_tool_loop",
-                    "policy": "confirm_each_step",
-                    "step_index": next_step_index,
-                    "window_pages": window_pages,
-                    "original_task": original_task,
-                    "source_path": pdf_file.path if pdf_file and pdf_file.path else "",
-                    "target_path": target_path,
-                },
-                "followup_context": {
-                    "kind": "stepwise_task_resume",
-                    "source": "koto_stepwise_resume_artifact",
-                    "followup_action": "resume",
-                    "stepwise": {
-                        "policy": "confirm_each_step",
-                        "completed_page_range": f"{current_start}-{current_end}",
-                        "next_page_range": f"{next_start}-{next_end}",
-                        "next_step_index": next_step_index,
-                        "original_task": original_task,
-                    },
-                },
-            },
-        }
-        artifact: Dict[str, Any] = {
-            "artifact_type": "koto_stepwise_resume_v1",
-            "category": "stepwise_confirmation",
-            "title": f"继续处理第 {next_start}-{next_end} 页",
-            "summary": f"上一段（第 {current_start}-{current_end} 页）已写入 DOCX。可以继续处理第 {next_start}-{next_end} 页。",
-            "suggested_next_step": f"点击继续处理第 {next_start}-{next_end} 页",
-            "action_label": f"继续第 {next_start}-{next_end} 页",
-            "route": "long_pdf_stepwise_docx_summary",
-            "current_step_status": "written",
-            "completed_page_range": f"{current_start}-{current_end}",
-            "next_page_range": f"{next_start}-{next_end}",
-            "next_start_page": next_start,
-            "next_end_page": next_end,
-            "next_step_index": next_step_index,
-            "window_pages": window_pages,
-            "original_task": original_task,
-            "resume_request": resume_request,
-        }
-        if target_path:
-            artifact["target_path"] = target_path
-        if pdf_file and pdf_file.path:
-            artifact["source_path"] = pdf_file.path
-        return artifact
 
     def _stepwise_pdf_fallback_paragraphs(
         self,
@@ -5776,272 +5189,10 @@ class FileTaskRuntime:
         pdf_snippet: Dict[str, Any],
         exc: Exception,
     ) -> List[Dict[str, str]]:
-        preview = str(
-            pdf_snippet.get("_raw_text") or pdf_snippet.get("preview") or ""
-        ).strip()
-        pages = [
-            int(match.group(1)) for match in re.finditer(r"\[Page\s+(\d+)\]", preview)
-        ]
-        start_page = int(pdf_snippet.get("start_page") or 0)
-        end_page = int(pdf_snippet.get("end_page") or 0)
-        if start_page and end_page:
-            page_range = (
-                f"第 {start_page}-{end_page} 页"
-                if start_page != end_page
-                else f"第 {start_page} 页"
-            )
-        elif pages:
-            page_range = (
-                f"第 {min(pages)}-{max(pages)} 页"
-                if min(pages) != max(pages)
-                else f"第 {pages[0]} 页"
-            )
-        else:
-            page_range = "当前页窗口"
-        insights = self._stepwise_pdf_fallback_insights(preview)
-        cleaned_preview = re.sub(r"\[Page\s+\d+\]", " ", preview, flags=re.IGNORECASE)
-        cleaned_preview = re.sub(r"\s+", " ", cleaned_preview).strip(" ；;，,")
-
-        def _field(label: str) -> str:
-            prefix = f"{label}："
-            for item in insights:
-                text = str(item or "").strip()
-                if text.startswith(prefix):
-                    return text[len(prefix) :].strip()
-            return ""
-
-        source_name = _compact_line(
-            Path(
-                str(pdf_snippet.get("source") or pdf_snippet.get("path") or "PDF 文档")
-            ).stem,
-            160,
-        )
-        document_value = _field("文档识别") or f"当前页窗来自“{source_name}”。"
-        topic_value = _field("段落主题")
-        structure_value = _field("结构线索")
-        content_value = _field("内容线索")
-
-        supplemental = [
-            str(item or "").strip()
-            for item in insights
-            if item
-            and not str(item).startswith(("文档识别：", "段落主题：", "结构线索：", "内容线索：", "来源页码："))
-        ]
-        if not topic_value:
-            topic_seed = (
-                content_value
-                or (supplemental[0] if supplemental else "")
-                or cleaned_preview
-            )
-            topic_value = _compact_line(topic_seed, 180) or "当前页窗文本较短，主题需结合后续页窗继续确认。"
-        if not structure_value:
-            structure_seed = "；".join(supplemental[:2])
-            structure_value = (
-                _compact_line(structure_seed, 220)
-                if structure_seed
-                else "当前页窗作为本步骤材料，记录可提取的结构与上下文线索，供后续页窗衔接。"
-            )
-        if not content_value:
-            content_seed = cleaned_preview or "当前页窗未提取到足够正文，暂不能形成可靠内容摘要。"
-            content_value = _compact_line(content_seed, 260)
-        paragraphs = [
-            {"text": f"当前页窗摘要（{page_range}）", "style": "Heading 1"},
-            {"text": f"文档识别：{document_value}"},
-            {"text": f"段落主题：{topic_value}"},
-            {"text": f"结构线索：{structure_value}"},
-            {"text": f"内容线索：{content_value}"},
-            {"text": f"来源页码：{page_range}"},
-        ]
-        return paragraphs
+        return _stepwise_pdf_fallback_paragraphs(pdf_snippet, exc)
 
     def _stepwise_pdf_fallback_insights(self, preview: str) -> List[str]:
-        cleaned = re.sub(
-            r"\[Page\s+\d+\]", "\n", str(preview or ""), flags=re.IGNORECASE
-        )
-        raw_lines = [
-            re.sub(r"\s+", " ", line).strip(" \t|-") for line in cleaned.splitlines()
-        ]
-
-        def _is_running_header(line: str) -> bool:
-            compact = re.sub(r"\s+", "", line)
-            return bool(
-                re.search(
-                    r"Annual Report on Digital Technology Application|Case Study in Chinese Museums",
-                    line,
-                    re.IGNORECASE,
-                )
-                or "中国博物馆数字技术应用及案例研究年度报告" in compact
-                or re.fullmatch(r"(?:SUMMAR|ARTICLE|综|述|篇)", line, flags=re.IGNORECASE)
-            )
-
-        def _is_noise_line(line: str) -> bool:
-            if not line or len(line) < 2:
-                return True
-            if line.isdigit() or re.fullmatch(r"\d+\s+\d+", line):
-                return True
-            if _is_running_header(line):
-                return True
-            return False
-
-        def _join_pdf_body_lines(source_lines: List[str]) -> List[str]:
-            blocks: List[str] = []
-            buffer = ""
-
-            def _flush() -> None:
-                nonlocal buffer
-                text = buffer.strip(" ；;，,")
-                if len(text) >= 12:
-                    blocks.append(text)
-                buffer = ""
-
-            for line in source_lines:
-                if _is_noise_line(line):
-                    _flush()
-                    continue
-                if re.fullmatch(r"\d+\.\s+.+", line) and len(line) > 90:
-                    _flush()
-                    continue
-                starts_new = bool(
-                    re.match(r"^[一二三四五六七八九十]+、", line)
-                    or re.match(r"^\d+[.、]\s*", line)
-                    or re.match(r"^《.+》", line)
-                    or re.match(r"^表\d+", line)
-                )
-                if starts_new:
-                    _flush()
-                    buffer = line
-                elif buffer and len(buffer) + len(line) <= 260:
-                    separator = "" if re.search(r"[\u4e00-\u9fff]$", buffer) else " "
-                    buffer = f"{buffer}{separator}{line}"
-                else:
-                    _flush()
-                    buffer = line
-                if re.search(r"[。！？!?]$", line) or len(buffer) >= 220:
-                    _flush()
-            _flush()
-
-            deduped: List[str] = []
-            seen_blocks: set[str] = set()
-            for block in blocks:
-                key = re.sub(r"\s+", "", block).lower()
-                if key in seen_blocks:
-                    continue
-                seen_blocks.add(key)
-                deduped.append(block)
-            return deduped
-
-        lines: List[str] = []
-        seen: set[str] = set()
-        for line in raw_lines:
-            if _is_noise_line(line) or len(line) < 4:
-                continue
-            key = line.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            lines.append(line)
-            if len(lines) >= 80:
-                break
-
-        annual_title = next(
-            (
-                line
-                for line in raw_lines
-                if line
-                and (
-                    "Annual Report" in line
-                    or "年度报告" in line
-                    or "中国博物馆数字技术应用及案例研究年度报告" in re.sub(r"\s+", "", line)
-                )
-            ),
-            "",
-        )
-        section_title = next(
-            (
-                line
-                for line in lines
-                if re.match(r"^[一二三四五六七八九十]+、", line)
-                or line.startswith("关于")
-                or re.match(r"^《.+》", line)
-            ),
-            "",
-        )
-        organizer = next(
-            (
-                line
-                for line in lines
-                if len(line) <= 120
-                and not re.match(r"^\d+[.、]", line)
-                and (
-                    re.search(
-                        r"^(?:主\s*编|执行主编|副\s*主\s*编|专家顾问|编\s*辑|英文翻译|美术编辑)",
-                        line,
-                    )
-                    or "委员会" in line
-                    or "中国博物馆协会资助项目" in line
-                    or re.search(r"中国博物馆协会.*(?:编|委员会)", line)
-                )
-            ),
-            "",
-        )
-        editor_lines = [
-            line
-            for line in lines
-            if re.search(r"(?:主\s*编|执行主编|副\s*主\s*编|专家顾问|编辑)", line)
-        ][:3]
-        toc_lines = [
-            line
-            for line in lines
-            if len(line) <= 50 and re.search(r"(?:目录|引言|综述篇|案例篇|参考文献|作者简介)", line)
-        ][:4]
-        body_blocks = _join_pdf_body_lines(raw_lines)
-        content_lines = [
-            line
-            for line in body_blocks
-            if len(line) >= 18
-            and line != annual_title
-            and line != section_title
-            and not (section_title and line.startswith(section_title))
-            and line != organizer
-            and line not in editor_lines
-            and line not in toc_lines
-            and not _is_running_header(line)
-            and not re.search(
-                r"^(?:主\s*编|执行主编|副\s*主\s*编|专家顾问|编\s*辑|英文翻译|美术编辑)",
-                line,
-            )
-        ][:4]
-
-        insights: List[str] = []
-        if annual_title:
-            insights.append(f"文档识别：当前页窗来自“{_compact_line(annual_title, 180)}”。")
-        if section_title:
-            insights.append(f"段落主题：{_compact_line(section_title, 180)}。")
-        if organizer and organizer not in {annual_title, section_title}:
-            insights.append(f"组织信息：{_compact_line(organizer, 180)}。")
-        if editor_lines:
-            insights.append(
-                "编写线索："
-                + "；".join(_compact_line(line, 120) for line in editor_lines)
-                + "。"
-            )
-        if toc_lines:
-            insights.append(
-                "结构线索：" + "；".join(_compact_line(line, 120) for line in toc_lines) + "。"
-            )
-        if content_lines:
-            insights.append(
-                "内容线索："
-                + "；".join(_compact_line(line, 180) for line in content_lines)
-                + "。"
-            )
-        if not insights:
-            excerpt_lines = [_compact_line(line, 140) for line in lines[:4]]
-            if excerpt_lines:
-                insights.append("当前页窗可读内容集中在：" + "；".join(excerpt_lines) + "。")
-        if not insights:
-            insights.append("当前页窗未提取到足够正文，暂不能形成可靠内容摘要。")
-        return insights
+        return _stepwise_pdf_fallback_insights(preview)
 
     def _fallback_readonly_summary(
         self,
@@ -6224,89 +5375,21 @@ class FileTaskRuntime:
             classification=classification,
             intent_plan=intent_plan,
         )
-        resolved_classification = resolved_context.classification
-        resolved_intent_plan = resolved_context.intent_plan
-        resolved_known_tool_gap = resolved_context.known_tool_gap
-        workflows = json.dumps(supported_file_workflows(), ensure_ascii=False, indent=2)
-        file_list = (
-            ", ".join(
-                (file_info.path or file_info.name)
-                for file_info in files
-                if file_info.path or file_info.name
-            )
-            or "none"
-        )
-        capability_profiles = build_request_capability_profiles(request)
-        skeleton = recipe_skeleton or build_recipe_skeleton(
-            request,
-            files,
-            resolved_classification,
-            resolved_intent_plan,
-            [],
-        )
-        known_gap_text = ""
-        if resolved_known_tool_gap:
-            known_gap_text = (
-                "\n已知原生工具缺口：\n"
-                + json.dumps(resolved_known_tool_gap, ensure_ascii=False, indent=2)
-                + "\n"
-            )
-        capability_text = ""
-        if capability_profiles:
-            capability_text = (
-                "文件能力概览：" + json.dumps(capability_profiles, ensure_ascii=False) + "\n"
-            )
-        followup_context = self._followup_context(request)
-        financial_chart_docx_guidance = _prompt_financial_chart_docx_guidance(
-            self._looks_like_financial_xlsx_docx_chart_report_task(request, files)
-        )
-        docx_files = [
-            self._display_path(file_info.path or file_info.name)
-            for file_info in files
-            if str(
-                file_info.type
-                or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
-            ).lower()
-            in {"docx", "doc"}
-        ]
-        docx_compare_annotate_guidance = _prompt_docx_compare_annotate_guidance(
-            "compare_docx_and_annotate"
-            in resolved_classification.matched_capabilities,
-            docx_files,
-        )
-        followup_guidance = _prompt_followup_guidance(followup_context)
-        target_docx = (
-            self._display_path(request.target_path)
-            or self._first_file_name(files, {"docx"}, target=True)
-            or self._first_file_name(files, {"docx"})
-            or "当前 DOCX"
-        )
-        single_docx_annotate_guidance = _prompt_single_docx_annotate_guidance(
-            resolved_classification.docx_annotation_request,
-            target_docx,
-        )
-        clear_docx_review_guidance = _prompt_clear_docx_review_guidance(
-            (not resolved_classification.docx_annotation_request)
-            and self._is_docx_clear_review_request(request),
-            target_docx,
-        )
-        return _build_file_task_system_prompt(
-            output_mode_guidance=self._output_mode_guidance(
-                resolved_classification
-            ),
-            intent_plan_guidance=self._intent_plan_guidance(resolved_intent_plan),
-            followup_guidance=followup_guidance,
-            financial_chart_docx_guidance=financial_chart_docx_guidance,
-            docx_compare_annotate_guidance=docx_compare_annotate_guidance,
-            clear_docx_review_guidance=clear_docx_review_guidance,
-            single_docx_annotate_guidance=single_docx_annotate_guidance,
+        return build_file_task_runtime_system_prompt(
+            request=request,
+            files=files,
+            classification=resolved_context.classification,
+            intent_plan=resolved_context.intent_plan,
+            known_tool_gap=resolved_context.known_tool_gap,
+            recipe_skeleton=recipe_skeleton,
             execution_brief_schema=self._execution_brief_schema(),
-            recipe_skeleton=skeleton,
-            file_list=file_list,
-            target_path=request.target_path,
-            capability_text=capability_text,
-            known_gap_text=known_gap_text,
-            workflows=workflows,
+            output_mode_guidance=self._output_mode_guidance,
+            intent_plan_guidance=self._intent_plan_guidance,
+            financial_chart_docx_enabled=self._looks_like_financial_xlsx_docx_chart_report_task(
+                request, files
+            ),
+            display_path=self._display_path,
+            first_file_name=self._first_file_name,
             current_date=_dt.datetime.now().strftime("%Y-%m-%d"),
         )
 
@@ -6331,25 +5414,14 @@ class FileTaskRuntime:
         resolved_classification = resolved_context.classification
         resolved_intent_plan = resolved_context.intent_plan
         resolved_known_tool_gap = resolved_context.known_tool_gap
-        capability_profiles = build_request_capability_profiles(request)
-        followup_context = self._followup_context(request)
-        skeleton = recipe_skeleton or build_recipe_skeleton(
-            request,
-            files,
-            resolved_classification,
-            resolved_intent_plan,
-            [],
-        )
-        return _build_file_task_messages(
+        return build_file_task_runtime_messages(
             request=request,
             snippets=snippets,
             files=files,
             classification=resolved_classification,
             intent_plan=resolved_intent_plan,
             known_tool_gap=resolved_known_tool_gap,
-            capability_profiles=capability_profiles,
-            followup_context=followup_context,
-            recipe_skeleton=skeleton,
+            recipe_skeleton=recipe_skeleton,
             execution_brief_schema=self._execution_brief_schema(),
         )
 
@@ -6473,7 +5545,7 @@ class FileTaskRuntime:
             check_payload,
             round_index=round_index,
             repair_attempts=repair_attempts,
-            max_rounds=self._max_rounds,
+            max_rounds=self._max_rounds + _MAX_VERIFY_REPAIR_ATTEMPTS,
             max_repair_attempts=_MAX_VERIFY_REPAIR_ATTEMPTS,
         )
 
