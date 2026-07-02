@@ -704,10 +704,10 @@ def editor_ai_stream():
 
     def generate():
         try:
-            from app.core.agent.agent_loop import KotoAgentLoop
+            from app.core.agent.legacy_loop_facade import iter_editor_agent_events
 
             agent_request = _editor_agent_request_from_payload(data)
-            for event in KotoAgentLoop().run(agent_request):
+            for event in iter_editor_agent_events(agent_request):
                 yield _safe_sse(_agent_event_payload(event))
         except Exception as exc:
             _logger.exception("[editor-ai] stream failed")
