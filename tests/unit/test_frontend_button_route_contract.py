@@ -285,6 +285,42 @@ def _frontend_global_function_names() -> set[str]:
     return names
 
 
+def _reachable_frontend_sources() -> set[Path]:
+    source_root = Path("web/src").resolve()
+    entrypoints = [
+        "shared/auth.ts",
+        "bundles/app.ts",
+        "bundles/skills-ui.ts",
+        "skills/skills-panel.ts",
+        "bundles/workspace.ts",
+        "bundles/review.ts",
+        "skills/skill-marketplace.ts",
+        "skills/skill-community.ts",
+    ]
+    import_pattern = re.compile(
+        r"(?:import|export)\s+(?:[^'\"]*?\s+from\s+)?['\"]([^'\"]+)['\"]"
+    )
+    reachable: set[Path] = set()
+    pending = [source_root / entrypoint for entrypoint in entrypoints]
+
+    while pending:
+        path = pending.pop().resolve()
+        if path in reachable or not path.is_file():
+            continue
+        reachable.add(path)
+        source = path.read_text(encoding="utf-8")
+        for specifier in import_pattern.findall(source):
+            if not specifier.startswith("."):
+                continue
+            candidate = (path.parent / specifier).resolve()
+            choices = [candidate, candidate.with_suffix(".ts"), candidate / "index.ts"]
+            resolved = next((choice for choice in choices if choice.is_file()), None)
+            if resolved is not None:
+                pending.append(resolved)
+
+    return reachable
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize("app_factory", [_app_from_deferred_loader, _app_from_service_loader])
 def test_frontend_exposed_button_routes_are_registered(app_factory):
@@ -436,6 +472,33 @@ def test_frontend_static_asset_references_exist():
     )
 
     assert missing == []
+
+
+@pytest.mark.unit
+def test_all_typescript_sources_are_reachable_from_a_bundle_entrypoint():
+    source_root = Path("web/src").resolve()
+    all_sources = {path.resolve() for path in source_root.rglob("*.ts")}
+    unreachable = sorted(
+        path.relative_to(source_root).as_posix()
+        for path in all_sources - _reachable_frontend_sources()
+    )
+
+    assert unreachable == []
+
+
+@pytest.mark.unit
+def test_retired_frontend_artifacts_stay_removed():
+    retired = [
+        "web/static/css/inline-extracted.css",
+        "web/static/css/workspace-assistant.css",
+        "web/static/test-sheets.html",
+        "web/static/koto-minimal-tech-preview.html",
+        "web/templates/_workspace_model_controls_compact.html",
+        "web/src/editors/docx-readview.ts",
+        "web/src/workspace/tiptap-types.ts",
+    ]
+
+    assert [path for path in retired if Path(path).exists()] == []
 
 
 @pytest.mark.unit
