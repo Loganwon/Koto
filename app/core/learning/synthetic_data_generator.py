@@ -45,7 +45,7 @@ GoldSample = Tuple[str, str, float]
 # ═══════════════════════════════ SYSTEM ═══════════════════════════════════════
 SYSTEM_SAMPLES: List[GoldSample] = [
     # 基础高频
-    ("打开微信", "SYSTEM", 0.97),
+    ("打开微信", "SYSTEM", 0.96),
     ("帮我截图", "SYSTEM", 0.96),
     ("打开 Chrome 浏览器", "SYSTEM", 0.96),
     ("关闭所有窗口", "SYSTEM", 0.94),
@@ -91,7 +91,7 @@ SYSTEM_SAMPLES: List[GoldSample] = [
     ("运行记事本程序", "SYSTEM", 0.93),  # ≠ AGENT
     ("帮我打开 D 盘", "SYSTEM", 0.93),  # ≠ FILE_SEARCH（打开≠搜索）
     ("打开系统音量混合器", "SYSTEM", 0.92),
-    ("帮我打开微信，然后截图", "SYSTEM", 0.88),  # 复合但核心是SYSTEM
+    ("帮我打开微信，然后截图", "AGENT", 0.88),  # 复合应用控制，不是简单白名单启动
     ("把 Chrome 设为默认浏览器", "SYSTEM", 0.91),
     ("清理回收站", "SYSTEM", 0.93),
     ("帮我格式化U盘", "SYSTEM", 0.92),
@@ -784,7 +784,7 @@ BOUNDARY_SAMPLES: List[GoldSample] = [
     ("什么是设计模式", "CHAT", 0.95),
     ("用Python实现一个观察者设计模式", "CODER", 0.93),
     # ── SYSTEM vs AGENT（操作系统 vs 控制应用发内容）──────────────────────
-    ("打开微信", "SYSTEM", 0.97),
+    ("打开微信", "SYSTEM", 0.96),
     ("给微信好友发消息", "AGENT", 0.95),
     ("打开邮件客户端", "SYSTEM", 0.95),
     ("给老板发邮件", "AGENT", 0.95),

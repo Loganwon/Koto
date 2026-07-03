@@ -311,10 +311,12 @@ class SkillRecorder:
             return None
 
         # 获取共享 Gemini client（与 AIRouter 同一模式）
-        import sys as _sys
+        try:
+            from web.runtime_context import get_client_proxy
 
-        _app_module = _sys.modules.get("web.app") or _sys.modules.get("app")
-        _client = getattr(_app_module, "client", None) if _app_module else None
+            _client = get_client_proxy()
+        except Exception:
+            _client = None
         if _client is None:
             logger.debug("[skill_recorder] Gemini client 不可用，跳过 LLM 分析")
             return None
