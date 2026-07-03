@@ -1,10 +1,8 @@
 # ══════════════════════════════════════════════════════════════
-# contract_diff_markup.py — 合同差异标红批注
-#
-# 用户场景：
-#   两份合同文件（原始 + 修改版），
-#   AI 比对差异 → 在 Word 中添加 Track Changes + 批注。
-#   输出一份标记了所有变更的 DOCX，用户可在 Word 审阅。
+# contract_diff_markup.py — 合同差异标红批注  [DEPRECATED]
+# ⚠️ 此模块已合并到 doc_smart_compare.py。
+# ⚠️ 保留仅供测试向后兼容（test_workflow_skills.py, test_workflow_integration.py）。
+# ⚠️ 后续清理窗口：2026-Q3 — 测试迁移后移除。
 # ══════════════════════════════════════════════════════════════
 
 from __future__ import annotations
