@@ -23,7 +23,10 @@ download_vendors.py — 将所有 CDN 依赖下载到 web/static/vendor/ 实现�
       css/all.min.css
       webfonts/fa-*.woff2
     tailwindcss/
-      tailwind.min.css
+      tailwind-play-cdn.js
+    pdfjs-dist/3.11.174/
+      build/pdf.min.js
+      build/pdf.worker.min.js
 """
 
 import urllib.request
@@ -114,32 +117,15 @@ dl(f"{FA}/css/all.min.css", "font-awesome/6.0.0/css/all.min.css")
 for font_name in ["fa-brands-400", "fa-regular-400", "fa-solid-900", "fa-v4compatibility"]:
     dl(f"{FA}/webfonts/{font_name}.woff2", f"font-awesome/6.0.0/webfonts/{font_name}.woff2")
 
-# ── Tailwind CSS 3 (full pre-built, replaces Play CDN script) ───────────────
+# ── Tailwind CSS Play CDN script ────────────────────────────────────────────
 print("\n== Tailwind CSS ==")
-dl(f"{JSDELIVR}/tailwindcss@3/dist/tailwind.min.css", "tailwindcss/tailwind.min.css")
+dl("https://cdn.tailwindcss.com", "tailwindcss/tailwind-play-cdn.js")
 
-# ── React 18.3.1 (required by dependencies) ───────────────────────────────────────
-print("\n== React 18 ==")
-REACT_CDN = "https://unpkg.com"
-dl(f"{REACT_CDN}/react@18.3.1/umd/react.production.min.js",     "react/react.production.min.js")
-dl(f"{REACT_CDN}/react-dom@18.3.1/umd/react-dom.production.min.js", "react/react-dom.production.min.js")
-
-# ── RxJS 7 (required by dependencies) ─────────────────────────────────────────────
-print("\n== RxJS ==")
-dl(f"{REACT_CDN}/rxjs/dist/bundles/rxjs.umd.min.js", "rxjs/rxjs.umd.min.js")
-
-
-# ── PDF.js 4.x (in-browser PDF rendering) ───────────────────────────────────
+# ── PDF.js 3.11.174 (in-browser PDF rendering) ──────────────────────────────
 print("\n== PDF.js ==")
-PDFJS_VER = "4.10.38"
-PDFJS = f"{REACT_CDN}/pdfjs-dist@{PDFJS_VER}/build"
-dl(f"{PDFJS}/pdf.min.mjs",        "pdfjs/pdf.min.mjs")
-dl(f"{PDFJS}/pdf.worker.min.mjs", "pdfjs/pdf.worker.min.mjs")
-# ── Floating UI DOM ─────────────────────────────────────────────────────────
-print("\n== Floating UI ==")
-FUI = f"{JSDELIVR}/@floating-ui"
-dl(f"{FUI}/core@1.6.9/dist/floating-ui.core.umd.min.js",   "floating-ui/floating-ui.core.umd.min.js")
-dl(f"{FUI}/dom@1.6.13/dist/floating-ui.dom.umd.min.js",   "floating-ui/floating-ui.dom.umd.min.js")
+PDFJS = f"{JSDELIVR}/pdfjs-dist@3.11.174/build"
+dl(f"{PDFJS}/pdf.min.js",        "pdfjs-dist/3.11.174/build/pdf.min.js")
+dl(f"{PDFJS}/pdf.worker.min.js", "pdfjs-dist/3.11.174/build/pdf.worker.min.js")
 
 # ── 汇总 ────────────────────────────────────────────────────────────────────
 total_kb = sum(f.stat().st_size for f in VENDOR.rglob("*") if f.is_file()) // 1024

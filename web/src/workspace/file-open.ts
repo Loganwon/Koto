@@ -35,6 +35,21 @@ function _setHeaderFileName(name: string): void {
   if (fileNameEl) fileNameEl.textContent = name || '未打开文件';
 }
 
+function _showPdfOpenError(error: any): void {
+  const outer = document.getElementById('wa-pdf-editor') as HTMLElement | null;
+  const viewer = document.getElementById('wa-pdf-viewer') as HTMLElement | null;
+  if (outer) outer.classList.add('active');
+  if (viewer) {
+    viewer.classList.add('active');
+    const message = error && error.message ? error.message : String(error || '未知错误');
+    viewer.innerHTML = `
+      <div style="max-width:720px;margin:40px auto;padding:16px 18px;border:1px solid rgba(239,68,68,.45);border-radius:6px;background:#fff;color:#3f1f1f;line-height:1.6;font-size:13px;">
+        <div style="font-weight:700;margin-bottom:6px;color:#b42318;">PDF 加载失败</div>
+        <div>${_escHtml(message)}</div>
+      </div>`;
+  }
+}
+
 function _syncPrimarySaveButtons(tab: TabInfo | null): void {
   const readonly = !tab || tab.fileType === 'pdf' || tab.fileType === 'image';
   const saveBtn = document.getElementById('wa-save-btn') as HTMLButtonElement | null;
@@ -66,6 +81,23 @@ export function _serializeEditorForTab(_tab: TabInfo | null, editor: any): any {
   return editor.serialize();
 }
 
+export function _stableWorkspaceSnapshot(value: any): string {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+export function _rememberSavedSnapshotForTab(tab: TabInfo | null, editor: any = state.activeEditor): void {
+  if (!tab) return;
+  const data = editor ? _serializeEditorForTab(tab, editor) : (tab.cache !== undefined && tab.cache !== null ? tab.cache : tab.serverData);
+  tab.savedSnapshot = _stableWorkspaceSnapshot(data);
+}
+
 async function _mountDocx(tab: TabInfo, data: any): Promise<void> {
   await _ensureTipTap();
   const html = typeof tab.cache === 'string' && tab.cache.trim()
@@ -95,9 +127,14 @@ async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
     state.activeEditor = new KotoPptxEditor();
     state.activeEditor.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
   } else if (tab.fileType === 'pdf') {
-    await _ensurePdfJS();
-    state.activeEditor = new KotoPdfViewer();
-    state.activeEditor.render(data && data.raw_url, data);
+    try {
+      await _ensurePdfJS();
+      state.activeEditor = new KotoPdfViewer();
+      await state.activeEditor.render(data && data.raw_url, data);
+    } catch (error) {
+      console.error('[WA] PDF 打开失败:', error);
+      _showPdfOpenError(error);
+    }
   } else if (tab.fileType === 'image') {
     state.activeEditor = new KotoImageViewer();
     state.activeEditor.render(data && data.raw_url);
@@ -145,6 +182,7 @@ async function _switchToTabImpl(path: string): Promise<void> {
   if (!tab) return;
   _applyTabState(tab);
   await _mountEditor(tab, tab.serverData);
+  if (!tab.modified && !tab.savedSnapshot) _rememberSavedSnapshotForTab(tab, state.activeEditor);
   _renderTabs();
   _highlightActiveFile(path);
 }
@@ -180,6 +218,7 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
     fileId: json.file_id || null,
     serverData: json.data,
     cache: null,
+    savedSnapshot: null,
     modified: false,
     capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, fileType, fileName),
     reviewState: existingTab && existingTab.reviewState
@@ -194,6 +233,10 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
 
   _applyTabState(tabEntry);
   await _mountEditor(tabEntry, json.data);
+  _rememberSavedSnapshotForTab(tabEntry, state.activeEditor);
+  if (typeof (window as any).WA?.clearExternalFileChange === 'function') {
+    (window as any).WA.clearExternalFileChange(resolvedPath);
+  }
   _renderTabs();
   _highlightActiveFile(resolvedPath);
   setTimeout(() => {
@@ -213,7 +256,11 @@ const wa = (window as any).WA || {};
 (window as any)._serializeEditorForTab = _serializeEditorForTab;
 wa._applyFileJson = _applyFileJson;
 wa._syncPrimarySaveButtons = _syncPrimarySaveButtons;
+wa._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
+wa._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
 
 // Keeps old inline templates that call global helpers from breaking in the TS bundle.
 (window as any)._serializeEditorForTab = _serializeEditorForTab;
+(window as any)._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
+(window as any)._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
 (window as any)._escHtml = (window as any)._escHtml || _escHtml;

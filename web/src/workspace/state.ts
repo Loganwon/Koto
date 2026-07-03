@@ -16,6 +16,7 @@ export interface TabInfo {
   filePath?: string | null;
   serverData: any;
   cache?: any;
+  savedSnapshot?: string | null;
   modified?: boolean;
   capabilityProfile?: any;
   reviewState?: any;
@@ -87,7 +88,6 @@ export interface WorkspaceState {
   selectedFiles: Set<string>;
   openTabs: TabInfo[];
   activeTabPath: string | null;
-  aiOutputMode: string;
   lockedModel: string;
   _reviewCenterOpen: boolean;
   _reviewMode: string;
@@ -172,7 +172,6 @@ export const state: WorkspaceState = {
   selectedFiles: new Set(),
   openTabs: [..._WA_EMPTY_WORKSPACE_LAYOUT.open_tabs],
   activeTabPath: _WA_EMPTY_WORKSPACE_LAYOUT.active_tab_path,
-  aiOutputMode: 'inline',
   lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek'),
   _reviewCenterOpen: localStorage.getItem('wa_review_center_open') !== '0',
   _reviewMode: ['all', 'comments', 'proposals'].includes(localStorage.getItem('wa_review_mode') || '')
@@ -395,6 +394,7 @@ function _deactivateWorkspaceEditors(): void {
     'wa-docx-editor',
     'wa-xlsx-editor',
     'wa-pptx-editor',
+    'wa-pdf-editor',
     'wa-pdf-viewer',
     'wa-image-viewer',
     'wa-text-editor',
@@ -490,7 +490,13 @@ export async function _switchToTab(path: string): Promise<void> {
 // ── Editor Layout Helpers ──
 
 function _editorLayoutContainerId(fileType: string): string | null {
-  return fileType === 'xlsx' ? 'wa-xlsx-editor' : fileType === 'pptx' ? 'wa-pptx-editor' : null;
+  return fileType === 'xlsx'
+    ? 'wa-xlsx-editor'
+    : fileType === 'pptx'
+      ? 'wa-pptx-editor'
+      : fileType === 'pdf'
+        ? 'wa-pdf-editor'
+        : null;
 }
 
 const _WORKSPACE_SURFACE_IDS = [
@@ -498,6 +504,7 @@ const _WORKSPACE_SURFACE_IDS = [
   'wa-docx-editor',
   'wa-xlsx-editor',
   'wa-pptx-editor',
+  'wa-pdf-editor',
   'wa-pdf-viewer',
   'wa-image-viewer',
   'wa-text-editor',
@@ -524,6 +531,9 @@ export function _primeEditorLayout(fileType: string): void {
   if (!containerId) return;
   const el = document.getElementById(containerId);
   if (el) el.classList.add('active');
+  if (fileType === 'pdf') {
+    document.getElementById('wa-pdf-viewer')?.classList.add('active');
+  }
   _syncWorkspaceSurfaces();
 }
 
@@ -992,6 +1002,7 @@ window.addEventListener('resize', _syncMobileFilesA11y);
 (window as any)._cloneSerializable = _cloneSerializable;
 
 wa._renderTabs = _renderTabs;
+wa._removeOpenTabAfterFileDeleted = _removeOpenTabAfterFileDeleted;
 wa._tabClick = async (path: string) => {
   await _switchToTab(path);
 };
@@ -1000,8 +1011,17 @@ wa._closeTab = async (path: string) => {
   if (idx < 0) return;
   const tab = state.openTabs[idx];
 
-  if (tab.modified) {
+  const wa = (window as any).WA || {};
+  const isUnsaved = typeof wa.isTabActuallyUnsaved === 'function'
+    ? wa.isTabActuallyUnsaved(tab)
+    : !!tab.modified;
+  if (isUnsaved) {
     if (!confirm(`"${tab.name}" 有未保存的修改，关闭后将丢失。\n是否继续关闭？`)) return;
+  } else if (tab.modified) {
+    tab.modified = false;
+    if (typeof wa._notifyPyModified === 'function') {
+      try { wa._notifyPyModified(tab, false); } catch (_) {}
+    }
   }
 
   const isActive = tab.path === state.activeTabPath;

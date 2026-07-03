@@ -95,12 +95,36 @@ export async function _ensurePdfJS(): Promise<void> {
   if (window.pdfjsLib || _libsLoaded.pdfjs) return;
   if (_libLoadPromises.pdfjs) return _libLoadPromises.pdfjs;
   _libLoadPromises.pdfjs = (async () => {
-    await _loadScript('https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js');
-    if (window.pdfjsLib) {
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    const candidates = [
+      {
+        script: '/static/vendor/pdfjs-dist/3.11.174/build/pdf.min.js',
+        worker: '/static/vendor/pdfjs-dist/3.11.174/build/pdf.worker.min.js',
+      },
+      {
+        script: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js',
+        worker: 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+      },
+      {
+        script: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js',
+        worker: 'https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.worker.min.js',
+      },
+    ];
+    const errors: string[] = [];
+
+    for (const candidate of candidates) {
+      try {
+        await _loadScript(candidate.script);
+        if (window.pdfjsLib) {
+          window.pdfjsLib.GlobalWorkerOptions.workerSrc = candidate.worker;
+          _libsLoaded.pdfjs = true;
+          return;
+        }
+        errors.push(`${candidate.script}: pdfjsLib 未注册`);
+      } catch (error: any) {
+        errors.push(`${candidate.script}: ${error?.message || error}`);
+      }
     }
-    _libsLoaded.pdfjs = true;
+    throw new Error(`PDF.js 加载失败：${errors.join('；')}`);
   })().finally(() => { _libLoadPromises.pdfjs = null; });
   return _libLoadPromises.pdfjs;
 }
@@ -128,6 +152,11 @@ Object.assign((window as any).WA || ((window as any).WA = {}), {
   _ensureUniverSheets,
   _ensurePdfJS,
   _ensureWorkbookDefaults,
+  _updatePdfZoomUI,
+  _updateDocxZoomUI,
+});
+
+Object.assign(window as any, {
   _updatePdfZoomUI,
   _updateDocxZoomUI,
 });

@@ -1,0 +1,8 @@
+{
+  "budgets": {
+    "web/static/univer-dist/assets/sheets-main.js": 11200000,
+    "web/static/js/build/workspace-bundle.js": 1150000,
+    "web/static/js/tiptap-docx-bundle.js": 550000,
+    "web/static/vendor": 6800000
+  }
+}

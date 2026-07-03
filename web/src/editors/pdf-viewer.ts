@@ -1,5 +1,6 @@
 // @ts-nocheck
 import type { WorkspaceEditor, PdfViewerOptions, PdfOutlineItem, PdfAnnotation, PdfSearchMatch } from './types';
+import { _updatePdfZoomUI } from './cdn-loaders';
 
 declare const WA: any;
 declare const state: any;
@@ -14,7 +15,6 @@ declare function _hideWelcome(): void;
 declare function _setStreamBtn(isLoading: boolean): void;
 declare var _waTaskDispatcher: any;
 declare var _waConversationRuntime: any;
-declare function _updatePdfZoomUI(pct: number): void;
 declare var pdfjsLib: any;
 
 export class KotoPdfViewer implements WorkspaceEditor {
@@ -139,7 +139,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         // Estimate page size for placeholders (use page 1)
         const firstPage = await pdf.getPage(1);
         const baseVP = firstPage.getViewport({ scale: 1 });
-        const containerW = (c.clientWidth || 800) - 32;
+        const containerW = Math.max(240, (c.clientWidth || c.getBoundingClientRect?.().width || 800) - 32);
         const dpr = window.devicePixelRatio || 1;
         this._quality = Math.max(2, dpr);
         this._containerW = containerW;
@@ -167,18 +167,21 @@ export class KotoPdfViewer implements WorkspaceEditor {
 
         // Disconnect old observer and set up new one
         if (this._observer) this._observer.disconnect();
-        this._observer = new IntersectionObserver(
-          (entries) => entries.forEach(en => {
-            if (en.isIntersecting) {
-              const pg = parseInt(en.target.dataset.page, 10);
-              if (pg && !this._renderedPgs.has(pg)) {
-                this._renderPage(pg);
+        if (typeof IntersectionObserver !== 'undefined') {
+          this._observer = new IntersectionObserver(
+            (entries) => entries.forEach(en => {
+              if (en.isIntersecting) {
+                const pg = parseInt(en.target.dataset.page, 10);
+                if (pg && !this._renderedPgs.has(pg)) {
+                  this._renderPage(pg);
+                }
               }
-            }
-          }),
-          { root: c, rootMargin: '300px 0px 300px 0px', threshold: 0 }
-        );
-        c.querySelectorAll('.wa-pdf-page-wrap').forEach(el => this._observer.observe(el));
+            }),
+            { root: c, rootMargin: '300px 0px 300px 0px', threshold: 0 }
+          );
+          c.querySelectorAll('.wa-pdf-page-wrap').forEach(el => this._observer.observe(el));
+        }
+        this._scheduleVisiblePageRenderPasses();
 
         // Build sidebar
         this._buildThumbs();
@@ -190,6 +193,41 @@ export class KotoPdfViewer implements WorkspaceEditor {
       } catch (e) {
         console.error('[KotoPdfViewer] render error:', e);
         c.innerHTML = `<div style="color:var(--danger);padding:16px">PDF 渲染报错: ${e.message}</div>`;
+      }
+    }
+
+    _scheduleVisiblePageRenderPasses() {
+      this._renderVisiblePagesNow();
+      requestAnimationFrame(() => this._renderVisiblePagesNow());
+      setTimeout(() => this._renderVisiblePagesNow(), 120);
+      setTimeout(() => this._renderVisiblePagesNow(), 500);
+    }
+
+    _renderVisiblePagesNow() {
+      const c = $(this.containerId);
+      if (!c || !this._pdfDoc) return;
+      const wraps = Array.from(c.querySelectorAll('.wa-pdf-page-wrap'));
+      if (!wraps.length) return;
+
+      const rootRect = c.getBoundingClientRect?.();
+      const hasViewport = rootRect && rootRect.width > 0 && rootRect.height > 0;
+      const margin = 300;
+      let renderedAny = false;
+
+      wraps.forEach((wrap) => {
+        const pg = parseInt(wrap.dataset.page, 10);
+        if (!pg || this._renderedPgs.has(pg)) return;
+        if (!hasViewport) return;
+        const rect = wrap.getBoundingClientRect();
+        const visible = rect.bottom >= rootRect.top - margin && rect.top <= rootRect.bottom + margin;
+        if (visible) {
+          renderedAny = true;
+          this._renderPage(pg);
+        }
+      });
+
+      if (!renderedAny && !this._renderedPgs.has(1)) {
+        this._renderPage(1);
       }
     }
 
@@ -516,6 +554,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
           c.querySelectorAll('.wa-pdf-page-wrap').forEach(el => this._observer.observe(el));
         }
       }
+      this._scheduleVisiblePageRenderPasses();
     }
 
     // ─── Sidebar tab switch ───────────────────────────────────────────────────
