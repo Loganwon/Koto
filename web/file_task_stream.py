@@ -563,10 +563,14 @@ def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
         "context_summary_fallback",
         "needs_review",
         "pending",
+        "blocked",
         "failed",
         "error",
         "write_blocked",
         "tool_gap",
+        "no_file_change",
+        "model_unavailable",
+        "quality_gate_failed",
     }:
         return raw_status
     terminal_status = _file_task_terminal_status(event_type, event_payload)

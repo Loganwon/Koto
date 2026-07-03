@@ -229,13 +229,20 @@ def test_file_task_stream_preserves_artifact_result_artifacts_as_changes():
 def test_file_task_artifact_status_preserves_attention_diagnostics():
     from web.file_task_stream import _file_task_artifact_status
 
-    assert _file_task_artifact_status(
-        "run.finished",
-        {
-            "completed_task": False,
-            "runtime": {"terminal_status": "context_summary_fallback"},
-        },
-    ) == "context_summary_fallback"
+    for status in [
+        "context_summary_fallback",
+        "blocked",
+        "no_file_change",
+        "model_unavailable",
+        "quality_gate_failed",
+    ]:
+        assert _file_task_artifact_status(
+            "run.finished",
+            {
+                "completed_task": False,
+                "runtime": {"terminal_status": status},
+            },
+        ) == status
 
 
 def test_task_route_serializer_extracts_artifact_result_from_metadata():
