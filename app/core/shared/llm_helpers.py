@@ -52,6 +52,11 @@ def is_online_failure(exc: Exception) -> bool:
         or "api_key" in s
         or "expired" in s
         or "400" in s
+        # Model availability / project access issues
+        or "404" in s
+        or "model not found" in s
+        or "permission denied" in s
+        or "does not have access to model" in s
         # Region restriction
         or "location is not supported" in s
         or "failed_precondition" in s

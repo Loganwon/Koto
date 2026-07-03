@@ -6,6 +6,11 @@ import time
 import os
 import re
 
+from app.core.llm.chat_generation_policy import (
+    first_token_timeout_seconds,
+    select_regular_model,
+    should_try_local_chat_fast_path,
+)
 from web.sse.sanitizer import safe_sse as _safe_sse
 
 
@@ -47,7 +52,7 @@ def handle_regular(
     def interrupted():
         return _interrupt_manager.is_interrupted(session_name)
 
-    model_id = MODEL_MAP.get(task_type, MODEL_MAP.get("CHAT", "gemini-2.5-flash"))
+    model_id = select_regular_model(task_type, MODEL_MAP)
     full_history = history
     _local_chat_override = (context_info or {}).get("local_chat_override", False)
     _memory_manager = get_memory_manager()
@@ -111,10 +116,16 @@ def handle_regular(
 
             from app.core.routing import LocalModelRouter
 
-            if locked_model != "local" and (
-                _local_chat_override or LocalModelRouter.is_simple_query(
+            _simple_local_query = False
+            if locked_model != "local" and not _local_chat_override:
+                _simple_local_query = LocalModelRouter.is_simple_query(
                     user_input, task_type, history
                 )
+            if should_try_local_chat_fast_path(
+                task_type=task_type,
+                locked_model=locked_model,
+                local_chat_override=_local_chat_override,
+                simple_query=_simple_local_query,
             ):
                 local_stream = LocalModelRouter.generate_stream(
                     user_input,
@@ -351,7 +362,7 @@ def handle_regular(
         _plan_flushed = False
 
         try:
-            max_wait = 60 if task_type == "CODER" else 120
+            max_wait = first_token_timeout_seconds(task_type)
             for item_type, item_data in stream_with_keepalive(
                 response,
                 start_time,
@@ -468,7 +479,7 @@ def handle_regular(
             error_str = str(stream_error)
             _app_logger.debug(f"[CHAT] Stream error: {error_str}")
 
-            from app.core.socket_handler import _is_online_failure as _iof, _is_ollama_alive as _ioav
+            from app.core.shared.llm_helpers import is_online_failure as _iof, is_ollama_alive as _ioav
             from app.core.routing import LocalModelRouter as _LMR_fb
             _OLLAMA_TEXT_TASKS = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
 
@@ -603,7 +614,7 @@ def handle_regular(
         error_str = str(e)
         _app_logger.debug(f"[CHAT] Exception: {error_str}")
 
-        from app.core.socket_handler import _is_online_failure as _iof2, _is_ollama_alive as _ioav2
+        from app.core.shared.llm_helpers import is_online_failure as _iof2, is_ollama_alive as _ioav2
         from app.core.routing import LocalModelRouter as _LMR_fb2
         _OLLAMA_TEXT_TASKS2 = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
 
