@@ -262,6 +262,7 @@ def enqueue_frontend_action(
         "open_panel",
         "search_workspace",
         "submit_prompt",
+        "attach_task_file",
         "list_workspace_files",
         "open_workspace_file",
         "current_file_state",
