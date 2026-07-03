@@ -35,7 +35,7 @@ import time
 from flask import Blueprint, Response, jsonify, request
 
 from app.core.llm.gemini_config import get_gemini_api_key
-from web.runtime_context import (
+from web.runtime_services import (
     get_concept_extractor,
     get_file_editor,
     get_file_indexer,

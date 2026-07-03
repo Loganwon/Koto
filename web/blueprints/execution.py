@@ -27,7 +27,7 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.runtime_context import get_auto_execution, get_trigger_system
+from web.runtime_services import get_auto_execution, get_trigger_system
 
 _logger = logging.getLogger("koto.routes.execution")
 

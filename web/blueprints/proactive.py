@@ -24,7 +24,7 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.runtime_context import (
+from web.runtime_services import (
     get_context_awareness,
     get_notification_manager,
     get_proactive_dialogue,
