@@ -15,6 +15,7 @@ import re
 
 from flask import Blueprint, jsonify, request, send_file
 
+from app.core.services.ppt_generation_service import PPTGenerationService
 from web.ppt_session_manager import get_ppt_session_manager
 
 ppt_api_bp = Blueprint("ppt_api", __name__, url_prefix="/api/ppt")
@@ -360,12 +361,7 @@ def render_pptx(session_id):
         request_data = request.get_json() or {}
         theme = request_data.get("theme", session.get("theme", "business"))
 
-        # 生成新的 PPTX 文件
-        from web.ppt_generator import PPTGenerator
-
         ppt_title = ppt_data.get("title", "演示文稿")
-
-        ppt_gen = PPTGenerator(theme=theme)
 
         # 使用原来的路径或生成新路径
         original_path = session.get("ppt_file_path", "")
@@ -384,12 +380,10 @@ def render_pptx(session_id):
             os.makedirs(docs_dir, exist_ok=True)
             output_path = os.path.join(docs_dir, filename)
 
-        # 渲染
-        ppt_gen.generate_from_outline(
-            title=ppt_title,
-            outline=ppt_data.get("slides", []),
+        PPTGenerationService().render_editor_pptx(
+            ppt_data=ppt_data,
             output_path=output_path,
-            subtitle=ppt_data.get("subtitle", ""),
+            theme=theme,
             author="Koto AI",
         )
 

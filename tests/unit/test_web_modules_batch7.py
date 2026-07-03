@@ -1429,3 +1429,37 @@ class TestTemplateLibrary:
         )
         assert len(outline) == 6
         assert outline[0]["title"] == "产品概览"
+
+    @patch("web.template_library.PPTGenerationService")
+    @patch("web.template_library.os.makedirs")
+    def test_generate_ppt_template_uses_generation_service(
+        self, mock_makedirs, mock_service_cls
+    ):
+        from web.template_library import TemplateLibrary
+
+        mock_service = mock_service_cls.return_value
+        mock_service.generate_outline_result.return_value = {
+            "success": True,
+            "output_path": "/tmp/out/Widget.pptx",
+            "slide_count": 6,
+        }
+        lib = TemplateLibrary(workspace_dir="/tmp/ws")
+
+        result = lib._generate_pptx_from_template(
+            "product_intro_ppt",
+            {"name": "产品介绍"},
+            {
+                "product_name": "Widget",
+                "tagline": "Better widgets",
+                "speaker": "Tester",
+            },
+            "/tmp/out",
+        )
+
+        call_kwargs = mock_service.generate_outline_result.call_args.kwargs
+        assert call_kwargs["title"] == "Widget"
+        assert call_kwargs["theme"] == "business"
+        assert call_kwargs["subtitle"] == "Better widgets"
+        assert call_kwargs["author"] == "Tester"
+        assert result["success"] is True
+        assert result["slide_count"] == 6

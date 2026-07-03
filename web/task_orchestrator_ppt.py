@@ -8,6 +8,8 @@ import os
 import re
 from datetime import datetime
 
+from app.core.services.ppt_generation_service import PPTGenerationService
+
 from web.task_orchestrator_runtime import WORKSPACE_DIR, client, settings_manager
 
 _app_logger = logging.getLogger("koto.app")
@@ -35,12 +37,13 @@ async def execute_ppt_multi_step(
     _report(m, d)
 
     try:
-        from web.ppt_master import PPTContentPlanner
-
-        planner = PPTContentPlanner(ai_client=client, model_name="gemini-2.5-flash")
+        ppt_service = PPTGenerationService(
+            ai_client=client,
+            model_name="gemini-2.5-flash",
+        )
 
         _report("正在规划内容结构...", "调用 AI 规划大纲")
-        plan_result = await planner.plan_content_structure(
+        plan_result = await ppt_service.plan_content_structure(
             user_input, search_results=None
         )
 
@@ -81,19 +84,18 @@ async def execute_ppt_multi_step(
                 )
 
                 expanded_points = s_points
-                if hasattr(planner, "expand_slide_content"):
-                    try:
-                        expanded_points = await planner.expand_slide_content(
-                            s_title, s_points, context=f"Context: {section_title}"
+                try:
+                    expanded_points = await ppt_service.expand_slide_content(
+                        s_title, s_points, context=f"Context: {section_title}"
+                    )
+                    if expanded_points != s_points:
+                        _report(
+                            f"  ✨ 内容已扩充: {len(expanded_points)} 条",
+                            f"幻灯片: {s_title}",
                         )
-                        if expanded_points != s_points:
-                            _report(
-                                f"  ✨ 内容已扩充: {len(expanded_points)} 条",
-                                f"幻灯片: {s_title}",
-                            )
-                    except Exception as exp_err:
-                        _report(f"  ⚠️ 扩充失败，使用原始内容", str(exp_err))
-                        expanded_points = s_points
+                except Exception as exp_err:
+                    _report(f"  ⚠️ 扩充失败，使用原始内容", str(exp_err))
+                    expanded_points = s_points
 
                 ppt_slides.append(
                     {
@@ -159,9 +161,6 @@ async def execute_ppt_multi_step(
             _report("⚠️ AI 验证跳过 (非致命)", str(v_err))
 
         _report("正在生成最终文件...", "阶段 3/3: 渲染与保存")
-        from web.ppt_generator import PPTGenerator
-
-        ppt_gen = PPTGenerator(theme=theme_choice)
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_title = re.sub(r'[\\/*?:"<>|]', "", user_input[:20]) or "演示文稿"
@@ -169,8 +168,11 @@ async def execute_ppt_multi_step(
         ppt_path = os.path.join(settings_manager.documents_dir, filename)
         os.makedirs(settings_manager.documents_dir, exist_ok=True)
 
-        ppt_gen.generate_from_outline(
-            title=safe_title, outline=ppt_slides, output_path=ppt_path
+        ppt_service.generate_from_outline(
+            title=safe_title,
+            outline=ppt_slides,
+            output_path=ppt_path,
+            theme=theme_choice,
         )
 
         rel_path = os.path.relpath(ppt_path, WORKSPACE_DIR).replace("\\", "/")
