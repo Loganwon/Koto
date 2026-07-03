@@ -49,6 +49,66 @@ def test_file_task_runtime_readonly_summary_surfaces_model_answer():
     assert run_finished.payload["completed_task"] is True
 
 
+def test_file_task_runtime_readonly_pdf_page_range_ignores_frontend_short_preview():
+    calls = []
+
+    def fake_executor(tool_name, args):
+        calls.append((tool_name, dict(args)))
+        if tool_name == "parse_file_to_text":
+            return (
+                "[Page 19]\n第十一封信：感性冲动与形式冲动的张力。\n"
+                "[Page 20]\n第十四封信：两种冲动在审美状态中相互作用。\n"
+                "[Page 21]\n第十五封信：人只有在游戏时才完全是人。"
+            )
+        return ""
+
+    def fake_model(**kwargs):
+        return {
+            "content": "第 19-21 页原文段落显示，席勒把游戏冲动置于感性冲动与形式冲动的调和处。",
+            "tool_calls": [],
+        }
+
+    request = FileTaskRequest(
+        task=(
+            "请读取 OpenSpace PDF 第 19-21 页，围绕感性冲动、形式冲动、"
+            "游戏冲动给出较长原文段落、页码和解读。"
+        ),
+        run_id="readonly_pdf_explicit_page_window",
+        files=[
+            FileTaskFile(
+                path="schiller.pdf",
+                name="schiller.pdf",
+                type="pdf",
+                content="版权页短预览，不包含第十五封信正文。",
+            )
+        ],
+    )
+
+    events = list(
+        FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(
+            request
+        )
+    )
+
+    parse_calls = [args for name, args in calls if name == "parse_file_to_text"]
+    assert parse_calls
+    assert parse_calls[0]["path"] == "schiller.pdf"
+    assert parse_calls[0]["start_page"] == 19
+    assert parse_calls[0]["end_page"] == 21
+    assert not any(
+        event.type == "tool.finished"
+        and event.payload.get("tool_name") == "provided_file_context"
+        for event in events
+    )
+    context_event = next(
+        event
+        for event in events
+        if event.type == "tool.finished"
+        and event.payload.get("tool_name") == "parse_file_to_text"
+    )
+    assert "第十五封信" in context_event.payload["result_preview"]
+
+
 def test_file_task_runtime_readonly_docx_blank_model_gets_visible_fallback_answer():
     responses = [
         {

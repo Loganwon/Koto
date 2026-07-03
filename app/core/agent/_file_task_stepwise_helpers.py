@@ -55,6 +55,10 @@ def looks_like_windowed_pdf_task(
         "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
     ):
         return True
+    if explicit_pdf_page_window(request) and (
+        "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
+    ):
+        return True
     return bool(
         re.search(
             r"(?:分步|一步一步|每一步|继续|下一段|下一页|按页|分页|stepwise|chunk)",
@@ -63,6 +67,46 @@ def looks_like_windowed_pdf_task(
         )
         and re.search(r"(?:pdf|长文|很长|大量内容)", text, re.IGNORECASE)
     )
+
+
+def explicit_pdf_page_window(request: FileTaskRequest) -> Optional[Dict[str, int]]:
+    """Extract an explicit PDF page window from the user task text.
+
+    This covers research/read-only tasks like "OpenSpace PDF 第 19-21 页",
+    which are not stepwise workflows but still require path-based PDF reading
+    instead of trusting the frontend's short attachment preview.
+    """
+    resume_control = _workflow_resume_control(request)
+    texts = [
+        str(getattr(request, "task", "") or ""),
+        str(resume_control.get("current_task") or ""),
+    ]
+    # Keep original_task last so a resumed concrete "第 7-9 页" instruction wins.
+    texts.append(str(resume_control.get("original_task") or ""))
+    source = "\n".join(item for item in texts if item).strip()
+    if not source:
+        return None
+
+    patterns = (
+        r"第\s*(\d{1,4})\s*(?:[-－—–~至到]\s*(\d{1,4}))?\s*页",
+        r"\bpages?\s*(\d{1,4})\s*(?:[-－—–~至to]+\s*(\d{1,4}))?\b",
+        r"\bp\.?\s*(\d{1,4})\s*(?:[-－—–~至to]+\s*(\d{1,4}))?\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, source, re.IGNORECASE)
+        if not match:
+            continue
+        start = int(match.group(1))
+        end = int(match.group(2) or start)
+        if start <= 0 or end <= 0:
+            continue
+        if end < start:
+            start, end = end, start
+        # Avoid accidentally reading a huge document when the wording is broad.
+        if end - start > 49:
+            end = start + 49
+        return {"start": start, "end": end}
+    return None
 
 
 def stepwise_docx_polish_window_paragraphs(request: FileTaskRequest) -> int:
@@ -93,6 +137,7 @@ def should_force_pdf_tool_read(
     resume_control = _workflow_resume_control(request)
     should_force = (
         str(resume_control.get("policy") or "").strip().lower() == "confirm_each_step"
+        or bool(explicit_pdf_page_window(request))
         or looks_like_windowed_pdf_task(request, recipe_skeleton or {})
     )
     if not should_force:
@@ -108,10 +153,17 @@ def pdf_context_read_args(
     recipe_skeleton: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     resume_control = _workflow_resume_control(request)
-    window_pages = stepwise_pdf_window_pages(request)
-    step_index = stepwise_pdf_step_index(request)
-    start_page = step_index * window_pages + 1
-    end_page = start_page + window_pages - 1
+    explicit_window = explicit_pdf_page_window(request)
+    if explicit_window:
+        start_page = int(explicit_window["start"])
+        end_page = int(explicit_window["end"])
+        window_pages = max(1, end_page - start_page + 1)
+        step_index = 0
+    else:
+        window_pages = stepwise_pdf_window_pages(request)
+        step_index = stepwise_pdf_step_index(request)
+        start_page = step_index * window_pages + 1
+        end_page = start_page + window_pages - 1
     source_path = str(
         resume_control.get("source_path")
         or getattr(file_info, "path", "")

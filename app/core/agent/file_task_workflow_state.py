@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 from app.core.agent._file_task_stepwise_helpers import (
+    explicit_pdf_page_window,
     looks_like_windowed_pdf_task,
     stepwise_docx_polish_step_index,
     stepwise_docx_polish_window_paragraphs,
@@ -99,10 +100,19 @@ def _int_or_zero(value: Any) -> int:
 
 
 def _pdf_window(request: FileTaskRequest, file_info: FileTaskFile) -> Dict[str, Any]:
-    size = stepwise_pdf_window_pages(request)
-    step_index = stepwise_pdf_step_index(request)
-    start = 1 + step_index * size
-    end = start + size - 1
+    explicit_window = explicit_pdf_page_window(request)
+    if explicit_window:
+        start = int(explicit_window["start"])
+        end = int(explicit_window["end"])
+        size = max(1, end - start + 1)
+        step_index = 0
+        strategy = "explicit_page_window"
+    else:
+        size = stepwise_pdf_window_pages(request)
+        step_index = stepwise_pdf_step_index(request)
+        start = 1 + step_index * size
+        end = start + size - 1
+        strategy = "page_window"
     return {
         "file_type": "pdf",
         "path": file_info.path or file_info.name,
@@ -111,7 +121,7 @@ def _pdf_window(request: FileTaskRequest, file_info: FileTaskFile) -> Dict[str, 
         "step_index": step_index,
         "current": {"start": start, "end": end},
         "next": {"start": end + 1, "end": end + size},
-        "strategy": "page_window",
+        "strategy": strategy,
     }
 
 
@@ -180,7 +190,9 @@ def large_file_windows(
     for file_info in files:
         suffix = _file_type(file_info)
         if suffix == "pdf" and (
-            has_resume_control or looks_like_windowed_pdf_task(request, dict(recipe_skeleton))
+            has_resume_control
+            or explicit_pdf_page_window(request)
+            or looks_like_windowed_pdf_task(request, dict(recipe_skeleton))
         ):
             windows.append(_pdf_window(request, file_info))
         elif suffix in {"doc", "docx"} and (
