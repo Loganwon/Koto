@@ -59,6 +59,10 @@ def looks_like_windowed_pdf_task(
         "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
     ):
         return True
+    if explicit_pdf_letter_window(request) and (
+        "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
+    ):
+        return True
     return bool(
         re.search(
             r"(?:分步|一步一步|每一步|继续|下一段|下一页|按页|分页|stepwise|chunk)",
@@ -69,6 +73,114 @@ def looks_like_windowed_pdf_task(
     )
 
 
+_ROMAN_VALUES = {
+    "I": 1,
+    "V": 5,
+    "X": 10,
+    "L": 50,
+    "C": 100,
+    "D": 500,
+    "M": 1000,
+}
+_CHINESE_DIGITS = {
+    "一": 1,
+    "二": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+}
+
+
+def _roman_to_int(value: str) -> int:
+    total = 0
+    prev = 0
+    for char in reversed(str(value or "").upper()):
+        current = _ROMAN_VALUES.get(char, 0)
+        if current < prev:
+            total -= current
+        else:
+            total += current
+            prev = current
+    return total
+
+
+def _chinese_letter_to_int(value: str) -> int:
+    text = str(value or "").strip()
+    if not text:
+        return 0
+    if text == "十":
+        return 10
+    if text.startswith("十"):
+        return 10 + _CHINESE_DIGITS.get(text[1:], 0)
+    if "十" in text:
+        head, tail = text.split("十", 1)
+        return _CHINESE_DIGITS.get(head, 0) * 10 + _CHINESE_DIGITS.get(tail, 0)
+    return _CHINESE_DIGITS.get(text, 0)
+
+
+def _request_text_for_window_detection(request: FileTaskRequest) -> str:
+    resume_control = _workflow_resume_control(request)
+    texts = [
+        str(getattr(request, "task", "") or ""),
+        str(resume_control.get("current_task") or ""),
+    ]
+    # Keep original_task last so a resumed concrete instruction wins.
+    texts.append(str(resume_control.get("original_task") or ""))
+    return "\n".join(item for item in texts if item).strip()
+
+
+def explicit_pdf_letter_window(request: FileTaskRequest) -> Optional[Dict[str, int]]:
+    """Extract a Schiller-style letter/chapter window such as XI-XV."""
+    source = _request_text_for_window_detection(request)
+    if not source:
+        return None
+
+    roman = re.search(
+        r"第\s*([IVXLCDM]+)\s*(?:[-－—–~至到]\s*([IVXLCDM]+))?\s*封(?:信)?",
+        source,
+        re.IGNORECASE,
+    )
+    if not roman:
+        roman = re.search(
+            r"\bletters?\s+([IVXLCDM]+)\s*(?:[-－—–~至to]+\s*([IVXLCDM]+))?\b",
+            source,
+            re.IGNORECASE,
+        )
+    if roman:
+        start = _roman_to_int(roman.group(1))
+        end = _roman_to_int(roman.group(2) or roman.group(1))
+    else:
+        arabic = re.search(
+            r"第\s*(\d{1,2})\s*(?:[-－—–~至到]\s*(\d{1,2}))?\s*封(?:信)?",
+            source,
+            re.IGNORECASE,
+        )
+        if arabic:
+            start = int(arabic.group(1))
+            end = int(arabic.group(2) or arabic.group(1))
+        else:
+            chinese = re.search(
+                r"第\s*([一二三四五六七八九十]{1,3})\s*(?:[-－—–~至到]\s*([一二三四五六七八九十]{1,3}))?\s*封(?:信)?",
+                source,
+                re.IGNORECASE,
+            )
+            if not chinese:
+                return None
+            start = _chinese_letter_to_int(chinese.group(1))
+            end = _chinese_letter_to_int(chinese.group(2) or chinese.group(1))
+    if start <= 0 or end <= 0:
+        return None
+    if end < start:
+        start, end = end, start
+    if end - start > 20:
+        end = start + 20
+    return {"start": start, "end": end}
+
+
 def explicit_pdf_page_window(request: FileTaskRequest) -> Optional[Dict[str, int]]:
     """Extract an explicit PDF page window from the user task text.
 
@@ -76,14 +188,7 @@ def explicit_pdf_page_window(request: FileTaskRequest) -> Optional[Dict[str, int
     which are not stepwise workflows but still require path-based PDF reading
     instead of trusting the frontend's short attachment preview.
     """
-    resume_control = _workflow_resume_control(request)
-    texts = [
-        str(getattr(request, "task", "") or ""),
-        str(resume_control.get("current_task") or ""),
-    ]
-    # Keep original_task last so a resumed concrete "第 7-9 页" instruction wins.
-    texts.append(str(resume_control.get("original_task") or ""))
-    source = "\n".join(item for item in texts if item).strip()
+    source = _request_text_for_window_detection(request)
     if not source:
         return None
 
@@ -137,6 +242,7 @@ def should_force_pdf_tool_read(
     resume_control = _workflow_resume_control(request)
     should_force = (
         str(resume_control.get("policy") or "").strip().lower() == "confirm_each_step"
+        or bool(explicit_pdf_letter_window(request))
         or bool(explicit_pdf_page_window(request))
         or looks_like_windowed_pdf_task(request, recipe_skeleton or {})
     )
@@ -153,13 +259,21 @@ def pdf_context_read_args(
     recipe_skeleton: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     resume_control = _workflow_resume_control(request)
-    explicit_window = explicit_pdf_page_window(request)
-    if explicit_window:
+    explicit_letter_window = explicit_pdf_letter_window(request)
+    if explicit_letter_window:
+        start_page = int(explicit_letter_window["start"])
+        end_page = int(explicit_letter_window["end"])
+        window_pages = max(1, end_page - start_page + 1)
+        step_index = 0
+        window_unit = "pdf_letter"
+    elif explicit_window := explicit_pdf_page_window(request):
+        window_unit = ""
         start_page = int(explicit_window["start"])
         end_page = int(explicit_window["end"])
         window_pages = max(1, end_page - start_page + 1)
         step_index = 0
     else:
+        window_unit = ""
         window_pages = stepwise_pdf_window_pages(request)
         step_index = stepwise_pdf_step_index(request)
         start_page = step_index * window_pages + 1
@@ -176,6 +290,7 @@ def pdf_context_read_args(
         "end_page": end_page,
         "path": source_path,
         "source_path": source_path,
+        **({"window_unit": window_unit, "start": start_page, "end": end_page} if window_unit else {}),
     }
 
 

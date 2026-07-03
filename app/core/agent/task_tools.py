@@ -835,6 +835,7 @@ def _read_pdf_excerpt(
     max_chars: int,
     start_page: int = 1,
     end_page: int = 0,
+    allow_full_fallback: bool = True,
 ) -> str:
     """Read only a window of PDF pages to avoid full-document extraction stalls."""
     start_page = max(1, int(start_page or 1))
@@ -903,9 +904,136 @@ def _read_pdf_excerpt(
         except Exception as exc:
             logger.debug("[TaskTools] PDF excerpt collector failed: %s", exc)
 
-    from app.core.workflow_engine import parse_source_file
+    if not allow_full_fallback:
+        return ""
 
+    from app.core.workflow_engine import parse_source_file
     return parse_source_file(path)[:max_chars]
+
+
+_PDF_ROMAN_DIGITS = (
+    (10, "X"),
+    (9, "IX"),
+    (5, "V"),
+    (4, "IV"),
+    (1, "I"),
+)
+_PDF_CHINESE_DIGITS = {
+    1: "一",
+    2: "二",
+    3: "三",
+    4: "四",
+    5: "五",
+    6: "六",
+    7: "七",
+    8: "八",
+    9: "九",
+}
+
+
+def _int_to_pdf_roman(value: int) -> str:
+    number = max(1, int(value or 1))
+    output = []
+    for unit, symbol in _PDF_ROMAN_DIGITS:
+        while number >= unit:
+            output.append(symbol)
+            number -= unit
+    return "".join(output)
+
+
+def _int_to_chinese_letter_number(value: int) -> str:
+    number = max(1, int(value or 1))
+    if number < 10:
+        return _PDF_CHINESE_DIGITS.get(number, "")
+    if number == 10:
+        return "十"
+    if number < 20:
+        return "十" + _PDF_CHINESE_DIGITS.get(number - 10, "")
+    tens = number // 10
+    ones = number % 10
+    return _PDF_CHINESE_DIGITS.get(tens, "") + "十" + (
+        _PDF_CHINESE_DIGITS.get(ones, "") if ones else ""
+    )
+
+
+def _pdf_letter_heading_terms(value: int) -> list[str]:
+    chinese = _int_to_chinese_letter_number(value)
+    roman = _int_to_pdf_roman(value)
+    return [
+        f"第{chinese}封信",
+        f"第 {chinese} 封信",
+        f"Letter {roman}",
+        f"LETTER {roman}",
+        f"letter {roman.lower()}",
+    ]
+
+
+def _pdf_page_has_letter_heading(page_text: str, terms: list[str]) -> bool:
+    text = str(page_text or "")
+    if "目 录" in text or "目录" in text:
+        if len(re.findall(r"第[一二三四五六七八九十]+封信", text)) >= 5:
+            return False
+    normalized_terms = {re.sub(r"\s+", "", term).lower() for term in terms}
+    for line in text.splitlines():
+        cleaned = re.sub(r"\s+", "", line).strip().lower()
+        if cleaned in normalized_terms:
+            return True
+    return False
+
+
+def _read_pdf_letter_window(
+    path: str,
+    *,
+    max_chars: int,
+    start_letter: int,
+    end_letter: int,
+) -> str:
+    start_letter = max(1, int(start_letter or 1))
+    end_letter = max(start_letter, int(end_letter or start_letter))
+    next_letter = end_letter + 1
+    start_terms = _pdf_letter_heading_terms(start_letter)
+    next_terms = _pdf_letter_heading_terms(next_letter)
+
+    found_start_page = 0
+    found_end_page = 0
+    probe_limit = 240_000
+    for page in range(1, 400):
+        page_text = _read_pdf_excerpt(
+            path,
+            max_chars=probe_limit,
+            start_page=page,
+            end_page=page,
+            allow_full_fallback=False,
+        )
+        if not page_text.strip():
+            if found_start_page and page > found_start_page + 30:
+                break
+            continue
+        if not found_start_page and _pdf_page_has_letter_heading(page_text, start_terms):
+            found_start_page = page
+            continue
+        if (
+            found_start_page
+            and page > found_start_page
+            and _pdf_page_has_letter_heading(page_text, next_terms)
+        ):
+            found_end_page = page - 1
+            break
+    if not found_start_page:
+        return ""
+    if not found_end_page:
+        found_end_page = min(found_start_page + 30, 399)
+    header = (
+        f"[PDF letter window: {start_letter}-{end_letter}; "
+        f"resolved pages {found_start_page}-{found_end_page}]\n"
+    )
+    body = _read_pdf_excerpt(
+        path,
+        max_chars=max(1, max_chars - len(header)),
+        start_page=found_start_page,
+        end_page=found_end_page,
+    )
+    return (header + body).strip()[:max_chars]
 
 
 def _success_result(
@@ -1454,7 +1582,14 @@ def parse_file_to_text(
         from app.core.workflow_engine import parse_source_file
 
         suffix = Path(resolved).suffix.lower()
-        if suffix == ".pdf":
+        if suffix == ".pdf" and window_unit == "pdf_letter":
+            text = _read_pdf_letter_window(
+                resolved,
+                max_chars=max_chars,
+                start_letter=start or 1,
+                end_letter=end or start or 1,
+            )
+        elif suffix == ".pdf":
             text = _read_pdf_excerpt(
                 resolved,
                 max_chars=max_chars,

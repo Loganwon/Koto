@@ -109,6 +109,49 @@ def test_file_task_runtime_readonly_pdf_page_range_ignores_frontend_short_previe
     assert "第十五封信" in context_event.payload["result_preview"]
 
 
+def test_file_task_runtime_pdf_letter_window_overrides_conflicting_page_hint():
+    calls = []
+
+    def fake_executor(tool_name, args):
+        calls.append((tool_name, dict(args)))
+        if tool_name == "parse_file_to_text":
+            return (
+                "[PDF letter window: 11-15; resolved pages 63-84]\n"
+                "[Page 81]\n第十五封信\n游戏冲动的对象是活的形象。"
+            )
+        return ""
+
+    def fake_model(**kwargs):
+        return {
+            "content": "已按第 XI-XV 封信定位，第 XV 封说明游戏冲动。",
+            "tool_calls": [],
+        }
+
+    request = FileTaskRequest(
+        task="读取第 XI-XV 封信，尤其第 XV 封；OpenSpace PDF 第 19-21 页。",
+        run_id="readonly_pdf_letter_window",
+        files=[
+            FileTaskFile(
+                path="schiller.pdf",
+                name="schiller.pdf",
+                type="pdf",
+                content="前端短预览只包含目录和版权页。",
+            )
+        ],
+    )
+
+    list(FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(request))
+
+    parse_calls = [args for name, args in calls if name == "parse_file_to_text"]
+    assert parse_calls
+    assert parse_calls[0]["path"] == "schiller.pdf"
+    assert parse_calls[0]["window_unit"] == "pdf_letter"
+    assert parse_calls[0]["start"] == 11
+    assert parse_calls[0]["end"] == 15
+    assert "start_page" not in parse_calls[0]
+    assert "end_page" not in parse_calls[0]
+
+
 def test_file_task_runtime_readonly_docx_blank_model_gets_visible_fallback_answer():
     responses = [
         {
