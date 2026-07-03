@@ -96,8 +96,8 @@ jobs:
       - name: Install Inno Setup (if missing)
         shell: pwsh
         run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
+          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
+          if (-not $iscc -or -not (Test-Path $iscc)) {
             winget install --id JRSoftware.InnoSetup --silent --accept-source-agreements --accept-package-agreements
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
@@ -105,9 +105,8 @@ jobs:
       - name: Build installer (Inno Setup)
         shell: pwsh
         run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
-          if (-not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
+          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
+          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
           & $iscc /DAppVersion=$env:VERSION koto_installer.iss
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Inno Setup build failed"; exit 1 }
           $setupName = "Koto_v$($env:VERSION)_Setup.exe"

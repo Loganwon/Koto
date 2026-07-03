@@ -26,12 +26,12 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Set up Python 3.11
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
@@ -204,7 +204,7 @@ jobs:
 
       - name: Upload build log
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: build-log
           path: logs\build_latest.log
@@ -245,8 +245,8 @@ jobs:
       - name: Install Inno Setup (if missing)
         shell: pwsh
         run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) {
+          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
+          if (-not $iscc -or -not (Test-Path $iscc)) {
             winget install --id JRSoftware.InnoSetup --silent --accept-source-agreements --accept-package-agreements
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
@@ -254,9 +254,8 @@ jobs:
       - name: Build installer (Inno Setup)
         shell: pwsh
         run: |
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          if (-not (Test-Path $iscc)) { $iscc = "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe" }
-          if (-not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
+          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
+          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
           & $iscc /DAppVersion=$env:VERSION koto_installer.iss
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Inno Setup build failed"; exit 1 }
           $setupName = "Koto_v$($env:VERSION)_Setup.exe"
@@ -274,7 +273,7 @@ jobs:
           Write-Host "Zip: $zipName ($sizeMB MB)"
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@v4
         with:
           name: koto-windows
           path: |
@@ -294,10 +293,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: koto-windows
           path: dist
@@ -345,7 +344,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
@@ -379,7 +378,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 3: 创建 GitHub Release（tag 推送时才运行）
+  # Job 4: 创建 GitHub Release（tag 推送时才运行）
   # ══════════════════════════════════════════════════════════════════════════
   create-release:
     name: Create GitHub Release
@@ -391,7 +390,7 @@ jobs:
 
     steps:
       - name: Download Windows artifacts
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v4
         with:
           name: koto-windows
 
@@ -404,7 +403,7 @@ jobs:
             Koto_v*_Windows.zip
 
   # ══════════════════════════════════════════════════════════════════════════
-  # Job 4: Sync VERSION file to match released tag
+  # Job 5: Sync VERSION file to match released tag
   # ══════════════════════════════════════════════════════════════════════════
   sync-version:
     name: Sync VERSION file
@@ -416,7 +415,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0

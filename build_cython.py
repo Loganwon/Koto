@@ -17,22 +17,12 @@ from setuptools import setup, find_packages
 from Cython.Build import cythonize
 from Cython.Distutils import build_ext
 from setuptools.extension import Extension
+from build_config import PROTECTED_DIRS
 
 ROOT = Path(__file__).parent
 
 # ─── 需要编译的模块（相对于 ROOT） ───────────────────────────────────────────
-# 修改此列表来控制哪些模块被编译
-PROTECTED_DIRS = [
-    "app/core/agent",
-    "app/core/llm",
-    "app/core/memory",
-    "app/core/workflow",
-    "app/core/skills",
-    "app/core/learning",
-    "app/core/routing",
-    "app/core/goal",
-    "app/core/tasks",
-]
+# 修改 build_config.PROTECTED_DIRS 来控制哪些模块被编译
 
 # 不编译 __init__.py（保留为源码，方便 Python 发现包）
 EXCLUDE_FILES = {"__init__.py"}

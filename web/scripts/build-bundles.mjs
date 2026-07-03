@@ -2,6 +2,7 @@ import { build } from 'vite';
 import { resolve, dirname } from 'path';
 import { mkdir } from 'fs/promises';
 import { fileURLToPath } from 'url';
+import { createAliases } from '../build-aliases.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -11,13 +12,7 @@ const shared = {
   root: ROOT,
   publicDir: false,
   resolve: {
-    alias: {
-      '@workspace': resolve(ROOT, 'src/workspace'),
-      '@chat': resolve(ROOT, 'src/chat'),
-      '@skills': resolve(ROOT, 'src/skills'),
-      '@review': resolve(ROOT, 'src/review'),
-      '@shared': resolve(ROOT, 'src/shared'),
-    },
+    alias: createAliases(ROOT),
   },
 };
 

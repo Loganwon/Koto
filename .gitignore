@@ -124,6 +124,8 @@ config/test_*.db
 config/skill_ratings.json
 config/token_usage.json
 app/core/config/token_usage.json
+config/memory_vectors.json
+tests/e2e/screenshots/*.png
 
 # Backup files
 *.bak
@@ -131,6 +133,7 @@ web/app.py.bak
 
 # Temporary debug/analysis files (generated during development, not for repo)
 .tmp_external_agents/
+_codex_*_clone/
 tmp_*
 *_log.txt
 git_log_*.txt

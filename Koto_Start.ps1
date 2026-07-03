@@ -144,6 +144,8 @@ function Get-KotoProcesses {
 # 防重复启动 (锁文件 + 进程检测)
 # ─────────────────────────────────────────────
 function Invoke-LockCheck {
+    param([string]$RunMode)
+
     if (Test-Path $LOCK_FILE) {
         $lockedPid = (Get-Content $LOCK_FILE -ErrorAction SilentlyContinue).Trim()
         if ($lockedPid -match '^\d+$') {
@@ -153,6 +155,13 @@ function Invoke-LockCheck {
                 # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
                 $runningCmd = (Get-CimInstance Win32_Process -Filter "ProcessId=$lockedPid" -ErrorAction SilentlyContinue).CommandLine
                 if ($runningCmd -match "web[/\\\\]app\.py" -or $runningCmd -notmatch "koto_app\.py") {
+                    if ($RunMode -eq "desktop") {
+                        Write-Log "WARN" "检测到正在运行的 Flask 调试模式；desktop 启动将先停止它，再打开桌面窗口。"
+                        Stop-Process -Id ([int]$lockedPid) -Force -ErrorAction SilentlyContinue
+                        Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
+                        Start-Sleep -Milliseconds 800
+                        return
+                    }
                     Write-Log "INFO" "Koto 已在运行（Flask调试模式），正在打开统一入口..."
                     $openPort = if ($env:KOTO_PORT) { [int]$env:KOTO_PORT } else { 5000 }
                     Start-Process (Get-UnifiedAppUrl -Port $openPort)
@@ -522,7 +531,7 @@ if ($Mode -eq "server") {
 }
 
 # Step 1: 防重复
-Invoke-LockCheck
+Invoke-LockCheck -RunMode $Mode
 
 # Step 2: 清理退休外部自动化/旧语音残留
 Clear-RetiredExternalProcesses

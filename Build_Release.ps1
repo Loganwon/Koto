@@ -345,12 +345,8 @@ Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_int
 
 # ─── 步骤 4：构建 Inno Setup 安装包（可选） ──────────────
 Write-Step "步骤 4/5  构建安装包（Inno Setup，未安装则跳过）"
-$isccPaths = @(
-    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
-    "C:\Program Files\Inno Setup 6\ISCC.exe",
-    "$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe"
-)
-$iscc = $isccPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+$resolveInno = Join-Path $REPO_ROOT "scripts\resolve_inno_setup.ps1"
+$iscc = (& $resolveInno -Quiet) | Select-Object -First 1
 if ($iscc) {
     $issFile = Join-Path $REPO_ROOT "koto_installer.iss"
     $isccLog = Join-Path $LOG_DIR "inno_setup_build.log"

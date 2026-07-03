@@ -12,6 +12,10 @@ from pathlib import Path
 
 block_cipher = None
 ROOT = os.path.abspath('.')
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from build_config import protected_dir_paths
 
 # ═══════════════════════════════════════════════
 # 数据文件（资源 + Python 源码）
@@ -22,17 +26,7 @@ datas = []
 # ── Protected 模式：检测是否存在 Cython 编译产物 ──────────────────────────────
 # 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
 # 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
-_PROTECTED_DIRS = {
-    os.path.join(ROOT, 'app', 'core', 'agent'),
-    os.path.join(ROOT, 'app', 'core', 'llm'),
-    os.path.join(ROOT, 'app', 'core', 'memory'),
-    os.path.join(ROOT, 'app', 'core', 'workflow'),
-    os.path.join(ROOT, 'app', 'core', 'skills'),
-    os.path.join(ROOT, 'app', 'core', 'learning'),
-    os.path.join(ROOT, 'app', 'core', 'routing'),
-    os.path.join(ROOT, 'app', 'core', 'goal'),
-    os.path.join(ROOT, 'app', 'core', 'tasks'),
-}
+_PROTECTED_DIRS = protected_dir_paths(ROOT)
 
 def _protected_pyd_exists(py_path):
     """检查对应的 .pyd / .so 是否已编译"""
@@ -183,6 +177,10 @@ _add(os.path.join(ROOT, 'README.md'), '.')
 # ═══════════════════════════════════════════════
 # 隐式导入
 # ═══════════════════════════════════════════════
+# NOTE: 此列表与下方 _discover_hidden_imports() 自动发现存在大量重叠。
+# 后续清理时可删除已被 auto-discovery 覆盖的条目（预计可缩减 200+ 行）。
+# 标准库模块（subprocess, socket, threading 等）通常无需手动列举。
+# 保留期：2026-Q3 — 待通过完整构建验证后安全移除。
 
 hiddenimports = [
     # ── 标准库 tkinter（模型下载器 GUI）──
@@ -523,8 +521,20 @@ def _discover_hidden_imports(base_dir, base_pkg):
                 imports.append(pkg)
     return imports
 
+def _dedupe_hiddenimports(imports):
+    """Deduplicate hidden imports while preserving first-seen order."""
+    seen = set()
+    deduped = []
+    for name in imports:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append(name)
+    return deduped
+
 hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'app'), 'app'))
 hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'web'), 'web'))
+hiddenimports = _dedupe_hiddenimports(hiddenimports)
 
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
