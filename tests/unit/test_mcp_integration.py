@@ -12,7 +12,12 @@ TEST_MCP_API_KEY = "test-mcp-key"
 
 @pytest.fixture(autouse=True)
 def _mcp_test_api_key(monkeypatch):
+    from app.core.agent.mcp_manager import reset_mcp_runtime_for_tests
+
+    reset_mcp_runtime_for_tests()
     monkeypatch.setenv("KOTO_MCP_API_KEY", TEST_MCP_API_KEY)
+    yield
+    reset_mcp_runtime_for_tests()
 
 
 def _mcp_rpc(client, payload: dict, headers: dict | None = None):
@@ -1022,6 +1027,76 @@ def test_websocket_status_tracks_external_sessions_only():
         _unregister_session("external-test")
 
 
+def test_notification_socket_registers_mcp_websocket_endpoint():
+    from web.app_realtime import init_notification_socket
+
+    class FakeSock:
+        routes: list[str] = []
+
+        def __init__(self, app):
+            self.app = app
+
+        def route(self, path):
+            self.routes.append(path)
+
+            def decorator(func):
+                return func
+
+            return decorator
+
+    class FakeLogger:
+        def warning(self, *args, **kwargs):
+            pass
+
+        def info(self, *args, **kwargs):
+            pass
+
+    FakeSock.routes = []
+    init_notification_socket(Flask(__name__), FakeLogger(), FakeSock, lambda: object())
+
+    assert "/ws/notifications" in FakeSock.routes
+    assert "/ws/mcp" in FakeSock.routes
+
+
+def test_websocket_mcp_auth_uses_runtime_api_key(monkeypatch):
+    from web.mcp_ws import _authorized_ws_request
+
+    app = Flask(__name__)
+    monkeypatch.setenv("KOTO_MCP_API_KEY", "secret")
+
+    with app.test_request_context("/ws/mcp", headers={"X-Koto-MCP-Key": "bad"}):
+        assert _authorized_ws_request() is False
+    with app.test_request_context("/ws/mcp", headers={"X-Koto-MCP-Key": "secret"}):
+        assert _authorized_ws_request() is True
+    with app.test_request_context("/ws/mcp", headers={"Authorization": "Bearer secret"}):
+        assert _authorized_ws_request() is True
+
+
+def test_stdio_mcp_bridge_passes_runtime_api_key_header(monkeypatch):
+    import websocket
+
+    from scripts.koto_mcp_cli import StdioMCPBridge
+
+    captured = {}
+
+    def fake_create_connection(url, **kwargs):
+        captured["url"] = url
+        captured["header"] = kwargs.get("header")
+
+        class FakeWebSocket:
+            pass
+
+        return FakeWebSocket()
+
+    monkeypatch.setattr(websocket, "create_connection", fake_create_connection)
+
+    bridge = StdioMCPBridge("ws://127.0.0.1:5000/ws/mcp", timeout=0.2, api_key="secret")
+    bridge._connect()
+
+    assert captured["url"] == "ws://127.0.0.1:5000/ws/mcp"
+    assert captured["header"] == ["X-Koto-MCP-Key: secret"]
+
+
 def test_stdio_mcp_bridge_handles_fast_websocket_response(monkeypatch):
     import io
     import json
@@ -1052,7 +1127,8 @@ def test_stdio_mcp_bridge_handles_fast_websocket_response(monkeypatch):
         sys,
         "stdin",
         io.StringIO(
-            json.dumps(
+            "\ufeff"
+            + json.dumps(
                 {
                     "jsonrpc": "2.0",
                     "id": 1,

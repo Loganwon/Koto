@@ -6,9 +6,13 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
+import uuid
 from typing import Any, Dict
+
+from flask import request
 
 _SESSIONS: Dict[str, Dict[str, Any]] = {}
 _LOCK = threading.RLock()
@@ -116,6 +120,7 @@ class MCPWebSocketSession:
         return {"content": [{"type": "text", "text": _json_text(data)}], "isError": False}
 
     def handle_message(self, raw: str) -> str:
+        raw = str(raw).lstrip("\ufeff")
         payload = json.loads(raw)
         req_id = payload.get("id")
         method = payload.get("method", "")
@@ -146,3 +151,37 @@ class MCPWebSocketSession:
                 },
                 ensure_ascii=False,
             )
+
+
+def _authorized_ws_request() -> bool:
+    required_key = os.environ.get("KOTO_MCP_API_KEY", "").strip()
+    if not required_key:
+        return True
+    bearer = request.headers.get("Authorization", "")
+    provided = (
+        request.headers.get("X-Koto-MCP-Key")
+        or request.args.get("key")
+        or (bearer.removeprefix("Bearer ").strip() if bearer.startswith("Bearer ") else "")
+    )
+    return provided == required_key
+
+
+def register_mcp_ws(sock: Any) -> None:
+    """Register Koto's external MCP WebSocket endpoint on a Flask-Sock instance."""
+
+    @sock.route("/ws/mcp")
+    def ws_mcp(ws):
+        if not _authorized_ws_request():
+            ws.close()
+            return
+        session = MCPWebSocketSession(f"mcp-ws-{uuid.uuid4().hex}")
+        try:
+            while True:
+                raw = ws.receive()
+                if raw is None:
+                    break
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                ws.send(session.handle_message(str(raw)))
+        finally:
+            session.close()

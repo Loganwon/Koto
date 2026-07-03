@@ -67,4 +67,12 @@ def init_notification_socket(
         finally:
             manager.unregister_connection(user_id, ws)
 
+    try:
+        from web.mcp_ws import register_mcp_ws
+
+        register_mcp_ws(sock)
+        logger.info("[WebSocket] MCP endpoint registered at /ws/mcp")
+    except Exception as exc:
+        logger.warning("[WebSocket] MCP endpoint registration failed: %s", exc)
+
     return sock
