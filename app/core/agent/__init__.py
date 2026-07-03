@@ -31,7 +31,6 @@ def _prefer_source_module(module_basename: str) -> None:
 		logger.debug("[app.core.agent] 源码 %s 预加载失败: %s", module_basename, exc)
 
 
-_prefer_source_module("langgraph_agent")
 _prefer_source_module("tool_registry")
 _prefer_source_module("unified_agent")
 
