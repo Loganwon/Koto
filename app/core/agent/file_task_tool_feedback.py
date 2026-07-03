@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Pattern
 
@@ -60,6 +61,32 @@ def tool_result_for_model(
     return sanitized or {"summary": "(no output)"}
 
 
+def _run_python_write_metrics(result: Any) -> Dict[str, int]:
+    text = stringify_result(result)
+    metrics: Dict[str, int] = {}
+    cells_patterns = (
+        r"(?:total\s+)?cells?\s+written\s*[:：]\s*(\d+)",
+        r"(?:已写入|写入)\s*(\d+)\s*个?单元格",
+        r"单元格(?:/行)?指标合计\s*[:：]?\s*(\d+)",
+    )
+    rows_patterns = (
+        r"(?:data\s+)?rows?\s+written\s*[:：]\s*(\d+)",
+        r"(?:已写入|写入)\s*(\d+)\s*行",
+        r"(\d+)\s*(?:data\s+)?rows?",
+    )
+    for pattern in cells_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            metrics["cells_written"] = int(match.group(1))
+            break
+    for pattern in rows_patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            metrics["rows_written"] = int(match.group(1))
+            break
+    return metrics
+
+
 def extract_file_changes(
     tool_name: str,
     tool_args: Dict[str, Any],
@@ -73,30 +100,31 @@ def extract_file_changes(
     if structured:
         changes.append(structured)
     if tool_name == "run_python_code":
+        metrics = _run_python_write_metrics(result)
         for path in extract_koto_paths(result, created_marker):
-            changes.append(
-                {
-                    "path": path,
-                    "file_type": Path(path).suffix.lstrip(".").lower(),
-                    "operation": "run_python_code",
-                    "summary": f"Python 代码创建了 {Path(path).name}",
-                    "preview": "",
-                    "change_type": "create",
-                    "focus": True,
-                }
-            )
+            change = {
+                "path": path,
+                "file_type": Path(path).suffix.lstrip(".").lower(),
+                "operation": "run_python_code",
+                "summary": f"Python 代码创建了 {Path(path).name}",
+                "preview": "",
+                "change_type": "create",
+                "focus": True,
+            }
+            change.update(metrics)
+            changes.append(change)
         for path in extract_koto_paths(result, modified_marker):
-            changes.append(
-                {
-                    "path": path,
-                    "file_type": Path(path).suffix.lstrip(".").lower(),
-                    "operation": "run_python_code",
-                    "summary": f"Python 代码更新了 {Path(path).name}",
-                    "preview": "",
-                    "change_type": "modify",
-                    "focus": True,
-                }
-            )
+            change = {
+                "path": path,
+                "file_type": Path(path).suffix.lstrip(".").lower(),
+                "operation": "run_python_code",
+                "summary": f"Python 代码更新了 {Path(path).name}",
+                "preview": "",
+                "change_type": "modify",
+                "focus": True,
+            }
+            change.update(metrics)
+            changes.append(change)
     return changes
 
 

@@ -66,6 +66,7 @@ from app.core.agent.task_tools_pptx_layout import (
     _remove_koto_theme_shapes,
     _set_slide_background,
 )
+from app.core.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
 
@@ -94,6 +95,13 @@ def _get_workspace_root() -> str:
 def _get_project_root() -> str:
     """Return the project root (parent of workspace)."""
     return os.path.dirname(_get_workspace_root())
+
+
+def _file_service(*, backup_enabled: bool = False) -> FileService:
+    return FileService(
+        workspace_dir=_get_workspace_root(),
+        backup_enabled=backup_enabled,
+    )
 
 
 def _safe_resolve(relative_path: str) -> Optional[str]:
@@ -1585,7 +1593,12 @@ def _stage_task_files_for_sandbox(
     return staged_entries
 
 
-def _prepend_task_file_context(code: str, staged_entries: List[Dict[str, str]]) -> str:
+def _prepend_task_file_context(
+    code: str,
+    staged_entries: List[Dict[str, str]],
+    *,
+    output_dir: str = "",
+) -> str:
     """Expose task file paths to sandbox code and keep basename access working."""
     absolute_paths = {
         entry["display_name"]: entry["source_path"] for entry in staged_entries
@@ -1596,13 +1609,21 @@ def _prepend_task_file_context(code: str, staged_entries: List[Dict[str, str]]) 
     staged_names = [entry["staged_name"] for entry in staged_entries]
 
     workspace_root = _get_workspace_root()
+    normalized_output_dir = _normalize_workspace_relative_path(output_dir)
+    output_dir_abs = ""
+    if normalized_output_dir:
+        output_dir_abs = str(
+            (Path(workspace_root) / Path(*normalized_output_dir.split("/"))).resolve()
+        )
     preamble = (
         "# Attached task files are mirrored into the sandbox working directory.\n"
         f"TASK_WORKSPACE_ROOT = {json.dumps(workspace_root, ensure_ascii=False)}\n"
+        f"TASK_OUTPUT_DIR = {json.dumps(output_dir_abs, ensure_ascii=False)}\n"
         f"TASK_SANDBOX_FILE_PATHS = {json.dumps(staged_paths, ensure_ascii=False)}\n"
         f"TASK_FILE_PATHS = {json.dumps(absolute_paths, ensure_ascii=False)}\n"
         f"TASK_SANDBOX_FILES = {json.dumps(staged_names, ensure_ascii=False)}\n"
         "# Prefer TASK_SANDBOX_FILE_PATHS[...] for opening and editing attached files.\n"
+        "# If TASK_OUTPUT_DIR is not empty, create new relative output files there.\n"
         "# After modifying an attached file, print: KOTO_MODIFIED:<sandbox_absolute_path>\n"
         "# Koto will sync the staged edit back to the source file automatically.\n"
         "# After creating a file in the workspace, print: KOTO_CREATED:<absolute_path>\n"
@@ -1809,6 +1830,64 @@ def _sync_created_workspace_files_from_sandbox(
         updated["stdout"] = "\n".join(
             part for part in [stdout.rstrip(), *marker_lines] if part
         )
+    return updated
+
+
+def _workspace_output_dir_path(output_dir: str) -> Optional[Path]:
+    rel_dir = _normalize_workspace_relative_path(output_dir)
+    if not rel_dir:
+        return None
+    workspace_root = Path(_get_workspace_root()).resolve()
+    target_dir = (workspace_root / Path(*rel_dir.split("/"))).resolve()
+    try:
+        target_dir.relative_to(workspace_root)
+    except ValueError:
+        return None
+    return target_dir
+
+
+def _relocate_root_created_files_to_output_dir(
+    result: Dict[str, Any],
+    *,
+    output_dir: str,
+) -> Dict[str, Any]:
+    target_dir = _workspace_output_dir_path(output_dir)
+    if target_dir is None:
+        return result
+    workspace_root = Path(_get_workspace_root()).resolve()
+    markers = _parse_koto_file_markers(str(result.get("stdout") or ""))
+    replacements: Dict[str, str] = {}
+    for raw_path in markers.get("created", []):
+        try:
+            source = Path(raw_path).resolve()
+            source.relative_to(workspace_root)
+        except (OSError, ValueError):
+            continue
+        if source.parent != workspace_root:
+            continue
+        if source.suffix.lower() not in _WORKSPACE_CREATED_FILE_EXTS:
+            continue
+        target = (target_dir / source.name).resolve()
+        try:
+            target.relative_to(workspace_root)
+        except ValueError:
+            continue
+        if source == target or target.exists() or not source.is_file():
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(target))
+        except OSError:
+            continue
+        replacements[str(source)] = str(target)
+
+    if not replacements:
+        return result
+    updated = dict(result)
+    stdout = str(updated.get("stdout") or "")
+    for source, target in replacements.items():
+        stdout = stdout.replace(source, target)
+    updated["stdout"] = stdout
     return updated
 
 
@@ -2038,6 +2117,7 @@ def run_python_in_sandbox(
     timeout: int = 30,
     task_files: Optional[List[Dict[str, str]]] = None,
     target_path: str = "",
+    output_dir: str = "",
 ) -> Dict[str, Any]:
     """Execute Python code in the sandbox. Returns structured stdout/stderr/files.
 
@@ -2057,7 +2137,11 @@ def run_python_in_sandbox(
         resolved_target = _workspace_target_path(target_path)
         target_existed = bool(resolved_target and resolved_target.is_file())
         _prepare_sandbox_target_paths(tmpdir, target_path)
-        prepared_code = _prepend_task_file_context(code, staged_entries)
+        prepared_code = _prepend_task_file_context(
+            code,
+            staged_entries,
+            output_dir=output_dir,
+        )
         result = run_python(prepared_code, timeout=normalized_timeout, work_dir=tmpdir)
         result = _sync_target_outputs_from_sandbox(
             tmpdir,
@@ -2066,9 +2150,13 @@ def run_python_in_sandbox(
             target_existed=target_existed,
         )
         result = _sync_created_workspace_files_from_sandbox(tmpdir, result)
+        result = _relocate_root_created_files_to_output_dir(
+            result,
+            output_dir=output_dir,
+        )
         if staged_entries:
             result = _sync_staged_files_to_source(staged_entries, result)
-        return _wrap_sandbox_result(result)
+        return _wrap_sandbox_result(result, output_dir=output_dir)
     except Exception as e:
         return SandboxRunResult(
             {
@@ -2119,7 +2207,60 @@ def _cleanup_sandbox_tmpdir(tmpdir: str) -> None:
             )
 
 
-def _wrap_sandbox_result(result: Dict[str, Any]) -> Dict[str, Any]:
+def _relocate_materialized_files_to_output_dir(
+    materialized_files: Dict[str, str],
+    *,
+    output_dir: str,
+) -> Dict[str, str]:
+    target_dir = _workspace_output_dir_path(output_dir)
+    if target_dir is None or not materialized_files:
+        return materialized_files
+    workspace_root = Path(_get_workspace_root()).resolve()
+    relocated: Dict[str, str] = {}
+    changed = False
+    for name, raw_path in materialized_files.items():
+        path_text = str(raw_path or "").strip()
+        if not path_text:
+            continue
+        try:
+            source = Path(path_text).resolve()
+        except OSError:
+            relocated[name] = path_text
+            continue
+        if (
+            source.parent != workspace_root
+            or source.suffix.lower() not in _WORKSPACE_CREATED_FILE_EXTS
+        ):
+            relocated[name] = path_text
+            continue
+        target = (target_dir / source.name).resolve()
+        try:
+            target.relative_to(workspace_root)
+        except ValueError:
+            relocated[name] = path_text
+            continue
+        if source == target:
+            relocated[name] = str(source)
+            continue
+        if target.exists() or not source.is_file():
+            relocated[name] = path_text
+            continue
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(target))
+        except OSError:
+            relocated[name] = path_text
+            continue
+        relocated[name] = str(target)
+        changed = True
+    return relocated if changed else materialized_files
+
+
+def _wrap_sandbox_result(
+    result: Dict[str, Any],
+    *,
+    output_dir: str = "",
+) -> Dict[str, Any]:
     """Normalize sandbox result into structured runtime payload."""
     text = _format_sandbox_result(result)
     markers = _parse_koto_file_markers(str(result.get("stdout", "")))
@@ -2129,6 +2270,10 @@ def _wrap_sandbox_result(result: Dict[str, Any]) -> Dict[str, Any]:
     if not isinstance(generated_files, dict):
         generated_files = {}
     materialized_files = _materialize_sandbox_files(generated_files)
+    materialized_files = _relocate_materialized_files_to_output_dir(
+        materialized_files,
+        output_dir=output_dir,
+    )
     # fallback: when stdout has no KOTO_CREATED markers, use sandbox-captured files
     if not created and materialized_files:
         created = list(materialized_files.values())
@@ -2271,17 +2416,34 @@ def copy_file(source: str, destination: str) -> str:
             {"error": f"Invalid destination: {destination}"}, ensure_ascii=False
         )
     try:
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
         write_warning = (
             _ensure_existing_file_writable(dst) if os.path.exists(dst) else ""
         )
-        shutil.copy2(src, dst)
+        result = _file_service().copy_file(src, dst, overwrite=True)
+        if not result.get("success"):
+            error_text = str(result.get("error") or "复制失败")
+            if (
+                any(
+                    token in error_text.lower()
+                    for token in ("permission", "denied")
+                )
+                or "权限" in error_text
+            ):
+                return _blocked_write_result(
+                    _result_path(destination, dst),
+                    summary=error_text,
+                    suggested_next_step=_nonwritable_target_next_step(dst),
+                    operation="copy_file",
+                    file_type=Path(dst).suffix.lstrip(".").lower(),
+                )
+            return json.dumps({"error": error_text}, ensure_ascii=False)
+        copied_path = str(result.get("destination") or dst)
         return _success_result(
-            _result_path(destination, dst),
+            _result_path(destination, copied_path),
             operation="copy_file",
-            summary=f"已复制文件到 {os.path.basename(dst)}",
+            summary=f"已复制文件到 {os.path.basename(copied_path)}",
             change_type="create",
-            file_type=Path(dst).suffix.lstrip(".").lower(),
+            file_type=Path(copied_path).suffix.lstrip(".").lower(),
             focus=True,
             warning=write_warning,
         )
@@ -5538,7 +5700,88 @@ class TaskToolsPlugin(AgentPlugin):
             timeout=timeout,
             task_files=self._task_files,
             target_path=str(self._request_context.get("target_path") or ""),
+            output_dir=self._contextual_output_directory(),
         )
+
+    def _contextual_output_directory(self) -> str:
+        target_path = str(self._request_context.get("target_path") or "").strip()
+        if target_path:
+            normalized_target = target_path.replace("\\", "/").strip("/")
+            if "/" in normalized_target:
+                parent = str(Path(normalized_target).parent).replace("\\", "/")
+                if parent and parent != ".":
+                    return parent
+
+        file_dirs: set[str] = set()
+        for item in self._task_files:
+            if not isinstance(item, dict):
+                continue
+            path_text = str(item.get("path") or "").strip()
+            if not path_text:
+                continue
+            parent = str(Path(path_text.replace("\\", "/")).parent).replace("\\", "/")
+            if parent not in {"", "."}:
+                file_dirs.add(parent)
+        if len(file_dirs) == 1:
+            return next(iter(file_dirs))
+
+        task_text = str(self._request_context.get("task") or "").casefold()
+        if not task_text:
+            return ""
+        task_dir = self._contextual_output_directory_from_task_text(task_text)
+        if task_dir:
+            return task_dir
+        workspace_root = Path(self._workspace_root or _get_workspace_root())
+        try:
+            matches = [
+                child.name
+                for child in workspace_root.iterdir()
+                if child.is_dir() and child.name.casefold() in task_text
+            ]
+        except Exception:
+            matches = []
+        unique_matches = sorted(set(matches))
+        if len(unique_matches) == 1:
+            return unique_matches[0]
+        return ""
+
+    def _contextual_output_directory_from_task_text(self, task_text: str) -> str:
+        candidates: set[str] = set()
+        for match in re.finditer(
+            r"(?P<dir>[A-Za-z0-9_. -]+)/(?:[A-Za-z0-9_. -]+)\.(?:csv|xlsx|xlsm|docx|md|txt|json|pptx|pdf)",
+            task_text,
+            re.IGNORECASE,
+        ):
+            directory = str(match.group("dir") or "").strip().strip("/")
+            if directory and not Path(directory).suffix:
+                candidates.add(directory)
+        workspace_root = Path(self._workspace_root or _get_workspace_root())
+        existing = []
+        for candidate in candidates:
+            try:
+                target = (workspace_root / candidate).resolve()
+                target.relative_to(workspace_root.resolve())
+            except Exception:
+                continue
+            if target.is_dir():
+                existing.append(candidate.replace("\\", "/"))
+        unique_existing = sorted(set(existing))
+        return unique_existing[0] if len(unique_existing) == 1 else ""
+
+    def _contextual_create_file_path(self, path: str) -> str:
+        raw_path = str(path or "").strip()
+        if not raw_path:
+            return raw_path
+        normalized = raw_path.replace("\\", "/").strip()
+        if os.path.isabs(raw_path) or "/" in normalized.strip("/"):
+            return raw_path
+        output_dir = self._contextual_output_directory()
+        if not output_dir:
+            return raw_path
+        return str(Path(output_dir.replace("\\", "/")) / normalized).replace("\\", "/")
+
+    def _create_file(self, path: str, content: str = "") -> str:
+        return create_file(self._contextual_create_file_path(path), content)
 
     def _annotate_file(
         self,
@@ -5779,7 +6022,7 @@ class TaskToolsPlugin(AgentPlugin):
             },
             {
                 "name": "create_file",
-                "func": create_file,
+                "func": self._create_file,
                 "description": (
                     "Create a new file in the workspace with given content. "
                     "Args: path (str, relative), content (str)."
