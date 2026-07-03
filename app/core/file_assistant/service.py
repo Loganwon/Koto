@@ -9,7 +9,7 @@ from typing import Any, Callable
 import zipfile
 
 TEXT_EXTENSIONS = {
-    ".txt", ".md", ".markdown",
+    ".txt", ".md", ".markdown", ".csv",
     ".py", ".js", ".ts", ".json", ".html", ".css", ".xml",
     ".sh", ".bash", ".yaml", ".yml",
     ".c", ".cpp", ".h", ".hpp", ".java", ".rb", ".go",
@@ -129,7 +129,7 @@ class FileAssistantService:
         if ext in TEXT_EXTENSIONS:
             source = Path(text_source_path) if text_source_path is not None else path
             content = source.read_text(encoding="utf-8", errors="replace")
-            file_type = "text" if ext in {".txt", ".md", ".markdown"} else "code"
+            file_type = "text" if ext in {".txt", ".md", ".markdown", ".csv"} else "code"
             return ParsedEditorFile(
                 file_type=file_type,
                 data={"content": content, "language": ext.lstrip("."), "extension": ext},
