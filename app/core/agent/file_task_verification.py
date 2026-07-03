@@ -126,10 +126,10 @@ def verification_precheck(
 
     if not write_intent and readonly_fallback_used:
         return {
-            "passed": True,
-            "status": "context_summary_fallback",
-            "summary": "模型不可用，已基于显式上下文生成可见内容摘要。",
-            "remaining": ["恢复模型后可生成更完整的 AI 分析"],
+            "passed": False,
+            "status": "needs_attention",
+            "summary": "模型未返回完整自然语言答案，已基于显式上下文生成临时摘要，但仍需重新生成完整回答。",
+            "remaining": ["恢复模型后重新生成完整 AI 分析，而不是仅使用上下文摘要"],
         }
 
     return None

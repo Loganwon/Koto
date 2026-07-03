@@ -15,6 +15,7 @@ from app.core.agent.file_task_recipes import (
     select_task_recipe,
     semantic_markers,
 )
+from app.core.agent.file_task_targeting import files_explicitly_mentioned_in_task
 
 _SOURCE_CONTENT_REQUIRED_PATTERNS = (
     re.compile(
@@ -53,6 +54,39 @@ _TOP_WORDS = {
     "nine": 9,
     "ten": 10,
 }
+_ZH_COUNT_WORDS = {
+    "一": 1,
+    "二": 2,
+    "两": 2,
+    "三": 3,
+    "四": 4,
+    "五": 5,
+    "六": 6,
+    "七": 7,
+    "八": 8,
+    "九": 9,
+    "十": 10,
+}
+_IGNORED_REQUIRED_PHRASES = {
+    "bullet",
+    "bullets",
+    "markdown",
+    "md",
+    "word",
+    "docx",
+    "excel",
+    "xlsx",
+    "pdf",
+}
+_DOCX_TABLE_OUTPUT_PATTERN = re.compile(
+    r"(?:创建|新增|生成|插入|添加|加入|追加|写入|放入|包含|包括|附上).{0,40}"
+    r"(?:真实\s*)?(?:word|docx|文档)?\s*(?:表格|table)"
+    r"|(?:真实\s*)?(?:word|docx|文档)?\s*(?:表格|table).{0,40}"
+    r"(?:创建|新增|生成|插入|添加|加入|追加|写入|放入|包含|包括|附上)"
+    r"|(?:create|add|insert|append|write|include|put).{0,40}"
+    r"(?:real\s*)?(?:word|docx|document)?\s*table",
+    re.IGNORECASE,
+)
 
 
 def should_attempt_repair(
@@ -175,6 +209,11 @@ def evaluate_task_quality_gate(
         and _looks_like_local_docx_edit_request(task_text)
         and not _looks_like_table_request(task_text)
     )
+    actual_docx_paragraphs = (
+        _target_docx_quality_paragraph_count(request, file_changes)
+        if target_type in {"docx", "doc"} and file_changes
+        else 0
+    )
 
     criteria: List[Dict[str, Any]] = []
     metric_values = {
@@ -202,6 +241,16 @@ def evaluate_task_quality_gate(
     )
     explicit_top_table_gate = _top_table_requirement_gate(request, file_changes)
     explicit_section_gates = _explicit_docx_section_gates(request, file_changes)
+    explicit_phrase_gate = _explicit_required_phrase_gate(request, file_changes)
+    explicit_bullet_count_gate = _explicit_bullet_count_gate(request, file_changes)
+    explicit_slide_count_gate = _explicit_slide_count_gate(
+        request, file_changes, target_type
+    )
+    explicit_spreadsheet_chart_gate = _spreadsheet_chart_requirement_gate(
+        request,
+        file_changes,
+        target_type,
+    )
     seen_recipe_criteria: set[str] = set()
     if recipe_match and not local_docx_edit_request:
         for gate in recipe_match.recipe.quality_gates:
@@ -217,14 +266,32 @@ def evaluate_task_quality_gate(
             }
             metric_name = str(gate.get("metric") or "").strip()
             actual = int(metric_values.get(metric_name, 0) or 0)
+            if metric_name == "paragraphs_written" and actual_docx_paragraphs:
+                actual = max(actual, actual_docx_paragraphs)
             minimum = int(gate.get("minimum") or 0)
             if any_operation:
-                passed = bool(operations.intersection(any_operation)) and actual >= minimum
+                operation_present = bool(operations.intersection(any_operation))
+                if (
+                    not operation_present
+                    and "write_docx_content" in any_operation
+                    and "run_python_code" in operations
+                    and actual_docx_paragraphs
+                ):
+                    operation_present = True
+                passed = operation_present and actual >= minimum
                 detail = str(gate.get("detail") or "").format(
                     operations=", ".join(sorted(operations)) or "无", actual=actual
                 )
             else:
-                passed = (not operation or operation in operations) and actual >= minimum
+                operation_present = not operation or operation in operations
+                if (
+                    not operation_present
+                    and operation == "write_docx_content"
+                    and "run_python_code" in operations
+                    and actual_docx_paragraphs
+                ):
+                    operation_present = True
+                passed = operation_present and actual >= minimum
                 detail = str(gate.get("detail") or "").format(
                     operations=", ".join(sorted(operations)) or "无",
                     actual=actual,
@@ -253,6 +320,14 @@ def evaluate_task_quality_gate(
         if explicit_top_table_gate:
             criteria.append(explicit_top_table_gate)
         criteria.extend(explicit_section_gates)
+        if explicit_phrase_gate:
+            criteria.append(explicit_phrase_gate)
+        if explicit_bullet_count_gate:
+            criteria.append(explicit_bullet_count_gate)
+        if explicit_slide_count_gate:
+            criteria.append(explicit_slide_count_gate)
+        if explicit_spreadsheet_chart_gate:
+            criteria.append(explicit_spreadsheet_chart_gate)
         failed = [item for item in criteria if not item.get("passed")]
         return {
             "passed": not failed,
@@ -315,6 +390,12 @@ def evaluate_task_quality_gate(
         if explicit_source_content_gate:
             criteria.append(explicit_source_content_gate)
         criteria.extend(explicit_section_gates)
+        if explicit_phrase_gate:
+            criteria.append(explicit_phrase_gate)
+        if explicit_bullet_count_gate:
+            criteria.append(explicit_bullet_count_gate)
+        if explicit_slide_count_gate:
+            criteria.append(explicit_slide_count_gate)
         failed = [item for item in criteria if not item.get("passed")]
         return {
             "passed": not failed,
@@ -335,10 +416,12 @@ def evaluate_task_quality_gate(
                     "write_docx_content" in operations
                     and paragraphs_written >= narrative_minimum
                 )
-                or paragraphs_written >= narrative_minimum,
+                or paragraphs_written >= narrative_minimum
+                or (bool(file_changes) and actual_docx_paragraphs >= narrative_minimum),
                 detail=(
                     "DOCX 报告/分析任务应写入可读文本结构；"
                     f"当前段落写入数：{paragraphs_written}，"
+                    f"目标文档实际段落数：{actual_docx_paragraphs}，"
                     f"最低要求：{narrative_minimum}。"
                 ),
                 priority="high",
@@ -347,8 +430,13 @@ def evaluate_task_quality_gate(
 
     if (
         target_type in {"docx", "doc"}
-        and _looks_like_table_request(task_text)
-        and not _looks_like_problem_analysis_request(task_text)
+        and (
+            _looks_like_docx_table_output_request(task_text)
+            or (
+                _looks_like_table_request(task_text)
+                and not _looks_like_problem_analysis_request(task_text)
+            )
+        )
     ):
         criteria.append(
             quality_gate_result(
@@ -466,12 +554,13 @@ def evaluate_task_quality_gate(
             )
         )
 
-    if target_type in {"xlsx", "xlsm", "csv"} and not criteria:
+    if target_type in {"xlsx", "xlsm"} and not criteria:
         spreadsheet_metric_total = rows_written + cells_written
+        spreadsheet_write_ops = {"write_sheet_data", "run_python_code"}
         criteria.append(
             quality_gate_result(
                 criterion="generic_spreadsheet_has_native_write",
-                passed="write_sheet_data" in operations
+                passed=bool(operations.intersection(spreadsheet_write_ops))
                 and spreadsheet_metric_total > 0,
                 detail=(
                     "表格写入任务必须产生可核验的单元格/行写入指标；"
@@ -482,11 +571,41 @@ def evaluate_task_quality_gate(
             )
         )
 
+    if target_type == "csv" and not criteria:
+        csv_metric_total = rows_written + cells_written
+        csv_write_ops = {"create_file", "extract_to_file", "run_python_code", "write_sheet_data"}
+        csv_output_text = _target_text_for_quality_gate(request, file_changes)
+        csv_has_content = bool(str(csv_output_text or "").strip())
+        criteria.append(
+            quality_gate_result(
+                criterion="generic_csv_has_written_content",
+                passed=(
+                    bool(operations.intersection(csv_write_ops))
+                    and (csv_metric_total > 0 or csv_has_content)
+                ),
+                detail=(
+                    "CSV 写入任务必须产生非空 CSV 内容或可核验的行/单元格指标；"
+                    f"当前操作：{', '.join(sorted(operations)) or '无'}，"
+                    f"行/单元格指标合计：{csv_metric_total}，"
+                    f"CSV 内容：{'已生成' if csv_has_content else '未检测到'}。"
+                ),
+                priority="high",
+            )
+        )
+
     if explicit_source_content_gate:
         criteria.append(explicit_source_content_gate)
     if explicit_top_table_gate:
         criteria.append(explicit_top_table_gate)
     criteria.extend(explicit_section_gates)
+    if explicit_phrase_gate:
+        criteria.append(explicit_phrase_gate)
+    if explicit_bullet_count_gate:
+        criteria.append(explicit_bullet_count_gate)
+    if explicit_slide_count_gate:
+        criteria.append(explicit_slide_count_gate)
+    if explicit_spreadsheet_chart_gate:
+        criteria.append(explicit_spreadsheet_chart_gate)
 
     failed = [item for item in criteria if not item.get("passed")]
     return {
@@ -604,8 +723,9 @@ def _output_text_for_quality_gate(
     request: FileTaskRequest, file_changes: List[Dict[str, Any]]
 ) -> str:
     parts: List[str] = []
-    for path_text in _quality_target_paths(request, file_changes):
-        parts.append(_read_quality_text_from_path(path_text))
+    target_text = _target_text_for_quality_gate(request, file_changes)
+    if target_text:
+        parts.append(target_text)
     for change in file_changes:
         if not isinstance(change, dict):
             continue
@@ -626,17 +746,30 @@ def _output_text_for_quality_gate(
     return "\n".join(part for part in parts if part)
 
 
+def _target_text_for_quality_gate(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> str:
+    parts: List[str] = []
+    for path_text in _quality_target_paths(request, file_changes):
+        text = _read_quality_text_from_path(path_text)
+        if text:
+            parts.append(text)
+    return "\n".join(parts)
+
+
 def _read_quality_text_from_path(path_text: str) -> str:
     path_value = str(path_text or "").strip()
     if not path_value:
         return ""
     try:
-        path = Path(path_value)
-        if not path.exists() or not path.is_file():
+        path = _resolve_quality_path(path_value)
+        if not path:
             return ""
         suffix = path.suffix.lower().lstrip(".")
         if suffix in {"docx", "doc"}:
             return _read_docx_quality_text(path)
+        if suffix in {"pptx", "ppt"}:
+            return _read_pptx_quality_text(path)
         if suffix not in _TEXT_SOURCE_SUFFIXES:
             return ""
         return path.read_text(encoding="utf-8", errors="replace")[:_QUALITY_TEXT_LIMIT]
@@ -664,6 +797,342 @@ def _read_docx_quality_text(path: Path) -> str:
     return "\n".join(parts)[:_QUALITY_TEXT_LIMIT]
 
 
+def _read_pptx_quality_text(path: Path) -> str:
+    try:
+        from pptx import Presentation
+
+        presentation = Presentation(str(path))
+    except Exception:
+        return ""
+    parts: List[str] = []
+    for index, slide in enumerate(presentation.slides, 1):
+        slide_parts: List[str] = []
+        for shape in slide.shapes:
+            text = str(getattr(shape, "text", "") or "").strip()
+            if text:
+                slide_parts.append(text)
+        if slide_parts:
+            parts.append(f"Slide {index}\n" + "\n".join(slide_parts))
+    return "\n".join(parts)[:_QUALITY_TEXT_LIMIT]
+
+
+def _explicit_required_phrase_gate(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> Dict[str, Any] | None:
+    phrases = _explicit_required_phrases(str(request.task or ""))
+    if not phrases:
+        return None
+    output_text = _output_text_for_quality_gate(request, file_changes)
+    normalized_output = _normalize_quality_phrase(output_text)
+    missing = [
+        phrase
+        for phrase in phrases
+        if _normalize_quality_phrase(phrase) not in normalized_output
+    ]
+    return quality_gate_result(
+        criterion="explicit_required_phrases_present",
+        passed=not missing,
+        detail=(
+            "用户显式要求输出包含这些短语；"
+            + (
+                "目标产物中均已找到。"
+                if not missing
+                else "目标产物缺少：" + "、".join(missing[:5])
+            )
+        ),
+        priority="critical",
+    )
+
+
+def _explicit_slide_count_gate(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]], target_type: str
+) -> Dict[str, Any] | None:
+    if target_type not in {"pptx", "ppt"}:
+        return None
+    expected = _explicit_slide_count(str(request.task or ""))
+    if expected is None:
+        return None
+    actual = _target_presentation_slide_count(request, file_changes)
+    return quality_gate_result(
+        criterion="explicit_pptx_slide_count",
+        passed=actual == expected,
+        detail=(
+            f"用户显式要求幻灯片页数为 {expected}；"
+            f"目标演示文稿可核验页数：{actual}。"
+        ),
+        priority="critical",
+    )
+
+
+def _explicit_slide_count(task: str) -> int | None:
+    text = str(task or "")
+    count_token = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|一|二|两|三|四|五|六|七|八|九|十"
+    patterns = (
+        rf"(?:正好|恰好|exactly|必须正好)\s*(?P<count>{count_token})\s*(?:页|张|个)?\s*(?:幻灯片|slides?)",
+        rf"(?P<count>{count_token})\s*(?:页|张|个)\s*(?:幻灯片|slides?)",
+        rf"(?P<count>{count_token})\s*slides?",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        value = _count_word_to_int(match.group("count"))
+        if value is not None:
+            return value
+    return None
+
+
+def _target_presentation_slide_count(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> int:
+    counts = [
+        _presentation_slide_count(path_text)
+        for path_text in _quality_target_paths(request, file_changes)
+        if str(path_text or "").lower().endswith((".pptx", ".ppt"))
+    ]
+    return max(counts, default=0)
+
+
+def _presentation_slide_count(path_text: str) -> int:
+    resolved = _resolve_quality_path(path_text)
+    if not resolved:
+        return 0
+    try:
+        from pptx import Presentation
+
+        presentation = Presentation(str(resolved))
+        return len(presentation.slides)
+    except Exception:
+        return 0
+
+
+def _explicit_bullet_count_gate(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> Dict[str, Any] | None:
+    expected = _explicit_bullet_count(str(request.task or ""))
+    if expected is None:
+        return None
+    output_text = _target_text_for_quality_gate(
+        request, file_changes
+    ) or _output_text_for_quality_gate(request, file_changes)
+    actual = _quality_bullet_count(output_text)
+    return quality_gate_result(
+        criterion="explicit_bullet_count",
+        passed=actual == expected,
+        detail=(
+            f"用户显式要求 bullet 数量为 {expected}；"
+            f"目标产物中可核验 bullet 数量：{actual}。"
+        ),
+        priority="critical",
+    )
+
+
+def _explicit_bullet_count(task: str) -> int | None:
+    text = str(task or "")
+    count_token = r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|一|二|两|三|四|五|六|七|八|九|十"
+    patterns = (
+        rf"(?:正好|恰好|exactly)\s*(?P<count>{count_token})\s*(?:条|个|项)?\s*(?:bullet|bullets|要点|项目)",
+        rf"(?P<count>{count_token})\s*(?:条|个|项)?\s*(?:bullet|bullets)",
+        rf"(?:bullet|bullets|要点|项目).{{0,12}}(?:正好|恰好|exactly)\s*(?P<count>{count_token})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if not match:
+            continue
+        value = _count_word_to_int(match.group("count"))
+        if value is not None:
+            return value
+    return None
+
+
+def _count_word_to_int(value: str) -> int | None:
+    token = str(value or "").strip().casefold()
+    if not token:
+        return None
+    if token.isdigit():
+        number = int(token)
+        return number if 0 <= number <= 50 else None
+    if token in _TOP_WORDS:
+        return _TOP_WORDS[token]
+    return _ZH_COUNT_WORDS.get(token)
+
+
+def _quality_bullet_count(text: str) -> int:
+    return len(
+        re.findall(
+            r"(?m)^\s*(?:[-*+]|(?:\d+[.)])|(?:[一二三四五六七八九十]+[、.]))\s+\S",
+            str(text or ""),
+        )
+    )
+
+
+def _explicit_required_phrases(task: str) -> List[str]:
+    text = str(task or "")
+    phrases: List[str] = []
+    patterns = (
+        (r"(?:标题分别为|标题依次为)\s*([^。；;\n]+)", True, False),
+        (r"(?:包含标题|标题为|标题是)\s*([^。；;\n，,]+)", False, False),
+        (r"(?:包含客户|保留客户|客户(?:为|是)?)\s*([^。；;\n，,]+)", False, False),
+        (r"(?:包含日期|日期(?:为|是)?)\s*([^。；;\n，]+)", False, False),
+        (
+            r"(?:最后包含一句|包含一句|包含短语|包含字样|包括字样)\s*([^。；;\n，,]+)",
+            False,
+            False,
+        ),
+        (r"(?:每条|每项).{0,16}(?:包含|包括)\s*([^。；;\n]+)", True, False),
+        (
+            r"([A-Za-z][A-Za-z0-9 /:&.+-]{2,80})\s*(?:小节|章节|section)",
+            False,
+            True,
+        ),
+    )
+    for pattern, split_segment, section_name in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            segment = match.group(1)
+            extracted = (
+                _english_phrases_from_segment(segment)
+                if split_segment
+                else [_clean_required_phrase(segment)]
+            )
+            for phrase in extracted:
+                keep_phrase = (
+                    _should_keep_required_section_phrase(phrase)
+                    if section_name
+                    else _should_keep_required_phrase(phrase)
+                )
+                if keep_phrase and phrase.casefold() not in {item.casefold() for item in phrases}:
+                    phrases.append(phrase)
+    return phrases
+
+
+def _english_phrases_from_segment(segment: str) -> List[str]:
+    pieces = re.split(r"\s*(?:和|及|与|、|，|;|；)\s*", str(segment or ""))
+    phrases: List[str] = []
+    for piece in pieces:
+        for match in re.finditer(
+            r"[A-Za-z][A-Za-z0-9]*(?:[ /:&.+-]+[A-Za-z0-9][A-Za-z0-9]*){0,8}",
+            piece,
+        ):
+            phrase = _clean_required_phrase(match.group(0))
+            if _should_keep_required_phrase(phrase) and phrase.casefold() not in {
+                item.casefold() for item in phrases
+            }:
+                phrases.append(phrase)
+    return phrases
+
+
+def _clean_required_phrase(text: str) -> str:
+    phrase = re.sub(r"\s+", " ", str(text or "")).strip(" .:-：")
+    phrase = re.sub(r"\s*(?:小节|章节|section)\s*$", "", phrase, flags=re.IGNORECASE)
+    return phrase.strip(" .:-：")
+
+
+def _should_keep_required_phrase(phrase: str) -> bool:
+    normalized = _normalize_quality_phrase(phrase)
+    return len(phrase) >= 3 and normalized not in _IGNORED_REQUIRED_PHRASES
+
+
+def _should_keep_required_section_phrase(phrase: str) -> bool:
+    normalized = _normalize_quality_phrase(phrase)
+    if not _should_keep_required_phrase(phrase):
+        return False
+    if re.search(
+        r"\b(?:create|generate|write|include|includes|must|should|the|this|that|report|document|docx|file)\b",
+        normalized,
+    ):
+        return False
+    generic_sections = {
+        "risk",
+        "risks",
+        "action",
+        "actions",
+        "next action",
+        "next actions",
+        "summary",
+        "summaries",
+        "section",
+        "sections",
+    }
+    return normalized not in generic_sections
+
+
+def _normalize_quality_phrase(text: str) -> str:
+    return re.sub(r"\s+", " ", str(text or "")).strip().casefold()
+
+
+def _spreadsheet_chart_requirement_gate(
+    request: FileTaskRequest,
+    file_changes: List[Dict[str, Any]],
+    target_type: str,
+) -> Dict[str, Any] | None:
+    if target_type not in {"xlsx", "xlsm"}:
+        return None
+    if not _looks_like_chart_request(str(request.task or "")):
+        return None
+    chart_count = _target_workbook_chart_count(request, file_changes)
+    return quality_gate_result(
+        criterion="spreadsheet_chart_request_has_workbook_chart",
+        passed=chart_count > 0,
+        detail=(
+            "用户要求 Excel 产物包含真实图表；"
+            f"目标工作簿中可核验图表数量：{chart_count}。"
+        ),
+        priority="critical",
+    )
+
+
+def _target_workbook_chart_count(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> int:
+    paths = list(_quality_target_paths(request, file_changes))
+    for file_info in request.files or []:
+        file_path = str(file_info.path or "").strip()
+        file_name = str(file_info.name or file_path).strip()
+        if file_info.target:
+            paths.extend([file_path, file_name])
+    counts = [_workbook_chart_count(path_text) for path_text in paths if path_text]
+    return max(counts, default=0)
+
+
+def _workbook_chart_count(path_text: str) -> int:
+    resolved = _resolve_quality_path(path_text)
+    if not resolved or resolved.suffix.lower() not in {".xlsx", ".xlsm"}:
+        return 0
+    try:
+        import openpyxl
+
+        workbook = openpyxl.load_workbook(str(resolved), data_only=False)
+    except Exception:
+        return 0
+    try:
+        return sum(len(getattr(sheet, "_charts", []) or []) for sheet in workbook.worksheets)
+    finally:
+        workbook.close()
+
+
+def _resolve_quality_path(path_text: str) -> Path | None:
+    raw = str(path_text or "").strip()
+    if not raw:
+        return None
+    candidates = [Path(raw)]
+    if not Path(raw).is_absolute():
+        project_root = Path(__file__).resolve().parents[3]
+        candidates.extend(
+            [
+                Path.cwd() / raw,
+                project_root / raw,
+                project_root / "workspace" / raw,
+            ]
+        )
+    for candidate in candidates:
+        try:
+            if candidate.exists() and candidate.is_file():
+                return candidate
+        except Exception:
+            continue
+    return None
+
+
 def _quality_target_paths(
     request: FileTaskRequest, file_changes: List[Dict[str, Any]]
 ) -> set[str]:
@@ -678,6 +1147,31 @@ def _quality_target_paths(
             if value:
                 paths.add(value)
     return paths
+
+
+def _target_docx_quality_paragraph_count(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> int:
+    paths = set(_quality_target_paths(request, file_changes))
+    target_names = {
+        Path(path_text).name.casefold()
+        for path_text in paths
+        if str(path_text or "").strip()
+    }
+    for file_info in request.files or []:
+        file_path = str(file_info.path or "").strip()
+        file_name = str(file_info.name or file_path).strip()
+        if file_info.target or Path(file_name).name.casefold() in target_names:
+            if file_path:
+                paths.add(file_path)
+            if file_name:
+                paths.add(file_name)
+    paragraph_counts = [
+        len(_read_docx_quality_paragraphs(path_text))
+        for path_text in paths
+        if str(path_text or "").lower().endswith((".docx", ".doc"))
+    ]
+    return max(paragraph_counts, default=0)
 
 
 def _quality_file_is_target(file_info: FileTaskFile, target_paths: set[str]) -> bool:
@@ -1153,7 +1647,14 @@ def repair_retry_message(
     if request.target_path:
         lines.append(f"目标文件：{request.target_path}")
 
-    request_files = getattr(request, "files", []) or []
+    request_files = list(getattr(request, "files", []) or [])
+    if not request_files:
+        request_files.extend(
+            files_explicitly_mentioned_in_task(
+                workspace_root=Path.cwd() / "workspace",
+                task=request.task,
+            )
+        )
     recipe_match = select_task_recipe(request, request_files, write_intent=True)
     if recipe_match:
         lines.append(f"当前任务路线：{recipe_match.recipe.id}")
@@ -1185,6 +1686,26 @@ def repair_retry_message(
             text = str(item or "").strip()
             if text:
                 lines.append(f"{index}. {text}")
+
+    if any("表格" in str(item or "") and "Word" in str(item or "") for item in remaining):
+        target_path = str(request.target_path or "").strip()
+        xlsx_sources = [
+            str(file_info.path or file_info.name or "").strip()
+            for file_info in request_files
+            if str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip("."))
+            .lower()
+            .strip()
+            in {"xlsx", "xlsm", "xls", "csv"}
+            and str(file_info.path or file_info.name or "").strip()
+        ]
+        lines.append(
+            "表格修复要求：必须调用 insert_excel_as_docx_table，把源表格作为真实 Word 表格写入目标 DOCX；"
+            "只调用 write_docx_content 写文字段落不能通过。"
+        )
+        if xlsx_sources:
+            lines.append(f"推荐 source_path：{xlsx_sources[0]}")
+        if target_path:
+            lines.append(f"推荐 target_path：{target_path}")
 
     if file_changes:
         lines.append("已观察到的文件变更：")
@@ -1252,6 +1773,10 @@ def _looks_like_problem_analysis_request(task: str) -> bool:
 
 def _looks_like_table_request(task: str) -> bool:
     return semantic_markers(task).get("table_request", False)
+
+
+def _looks_like_docx_table_output_request(task: str) -> bool:
+    return bool(_DOCX_TABLE_OUTPUT_PATTERN.search(str(task or "")))
 
 
 def _table_narrative_requirement_gate(
