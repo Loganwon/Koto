@@ -293,6 +293,18 @@ class TestGetModelForTask:
         assert result == "fallback-model"
 
     @patch("app.core.llm.model_fallback.get_fallback_executor")
+    def test_chat_uses_configured_deepseek_model_without_tier_downgrade(
+        self, mock_fbe_factory
+    ):
+        mock_fbe = MagicMock()
+        mock_fbe.is_available.return_value = True
+        mock_fbe_factory.return_value = mock_fbe
+        self.SD._dependencies["MODEL_MAP"] = {"CHAT": "deepseek-v4-pro"}
+
+        result = self.SD.get_model_for_task("CHAT")
+        assert result == "deepseek-v4-pro"
+
+    @patch("app.core.llm.model_fallback.get_fallback_executor")
     def test_empty_model_map_uses_defaults(self, mock_fbe_factory):
         mock_fbe = MagicMock()
         mock_fbe.is_available.return_value = True

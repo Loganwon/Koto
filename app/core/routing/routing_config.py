@@ -101,6 +101,8 @@ TASK_CORPUS: dict[str, list[str]] = {
         "cpu状态",
         "内存状态",
         "磁盘状态",
+        "打开微信",
+        "open wechat",
     ],
     "AGENT": [
         "发微信",

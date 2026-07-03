@@ -276,7 +276,7 @@ class SmartDispatcher:
         *,
         threshold: float = 0.72,
     ):
-        """ML Model Primary Route — model first, threshold 0.72"""
+        """ML model route for inputs not handled by deterministic rules."""
         early_model_result = None
 
         # --- Cloud AI Router (primary, fastest cloud model) ---
@@ -482,26 +482,6 @@ class SmartDispatcher:
             )
             return "CHAT", "💬 Capability/HowTo-Query", context_info
 
-        # ── 3. ML Model Primary Route ───────────────────────────────────────
-        _early_model_result = None
-        if not file_context:
-            primary_model_route, _early_model_result = cls._model_primary_route(
-                user_input,
-                user_lower,
-                file_context,
-                LocalExecutor,
-                WebSearcher,
-                similarity_scores,
-            )
-            if primary_model_route:
-                if cache is not None and lock is not None:
-                    with lock:
-                        cache[cache_key] = primary_model_route
-                        cache.move_to_end(cache_key)
-                        while len(cache) > cls._route_cache_max:
-                            cache.popitem(last=False)
-                return primary_model_route
-
         # ── 3. Composable Rule Chain ───────────────────────────────────────
         from app.core.routing.routing_rule_chain import RuleContext, build_rule_chain
 
@@ -529,7 +509,27 @@ class SmartDispatcher:
                         cache.popitem(last=False)
             return task, label, info
 
-        # ── 4. Model Second-Chance (threshold 0.62) ─────────────────────────
+        # ── 4. ML Model Primary Route ───────────────────────────────────────
+        _early_model_result = None
+        if not file_context:
+            primary_model_route, _early_model_result = cls._model_primary_route(
+                user_input,
+                user_lower,
+                file_context,
+                LocalExecutor,
+                WebSearcher,
+                similarity_scores,
+            )
+            if primary_model_route:
+                if cache is not None and lock is not None:
+                    with lock:
+                        cache[cache_key] = primary_model_route
+                        cache.move_to_end(cache_key)
+                        while len(cache) > cls._route_cache_max:
+                            cache.popitem(last=False)
+                return primary_model_route
+
+        # ── 5. Model Second-Chance (threshold 0.62) ─────────────────────────
         _SEC_THRESH = 0.62
         try:
             _TC2 = _get_task_classifier()
@@ -845,29 +845,9 @@ class SmartDispatcher:
                 "MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro")
             )
 
-        # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
+        # CHAT 任务使用当前配置的 CHAT 模型；可用性由 _avail 统一处理。
         if task_type == "CHAT":
             _chat_candidate = MODEL_MAP.get("CHAT", "gemini-2.5-flash")
-            # 安全网：如果 ModelManager 将 CHAT 路由到 Pro 模型（tier>7），强制回退到 Flash
-            _FLASH_FALLBACK = "gemini-2.5-flash"
-            try:
-                from web.model_manager import KNOWN_MODEL_REGISTRY
-
-                _candidate_tier = KNOWN_MODEL_REGISTRY.get(_chat_candidate, {}).get(
-                    "tier", 5
-                )
-                if _candidate_tier > 7:
-                    import logging as _lg
-
-                    _lg.getLogger(__name__).warning(
-                        "[Dispatcher] CHAT MODEL_MAP 指向 tier-%d 模型 %s，强制回退到 %s",
-                        _candidate_tier,
-                        _chat_candidate,
-                        _FLASH_FALLBACK,
-                    )
-                    _chat_candidate = _FLASH_FALLBACK
-            except Exception:
-                logger.warning("[SmartDispatcher] CHAT tier check failed", exc_info=True)
             return _avail(_chat_candidate)
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
