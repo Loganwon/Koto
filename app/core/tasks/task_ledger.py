@@ -683,6 +683,145 @@ class TaskLedger:
         logger.info(f"[TaskLedger] 清理 {deleted} 条历史任务（>{keep_days}天）")
         return deleted
 
+    def cancel_stale_startup_health_tasks(self, timeout_seconds: float = 300.0) -> int:
+        """
+        Mark orphaned startup health-check jobs as cancelled.
+
+        This is intentionally narrow: it only catches the built-in startup
+        health preset and the historical source=agent child tasks created by
+        that preset before JobRunner delegated without creating a second ledger
+        entry.
+        """
+        timeout = max(0.0, float(timeout_seconds))
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT task_id, started_at, created_at, source, task_type, user_input, metadata
+                FROM koto_tasks
+                WHERE status = ?
+                """,
+                (TaskStatus.RUNNING.value,),
+            ).fetchall()
+
+        now = datetime.now()
+        task_ids: List[str] = []
+        for row in rows:
+            started_raw = row["started_at"] or row["created_at"] or ""
+            try:
+                started_at = datetime.strptime(str(started_raw)[:26], "%Y-%m-%dT%H:%M:%S.%f")
+            except Exception:
+                continue
+            if (now - started_at).total_seconds() < timeout:
+                continue
+
+            metadata = {}
+            try:
+                metadata = json.loads(row["metadata"] or "{}")
+            except Exception:
+                metadata = {}
+            user_input = str(row["user_input"] or "")
+            source = str(row["source"] or "")
+            task_type = str(row["task_type"] or "")
+            preset = str(metadata.get("preset_key") or "")
+            trigger_name = str(metadata.get("trigger_name") or "")
+
+            is_job_runner_health = (
+                source == "job_runner"
+                and task_type == "agent_query"
+                and (
+                    preset == "startup_runtime_health"
+                    or "startup_runtime_health" in user_input
+                    or trigger_name == "启动自检摘要"
+                )
+            )
+            is_historical_agent_child = (
+                source == "agent"
+                and task_type == "agent"
+                and "请总结当前 Koto 的后台运行状态、关键模块是否就绪" in user_input
+            )
+            if is_job_runner_health or is_historical_agent_child:
+                task_ids.append(row["task_id"])
+
+        if not task_ids:
+            return 0
+
+        completed_at = _now_iso()
+        with self._lock:
+            self._conn.executemany(
+                """
+                UPDATE koto_tasks
+                SET status = ?, cancel_requested = 1, completed_at = ?
+                WHERE task_id = ? AND status = ?
+                """,
+                [
+                    (
+                        TaskStatus.CANCELLED.value,
+                        completed_at,
+                        task_id,
+                        TaskStatus.RUNNING.value,
+                    )
+                    for task_id in task_ids
+                ],
+            )
+            self._conn.commit()
+        for task_id in task_ids:
+            self._notify_status_change(task_id, TaskStatus.CANCELLED)
+        logger.info("[TaskLedger] 清理启动自检残留 running 任务 %d 条", len(task_ids))
+        return len(task_ids)
+
+    def cancel_stale_running_tasks(self, timeout_seconds: float = 86400.0) -> int:
+        """Mark old running tasks as cancelled after a process restart."""
+        timeout = max(0.0, float(timeout_seconds))
+        with self._lock:
+            rows = self._conn.execute(
+                """
+                SELECT task_id, started_at, created_at
+                FROM koto_tasks
+                WHERE status = ?
+                """,
+                (TaskStatus.RUNNING.value,),
+            ).fetchall()
+
+        now = datetime.now()
+        task_ids: List[str] = []
+        for row in rows:
+            started_raw = row["started_at"] or row["created_at"] or ""
+            try:
+                started_at = datetime.strptime(
+                    str(started_raw)[:26], "%Y-%m-%dT%H:%M:%S.%f"
+                )
+            except Exception:
+                continue
+            if (now - started_at).total_seconds() >= timeout:
+                task_ids.append(row["task_id"])
+
+        if not task_ids:
+            return 0
+
+        completed_at = _now_iso()
+        with self._lock:
+            self._conn.executemany(
+                """
+                UPDATE koto_tasks
+                SET status = ?, cancel_requested = 1, completed_at = ?
+                WHERE task_id = ? AND status = ?
+                """,
+                [
+                    (
+                        TaskStatus.CANCELLED.value,
+                        completed_at,
+                        task_id,
+                        TaskStatus.RUNNING.value,
+                    )
+                    for task_id in task_ids
+                ],
+            )
+            self._conn.commit()
+        for task_id in task_ids:
+            self._notify_status_change(task_id, TaskStatus.CANCELLED)
+        logger.info("[TaskLedger] 清理超时 running 孤儿任务 %d 条", len(task_ids))
+        return len(task_ids)
+
     # ── ProgressBus 联动 ──────────────────────────────────────────────────────
 
     def _notify_status_change(self, task_id: str, new_status: TaskStatus):

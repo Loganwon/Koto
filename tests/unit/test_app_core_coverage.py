@@ -1023,6 +1023,133 @@ class TestJobRunner:
         mock_ledger.mark_running.assert_called_with("tid-2")
         mock_ledger.mark_completed.assert_called_once()
 
+    def test_agent_query_handler_uses_job_runner_ledger_only(self):
+        """agent_query should not create a second source=agent ledger task."""
+        from app.api.agent_routes import AgentStepType
+        from app.core.jobs.job_runner import JobContext, _handle_agent_query
+
+        calls = []
+
+        class FakeStep:
+            step_type = AgentStepType.ANSWER
+            content = "done"
+
+            def to_dict(self):
+                return {"step_type": "ANSWER", "content": self.content}
+
+        class FakeAgent:
+            def run(self, **kwargs):
+                calls.append(kwargs)
+                yield FakeStep()
+
+        ctx = JobContext(
+            task_id="job-task",
+            session_id="system",
+            payload={"query": "health check", "history": []},
+            ledger=MagicMock(),
+            bus=MagicMock(),
+        )
+        with patch("app.api.agent_routes.get_agent", return_value=FakeAgent()):
+            result = _handle_agent_query(ctx)
+
+        assert result == "done"
+        assert calls
+        assert calls[0]["record_task"] is False
+
+    def test_recover_stale_tasks_cleans_startup_health_orphans(self, runner):
+        """Startup recovery should cancel old health-check leftovers first."""
+        from app.core.tasks.task_ledger import TaskStatus
+
+        mock_ledger = MagicMock()
+        mock_ledger.list_tasks.return_value = []
+
+        with (
+            patch("app.core.jobs.job_runner.time.sleep"),
+            patch(
+                "app.core.tasks.task_ledger.get_ledger",
+                return_value=mock_ledger,
+            ),
+        ):
+            runner._recover_stale_tasks()
+
+        mock_ledger.cancel_stale_running_tasks.assert_called_once_with(
+            timeout_seconds=86400.0
+        )
+        mock_ledger.cancel_stale_startup_health_tasks.assert_called_once_with(
+            timeout_seconds=300.0
+        )
+        mock_ledger.list_tasks.assert_called_once_with(
+            status=TaskStatus.PENDING, source="job_runner", limit=100
+        )
+
+    def test_task_ledger_cancels_only_stale_startup_health_tasks(self, tmp_path):
+        """Stale startup health rows are cancelled without touching normal jobs."""
+        from app.core.tasks.task_ledger import TaskLedger, TaskStatus
+
+        ledger = TaskLedger(str(tmp_path / "task_ledger.sqlite"))
+        old_started = "2000-01-01T00:00:00.000"
+
+        health = ledger.create(
+            session_id="system",
+            user_input='{"preset_key": "startup_runtime_health"}',
+            task_type="agent_query",
+            source="job_runner",
+            metadata={
+                "job_type": "agent_query",
+                "trigger_name": "启动自检摘要",
+            },
+        )
+        agent_child = ledger.create(
+            session_id="",
+            user_input="请总结当前 Koto 的后台运行状态、关键模块是否就绪，并给出简短的启动后检查结论。",
+            task_type="agent",
+            source="agent",
+        )
+        ordinary = ledger.create(
+            session_id="user",
+            user_input="ordinary running task",
+            task_type="agent",
+            source="agent",
+        )
+        for task in (health, agent_child, ordinary):
+            ledger.mark_running(task.task_id)
+            ledger._update_fields(task.task_id, started_at=old_started)
+
+        assert ledger.cancel_stale_startup_health_tasks(timeout_seconds=300.0) == 2
+        assert ledger.get(health.task_id).status == TaskStatus.CANCELLED
+        assert ledger.get(agent_child.task_id).status == TaskStatus.CANCELLED
+        assert ledger.get(ordinary.task_id).status == TaskStatus.RUNNING
+        ledger._conn.close()
+
+    def test_task_ledger_cancels_only_old_running_orphans(self, tmp_path):
+        """Generic startup cleanup leaves recent running tasks alone."""
+        from app.core.tasks.task_ledger import TaskLedger, TaskStatus
+
+        ledger = TaskLedger(str(tmp_path / "task_ledger.sqlite"))
+        old_task = ledger.create(
+            session_id="user",
+            user_input="old file task",
+            task_type="file_task",
+            source="file_task",
+        )
+        fresh_task = ledger.create(
+            session_id="user",
+            user_input="fresh file task",
+            task_type="file_task",
+            source="file_task",
+        )
+        ledger.mark_running(old_task.task_id)
+        ledger.mark_running(fresh_task.task_id)
+        ledger._update_fields(
+            old_task.task_id,
+            started_at="2000-01-01T00:00:00.000",
+        )
+
+        assert ledger.cancel_stale_running_tasks(timeout_seconds=86400.0) == 1
+        assert ledger.get(old_task.task_id).status == TaskStatus.CANCELLED
+        assert ledger.get(fresh_task.task_id).status == TaskStatus.RUNNING
+        ledger._conn.close()
+
     @patch("app.core.tasks.progress_bus.get_progress_bus")
     @patch("app.core.tasks.task_ledger.get_ledger")
     def test_run_job_handler_exception(self, mock_get_ledger, mock_get_bus, runner):
