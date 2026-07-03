@@ -16,6 +16,17 @@ def test_release_build_includes_file_task_chart_dependencies():
     assert "'matplotlib', 'scipy'" not in spec
 
 
+def test_release_build_includes_mcp_websocket_dependencies():
+    requirements = Path("config/requirements.txt").read_text(encoding="utf-8")
+    lock = Path("config/requirements.lock").read_text(encoding="utf-8")
+
+    assert "flask-sock>=0.7.0" in requirements
+    assert "websocket-client>=1.8.0" in requirements
+    assert "flask-sock==" in lock
+    assert "simple-websocket==" in lock
+    assert "websocket-client==" in lock
+
+
 def test_runtime_requirements_exclude_dev_only_tools():
     runtime_requirements = Path("config/requirements.txt").read_text(encoding="utf-8")
     dev_requirements = Path("config/requirements-dev.txt").read_text(encoding="utf-8")
