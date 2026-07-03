@@ -50,7 +50,12 @@ class FileTaskRecipeMatch:
         }
 
 
-_CHART_PATTERN = re.compile(r"(?:图表|做成图|绘图|画图|画.{0,4}图|可视化|图片|chart|plot|graph|image)", re.IGNORECASE)
+_CHART_PATTERN = re.compile(
+    r"(?:图表|做成图|绘图|画图|画.{0,4}图|可视化|图片|"
+    r"统计图|折线图|柱状图|饼图|散点图|曲线图|"
+    r"chart|plot|graph|image)",
+    re.IGNORECASE,
+)
 _PROBLEM_PATTERN = re.compile(r"(?:问题|风险|缺陷|异常|分析|审计|检查|issue|risk|problem|analy[sz]e|audit)", re.IGNORECASE)
 _TABLE_PATTERN = re.compile(r"(?:表格|工作表|数据表|sheet|table|spreadsheet)", re.IGNORECASE)
 _TABLE_PRESERVE_PATTERN = re.compile(
@@ -97,7 +102,7 @@ _FILE_FORMAT_CONVERT_PATTERN = re.compile(
     r"(?:转换|转成|转换为|导出为|另存为|保存为|输出为|convert|export|save as).{0,64}"
     r"(?:pdf|docx?|word|txt|text|md|markdown|html|xlsx?|excel|csv|pptx?|powerpoint|png|jpe?g|webp|bmp|gif)"
     r"|(?:pdf|docx?|word|txt|text|md|markdown|html|xlsx?|excel|csv|pptx?|powerpoint|png|jpe?g|webp|bmp|gif).{0,64}"
-    r"(?:格式|文件|file|format).{0,24}(?:转换|转成|导出|另存|保存|输出|convert|export|save)",
+    r"(?:格式|format).{0,24}(?:转换|转成|导出|另存|保存|convert|export|save)",
     re.IGNORECASE,
 )
 _DOCX_CLEAR_REVIEW_PATTERN = re.compile(
@@ -188,7 +193,8 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
     docx_write_phrase = bool(_DOCX_WRITE_PATTERN.search(text))
     docx_create_phrase = bool(_DOCX_CREATE_PATTERN.search(text))
     mentions_docx = any(marker in lowered for marker in ("docx", "word", "文档"))
-    has_docx_target = target_file_type in {"docx", "doc"} or "docx" in known_file_types or docx_write_phrase or docx_create_phrase
+    has_docx_output_target = target_file_type in {"docx", "doc"} or docx_write_phrase or docx_create_phrase
+    has_docx_target = has_docx_output_target or "docx" in known_file_types
     has_ppt = "pptx" in known_file_types or any(marker in lowered for marker in ("ppt", "pptx", "幻灯片", "演示文稿", "slides", "presentation", "deck"))
     table_mentioned = bool(_TABLE_PATTERN.search(text))
     table_preserve_only = bool(_TABLE_PRESERVE_PATTERN.search(text)) and not bool(
@@ -221,6 +227,7 @@ def semantic_markers(task: str, *, file_types: set[str] | None = None, target_fi
         "file_copy_request": bool(_FILE_COPY_PATTERN.search(text)),
         "cross_file_extract_request": bool(_CROSS_FILE_EXTRACT_PATTERN.search(text)),
         "docx_target": has_docx_target,
+        "docx_output_target": has_docx_output_target,
         "docx_write_phrase": docx_write_phrase,
         "docx_create_phrase": docx_create_phrase,
         "stepwise_confirmation_request": bool(_STEPWISE_PATTERN.search(text)),
@@ -400,6 +407,7 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         any_file_types=("docx", "doc"),
         target_file_types=("docx", "doc"),
         required_markers=("docx_template_fill_request", "docx_target"),
+        forbidden_markers=("table_request",),
         requires_write=True,
         matched_capabilities=("read_docx_content", "fill_docx_template"),
         plan_steps=(
@@ -680,7 +688,7 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         any_file_types=("xlsx", "xlsm", "csv"),
         target_file_types=("xlsx", "xlsm", "csv"),
         required_markers=("spreadsheet_write_request",),
-        forbidden_markers=("chart_request", "docx_report_request"),
+        forbidden_markers=("chart_request", "docx_report_request", "docx_output_target"),
         requires_write=True,
         matched_capabilities=("read_sheet_data", "write_sheet_data"),
         success_criteria=("表格修改任务必须写入真实单元格", "目标表格产生 cells_written > 0 的 file.changed"),
@@ -730,6 +738,44 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
                 "operation": "extract_to_file",
                 "priority": "critical",
                 "detail": "跨文件提取任务必须调用 extract_to_file；当前操作：{operations}。",
+            },
+        ),
+    ),
+    FileTaskRecipe(
+        id="docx_report_table_write",
+        task_family="summarize",
+        write_operation_kind="write",
+        priority=88,
+        target_file_types=("docx", "doc"),
+        required_markers=("docx_report_request", "docx_target", "table_request"),
+        requires_write=True,
+        matched_capabilities=(
+            "parse_file_to_text",
+            "read_sheet_data",
+            "insert_excel_as_docx_table",
+            "write_docx_content",
+        ),
+        success_criteria=(
+            "DOCX 报告/分析任务必须写入可读文本结构",
+            "涉及表格或预算核验时必须在目标 DOCX 中保留可核验表格/段落",
+            "目标 DOCX 产生 file.changed 事件",
+        ),
+        quality_gates=(
+            {
+                "criterion": "docx_report_has_narrative",
+                "operation": "write_docx_content",
+                "metric": "paragraphs_written",
+                "minimum": 3,
+                "priority": "high",
+                "detail": "DOCX 报告/分析任务应写入可读文本结构；当前段落写入数：{actual}。",
+            },
+            {
+                "criterion": "docx_table_request_has_table",
+                "operation": "insert_excel_as_docx_table",
+                "metric": "rows_written",
+                "minimum": 1,
+                "priority": "high",
+                "detail": "用户要求表格进入 Word；当前表格写入行数：{actual}。",
             },
         ),
     ),

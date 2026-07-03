@@ -41,7 +41,7 @@ _TASK_TEXT_FILE_REFERENCE_PATTERN = re.compile(
 )
 _OUTPUT_PATH_CONTEXT_PATTERNS = (
     re.compile(
-        r"(?:创建|新建|生成|导出|保存为|另存为|写入|输出到|放到|加入|target|output|create|generate|export|save as)",
+        r"(?:创建|新建|生成|导出|保存为|另存为|保存在|保存到|保存至|写入|写入到|输出到|输出至|放到|放在|存到|存入|加入|target|output|create|generate|export|save as)",
         re.IGNORECASE,
     ),
     re.compile(r"(?:新的|新|目标|输出|结果|产出).{0,12}(?:文件|文档|路径|path)", re.IGNORECASE),
@@ -299,11 +299,11 @@ _GLOBAL_READONLY_WRITE_NEGATION_PATTERNS = (
 )
 _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS = (
     re.compile(
-        r"(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新).{0,12}(?:原文件|源文件|原始文件|输入文件|已添加的?文件|当前文件)",
+        r"(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新).{0,12}(?:原文件|源文件|源\s*(?:docx|xlsx|xls|csv|pptx?|pdf)?|原始文件|输入文件|已添加的?文件|当前文件)",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:原文件|源文件|原始文件|输入文件|已添加的?文件|当前文件).{0,12}(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新)",
+        r"(?:原文件|源文件|源\s*(?:docx|xlsx|xls|csv|pptx?|pdf)?|原始文件|输入文件|已添加的?文件|当前文件).{0,12}(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新)",
         re.IGNORECASE,
     ),
     re.compile(
