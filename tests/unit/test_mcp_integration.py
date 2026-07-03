@@ -3,7 +3,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from flask import Flask
+
+
+TEST_MCP_API_KEY = "test-mcp-key"
+
+
+@pytest.fixture(autouse=True)
+def _mcp_test_api_key(monkeypatch):
+    monkeypatch.setenv("KOTO_MCP_API_KEY", TEST_MCP_API_KEY)
+
+
+def _mcp_rpc(client, payload: dict, headers: dict | None = None):
+    request_headers = {"X-Koto-MCP-Key": TEST_MCP_API_KEY}
+    if headers:
+        request_headers.update(headers)
+    return client.post("/api/mcp", json=payload, headers=request_headers)
 
 
 def test_mcp_registry_accepts_claude_style_stdio_config():
@@ -75,17 +91,14 @@ def test_mcp_routes_list_and_call_status_tool(monkeypatch):
     app.register_blueprint(mcp_bp)
     client = app.test_client()
 
-    listed = client.post(
-        "/api/mcp",
-        json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-    )
+    listed = _mcp_rpc(client, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
     assert listed.status_code == 200
     tool_names = [tool["name"] for tool in listed.get_json()["result"]["tools"]]
     assert "koto_mcp_status" in tool_names
 
-    called = client.post(
-        "/api/mcp",
-        json={
+    called = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 2,
             "method": "tools/call",
@@ -96,6 +109,107 @@ def test_mcp_routes_list_and_call_status_tool(monkeypatch):
     body = called.get_json()
     assert body["result"]["isError"] is False
     assert '"server_count": 0' in body["result"]["content"][0]["text"]
+
+
+def test_mcp_json_rpc_works_without_browser_csrf_but_rejects_untrusted_origin(monkeypatch):
+    from app.api import mcp_routes
+    from app.api.mcp_routes import mcp_bp
+    from web.app_blueprints import _exempt_csrf_blueprint
+    from web.app_factory import create_flask_app
+
+    monkeypatch.setattr(
+        mcp_routes,
+        "get_mcp_status",
+        lambda: {
+            "server_count": 0,
+            "tool_count": 0,
+            "servers": {},
+            "connect_results": {},
+            "injected_tool_count": 0,
+        },
+    )
+
+    app, _, _ = create_flask_app(__name__)
+    app.register_blueprint(mcp_bp)
+    _exempt_csrf_blueprint(app, mcp_bp)
+    client = app.test_client()
+
+    unauthenticated = client.post(
+        "/api/mcp",
+        json={"jsonrpc": "2.0", "id": 0, "method": "tools/list"},
+    )
+    assert unauthenticated.status_code == 401
+
+    listed = _mcp_rpc(client, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+    assert listed.status_code == 200
+    tool_names = [tool["name"] for tool in listed.get_json()["result"]["tools"]]
+    assert "koto_mcp_status" in tool_names
+
+    same_origin_event = client.post(
+        "/api/mcp/frontend-event",
+        json={"type": "codex_probe", "message": "same origin"},
+        headers={"Origin": "http://127.0.0.1:5000"},
+    )
+    assert same_origin_event.status_code == 200
+
+    rejected = _mcp_rpc(
+        client,
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
+        headers={"Origin": "https://example.invalid"},
+    )
+    assert rejected.status_code == 403
+    assert rejected.get_json()["error"] == "Untrusted MCP origin"
+
+
+def test_mcp_write_file_blocks_source_tree_but_allows_workspace(tmp_path, monkeypatch):
+    from app.api import mcp_routes
+
+    monkeypatch.setattr(mcp_routes, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(mcp_routes, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(mcp_routes, "resolve_project_path", lambda value: (tmp_path / value).resolve())
+    (tmp_path / "workspace").mkdir()
+    (tmp_path / "app").mkdir()
+
+    blocked = mcp_routes._koto_write_file("app/unsafe.py", "print('bad')")
+    allowed = mcp_routes._koto_write_file("workspace/notes.txt", "safe")
+
+    assert blocked["success"] is False
+    assert "blocked" in blocked["error"] or "not allowed" in blocked["error"]
+    assert allowed["success"] is True
+    assert (tmp_path / "workspace" / "notes.txt").read_text(encoding="utf-8") == "safe"
+    assert not (tmp_path / "app" / "unsafe.py").exists()
+
+
+def test_mcp_run_shell_uses_allowlist_without_shell(monkeypatch, tmp_path):
+    from app.api import mcp_routes
+
+    captured = {}
+
+    def fake_run(args, **kwargs):
+        captured["args"] = args
+        captured["shell"] = kwargs.get("shell")
+        captured["cwd"] = kwargs.get("cwd")
+
+        class Result:
+            returncode = 0
+            stdout = "ok"
+            stderr = ""
+
+        return Result()
+
+    monkeypatch.setattr(mcp_routes, "_project_root", lambda: tmp_path)
+    monkeypatch.setattr(mcp_routes, "project_root", lambda: tmp_path)
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    blocked = mcp_routes._koto_run_shell("cmd /c echo bad")
+    allowed = mcp_routes._koto_run_shell("python --version")
+
+    assert blocked["success"] is False
+    assert "allowlist" in blocked["error"]
+    assert allowed["success"] is True
+    assert captured["args"] == ["python", "--version"]
+    assert captured["shell"] is False
+    assert captured["cwd"] == str(tmp_path)
 
 
 def test_mcp_status_reports_exposed_tools_and_websocket_sessions(monkeypatch):
@@ -195,9 +309,9 @@ def test_mcp_routes_expose_supervision_tools(monkeypatch):
     assert "koto_search_code" in tool_names
     assert "koto_run_tests" in tool_names
 
-    called = client.post(
-        "/api/mcp",
-        json={
+    called = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 3,
             "method": "tools/call",
@@ -265,9 +379,9 @@ def test_mcp_task_status_tools_surface_task_ledger(tmp_path, monkeypatch):
     assert "koto_task_status" in tool_names
     assert "koto_task_progress_history" in tool_names
 
-    recent = client.post(
-        "/api/mcp",
-        json={
+    recent = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 18,
             "method": "tools/call",
@@ -283,9 +397,9 @@ def test_mcp_task_status_tools_surface_task_ledger(tmp_path, monkeypatch):
     assert "last_event_type" in recent_text
     assert "read_file" in recent_text
 
-    status = client.post(
-        "/api/mcp",
-        json={
+    status = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 19,
             "method": "tools/call",
@@ -336,9 +450,9 @@ def test_mcp_frontend_observability_routes_and_tools(tmp_path, monkeypatch):
     assert events[0]["type"] == "runtime_error"
     assert "undefined" in events[0]["message"]
 
-    called = client.post(
-        "/api/mcp",
-        json={
+    called = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 4,
             "method": "tools/call",
@@ -382,9 +496,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     app.register_blueprint(mcp_bp)
     client = app.test_client()
 
-    queued = client.post(
-        "/api/mcp",
-        json={
+    queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 5,
             "method": "tools/call",
@@ -419,9 +533,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert completed.status_code == 200
     assert completed.get_json()["action"]["status"] == "completed"
 
-    status = client.post(
-        "/api/mcp",
-        json={
+    status = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 6,
             "method": "tools/call",
@@ -436,9 +550,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert "completed" in status_text
     assert "navSettingsBtn" in status_text
 
-    panel_queued = client.post(
-        "/api/mcp",
-        json={
+    panel_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 7,
             "method": "tools/call",
@@ -459,9 +573,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert panel_payload["action"] == "open_panel"
     assert panel_payload["panel"] == "settings"
 
-    file_queued = client.post(
-        "/api/mcp",
-        json={
+    file_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 8,
             "method": "tools/call",
@@ -482,9 +596,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert file_payload["action"] == "open_workspace_file"
     assert file_payload["path"] == "demo/notes.txt"
 
-    read_queued = client.post(
-        "/api/mcp",
-        json={
+    read_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 9,
             "method": "tools/call",
@@ -505,9 +619,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert read_payload["action"] == "read_editor_content"
     assert read_payload["options"]["maxChars"] == 1000
 
-    selection_queued = client.post(
-        "/api/mcp",
-        json={
+    selection_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 10,
             "method": "tools/call",
@@ -526,9 +640,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     selection_payload = selection_action.get_json()["action"]
     assert selection_payload["action"] == "current_selection"
 
-    range_queued = client.post(
-        "/api/mcp",
-        json={
+    range_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 11,
             "method": "tools/call",
@@ -549,9 +663,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert range_payload["action"] == "select_text_range"
     assert range_payload["options"]["end"] == 10
 
-    replace_queued = client.post(
-        "/api/mcp",
-        json={
+    replace_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 12,
             "method": "tools/call",
@@ -572,9 +686,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert replace_payload["action"] == "replace_text_selection"
     assert replace_payload["value"] == "patched"
 
-    set_queued = client.post(
-        "/api/mcp",
-        json={
+    set_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 13,
             "method": "tools/call",
@@ -595,9 +709,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert set_payload["action"] == "set_editor_content"
     assert set_payload["value"] == "full content"
 
-    save_queued = client.post(
-        "/api/mcp",
-        json={
+    save_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 14,
             "method": "tools/call",
@@ -616,9 +730,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     save_payload = save_action.get_json()["action"]
     assert save_payload["action"] == "save_current_file"
 
-    context_queued = client.post(
-        "/api/mcp",
-        json={
+    context_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 15,
             "method": "tools/call",
@@ -639,9 +753,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert context_payload["action"] == "document_context"
     assert context_payload["options"]["shapeLimit"] == 20
 
-    pptx_queued = client.post(
-        "/api/mcp",
-        json={
+    pptx_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 16,
             "method": "tools/call",
@@ -664,9 +778,9 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
     assert pptx_payload["value"] == "Updated title"
     assert pptx_payload["options"]["shapeId"] == 2
 
-    docx_queued = client.post(
-        "/api/mcp",
-        json={
+    docx_queued = _mcp_rpc(
+        client,
+        {
             "jsonrpc": "2.0",
             "id": 17,
             "method": "tools/call",

@@ -19,6 +19,7 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict
+from urllib.parse import urlparse
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
@@ -56,6 +57,72 @@ mcp_bp = Blueprint("mcp", __name__, url_prefix="/api/mcp")
 # ── SSE session store ──────────────────────────────────────────────────
 _sse_sessions: Dict[str, Dict[str, Any]] = {}
 _SESSION_TTL = 300  # 5 min idle timeout
+
+
+def _resolve_mcp_api_key() -> str | None:
+    key = os.environ.get("KOTO_MCP_API_KEY", "").strip()
+    if key:
+        return key
+    jwt_secret = os.environ.get("KOTO_JWT_SECRET", "").strip()
+    if jwt_secret:
+        return jwt_secret
+    try:
+        secret_file = Path(__file__).resolve().parents[2] / "config" / "jwt_secret.txt"
+        if secret_file.exists():
+            return secret_file.read_text(encoding="utf-8").strip()
+    except Exception:
+        pass
+    return None
+
+
+def _origin_host(value: str) -> str:
+    try:
+        return (urlparse(value).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _is_trusted_browser_origin(origin: str) -> bool:
+    if not origin:
+        return True
+    origin_host = _origin_host(origin)
+    request_host = (request.host or "").split(":", 1)[0].lower()
+    return origin_host in {"localhost", "127.0.0.1", "::1"} or (
+        bool(origin_host) and origin_host == request_host
+    )
+
+
+def _validate_auth_token(token: str | None) -> bool:
+    expected = _resolve_mcp_api_key()
+    if expected is None:
+        return True
+    if not token:
+        return False
+    if token.startswith("Bearer "):
+        token = token[7:]
+    return token == expected
+
+
+_MCP_POST_AUTH_EXEMPT_PATHS = frozenset({
+    "/api/mcp/frontend-event",
+    "/api/mcp/frontend-action-result",
+    "/api/mcp/frontend-action",
+})
+
+
+@mcp_bp.before_request
+def _reject_untrusted_browser_origin():
+    if request.method in {"GET", "HEAD", "OPTIONS"}:
+        return None
+    origin = request.headers.get("Origin", "")
+    if origin and not _is_trusted_browser_origin(origin):
+        return jsonify({"success": False, "error": "Untrusted MCP origin"}), 403
+    if request.path in _MCP_POST_AUTH_EXEMPT_PATHS:
+        return None
+    token = request.headers.get("X-Koto-MCP-Key") or request.headers.get("Authorization")
+    if not _validate_auth_token(token):
+        return jsonify({"success": False, "error": "Invalid or missing MCP API key. Set KOTO_MCP_API_KEY env var or pass X-Koto-MCP-Key / Authorization header."}), 401
+    return None
 
 
 def _project_root() -> Path:
@@ -159,11 +226,51 @@ def _koto_project_overview(**_: Any) -> Dict[str, Any]:
     }
 
 
+_MCP_WRITABLE_PATHS = frozenset({
+    "workspace",
+    "logs",
+    "chats",
+    "models",
+})
+
+_MCP_BLOCKED_PATHS = frozenset({
+    "app",
+    "config",
+    "web",
+    "src",
+    "build",
+    "tests",
+    "docs",
+    "scripts",
+    "launcher",
+    "node_modules",
+    ".git",
+    ".venv",
+    ".koto",
+    ".agents",
+    ".claude",
+    ".codex",
+    ".codex_runtime",
+    ".nodeenv",
+    ".vscode",
+    ".webview2_profile",
+})
+
+
 def _koto_write_file(path: str = "", content: str = "", **_: Any) -> Dict[str, Any]:
     try:
         resolved = resolve_project_path(path)
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
+    relative = resolved.relative_to(project_root())
+    top_dir = relative.parts[0] if len(relative.parts) > 0 else ""
+    if resolved.suffix == ".py" and top_dir not in _MCP_WRITABLE_PATHS:
+        return {"success": False, "error": f"Writing .py files to '{top_dir}' is not allowed. Only writable in: {', '.join(sorted(_MCP_WRITABLE_PATHS))}"}
+    if top_dir in _MCP_BLOCKED_PATHS:
+        return {"success": False, "error": f"Writing to '{top_dir}' is blocked. Allowed directories: {', '.join(sorted(_MCP_WRITABLE_PATHS))}"}
+    if top_dir not in _MCP_WRITABLE_PATHS and top_dir != "":
+        if not resolved.is_relative_to(project_root() / "workspace"):
+            return {"success": False, "error": f"Writing to '{top_dir}' is not allowed. Only writable in: {', '.join(sorted(_MCP_WRITABLE_PATHS))}"}
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding="utf-8")
@@ -192,21 +299,123 @@ def _koto_read_file(path: str = "", max_chars: int = 50000, **_: Any) -> Dict[st
         return {"success": False, "error": str(exc)}
 
 
+_MCP_COMMAND_ALLOWLIST = frozenset({
+    "git",
+    "pytest",
+    "python",
+    "python3",
+    "pip",
+    "pip3",
+    "npm",
+    "npx",
+    "node",
+    "make",
+    "dir",
+    "ls",
+    "echo",
+    "cat",
+    "type",
+    "find",
+    "where",
+    "which",
+    "pwd",
+    "cd",
+    "tree",
+    "head",
+    "tail",
+    "wc",
+    "sort",
+    "uniq",
+    "grep",
+    "rg",
+    "curl",
+    "wget",
+    "tar",
+    "zip",
+    "unzip",
+    "cp",
+    "copy",
+    "mv",
+    "move",
+    "rm",
+    "del",
+    "mkdir",
+    "rmdir",
+    "chmod",
+    "chown",
+    "du",
+    "df",
+    "ps",
+    "tasklist",
+    "netstat",
+    "ipconfig",
+    "ifconfig",
+    "nslookup",
+    "ping",
+    "tracert",
+    "traceroute",
+    "docker",
+    "docker-compose",
+    "kubectl",
+    "helm",
+    "gh",
+    "openssl",
+    "ssh",
+    "scp",
+    "rsync",
+    "black",
+    "isort",
+    "flake8",
+    "mypy",
+    "bandit",
+    "ruff",
+    "pre-commit",
+    "coverage",
+    "pyinstaller",
+    "cython",
+    "gcc",
+    "g++",
+    "clang",
+    "cargo",
+    "go",
+    "java",
+    "javac",
+    "dotnet",
+    "pwsh",
+    "powershell",
+})
+
+
 def _koto_run_shell(
     command: str = "",
     timeout: int = 30,
     workdir: str = "",
     **_: Any,
 ) -> Dict[str, Any]:
+    import shlex
     import subprocess as _sp
+    if not command or not command.strip():
+        return {"success": False, "error": "Empty command"}
+    try:
+        args = shlex.split(command.strip())
+    except ValueError as exc:
+        return {"success": False, "error": f"Invalid command syntax: {exc}"}
+    if not args:
+        return {"success": False, "error": "Empty command after parsing"}
+    executable = args[0]
+    if executable not in _MCP_COMMAND_ALLOWLIST:
+        return {
+            "success": False,
+            "error": f"Command '{executable}' is not in the allowlist. Allowed commands: {', '.join(sorted(_MCP_COMMAND_ALLOWLIST))}",
+        }
     root = project_root()
     cwd = root / workdir if workdir else root
     if not cwd.exists():
         cwd = root
     try:
         proc = _sp.run(
-            command,
-            shell=True,  # nosec B602 — MCP server commands come from vetted configuration
+            args,
+            shell=False,
             capture_output=True,
             text=True,
             cwd=str(cwd),
@@ -220,6 +429,8 @@ def _koto_run_shell(
         }
     except _sp.TimeoutExpired:
         return {"success": False, "error": f"Command timed out after {timeout}s"}
+    except FileNotFoundError:
+        return {"success": False, "error": f"Command not found: {executable}"}
     except Exception as exc:
         return {"success": False, "error": str(exc)}
 

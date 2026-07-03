@@ -50,9 +50,9 @@ def _load_secret_key() -> str:
 
 
 def _resolve_cors_origins():
-    cors_origins = os.environ.get("KOTO_CORS_ORIGINS", "*")
-    if os.environ.get("KOTO_DEPLOY_MODE") == "cloud" and cors_origins == "*":
-        cors_origins = os.environ.get("KOTO_SITE_URL", "*")
+    cors_origins = os.environ.get("KOTO_CORS_ORIGINS", "http://localhost:5820,http://127.0.0.1:5820,http://localhost:5000,http://127.0.0.1:5000")
+    if os.environ.get("KOTO_DEPLOY_MODE") == "cloud" and "http://localhost" in cors_origins:
+        cors_origins = os.environ.get("KOTO_SITE_URL", cors_origins)
     return cors_origins
 
 

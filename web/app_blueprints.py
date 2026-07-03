@@ -74,6 +74,13 @@ def _exempt_csrf_endpoint(app: Flask, endpoint: str) -> None:
         exempt(view_func)
 
 
+def _exempt_csrf_blueprint(app: Flask, blueprint) -> None:
+    csrf = getattr(app, "extensions", {}).get("csrf")
+    exempt = getattr(csrf, "exempt", None)
+    if callable(exempt):
+        exempt(blueprint)
+
+
 def register_blueprints_deferred(app: Flask, logger: Logger):
     """Register API and web blueprints once for the process."""
     global _blueprints_registered
