@@ -588,6 +588,7 @@ def request_with_workflow_checkpoint(request: FileTaskRequest) -> FileTaskReques
             model_id=request.model_id,
             history=list(request.history),
             options=normalized_options,
+            routing_decision=request.routing_decision,
         )
     resume_control = {
         "adapter": str(checkpoint.get("adapter") or "generic_tool_loop").strip(),
@@ -628,6 +629,7 @@ def request_with_workflow_checkpoint(request: FileTaskRequest) -> FileTaskReques
         model_id=request.model_id,
         history=list(request.history),
         options=normalized_options,
+        routing_decision=request.routing_decision,
     )
 
 

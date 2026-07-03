@@ -15,6 +15,29 @@ def test_request_with_task_preserves_routing_decision() -> None:
     assert updated.routing_decision is decision
 
 
+def test_workflow_checkpoint_resume_preserves_routing_decision() -> None:
+    from app.core.agent.file_task_contract import FileTaskRequest, FileTaskRoutingDecision
+    from app.core.agent.file_task_workflow_state import request_with_workflow_checkpoint
+
+    decision = FileTaskRoutingDecision(route="file_task", confidence=0.91)
+    request = FileTaskRequest(
+        task="继续",
+        routing_decision=decision,
+        options={
+            "workflow_checkpoint": {
+                "step_index": 3,
+                "target_path": "summary.docx",
+            },
+        },
+    )
+
+    normalized = request_with_workflow_checkpoint(request)
+
+    assert normalized.routing_decision is decision
+    assert normalized.options["workflow_checkpoint"]["step_index"] == 3
+    assert normalized.target_path == "summary.docx"
+
+
 def test_file_task_classification_facade_exports_routing_helpers() -> None:
     import app.core.agent.file_task_classification as classification
 
