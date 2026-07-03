@@ -169,13 +169,11 @@ class MemoryToolsPlugin(AgentPlugin):
     def _get_memory_manager():
         """Lazily load MemoryManager without circular imports."""
         try:
-            import sys
+            from web.runtime_context import get_memory_manager
 
-            # Try web.app.get_memory_manager (runtime context)
-            if "web.app" in sys.modules:
-                fn = getattr(sys.modules["web.app"], "get_memory_manager", None)
-                if fn:
-                    return fn()
+            manager = get_memory_manager()
+            if manager is not None:
+                return manager
             # Fallback: direct instantiation
             try:
                 from web.enhanced_memory_manager import EnhancedMemoryManager

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskRequest
@@ -19,40 +18,16 @@ _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"
 
 
 def _runtime_model_map() -> Dict[str, Any]:
-    candidates = []
-    web_pkg = sys.modules.get("web")
-    package_runtime = getattr(web_pkg, "runtime_context", None) if web_pkg is not None else None
-    if package_runtime is not None:
-        candidates.append(package_runtime)
-    runtime_module = sys.modules.get("web.runtime_context")
-    if runtime_module is not None and runtime_module is not package_runtime:
-        candidates.append(runtime_module)
     try:
-        from web import runtime_context as imported_runtime
-
-        if imported_runtime not in candidates:
-            candidates.append(imported_runtime)
+        from web import runtime_context
     except Exception:
-        pass
+        return {}
     try:
-        from web import app as web_app_module
-
-        if web_app_module not in candidates:
-            candidates.append(web_app_module)
+        model_map = runtime_context.get_model_map()
     except Exception:
-        pass
-    for module in candidates:
-        getter = getattr(module, "get_model_map", None)
-        if callable(getter):
-            try:
-                model_map = getter()
-            except Exception:
-                continue
-            if isinstance(model_map, dict) and model_map:
-                return model_map
-        model_map = getattr(module, "MODEL_MAP", None)
-        if isinstance(model_map, dict) and model_map:
-            return model_map
+        return {}
+    if isinstance(model_map, dict) and model_map:
+        return model_map
     return {}
 
 
