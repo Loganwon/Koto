@@ -1081,7 +1081,7 @@ class FileTaskRuntime:
                 )
                 if fallback_summary:
                     readonly_fallback_used = True
-                    completed_task = True
+                    completed_task = False
                     final_summary = fallback_summary
                     yield ledger.event(
                         "tool.finished",
@@ -1099,7 +1099,7 @@ class FileTaskRuntime:
                         self._build_step_result_payload(
                             title="模型规划并调用工具",
                             summary=fallback_summary,
-                            status="completed",
+                            status="needs_attention",
                             round_index=round_index,
                         ),
                         step_id=execute_step_id,
@@ -1698,14 +1698,23 @@ class FileTaskRuntime:
                         step_id=execute_step_id,
                     )
                     continue
-                final_summary = (
-                    content_text
-                    or self._readonly_context_summary(
+                readonly_context_fallback = (
+                    ""
+                    if content_text
+                    else self._readonly_context_summary(
                         request, snippets, readonly_tool_outputs
                     )
+                )
+                final_summary = (
+                    content_text
+                    or readonly_context_fallback
                     or "已读取上下文，但模型未生成可见分析结果。"
                 )
-                completed_task = not write_intent or bool(file_changes)
+                if readonly_context_fallback and not write_intent:
+                    readonly_fallback_used = True
+                    completed_task = False
+                else:
+                    completed_task = not write_intent or bool(file_changes)
                 yield ledger.event(
                     "step.result",
                     self._build_step_result_payload(
@@ -1752,13 +1761,18 @@ class FileTaskRuntime:
                         final_summary = guard_summary
                         messages.append({"role": "user", "content": reminder})
                         continue
+                    readonly_context_fallback = self._readonly_context_summary(
+                        request, snippets, readonly_tool_outputs
+                    )
                     final_summary = _readonly_duplicate_final_summary(
-                        context_summary=self._readonly_context_summary(
-                            request, snippets, readonly_tool_outputs
-                        ),
+                        context_summary=readonly_context_fallback,
                         content_text=content_text,
                     )
-                    completed_task = True
+                    if readonly_context_fallback and not content_text:
+                        readonly_fallback_used = True
+                        completed_task = False
+                    else:
+                        completed_task = True
                     yield ledger.event(
                         "step.result",
                         self._build_step_result_payload(
@@ -2588,7 +2602,8 @@ class FileTaskRuntime:
                 request, snippets, readonly_tool_outputs
             )
             if final_summary:
-                completed_task = True
+                readonly_fallback_used = True
+                completed_task = False
 
         check_step_id = "check"
         if self._is_cancelled(request):
