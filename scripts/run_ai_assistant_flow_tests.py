@@ -67,11 +67,21 @@ SUITES = OrderedDict(
             },
         ),
         (
-            "browser",
+            "browser-mock",
             {
                 "description": "Playwright browser smoke for the workspace AI assistant shell and mocked task-card rendering.",
                 "nodes": [
                     "tests/e2e/test_workspace_ai_assistant.py",
+                ],
+            },
+        ),
+        (
+            "mcp",
+            {
+                "description": "MCP route, WebSocket, frontend-action, and stdio bridge contract checks.",
+                "nodes": [
+                    "tests/unit/test_mcp_integration.py",
+                    "tests/unit/test_frontend_observability_redaction.py",
                 ],
             },
         ),
@@ -91,9 +101,14 @@ SUITES = OrderedDict(
 COMPOSITE_SUITES = OrderedDict(
     [
         ("full", ["smoke", "contracts", "backend", "runtime"]),
-        ("release", ["smoke", "contracts", "backend", "runtime", "browser"]),
+        ("release", ["smoke", "contracts", "backend", "runtime", "browser-mock"]),
+        ("test-ready", ["smoke", "mcp", "browser-mock"]),
     ]
 )
+
+SUITE_ALIASES = {
+    "browser": "browser-mock",
+}
 
 BROWSER_PREREQUISITES = OrderedDict(
     [
@@ -115,6 +130,7 @@ def _ordered_unique(items: list[str]) -> list[str]:
 
 
 def _resolve_suite_names(name: str) -> list[str]:
+    name = SUITE_ALIASES.get(name, name)
     if name in SUITES:
         return [name]
     if name in COMPOSITE_SUITES:
@@ -130,11 +146,11 @@ def _resolve_nodes(name: str) -> list[str]:
 
 
 def _all_suite_names() -> list[str]:
-    return list(SUITES.keys()) + list(COMPOSITE_SUITES.keys())
+    return list(SUITES.keys()) + list(COMPOSITE_SUITES.keys()) + list(SUITE_ALIASES.keys())
 
 
 def _suite_requires_browser(name: str) -> bool:
-    return "browser" in _resolve_suite_names(name)
+    return "browser-mock" in _resolve_suite_names(name)
 
 
 def _missing_browser_prerequisites() -> list[str]:
@@ -169,6 +185,8 @@ def _print_suite_catalog() -> None:
     for name, members in COMPOSITE_SUITES.items():
         joined = ", ".join(members)
         print(f"- {name}: combines [{joined}]")
+    for alias, target in SUITE_ALIASES.items():
+        print(f"- {alias}: alias for {target}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -190,10 +208,13 @@ def main(argv: list[str] | None = None) -> int:
         _print_suite_catalog()
         return 0
 
-    nodes = _resolve_nodes(args.suite)
+    resolved_suite = SUITE_ALIASES.get(args.suite, args.suite)
+    nodes = _resolve_nodes(resolved_suite)
     command = [sys.executable, "-m", "pytest", *nodes, *pytest_args]
 
-    print(f"[ai-assistant-tests] suite={args.suite} nodes={len(nodes)}")
+    if resolved_suite != args.suite:
+        print(f"[ai-assistant-tests] suite={args.suite} alias_for={resolved_suite}")
+    print(f"[ai-assistant-tests] suite={resolved_suite} nodes={len(nodes)}")
     for node in nodes:
         print(f"  - {node}")
     if pytest_args:
@@ -203,7 +224,7 @@ def main(argv: list[str] | None = None) -> int:
         print(" ".join(command))
         return 0
 
-    if _suite_requires_browser(args.suite):
+    if _suite_requires_browser(resolved_suite):
         missing = _missing_browser_prerequisites()
         if missing:
             _print_browser_prerequisite_error(missing)
