@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from app.core.agent.file_task_review_intent import should_use_docx_review_system
 from app.core.routing.routing_config import (
     TRIVIAL_GREETINGS,
     TRIVIAL_IDENTITY,
@@ -317,27 +318,4 @@ class RuleRouter:
     @staticmethod
     def should_use_annotation_system(user_input: str, has_file: bool = False) -> bool:
         """Return True if the annotation workflow should be engaged."""
-        keywords = [
-            "标注",
-            "批注",
-            "润色",
-            "改写",
-            "校对",
-            "审校",
-            "修订",
-            "纠错",
-            "改善",
-            "优化",
-            "修改",
-        ]
-        quality_words = ["不合适", "生硬", "翻译腔", "语序", "用词", "逻辑", "问题"]
-        target_words = ["翻译", "文章", "文档", "内容", "文本", "段落", "句子", "字词"]
-
-        if not has_file:
-            return False
-
-        has_kw = any(k in user_input for k in keywords)
-        has_qw = any(q in user_input for q in quality_words)
-        has_target = any(t in user_input for t in target_words)
-
-        return has_kw or (has_qw and has_target)
+        return should_use_docx_review_system(user_input, has_file=has_file)
