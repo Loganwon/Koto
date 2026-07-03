@@ -1,0 +1,62 @@
+# -*- coding: utf-8 -*-
+from __future__ import annotations
+
+
+def test_request_with_task_preserves_routing_decision() -> None:
+    from app.core.agent.file_task_contract import FileTaskRequest, FileTaskRoutingDecision
+    from app.core.agent.file_task_intent_adjudication import request_with_task
+
+    decision = FileTaskRoutingDecision(route="file_task", confidence=0.91)
+    request = FileTaskRequest(task="旧任务", routing_decision=decision)
+
+    updated = request_with_task(request, "新任务")
+
+    assert updated.task == "新任务"
+    assert updated.routing_decision is decision
+
+
+def test_file_task_classification_facade_exports_routing_helpers() -> None:
+    import app.core.agent.file_task_classification as classification
+
+    assert classification.request_with_task is not None
+    assert classification.trusted_file_task_routing_decision is not None
+    assert classification.build_decision_context_payload is not None
+
+
+def test_hybrid_plan_only_requires_confirmation_when_explicit() -> None:
+    from app.core.agent.file_task_contract import FileTaskClassification, FileTaskRequest
+    from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
+
+    planner = FileTaskIntentPlanner()
+    classification = FileTaskClassification(output_mode="hybrid")
+
+    optional = planner.plan(FileTaskRequest(task="分析问题并给出修改建议"), [], classification)
+    confirmed = planner.plan(FileTaskRequest(task="先分析，等我确认后再应用"), [], classification)
+
+    assert optional.recommended_strategy == "analyze_then_optional_apply"
+    assert optional.requires_confirmation is False
+    assert confirmed.recommended_strategy == "analyze_then_confirm"
+    assert confirmed.requires_confirmation is True
+
+
+def test_source_negation_does_not_hide_explicit_target_write_intent() -> None:
+    from app.core.agent.file_task_intent_predicates import (
+        has_readonly_write_negation,
+        has_target_scoped_write_intent,
+    )
+
+    task = "Do not modify the source file; write the result to the current report file."
+
+    assert has_target_scoped_write_intent(task) is True
+    assert has_readonly_write_negation(task) is False
+
+
+def test_explicit_output_paths_join_split_directory_and_filename() -> None:
+    from app.core.agent.file_task_targeting import explicit_output_paths_from_task
+
+    paths = explicit_output_paths_from_task(
+        "请基于 sales_sample.xlsx 生成文件名为 sales_profit_report.xlsx 保存到 codex_real_task_20260701 目录下",
+        has_artifact_creation_intent=lambda _task: True,
+    )
+
+    assert paths == ["codex_real_task_20260701/sales_profit_report.xlsx"]

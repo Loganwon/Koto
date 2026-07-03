@@ -45,6 +45,7 @@ def request_with_task(
         model_id=request.model_id,
         history=list(request.history),
         options=dict(request.options),
+        routing_decision=request.routing_decision,
     )
 
 
@@ -60,7 +61,8 @@ def intent_adjudicator_system_prompt() -> str:
         "6. diagnose_failure：解释任务为什么失败或上一轮哪里不对。\n"
         "判断规则：\n"
         "- “改、换、应用、写入、创建、美化、更新、删除、插入、套用、换成”通常是写入。\n"
-        "- “看看、分析、建议、为什么、哪里有问题”通常是只读、先分析后确认或诊断。\n"
+        "- “看看、分析、建议、优化论点、哪里有问题、有什么风险和机会”默认是 answer_only，只给分析建议，不等待确认、不写入文件。\n"
+        "- 只有用户明确说“应用到文件、写回、按建议修改、确认后再改/写入”时，才使用 analyze_then_confirm。\n"
         "- “继续”要结合上一轮任务状态；没有上一轮状态时不要臆造。\n"
         "- 明确的“不写入、不修改、只分析、只给答案”必须覆盖其他写入词。\n"
         "- 如果入口模式和用户正文冲突，优先判断用户正文真正要求的产物。\n"

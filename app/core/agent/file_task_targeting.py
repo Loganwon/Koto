@@ -27,12 +27,26 @@ BoolPredicate = Callable[[str], bool]
 PathComparator = Callable[[Any, Any], bool]
 PathResolver = Callable[[Any], str]
 
+_TASK_TEXT_DIRECTORY_SEGMENT = (
+    r"(?:[A-Za-z]:[\\/])?[^\s\"'<>|,，。；;、!?！？()（）\[\]【】]+"
+)
+_TASK_TEXT_DIRECTORY_MARKER = (
+    r"(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory)"
+)
+_TASK_TEXT_OUTPUT_DIRECTORY_VERB = (
+    r"(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|"
+    r"save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)"
+)
+_TASK_TEXT_FILENAME_LABEL = (
+    r"(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)"
+)
+
 
 def request_with_target_path(
     request: FileTaskRequest,
     target_path: str,
 ) -> FileTaskRequest:
-    clean_target = str(target_path or "").strip()
+    clean_target = target_path_with_file_alias(request, target_path)
     if not clean_target:
         return request
     return FileTaskRequest(
@@ -48,7 +62,46 @@ def request_with_target_path(
         model_id=request.model_id,
         history=list(request.history),
         options=dict(request.options),
+        routing_decision=request.routing_decision,
     )
+
+
+def target_path_with_file_alias(request: FileTaskRequest, target_path: str) -> str:
+    clean_target = str(target_path or "").strip()
+    if not clean_target:
+        return ""
+    if "/" in clean_target.replace("\\", "/").strip("/"):
+        return clean_target
+    target_name = Path(clean_target.replace("\\", "/")).name.casefold()
+    if not target_name:
+        return clean_target
+
+    candidates: List[FileTaskFile] = []
+    for file_info in [*list(request.files or []), request.current_file]:
+        if not file_info:
+            continue
+        path_text = str(file_info.path or "").strip()
+        name_text = str(file_info.name or "").strip() or (
+            Path(path_text.replace("\\", "/")).name if path_text else ""
+        )
+        if name_text.casefold() != target_name:
+            continue
+        if not path_text or _is_weak_context_path(file_info):
+            continue
+        candidates.append(file_info)
+
+    if not candidates:
+        return clean_target
+
+    target_candidates = [item for item in candidates if item.target] or candidates
+    unique_paths = {
+        _context_file_key(item): str(item.path or "").strip()
+        for item in target_candidates
+        if str(item.path or "").strip()
+    }
+    if len(unique_paths) == 1:
+        return next(iter(unique_paths.values()))
+    return clean_target
 
 
 def request_target_points_to_source(
@@ -92,6 +145,9 @@ def explicit_output_path_from_task(
         near = f"{before}{after}"
         if _candidate_path_has_local_write_negation(before):
             continue
+        if _candidate_path_is_immediate_source_reference(before, after, suffix):
+            continue
+        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
         score = 0
         if suffix in {"doc", "docx", "ppt", "pptx", "xls", "xlsx", "pdf"}:
             score += 2
@@ -103,12 +159,66 @@ def explicit_output_path_from_task(
             score += 2
         if re.search(r"(?:原文件|源文件|输入文件|已添加)", near, re.IGNORECASE):
             score -= 2
+        if candidate_path != raw_path:
+            score += 8
+        if re.search(rf"{_TASK_TEXT_FILENAME_LABEL}\s*$", before, re.IGNORECASE):
+            score += 6
         if score > 0:
-            candidates.append((score, start, raw_path))
+            candidates.append((score, start, candidate_path))
     if not candidates:
         return ""
     candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
     return candidates[0][2]
+
+
+def explicit_output_paths_from_task(
+    task: str,
+    *,
+    has_artifact_creation_intent: BoolPredicate,
+) -> List[str]:
+    task_text = str(task or "").strip()
+    if not task_text or not has_artifact_creation_intent(task_text):
+        return []
+    candidates: List[tuple[int, int, str]] = []
+    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
+        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+        suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
+        if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
+            continue
+        start, end = match.span("path")
+        before = task_text[max(0, start - 72) : start]
+        after = task_text[end : min(len(task_text), end + 72)]
+        near = f"{before}{after}"
+        if _candidate_path_has_local_write_negation(before):
+            continue
+        if _candidate_path_is_immediate_source_reference(before, after, suffix):
+            continue
+        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
+        score = 0
+        if any(pattern.search(near) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS):
+            score += 5
+        if any(pattern.search(near) for pattern in _SOURCE_PATH_CONTEXT_PATTERNS):
+            score -= 3
+        if re.search(r"(?:新|新的|目标|输出|结果|产出)", near, re.IGNORECASE):
+            score += 2
+        if re.search(r"(?:原文件|源文件|输入文件|已添加)", near, re.IGNORECASE):
+            score -= 2
+        if candidate_path != raw_path:
+            score += 8
+        if re.search(rf"{_TASK_TEXT_FILENAME_LABEL}\s*$", before, re.IGNORECASE):
+            score += 6
+        if score > 0:
+            candidates.append((score, start, candidate_path))
+
+    seen: set[str] = set()
+    outputs: List[str] = []
+    for _score, _start, candidate_path in sorted(candidates, key=lambda item: item[1]):
+        normalized = candidate_path.replace("\\", "/").casefold()
+        if normalized in seen:
+            continue
+        seen.add(normalized)
+        outputs.append(candidate_path)
+    return outputs
 
 
 def explicit_write_target_path_from_task(task: str) -> str:
@@ -127,8 +237,11 @@ def explicit_write_target_path_from_task(task: str) -> str:
         near = f"{before}{after}"
         if _candidate_path_has_local_write_negation(before):
             continue
+        if _candidate_path_is_immediate_source_reference(before, after, suffix):
+            continue
         if _readonly_attached_source_reference(task_text, near, before):
             continue
+        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
         score = 0
         if any(pattern.search(near) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS):
             score += 5
@@ -157,8 +270,12 @@ def explicit_write_target_path_from_task(task: str) -> str:
             re.IGNORECASE,
         ):
             score -= 8
+        if candidate_path != raw_path:
+            score += 8
+        if re.search(rf"{_TASK_TEXT_FILENAME_LABEL}\s*$", before, re.IGNORECASE):
+            score += 6
         if score > 0:
-            candidates.append((score, start, raw_path))
+            candidates.append((score, start, candidate_path))
     if not candidates:
         return ""
     candidates.sort(key=lambda item: (item[0], -item[1]), reverse=True)
@@ -183,6 +300,113 @@ def _candidate_path_has_local_write_negation(before: str) -> bool:
             re.IGNORECASE,
         )
     )
+
+
+def _candidate_path_is_immediate_source_reference(before: str, after: str, suffix: str) -> bool:
+    before_text = str(before or "")
+    after_text = str(after or "")
+    local_before = re.split(r"[。!?！？；;\r\n]", before_text)[-1]
+    if re.search(
+        r"(?:读取|阅读|查看|分析|基于|来自|打开|导入|read|source|from|input)(?:的|该|这个|这份|当前)?\s*$",
+        local_before,
+        re.IGNORECASE,
+    ):
+        return True
+    if suffix in {"xls", "xlsx", "csv"} and re.match(
+        r"\s*(?:的|中|里|内|里的|中的|sheet|worksheet).{0,40}"
+        r"(?:工作表|sheet|worksheet|数据|表格|rows?|cells?)",
+        after_text,
+        re.IGNORECASE,
+    ):
+        return True
+    return False
+
+
+def _path_with_split_output_directory(
+    task_text: str,
+    raw_path: str,
+    start: int,
+    end: int,
+) -> str:
+    clean_path = str(raw_path or "").strip()
+    if not clean_path:
+        return ""
+    normalized_path = clean_path.replace("\\", "/")
+    if "/" in normalized_path.strip("/"):
+        return clean_path
+    before = str(task_text or "")[max(0, start - 140) : start]
+    after = str(task_text or "")[end : min(len(str(task_text or "")), end + 140)]
+    directory = _split_output_directory_after_file(after) or _split_output_directory_before_file(before)
+    if not directory:
+        return clean_path
+    file_name = Path(normalized_path).name
+    clean_dir = directory.replace("\\", "/").rstrip("/")
+    if not clean_dir or not file_name:
+        return clean_path
+    return f"{clean_dir}/{file_name}"
+
+
+def _split_output_directory_after_file(after: str) -> str:
+    match = re.search(
+        rf"^[\s,，。；;、]*(?:{_TASK_TEXT_OUTPUT_DIRECTORY_VERB})\s*"
+        rf"(?P<directory>{_TASK_TEXT_DIRECTORY_SEGMENT})\s*(?:{_TASK_TEXT_DIRECTORY_MARKER})",
+        str(after or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return _clean_split_output_directory(match.group("directory"))
+
+
+def _split_output_directory_before_file(before: str) -> str:
+    match = re.search(
+        rf"(?:{_TASK_TEXT_OUTPUT_DIRECTORY_VERB})\s*"
+        rf"(?P<directory>{_TASK_TEXT_DIRECTORY_SEGMENT})\s*(?:{_TASK_TEXT_DIRECTORY_MARKER})"
+        rf".{{0,80}}(?:{_TASK_TEXT_FILENAME_LABEL})?\s*$",
+        str(before or ""),
+        re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return _clean_split_output_directory(match.group("directory"))
+
+
+def _clean_split_output_directory(directory: str) -> str:
+    clean = str(directory or "").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+    clean = clean.replace("\\", "/").strip("/")
+    if not clean:
+        return ""
+    suffix = Path(clean).suffix.lower().lstrip(".")
+    if suffix in _TASK_TEXT_OUTPUT_EXTENSIONS:
+        return ""
+    return clean
+
+
+def _strong_output_reference_file_names(task_text: str) -> set[str]:
+    names: set[str] = set()
+    source = str(task_text or "")
+    if not source:
+        return names
+    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(source):
+        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+        suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
+        if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
+            continue
+        start, end = match.span("path")
+        before = source[max(0, start - 100) : start]
+        after = source[end : min(len(source), end + 120)]
+        if _candidate_path_is_immediate_source_reference(before, after, suffix):
+            continue
+        split_path = _path_with_split_output_directory(source, raw_path, start, end)
+        if split_path != raw_path or re.search(
+            rf"{_TASK_TEXT_FILENAME_LABEL}\s*$",
+            before,
+            re.IGNORECASE,
+        ):
+            name = Path(raw_path.replace("\\", "/")).name.casefold()
+            if name:
+                names.add(name)
+    return names
 
 
 def _readonly_attached_source_reference(task: str, near: str, before: str) -> bool:
@@ -305,6 +529,10 @@ def context_files(
         if existing is not None:
             if file_info.target:
                 existing.target = True
+            if _is_weak_context_path(existing) and not _is_weak_context_path(file_info):
+                existing.path = file_info.path
+                existing.name = file_info.name or existing.name
+                existing.type = file_info.type or existing.type
             if not existing.content and file_info.content:
                 existing.content = file_info.content
             if not existing.name and file_info.name:
@@ -380,6 +608,7 @@ def files_explicitly_mentioned_in_task(
     task_folded = task_text.replace("\\", "/").casefold()
     exact_matches: Dict[str, Path] = {}
     basename_matches: Dict[str, List[Path]] = {}
+    output_reference_names = _strong_output_reference_file_names(task_text)
 
     try:
         workspace_files = workspace_root.rglob("*")
@@ -397,9 +626,13 @@ def files_explicitly_mentioned_in_task(
             if task_text_mentions_path(
                 task_folded, rel_folded
             ) or task_text_mentions_path(task_folded, f"workspace/{rel_folded}"):
+                if name_folded in output_reference_names:
+                    continue
                 exact_matches[str(path.resolve()).casefold()] = path
                 continue
             if name_folded and name_folded in task_folded:
+                if name_folded in output_reference_names:
+                    continue
                 basename_matches.setdefault(name_folded, []).append(path)
     except OSError as exc:
         logger.debug("[FileTaskRuntime] workspace task-file scan skipped: %s", exc)

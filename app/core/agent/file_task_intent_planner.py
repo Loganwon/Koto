@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -19,6 +20,23 @@ def _preview(value: Any, limit: int = 180) -> str:
     return text[: limit - 3] + "..."
 
 
+_EXPLICIT_CONFIRMATION_PATTERN = re.compile(
+    r"(?:确认后|等(?:我|用户)?确认|等待(?:我|用户)?确认|我确认后|用户确认后|"
+    r"确认(?:了|完)?再|先.{0,24}(?:等|等待).{0,12}确认|"
+    r"等(?:我|用户)?(?:说)?继续|回复继续|说继续|"
+    r"wait for (?:my |user )?confirmation|confirm(?:ation)? before (?:apply|applying|write|writing))",
+    re.IGNORECASE,
+)
+
+
+def _requires_explicit_confirmation(request: FileTaskRequest) -> bool:
+    task_text = str(request.task or "").strip()
+    if _EXPLICIT_CONFIRMATION_PATTERN.search(task_text):
+        return True
+    options = request.options if isinstance(request.options, dict) else {}
+    return bool(options.get("requires_confirmation") or options.get("confirm_before_apply"))
+
+
 class FileTaskIntentPlanner:
     def plan(
         self,
@@ -30,9 +48,14 @@ class FileTaskIntentPlanner:
     ) -> FileTaskIntentPlan:
         output_mode = str(classification.output_mode or "answer").strip().lower() or "answer"
         recipe_match = select_task_recipe(request, files, write_intent=bool(classification.write_intent))
-        recommended_strategy = self._recommended_strategy(classification, output_mode, known_tool_gap)
+        requires_confirmation = output_mode == "hybrid" and _requires_explicit_confirmation(request)
+        recommended_strategy = self._recommended_strategy(
+            classification,
+            output_mode,
+            known_tool_gap,
+            requires_confirmation=requires_confirmation,
+        )
         can_apply = output_mode in {"write", "hybrid"} and self._has_apply_target(request, files)
-        requires_confirmation = output_mode == "hybrid"
         reason_codes = [item for item in classification.reason_codes if item]
         reason_codes.extend(
             [
@@ -82,7 +105,9 @@ class FileTaskIntentPlanner:
         if output_mode == "write":
             return f"完成真实文件修改并交付结果：{task_text}"
         if output_mode == "hybrid":
-            return f"先分析并整理可应用建议，再等待确认：{task_text}"
+            if _requires_explicit_confirmation(request):
+                return f"先分析并整理可应用建议，再等待确认：{task_text}"
+            return f"先分析并整理可应用建议，后续可按用户要求应用：{task_text}"
         return f"基于显式上下文给出结论或答复：{task_text}"
 
     def _recommended_strategy(
@@ -90,6 +115,8 @@ class FileTaskIntentPlanner:
         classification: FileTaskClassification,
         output_mode: str,
         known_tool_gap: Optional[Dict[str, Any]],
+        *,
+        requires_confirmation: bool = False,
     ) -> str:
         if known_tool_gap:
             return "design_new_tool"
@@ -100,7 +127,7 @@ class FileTaskIntentPlanner:
         if output_mode == "write":
             return "write_through"
         if output_mode == "hybrid":
-            return "analyze_then_confirm"
+            return "analyze_then_confirm" if requires_confirmation else "analyze_then_optional_apply"
         return "answer_only"
 
     def _has_apply_target(self, request: FileTaskRequest, files: List[FileTaskFile]) -> bool:
