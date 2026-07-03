@@ -18,6 +18,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from app.core.file.path_policy import FilePathPolicy
+
 
 def _make_entry(**overrides):
     """Create a mock FileRegistry entry (SimpleNamespace)."""
@@ -40,6 +42,11 @@ def plugin():
     from app.core.file.file_tools import FileToolsPlugin
 
     return FileToolsPlugin()
+
+
+class _DenyAllPathPolicy(FilePathPolicy):
+    def is_outside_protected_dirs(self, raw_path: str | Path) -> bool:
+        return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -391,6 +398,19 @@ class TestRenameFile:
         result = plugin.rename_file(str(f), "  ")
         assert "非法字符" in result or "为空" in result
 
+    def test_rename_rejects_policy_denied_path(self, tmp_path):
+        from app.core.file.file_tools import FileToolsPlugin
+
+        f = tmp_path / "x.txt"
+        f.write_text("data", encoding="utf-8")
+        plugin = FileToolsPlugin(path_policy=_DenyAllPathPolicy())
+
+        result = plugin.rename_file(str(f), "new.txt")
+
+        assert result == "错误：路径在系统保护目录中"
+        assert f.exists()
+        assert not (tmp_path / "new.txt").exists()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 12  move_file
@@ -432,6 +452,25 @@ class TestMoveFile:
         result = plugin.move_file(str(src), str(dest))
         assert "已存在" in result
 
+    def test_move_rejects_policy_denied_destination_before_creating_dir(self, tmp_path):
+        from app.core.file.file_tools import FileToolsPlugin
+
+        src = tmp_path / "f.txt"
+        src.write_text("a", encoding="utf-8")
+        dest = tmp_path / "blocked"
+
+        class DenyDestinationPolicy(FilePathPolicy):
+            def is_outside_protected_dirs(self, raw_path: str | Path) -> bool:
+                return Path(raw_path) != dest
+
+        plugin = FileToolsPlugin(path_policy=DenyDestinationPolicy())
+
+        result = plugin.move_file(str(src), str(dest))
+
+        assert result == "错误：目标路径在系统保护目录中"
+        assert src.exists()
+        assert not dest.exists()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 13  copy_file
@@ -468,6 +507,25 @@ class TestCopyFile:
         result = plugin.copy_file(str(src), str(dest))
         assert "已存在" in result
 
+    def test_copy_rejects_policy_denied_destination_before_creating_dir(self, tmp_path):
+        from app.core.file.file_tools import FileToolsPlugin
+
+        src = tmp_path / "f.txt"
+        src.write_text("a", encoding="utf-8")
+        dest = tmp_path / "blocked"
+
+        class DenyDestinationPolicy(FilePathPolicy):
+            def is_outside_protected_dirs(self, raw_path: str | Path) -> bool:
+                return Path(raw_path) != dest
+
+        plugin = FileToolsPlugin(path_policy=DenyDestinationPolicy())
+
+        result = plugin.copy_file(str(src), str(dest))
+
+        assert result == "错误：目标路径在系统保护目录中"
+        assert src.exists()
+        assert not dest.exists()
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 14–15  delete_file
@@ -485,9 +543,15 @@ class TestDeleteFile:
             mock_reg = MagicMock()
             mock_get_reg.return_value = mock_reg
             with patch.dict("sys.modules", {"send2trash": mock_send2trash}):
-                result = plugin.delete_file(str(f), use_trash=True)
+                with patch.object(
+                    plugin.file_service,
+                    "delete_path",
+                    wraps=plugin.file_service.delete_path,
+                ) as mock_delete:
+                    result = plugin.delete_file(str(f), use_trash=True)
         assert "回收站" in result
         mock_send2trash.send2trash.assert_called_once_with(str(f))
+        mock_delete.assert_called_once_with(str(f), use_trash=True)
 
     def test_delete_permanent(self, plugin, tmp_path):
         f = tmp_path / "perm.txt"
@@ -496,10 +560,16 @@ class TestDeleteFile:
         with patch("app.core.file.file_registry.get_file_registry") as mock_get_reg:
             mock_reg = MagicMock()
             mock_get_reg.return_value = mock_reg
-            result = plugin.delete_file(str(f), use_trash=False)
+            with patch.object(
+                plugin.file_service,
+                "delete_path",
+                wraps=plugin.file_service.delete_path,
+            ) as mock_delete:
+                result = plugin.delete_file(str(f), use_trash=False)
 
         assert "永久删除" in result
         assert not f.exists()
+        mock_delete.assert_called_once_with(str(f), use_trash=False)
 
     def test_delete_nonexistent(self, plugin):
         result = plugin.delete_file("/no/file.txt")
@@ -522,6 +592,18 @@ class TestDeleteFile:
                     # Simulate send2trash import failure inside delete_file
                     result = plugin.delete_file(str(f), use_trash=False)
         assert not f.exists()
+
+    def test_delete_rejects_policy_denied_path(self, tmp_path):
+        from app.core.file.file_tools import FileToolsPlugin
+
+        f = tmp_path / "keep.txt"
+        f.write_text("test", encoding="utf-8")
+        plugin = FileToolsPlugin(path_policy=_DenyAllPathPolicy())
+
+        result = plugin.delete_file(str(f), use_trash=False)
+
+        assert result == "错误：路径在系统保护目录中"
+        assert f.exists()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -729,14 +811,20 @@ class TestBatchRename:
             mock_reg = MagicMock()
             mock_reg.update_path.return_value = True
             mock_get_reg.return_value = mock_reg
-            result = plugin.batch_rename(
-                directory=str(tmp_path),
-                pattern=r"photo_(\d+)",
-                replacement=r"img_\1",
-                dry_run=False,
-            )
+            with patch.object(
+                plugin.file_service,
+                "rename_file",
+                wraps=plugin.file_service.rename_file,
+            ) as mock_rename:
+                result = plugin.batch_rename(
+                    directory=str(tmp_path),
+                    pattern=r"photo_(\d+)",
+                    replacement=r"img_\1",
+                    dry_run=False,
+                )
         assert "重命名完成" in result
         assert (tmp_path / "img_001.jpg").exists()
+        mock_rename.assert_called_once()
 
     def test_batch_rename_no_matches(self, plugin, tmp_path):
         (tmp_path / "readme.md").write_text("", encoding="utf-8")
@@ -816,13 +904,19 @@ class TestBatchMove:
             mock_reg = MagicMock()
             mock_reg.update_path.return_value = True
             mock_get_reg.return_value = mock_reg
-            result = plugin.batch_move(
-                source_dir=str(src),
-                dest_dir=str(dest),
-                dry_run=False,
-            )
+            with patch.object(
+                plugin.file_service,
+                "move_path",
+                wraps=plugin.file_service.move_path,
+            ) as mock_move:
+                result = plugin.batch_move(
+                    source_dir=str(src),
+                    dest_dir=str(dest),
+                    dry_run=False,
+                )
         assert "批量移动完成" in result
         assert (dest / "a.txt").exists()
+        mock_move.assert_called_once()
 
     def test_batch_move_no_matches(self, plugin, tmp_path):
         src = tmp_path / "src"
@@ -899,6 +993,32 @@ class TestCleanupDuplicates:
         result = plugin.cleanup_duplicates(keep_strategy="oldest", dry_run=True)
         # Oldest (e2) should be kept; newest (e1) should be listed for deletion
         assert "保留" in result
+
+    @patch("app.core.file.file_registry.get_file_registry")
+    def test_duplicates_execute_delegates_delete_path(
+        self, mock_get_reg, plugin, tmp_path
+    ):
+        keeper = tmp_path / "keep.txt"
+        duplicate = tmp_path / "duplicate.txt"
+        keeper.write_text("same", encoding="utf-8")
+        duplicate.write_text("same", encoding="utf-8")
+        e1 = _make_entry(path=str(keeper), mtime=2000000000.0, size_bytes=4)
+        e2 = _make_entry(path=str(duplicate), mtime=1000000000.0, size_bytes=4)
+        mock_reg = MagicMock()
+        mock_reg.get_duplicates.return_value = [[e1, e2]]
+        mock_get_reg.return_value = mock_reg
+
+        with patch.object(
+            plugin.file_service,
+            "delete_path",
+            wraps=plugin.file_service.delete_path,
+        ) as mock_delete:
+            result = plugin.cleanup_duplicates(dry_run=False)
+
+        assert "合计" in result
+        assert not duplicate.exists()
+        mock_delete.assert_called_once_with(str(duplicate), use_trash=True)
+        mock_reg.delete.assert_called_once_with(str(duplicate))
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -1302,9 +1422,15 @@ class TestUndoLastOp:
         mock_reg.update_path.return_value = True
         mock_get_reg.return_value = mock_reg
 
-        result = plugin.undo_last_op()
+        with patch.object(
+            plugin.file_service,
+            "rename_file",
+            wraps=plugin.file_service.rename_file,
+        ) as mock_rename:
+            result = plugin.undo_last_op()
         assert "已撤销重命名" in result
         assert original.exists()
+        mock_rename.assert_called_once_with(str(renamed), original.name)
 
     @patch("app.core.file.file_registry.get_file_registry")
     def test_undo_move(self, mock_get_reg, plugin, tmp_path):
@@ -1324,8 +1450,14 @@ class TestUndoLastOp:
         mock_reg.update_path.return_value = True
         mock_get_reg.return_value = mock_reg
 
-        result = plugin.undo_last_op()
+        with patch.object(
+            plugin.file_service,
+            "move_path",
+            wraps=plugin.file_service.move_path,
+        ) as mock_move:
+            result = plugin.undo_last_op()
         assert "已撤销移动" in result
+        mock_move.assert_called_once_with(str(moved), original)
 
     @patch("app.core.file.file_registry.get_file_registry")
     def test_undo_copy(self, mock_get_reg, plugin, tmp_path):
@@ -1341,9 +1473,15 @@ class TestUndoLastOp:
         }
         mock_get_reg.return_value = mock_reg
 
-        result = plugin.undo_last_op()
+        with patch.object(
+            plugin.file_service,
+            "delete_path",
+            wraps=plugin.file_service.delete_path,
+        ) as mock_delete:
+            result = plugin.undo_last_op()
         assert "已撤销复制" in result
         assert not copied.exists()
+        mock_delete.assert_called_once_with(str(copied))
 
     @patch("app.core.file.file_registry.get_file_registry")
     def test_undo_delete_trash(self, mock_get_reg, plugin):
