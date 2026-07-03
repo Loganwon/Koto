@@ -1,9 +1,4 @@
-"""
-request_validator.py — Prompt / instruction building helpers extracted from KotoAgentLoop.
-
-Provides a stateless RequestValidator class so that KotoAgentLoop methods
-become thin delegators and the prompt-building logic lives here.
-"""
+"""Prompt and instruction building helpers for doc/editor agent executors."""
 from __future__ import annotations
 
 from typing import Any
@@ -16,14 +11,12 @@ MAX_HISTORY_TURNS = 10
 class RequestValidator:
     """
     Stateless helpers for building system instructions and assembling prompts.
-    KotoAgentLoop methods delegate to these static methods.
     """
 
     @staticmethod
     def build_system_instruction(request: Any, hooks: Any = None) -> str:
         """Build the system instruction based on file type and mode.
 
-        Mirrors KotoAgentLoop._build_system_instruction.
         The ``hooks`` parameter is accepted for forward-compatibility but is
         not currently used by this method.
         """
@@ -126,7 +119,7 @@ class RequestValidator:
     def assemble_prompt(request: Any, prompt: str) -> str:
         """Assemble the full prompt with history, selection, CSV data.
 
-        Mirrors KotoAgentLoop._assemble_prompt.
+        Includes recent conversation history, selected text, and CSV data.
         """
         history = request.history or []
         recent = history[-MAX_HISTORY_TURNS * 2:] if history else []
