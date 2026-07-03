@@ -70,6 +70,29 @@ def test_file_task_artifact_result_maps_changes_and_sources():
     assert data["sources"][0]["file"] == "workspace/contracts/source.pdf"
 
 
+def test_csv_artifact_result_uses_data_type():
+    from app.core.artifacts import build_file_task_artifact_result
+
+    result = build_file_task_artifact_result(
+        task_id="task-csv-1",
+        task="生成补货 CSV",
+        run_id="run-csv-1",
+        status="completed",
+        summary="已生成补货计划。",
+        file_changes=[
+            {
+                "path": "workspace/reports/restock_plan.csv",
+                "operation": "run_python_code",
+                "summary": "已生成 restock_plan.csv。",
+            }
+        ],
+    )
+
+    data = result.to_dict()
+    assert data["artifacts"][0]["type"] == "data"
+    assert data["artifacts"][0]["path"] == "workspace/reports/restock_plan.csv"
+
+
 def test_file_task_stream_attaches_artifact_result_to_finished_event():
     from app.core.agent.file_task_contract import FileTaskEvent
     from web.file_task_stream import _iter_file_task_stream_events
@@ -135,6 +158,84 @@ def test_file_task_stream_attaches_artifact_result_to_finished_event():
     assert result["status"] == "completed"
     assert result["artifacts"][0]["path"] == "report.docx"
     assert result["changes"][0]["summary"] == "已写入报告摘要。"
+
+
+def test_file_task_stream_preserves_artifact_result_artifacts_as_changes():
+    from app.core.agent.file_task_contract import FileTaskEvent
+    from web.file_task_stream import _iter_file_task_stream_events
+
+    request_payload = SimpleNamespace(
+        task="生成运营报告和补货表",
+        run_id="run-stream-artifacts",
+        task_id="task-stream-artifacts",
+        session_id="session-1",
+        target_path="",
+        files=[],
+        current_file=None,
+        selection_source="",
+    )
+    events = [
+        FileTaskEvent(
+            type="run.finished",
+            run_id="run-stream-artifacts",
+            seq=1,
+            payload={
+                "summary": "已完成处理：operations_report.md",
+                "completed_task": True,
+                "artifact_result": {
+                    "task_id": "task-stream-artifacts",
+                    "title": "文件任务结果",
+                    "status": "completed",
+                    "summary": "已完成处理：operations_report.md",
+                    "artifacts": [
+                        {"path": "operations_report.md", "type": "markdown", "title": "operations_report.md"},
+                        {"path": "restock_plan.csv", "type": "data", "title": "restock_plan.csv"},
+                    ],
+                    "changes": [],
+                    "sources": [],
+                    "logs": [],
+                    "actions": [],
+                },
+            },
+        )
+    ]
+
+    chunks = list(
+        _iter_file_task_stream_events(
+            request_payload,
+            events,
+            save_task_summary_fn=lambda **_: None,
+            normalize_event_fn=lambda _: None,
+            persist_progress_fn=lambda *_: None,
+        )
+    )
+    parsed = [
+        json.loads(chunk.strip()[6:])
+        for chunk in chunks
+        if chunk.strip().startswith("data: ")
+    ]
+
+    result = parsed[-1]["payload"]["artifact_result"]
+    assert [item["path"] for item in result["artifacts"]] == [
+        "operations_report.md",
+        "restock_plan.csv",
+    ]
+    assert [item["file"] for item in result["changes"]] == [
+        "operations_report.md",
+        "restock_plan.csv",
+    ]
+
+
+def test_file_task_artifact_status_preserves_attention_diagnostics():
+    from web.file_task_stream import _file_task_artifact_status
+
+    assert _file_task_artifact_status(
+        "run.finished",
+        {
+            "completed_task": False,
+            "runtime": {"terminal_status": "context_summary_fallback"},
+        },
+    ) == "context_summary_fallback"
 
 
 def test_task_route_serializer_extracts_artifact_result_from_metadata():

@@ -51,6 +51,8 @@ def _sanitize_sse_text_field(
 
 
 def safe_editor_sse(payload: dict) -> str:
+    from web.sse.protocol import sse
+
     safe_payload = dict(payload or {})
     event_type = str(safe_payload.get("type") or "").strip().lower()
 
@@ -81,7 +83,7 @@ def safe_editor_sse(payload: dict) -> str:
             fallback="处理中…",
         )
 
-    return f"data: {json.dumps(safe_payload, ensure_ascii=False)}\n\n"
+    return sse.chunk(safe_payload)
 
 
 def _normalize_file_task_payload(data: dict) -> dict:
@@ -315,7 +317,12 @@ def _file_task_terminal_status(event_type: str, event_payload: dict) -> str:
         or event_payload.get("status")
         or ""
     ).strip().lower()
-    if raw_status in {"awaiting_confirmation", "waiting"} or event_payload.get("awaiting_confirmation"):
+    if raw_status in {
+        "awaiting_confirmation",
+        "waiting",
+        "needs_attention",
+        "context_summary_fallback",
+    } or event_payload.get("awaiting_confirmation"):
         return "waiting"
     if event_type == "run.started" or event_type == "multi_target.started":
         return "running"
@@ -495,6 +502,38 @@ def _append_file_task_artifact_changes(file_changes: list[dict], changes) -> Non
         file_changes.append(dict(item))
 
 
+def _artifact_result_file_changes(artifact_result: dict) -> list[dict]:
+    if not isinstance(artifact_result, dict):
+        return []
+    changes: list[dict] = []
+    for artifact in artifact_result.get("artifacts") or []:
+        if not isinstance(artifact, dict):
+            continue
+        path = str(artifact.get("path") or artifact.get("file") or "").strip()
+        if not path:
+            continue
+        changes.append(
+            {
+                "path": path,
+                "operation": artifact.get("operation") or artifact.get("type") or "artifact",
+                "summary": artifact.get("summary") or artifact.get("title") or f"已生成 {path}",
+                "status": artifact.get("status") or "applied",
+            }
+        )
+    for change in artifact_result.get("changes") or []:
+        if not isinstance(change, dict):
+            continue
+        path = str(change.get("file") or change.get("path") or "").strip()
+        if not path:
+            continue
+        item = dict(change)
+        item.setdefault("path", path)
+        item.setdefault("operation", item.get("kind") or "update")
+        item.setdefault("summary", item.get("summary") or f"已更新 {path}")
+        changes.append(item)
+    return changes
+
+
 def _collect_file_task_artifact_changes(event: dict, file_changes: list[dict]) -> None:
     event_type = str((event or {}).get("type") or "").strip()
     payload = event.get("payload") if isinstance((event or {}).get("payload"), dict) else {}
@@ -502,12 +541,14 @@ def _collect_file_task_artifact_changes(event: dict, file_changes: list[dict]) -
         _append_file_task_artifact_changes(file_changes, [payload])
     if isinstance(payload.get("file_changes"), list):
         _append_file_task_artifact_changes(file_changes, payload.get("file_changes"))
+    if isinstance(payload.get("artifact_result"), dict):
+        _append_file_task_artifact_changes(
+            file_changes,
+            _artifact_result_file_changes(payload.get("artifact_result")),
+        )
 
 
 def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
-    terminal_status = _file_task_terminal_status(event_type, event_payload)
-    if terminal_status:
-        return terminal_status
     runtime = event_payload.get("runtime") if isinstance(event_payload.get("runtime"), dict) else {}
     raw_status = str(
         runtime.get("terminal_status")
@@ -519,6 +560,7 @@ def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
         "awaiting_confirmation",
         "waiting",
         "needs_attention",
+        "context_summary_fallback",
         "needs_review",
         "pending",
         "failed",
@@ -527,6 +569,9 @@ def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
         "tool_gap",
     }:
         return raw_status
+    terminal_status = _file_task_terminal_status(event_type, event_payload)
+    if terminal_status:
+        return terminal_status
     if event_type in {"run.error", "run.cancelled"}:
         return "failed"
     return "running"
@@ -550,9 +595,81 @@ def _should_attach_file_task_artifact_result(
     return False
 
 
+def _merge_file_changes_into_artifact_result(artifact_result: dict, file_changes: list[dict]) -> dict:
+    result = dict(artifact_result or {})
+    existing_changes = [
+        dict(item)
+        for item in result.get("changes") or []
+        if isinstance(item, dict)
+    ]
+    seen_changes = {
+        str(item.get("file") or item.get("path") or "").strip().lower()
+        for item in existing_changes
+    }
+    for change in file_changes or []:
+        if not isinstance(change, dict):
+            continue
+        path = _file_task_change_path(change)
+        if not path or path.lower() in seen_changes:
+            continue
+        seen_changes.add(path.lower())
+        existing_changes.append(
+            {
+                "file": path,
+                "kind": change.get("kind") or change.get("operation") or "update",
+                "summary": change.get("summary") or f"已更新 {path}",
+                "status": change.get("status") or "applied",
+                "after_preview": change.get("after_preview") or change.get("preview") or "",
+                "metadata": {
+                    key: value
+                    for key, value in change.items()
+                    if key not in {"path", "file", "file_path", "output_path", "target_path", "operation", "kind", "summary", "status", "after_preview", "preview"}
+                },
+            }
+        )
+    result["changes"] = existing_changes
+
+    existing_artifacts = [
+        dict(item)
+        for item in result.get("artifacts") or []
+        if isinstance(item, dict)
+    ]
+    seen_artifacts = {
+        str(item.get("path") or "").strip().lower()
+        for item in existing_artifacts
+    }
+    for change in file_changes or []:
+        if not isinstance(change, dict):
+            continue
+        path = _file_task_change_path(change)
+        if not path or path.lower() in seen_artifacts:
+            continue
+        seen_artifacts.add(path.lower())
+        existing_artifacts.append(
+            {
+                "type": change.get("type") or change.get("file_type") or "data",
+                "title": str(path).replace("\\", "/").rsplit("/", 1)[-1] or path,
+                "path": path,
+                "status": "ready",
+                "metadata": {},
+            }
+        )
+    result["artifacts"] = existing_artifacts
+    return result
+
+
 def _attach_file_task_artifact_result(request_payload, event: dict, file_changes: list[dict]) -> dict:
     event_type = str((event or {}).get("type") or "").strip()
     event_payload = event.get("payload") if isinstance((event or {}).get("payload"), dict) else {}
+    if isinstance(event_payload.get("artifact_result"), dict):
+        outbound_event = dict(event)
+        outbound_payload = dict(event_payload)
+        outbound_payload["artifact_result"] = _merge_file_changes_into_artifact_result(
+            event_payload.get("artifact_result"),
+            file_changes,
+        )
+        outbound_event["payload"] = outbound_payload
+        return outbound_event
     if not _should_attach_file_task_artifact_result(event_type, event_payload, file_changes):
         return event
     try:

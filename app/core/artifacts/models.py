@@ -20,7 +20,7 @@ _FILE_EXT_TO_TYPE = {
     ".pptx": "pptx",
     ".xls": "xlsx",
     ".xlsx": "xlsx",
-    ".csv": "xlsx",
+    ".csv": "data",
     ".pdf": "pdf",
     ".png": "image",
     ".jpg": "image",
