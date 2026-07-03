@@ -215,6 +215,8 @@ def test_supervisor_audit_warns_on_low_confidence_without_blocking():
     assert audit["execution_allowed"] is True
     assert "low_classification_confidence" in audit["reason_codes"]
     assert audit["warnings"]
+    assert any("显式上下文" in item for item in audit["execution_constraints"])
+    assert audit["user_actions"] == []
 
 
 def test_supervisor_audit_blocks_ambiguous_write_target():
@@ -255,6 +257,107 @@ def test_supervisor_audit_blocks_ambiguous_write_target():
     assert audit["execution_allowed"] is False
     assert "ambiguous_write_target:docx" in audit["reason_codes"]
     assert any("指定" in item for item in audit["required_actions"])
+    assert any("指定" in item for item in audit["user_actions"])
+    assert audit["execution_constraints"] == []
+
+
+def test_supervisor_audit_allows_readonly_analysis_with_multiple_docx_contexts():
+    request = FileTaskRequest(
+        task="分析这个一级市场投资报告，告诉我有什么风险和投资机会",
+        files=[
+            FileTaskFile(path="a.docx", type="docx"),
+            FileTaskFile(path="b.docx", type="docx"),
+        ],
+    )
+    classification = FileTaskClassification(
+        task_family="analyze",
+        operation_kind="read",
+        output_mode="answer",
+        write_intent=False,
+        target_file_type="docx",
+        confidence=0.96,
+    )
+    intent_plan = FileTaskIntentPlan(
+        intent_type="analyze",
+        output_mode="answer",
+        write_intent=False,
+        confidence=0.96,
+    )
+    requirements = build_file_task_requirements(request, classification)
+    runtime = FileTaskRuntime()
+    constraint_audit = runtime._constraint_audit(
+        request,
+        request.files,
+        classification,
+        intent_plan,
+        requirements,
+        {"recipe_id": "generic_file_task"},
+    )
+
+    audit = build_supervisor_audit(
+        request=request,
+        files=request.files,
+        classification=classification,
+        intent_plan=intent_plan,
+        requirements=requirements,
+        plan_check=validate_file_task_plan(requirements, classification, intent_plan),
+        constraint_audit=constraint_audit,
+    ).public_dict()
+
+    assert constraint_audit["status"] == "clear"
+    assert not constraint_audit["conflicts"]
+    assert audit["status"] == "clear"
+    assert audit["execution_allowed"] is True
+
+
+def test_supervisor_audit_does_not_request_confirmation_for_optional_apply_analysis():
+    request = FileTaskRequest(
+        task="分析这个文章内容，看看有没有值得优化的论点",
+        files=[
+            FileTaskFile(path="essay.docx", name="essay.docx", type="docx", target=True),
+        ],
+    )
+    classification = FileTaskClassification(
+        task_family="analyze",
+        operation_kind="read",
+        output_mode="hybrid",
+        write_intent=False,
+        target_file_type="docx",
+        confidence=0.93,
+    )
+    intent_plan = FileTaskIntentPlan(
+        intent_type="analyze",
+        output_mode="hybrid",
+        write_intent=False,
+        can_apply=True,
+        requires_confirmation=False,
+        recommended_strategy="analyze_then_optional_apply",
+        confidence=0.93,
+    )
+    requirements = build_file_task_requirements(request, classification)
+
+    audit = build_supervisor_audit(
+        request=request,
+        files=request.files,
+        classification=classification,
+        intent_plan=intent_plan,
+        requirements=requirements,
+        plan_check=validate_file_task_plan(requirements, classification, intent_plan),
+        constraint_audit={"status": "clear", "conflicts": []},
+    ).public_dict()
+
+    combined_text = " ".join(
+        str(item)
+        for key in ("warnings", "required_actions", "execution_constraints", "user_actions")
+        for item in audit.get(key, [])
+    )
+    assert audit["status"] == "clear"
+    assert audit["execution_allowed"] is True
+    assert audit["review_recommended"] is False
+    assert "confirmation_required" not in audit["reason_codes"]
+    assert "确认" not in combined_text
+    assert "授权" not in combined_text
+    assert "写入" not in combined_text
 
 
 def test_file_task_runtime_continues_after_local_execution_plan_and_audits_decision():

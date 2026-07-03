@@ -382,12 +382,18 @@ class FileTaskSupervisorAudit:
     review_recommended: bool = False
     warnings: List[str] = field(default_factory=list)
     required_actions: List[str] = field(default_factory=list)
+    execution_constraints: List[str] = field(default_factory=list)
+    user_actions: List[str] = field(default_factory=list)
     reason_codes: List[str] = field(default_factory=list)
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["warnings"] = [item for item in self.warnings if item]
         data["required_actions"] = [item for item in self.required_actions if item]
+        data["execution_constraints"] = [
+            item for item in self.execution_constraints if item
+        ]
+        data["user_actions"] = [item for item in self.user_actions if item]
         data["reason_codes"] = [item for item in self.reason_codes if item]
         return data
 

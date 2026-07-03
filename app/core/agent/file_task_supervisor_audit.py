@@ -75,6 +75,8 @@ def build_supervisor_audit(
 ) -> FileTaskSupervisorAudit:
     warnings: list[str] = []
     required_actions: list[str] = []
+    execution_constraints: list[str] = []
+    user_actions: list[str] = []
     reason_codes: list[str] = ["supervisor_audit:v1"]
     blocked = False
     constraints = dict(constraint_audit or {})
@@ -87,13 +89,13 @@ def build_supervisor_audit(
     confidence = float(classification.confidence or intent_plan.confidence or 0.0)
     if confidence < _LOW_CONFIDENCE_THRESHOLD:
         warnings.append("任务识别置信度偏低，执行时需要保守处理。")
-        required_actions.append("优先读取显式上下文，避免把模糊意图升级为写入。")
+        execution_constraints.append("优先读取显式上下文，避免把模糊意图升级为写入。")
         reason_codes.append("low_classification_confidence")
 
     if not plan_check.passed:
         blocked = True
         warnings.append(plan_check.summary or "计划检查未通过。")
-        required_actions.append("重新分类或修正执行计划后再继续。")
+        execution_constraints.append("重新分类或修正执行计划后再继续。")
         reason_codes.extend(
             f"plan_check:{_clean(item, 120)}"
             for item in plan_check.violations
@@ -103,7 +105,7 @@ def build_supervisor_audit(
     if conflicts:
         blocked = True
         warnings.append("任务边界存在冲突：" + "；".join(conflicts[:4]))
-        required_actions.append("先澄清目标文件、输出方式或允许的写入范围。")
+        user_actions.append("澄清目标文件、输出方式或允许的写入范围。")
         reason_codes.extend(f"constraint_conflict:{item}" for item in conflicts[:6])
 
     target_type = str(
@@ -118,23 +120,25 @@ def build_supervisor_audit(
     ):
         blocked = True
         warnings.append(f"发现多个 {target_type.upper()} 候选文件，但没有明确写入目标。")
-        required_actions.append("请指定要修改或生成的目标文件。")
+        user_actions.append("指定要修改或生成的目标文件。")
         reason_codes.append(f"ambiguous_write_target:{target_type}")
 
     if requirements.write_required and str(classification.output_mode or "") != "write":
         warnings.append("任务要求写入，但当前产出模式不是直接写入。")
-        required_actions.append("写入前必须再次确认用户意图。")
+        execution_constraints.append("写入前重新校验用户意图和输出模式。")
         reason_codes.append("write_requirement_output_mode_mismatch")
 
     if not requirements.write_required and bool(classification.write_intent):
         blocked = True
         warnings.append("只读要求被升级为写入，已阻止执行。")
-        required_actions.append("保持只读答复，或等待用户明确授权写入。")
+        user_actions.append("如需写入，请明确授权修改目标文件。")
+        execution_constraints.append("保持只读答复，不得自动升级为写入。")
         reason_codes.append("readonly_escalated_to_write")
 
     if intent_plan.requires_confirmation:
-        warnings.append("当前计划要求写入前确认。")
-        required_actions.append("先输出分析结论，用户确认后再写入。")
+        warnings.append("当前计划是先分析后应用，写入需单独授权。")
+        user_actions.append("确认是否将分析建议应用到文件。")
+        execution_constraints.append("先输出分析结论，获得应用授权后再写入。")
         reason_codes.append("confirmation_required")
 
     if requirements.write_required:
@@ -150,6 +154,10 @@ def build_supervisor_audit(
     else:
         summary = "任务识别、目标和执行边界检查通过。"
 
+    required_actions = list(
+        dict.fromkeys([*execution_constraints, *user_actions])
+    )
+
     return FileTaskSupervisorAudit(
         status=status,
         risk_level=_risk_level(status, warnings),
@@ -159,6 +167,8 @@ def build_supervisor_audit(
         review_recommended=bool(warnings),
         warnings=list(dict.fromkeys(warnings)),
         required_actions=list(dict.fromkeys(required_actions)),
+        execution_constraints=list(dict.fromkeys(execution_constraints)),
+        user_actions=list(dict.fromkeys(user_actions)),
         reason_codes=list(dict.fromkeys(reason_codes)),
     )
 
