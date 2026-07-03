@@ -717,9 +717,24 @@ def _build_chat_system_context(
             fc_parts.append(f"工作区打开的标签页: {', '.join(str(t) for t in tabs[:10])}")
         sel = file_context.get("selection", "")
         if sel:
-            fc_parts.append(f"用户选中的文本:\n{str(sel)[:2000]}")
+            sel_kind = str(file_context.get("selection_kind") or "").strip()
+            sel_source = str(file_context.get("selection_source") or "").strip()
+            sel_meta = file_context.get("selection_meta")
+            if sel_kind:
+                fc_parts.append(f"选区类型: {sel_kind}")
+            if sel_source:
+                fc_parts.append(f"选区来源: {sel_source}")
+            if isinstance(sel_meta, dict):
+                meta_bits = []
+                for key in ("sheetName", "rangeA1", "rows", "cols", "kind"):
+                    value = sel_meta.get(key)
+                    if value not in (None, ""):
+                        meta_bits.append(f"{key}={value}")
+                if meta_bits:
+                    fc_parts.append("选区元信息: " + ", ".join(meta_bits))
+            fc_parts.append(f"用户明确选中的内容:\n{str(sel)[:4000]}")
         if fc_parts:
-            fc_block = "【文件助手上下文】\n用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n" + "\n".join(fc_parts)
+            fc_block = "【文件助手上下文】\n用户正在文件助手中操作文档。优先使用用户明确提供的选区和附加文件；如果用户要求只处理选区，不要擅自扩展到全文。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n" + "\n".join(fc_parts)
             sys_ctx = (sys_ctx + "\n\n" + fc_block) if sys_ctx else fc_block
             logger.info("[chat] File assistant context injected: %s", fc_file)
 
@@ -786,8 +801,8 @@ def list_tools():
 
 
 @agent_bp.route("/process", methods=["POST"])
-def process_compat():
-    """Phase2 compatibility endpoint for legacy AdaptiveAgent clients."""
+def process():
+    """Run one unified agent request and return the collected result."""
     data = request.json or {}
     user_request = data.get("request", "")
     session_id = data.get("session_id") or data.get("session", "")
@@ -855,8 +870,8 @@ def process_compat():
 
 
 @agent_bp.route("/process-stream", methods=["POST"])
-def process_stream_compat():
-    """Legacy compatibility SSE endpoint. Delegates to ChatPipeline."""
+def process_stream():
+    """Stream one unified agent request through the current chat pipeline."""
     data = request.json or {}
     user_request = data.get("request", "")
     session_id = data.get("session_id") or data.get("session", "")
