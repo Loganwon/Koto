@@ -11,7 +11,7 @@ skill_routes.py — Skill CRUD & MCP 导出 API Blueprint
   GET    /api/skills/<id>             获取单个 Skill 详情
   PUT    /api/skills/<id>             更新 Skill
   DELETE /api/skills/<id>             删除 Skill（仅自定义）
-  POST   /api/skills/<id>/enable      启用 / 禁用 Skill
+  POST   /api/skills/<id>/toggle      启用 / 禁用 Skill
   POST   /api/skills/<id>/record      从会话提取 Skill（触发 SkillRecorder）
   GET    /api/skills/mcp              以 MCP 工具格式导出所有启用的 Skill
   GET    /api/skills/stats            每个 Skill 的调用成本统计
@@ -675,22 +675,6 @@ def delete_skill(skill_id: str):
         return jsonify({"success": True, "deleted": skill_id})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# POST /api/skills/<id>/enable  —  [已废弃] 委托给 /toggle
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-@skill_bp.route("/<skill_id>/enable", methods=["POST"])
-def toggle_skill(skill_id: str):
-    """
-    [已废弃] 请改用 POST /api/skills/<id>/toggle。
-    此路由保留向后兼容，内部直接委托给 toggle_skill_v2，
-    以确保 SkillManager.set_enabled() 和 affinity 记录正确执行。
-    请求体: { "enabled": true | false }
-    """
-    return toggle_skill_v2(skill_id)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

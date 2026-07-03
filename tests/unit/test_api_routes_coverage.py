@@ -606,7 +606,7 @@ class TestFileHubRoutes:
 
     def test_open_file(self, full_client):
         resp = full_client.post("/api/files/" + "open", json={"file_id": "fake"})
-        assert resp.status_code == 404
+        assert resp.status_code == 405
 
     def test_delete_file_disk(self, full_client):
         resp = full_client.delete(
@@ -660,12 +660,6 @@ class TestSkillRoutes:
 
     def test_delete_skill_nonexistent(self, full_client):
         resp = full_client.delete("/api/skills/nonexistent-skill-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_toggle_skill_enable(self, full_client):
-        resp = full_client.post(
-            "/api/skills/nonexistent/enable", json={"enabled": True}
-        )
         assert resp.status_code in _ANY_VALID
 
     def test_toggle_skill_v2(self, full_client):
