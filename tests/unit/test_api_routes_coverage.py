@@ -140,6 +140,19 @@ class TestAgentRoutes:
         )
         assert resp.status_code == 404
 
+
+@pytest.mark.unit
+class TestDocumentRoutes:
+    """Tests for retired document-route compatibility aliases."""
+
+    def test_analyze_annotations_route_is_removed(self, full_client):
+        resp = full_client.post(
+            "/api/document/analyze-annotations",
+            json={"file_path": "missing.docx", "requirement": "review"},
+        )
+
+        assert resp.status_code == 404
+
     def test_list_available_scripts(self, full_client):
         resp = full_client.get("/api/agent/generate-script/list")
         assert resp.status_code == 404

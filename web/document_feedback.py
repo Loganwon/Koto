@@ -3314,23 +3314,6 @@ def iter_annotation_progress_events(
     )
 
 
-def analyze_annotations_only(
-    *,
-    file_path: str,
-    user_requirement: str,
-    gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
-) -> Dict[str, Any]:
-    feedback_system = DocumentFeedbackSystem(
-        gemini_client=gemini_client, default_model_id=model_id
-    )
-    return feedback_system.analyze_for_annotation_chunked(
-        file_path,
-        user_requirement,
-        model_id=model_id,
-    )
-
-
 def stream_annotation_events(
     *,
     file_path: str,
