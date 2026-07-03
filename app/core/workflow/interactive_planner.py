@@ -61,7 +61,7 @@ class InteractivePlanner:
       - 统一执行入口（execute，代理到 TaskPlanner.execute_plan）
 
     与旧代码的兼容：
-      create_ppt_plan()  返回旧 TaskPlan（PPT 流水线专用）
+      create_ppt_plan()  返回旧 TaskPlan（PPT 兼容规划专用）
       to_new_plan()      将旧 TaskPlan 转换为新 Plan 对象
     """
 
@@ -70,7 +70,7 @@ class InteractivePlanner:
     @staticmethod
     def create_ppt_plan(user_input: str) -> TaskPlan:
         """
-        构建 PPT 生成的旧式 TaskPlan，供 web/ppt_pipeline.py 等调用。
+        构建 PPT 生成的旧式 TaskPlan，供兼容规划路径调用。
 
         阶段：研究 → 大纲 → 内容扩展 → 组装
         """

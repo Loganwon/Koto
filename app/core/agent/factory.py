@@ -145,7 +145,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     except Exception as _e:
         logger.debug(f"[_build_registry] FileConverterPlugin 跳过: {_e}")
 
-    # ── PPT 生成工具（web/ppt_master + web/ppt_generator）────────────────
+    # ── PPT 生成工具（core PPT generation service facade）────────────────
     try:
         from app.core.agent.plugins.ppt_plugin import PPTPlugin
 

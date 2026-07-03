@@ -42,7 +42,7 @@ class RunState(Enum):
 
 @dataclass
 class AgentRequest:
-    """Input to KotoAgentLoop.run()."""
+    """Input to agent executors."""
     prompt: str
     session_id: str = ""
     file_type: str = ""

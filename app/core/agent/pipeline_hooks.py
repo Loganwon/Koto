@@ -2,8 +2,7 @@
 # pipeline_hooks.py — EditorAIPipeline ↔ Hook System Adapter
 #
 # Bridges the existing EditorAIPipeline (preprocess/postprocess)
-# into the hook registry so KotoAgentLoop can use hooks
-# instead of hard-calling the pipeline.
+# into the hook registry used by the editor/doc agent executors.
 #
 # This adapter preserves 100% backward compatibility:
 # the pipeline logic is untouched, only the call site changes.
