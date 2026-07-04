@@ -1,5 +1,10 @@
 # Koto 代码债务分析报告
 
+> 状态说明（2026-06-28）：本文保留早期审计背景；当前结论以
+> `docs/LEGACY_CODE_PATH_AUDIT.md` 为准。本轮已移除文中列出的
+> `analyze-annotations`、PPT 前端旧数组转换、冗余 `aiOutputMode` 状态，
+> 并清理了无法进入前端构建或页面加载图的孤儿文件。
+
 > 生成日期：2026-06-08
 > 范围：全栈（Python 后端 + JavaScript/CSS 前端）
 
@@ -13,7 +18,7 @@
 - 已从旧 bridge 中继续拆出 `file_task_doc_annotate_intent.py` 和 `file_task_doc_annotate_events.py`：路由意图判断、清理/直写排除规则、进度 payload、tool 结果转换不再混在执行流里。
 - 已把财务 XLSX -> DOCX 多文件报告链路从 runtime 主体迁移到 `file_task_financial_report_runner.py`，并补充“销售台账”跟随上一轮财务报告任务的路由测试。
 - 暂不删除 `data-review-action`：它仍由 `workspace-assistant.js` 生成，并被 e2e/unit 测试覆盖。
-- 暂不删除 `/api/document/analyze-annotations`、`WA.extractTopics`、PPT legacy：这些项需要先迁移或调整测试与前端入口，不能按“零风险删除”处理。
+- 后续复核已完成：`/api/document/analyze-annotations` 与 PPT 前端旧数组转换已在 2026-06-28 删除；`data-review-action` 是当前审阅 UI 的正式事件契约，不再视作 legacy handler。
 
 ---
 

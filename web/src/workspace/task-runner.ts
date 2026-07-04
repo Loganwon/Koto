@@ -202,10 +202,6 @@ function scrollToBottom(container?: HTMLElement | null): void {
   if (container) container.scrollTop = container.scrollHeight;
 }
 
-function eventPayload(evt: Record<string, any>): Record<string, any> {
-  return (evt && evt.payload && typeof evt.payload === 'object') ? evt.payload : {};
-}
-
 function normalizedTaskLifecyclePayload(payload: any): Record<string, any> {
   const data = payload && typeof payload === 'object' ? payload : {};
   const decisionContext = data.decision_context && typeof data.decision_context === 'object' ? data.decision_context : null;
@@ -294,14 +290,6 @@ function makeTaskError(message: string): Error & { waTaskError: boolean } {
   return error;
 }
 
-function normalizeTaskContractText(value: unknown, limit: number): string {
-  const text = String(value || '').trim();
-  const max = Number(limit) > 0 ? Number(limit) : 0;
-  if (!text) return '';
-  if (!max || text.length <= max) return text;
-  return text.slice(0, max) + '...';
-}
-
 function decodeTaskRequestPayload(encoded: string): Record<string, any> | null {
   const raw = String(encoded || '').trim();
   if (!raw) return null;
@@ -329,20 +317,6 @@ function basename(path: string): string {
   if (!text) return '';
   const parts = text.split(/[\\/]+/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : text;
-}
-
-function rowsColsText(payload: Record<string, any>): string {
-  const rows = Number(payload.rows_written || 0);
-  const cols = Number(payload.columns_written || 0);
-  if (rows && cols) return rows + ' 行 x ' + cols + ' 列';
-  if (rows) return rows + ' 行';
-  if (cols) return cols + ' 列';
-  return '';
-}
-
-function isReviewChangePayload(payload: any): boolean {
-  if (!payload || typeof payload !== 'object') return false;
-  return payload.operation === 'annotate_file' || payload.operation === 'annotate' || Number(payload.annotations_added || 0) > 0;
 }
 
 function isConfirmEachStepResumePayload(payload: any): boolean {
@@ -702,15 +676,6 @@ function upsertStepSingletonRow(step: HTMLElement, role: string, kind: string, h
   return row;
 }
 
-function upsertMultiTargetTerminalRow(step: HTMLElement, kind: string, html: string): HTMLElement | null {
-  if (!step) return null;
-  let row = (step as any)._multiTargetTerminalRow as HTMLElement;
-  if (!row) { row = appendRow(step, kind, html); row.dataset.role = 'multi-target-terminal'; (step as any)._multiTargetTerminalRow = row; return row; }
-  row.className = ('wa-task-row ' + (kind || '')).trim();
-  row.innerHTML = html;
-  return row;
-}
-
 function noteStreamIssue(card: TaskCardElement, key: string, text: string): void {
   if (!card) return;
   const state = ensureTaskUiState(card);
@@ -955,9 +920,9 @@ function taskResultActionsHtml(card: TaskCardElement): string {
       '</div>',
     ].join('');
   }
-  let questionText = completed ? '询问结果' : '追问原因';
+  const questionText = completed ? '询问结果' : '追问原因';
   let improveText = completed ? '继续处理' : '继续修复';
-  let actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';
+  const actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';
   let applyActionHtml = '';
   if (incompleteBlocked) improveText = '重新发起';
   const artifactButtonHtml = card.dataset.taskArtifactResult
@@ -1462,17 +1427,6 @@ function planSummaryFromPayload(data: Record<string, any>): string {
     || (data.execution_plan && (data.execution_plan.plan_summary || data.execution_plan.goal))
     || '已生成执行方案'
   ).trim();
-}
-
-function renderPlanStepItem(item: any, index: number): string {
-  if (item && typeof item === 'object') {
-    const title = String(item.title || item.name || item.label || item.stage || `步骤 ${index + 1}`).trim();
-    const tool = String(item.tool || item.tool_name || '').trim();
-    const why = String(item.why || item.reason || item.description || item.detail || '').trim();
-    const meta = [tool ? `工具：${tool}` : '', why].filter(Boolean).join(' · ');
-    return `<li><strong>${esc(title)}</strong>${meta ? `<span>${esc(meta)}</span>` : ''}</li>`;
-  }
-  return `<li><strong>${esc(String(item || `步骤 ${index + 1}`))}</strong></li>`;
 }
 
 function renderPlanIntoCard(card: TaskCardElement, data: Record<string, any>): void {
