@@ -2102,6 +2102,8 @@
       max-width: 100%;
       max-height: calc(var(--koto-docx-content-height, 880px) - 24px);
       object-fit: contain;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
     #wa-docx-editor [contenteditable="true"] img[style*="float"] {
       object-fit: contain;
@@ -2122,6 +2124,8 @@
       line-height: 0;         /* collapse visual gap below <img> */
       user-select: none;
       cursor: default;
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
 
     /* Image itself — fills the wrapper, no unwanted spacing */
@@ -2130,6 +2134,14 @@
       max-width: 100%;
       max-height: calc(var(--koto-docx-content-height, 880px) - 24px);
       object-fit: contain;
+      break-inside: avoid;
+      page-break-inside: avoid;
+    }
+
+    #wa-docx-editor .ProseMirror p:has(.koto-img-wrapper),
+    #wa-docx-editor .ProseMirror p:has(img) {
+      break-inside: avoid;
+      page-break-inside: avoid;
     }
 
     /* Resize handle dots — hidden by default, shown when wrapper is hovered */

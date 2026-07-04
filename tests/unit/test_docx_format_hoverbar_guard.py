@@ -565,3 +565,16 @@ def test_docx_tables_paginate_with_row_level_soft_break_widgets():
     assert "_collectTableRowPaginationGroups" in ext_js
     assert "TableMap.get(node).width" in ext_js
     assert "tableCols" in ext_js
+
+
+def test_docx_pagination_remeasures_after_media_load_and_visual_overflow():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function _measureDocxBlockContentHeightPx(element)" in ext_js
+    assert "_measureDocxBlockOuterHeightPx(domEl)" in ext_js
+    assert "'img,svg,canvas,video,.koto-img-wrapper'" in ext_js
+    assert "new ResizeObserver" in ext_js
+    assert "node.addEventListener('load', onSettled" in ext_js
+    assert "_scheduleAfterMediaSettles" in ext_js

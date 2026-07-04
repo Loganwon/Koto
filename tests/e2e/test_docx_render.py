@@ -23,6 +23,7 @@ Word page count: 72 pages
 
 from __future__ import annotations
 
+import base64
 import io
 import os
 import time
@@ -904,6 +905,177 @@ class TestPageCount:
             f"TipTap renders {total_pages} pages; "
             f"expected {expected_lower}–{expected_upper} (Word: {WORD_PAGE_COUNT}, ±30%)."
         )
+
+    def test_soft_page_breaks_do_not_overlap_floating_images(self, e2e_page, e2e_base_url):
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220">'
+            '<rect width="220" height="220" fill="#4f7eff"/>'
+            '<text x="110" y="116" text-anchor="middle" font-size="24" fill="#ffffff">IMG</text>'
+            '</svg>'
+        )
+        img_src = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        spacer = "".join(
+            '<p style="font-size:16px;line-height:24px;margin:0 0 8px 0">prefill line</p>'
+            for _ in range(8)
+        )
+        html = (
+            spacer
+            + f'<p style="font-size:16px;line-height:24px;margin:0">'
+              f'<img src="{img_src}" alt="" style="float:right;width:220px;height:220px;margin:0 0 8px 12px;max-width:100%" />'
+              f'</p>'
+            + '<p style="font-size:16px;line-height:24px;margin:0">after image</p>'
+        )
+        opts = {
+            "pageWidthPx": 520,
+            "pageHeightPx": 420,
+            "marginTopPx": 40,
+            "marginBottomPx": 40,
+            "marginLeftPx": 50,
+            "marginRightPx": 50,
+            "headerHtml": "",
+            "footerHtml": "",
+            "sections": [],
+        }
+
+        _mount_docx(e2e_page, html, e2e_base_url, opts)
+        e2e_page.wait_for_function(
+            """() => {
+                const img = document.querySelector('#wa-docx-editor .ProseMirror img.koto-docx-img');
+                return img
+                    && img.complete
+                    && img.getBoundingClientRect().height > 100
+                    && document.querySelectorAll('[data-soft-page-break]').length > 0;
+            }""",
+            timeout=20_000,
+        )
+
+        metrics = e2e_page.evaluate(
+            """() => {
+                const img = document.querySelector('#wa-docx-editor .ProseMirror img.koto-docx-img');
+                const imgRect = img.getBoundingClientRect();
+                const breaks = Array.from(document.querySelectorAll('[data-page-break],[data-soft-page-break]'));
+                const overlaps = breaks.map((breakEl) => {
+                    const rect = breakEl.getBoundingClientRect();
+                    return Math.max(0, Math.min(rect.bottom, imgRect.bottom) - Math.max(rect.top, imgRect.top));
+                });
+                return {
+                    breakCount: breaks.length,
+                    imageHeight: imgRect.height,
+                    maxOverlap: Math.max(0, ...overlaps),
+                    totalPages: window._testEditor ? window._testEditor._totalPages : 0,
+                };
+            }"""
+        )
+        assert metrics["breakCount"] > 0, metrics
+        assert metrics["imageHeight"] > 100, metrics
+        assert metrics["maxOverlap"] <= 1, metrics
+
+    def test_inline_soft_page_breaks_do_not_overlap_text(self, e2e_page, e2e_base_url):
+        repeated = (
+            "The forecast model includes revenue, gross margin, tax, cash flow, "
+            "and operating expense assumptions that should remain readable across pages. "
+        )
+        html = (
+            '<p style="font-size:16px;line-height:24px;margin:0">'
+            + repeated * 90
+            + "</p>"
+        )
+        opts = {
+            "pageWidthPx": 520,
+            "pageHeightPx": 420,
+            "marginTopPx": 40,
+            "marginBottomPx": 40,
+            "marginLeftPx": 50,
+            "marginRightPx": 50,
+            "headerHtml": "",
+            "footerHtml": "",
+            "sections": [],
+        }
+
+        _mount_docx(e2e_page, html, e2e_base_url, opts)
+        e2e_page.wait_for_function(
+            """() => document.querySelectorAll('.koto-inline-page-break-anchor [data-soft-page-break]').length > 0""",
+            timeout=20_000,
+        )
+
+        metrics = e2e_page.evaluate(
+            """() => {
+                const pm = document.querySelector('#wa-docx-editor .ProseMirror');
+                const breaks = Array.from(document.querySelectorAll('[data-soft-page-break]'));
+                const breakRects = breaks
+                    .map((node) => {
+                        const rect = node.getBoundingClientRect();
+                        return {
+                            top: rect.top,
+                            bottom: rect.bottom,
+                            left: rect.left,
+                            right: rect.right,
+                            width: rect.width,
+                            height: rect.height,
+                            inline: !!node.closest('.koto-inline-page-break-anchor'),
+                        };
+                    })
+                    .filter((rect) => rect.width > 0.5 && rect.height > 0.5);
+                const textRects = [];
+                const walker = document.createTreeWalker(pm, NodeFilter.SHOW_TEXT, {
+                    acceptNode(node) {
+                        if (!node.nodeValue || !node.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+                        const parent = node.parentElement;
+                        if (!parent || parent.closest('[data-soft-page-break]')) return NodeFilter.FILTER_REJECT;
+                        return NodeFilter.FILTER_ACCEPT;
+                    },
+                });
+                while (walker.nextNode()) {
+                    const range = document.createRange();
+                    range.selectNodeContents(walker.currentNode);
+                    for (const rect of Array.from(range.getClientRects())) {
+                        if (rect.width > 0.5 && rect.height > 0.5) {
+                            textRects.push({
+                                top: rect.top,
+                                bottom: rect.bottom,
+                                left: rect.left,
+                                right: rect.right,
+                                width: rect.width,
+                                height: rect.height,
+                            });
+                        }
+                    }
+                    range.detach();
+                }
+
+                let maxOverlapY = 0;
+                let realOverlapCount = 0;
+                for (const breakRect of breakRects) {
+                    for (const textRect of textRects) {
+                        const overlapX = Math.max(
+                            0,
+                            Math.min(breakRect.right, textRect.right) - Math.max(breakRect.left, textRect.left),
+                        );
+                        const overlapY = Math.max(
+                            0,
+                            Math.min(breakRect.bottom, textRect.bottom) - Math.max(breakRect.top, textRect.top),
+                        );
+                        maxOverlapY = Math.max(maxOverlapY, overlapY);
+                        if (overlapX > 2 && overlapY > 2) {
+                            realOverlapCount += 1;
+                        }
+                    }
+                }
+                return {
+                    breakCount: breaks.length,
+                    inlineBreakCount: breakRects.filter((rect) => rect.inline).length,
+                    textRectCount: textRects.length,
+                    maxOverlapY,
+                    realOverlapCount,
+                    totalPages: window._testEditor ? window._testEditor._totalPages : 0,
+                };
+            }"""
+        )
+        assert metrics["breakCount"] > 0, metrics
+        assert metrics["inlineBreakCount"] > 0, metrics
+        assert metrics["textRectCount"] > 0, metrics
+        assert metrics["realOverlapCount"] == 0, metrics
+        assert metrics["maxOverlapY"] <= 2, metrics
 
     def test_page_indicator_text(self, e2e_page, e2e_base_url, docx_html_from_api):
         """

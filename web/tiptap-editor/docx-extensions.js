@@ -2266,6 +2266,8 @@ const _AUTO_PB_KEY = new PluginKey('autoPageBreak');
 const _AUTO_PB_INITIAL_DELAY_MS = 80;
 const _AUTO_PB_UPDATE_DELAY_MS = 120;
 const _AUTO_PB_MIN_LINES_PER_FRAGMENT = 2;
+const _DOCX_SOFT_PAGE_BREAK_SELECTOR = '[data-soft-page-break]';
+const _DOCX_PAGE_BOUNDARY_SELECTOR = '[data-soft-page-break],[data-page-break]';
 
 function _normalizeDocxBreakFillPx(value) {
   const numeric = Number(value);
@@ -2462,6 +2464,55 @@ function _measureVerticalMarginsPx(element) {
     };
   } catch (_) {
     return { top: 0, bottom: 0 };
+  }
+}
+
+function _measureDocxBlockContentHeightPx(element) {
+  if (!element || typeof element.getBoundingClientRect !== 'function') {
+    return element?.offsetHeight || 0;
+  }
+
+  const baseHeight = element.offsetHeight || 0;
+  let contentHeight = baseHeight;
+
+  try {
+    const rootRect = element.getBoundingClientRect();
+    const scaleY = baseHeight > 0 && rootRect.height > 0
+      ? Math.max(0.01, rootRect.height / baseHeight)
+      : 1;
+    const visualChildren = element.querySelectorAll?.(
+      'img,svg,canvas,video,.koto-img-wrapper'
+    ) || [];
+
+    visualChildren.forEach((child) => {
+      if (!child || typeof child.getBoundingClientRect !== 'function') return;
+      const rect = child.getBoundingClientRect();
+      if (!rect || rect.width <= 0.5 || rect.height <= 0.5) return;
+      const childBottom = (rect.bottom - rootRect.top) / scaleY;
+      if (Number.isFinite(childBottom)) {
+        contentHeight = Math.max(contentHeight, childBottom);
+      }
+    });
+  } catch (_) {}
+
+  return Math.max(0, contentHeight);
+}
+
+function _measureDocxBlockOuterHeightPx(element) {
+  const margins = _measureVerticalMarginsPx(element);
+  return _measureDocxBlockContentHeightPx(element) + margins.top + margins.bottom;
+}
+
+function _docxBlockAvoidsAutoSplit(node, element) {
+  if (node?.type?.name === 'image') return true;
+  if (!element) return false;
+  try {
+    return !!(
+      element.matches?.('img,.koto-img-wrapper')
+      || element.querySelector?.('img,.koto-img-wrapper')
+    );
+  } catch (_) {
+    return false;
   }
 }
 
@@ -2693,16 +2744,35 @@ function _planDocxTextBlockBreaks(view, node, start, domEl, usedH, contentH, pag
   };
 }
 
-function _isDocxPaginationBoundaryEl(element) {
+function _isTopLevelDocxPaginationBoundaryEl(element) {
   return !!(
     element
     && element.nodeType === 1
     && (
-      element.hasAttribute('data-soft-page-break')
+      element.matches?.(_DOCX_PAGE_BOUNDARY_SELECTOR)
       || element.hasAttribute('data-page-break')
       || element.classList?.contains('koto-table-page-break-row')
     )
   );
+}
+
+function _suppressDocxSoftPageBreaksForMeasurement(root) {
+  const records = [];
+  try {
+    root?.querySelectorAll?.(_DOCX_SOFT_PAGE_BREAK_SELECTOR).forEach((node) => {
+      if (!node || !node.style) return;
+      records.push([node, node.style.display]);
+      node.style.display = 'none';
+    });
+  } catch (_) {}
+
+  return () => {
+    records.forEach(([node, display]) => {
+      try {
+        if (node && node.style) node.style.display = display || '';
+      } catch (_) {}
+    });
+  };
 }
 
 function _buildSoftBreakTableRow(pageNum, columnCount, headerHtml, footerHtml, marginTopPx, marginBottomPx, marginLeftPx, marginRightPx, pageWidthPx, extStorage, tableLeftOffsetPx, contentFillPx = 0) {
@@ -2850,6 +2920,8 @@ export const AutoPageBreakPlugin = Extension.create({
       view(editorView) {
         let _timer = null;
         let _measuring = false;  // guard against re-entrant measurement
+        let _mediaResizeObserver = null;
+        const _watchedMedia = new Map();
 
         const _schedule = (delayMs = _AUTO_PB_UPDATE_DELAY_MS) => {
           clearTimeout(_timer);
@@ -2858,12 +2930,53 @@ export const AutoPageBreakPlugin = Extension.create({
           }, delayMs);
         };
 
+        const _scheduleAfterMediaSettles = () => _schedule(40);
+
+        const _watchMediaForPagination = (view) => {
+          const pmDom = view?.dom;
+          if (!pmDom || !pmDom.querySelectorAll) return;
+
+          if (
+            typeof ResizeObserver !== 'undefined'
+            && !_mediaResizeObserver
+          ) {
+            _mediaResizeObserver = new ResizeObserver(() => {
+              _scheduleAfterMediaSettles();
+            });
+          }
+
+          const mediaNodes = Array.from(pmDom.querySelectorAll(
+            'img,svg,canvas,video,.koto-img-wrapper'
+          ));
+
+          mediaNodes.forEach((node) => {
+            if (!node || _watchedMedia.has(node)) return;
+            const onSettled = () => _scheduleAfterMediaSettles();
+            _watchedMedia.set(node, onSettled);
+
+            try {
+              _mediaResizeObserver?.observe(node);
+            } catch (_) {}
+
+            if (node.tagName === 'IMG' || node.tagName === 'VIDEO') {
+              node.addEventListener('load', onSettled, { passive: true });
+              node.addEventListener('error', onSettled, { passive: true });
+
+              if (node.tagName === 'IMG' && node.complete) {
+                _scheduleAfterMediaSettles();
+              }
+            }
+          });
+        };
+
         const _measure = (view) => {
           if (_measuring) return;
           _measuring = true;
+          const restoreSoftBreaks = _suppressDocxSoftPageBreaksForMeasurement(view?.dom);
           try {
             _measureInner(view);
           } finally {
+            restoreSoftBreaks();
             _measuring = false;
           }
         };
@@ -2937,7 +3050,7 @@ export const AutoPageBreakPlugin = Extension.create({
             } else {
               while (
                 pmIdx < pmChildren.length &&
-                _isDocxPaginationBoundaryEl(pmChildren[pmIdx])
+                _isTopLevelDocxPaginationBoundaryEl(pmChildren[pmIdx])
               ) {
                 pmIdx++;
               }
@@ -2967,7 +3080,7 @@ export const AutoPageBreakPlugin = Extension.create({
                 ? domEl
                 : domEl?.querySelector?.('table');
               const domRows = tableEl
-                ? Array.from(tableEl.rows || []).filter((rowEl) => !_isDocxPaginationBoundaryEl(rowEl))
+                ? Array.from(tableEl.rows || []).filter((rowEl) => !_isTopLevelDocxPaginationBoundaryEl(rowEl))
                 : [];
               const pmRows = [];
 
@@ -3025,29 +3138,29 @@ export const AutoPageBreakPlugin = Extension.create({
               }
             }
 
-            let blockH = domEl.offsetHeight;
-            const margins = _measureVerticalMarginsPx(domEl);
-            blockH += margins.top + margins.bottom;
+            let blockH = _measureDocxBlockOuterHeightPx(domEl);
 
             if (blockH <= 0) continue;
 
             const remaining = contentH - usedH;
             if (usedH > 0 && blockH > remaining) {
-              const textPlan = _planDocxTextBlockBreaks(
-                view,
-                node,
-                start,
-                domEl,
-                usedH,
-                contentH,
-                pageNum,
-                curSection,
-              );
-              if (textPlan && Array.isArray(textPlan.breaks) && textPlan.breaks.length) {
-                breaks.push(...textPlan.breaks);
-                pageNum = textPlan.pageNum;
-                usedH = textPlan.usedH;
-                continue;
+              if (!_docxBlockAvoidsAutoSplit(node, domEl)) {
+                const textPlan = _planDocxTextBlockBreaks(
+                  view,
+                  node,
+                  start,
+                  domEl,
+                  usedH,
+                  contentH,
+                  pageNum,
+                  curSection,
+                );
+                if (textPlan && Array.isArray(textPlan.breaks) && textPlan.breaks.length) {
+                  breaks.push(...textPlan.breaks);
+                  pageNum = textPlan.pageNum;
+                  usedH = textPlan.usedH;
+                  continue;
+                }
               }
 
               breaks.push({
@@ -3140,9 +3253,9 @@ export const AutoPageBreakPlugin = Extension.create({
                         extStorage,
                         contentFillPx,
                       );
-                  const breakRoot = breakDom.matches?.('[data-soft-page-break]')
+                  const breakRoot = breakDom.matches?.(_DOCX_SOFT_PAGE_BREAK_SELECTOR)
                     ? breakDom
-                    : breakDom.querySelector?.('[data-soft-page-break]');
+                    : breakDom.querySelector?.(_DOCX_SOFT_PAGE_BREAK_SELECTOR);
                   if (breakRoot) {
                     breakRoot.setAttribute('data-section-idx', String(Math.max(0, Number.parseInt(nsi, 10) || 0)));
                     breakRoot.setAttribute('data-current-section-idx', String(Math.max(0, Number.parseInt(csi, 10) || 0)));
@@ -3180,17 +3293,30 @@ export const AutoPageBreakPlugin = Extension.create({
           view.dispatch(view.state.tr.setMeta(_AUTO_PB_KEY, decoSet));
         };
 
+        _watchMediaForPagination(editorView);
         _schedule(_AUTO_PB_INITIAL_DELAY_MS);
 
         return {
           update(view, prevState) {
             // Only re-measure when doc content changed (not on meta dispatches)
             if (view.state.doc !== prevState.doc) {
+              _watchMediaForPagination(view);
               _schedule();
             }
           },
           destroy() {
             clearTimeout(_timer);
+            if (_mediaResizeObserver) {
+              try { _mediaResizeObserver.disconnect(); } catch (_) {}
+              _mediaResizeObserver = null;
+            }
+            _watchedMedia.forEach((onSettled, node) => {
+              try {
+                node.removeEventListener('load', onSettled);
+                node.removeEventListener('error', onSettled);
+              } catch (_) {}
+            });
+            _watchedMedia.clear();
           },
         };
       },
