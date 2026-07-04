@@ -4,6 +4,7 @@
  */
 
 import { _csrfFetch } from './infrastructure';
+import { fileTaskStatusLabel } from './file-task-status';
 
 export interface AiSessionPreview {
   id: string;
@@ -15,6 +16,7 @@ export interface AiSessionPreview {
   mtime?: number;
   task_count?: number;
   has_task_flow?: boolean;
+  latest_task_title?: string;
   latest_task_status?: string;
   latest_task_id?: string;
   latest_task_run_id?: string;
@@ -36,6 +38,8 @@ export function displaySessionName(sessionId: string): string {
 }
 
 export function sessionTitle(session: AiSessionPreview | null, fallbackSessionId = ''): string {
+  const taskTitle = String(session && session.latest_task_title || '').trim();
+  if (taskTitle) return taskTitle;
   const title = String(session && session.title || '').trim();
   if (title && title !== session?.id) return title;
   const id = session ? session.id : fallbackSessionId;
@@ -58,12 +62,7 @@ export function formatSessionTime(session: AiSessionPreview): string {
 }
 
 export function taskStatusLabel(status: string): string {
-  const normalized = String(status || '').trim().toLowerCase();
-  if (normalized === 'completed') return '已完成';
-  if (normalized === 'running') return '进行中';
-  if (normalized === 'failed') return '失败';
-  if (normalized === 'cancelled') return '已取消';
-  return '任务';
+  return fileTaskStatusLabel(status, '任务');
 }
 
 export function normalizeSession(raw: unknown): AiSessionPreview | null {
@@ -85,6 +84,7 @@ export function normalizeSession(raw: unknown): AiSessionPreview | null {
     mtime: Number(record.mtime || 0),
     task_count: Number(record.task_count || 0),
     has_task_flow: Boolean(record.has_task_flow || Number(record.task_count || 0)),
+    latest_task_title: String(record.latest_task_title || '').trim(),
     latest_task_status: String(record.latest_task_status || '').trim(),
     latest_task_id: String(record.latest_task_id || '').trim(),
     latest_task_run_id: String(record.latest_task_run_id || '').trim(),

@@ -10,6 +10,22 @@ declare global {
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 
+function _xlsxSelectionPayload(): any {
+  if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return null;
+  if (typeof window.KotoSheetsAPI.getSelectionPayload === 'function') {
+    return window.KotoSheetsAPI.getSelectionPayload();
+  }
+  const text = typeof window.KotoSheetsAPI.getSelectionText === 'function'
+    ? window.KotoSheetsAPI.getSelectionText()
+    : '';
+  return text ? {
+    kind: 'xlsx-range',
+    tsv: text,
+    aiText: `[当前选中表格数据]:\n${text}\n`,
+    previewText: '选中表格区域',
+  } : null;
+}
+
 export class KotoXlsxEditor implements WorkspaceEditor {
   containerId: string;
   _containerId: string;
@@ -69,11 +85,20 @@ export class KotoXlsxEditor implements WorkspaceEditor {
         }, 600);
 
         window.KotoSheetsAPI.onSelectionChange(() => {
-          const text = window.KotoSheetsAPI.getSelectionText();
-          if (text) {
-            (window as any).lastSelectionText = `[当前选中表格数据]:\n${text}\n`;
+          const payload = _xlsxSelectionPayload();
+          if (payload && payload.aiText) {
+            (window as any).lastSelectionText = payload.aiText;
             if (typeof (window as any)._pinSelectionChip === 'function') {
-              (window as any)._pinSelectionChip((window as any).lastSelectionText);
+              (window as any)._pinSelectionChip({
+                kind: payload.kind || 'xlsx-range',
+                text: payload.aiText,
+                previewText: payload.previewText || '选中表格区域',
+                sourceType: 'xlsx',
+                sheetName: payload.sheetName || '',
+                rangeA1: payload.rangeA1 || '',
+                rows: payload.rows || 0,
+                cols: payload.cols || 0,
+              });
             }
           }
         });
@@ -94,10 +119,15 @@ export class KotoXlsxEditor implements WorkspaceEditor {
   }
 
   getContent(): string {
-    if (!window.KotoSheetsAPI || !window.KotoSheetsAPI.isReady()) return '';
-    const text = window.KotoSheetsAPI.getSelectionText();
-    if (text && text.trim()) return `[当前选中表格数据]:\n${text}\n`;
+    const payload = this.getSelectionPayload();
+    if (payload && String(payload.aiText || '').trim()) return payload.aiText;
     return '[当前表格未选中区域，请提示用户框选数据]';
+  }
+
+  getSelectionPayload(): any {
+    const payload = _xlsxSelectionPayload();
+    if (!payload) return null;
+    return Object.assign({ sourceType: 'xlsx' }, payload);
   }
 
   getCSV(): string {

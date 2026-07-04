@@ -142,6 +142,23 @@ export function _setStreamBtn(streaming: boolean): void {
     : () => ((window as any).WA && (window as any).WA.sendMessage && (window as any).WA.sendMessage());
 }
 
+export function stopStream(): boolean {
+  const ctrl = state._streamAbortCtrl;
+  if (ctrl && typeof ctrl.abort === 'function' && !(ctrl.signal && ctrl.signal.aborted)) {
+    ctrl.abort();
+    showToast('正在停止当前任务...', 'info');
+    return true;
+  }
+  if (state.isLoading) {
+    state.isLoading = false;
+    state._streamAbortCtrl = null;
+    _setStreamBtn(false);
+    showToast('当前任务已停止', 'info');
+    return true;
+  }
+  return false;
+}
+
 export interface ProposalData {
   id: string;
   review_id?: string;
@@ -1036,6 +1053,7 @@ export function sendMessage(): void {
     text,
     pinnedSelText,
     pinnedSelSource,
+    selectionContext: explicitSelection || null,
     msgs,
     loadingEl,
     taskPayload: pendingTaskPayload,
@@ -1047,6 +1065,18 @@ export function sendMessage(): void {
     _setStreamBtn(false);
   });
   _clearPendingTaskResultFollowupBinding();
+}
+
+export function sendCustomMessage(text: string): void {
+  const input = $('wa-user-input') as HTMLTextAreaElement | null;
+  if (!input) {
+    showToast('AI 输入框未加载，请刷新后重试。', 'warning');
+    return;
+  }
+  input.value = String(text || '').trim();
+  input.focus();
+  autoResize(input);
+  sendMessage();
 }
 
 // ── Quick action dispatcher ──
@@ -1155,6 +1185,7 @@ export function sendQuickAction(action: string): void {
     selectionText: sel,
     selectionSource: _selectionContextSourceLabel(state.pinnedSelection),
     pinnedSelSource: _selectionContextSourceLabel(state.pinnedSelection),
+    selectionContext: state.pinnedSelection || null,
     fullDocText,
     hasSelection,
     loadingEl,
@@ -1189,6 +1220,8 @@ if (typeof window !== 'undefined') {
   (window as any).WA.resumeTaskArtifact = resumeTaskArtifact;
   (window as any).WA.resumePersistedTaskArtifact = resumePersistedTaskArtifact;
   (window as any).WA.sendMessage = sendMessage;
+  (window as any).WA.sendCustomMessage = sendCustomMessage;
+  (window as any).WA.stopStream = stopStream;
   (window as any).WA.handleInputKeydown = handleInputKeydown;
   (window as any).WA.closeReviewCenter = closeReviewCenter;
   (window as any).WA.setReviewMode = setReviewMode;

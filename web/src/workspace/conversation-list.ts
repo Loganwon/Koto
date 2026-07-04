@@ -40,6 +40,7 @@ let _sessions: AiSessionPreview[] = [];
 let _refreshPromise: Promise<AiSessionPreview[]> | null = null;
 let _bound = false;
 let _sessionsExpanded = false;
+let _sessionActionsBusy = false;
 
 const _SESSION_PREVIEW_LIMIT = 5;
 
@@ -88,6 +89,7 @@ function _renderLoading(): void {
   const list = $('wa-ai-session-list');
   if (!list) return;
   list.innerHTML = '<div class="wa-ai-session-state">正在读取对话...</div>';
+  _syncSessionActionState();
 }
 
 function _renderEmpty(message = '暂无对话与任务'): void {
@@ -96,8 +98,29 @@ function _renderEmpty(message = '暂无对话与任务'): void {
   list.innerHTML = `
     <div class="wa-ai-session-empty">
       <strong>${_escHtml(message)}</strong>
-      <span>在底部输入即可开始新对话；附加文件后会进入文件任务流程。</span>
+      <span>在输入框输入即可开始新对话；附加文件后会进入文件任务流程。</span>
     </div>`;
+  _syncSessionActionState();
+}
+
+function _syncSessionActionState(): void {
+  const clearButton = $('wa-ai-session-clear') as HTMLButtonElement | null;
+  const refreshButton = $('wa-ai-session-refresh') as HTMLButtonElement | null;
+  const summary = $('wa-ai-session-summary');
+  const totalTasks = _sessions.reduce((sum, session) => sum + Math.max(0, Number(session.task_count || 0)), 0);
+  if (summary) {
+    summary.textContent = _sessions.length
+      ? `${_sessions.length} 条对话${totalTasks ? ` · ${totalTasks} 个任务` : ''}`
+      : 'AI 工作区';
+  }
+  if (clearButton) {
+    clearButton.disabled = _sessionActionsBusy || !_sessions.length;
+    clearButton.classList.toggle('is-busy', _sessionActionsBusy);
+  }
+  if (refreshButton) {
+    refreshButton.disabled = _sessionActionsBusy;
+    refreshButton.classList.toggle('is-busy', !!_refreshPromise);
+  }
 }
 
 function _renderSessions(): void {
@@ -111,7 +134,8 @@ function _renderSessions(): void {
   const hiddenCount = Math.max(0, _sessions.length - visibleSessions.length);
   const sessionHtml = visibleSessions.map((session) => {
     const active = session.id === _activeAiSessionId ? ' is-active' : '';
-    const title = sessionTitle(session, _activeAiSessionId);
+    const taskTitle = String(session.latest_task_title || '').trim();
+    const title = taskTitle || sessionTitle(session, _activeAiSessionId);
     const preview = session.preview || '暂无消息';
     const time = formatSessionTime(session);
     const count = Number(session.message_count || 0);
@@ -123,7 +147,7 @@ function _renderSessions(): void {
       ? `<span class="wa-ai-session-task-badge" data-status="${_escHtml(taskStatus || 'task')}">${_escHtml(taskCount > 1 ? `任务 ${taskCount} · ${taskStatusLabel(taskStatus)}` : taskStatusLabel(taskStatus))}</span>`
       : '';
     return `
-      <div role="button" tabindex="0" class="wa-ai-session-item${hasTaskFlow ? ' has-task-flow' : ''}${active}" data-ai-session-id="${_escHtml(session.id)}" data-task-count="${_escHtml(String(taskCount))}" data-latest-task-status="${_escHtml(taskStatus)}" title="${_escHtml(title)}">
+      <div role="button" tabindex="0" class="wa-ai-session-item${hasTaskFlow ? ' has-task-flow' : ''}${active}" data-ai-session-id="${_escHtml(session.id)}" data-task-count="${_escHtml(String(taskCount))}" data-latest-task-title="${_escHtml(taskTitle)}" data-latest-task-status="${_escHtml(taskStatus)}" title="${_escHtml(title)}">
         <span class="wa-ai-session-icon">${_CHAT_SVG}</span>
         <span class="wa-ai-session-main">
           <span class="wa-ai-session-top">
@@ -143,6 +167,7 @@ function _renderSessions(): void {
     ? `<button type="button" class="wa-ai-session-expand" data-ai-session-expand="${_sessionsExpanded ? '0' : '1'}">${_escHtml(_sessionsExpanded ? '收起历史' : `展开 ${hiddenCount} 条历史`)}</button>`
     : '';
   list.innerHTML = sessionHtml + expandHtml;
+  _syncSessionActionState();
   _setChatHeader();
 }
 
@@ -180,7 +205,7 @@ function _syncHistoricalTaskLiveProgress(session?: AiSessionPreview): void {
     planEl.textContent = '历史任务';
     planEl.style.display = '';
   }
-  if (valueEl) valueEl.textContent = status === 'running' ? '继续观察步骤' : '查看下方步骤';
+  if (valueEl) valueEl.textContent = status === 'running' ? '继续观察步骤' : '查看执行过程';
   if (fillEl) fillEl.style.width = status === 'running' ? '55%' : '100%';
 }
 
@@ -211,6 +236,7 @@ export async function refreshAiSessions(options: RefreshOptions = {}): Promise<A
   if (_refreshPromise) return _refreshPromise;
   const list = $('wa-ai-session-list');
   if (list && (!options.silent || !list.children.length)) _renderLoading();
+  _syncSessionActionState();
   _refreshPromise = fetchAiSessionPreviews()
     .then((sessions) => {
       _sessions = sessions;
@@ -224,6 +250,7 @@ export async function refreshAiSessions(options: RefreshOptions = {}): Promise<A
     })
     .finally(() => {
       _refreshPromise = null;
+      _syncSessionActionState();
     });
   return _refreshPromise;
 }
@@ -277,6 +304,54 @@ export async function deleteAiSession(sessionId: string): Promise<boolean> {
   } catch (error: any) {
     showToast(error && error.message ? error.message : '删除对话失败', 'error');
     return false;
+  }
+}
+
+export async function clearAiSessions(): Promise<boolean> {
+  if (!_sessions.length) {
+    showToast('没有可清除的历史对话', 'info');
+    return false;
+  }
+  const count = _sessions.length;
+  if (!window.confirm(`确认清除全部 ${count} 条历史对话？此操作不可撤销。`)) return false;
+
+  const sessionsToDelete = _sessions.map((session) => session.id).filter(Boolean);
+  const clearButton = $('wa-ai-session-clear') as HTMLButtonElement | null;
+  _sessionActionsBusy = true;
+  if (clearButton) clearButton.disabled = true;
+  _syncSessionActionState();
+
+  const failedIds: string[] = [];
+  try {
+    for (const sessionId of sessionsToDelete) {
+      try {
+        await deleteAiSessionRecord(sessionId);
+      } catch (error) {
+        console.warn('[WA] clear AI session failed:', sessionId, error);
+        failedIds.push(sessionId);
+      }
+    }
+
+    _sessions = failedIds.length
+      ? _sessions.filter((session) => failedIds.includes(session.id))
+      : [];
+    if (!failedIds.length) {
+      _activeAiSessionId = '';
+      const runtime = (window as any)._waConversationRuntime;
+      if (runtime && typeof runtime.reset === 'function') runtime.reset();
+    }
+    showAiSessionList();
+    await refreshAiSessions({ silent: true });
+
+    if (failedIds.length) {
+      showToast(`已清除 ${count - failedIds.length} 条，${failedIds.length} 条失败`, 'error');
+      return false;
+    }
+    showToast(`已清除 ${count} 条历史对话`, 'success');
+    return true;
+  } finally {
+    _sessionActionsBusy = false;
+    _syncSessionActionState();
   }
 }
 
@@ -428,6 +503,7 @@ if (typeof window !== 'undefined') {
   (window as any).WA.refreshAiSessions = refreshAiSessions;
   (window as any).WA.openAiSession = openAiSession;
   (window as any).WA.deleteAiSession = deleteAiSession;
+  (window as any).WA.clearAiSessions = clearAiSessions;
   (window as any).WA.newAiSession = newAiSession;
   (window as any).WA.submitUnifiedAiComposer = submitUnifiedAiComposer;
   (window as any).WA.handleUnifiedComposerKeydown = handleUnifiedComposerKeydown;

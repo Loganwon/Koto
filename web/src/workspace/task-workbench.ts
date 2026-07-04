@@ -1,3 +1,16 @@
+import {
+  TASK_REPORT_LABELS,
+  TASK_REPORT_STAGE_DEFS,
+  TASK_REPORT_STAGE_DONE_TEXT,
+  taskReportCompactText as compactText,
+  taskReportStageActionText as stageActionText,
+  taskReportStageDef as stageDef,
+  taskReportStageFromStep as stageFromStep,
+  taskReportStageStatusText,
+  taskReportStatusClass as statusClass,
+  taskReportUniqueTexts as uniqueTexts,
+} from './task-report-layout';
+import { fileTaskStatusLabel, isFileTaskAttentionStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
 /**
  * Task Workbench UI — batch task management
  * Workspace task workbench.
@@ -60,16 +73,6 @@ interface WorkbenchState {
   refreshTimer: number | null;
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  pending: '排队',
-  running: '进行中',
-  waiting: '待确认',
-  completed: '已完成',
-  failed: '失败',
-  cancelled: '已取消',
-  retrying: '重试中',
-};
-
 const PRESET_LABELS: Record<string, string> = {
   proactive_agent_tick: '后台巡检',
   startup_runtime_health: '启动检查',
@@ -107,34 +110,6 @@ const TOOL_LABELS: Record<string, string> = {
   run_python_code: '执行代码',
 };
 
-const FLOW_STAGE_DEFS = [
-  { id: 'route', title: '任务识别', hint: '判断用户意图、目标文件和处理类型' },
-  { id: 'plan', title: '执行方案', hint: '确定处理路线、工具选择和质量要求' },
-  { id: 'execute', title: '执行进度', hint: '读取、分析、生成、写入或调用模型' },
-  { id: 'check', title: '完成核验', hint: '检查结果、变更和可继续处理项' },
-];
-
-const FLOW_STAGE_DONE_TEXT: Record<string, string> = {
-  route: '已确认任务目标、处理类型和文件上下文。',
-  plan: '已确定执行方式和输出要求。',
-  execute: '已按方案完成处理，结果已同步到对话。',
-  check: '已核验结果并同步到对话汇报。',
-};
-
-const FLOW_STAGE_RUNNING_TEXT: Record<string, string> = {
-  route: '正在确认任务目标和文件上下文。',
-  plan: '正在整理执行方案和输出要求。',
-  execute: '正在读取文件并整理结果。',
-  check: '正在检查结果文件和任务完成状态。',
-};
-
-const FLOW_STAGE_PENDING_TEXT: Record<string, string> = {
-  route: '等待开始识别任务。',
-  plan: '等待生成执行方案。',
-  execute: '等待开始处理文件。',
-  check: '等待完成后核验。',
-};
-
 const INTERNAL_PROGRESS_PATTERNS = [
   /你还没有/,
   /下一轮必须/,
@@ -150,21 +125,13 @@ const INTERNAL_PROGRESS_PATTERNS = [
   /planner_backend/i,
 ];
 
-const STEP_STAGE_BY_ID: Record<string, string> = {
-  route: 'route',
-  'task.classified': 'route',
-  model: 'route',
-  context: 'route',
-  plan: 'plan',
-  execute: 'execute',
-  run: 'execute',
-  check: 'check',
-};
-
 const TITLE_KEYS = ['query', 'task', 'user_input', 'prompt', 'text', 'title', 'instruction'];
 const SUMMARY_KEYS = ['summary', 'message', 'error', 'observation', 'result_summary', 'result', 'preview'];
 const STARTUP_HEALTH_PROMPT = '请总结当前 Koto 的后台运行状态';
 const INTERNAL_AGENT_SESSIONS = new Set(['s1', 'test-session']);
+const WORKBENCH_STAGE_BY_STEP_ID: Record<string, string> = {
+  'task.classified': 'route',
+};
 
 function esc(text: any): string {
   return String(text || '')
@@ -175,54 +142,6 @@ function esc(text: any): string {
 
 function attr(text: any): string {
   return esc(text).replace(/"/g, '&quot;');
-}
-
-function compactText(value: any, limit: any): string {
-  const text = String(value || '').replace(/\s+/g, ' ').trim();
-  const max = Number(limit || 0);
-  if (!text || !max || text.length <= max) return text;
-  return `${text.slice(0, Math.max(0, max - 3)).trimEnd()}...`;
-}
-
-function stageDef(stageId: any): { id: string; title: string; hint: string } {
-  return FLOW_STAGE_DEFS.find((item) => item.id === stageId) || FLOW_STAGE_DEFS[2];
-}
-
-function stageFromStep(step: any, fallbackStage?: string): string {
-  const id = String(step && (step.id || step.step_id || step.stage || '') || '').trim().toLowerCase();
-  if (STEP_STAGE_BY_ID[id]) return STEP_STAGE_BY_ID[id];
-  const title = String(step && (step.title || step.label || '') || '').trim();
-  if (/识别|路由|模型|上下文|读取文件/.test(title)) return 'route';
-  if (/方案|计划|规划|监管/.test(title)) return 'plan';
-  if (/核验|检查|完成|结果/.test(title)) return 'check';
-  return fallbackStage || 'execute';
-}
-
-function statusClass(status: any, tone: any): string {
-  const normalized = String(status || '').trim();
-  if (String(tone || '') === 'error' || normalized === '异常' || normalized === '失败') return 'error';
-  if (normalized === '进行中') return 'running';
-  if (normalized === '已完成') return 'done';
-  return 'pending';
-}
-
-function stageActionText(stageId: string, step: any): string {
-  const fallback = stageDef(stageId).hint;
-  const text = String(step && step.text || '').trim();
-  if (!text) return fallback;
-  return compactText(text, 180);
-}
-
-function uniqueTexts(items: any[], limit?: number): string[] {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  (items || []).forEach((item) => {
-    const text = String(item || '').replace(/\s+/g, ' ').trim();
-    if (!text || seen.has(text)) return;
-    seen.add(text);
-    result.push(text);
-  });
-  return result.slice(0, limit || 4);
 }
 
 function isInternalProgressText(text: any): boolean {
@@ -273,19 +192,24 @@ function userFacingTaskText(value: any, stageId?: string): string {
     return '方案已通过约束检查。';
   }
   if (/^方案[:：]/.test(text)) {
-    return text.replace(/^方案[:：]\s*/, '') || FLOW_STAGE_DONE_TEXT.plan;
+    return text.replace(/^方案[:：]\s*/, '') || TASK_REPORT_STAGE_DONE_TEXT.plan;
   }
   if (/^完成[:：]/.test(text)) {
-    return text.replace(/^完成[:：]\s*/, '') || FLOW_STAGE_DONE_TEXT.check;
+    return text.replace(/^完成[:：]\s*/, '') || TASK_REPORT_STAGE_DONE_TEXT.check;
   }
   if (stageId === 'check' && text.length > 80) {
-    return FLOW_STAGE_DONE_TEXT.check;
+    return TASK_REPORT_STAGE_DONE_TEXT.check;
   }
   if (stageId === 'execute' && text.length > 90) {
-    return FLOW_STAGE_DONE_TEXT.execute;
+    return TASK_REPORT_STAGE_DONE_TEXT.execute;
   }
 
   return compactText(text, stageId === 'execute' ? 120 : 110);
+}
+
+function workbenchStageFromStep(step: any, fallbackStage = ''): string {
+  const id = String(step && (step.id || step.step_id || step.stage || '') || '').trim().toLowerCase();
+  return WORKBENCH_STAGE_BY_STEP_ID[id] || stageFromStep(step, fallbackStage);
 }
 
 function safeJsonObject(value: any): Record<string, any> | null {
@@ -370,7 +294,9 @@ function shortId(taskId: any): string {
 }
 
 function statusLabel(status: any): string {
-  return STATUS_LABELS[String(status || '').toLowerCase()] || '任务';
+  const normalized = String(status || '').trim().toLowerCase();
+  if (normalized === 'retrying') return '重试中';
+  return fileTaskStatusLabel(normalized, '任务');
 }
 
 function timeLabel(value: any): string {
@@ -502,8 +428,10 @@ function metadataStepsForTask(task: any): WorkbenchStep[] {
   const route = taskRouteLabel(task, metadata);
   const model = metadataModelLabel(task, metadata) || '自动';
   const status = terminalStatus(task);
+  const terminalComplete = status === 'completed';
+  const terminalFailed = status === 'failed';
   const steps: WorkbenchStep[] = [{
-    tone: status === 'failed' ? 'error' : (status === 'completed' ? 'answer' : 'action'),
+    tone: terminalFailed ? 'error' : (terminalComplete ? 'answer' : 'action'),
     label: `模型调用 · ${statusLabel(task && task.status)}`,
     text: `路由：${route} · 模型：${model}${runIdForTask(task) ? ` · 运行：${runIdForTask(task)}` : ''}`,
   }];
@@ -520,8 +448,8 @@ function metadataStepsForTask(task: any): WorkbenchStep[] {
   const summary = taskSummary(task);
   if (summary) {
     steps.push({
-      tone: status === 'failed' ? 'error' : 'answer',
-      label: status === 'failed' ? '结果 · 失败' : '结果 · 已完成',
+      tone: terminalFailed ? 'error' : (terminalComplete ? 'answer' : 'action'),
+      label: terminalFailed ? '结果 · 失败' : (terminalComplete ? '结果 · 已完成' : `结果 · ${statusLabel(task && task.status)}`),
       text: compactText(summary, 170),
     });
   }
@@ -578,6 +506,19 @@ function taskSummary(task: any): string {
   return compactText(firstPayloadText(taskPayload(task), SUMMARY_KEYS), 180);
 }
 
+function taskCompletionSummary(task: any): string {
+  const text = String(task && (task.result_summary || task.error) || '').trim();
+  if (text) {
+    const parsed = safeJsonObject(text);
+    if (parsed) {
+      const payloadText = firstPayloadText(parsed, SUMMARY_KEYS);
+      if (payloadText) return compactText(payloadText, 8000);
+    } else if (text[0] !== '[' && text[0] !== '{') {
+      return compactText(text, 8000);
+    }
+  }
+  return compactText(firstPayloadText(taskPayload(task), SUMMARY_KEYS), 8000);
+}
 function taskMetaLine(task: any): string {
   const parts = [
     timeLabel(task && task.created_at),
@@ -606,12 +547,10 @@ function openTaskFile(path: any): void {
 }
 
 function terminalStatus(task: any): string {
-  const status = String(task.status || '').toLowerCase();
-  if (status === 'waiting') return 'waiting';
-  if (status === 'cancelled') return 'cancelled';
-  if (status === 'failed') return 'failed';
-  if (status === 'completed') return 'completed';
-  return status || 'running';
+  const metadata = parseMetadata(task);
+  return normalizeFileTaskTerminalStatus(
+    metadata.task_terminal_status || metadata.terminal_status || metadata.status || (task && task.status),
+  ) || 'running';
 }
 
 function decodeTaskPayload(value: any): Record<string, any> {
@@ -641,10 +580,11 @@ function latestLiveTaskCard(): HTMLElement | null {
 
 function statusFromLiveCard(card: HTMLElement): string {
   const dataset = card.dataset || {};
-  const terminal = String(dataset.taskTerminalStatus || '').trim().toLowerCase();
+  const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
   if (terminal === 'cancelled') return 'cancelled';
   if (terminal === 'failed' || terminal === 'error' || terminal === 'blocked') return 'failed';
-  if (terminal === 'completed' || terminal === 'verified' || card.classList.contains('done')) return 'completed';
+  if (isFileTaskAttentionStatus(terminal)) return 'waiting';
+  if (terminal === 'completed' || card.classList.contains('done')) return 'completed';
   if (card.classList.contains('cancelled')) return 'cancelled';
   if (card.classList.contains('failed')) return 'failed';
   return 'running';
@@ -658,9 +598,11 @@ function liveTaskFromCard(card: HTMLElement): WorkbenchTask {
     files: Array.isArray(requestPayload.files) ? requestPayload.files : [],
     task_request_payload: requestPayload,
   };
-  const routeIntent = requestPayload.options && typeof requestPayload.options === 'object'
-    ? requestPayload.options.workspace_route_intent
-    : null;
+  const routeIntent = requestPayload.routing_decision && typeof requestPayload.routing_decision === 'object'
+    ? requestPayload.routing_decision
+    : (requestPayload.options && typeof requestPayload.options === 'object'
+      ? requestPayload.options.workspace_route_intent
+      : null);
   if (routeIntent && typeof routeIntent === 'object') metadata.route_intent = routeIntent;
   if (requestPayload.model_mode) metadata.model_mode = requestPayload.model_mode;
   if (requestPayload.model_id) metadata.model_id = requestPayload.model_id;
@@ -756,15 +698,15 @@ function ensureWorkbench(): HTMLElement | null {
 }
 
 function emptyTaskFlowHtml(): string {
+  const stageLabels = TASK_REPORT_STAGE_DEFS
+    .map((def) => '    <span>' + esc(def.title) + '</span>')
+    .join('');
   return [
     '<div class="wa-task-workbench-empty wa-task-workbench-empty-flow">',
     '  <strong>等待文件任务</strong>',
     '  <span>当请求需要读取、修改或生成文件时，这里会直接展开任务识别、执行方案、进度和核验结果。</span>',
     '  <div class="wa-task-workbench-empty-steps">',
-    '    <span>任务识别</span>',
-    '    <span>模型调用</span>',
-    '    <span>执行进度</span>',
-    '    <span>完成核验</span>',
+    stageLabels,
     '  </div>',
     '</div>',
   ].join('');
@@ -834,8 +776,9 @@ function stepText(step: any): string {
 
 function liveCardCompleted(card: any): boolean {
   const dataset = card && card.dataset ? card.dataset : {};
-  const terminal = String(dataset['taskTerminalStatus'] || '').trim().toLowerCase();
-  return terminal === 'completed' || terminal === 'verified' || String(dataset['taskCompleted'] || '').trim().toLowerCase() === 'true';
+  const terminal = normalizeFileTaskTerminalStatus(dataset['taskTerminalStatus'] || '');
+  if (isFileTaskAttentionStatus(terminal)) return false;
+  return terminal === 'completed' || String(dataset['taskCompleted'] || '').trim().toLowerCase() === 'true';
 }
 
 function liveStepTone(step: any, card: any): string {
@@ -904,7 +847,7 @@ function liveStepsForTask(task: any): WorkbenchStep[] {
     const stepId = String((step as HTMLElement).dataset && (step as HTMLElement).dataset.stepId || '').trim();
     let title = String((step.querySelector('.wa-task-step-title') as HTMLElement | null)?.textContent || '').trim() || '步骤';
     if (completed && (stepId === 'run' || title === '任务状态')) return null;
-    const stage = stageFromStep({ id: stepId, title }, stepId === 'run' ? 'execute' : '');
+    const stage = workbenchStageFromStep({ id: stepId, title }, stepId === 'run' ? 'execute' : '');
     const rows = Array.from(step.querySelectorAll('.wa-task-row'))
       .map((row) => userFacingTaskText(liveStepText(liveRowText(row), 220), stage))
       .filter(Boolean);
@@ -927,13 +870,11 @@ function liveStepsForTask(task: any): WorkbenchStep[] {
 }
 
 function flowStageIndex(stageId: string): number {
-  return Math.max(0, FLOW_STAGE_DEFS.findIndex((item) => item.id === stageId));
+  return Math.max(0, TASK_REPORT_STAGE_DEFS.findIndex((item) => item.id === stageId));
 }
 
 function stageFallbackText(stageId: string, status: string): string {
-  if (status === '已完成') return FLOW_STAGE_DONE_TEXT[stageId] || stageDef(stageId).hint;
-  if (status === '进行中') return FLOW_STAGE_RUNNING_TEXT[stageId] || stageDef(stageId).hint;
-  return FLOW_STAGE_PENDING_TEXT[stageId] || stageDef(stageId).hint;
+  return taskReportStageStatusText(stageId, status);
 }
 
 function inferredStageStatus(def: { id: string }, existing: any, task: any, maxSeenIndex: number): string {
@@ -949,7 +890,7 @@ function normalizedFlowStages(rawSteps: any[], task: any): WorkbenchStep[] {
   const byStage = new Map<string, any>();
   let maxSeenIndex = -1;
   (rawSteps || []).forEach((rawStep) => {
-    const stage = stageFromStep(rawStep);
+    const stage = workbenchStageFromStep(rawStep);
     const stageIndex = flowStageIndex(stage);
     maxSeenIndex = Math.max(maxSeenIndex, stageIndex);
     const cleanText = userFacingTaskText(rawStep && rawStep.text, stage);
@@ -970,7 +911,7 @@ function normalizedFlowStages(rawSteps: any[], task: any): WorkbenchStep[] {
     });
   });
 
-  return FLOW_STAGE_DEFS.map((def) => {
+  return TASK_REPORT_STAGE_DEFS.map((def) => {
     const existing = byStage.get(def.id);
     const status = inferredStageStatus(def, existing, task, maxSeenIndex);
     const text = existing && existing.text ? existing.text : stageFallbackText(def.id, status);
@@ -1009,7 +950,7 @@ function normalizedWorkbenchSteps(steps: any[], task: any): WorkbenchStep[] {
   const persistedSteps = steps.map((step) => {
     const label = stepLabel(step);
     const tone = stepTone(step.step_type);
-    const stage = stageFromStep({ id: step && (step.step_id || step.id), title: label });
+    const stage = workbenchStageFromStep({ id: step && (step.step_id || step.id), title: label });
     const text = userFacingTaskText(stepText(step), stage);
     if (finalSummary && text && finalSummary.includes(text.slice(0, 80))) return null;
     if (text.length > 260 && stage === 'check') return null;
@@ -1029,12 +970,12 @@ function normalizedWorkbenchSteps(steps: any[], task: any): WorkbenchStep[] {
 function renderStageOverview(steps: WorkbenchStep[]): string {
   const byStage = new Map<string, WorkbenchStep>();
   (steps || []).forEach((step) => {
-    const stage = stageFromStep(step);
+    const stage = workbenchStageFromStep(step);
     byStage.set(stage, step);
   });
   return [
     '<div class="wa-task-workbench-stage-grid" aria-label="任务阶段总览">',
-    FLOW_STAGE_DEFS.map((def, index) => {
+    TASK_REPORT_STAGE_DEFS.map((def, index) => {
       const step = byStage.get(def.id);
       const status = step ? String(step.status || (step.tone === 'action' ? '进行中' : '已完成')) : '待处理';
       const tone = statusClass(status, step && step.tone);
@@ -1054,37 +995,34 @@ function renderStageOverview(steps: WorkbenchStep[]): string {
   ].join('');
 }
 
-function renderWorkbenchStep(step: WorkbenchStep, index: number): string {
-  const stage = stageFromStep(step);
-  const def = stageDef(stage);
-  const status = String(step.status || '').trim();
-  const text = String(step.text || '').trim();
-  return [
-    `<div class="wa-task-workbench-step ${esc(step.tone)}" data-stage="${attr(stage)}">`,
-    `  <div class="wa-task-workbench-step-index">${index + 1}</div>`,
-    '  <div class="wa-task-workbench-step-main">',
-    '    <div class="wa-task-workbench-step-headline">',
-    `      <strong>${esc(def.title)}</strong>`,
-    `      <span>${esc(status || '过程')}</span>`,
-    '    </div>',
-    text ? `    <div class="wa-task-workbench-step-text">${esc(text)}</div>` : '',
-    '  </div>',
-    '</div>',
-  ].join('');
-}
-
 function renderSteps(steps: any[], task: any): string {
   const visibleSteps = normalizedWorkbenchSteps(steps, task);
   if (!visibleSteps.length) {
     return '<div class="wa-task-workbench-empty">暂无步骤</div>';
   }
   return [
+    `<div class="wa-task-workbench-section-title">${esc(TASK_REPORT_LABELS.processTitle)}</div>`,
     renderStageOverview(visibleSteps),
-    '<div class="wa-task-workbench-section-title">任务步骤</div>',
-    visibleSteps.map((step, index) => renderWorkbenchStep(step, index)).join(''),
   ].join('');
 }
 
+function renderCompletionReport(task: WorkbenchTask, summary: string, artifactButton: string): string {
+  const stats = renderArtifactStats(task.artifact_result);
+  const body = summary
+    ? `<div class="wa-task-workbench-summary">${esc(summary)}</div>`
+    : '<div class="wa-task-workbench-summary is-empty">暂无总结与回答。</div>';
+  const actions = artifactButton
+    ? `<div class="wa-task-workbench-detail-actions">${artifactButton}</div>`
+    : '';
+  return [
+    `<div class="wa-task-workbench-section-title">${esc(TASK_REPORT_LABELS.finalTitle)}</div>`,
+    '<div class="wa-task-workbench-completion">',
+    stats,
+    actions,
+    body,
+    '</div>',
+  ].join('');
+}
 function renderTaskFiles(files: WorkbenchFile[]): string {
   if (!Array.isArray(files) || !files.length) return '';
   const visible = files.slice(0, 3);
@@ -1105,10 +1043,10 @@ function renderTaskFiles(files: WorkbenchFile[]): string {
 function renderArtifactStats(result: any): string {
   if (!result || typeof result !== 'object') return '';
   const stats = [
-    ['文件', Array.isArray(result.artifacts) ? result.artifacts.length : 0],
+    ['产物', Array.isArray(result.artifacts) ? result.artifacts.length : 0],
     ['变更', Array.isArray(result.changes) ? result.changes.length : 0],
-    ['来源', Array.isArray(result.sources) ? result.sources.length : 0],
-    ['日志', Array.isArray(result.logs) ? result.logs.length : 0],
+    ['引用', Array.isArray(result.sources) ? result.sources.length : 0],
+    ['过程记录', Array.isArray(result.logs) ? result.logs.length : 0],
   ].filter((entry) => entry[1] > 0);
   if (!stats.length) return '';
   return [
@@ -1125,10 +1063,10 @@ function renderDetail(state: WorkbenchState, task: WorkbenchTask | null): void {
     renderEmptyDetail(detail as HTMLElement);
     return;
   }
-  const summary = taskSummary(task);
+  const summary = taskCompletionSummary(task);
   const files = taskFiles(task);
   const artifactButton = task.artifact_result
-    ? '<button type="button" data-task-detail-action="artifact">结果</button>'
+    ? '<button type="button" data-task-detail-action="artifact">查看产物</button>'
     : '';
   const canResume = typeof (window as any).WA.resumePersistedFileTask === 'function';
   const processButton = !state.focusedOnly && canResume
@@ -1147,10 +1085,8 @@ function renderDetail(state: WorkbenchState, task: WorkbenchTask | null): void {
     '</div>',
     '<div class="wa-task-workbench-detail-actions">',
     processButton,
-    artifactButton,
     '</div>',
-    renderArtifactStats(task.artifact_result),
-    summary ? `<div class="wa-task-workbench-summary">${esc(summary)}</div>` : '',
+    renderCompletionReport(task, summary, artifactButton),
   ].join('');
 }
 

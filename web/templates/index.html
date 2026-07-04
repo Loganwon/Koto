@@ -277,7 +277,7 @@
                         </div><!-- /chatView -->
 
             <!-- ═══ 文件工作站视图 ═══ -->
-            <div id="workspaceView" class="wa-embedded" style="display:none">
+            <div id="workspaceView" class="wa-embedded" style="display:none" aria-hidden="true" inert>
                 <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" style="display:none">
                 <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
                 <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json" multiple style="display:none">
@@ -1038,12 +1038,15 @@
                   <div id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史">
                     <div class="wa-ai-session-list-head">
                       <div class="wa-ai-session-title-group">
-                        <span>AI 工作区</span>
+                        <span id="wa-ai-session-summary">AI 工作区</span>
                         <strong>对话与任务</strong>
                       </div>
                       <div class="wa-ai-session-actions">
                         <button type="button" id="wa-ai-session-refresh" title="刷新对话" aria-label="刷新对话" onclick="WA.refreshAiSessions && WA.refreshAiSessions()">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>
+                        </button>
+                        <button type="button" id="wa-ai-session-clear" class="wa-ai-session-clear-btn" title="清除全部历史对话" aria-label="清除全部历史对话" onclick="WA.clearAiSessions && WA.clearAiSessions()">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M9 6V4h6v2"/><path d="M7 6l1 14h8l1-14"/><path d="M10 10v6"/><path d="M14 10v6"/></svg>
                         </button>
                         <button type="button" id="wa-ai-session-new" class="wa-ai-session-new-btn" title="新建对话" aria-label="新建对话" onclick="WA.newAiSession && WA.newAiSession()">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
@@ -1068,6 +1071,8 @@
                       </div>
                     </div>
 
+                  <section id="wa-artifact-panel" class="wa-artifact-panel" hidden></section>
+
                   <div id="wa-ai-messages">
                     <!-- PEMO-style welcome card — hidden once any message is sent -->
                     <div class="wa-welcome" id="wa-ai-welcome">
@@ -1082,8 +1087,6 @@
                       </div>
                     </div>
                   </div>
-
-                  <section id="wa-artifact-panel" class="wa-artifact-panel" hidden></section>
 
                   <div id="wa-task-live-progress" class="wa-task-live-progress" hidden>
                     <div class="wa-task-live-top">

@@ -1,5 +1,9 @@
 
-    :root {
+    /* Scoped to workspace areas — prevents overriding style.css :root theme */
+    #workspaceView,
+    #workspacePanel,
+    .wa-embedded,
+    .workspace-panel {
       /* Workspace — Apple-Inspired Light Theme (synced with file-assistant) */
       --bg: #F5F5F7;
       --surface: #FFFFFF;
@@ -745,11 +749,11 @@
     /* ── Open Folder dialog overlay ── */
     .wa-dlg-overlay {
       position: fixed; inset: 0;
-      background: rgba(0,0,0,0.22);
-      backdrop-filter: blur(4px);
-      -webkit-backdrop-filter: blur(4px);
+      background: rgba(17, 24, 39, 0.38);
       z-index: 9999;
       display: flex; align-items: center; justify-content: center;
+      padding: 18px;
+      overflow: auto;
     }
     .wa-dlg-box {
       background: var(--surface);
@@ -807,37 +811,39 @@
       align-items: center;
       justify-content: center;
       padding: 24px;
-      background: rgba(15, 23, 42, 0.18);
-      backdrop-filter: blur(8px) saturate(1.08);
-      -webkit-backdrop-filter: blur(8px) saturate(1.08);
+      background: rgba(17, 24, 39, 0.42);
+      overflow: auto;
     }
     .wa-close-warn-dialog {
-      width: 560px;
-      max-width: min(560px, calc(100vw - 28px));
+      width: 520px;
+      max-width: min(520px, calc(100vw - 28px));
+      max-height: calc(100vh - 28px);
       padding: 0;
       overflow: hidden;
-      border: 1px solid rgba(15, 23, 42, 0.1);
-      border-radius: 18px;
+      display: flex;
+      flex-direction: column;
+      border: 1px solid rgba(15, 23, 42, 0.14);
+      border-radius: 8px;
       background: var(--surface);
-      box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22), 0 8px 24px rgba(15, 23, 42, 0.08);
+      box-shadow: 0 22px 54px rgba(15, 23, 42, 0.28), 0 3px 12px rgba(15, 23, 42, 0.12);
       animation: wa-dialog-in 0.22s cubic-bezier(0.2, 0, 0.2, 1);
     }
     .wa-close-warn-head {
       display: flex;
       align-items: flex-start;
       gap: 16px;
-      padding: 24px 24px 18px;
+      padding: 20px 22px 16px;
       border-bottom: 1px solid rgba(15, 23, 42, 0.08);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(247, 248, 250, 0.96) 100%);
+      background: #fff;
     }
     .wa-close-warn-icon {
-      width: 44px;
-      height: 44px;
+      width: 40px;
+      height: 40px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
       flex-shrink: 0;
-      border-radius: 14px;
+      border-radius: 8px;
       background: rgba(232, 168, 56, 0.14);
       color: #c58300;
       box-shadow: inset 0 0 0 1px rgba(197, 131, 0, 0.12);
@@ -861,7 +867,9 @@
     }
     .wa-close-warn-close { margin-top: -2px; }
     .wa-close-warn-body {
-      padding: 18px 24px 0;
+      padding: 16px 22px 0;
+      min-height: 0;
+      overflow: hidden;
     }
     .wa-close-warn-summary {
       display: flex;
@@ -869,10 +877,10 @@
       justify-content: space-between;
       gap: 12px;
       margin-bottom: 14px;
-      padding: 14px 16px;
-      border-radius: 14px;
+      padding: 12px 14px;
+      border-radius: 8px;
       border: 1px solid rgba(232, 168, 56, 0.18);
-      background: linear-gradient(135deg, rgba(255, 248, 235, 0.92) 0%, rgba(255, 255, 255, 0.98) 100%);
+      background: #fff8eb;
     }
     .wa-close-warn-summary-main {
       display: flex;
@@ -897,7 +905,7 @@
     .wa-close-warn-risk {
       flex-shrink: 0;
       padding: 8px 10px;
-      border-radius: 999px;
+      border-radius: 6px;
       background: rgba(232, 168, 56, 0.16);
       color: #9a5b00;
       font-size: 12px;
@@ -908,7 +916,7 @@
       display: flex;
       flex-direction: column;
       gap: 10px;
-      max-height: 264px;
+      max-height: 236px;
       overflow: auto;
       padding-right: 4px;
       margin-bottom: 18px;
@@ -918,9 +926,9 @@
       align-items: flex-start;
       gap: 12px;
       padding: 12px 14px;
-      border-radius: 14px;
+      border-radius: 8px;
       border: 1px solid rgba(15, 23, 42, 0.08);
-      background: linear-gradient(180deg, rgba(255, 255, 255, 0.98) 0%, rgba(250, 250, 250, 0.96) 100%);
+      background: #fff;
     }
     .wa-close-warn-item-indicator {
       width: 10px;
@@ -954,9 +962,9 @@
       align-items: flex-end;
       justify-content: space-between;
       gap: 16px;
-      padding: 18px 24px 24px;
+      padding: 16px 22px 20px;
       border-top: 1px solid rgba(15, 23, 42, 0.08);
-      background: rgba(249, 250, 251, 0.88);
+      background: #f8fafc;
     }
     .wa-close-warn-footer-note {
       margin: 0;
@@ -5168,44 +5176,48 @@
     }
     .wa-ai-header-btns > button:hover { background: var(--hover); color: var(--text); }
 
-    .wa-ai-session-list-view,
-    .wa-ai-chat-view {
-      display: flex;
-      flex-direction: column;
-      min-height: 0;
-      flex: 1 1 auto;
-    }
-
-    .wa-ai-session-list-view[hidden],
-    .wa-ai-chat-view[hidden] {
-      display: none !important;
-    }
-
-    .wa-ai-session-list-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 8px;
-      padding: 8px 10px;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .wa-ai-session-list,
-    .wa-ai-session-list-composer {
-      min-width: 0;
-    }
-
-    .wa-ai-session-list {
-      flex: 1 1 auto;
-      overflow: auto;
-      padding: 8px;
-    }
-
-    .wa-ai-session-list-composer {
-      flex-shrink: 0;
-      border-top: 1px solid var(--border);
-      padding: 10px 12px 12px;
+    .wa-ai-session-actions > button {
+      min-width: 32px;
+      height: 28px;
+      border: 1px solid color-mix(in srgb, var(--ai-border) 72%, transparent);
+      border-radius: 7px;
       background: var(--ai-surface);
+      color: var(--text-muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      padding: 0 8px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 650;
+      line-height: 1;
+      transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease, box-shadow 0.14s ease;
+    }
+
+    .wa-ai-session-actions > button:hover,
+    .wa-ai-session-actions > button:focus-visible {
+      background: color-mix(in srgb, var(--accent) 7%, var(--ai-surface));
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--ai-border));
+      color: var(--accent);
+      outline: none;
+    }
+
+    .wa-ai-session-actions > button:focus-visible {
+      box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+    .wa-ai-session-actions > button:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+
+    .wa-ai-session-actions > button.is-busy svg {
+      animation: wa-session-action-spin 0.9s linear infinite;
+    }
+
+    @keyframes wa-session-action-spin {
+      to { transform: rotate(360deg); }
     }
 
     .wa-session-list-input {
@@ -5220,24 +5232,38 @@
       height: 32px;
     }
 
-    .wa-ai-chat-view {
-      position: relative;
-      z-index: 190;
-    }
-
-    .wa-ai-chat-header {
-      position: sticky;
-      top: 82px;
-      z-index: 190;
-    }
-
-    .wa-ai-session-new-btn {
+    .wa-ai-session-actions > .wa-ai-session-new-btn {
       display: inline-flex;
       align-items: center;
       gap: 5px;
+      color: var(--accent);
+      border-color: color-mix(in srgb, var(--accent) 32%, var(--ai-border));
+      background: color-mix(in srgb, var(--accent) 8%, var(--ai-surface));
+    }
+
+    .wa-ai-session-actions > .wa-ai-session-new-btn:hover,
+    .wa-ai-session-actions > .wa-ai-session-new-btn:focus-visible {
+      background: color-mix(in srgb, var(--accent) 13%, var(--ai-surface));
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
+    }
+
+    .wa-ai-session-actions > .wa-ai-session-clear-btn:hover,
+    .wa-ai-session-actions > .wa-ai-session-clear-btn:focus-visible {
+      background: color-mix(in srgb, #d64b4b 9%, var(--ai-surface));
+      border-color: color-mix(in srgb, #d64b4b 34%, var(--ai-border));
+      color: #b43434;
+    }
+
+    .wa-ai-session-actions > .wa-ai-session-clear-btn:disabled {
+      opacity: 0.38;
+      cursor: default;
+      background: var(--ai-surface);
+      border-color: color-mix(in srgb, var(--ai-border) 56%, transparent);
+      color: var(--text-muted);
     }
 
     .wa-ai-session-expand {
+      width: 100%;
       min-height: 32px;
       border: 1px solid color-mix(in srgb, var(--ai-border) 72%, transparent);
       border-radius: 7px;
@@ -5258,28 +5284,31 @@
 
     .wa-ai-session-item {
       width: 100%;
-      min-height: 62px;
+      min-height: 64px;
       border: 1px solid transparent;
       background: transparent;
       color: var(--text);
       border-radius: 7px;
-      display: flex;
-      align-items: flex-start;
-      gap: 8px;
-      padding: 8px 9px;
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr) 28px;
+      align-items: start;
+      column-gap: 9px;
+      padding: 8px 8px 8px 10px;
       text-align: left;
       cursor: pointer;
       position: relative;
-      transition: background 0.14s ease, border-color 0.14s ease;
+      box-sizing: border-box;
+      transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease;
     }
 
     .wa-ai-session-item:hover {
-      background: var(--hover);
+      background: color-mix(in srgb, var(--hover) 78%, transparent);
     }
 
     .wa-ai-session-item.is-active {
-      background: color-mix(in srgb, var(--accent) 8%, var(--ai-surface));
-      border-color: color-mix(in srgb, var(--accent) 28%, transparent);
+      background: color-mix(in srgb, var(--accent) 7%, var(--ai-surface));
+      border-color: color-mix(in srgb, var(--accent) 34%, var(--ai-border));
+      box-shadow: inset 3px 0 0 color-mix(in srgb, var(--accent) 80%, transparent);
     }
 
     .wa-ai-session-item:focus-visible {
@@ -5290,7 +5319,7 @@
     .wa-ai-session-delete {
       width: 26px;
       height: 26px;
-      margin-left: 4px;
+      margin: -1px 0 0 0;
       border: 1px solid transparent;
       border-radius: 6px;
       background: transparent;
@@ -5299,12 +5328,13 @@
       align-items: center;
       justify-content: center;
       cursor: pointer;
-      opacity: 0.42;
-      flex-shrink: 0;
+      opacity: 0;
+      justify-self: end;
       transition: opacity 0.12s ease, background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
     }
 
     .wa-ai-session-item:hover .wa-ai-session-delete,
+    .wa-ai-session-item.is-active .wa-ai-session-delete,
     .wa-ai-session-item:focus-within .wa-ai-session-delete,
     .wa-ai-session-delete:focus-visible {
       opacity: 1;
@@ -5325,7 +5355,7 @@
     .wa-ai-session-icon {
       width: 22px;
       height: 22px;
-      margin-top: 1px;
+      margin-top: 0;
       border-radius: 6px;
       color: var(--accent);
       background: color-mix(in srgb, var(--accent) 10%, transparent);
@@ -5337,17 +5367,19 @@
 
     .wa-ai-session-main {
       min-width: 0;
-      flex: 1 1 auto;
       display: flex;
       flex-direction: column;
-      gap: 3px;
+      gap: 4px;
+      padding-top: 0;
     }
 
     .wa-ai-session-top {
       min-width: 0;
-      display: flex;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
       align-items: center;
-      gap: 8px;
+      gap: 10px;
+      min-height: 18px;
     }
 
     .wa-ai-session-name {
@@ -5356,21 +5388,23 @@
       text-overflow: ellipsis;
       white-space: nowrap;
       font-size: 12.5px;
-      font-weight: 650;
-      line-height: 1.35;
+      font-weight: 680;
+      line-height: 18px;
     }
 
     .wa-ai-session-time {
       flex-shrink: 0;
       color: var(--text-muted);
       font-size: 10.5px;
-      line-height: 1.2;
+      line-height: 18px;
+      justify-self: end;
+      white-space: nowrap;
     }
 
     .wa-ai-session-preview {
       color: var(--text-muted);
       font-size: 11.5px;
-      line-height: 1.4;
+      line-height: 16px;
       overflow: hidden;
       display: -webkit-box;
       -webkit-line-clamp: 1;
@@ -5381,7 +5415,8 @@
     .wa-ai-session-count {
       color: color-mix(in srgb, var(--text-muted) 76%, transparent);
       font-size: 10.5px;
-      line-height: 1.2;
+      line-height: 18px;
+      white-space: nowrap;
     }
 
     .wa-ai-session-meta-row {
@@ -5390,6 +5425,7 @@
       gap: 6px;
       flex-wrap: wrap;
       min-width: 0;
+      min-height: 18px;
     }
 
     .wa-ai-session-task-badge {
@@ -5401,8 +5437,9 @@
       color: #0d7c5b;
       background: color-mix(in srgb, #25b37e 9%, transparent);
       font-size: 10.5px;
-      line-height: 1.2;
-      padding: 2px 5px;
+      line-height: 14px;
+      min-height: 18px;
+      padding: 1px 6px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -6120,21 +6157,6 @@
     }
 
     /* ── Messages Area ── */
-    #wa-ai-messages {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      overflow-anchor: none;
-      padding: 12px 14px;
-      display: flex;
-      flex-direction: column;
-      gap: 12px;
-    }
-
-    #wa-ai-messages > * {
-      flex-shrink: 0;
-    }
-
     /* Scrollbar */
     #wa-ai-messages::-webkit-scrollbar { width: 6px; }
     #wa-ai-messages::-webkit-scrollbar-track { background: transparent; }
@@ -7382,6 +7404,8 @@
     .wa-task-run {
       width: 100%;
       max-width: 96%;
+      display: flex;
+      flex-direction: column;
     }
     .wa-task-run.is-compact [data-role="ui-progress"] {
       display: none !important;
@@ -7621,6 +7645,11 @@
     .wa-task-row.ok { border-color: color-mix(in srgb, var(--accent) 35%, var(--ai-border)); }
     .wa-task-row.warn { border-color: #d9a441; }
     .wa-task-row.error { border-color: #d64b4b; }
+    .wa-task-row.wa-task-performance {
+      color: color-mix(in srgb, var(--text-muted) 88%, var(--text));
+      background: color-mix(in srgb, var(--ai-surface) 72%, var(--bg));
+      border-style: dashed;
+    }
     .wa-task-chip {
       display: inline-flex;
       align-items: center;
@@ -7741,8 +7770,10 @@
     }
     .wa-task-artifacts {
       display: grid;
-      gap: 8px;
-      margin-top: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 10px;
+      margin-top: 10px;
+      max-width: 100%;
     }
     .wa-task-artifact {
       margin: 0;
@@ -7750,18 +7781,25 @@
       border: 1px solid color-mix(in srgb, var(--ai-border) 70%, transparent);
       border-radius: 8px;
       background: color-mix(in srgb, var(--bg) 85%, white 15%);
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
     .wa-task-artifact-image {
       display: block;
       width: 100%;
-      max-width: 360px;
+      max-width: 100%;
+      aspect-ratio: 16 / 10;
+      object-fit: contain;
       border-radius: 6px;
       border: 1px solid color-mix(in srgb, var(--ai-border) 75%, transparent);
       background: white;
     }
     .wa-task-artifact-caption {
-      margin-top: 6px;
       font-size: 11px;
+      line-height: 1.35;
+      overflow-wrap: anywhere;
     }
     .wa-task-artifact-open {
       color: var(--accent);
@@ -7791,10 +7829,14 @@
       color: #9a6a09;
     }
     .wa-task-summary {
+      order: 20;
       margin-top: 9px;
       font-size: 12px;
-      font-weight: 600;
+      font-weight: 400;
       color: var(--text);
+    }
+    .wa-task-process {
+      order: 10;
     }
     .wa-task-outcome {
       line-height: 1.55;
@@ -7906,7 +7948,8 @@
       line-height: 1.4;
     }
     #wa-context-bar b { color: var(--text, #1D1D1F); font-weight: 600; }
-    .ctx-bar-sel { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .ctx-bar-sel { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap; }
+    .ctx-bar-sel b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .ctx-bar-quote { width: 3px; height: 14px; background: var(--accent, #5b8def); border-radius: 2px; flex-shrink: 0; }
     .ctx-bar-source { color: var(--text-muted, #6E6E73); white-space: nowrap; }
     .ctx-bar-files { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
@@ -7935,6 +7978,40 @@
       font-size: 14px; padding: 0 2px; line-height: 1; opacity: 0.7;
     }
     .ctx-bar-clear:hover { opacity: 1; color: var(--text); }
+    .ctx-bar-clear-selection {
+      flex: 0 0 auto;
+      margin-left: 4px;
+      padding: 2px 6px;
+      border: 1px solid var(--border, rgba(0,0,0,.12));
+      border-radius: 6px;
+      background: var(--surface, #fff);
+      color: var(--text-muted, #6E6E73);
+      font-size: 12px;
+      line-height: 1.35;
+      opacity: 1;
+    }
+    .ctx-bar-clear-selection:hover {
+      border-color: var(--accent, #5b8def);
+      color: var(--text, #1D1D1F);
+      background: rgba(91, 141, 239, 0.08);
+    }
+    .ctx-bar-clear-files {
+      flex: 0 0 auto;
+      margin-left: 4px;
+      padding: 2px 6px;
+      border: 1px solid var(--border, rgba(0,0,0,.12));
+      border-radius: 6px;
+      background: var(--surface, #fff);
+      color: var(--text-muted, #6E6E73);
+      font-size: 12px;
+      line-height: 1.35;
+      opacity: 1;
+    }
+    .ctx-bar-clear-files:hover {
+      border-color: var(--danger, #d92d20);
+      color: var(--danger, #d92d20);
+      background: rgba(217, 45, 32, 0.06);
+    }
 
     /* ── Chart image result ── */
     .wa-chart-img-wrap {
@@ -8707,158 +8784,22 @@
     }
     .ctx-row-retry:hover { text-decoration: underline; }
     .ctx-row-remove {
+      border: none;
+      background: transparent;
+      color: var(--text-muted);
       cursor: pointer;
       opacity: 0.32;
       font-size: 15px;
       line-height: 1;
       flex-shrink: 0;
+      padding: 0 3px;
+      border-radius: 4px;
       transition: opacity 0.15s;
     }
-    .ctx-row-remove:hover { opacity: 1; color: var(--danger); }
+    .ctx-row-remove:hover { opacity: 1; color: var(--danger); background: rgba(239, 68, 68, 0.08); }
 
     /* Target hint in header */
     .wa-target-hint { color: #ffab00; font-size: 11px; font-weight: 500; }
-
-/* Workspace AI composer */
-.wa-composer-host {
-  min-width: 0;
-}
-
-.wa-input-box {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface);
-}
-
-.wa-input-row {
-  min-width: 0;
-}
-
-.wa-ai-composer-input {
-  width: 100%;
-  min-height: 68px;
-  max-height: 180px;
-  resize: vertical;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  line-height: 1.5;
-}
-
-.wa-input-box-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  min-height: 32px;
-}
-
-.wa-footer-meta,
-.wa-footer-actions {
-  display: flex;
-  align-items: center;
-  min-width: 0;
-  gap: 8px;
-}
-
-.wa-footer-meta {
-  flex: 1 1 auto;
-  overflow: hidden;
-}
-
-.wa-footer-actions {
-  flex: 0 0 auto;
-  justify-content: flex-end;
-}
-
-.wa-model-mode-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  max-width: 100%;
-  padding: 2px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface2);
-}
-
-.wa-model-mode-toggle-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 74px;
-  min-height: 26px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-muted);
-  font-size: 11px;
-  font-weight: 600;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
-.wa-model-mode-toggle-btn.active {
-  background: var(--accent);
-  color: #fff;
-}
-
-.wa-model-mode-sub::before {
-  content: attr(data-label);
-}
-
-.wa-model-mode-sub[hidden] {
-  display: none !important;
-}
-
-.wa-attach-file-btn,
-#wa-send-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 30px;
-  height: 30px;
-  flex: 0 0 30px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--surface);
-  color: var(--text-muted);
-  cursor: pointer;
-}
-
-#wa-send-btn {
-  border-color: var(--accent);
-  background: var(--accent);
-  color: #fff;
-}
-
-.wa-input-hint {
-  color: var(--text-muted);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.wa-wf-active-chip {
-  display: inline-flex;
-  align-items: center;
-  max-width: 180px;
-  min-height: 24px;
-  gap: 5px;
-  padding: 0 8px;
-  border: 1px solid rgba(37, 99, 235, 0.22);
-  border-radius: 7px;
-  background: rgba(37, 99, 235, 0.08);
-  color: var(--accent);
-  font-size: 11px;
-  font-weight: 600;
-}
 
     /* Proposal-bar download button */
 
@@ -10589,13 +10530,13 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 /* Task flow cleanup */
 #wa-ai-messages .wa-task-run.is-compact {
   max-width: 100%;
-  padding: 10px 12px;
+  padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--ai-border) 58%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--accent) 72%, var(--ai-border));
-  border-radius: 8px;
+  border-left: 2px solid color-mix(in srgb, var(--accent) 72%, var(--ai-border));
+  border-radius: 7px;
   background: color-mix(in srgb, var(--ai-surface) 92%, var(--hover));
   box-shadow: none;
-  line-height: 1.45;
+  line-height: 1.38;
 }
 #wa-ai-messages .wa-task-run.is-compact [data-role="ui-progress"] {
   display: none !important;
@@ -10603,14 +10544,20 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 #wa-ai-messages .wa-task-run.is-compact:not(.streaming) .wa-task-header {
   display: none !important;
 }
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-header {
+  display: flex !important;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
+}
 #wa-ai-messages .wa-task-run.is-compact.streaming .wa-task-header {
   align-items: center;
-  margin-bottom: 7px;
+  margin-bottom: 5px;
   gap: 8px;
 }
 #wa-ai-messages .wa-task-run.is-compact .wa-task-title {
   color: var(--text);
-  font-size: 12.5px;
+  font-size: 12px;
   font-weight: 750;
 }
 #wa-ai-messages .wa-task-run.is-compact .wa-task-status {
@@ -10624,7 +10571,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 #wa-ai-messages .wa-task-run.is-compact .wa-task-summary {
   margin-top: 0;
   display: grid;
-  gap: 7px;
+  gap: 5px;
 }
 #wa-ai-messages .wa-task-run.is-compact .wa-task-outcome {
   margin: 0;
@@ -10632,6 +10579,81 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   font-size: 13px;
   line-height: 1.55;
   font-weight: 650;
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot {
+  border-left-color: color-mix(in srgb, var(--text-muted) 44%, var(--ai-border));
+  background: color-mix(in srgb, var(--ai-surface) 94%, var(--hover));
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot[data-history-status="completed"] {
+  border-left-color: color-mix(in srgb, #25b37e 68%, var(--ai-border));
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot[data-history-status="failed"] {
+  border-left-color: color-mix(in srgb, #d64b4b 72%, var(--ai-border));
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot[data-history-status="cancelled"] {
+  border-left-color: color-mix(in srgb, var(--text-muted) 58%, var(--ai-border));
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-title-wrap {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-title {
+  margin: 0;
+}
+#wa-ai-messages .wa-task-history-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 19px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text-muted) 28%, var(--ai-border));
+  background: color-mix(in srgb, var(--text-muted) 7%, transparent);
+  color: var(--text-muted);
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+}
+#wa-ai-messages .wa-task-history-badge[data-status="completed"] {
+  border-color: color-mix(in srgb, #25b37e 32%, var(--ai-border));
+  background: color-mix(in srgb, #25b37e 8%, transparent);
+  color: #0d7c5b;
+}
+#wa-ai-messages .wa-task-history-badge[data-status="failed"] {
+  border-color: color-mix(in srgb, #d64b4b 34%, var(--ai-border));
+  background: color-mix(in srgb, #d64b4b 8%, transparent);
+  color: #b43434;
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-status {
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-muted);
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-status[data-status="completed"] {
+  background: color-mix(in srgb, #25b37e 9%, transparent);
+  color: #0d7c5b;
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-status[data-status="failed"] {
+  background: color-mix(in srgb, #d64b4b 10%, transparent);
+  color: #b43434;
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-process {
+  margin-top: 6px;
+  border-color: color-mix(in srgb, var(--ai-border) 54%, transparent);
+  background: color-mix(in srgb, var(--ai-bg) 44%, transparent);
+}
+#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-process summary {
+  min-height: 30px;
+}
+#wa-ai-messages .wa-task-history-note {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--ai-border) 60%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--hover) 34%, transparent);
 }
 .wa-task-actions {
   display: grid;
@@ -10739,7 +10761,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 }
 .wa-task-column .wa-task-workbench-detail,
 .wa-task-workbench.is-focused-task .wa-task-workbench-detail {
-  padding: 10px 12px 12px;
+  padding: 8px 10px 10px;
 }
 .wa-task-workbench-item {
   padding: 7px 7px;
@@ -10766,16 +10788,16 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 }
 .wa-task-workbench-stage-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 7px;
-  margin-bottom: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));
+  gap: 6px;
+  margin-bottom: 8px;
 }
 .wa-task-workbench-stage {
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--ai-border) 56%, transparent);
-  border-radius: 7px;
+  border-radius: 6px;
   background: color-mix(in srgb, var(--ai-surface) 88%, var(--hover));
-  padding: 7px 8px;
+  padding: 6px 7px;
 }
 .wa-task-workbench-stage.running {
   border-color: color-mix(in srgb, var(--accent) 36%, var(--ai-border));
@@ -10837,12 +10859,12 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   white-space: nowrap;
 }
 .wa-task-workbench-stage-text {
-  margin-top: 5px;
+  margin-top: 4px;
   color: var(--text-muted);
   font-size: 10.5px;
-  line-height: 1.4;
+  line-height: 1.35;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
   overflow-wrap: anywhere;
@@ -11046,7 +11068,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 #wa-ai-messages > .wa-inline-task-workbench {
   width: calc(100% - 28px);
   align-self: stretch;
-  margin: 4px 14px 10px;
+  margin: 3px 14px 8px;
   border: 1px solid color-mix(in srgb, var(--ai-border) 72%, transparent);
   border-radius: 8px;
   background: color-mix(in srgb, var(--ai-surface) 94%, var(--hover));
@@ -11058,8 +11080,8 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 }
 
 #wa-ai-messages > .wa-inline-task-workbench .wa-task-workbench-header {
-  min-height: 32px;
-  padding: 7px 10px;
+  min-height: 30px;
+  padding: 6px 10px;
   border-bottom: 1px solid color-mix(in srgb, var(--ai-border) 48%, transparent);
 }
 
@@ -11083,7 +11105,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 }
 
 #wa-ai-messages > .wa-inline-task-workbench .wa-task-workbench-detail {
-  padding: 9px 11px 11px;
+  padding: 8px 10px 10px;
 }
 
 #wa-ai-messages > .wa-inline-task-workbench .wa-task-workbench-detail-head strong {
@@ -12364,3 +12386,267 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 /* merged assistant */
 ﻿/* Compatibility stylesheet manifest for the workspace assistant.
 	Keep selector ownership in workspace.css during the first migration wave. */
+
+.wa-task-final-report {
+  margin-top: 0;
+  padding: 12px 0 2px;
+  border-top: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.24));
+  outline: none;
+}
+
+.wa-task-final-report.is-revealed {
+  animation: wa-task-result-reveal 220ms ease-out;
+}
+
+.wa-task-final-report-title {
+  margin-bottom: 9px;
+  font-size: 13px;
+  font-weight: 750;
+  color: var(--text);
+}
+
+.wa-task-final-report-content,
+.wa-task-final-answer-content {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+.wa-task-final-report-content > :first-child,
+.wa-task-final-answer-content > :first-child {
+  margin-top: 0;
+}
+
+.wa-task-final-report-content > :last-child,
+.wa-task-final-answer-content > :last-child {
+  margin-bottom: 0;
+}
+
+.wa-task-completion-banner {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 9px 10px;
+  border-left: 3px solid color-mix(in srgb, #25b37e 76%, var(--ai-border));
+  background: color-mix(in srgb, #25b37e 7%, transparent);
+}
+
+.wa-task-completion-icon {
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 20px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #25b37e;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.wa-task-completion-icon::before {
+  content: "✓";
+}
+
+.wa-task-completion-copy {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wa-task-completion-copy strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 750;
+}
+
+.wa-task-completion-copy > span {
+  color: var(--text-muted);
+  font-size: 11.5px;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.wa-task-interaction-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.22));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface, #fff) 82%, #4f8cff 5%);
+}
+
+.wa-task-memory-card {
+  background: color-mix(in srgb, var(--surface, #fff) 84%, #25b37e 5%);
+}
+
+.wa-task-artifact-summary-card {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 10px;
+  border: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.22));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface, #fff) 86%, #2563eb 4%);
+}
+
+.wa-task-artifact-summary-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.wa-task-artifact-summary-head strong {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 750;
+}
+
+.wa-task-artifact-open-panel {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  border: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.28));
+  border-radius: 6px;
+  background: var(--surface, #fff);
+  color: var(--text);
+  font-size: 11.5px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.wa-task-artifact-open-panel:hover {
+  border-color: color-mix(in srgb, #2563eb 40%, var(--wa-border-soft, rgba(148, 163, 184, 0.28)));
+  color: #2563eb;
+}
+
+.wa-task-artifact-summary-card ul {
+  display: grid;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.wa-task-artifact-summary-card li {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.wa-task-artifact-name {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.wa-task-artifact-meta,
+.wa-task-artifact-overflow {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.wa-task-interaction-title {
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.wa-task-interaction-line {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.wa-task-interaction-line > span {
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.wa-task-interaction-line > p {
+  margin: 0;
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 400;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.wa-task-completion-banner[data-status="error"] {
+  border-left-color: color-mix(in srgb, #d64b4b 78%, var(--ai-border));
+  background: color-mix(in srgb, #d64b4b 7%, transparent);
+}
+
+.wa-task-completion-banner[data-status="error"] .wa-task-completion-icon {
+  background: #d64b4b;
+}
+
+.wa-task-completion-banner[data-status="error"] .wa-task-completion-icon::before {
+  content: "!";
+}
+
+.wa-task-completion-banner[data-status="pending"] {
+  border-left-color: color-mix(in srgb, #d69a24 78%, var(--ai-border));
+  background: color-mix(in srgb, #d69a24 8%, transparent);
+}
+
+.wa-task-completion-banner[data-status="pending"] .wa-task-completion-icon {
+  background: #d69a24;
+}
+
+.wa-task-completion-banner[data-status="pending"] .wa-task-completion-icon::before {
+  content: "…";
+}
+
+.wa-task-completion-banner[data-status="cancelled"] {
+  border-left-color: color-mix(in srgb, var(--text-muted) 68%, var(--ai-border));
+  background: color-mix(in srgb, var(--text-muted) 7%, transparent);
+}
+
+.wa-task-completion-banner[data-status="cancelled"] .wa-task-completion-icon {
+  background: var(--text-muted);
+}
+
+.wa-task-completion-banner[data-status="cancelled"] .wa-task-completion-icon::before {
+  content: "×";
+}
+
+.wa-task-final-answer {
+  margin-top: 10px;
+  padding-top: 11px;
+  border-top: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.24));
+}
+
+.wa-task-final-answer-title {
+  margin-bottom: 9px;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 750;
+}
+
+@keyframes wa-task-result-reveal {
+  from {
+    opacity: 0.35;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.wa-task-workbench-completion {
+  display: grid;
+  gap: 10px;
+}

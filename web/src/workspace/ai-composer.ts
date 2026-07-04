@@ -33,8 +33,22 @@ const COMPOSERS: Record<WorkspaceAiComposerKind, ComposerConfig> = {
   },
 };
 
+const pendingComposerResizeFrames = new WeakMap<HTMLTextAreaElement, number>();
+
 function configFor(kind: WorkspaceAiComposerKind): ComposerConfig {
   return COMPOSERS[kind] || COMPOSERS.chat;
+}
+
+function applyWorkspaceAiComposerResize(input: HTMLTextAreaElement): void {
+  pendingComposerResizeFrames.delete(input);
+  const cssMaxHeight = parseFloat(window.getComputedStyle(input).maxHeight || '');
+  const maxHeight = Number.isFinite(cssMaxHeight) && cssMaxHeight > 0
+    ? cssMaxHeight
+    : configFor(workspaceAiComposerMode()).fallbackMaxHeight;
+  input.style.height = 'auto';
+  const scrollHeight = input.scrollHeight;
+  input.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+  input.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
 export function getWorkspaceAiComposerInput(kind: WorkspaceAiComposerKind = 'chat'): HTMLTextAreaElement | null {
@@ -90,13 +104,18 @@ export function resizeWorkspaceAiComposer(
     ? getWorkspaceAiComposerInput(inputOrKind)
     : inputOrKind;
   if (!input) return;
-  const cssMaxHeight = parseFloat(window.getComputedStyle(input).maxHeight || '');
-  const maxHeight = Number.isFinite(cssMaxHeight) && cssMaxHeight > 0
-    ? cssMaxHeight
-    : configFor(workspaceAiComposerMode()).fallbackMaxHeight;
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, maxHeight) + 'px';
-  input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  const pendingFrame = pendingComposerResizeFrames.get(input);
+  if (pendingFrame) {
+    window.cancelAnimationFrame(pendingFrame);
+  }
+  const resizeFrame = window.requestAnimationFrame
+    ? window.requestAnimationFrame(() => applyWorkspaceAiComposerResize(input))
+    : 0;
+  if (resizeFrame) {
+    pendingComposerResizeFrames.set(input, resizeFrame);
+  } else {
+    applyWorkspaceAiComposerResize(input);
+  }
 }
 
 export function setWorkspaceAiComposerValue(

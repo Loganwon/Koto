@@ -23,6 +23,82 @@
   function _route() {
     return `${location.pathname}${location.search}${location.hash}`;
   }
+  function _normalizeFrontendTaskPath(path) {
+    let value = String(path || "").trim().replace(/\\/g, "/");
+    value = value.replace(/^\.\//, "");
+    if (/^workspace\//i.test(value)) {
+      value = value.slice("workspace/".length);
+    }
+    return value;
+  }
+  function _elementViewportClip(el, padding = 8) {
+    const rect = el.getBoundingClientRect();
+    const x = Math.max(0, Math.floor(rect.x - padding));
+    const y = Math.max(0, Math.floor(rect.y - padding));
+    const maxWidth = Math.max(1, window.innerWidth - x);
+    const maxHeight = Math.max(1, window.innerHeight - y);
+    return {
+      x,
+      y,
+      width: Math.max(1, Math.min(Math.ceil(rect.width + padding * 2), maxWidth)),
+      height: Math.max(1, Math.min(Math.ceil(rect.height + padding * 2), maxHeight))
+    };
+  }
+  function _elementRect(el) {
+    const rect = el.getBoundingClientRect();
+    return {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+  }
+  function _htmlEscape(value) {
+    return String(value || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function _removeTaskEvidenceOverlay() {
+    document.getElementById("koto-task-evidence-capture")?.remove();
+  }
+  function _renderTaskEvidenceOverlay(evidence) {
+    _removeTaskEvidenceOverlay();
+    const overlay = document.createElement("div");
+    overlay.id = "koto-task-evidence-capture";
+    overlay.style.cssText = [
+      "position:fixed",
+      "left:12px",
+      "top:12px",
+      "z-index:2147483647",
+      "box-sizing:border-box",
+      "width:min(720px, calc(100vw - 24px))",
+      "max-height:calc(100vh - 24px)",
+      "overflow:auto",
+      "padding:16px",
+      "border:1px solid #d0d7de",
+      "border-radius:8px",
+      "background:#ffffff",
+      "color:#17202a",
+      "box-shadow:0 16px 48px rgba(15, 23, 42, 0.22)",
+      'font:13px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      "white-space:normal"
+    ].join(";");
+    const chips = Array.isArray(evidence.chips) ? evidence.chips : [];
+    const chipText = chips.map((item) => String(item && (item.title || item.text) || "").trim()).filter(Boolean).join(", ");
+    const status = String(evidence.terminalStatus || "").trim() || "unknown";
+    const taskId = String(evidence.taskId || "").trim();
+    const runId = String(evidence.runId || "").trim();
+    const finalAnswer = String(evidence.finalAnswer || evidence.text || "").trim();
+    overlay.innerHTML = [
+      '<div style="font-weight:700;font-size:15px;margin-bottom:8px;">Koto Task Result Evidence</div>',
+      `<div><strong>Status:</strong> ${_htmlEscape(status)}</div>`,
+      taskId ? `<div><strong>Task ID:</strong> ${_htmlEscape(taskId)}</div>` : "",
+      runId ? `<div><strong>Run ID:</strong> ${_htmlEscape(runId)}</div>` : "",
+      chipText ? `<div><strong>Attached:</strong> ${_htmlEscape(chipText)}</div>` : "",
+      '<div style="height:1px;background:#e5e7eb;margin:12px 0;"></div>',
+      `<div style="white-space:pre-wrap;">${_htmlEscape(finalAnswer || "No final answer text captured.")}</div>`
+    ].join("");
+    document.body.appendChild(overlay);
+    return overlay;
+  }
   function _getSessionId() {
     if (_sessionId) return _sessionId;
     try {
@@ -1083,6 +1159,65 @@
       workspace: _workspaceStateDetails()
     };
   }
+  function _taskResultEvidence(action) {
+    const opts = action.options || {};
+    const limit = Math.max(200, Math.min(Number(opts.limit || 2400), 8e3));
+    const taskId = String(opts.taskId || opts.task_id || action.value || action.text || "").trim();
+    const runId = String(opts.runId || opts.run_id || action.path || "").trim();
+    const selectors = [];
+    if (taskId) selectors.push(`.wa-task-run[data-task-id="${CSS.escape(taskId)}"]`);
+    if (runId) selectors.push(`.wa-task-run[data-task-run-id="${CSS.escape(runId)}"]`);
+    selectors.push('.wa-task-run:not([data-history-snapshot="true"])', ".wa-task-run");
+    let card = null;
+    let selector = "";
+    for (const candidateSelector of selectors) {
+      const matches = Array.from(document.querySelectorAll(candidateSelector)).filter((item) => _isVisible(item));
+      if (matches.length) {
+        card = matches[matches.length - 1];
+        selector = candidateSelector;
+        break;
+      }
+    }
+    if (!card) {
+      return {
+        found: false,
+        reason: "No visible task result card found",
+        chips: Array.from(document.querySelectorAll("#wa-ai-file-chip-list .wa-ctx-file-row")).map((item) => _visibleText(item, 180))
+      };
+    }
+    if (opts.scroll !== false) {
+      card.scrollIntoView({ block: "nearest", inline: "nearest" });
+    }
+    const finalReport = card.querySelector(".wa-task-final-report, .wa-task-final-answer");
+    const chips = Array.from(document.querySelectorAll("#wa-ai-file-chip-list .wa-ctx-file-row")).map((item) => ({
+      text: _visibleText(item, 180),
+      title: item.getAttribute("title") || ""
+    }));
+    const dataset = card.dataset || {};
+    const evidence = {
+      found: true,
+      selector,
+      taskId: dataset.taskId || "",
+      runId: dataset.taskRunId || "",
+      terminalStatus: dataset.taskTerminalStatus || "",
+      text: _visibleText(card, limit),
+      finalAnswer: finalReport ? _visibleText(finalReport, limit) : "",
+      chips,
+      elementRect: _elementRect(card),
+      screenshotClip: _elementViewportClip(card, Number(opts.padding || 8)),
+      viewport: {
+        width: window.innerWidth,
+        height: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio
+      }
+    };
+    if (opts.renderOverlay) {
+      const overlay = _renderTaskEvidenceOverlay(evidence);
+      evidence.overlaySelector = "#koto-task-evidence-capture";
+      evidence.overlayClip = _elementViewportClip(overlay, 4);
+    }
+    return evidence;
+  }
   function _enqueue(event) {
     const enriched = {
       ...event,
@@ -1269,6 +1404,7 @@
   async function _executeFrontendAction(action) {
     if (action.action === "snapshot") return _snapshotDetails();
     if (action.action === "surface_inventory") return _surfaceInventoryDetails(action);
+    if (action.action === "task_result_evidence") return _taskResultEvidence(action);
     if (action.action === "read_dom") {
       return {
         snapshot: _snapshotDetails(),
@@ -1324,7 +1460,7 @@
     if (action.action === "attach_task_file") {
       const rawPath = String(action.path || action.value || action.text || "").trim();
       const rawPaths = Array.isArray(action.options?.paths) ? action.options.paths : [];
-      const paths = rawPaths.length ? rawPaths.map((item) => String(item || "").trim()).filter(Boolean) : [rawPath].filter(Boolean);
+      const paths = rawPaths.length ? rawPaths.map((item) => _normalizeFrontendTaskPath(String(item || ""))).filter(Boolean) : [_normalizeFrontendTaskPath(rawPath)].filter(Boolean);
       if (!paths.length) throw new Error("Task file path is required");
       const attachFilesToTask = window.WA?.attachFilesToTask;
       if (typeof attachFilesToTask !== "function") throw new Error("WA.attachFilesToTask is not available");
@@ -1332,7 +1468,8 @@
         source: "frontend_action",
         expandPanel: action.options?.expandPanel !== false,
         focusInput: action.options?.focusInput !== false,
-        duplicateToast: false
+        duplicateToast: false,
+        replaceExisting: action.options?.replaceExisting !== false
       });
       return { attached: true, paths, result: _safeJsonClone$1(result, {}) };
     }
@@ -2908,6 +3045,11 @@
   async function _attachFilesToTask(paths, options = {}) {
     const filePaths = _normalizeTaskFilePaths(paths);
     const duplicateToast = options.duplicateToast !== false && filePaths.length === 1;
+    if (options.replaceExisting && state$1._aiFileContext.length) {
+      state$1._aiFileContext = [];
+      state$1._aiTargetFileIdx = -1;
+      _renderAIFileChips();
+    }
     let added = 0;
     let skipped = 0;
     for (const path of filePaths) {
@@ -6753,6 +6895,14 @@ ${defaultPrompt}`;
   function isFileTaskFailureStatus(status) {
     return FILE_TASK_FAILED_TERMINAL_STATUSES.has(normalizeFileTaskTerminalStatus(status));
   }
+  function isFileTaskAttentionStatus(status) {
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(status);
+    return terminalStatus2 === "needs_attention" || terminalStatus2 === "context_summary_fallback";
+  }
+  function isFileTaskTerminalStatus(status) {
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(status);
+    return ["completed", "done", "verified", "cancelled"].includes(terminalStatus2) || isFileTaskConfirmationStatus(terminalStatus2) || isFileTaskAttentionStatus(terminalStatus2) || isFileTaskFailureStatus(terminalStatus2);
+  }
   function isFileTaskIncompleteBlockedStatus(status, completedTask) {
     const terminalStatus2 = normalizeFileTaskTerminalStatus(status);
     return terminalStatus2 === "plan_checked" && !completedTask || isFileTaskFailureStatus(terminalStatus2);
@@ -6762,7 +6912,7 @@ ${defaultPrompt}`;
     if (String(fatalSummary || "").trim()) return "error";
     if (terminalStatus2 === "cancelled") return "cancelled";
     if (isFileTaskConfirmationStatus(terminalStatus2)) return "pending";
-    if (terminalStatus2 === "needs_attention" || terminalStatus2 === "context_summary_fallback") return "pending";
+    if (isFileTaskAttentionStatus(terminalStatus2)) return "pending";
     if (isFileTaskIncompleteBlockedStatus(terminalStatus2, completedTask)) return "error";
     if (!completedTask) return "pending";
     return "done";
@@ -6786,13 +6936,13 @@ ${defaultPrompt}`;
     if (normalized === "context_summary_fallback") return "需复核";
     if (normalized === "pending") return "排队";
     if (normalized === "needs_review") return "需复核";
-    if (normalized === "failed" || normalized === "error") return "失败";
+    if (isFileTaskFailureStatus(normalized)) return "失败";
     if (normalized === "cancelled") return "已取消";
     return fallback;
   }
   function fileTaskOutcomeCopy(status, requiresConfirmation = false) {
     const normalized = normalizeFileTaskTerminalStatus(status);
-    if (normalized === "error" || normalized === "failed") {
+    if (isFileTaskFailureStatus(normalized)) {
       return {
         title: "任务未完成",
         detail: "失败原因和可继续处理的建议已整理到总结与回答区域。",
@@ -6822,6 +6972,15 @@ ${defaultPrompt}`;
         detail: "当前进度已保留，可查看过程并继续处理。",
         stepSummary: "任务仍在处理中或等待同步。",
         toast: "任务仍在处理中或等待同步",
+        toastType: "info"
+      };
+    }
+    if (normalized === "needs_attention") {
+      return {
+        title: "需处理",
+        detail: "当前任务未完成，原因和可继续处理的建议已整理到总结与回答区域。",
+        stepSummary: "任务需要处理，进度已保留。",
+        toast: "任务需要处理，请查看总结与回答",
         toastType: "info"
       };
     }
@@ -6895,8 +7054,8 @@ ${defaultPrompt}`;
   const TASK_REPORT_STAGE_DONE_TEXT = {
     route: "已确认任务目标、处理类型和文件上下文。",
     plan: "已确定执行方式和输出要求。",
-    execute: "已按方案完成处理，结果已同步到总结与回答。",
-    check: "已核验结果并同步到总结与回答。"
+    execute: "本轮处理已结束，输出已同步到总结与回答。",
+    check: "核验已结束，结论已同步到总结与回答。"
   };
   const TASK_REPORT_STAGE_RUNNING_TEXT = {
     route: "正在确认任务目标和文件上下文。",
@@ -6976,10 +7135,6 @@ ${defaultPrompt}`;
     if (status === "进行中") return TASK_REPORT_STAGE_RUNNING_TEXT[stageId] || taskReportStageDef(stageId).hint;
     return TASK_REPORT_STAGE_PENDING_TEXT[stageId] || taskReportStageDef(stageId).hint;
   }
-  const FILE_TASK_LOG_PREFIX = "[WA fileTask]";
-  const FILE_TASK_IDLE_NOTICE_MS = 25e3;
-  const FILE_TASK_IDLE_WARN_MS = 6e4;
-  const TaskStatus = window.WA?.fileTaskStatus || {};
   const TOOL_LABELS$1 = {
     selection_context: "读取选区",
     provided_file_context: "读取文件上下文",
@@ -7053,11 +7208,265 @@ ${defaultPrompt}`;
     "annotation_request_not_classified_as_annotation": "批注任务未被识别为批注流程",
     "read_request_escalated_to_write": "只读任务被错误升级为写入"
   };
-  function planViolationLabel(code) {
+  function taskToolLabel(name) {
+    return TOOL_LABELS$1[name] || name || "工具";
+  }
+  function isInternalTaskTool(name) {
+    return INTERNAL_TOOL_NAMES.has(name || "");
+  }
+  function shouldAlwaysSuppressTaskToolFinished(name) {
+    return ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name || "");
+  }
+  function isReadTaskTool(name) {
+    return READ_TOOL_NAMES.has(name || "");
+  }
+  function taskStepTitle(stepId, fallback) {
+    return EXTRA_STEP_TITLES[stepId] || taskReportStageTitle(stepId, "步骤");
+  }
+  function taskPlanViolationLabel(code) {
     const value = String(code || "").trim();
     if (!value) return "";
     if (PLAN_VIOLATION_LABELS[value]) return PLAN_VIOLATION_LABELS[value];
     return value.replace(/_/g, " ");
+  }
+  function escapeHtml$1(value) {
+    return String(value == null ? "" : value).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+  function previewText(value, limit) {
+    const text = String(value || "").trim();
+    const max = Number(limit) > 0 ? Number(limit) : 0;
+    if (!max || text.length <= max) return text;
+    return text.slice(0, max) + "...";
+  }
+  function looksLikeFullAnswerText(value) {
+    const text = String(value || "").trim();
+    if (!text) return false;
+    if (text.length > 260) return true;
+    return /(^|\n)\s*#{1,6}\s|\*\*|```|(^|\n)\s*[-*]\s+\S/u.test(text);
+  }
+  function compactFlowSummary(value, fallback = "详细内容见总结与回答。") {
+    const text = String(value || "").trim();
+    if (!text) return fallback;
+    if (looksLikeFullAnswerText(text)) return fallback;
+    return previewText(text.replace(/\s+/g, " "), 160);
+  }
+  function terminalTextValue(value, depth = 0) {
+    if (typeof value === "string") return value.trim();
+    if (!value || depth > 3) return "";
+    if (Array.isArray(value)) {
+      return value.map((item) => terminalTextValue(item, depth + 1)).filter(Boolean).join("\n").trim();
+    }
+    if (typeof value !== "object") return "";
+    const keys = [
+      "final_answer",
+      "finalAnswer",
+      "answer",
+      "summary",
+      "text",
+      "content",
+      "output_text",
+      "output",
+      "result",
+      "message",
+      "error"
+    ];
+    for (const key of keys) {
+      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+      const text = terminalTextValue(value[key], depth + 1);
+      if (text) return text;
+    }
+    return "";
+  }
+  function terminalAnswerText(payload, fallback = "") {
+    const data = payload && typeof payload === "object" ? payload : {};
+    const candidates = [
+      data.final_answer,
+      data.finalAnswer,
+      data.answer,
+      data.output_text,
+      data.output,
+      data.result,
+      data.summary,
+      data.text,
+      data.content,
+      data.message,
+      data.error,
+      data.data,
+      data.payload,
+      fallback
+    ];
+    for (const candidate of candidates) {
+      const text = terminalTextValue(candidate);
+      if (text) return text;
+    }
+    return "";
+  }
+  function renderTaskFinalReport(value) {
+    const text = normalizeTaskFinalReportMarkdown(value);
+    if (!text) return "";
+    const renderer = window._waRenderMarkdown;
+    if (typeof renderer === "function" && window.marked) {
+      try {
+        return renderer(text);
+      } catch {
+      }
+    }
+    if (window.marked) {
+      try {
+        const sanitizer = window._sanitizeRenderedHtml;
+        const html = window.marked.parse(text);
+        return typeof sanitizer === "function" ? sanitizer(html) : html;
+      } catch {
+      }
+    }
+    return renderReadableMarkdownFallback(text);
+  }
+  function normalizeTaskFinalReportMarkdown(value) {
+    return String(value || "").trim().replace(/^(?:---|\*\*\*)\s*\n+(?=#{1,6}\s+)/, "").trim();
+  }
+  function renderReadableMarkdownFallback(value) {
+    const text = normalizeTaskFinalReportMarkdown(value);
+    if (!text) return "";
+    const lines = text.split(/\r?\n/);
+    const blocks = [];
+    let paragraph = [];
+    let listItems = [];
+    const inline = (source) => escapeHtml$1(source).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
+    const flushParagraph = () => {
+      if (!paragraph.length) return;
+      blocks.push("<p>" + inline(paragraph.join(" ")) + "</p>");
+      paragraph = [];
+    };
+    const flushList = () => {
+      if (!listItems.length) return;
+      blocks.push("<ul>" + listItems.map((item) => "<li>" + inline(item) + "</li>").join("") + "</ul>");
+      listItems = [];
+    };
+    lines.forEach((rawLine, index) => {
+      const line = rawLine.trim();
+      if (!line || /^(?:---|\*\*\*)$/.test(line) && index === 0) {
+        flushParagraph();
+        flushList();
+        return;
+      }
+      const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+      if (heading) {
+        flushParagraph();
+        flushList();
+        const level = Math.min(4, heading[1].length + 1);
+        blocks.push("<h" + level + ">" + inline(heading[2]) + "</h" + level + ">");
+        return;
+      }
+      const bullet = /^(?:[-*]|\d+\.)\s+(.+)$/.exec(line);
+      if (bullet) {
+        flushParagraph();
+        listItems.push(bullet[1]);
+        return;
+      }
+      flushList();
+      paragraph.push(line);
+    });
+    flushParagraph();
+    flushList();
+    return blocks.join("");
+  }
+  function createModelSummaryState() {
+    return {
+      rounds: /* @__PURE__ */ new Set(),
+      startedRounds: /* @__PURE__ */ new Set(),
+      toolCalls: 0,
+      contentChars: 0,
+      latestRound: 0,
+      mode: "",
+      failed: false
+    };
+  }
+  function taskPerformanceSource(data) {
+    const merged = {};
+    const routingDecision = data.routing_decision && typeof data.routing_decision === "object" ? data.routing_decision : null;
+    const routePerformance = routingDecision && routingDecision.performance && typeof routingDecision.performance === "object" ? routingDecision.performance : null;
+    const payloadPerformance = data.performance && typeof data.performance === "object" ? data.performance : null;
+    const runtime = data.runtime && typeof data.runtime === "object" ? data.runtime : null;
+    const runtimePerformance = runtime && runtime.performance && typeof runtime.performance === "object" ? runtime.performance : null;
+    [routePerformance, payloadPerformance, runtimePerformance].forEach((source) => {
+      if (!source) return;
+      Object.keys(source).forEach((key) => {
+        merged[key] = source[key];
+      });
+    });
+    return merged;
+  }
+  function taskPerformanceFromDataset(encoded) {
+    const value = String(encoded || "").trim();
+    if (!value) return {};
+    try {
+      const parsed = JSON.parse(decodeURIComponent(value));
+      return parsed && typeof parsed === "object" ? parsed : {};
+    } catch (_) {
+      return {};
+    }
+  }
+  function encodeTaskPerformance(performance2) {
+    return encodeURIComponent(JSON.stringify(performance2 || {}));
+  }
+  function taskPerformanceMs(value) {
+    const num = Number(value);
+    return Number.isFinite(num) && num >= 0 ? num : null;
+  }
+  function taskPerformanceDuration(ms) {
+    if (ms >= 1e3) return `${(ms / 1e3).toFixed(ms >= 1e4 ? 1 : 2)}s`;
+    if (ms >= 10) return `${Math.round(ms)}ms`;
+    return `${ms.toFixed(1)}ms`;
+  }
+  function taskPerformanceSummary(data) {
+    const perf = taskPerformanceSource(data);
+    const fields = [
+      ["路由", "route_decision_ms"],
+      ["上下文", "context_files_ms"],
+      ["分类", "classification_ms"],
+      ["裁决", "intent_adjudication_ms"],
+      ["计划", "plan_materialization_ms"],
+      ["总计", "total_ms"]
+    ];
+    const parts = fields.map(([label, key]) => {
+      const ms = taskPerformanceMs(perf[key]);
+      return ms === null ? "" : `${label} ${taskPerformanceDuration(ms)}`;
+    }).filter(Boolean);
+    return parts.join(" · ");
+  }
+  function updateTaskPerformanceDataset(currentEncoded, data) {
+    const performance2 = Object.assign({}, taskPerformanceFromDataset(currentEncoded), taskPerformanceSource(data));
+    return {
+      performance: performance2,
+      encoded: encodeTaskPerformance(performance2),
+      summary: taskPerformanceSummary({ performance: performance2 })
+    };
+  }
+  function updateModelSummaryState(state2, data) {
+    state2.latestRound = Number(data.round || state2.latestRound || 0);
+    state2.toolCalls = Number(data.tool_calls || state2.toolCalls || 0);
+    state2.contentChars = Number(data.content_chars || state2.contentChars || 0);
+    state2.mode = String(data.mode || state2.mode || "").trim();
+    if (data.failed) state2.failed = true;
+    if (data.round !== void 0 && !state2.startedRounds.has(state2.latestRound)) state2.startedRounds.add(state2.latestRound);
+    if (data.round_finished !== void 0 && state2.latestRound) state2.rounds.add(state2.latestRound);
+    const roundLabel = state2.latestRound ? "第" + state2.latestRound + "轮" : "";
+    const callsLabel = state2.toolCalls ? state2.toolCalls + "次工具调用" : "";
+    return {
+      chip: state2.mode || "思考",
+      summary: [roundLabel, callsLabel].filter(Boolean).join("，") || "思考中"
+    };
+  }
+  const FILE_TASK_LOG_PREFIX = "[WA fileTask]";
+  const FILE_TASK_IDLE_NOTICE_MS = 25e3;
+  const FILE_TASK_IDLE_WARN_MS = 6e4;
+  const TaskStatus = window.WA?.fileTaskStatus || {};
+  const TASK_RUNNER_PLAN_VIOLATION_LABELS = {
+    "read_request_escalated_to_write": "只读任务被错误升级为写入"
+  };
+  function taskRunnerPlanViolationLabel(code) {
+    const value = String(code || "").trim();
+    return TASK_RUNNER_PLAN_VIOLATION_LABELS[value] || taskPlanViolationLabel(value);
   }
   function planGateVisibleIssues(data) {
     const violations = Array.isArray(data.violations) ? data.violations : [];
@@ -7168,66 +7577,17 @@ ${defaultPrompt}`;
     if (Object.prototype.hasOwnProperty.call(data, "completed_task")) normalized.completed_task = data.completed_task;
     return normalized;
   }
-  function taskPerformanceSource(data) {
-    const merged = {};
-    const routingDecision = data.routing_decision && typeof data.routing_decision === "object" ? data.routing_decision : null;
-    const routePerformance = routingDecision && routingDecision.performance && typeof routingDecision.performance === "object" ? routingDecision.performance : null;
-    const payloadPerformance = data.performance && typeof data.performance === "object" ? data.performance : null;
-    const runtime = data.runtime && typeof data.runtime === "object" ? data.runtime : null;
-    const runtimePerformance = runtime && runtime.performance && typeof runtime.performance === "object" ? runtime.performance : null;
-    [routePerformance, payloadPerformance, runtimePerformance].forEach((source) => {
-      if (!source) return;
-      Object.keys(source).forEach((key) => {
-        merged[key] = source[key];
-      });
-    });
-    return merged;
-  }
-  function taskPerformanceFromCard(card) {
-    const encoded = String(card && card.dataset ? card.dataset.taskPerformance || "" : "").trim();
-    if (!encoded) return {};
-    try {
-      const parsed = JSON.parse(decodeURIComponent(encoded));
-      return parsed && typeof parsed === "object" ? parsed : {};
-    } catch (_) {
-      return {};
-    }
-  }
-  function taskPerformanceMs(value) {
-    const num = Number(value);
-    return Number.isFinite(num) && num >= 0 ? num : null;
-  }
-  function taskPerformanceDuration(ms) {
-    if (ms >= 1e3) return `${(ms / 1e3).toFixed(ms >= 1e4 ? 1 : 2)}s`;
-    if (ms >= 10) return `${Math.round(ms)}ms`;
-    return `${ms.toFixed(1)}ms`;
-  }
-  function taskPerformanceSummary(data) {
-    const perf = taskPerformanceSource(data);
-    const fields = [
-      ["路由", "route_decision_ms"],
-      ["上下文", "context_files_ms"],
-      ["分类", "classification_ms"],
-      ["裁决", "intent_adjudication_ms"],
-      ["计划", "plan_materialization_ms"],
-      ["总计", "total_ms"]
-    ];
-    const parts = fields.map(([label, key]) => {
-      const ms = taskPerformanceMs(perf[key]);
-      return ms === null ? "" : `${label} ${taskPerformanceDuration(ms)}`;
-    }).filter(Boolean);
-    return parts.join(" · ");
-  }
   function updateTaskPerformanceRow(card, data) {
-    const merged = Object.assign({}, taskPerformanceFromCard(card), taskPerformanceSource(data));
+    const current = String(card && card.dataset ? card.dataset.taskPerformance || "" : "").trim();
+    const next = updateTaskPerformanceDataset(current, data);
     if (card && card.dataset) {
       try {
-        card.dataset.taskPerformance = encodeURIComponent(JSON.stringify(merged));
+        card.dataset.taskPerformance = next.encoded;
       } catch {
         delete card.dataset.taskPerformance;
       }
     }
-    const summary = taskPerformanceSummary({ performance: merged });
+    const summary = next.summary;
     if (!summary) return;
     const step = taskStageStep(card, "route");
     upsertStepSingletonRow(
@@ -7268,18 +7628,6 @@ ${defaultPrompt}`;
   function isTaskCardElement(value) {
     return !!(value && value.nodeType === 1 && value.classList && typeof value.querySelector === "function" && typeof value.querySelectorAll === "function");
   }
-  function toolLabel(name) {
-    return TOOL_LABELS$1[name] || name || "工具";
-  }
-  function isInternalTool(name) {
-    return INTERNAL_TOOL_NAMES.has(name || "");
-  }
-  function isReadTool(name) {
-    return READ_TOOL_NAMES.has(name || "");
-  }
-  function stepTitle(stepId, fallback) {
-    return EXTRA_STEP_TITLES[stepId] || taskReportStageTitle(stepId, "步骤");
-  }
   function basename$2(path) {
     const text = String(path || "").trim();
     if (!text) return "";
@@ -7290,144 +7638,6 @@ ${defaultPrompt}`;
     const options = payload && typeof payload === "object" && payload.options && typeof payload.options === "object" ? payload.options : {};
     const checkpoint = workflowCheckpointFromOptions(options);
     return String(checkpoint && checkpoint.policy || "").trim().toLowerCase() === "confirm_each_step";
-  }
-  function previewText(value, limit) {
-    const text = String(value || "").trim();
-    const max = Number(limit) > 0 ? Number(limit) : 0;
-    if (!max || text.length <= max) return text;
-    return text.slice(0, max) + "...";
-  }
-  function looksLikeFullAnswerText(value) {
-    const text = String(value || "").trim();
-    if (!text) return false;
-    if (text.length > 260) return true;
-    return /(^|\n)\s*#{1,6}\s|\*\*|```|(^|\n)\s*[-*]\s+\S/u.test(text);
-  }
-  function compactFlowSummary(value, fallback = "完整结果见总结与回答。") {
-    const text = String(value || "").trim();
-    if (!text) return fallback;
-    if (looksLikeFullAnswerText(text)) return fallback;
-    return previewText(text.replace(/\s+/g, " "), 160);
-  }
-  function terminalTextValue(value, depth = 0) {
-    if (typeof value === "string") return value.trim();
-    if (!value || depth > 3) return "";
-    if (Array.isArray(value)) {
-      return value.map((item) => terminalTextValue(item, depth + 1)).filter(Boolean).join("\n").trim();
-    }
-    if (typeof value !== "object") return "";
-    const keys = [
-      "final_answer",
-      "finalAnswer",
-      "answer",
-      "summary",
-      "text",
-      "content",
-      "output_text",
-      "output",
-      "result",
-      "message",
-      "error"
-    ];
-    for (const key of keys) {
-      if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-      const text = terminalTextValue(value[key], depth + 1);
-      if (text) return text;
-    }
-    return "";
-  }
-  function terminalAnswerText(payload, fallback = "") {
-    const data = payload && typeof payload === "object" ? payload : {};
-    const candidates = [
-      data.final_answer,
-      data.finalAnswer,
-      data.answer,
-      data.output_text,
-      data.output,
-      data.result,
-      data.summary,
-      data.text,
-      data.content,
-      data.message,
-      data.error,
-      data.data,
-      data.payload,
-      fallback
-    ];
-    for (const candidate of candidates) {
-      const text = terminalTextValue(candidate);
-      if (text) return text;
-    }
-    return "";
-  }
-  function renderTaskFinalReport(value) {
-    const text = normalizeTaskFinalReportMarkdown(value);
-    if (!text) return "";
-    const renderer = window._waRenderMarkdown;
-    if (typeof renderer === "function" && window.marked) {
-      try {
-        return renderer(text);
-      } catch {
-      }
-    }
-    if (window.marked) {
-      try {
-        const sanitizer = window._sanitizeRenderedHtml;
-        const html = window.marked.parse(text);
-        return typeof sanitizer === "function" ? sanitizer(html) : html;
-      } catch {
-      }
-    }
-    return renderReadableMarkdownFallback(text);
-  }
-  function normalizeTaskFinalReportMarkdown(value) {
-    return String(value || "").trim().replace(/^(?:---|\*\*\*)\s*\n+(?=#{1,6}\s+)/, "").trim();
-  }
-  function renderReadableMarkdownFallback(value) {
-    const text = normalizeTaskFinalReportMarkdown(value);
-    if (!text) return "";
-    const lines = text.split(/\r?\n/);
-    const blocks = [];
-    let paragraph = [];
-    let listItems = [];
-    const inline = (source) => esc$1(source).replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
-    const flushParagraph = () => {
-      if (!paragraph.length) return;
-      blocks.push("<p>" + inline(paragraph.join(" ")) + "</p>");
-      paragraph = [];
-    };
-    const flushList = () => {
-      if (!listItems.length) return;
-      blocks.push("<ul>" + listItems.map((item) => "<li>" + inline(item) + "</li>").join("") + "</ul>");
-      listItems = [];
-    };
-    lines.forEach((rawLine, index) => {
-      const line = rawLine.trim();
-      if (!line || /^(?:---|\*\*\*)$/.test(line) && index === 0) {
-        flushParagraph();
-        flushList();
-        return;
-      }
-      const heading = /^(#{1,4})\s+(.+)$/.exec(line);
-      if (heading) {
-        flushParagraph();
-        flushList();
-        const level = Math.min(4, heading[1].length + 1);
-        blocks.push("<h" + level + ">" + inline(heading[2]) + "</h" + level + ">");
-        return;
-      }
-      const bullet = /^(?:[-*]|\d+\.)\s+(.+)$/.exec(line);
-      if (bullet) {
-        flushParagraph();
-        listItems.push(bullet[1]);
-        return;
-      }
-      flushList();
-      paragraph.push(line);
-    });
-    flushParagraph();
-    flushList();
-    return blocks.join("");
   }
   function firstContextText(source, keys) {
     if (!source || typeof source !== "object") return "";
@@ -7631,7 +7841,7 @@ ${defaultPrompt}`;
     if (toolName === "provided_file_context" || toolName === "selection_context") return "";
     if (toolName === "parse_file_to_text" && payload.success !== false) return "";
     if (looksLikeFullAnswerText(preview)) {
-      return '<div class="wa-task-result-text">' + esc$1("结果已生成，完整内容见总结与回答。") + "</div>";
+      return '<div class="wa-task-result-text">' + esc$1("已收到较长内容，详细内容见总结与回答。") + "</div>";
     }
     const summary = toolPreviewSummary(toolName, preview);
     if (!summary) return "";
@@ -7640,12 +7850,12 @@ ${defaultPrompt}`;
   }
   function shouldSuppressToolStart(payload) {
     const name = payload.tool_name || "";
-    return isInternalTool(name) || isReadTool(name);
+    return isInternalTaskTool(name) || isReadTaskTool(name);
   }
   function shouldSuppressToolFinished(payload) {
     const name = payload.tool_name || "";
-    if (ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name)) return true;
-    if (isInternalTool(name) && payload.success !== false && !payload.blocked) return true;
+    if (shouldAlwaysSuppressTaskToolFinished(name)) return true;
+    if (isInternalTaskTool(name) && payload.success !== false && !payload.blocked) return true;
     if (payload.skipped) return true;
     return false;
   }
@@ -7662,7 +7872,7 @@ ${defaultPrompt}`;
         fileChanges: [],
         readSummaries: /* @__PURE__ */ new Map(),
         modelSummaryRows: /* @__PURE__ */ new Map(),
-        modelSummary: { rounds: /* @__PURE__ */ new Set(), startedRounds: /* @__PURE__ */ new Set(), toolCalls: 0, contentChars: 0, latestRound: 0, mode: "", failed: false },
+        modelSummary: createModelSummaryState(),
         codeSummaryRows: /* @__PURE__ */ new Map(),
         uiProgress: 0,
         progressExplicit: false,
@@ -7685,7 +7895,7 @@ ${defaultPrompt}`;
         fileChanges: [],
         readSummaries: /* @__PURE__ */ new Map(),
         modelSummaryRows: /* @__PURE__ */ new Map(),
-        modelSummary: { rounds: /* @__PURE__ */ new Set(), startedRounds: /* @__PURE__ */ new Set(), toolCalls: 0, contentChars: 0, latestRound: 0, mode: "", failed: false },
+        modelSummary: createModelSummaryState(),
         codeSummaryRows: /* @__PURE__ */ new Map(),
         uiProgress: 0,
         progressExplicit: false,
@@ -7730,7 +7940,7 @@ ${defaultPrompt}`;
     const safeId = String(stepId || "run");
     let step = Array.from(steps.children).find((n) => n.dataset.stepId === safeId);
     if (step) {
-      setStepTitle(step, title || stepTitle(safeId));
+      setStepTitle(step, title || taskStepTitle(safeId));
       return step;
     }
     step = document.createElement("div");
@@ -7756,7 +7966,7 @@ ${defaultPrompt}`;
     step.classList.add("failed");
   }
   function taskStageStep(card, stepId) {
-    return ensureStep(card, stepId, stepTitle(stepId));
+    return ensureStep(card, stepId, taskStepTitle(stepId));
   }
   function appendRow(step, kind, html) {
     const body = step.querySelector(".wa-task-step-body");
@@ -7824,7 +8034,7 @@ ${defaultPrompt}`;
     if (data.mode) card.dataset.taskMode = String(data.mode || "").trim();
     const eventAnswer = terminalAnswerText(data);
     if (eventAnswer) {
-      card.dataset.taskSummary = compactFlowSummary(eventAnswer, "任务已完成，完整结果见总结与回答。");
+      card.dataset.taskSummary = compactFlowSummary(eventAnswer, "详细内容见总结与回答。");
       card.dataset.taskFinalAnswer = eventAnswer;
     }
     if (data.quick_action_mode) {
@@ -7943,16 +8153,15 @@ ${defaultPrompt}`;
     const terminalStatus2 = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || "");
     const explicitSummary = String(fallbackSummary || dataset.taskFinalAnswer || dataset.taskSummary || "").trim();
     const fatalSummary = String(card && card._fatalErrorText || "").trim();
-    const completedTask = Object.prototype.hasOwnProperty.call(dataset, "taskCompleted") ? boolAttr(dataset.taskCompleted) : true;
+    const completedTask = Object.prototype.hasOwnProperty.call(dataset, "taskCompleted") ? boolAttr(dataset.taskCompleted) : ["completed", "done", "verified"].includes(terminalStatus2);
     const status = fileTaskTerminalUiStatus(terminalStatus2, completedTask, fatalSummary);
-    return { summary: explicitSummary || fatalSummary || "文件任务流已完成。", status, task_id: String(dataset.taskId || "").trim(), run_id: String(dataset.taskRunId || "").trim(), loadingEl: card || null, terminal_status: terminalStatus2, completed_task: completedTask };
+    return { summary: explicitSummary || fatalSummary || "文件任务流已结束。", status, task_id: String(dataset.taskId || "").trim(), run_id: String(dataset.taskRunId || "").trim(), loadingEl: card || null, terminal_status: terminalStatus2, completed_task: completedTask };
   }
   function taskResultRequiresUserConfirmation(result) {
     return !!result && isFileTaskConfirmationStatus(result.terminal_status);
   }
   function taskResultNeedsAttention(result) {
-    const terminal = normalizeFileTaskTerminalStatus(result && result.terminal_status);
-    return terminal === "needs_attention" || terminal === "context_summary_fallback";
+    return isFileTaskAttentionStatus(result && result.terminal_status);
   }
   function taskResultOutcomeCopy(result) {
     if (normalizeFileTaskTerminalStatus(result && result.terminal_status) === "context_summary_fallback") {
@@ -8586,7 +8795,7 @@ ${defaultPrompt}`;
     const passed = data.passed !== false && String(data.status || "").trim().toLowerCase() !== "replan";
     const violations = Array.isArray(data.violations) ? data.violations : [];
     const warnings = Array.isArray(data.warnings) ? data.warnings : [];
-    const detail = [...violations, ...warnings].slice(0, 5).map((item) => planViolationLabel(String(item || "")) || String(item || "")).filter(Boolean).join("；");
+    const detail = [...violations, ...warnings].slice(0, 5).map((item) => taskRunnerPlanViolationLabel(String(item || "")) || String(item || "")).filter(Boolean).join("；");
     const summary = passed ? planCheckSummaryText(data, true) : detail || planCheckSummaryText(data, false);
     upsertStepSingletonRow(step, "plan.checked", passed ? "success" : "warn", '<span class="wa-task-chip ' + (passed ? "success" : "warn") + '">' + esc$1(passed ? "监管" : "需调整") + "</span>" + esc$1(summary) + supervisorAuditHtml(data, { compact: true }));
     updateTaskPerformanceRow(card, data);
@@ -8595,7 +8804,7 @@ ${defaultPrompt}`;
     syncTaskLiveProgress(card);
   }
   function planGateIssueHtml(data) {
-    const details = planGateVisibleIssues(data).slice(0, 5).map((item) => planViolationLabel(item));
+    const details = planGateVisibleIssues(data).slice(0, 5).map((item) => taskRunnerPlanViolationLabel(item));
     return details.length ? '<ul class="wa-task-plan-violations">' + details.map((item) => "<li>" + esc$1(item) + "</li>").join("") + "</ul>" : "";
   }
   function handleEvent_plan_gated(card, evt, payload) {
@@ -8759,7 +8968,7 @@ ${defaultPrompt}`;
     if (planStep && !planStep.classList.contains("failed")) markStepDone(planStep);
     const step = taskStageStep(card, "check");
     const terminalAnswer = terminalAnswerText(data, terminalAnswerText(payload, ""));
-    const result = taskTerminalResult(card, terminalAnswer || "文件任务已完成。");
+    const result = taskTerminalResult(card, terminalAnswer || "文件任务流已结束。");
     const needsAttention = taskResultNeedsAttention(result);
     if (result.status === "error") markStepFailed(executeStep);
     else if (result.status === "pending") markStepRunning(executeStep);
@@ -8874,7 +9083,7 @@ ${defaultPrompt}`;
     markStepRunning(step);
     setStatus(card, "处理中");
     const toolName = data.tool_name || "";
-    const toolTitle = data.tool_title || toolLabel(toolName);
+    const toolTitle = data.tool_title || taskToolLabel(toolName);
     const args = data.tool_args || "";
     const argStr = args ? " " + esc$1(String(args).trim()) : "";
     const content = '<span class="wa-task-chip">' + esc$1(toolTitle) + "</span>" + esc$1("准备执行") + argStr;
@@ -8889,7 +9098,7 @@ ${defaultPrompt}`;
     const step = taskStageStep(card, "execute");
     markStepRunning(step);
     const toolName = data.tool_name || "";
-    const toolTitle = data.tool_title || toolLabel(toolName);
+    const toolTitle = data.tool_title || taskToolLabel(toolName);
     const tag = "tool:" + toolName + ":" + String(data.tool_use_id || data.execution_id || "");
     const finished = data.success !== false && !data.blocked && !data.skipped;
     const kind = data.blocked || data.tool_name === "ask_user" ? "warn" : finished ? "tool-finished" : "tool-error";
@@ -8978,18 +9187,8 @@ ${defaultPrompt}`;
     const step = taskStageStep(card, "execute");
     markStepRunning(step);
     const state2 = ensureTaskUiState(card);
-    const ms = state2.modelSummary;
-    ms.latestRound = Number(data.round || ms.latestRound || 0);
-    ms.toolCalls = Number(data.tool_calls || ms.toolCalls || 0);
-    ms.contentChars = Number(data.content_chars || ms.contentChars || 0);
-    ms.mode = String(data.mode || ms.mode || "").trim();
-    if (data.failed) ms.failed = true;
-    if (data.round !== void 0 && !ms.startedRounds.has(ms.latestRound)) ms.startedRounds.add(ms.latestRound);
-    if (data.round_finished !== void 0 && ms.latestRound) ms.rounds.add(ms.latestRound);
-    const roundLabel = ms.latestRound ? "第" + ms.latestRound + "轮" : "";
-    const callsLabel = ms.toolCalls ? ms.toolCalls + "次工具调用" : "";
-    const summaryText = [roundLabel, callsLabel].filter(Boolean).join("，") || "思考中";
-    const content = '<span class="wa-task-chip">' + esc$1(ms.mode || "思考") + "</span>" + esc$1(summaryText);
+    const summary = updateModelSummaryState(state2.modelSummary, data);
+    const content = '<span class="wa-task-chip">' + esc$1(summary.chip) + "</span>" + esc$1(summary.summary);
     const row = upsertStepSingletonRow(step, "model:thinking", "model-summary", content);
     if (row) state2.modelSummaryRows.set("thinking", row);
     markTaskActivity(card);
@@ -9055,7 +9254,7 @@ ${defaultPrompt}`;
     else if (pending) markStepRunning(step);
     else markStepDone(step);
     const title = String(data.title || evt.step_id || stepId || "任务步骤").trim();
-    const summary = compactFlowSummary(String(data.summary || data.text || data.message || "").trim(), "步骤已完成，结果见总结与回答。");
+    const summary = compactFlowSummary(String(data.summary || data.text || data.message || "").trim(), "步骤已结束，详细内容见总结与回答。");
     const chip = failed ? "需处理" : pending ? "待处理" : "完成";
     const kind = failed ? "warn" : pending ? "progress" : "success";
     upsertStepSingletonRow(
@@ -9739,6 +9938,9 @@ ${defaultPrompt}`;
   const SUMMARY_KEYS = ["summary", "message", "error", "observation", "result_summary", "result", "preview"];
   const STARTUP_HEALTH_PROMPT = "请总结当前 Koto 的后台运行状态";
   const INTERNAL_AGENT_SESSIONS = /* @__PURE__ */ new Set(["s1", "test-session"]);
+  const WORKBENCH_STAGE_BY_STEP_ID = {
+    "task.classified": "route"
+  };
   function esc(text) {
     return String(text || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
   }
@@ -9792,6 +9994,10 @@ ${defaultPrompt}`;
       return TASK_REPORT_STAGE_DONE_TEXT.execute;
     }
     return taskReportCompactText(text, stageId === "execute" ? 120 : 110);
+  }
+  function workbenchStageFromStep(step, fallbackStage = "") {
+    const id = String(step && (step.id || step.step_id || step.stage || "") || "").trim().toLowerCase();
+    return WORKBENCH_STAGE_BY_STEP_ID[id] || taskReportStageFromStep(step, fallbackStage);
   }
   function safeJsonObject(value) {
     const text = String(value || "").trim();
@@ -10087,7 +10293,10 @@ ${defaultPrompt}`;
     }
   }
   function terminalStatus(task) {
-    return normalizeFileTaskTerminalStatus(task && task.status) || "running";
+    const metadata = parseMetadata(task);
+    return normalizeFileTaskTerminalStatus(
+      metadata.task_terminal_status || metadata.terminal_status || metadata.status || task && task.status
+    ) || "running";
   }
   function decodeTaskPayload(value) {
     const raw = String(value || "").trim();
@@ -10117,7 +10326,7 @@ ${defaultPrompt}`;
     const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || "");
     if (terminal === "cancelled") return "cancelled";
     if (terminal === "failed" || terminal === "error" || terminal === "blocked") return "failed";
-    if (terminal === "needs_attention" || terminal === "context_summary_fallback") return "waiting";
+    if (isFileTaskAttentionStatus(terminal)) return "waiting";
     if (terminal === "completed" || card.classList.contains("done")) return "completed";
     if (card.classList.contains("cancelled")) return "cancelled";
     if (card.classList.contains("failed")) return "failed";
@@ -10280,8 +10489,8 @@ ${defaultPrompt}`;
     const type = String(step && step.step_type || "").trim().toUpperCase();
     const toolName = String(step && step.tool_name || "").trim();
     const typeLabel = STEP_TYPE_LABELS[type] || "过程";
-    const toolLabel2 = TOOL_LABELS[toolName] || "";
-    return [typeLabel, toolLabel2].filter(Boolean).join(" · ");
+    const toolLabel = TOOL_LABELS[toolName] || "";
+    return [typeLabel, toolLabel].filter(Boolean).join(" · ");
   }
   function stepText(step) {
     const text = readableJsonishText(step && (step.content || step.observation || step.message || step.error), 170, { includePreset: false });
@@ -10292,7 +10501,7 @@ ${defaultPrompt}`;
   function liveCardCompleted(card) {
     const dataset = card && card.dataset ? card.dataset : {};
     const terminal = normalizeFileTaskTerminalStatus(dataset["taskTerminalStatus"] || "");
-    if (terminal === "needs_attention" || terminal === "context_summary_fallback") return false;
+    if (isFileTaskAttentionStatus(terminal)) return false;
     return terminal === "completed" || String(dataset["taskCompleted"] || "").trim().toLowerCase() === "true";
   }
   function liveStepTone(step, card) {
@@ -10349,7 +10558,7 @@ ${defaultPrompt}`;
       const stepId = String(step.dataset && step.dataset.stepId || "").trim();
       let title = String(step.querySelector(".wa-task-step-title")?.textContent || "").trim() || "步骤";
       if (completed && (stepId === "run" || title === "任务状态")) return null;
-      const stage = taskReportStageFromStep({ id: stepId, title }, stepId === "run" ? "execute" : "");
+      const stage = workbenchStageFromStep({ id: stepId, title }, stepId === "run" ? "execute" : "");
       const rows = Array.from(step.querySelectorAll(".wa-task-row")).map((row) => userFacingTaskText(liveStepText(liveRowText(row), 220), stage)).filter(Boolean);
       if (title === "任务状态" && rows.length === 1 && rows[0].includes("：")) {
         title = rows[0].split("：")[0] || title;
@@ -10386,7 +10595,7 @@ ${defaultPrompt}`;
     const byStage = /* @__PURE__ */ new Map();
     let maxSeenIndex = -1;
     (rawSteps || []).forEach((rawStep) => {
-      const stage = taskReportStageFromStep(rawStep);
+      const stage = workbenchStageFromStep(rawStep);
       const stageIndex = flowStageIndex(stage);
       maxSeenIndex = Math.max(maxSeenIndex, stageIndex);
       const cleanText = userFacingTaskText(rawStep && rawStep.text, stage);
@@ -10442,7 +10651,7 @@ ${defaultPrompt}`;
     const persistedSteps = steps.map((step) => {
       const label = stepLabel(step);
       const tone = stepTone(step.step_type);
-      const stage = taskReportStageFromStep({ id: step && (step.step_id || step.id), title: label });
+      const stage = workbenchStageFromStep({ id: step && (step.step_id || step.id), title: label });
       const text = userFacingTaskText(stepText(step), stage);
       if (finalSummary && text && finalSummary.includes(text.slice(0, 80))) return null;
       if (text.length > 260 && stage === "check") return null;
@@ -10461,7 +10670,7 @@ ${defaultPrompt}`;
   function renderStageOverview(steps) {
     const byStage = /* @__PURE__ */ new Map();
     (steps || []).forEach((step) => {
-      const stage = taskReportStageFromStep(step);
+      const stage = workbenchStageFromStep(step);
       byStage.set(stage, step);
     });
     return [
@@ -11458,6 +11667,7 @@ ${defaultPrompt}`;
       }
       let terminalTaskPersisted = false;
       let activeTaskCard = loadingEl || void 0;
+      let terminalPersistTimer = null;
       let terminalPersistDelayTimer = null;
       const basePersistMetadata = (card, extra) => Object.assign({
         turn_id: taskTurnId,
@@ -11470,10 +11680,10 @@ ${defaultPrompt}`;
       const taskCardHasTerminalResult = (card) => {
         if (!card || !card.dataset) return false;
         const dataset = card.dataset;
-        const status = String(dataset.taskTerminalStatus || "").trim().toLowerCase();
+        const status = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || "");
         const hasFinalText = !!String(dataset.taskFinalAnswer || dataset.taskSummary || "").trim();
         if (card.classList.contains("done") || card.classList.contains("failed") || card.classList.contains("cancelled")) return hasFinalText || status !== "";
-        if (["completed", "done", "verified", "failed", "error", "cancelled", "canceled", "awaiting_confirmation", "blocked"].includes(status)) return true;
+        if (isFileTaskTerminalStatus(status)) return true;
         return String(dataset.taskCompleted || "").trim().toLowerCase() === "true" && hasFinalText;
       };
       const persistTerminalTaskCard = (card, streamResult, fallbackStatus = "done") => {
@@ -11495,12 +11705,31 @@ ${defaultPrompt}`;
         return assistantText;
       };
       const stopTerminalPersistWatch = () => {
+        if (terminalPersistTimer !== null) {
+          window.clearInterval(terminalPersistTimer);
+          terminalPersistTimer = null;
+        }
         if (terminalPersistDelayTimer !== null) {
           window.clearTimeout(terminalPersistDelayTimer);
           terminalPersistDelayTimer = null;
         }
       };
+      const startTerminalPersistWatch = () => {
+        stopTerminalPersistWatch();
+        terminalPersistTimer = window.setInterval(() => {
+          if (terminalTaskPersisted) {
+            stopTerminalPersistWatch();
+            return;
+          }
+          if (activeTaskCard && taskCardHasTerminalResult(activeTaskCard)) {
+            persistTerminalTaskCard(activeTaskCard);
+            stopTerminalPersistWatch();
+          }
+        }, 150);
+        window.setTimeout(stopTerminalPersistWatch, 3e4);
+      };
       persistTaskTurn(context.text, "文件任务已启动，正在执行…", basePersistMetadata(loadingEl), payload.files || [], loadingEl);
+      startTerminalPersistWatch();
       return Promise.resolve(streamTaskFlow2({
         payload,
         msgs: context.msgs,
@@ -11698,7 +11927,7 @@ ${defaultPrompt}`;
     function taskCardCheckLine(value) {
       let text = String(value || "").replace(/\s+/g, " ").trim();
       if (!text) return "";
-      if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return "";
+      if (/详细内容见总结与回答|较长内容.*总结与回答/u.test(text)) return "";
       text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, "").trim();
       if (/whitebox_v1.*开始执行任务/u.test(text)) return "任务流已启动";
       if (/决策已完成执行决策/u.test(text)) return "模型决策已完成";
@@ -11723,8 +11952,8 @@ ${defaultPrompt}`;
           checks
         };
       }).filter((step) => step.id || step.title || step.checks.length);
-      const terminal = String(dataset.taskTerminalStatus || "").trim();
-      const completed = Object.prototype.hasOwnProperty.call(dataset, "taskCompleted") ? String(dataset.taskCompleted || "").trim().toLowerCase() === "true" : terminal === "completed" || terminal === "verified";
+      const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || "");
+      const completed = Object.prototype.hasOwnProperty.call(dataset, "taskCompleted") ? String(dataset.taskCompleted || "").trim().toLowerCase() === "true" : ["completed", "done", "verified"].includes(terminal);
       const summaryEl = loadingEl.querySelector('[data-role="summary"]');
       const finalSummary = previewText2(
         String(dataset.taskSummary || summaryEl && (summaryEl.innerText || summaryEl.textContent) || "").replace(/\s+/g, " ").trim(),
@@ -11782,7 +12011,7 @@ ${defaultPrompt}`;
       const assistantText = terminalTaskAnswer(
         payload,
         String(dataset.taskFinalAnswer || dataset.taskSummary || "").trim()
-      ) || "文件任务流已完成。";
+      ) || "文件任务流已结束。";
       if (loadingEl && loadingEl.dataset) loadingEl.dataset.rawText = assistantText;
       const turnMetadata = Object.assign({
         content: assistantText,
@@ -12535,7 +12764,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
   function testStructureCheckText(value) {
     let text = String(value || "").replace(/\s+/g, " ").trim();
     if (!text) return "";
-    if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return "";
+    if (/详细内容见总结与回答|较长内容.*总结与回答/u.test(text)) return "";
     text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, "").trim();
     if (/whitebox_v1.*开始执行任务/u.test(text)) return "任务流已启动";
     if (/决策已完成执行决策/u.test(text)) return "模型决策已完成";
@@ -12549,7 +12778,7 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     const status = String(turn && (turn.status || turn.task_terminal_status || "") || "").trim().toLowerCase();
     const structure = turn && turn.test_structure;
     const terminal = String(structure && structure.terminal_status || "").trim().toLowerCase();
-    return structure && structure.completed_task === true || ["done", "completed", "verified", "success", "failed", "error", "cancelled", "canceled"].includes(status) || ["completed", "verified", "failed", "error", "cancelled", "canceled"].includes(terminal);
+    return structure && structure.completed_task === true || isFileTaskTerminalStatus(status) || status === "success" || isFileTaskTerminalStatus(terminal);
   }
   function renderTestStructure(structure) {
     if (!structure || typeof structure !== "object") return null;
@@ -14225,6 +14454,10 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
     if (!userText || !assistantText) return Promise.resolve(null);
     dataset.taskTerminalPersisting = "true";
     const WA2 = window.WA || {};
+    const hasCompletedAttr = Object.prototype.hasOwnProperty.call(dataset, "taskCompleted");
+    const completedTask = hasCompletedAttr ? String(dataset.taskCompleted || "").trim().toLowerCase() === "true" : ["completed", "done", "verified"].includes(normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || ""));
+    const terminalStatus2 = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || (completedTask ? "completed" : "needs_attention"));
+    const uiStatus = fileTaskTerminalUiStatus(terminalStatus2, completedTask);
     const metadata = {
       turn_id: String(dataset.turnId || "").trim(),
       task_kind: "file_task",
@@ -14232,9 +14465,9 @@ ${previousTaskVisibleTrace}`, 2e3) : previewText2(previousTaskTurn.content || ""
       skip_model_context: false,
       task_title: String(dataset.taskTitle || "").trim() || "文件任务结果",
       task_request: userText,
-      status: String(dataset.taskTerminalStatus || "done").trim() || "done",
-      task_terminal_status: String(dataset.taskTerminalStatus || "completed").trim() || "completed",
-      completed_task: String(dataset.taskCompleted || "").trim().toLowerCase() !== "false"
+      status: uiStatus,
+      task_terminal_status: terminalStatus2,
+      completed_task: completedTask
     };
     if (taskPayload2 && Object.keys(taskPayload2).length) {
       metadata.task_request_payload = taskPayload2;

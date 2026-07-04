@@ -230,6 +230,18 @@ _initAIAttachmentDrops();
 
 export const _isEmbedded: boolean = !!document.getElementById('workspaceView');
 
+function setMainViewActive(view: HTMLElement | null, active: boolean): void {
+  if (!view) return;
+  view.style.display = active ? '' : 'none';
+  view.setAttribute('aria-hidden', active ? 'false' : 'true');
+  if (active) {
+    view.removeAttribute('inert');
+  } else {
+    view.setAttribute('inert', '');
+  }
+  (view as any).inert = !active;
+}
+
 export function toggleFileMenu(): void {
   const dd = $('wa-file-dropdown');
   const btn = $('wa-ribbon-file-btn');
@@ -287,7 +299,8 @@ export function openInMainView(): void {
   const shell = document.querySelector('.app-shell');
   if (shell) shell.classList.add('koto-unified-workspace');
   _setActivityActive('navWorkspaceBtn');
-  if (chatView) chatView.style.display = 'none';
+  setMainViewActive(chatView, false);
+  setMainViewActive(wsView, true);
   wsView.style.display = 'flex';
   localStorage.setItem('koto.inWorkspace', '1');
   if ((window as any).KotoSessionBridge && typeof (window as any).KotoSessionBridge.getSession === 'function') {
@@ -371,8 +384,8 @@ export function showAiWorkspace(): void {
 export function closeInMainView(): void {
   const chatView = document.getElementById('chatView');
   const wsView = document.getElementById('workspaceView');
-  if (wsView) wsView.style.display = 'none';
-  if (chatView) chatView.style.display = '';
+  setMainViewActive(wsView, false);
+  setMainViewActive(chatView, true);
   localStorage.removeItem('koto.inWorkspace');
   const navBtn = document.getElementById('navWorkspaceBtn');
   if (navBtn) navBtn.classList.remove('active');

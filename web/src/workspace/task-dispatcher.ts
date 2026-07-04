@@ -1,4 +1,5 @@
 import { _csrfFetch } from './infrastructure';
+import { isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
 
 export interface TaskDispatcherDeps {
   state?: Record<string, any>;
@@ -7,21 +8,21 @@ export interface TaskDispatcherDeps {
   getConversationHistory?: () => any[];
   getModelMode?: () => string;
   getSelectedCloudModelId?: () => string;
-  setStreamButton?: (loading: boolean) => void;
-  streamTaskFlow?: (opts: any) => Promise<any>;
-  beginAssistantTaskTurn?: (metadata?: any) => any;
-  syncAssistantTaskTurn?: (turnId: string, metadata?: any) => any;
-  appendAssistantTurn?: (content: string, metadata?: any) => any;
-  persistTaskTurn?: (record?: any) => Promise<any>;
+  setStreamButton?: (_loading: boolean) => void;
+  streamTaskFlow?: (_opts: any) => Promise<any>;
+  beginAssistantTaskTurn?: (_metadata?: any) => any;
+  syncAssistantTaskTurn?: (_turnId: string, _metadata?: any) => any;
+  appendAssistantTurn?: (_content: string, _metadata?: any) => any;
+  persistTaskTurn?: (_record?: any) => Promise<any>;
   getActiveEditorContent?: () => string;
-  sampleTaskContext?: (content: string) => string;
+  sampleTaskContext?: (_content: string) => string;
 }
 
 export interface MessageRoute {
   id?: string;
   priority?: number;
-  match: (context: any) => boolean;
-  run: (context: any) => any;
+  match: (_context: any) => boolean;
+  run: (_context: any) => any;
 }
 
 export interface TaskContext {
@@ -81,11 +82,15 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   const messageRoutes: MessageRoute[] = [];
   const quickActionHandlers = new Map<string, Function>();
   let defaultQuickActionHandler: Function | null = null;
-  const WORKSPACE_ROUTE_NAMES = new Set(['light_chat', 'web_search', 'file_task', 'open_file']);
-  const WORKSPACE_DIRECT_ROUTES = new Set(['light_chat', 'web_search']);
+  const WORKSPACE_ROUTE_NAMES = new Set(['light_chat', 'web_search', 'file_task', 'open_file', 'system_action']);
+  const WORKSPACE_DIRECT_ROUTES = new Set(['light_chat', 'web_search', 'system_action']);
   const WORKSPACE_FILE_TASK_ROUTE = 'file_task';
   const WORKSPACE_FILE_TASK_KIND = 'complex_task';
   const WORKSPACE_DIRECT_KIND = 'direct_response';
+  const FILE_TASK_CONTEXT_CUE_RE = /(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|已打开|附件|选区|读取|阅读|查看|总结|概括|归纳|分析|检查|提取|改写|润色|翻译|批注|修订|写入|写回|修改|更新|处理|基于|文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv)/i;
+  const EXPLICIT_FILE_REFERENCE_RE = /[\w\u4e00-\u9fff ._()[\]{}~@#$%^&+=,;!-]{1,180}\.(?:pdf|docx?|xlsx?|xlsm|pptx?|txt|md|csv)\b/i;
+  const SYSTEM_ACTION_CUE_RE = /^(?:现在)?(?:几点|时间|日期|几号|星期几|系统状态|电脑状态|系统信息|电脑信息|配置|内存|cpu|硬盘|time|date)$/i;
+  const WHITELISTED_APP_LAUNCH_RE = /^(?:请|帮我|麻烦)?\s*(?:打开|启动|开启|open|launch)\s*(?:微信|wechat|weixin)\s*(?:应用|app)?$/i;
 
   function registerMessageRoute(route: MessageRoute): MessageRoute {
     if (!route || typeof route.match !== 'function' || typeof route.run !== 'function') {
@@ -405,11 +410,9 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     return /(?:附件|附加|已添加|添加的|分析文档|拖入|上传|attached|uploaded)/i.test(source);
   }
 
-  function sameTaskFile(left: TaskFileInfo | null | undefined, right: TaskFileInfo | null | undefined): boolean {
-    if (!left || !right) return false;
-    const leftKey = normalizeTaskPath(left.path || left.name || '');
-    const rightKey = normalizeTaskPath(right.path || right.name || '');
-    return !!leftKey && !!rightKey && leftKey === rightKey;
+  function mentionsExplicitTaskFile(text: string): boolean {
+    const source = String(text || '').trim();
+    return !!source && EXPLICIT_FILE_REFERENCE_RE.test(source);
   }
 
   function shouldForceFileTaskForWorkspaceContext(context: TaskContext, routeDecision: Record<string, any> | null): boolean {
@@ -419,11 +422,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (!text) return false;
     const hasFileContext = workspaceRouteFiles().length > 0 || !!String(context.pinnedSelText || '').trim();
     if (!hasFileContext) return false;
-    return /(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|已打开|附件|选区|读取|阅读|查看|总结|概括|归纳|分析|检查|提取|改写|润色|翻译|批注|修订|写入|写回|修改|更新|处理|基于|文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv)/i.test(text);
+    return FILE_TASK_CONTEXT_CUE_RE.test(text);
   }
 
   function fileTaskRouteDecision(routeSource: string, base?: Record<string, any> | null): Record<string, any> {
-    return Object.assign({}, base || {}, {
+    const decision = Object.assign({}, base || {}, {
       route_kind: WORKSPACE_FILE_TASK_KIND,
       base_task_type: 'COMPLEX_TASK',
       route: WORKSPACE_FILE_TASK_ROUTE,
@@ -431,6 +434,39 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       route_source: routeSource,
       keyword_policy: 'hint_only',
     });
+    if (
+      routeSource === 'frontend_deterministic_file_context'
+      || routeSource === 'frontend_deterministic_explicit_file_reference'
+      || routeSource === 'frontend_file_context_guard'
+    ) {
+      decision.skip_ai_intent_adjudicator = true;
+    }
+    return decision;
+  }
+
+  function deterministicWorkspaceRouteDecision(context: TaskContext): Record<string, any> | null {
+    const text = String(context && context.text || '').trim();
+    if (!text) return null;
+    if (text.length <= 30 && (SYSTEM_ACTION_CUE_RE.test(text) || WHITELISTED_APP_LAUNCH_RE.test(text))) {
+      return normalizeWorkspaceRouteDecision({
+        route_kind: WORKSPACE_DIRECT_KIND,
+        route: 'system_action',
+        task_type: 'SYSTEM',
+        confidence: 0.99,
+        reason: '前端确定性系统动作短路。',
+        route_source: 'frontend_deterministic_system',
+      });
+    }
+    const hasFileContext = workspaceRouteFiles().length > 0
+      || !!currentOpenTaskFile()
+      || !!String(context.pinnedSelText || '').trim();
+    if (hasFileContext && FILE_TASK_CONTEXT_CUE_RE.test(text)) {
+      return fileTaskRouteDecision('frontend_deterministic_file_context');
+    }
+    if (mentionsExplicitTaskFile(text) && FILE_TASK_CONTEXT_CUE_RE.test(text)) {
+      return fileTaskRouteDecision('frontend_deterministic_explicit_file_reference');
+    }
+    return null;
   }
 
   function isDirectWorkspaceResponse(routeDecision: Record<string, any> | null): boolean {
@@ -444,9 +480,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const payload = data && typeof data === 'object' ? data : {};
     const route = String(payload.route || '').trim().toLowerCase();
     const legacyRoute = WORKSPACE_ROUTE_NAMES.has(route) ? route : WORKSPACE_FILE_TASK_ROUTE;
-    const normalizedRoute = legacyRoute === 'open_file' ? WORKSPACE_FILE_TASK_ROUTE : legacyRoute;
-    const routeKind = canonicalWorkspaceRouteKind(normalizedRoute, payload.route_kind);
     const rawTaskType = String(payload.task_type || '').trim().toUpperCase();
+    const normalizedRoute = rawTaskType === 'SYSTEM' && legacyRoute === WORKSPACE_FILE_TASK_ROUTE
+      ? 'system_action'
+      : (legacyRoute === 'open_file' ? WORKSPACE_FILE_TASK_ROUTE : legacyRoute);
+    const routeKind = canonicalWorkspaceRouteKind(normalizedRoute, payload.route_kind);
     const canonicalTaskType = canonicalWorkspaceTaskType(normalizedRoute, rawTaskType);
     const explicitSourceTaskType = String(payload.source_task_type || '').trim().toUpperCase();
     const sourceTaskType = explicitSourceTaskType || (rawTaskType && rawTaskType !== canonicalTaskType ? rawTaskType : '');
@@ -463,6 +501,9 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       hint: previewText(payload.hint || '', 180),
       route_source: previewText(payload.route_source || '', 160),
       keyword_policy: String(payload.keyword_policy || '').trim() || 'hint_only',
+      performance: payload.performance && typeof payload.performance === 'object'
+        ? compactJsonValue(payload.performance, 0, 800)
+        : undefined,
     };
   }
 
@@ -485,6 +526,12 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       keyword_policy: previewText(source.keyword_policy || '', 120),
       target_path: previewText(source.target_path || '', 260),
     };
+    if (source.performance && typeof source.performance === 'object') {
+      normalized.performance = compactJsonValue(source.performance, 0, 800);
+    }
+    if (source.skip_ai_intent_adjudicator === true) {
+      normalized.skip_ai_intent_adjudicator = true;
+    }
     const candidateWorkflows = Array.isArray(source.candidate_workflows || source.workflow_candidates)
       ? (source.candidate_workflows || source.workflow_candidates)
           .slice(0, 8)
@@ -533,6 +580,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const normalizedRoute = String(route || '').trim().toLowerCase();
     const normalizedTask = String(taskType || '').trim().toUpperCase();
     if (normalizedRoute === 'web_search') return 'WEB_SEARCH';
+    if (normalizedRoute === 'system_action') return 'SYSTEM';
     if (normalizedRoute === 'light_chat') return 'CHAT';
     if (normalizedRoute === WORKSPACE_FILE_TASK_ROUTE) return 'FILE_TASK';
     if (normalizedTask === 'CHAT' || normalizedTask === 'WEB_SEARCH') return normalizedTask;
@@ -613,7 +661,8 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   async function streamWorkspaceChatRoute(context: TaskContext, routeDecision: Record<string, any>): Promise<any> {
     const loadingEl = context.loadingEl;
     const route = String(routeDecision.route || '').trim();
-    const lockedTask = route === 'web_search' ? 'WEB_SEARCH' : 'CHAT';
+    const lockedTask = route === 'web_search' ? 'WEB_SEARCH' : (route === 'system_action' ? 'SYSTEM' : 'CHAT');
+    const directTaskKind = route === 'web_search' ? 'web_search' : (route === 'system_action' ? 'system_action' : 'message');
     const ctrl = new AbortController();
     let assistantText = '';
     state._streamAbortCtrl = ctrl;
@@ -621,7 +670,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (typeof options.setStreamButton === 'function') options.setStreamButton(true);
     if (loadingEl) {
       loadingEl.classList.add('streaming');
-      loadingEl.textContent = route === 'web_search' ? '正在检索…' : '正在思考…';
+      loadingEl.textContent = route === 'web_search' ? '正在检索…' : (route === 'system_action' ? '正在执行…' : '正在思考…');
       loadingEl.dataset!.workspaceRoute = route;
       loadingEl.dataset!.workspaceRouteSource = String(routeDecision.route_source || '');
     }
@@ -680,7 +729,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       }
       appendAssistantConversationTurn(assistantText, {
         loadingEl,
-        task_kind: route === 'web_search' ? 'web_search' : 'message',
+        task_kind: directTaskKind,
         status: 'done',
         route_intent: routeDecision,
         skip_model_context: false,
@@ -695,7 +744,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       }
       appendAssistantConversationTurn(assistantText, {
         loadingEl,
-        task_kind: route === 'web_search' ? 'web_search' : 'message',
+        task_kind: directTaskKind,
         status: aborted ? 'cancelled' : 'error',
         route_intent: routeDecision,
       });
@@ -755,10 +804,10 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const taskCardHasTerminalResult = (card?: HTMLElement): boolean => {
       if (!card || !card.dataset) return false;
       const dataset = card.dataset;
-      const status = String(dataset.taskTerminalStatus || '').trim().toLowerCase();
+      const status = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
       const hasFinalText = !!String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim();
       if (card.classList.contains('done') || card.classList.contains('failed') || card.classList.contains('cancelled')) return hasFinalText || status !== '';
-      if (['completed', 'done', 'verified', 'failed', 'error', 'cancelled', 'canceled', 'awaiting_confirmation', 'blocked'].includes(status)) return true;
+      if (isFileTaskTerminalStatus(status)) return true;
       return String(dataset.taskCompleted || '').trim().toLowerCase() === 'true' && hasFinalText;
     };
     const persistTerminalTaskCard = (card?: HTMLElement, streamResult?: any, fallbackStatus = 'done'): string => {
@@ -804,6 +853,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       window.setTimeout(stopTerminalPersistWatch, 30000);
     };
     persistTaskTurn(context.text, '文件任务已启动，正在执行…', basePersistMetadata(loadingEl), payload.files || [], loadingEl);
+    startTerminalPersistWatch();
     return Promise.resolve(streamTaskFlow!({
       payload, msgs: context.msgs, loadingEl, signal: ctrl.signal, abortController: ctrl,
       onTaskCardSnapshot: (card: HTMLElement) => {
@@ -846,6 +896,13 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   async function runWorkspaceModelRoutedTask(context: TaskContext): Promise<any> {
     if (shouldBypassWorkspaceRoute(context)) {
       return runTaskFlowRoute(context, fileTaskRouteDecision('explicit_task_payload'));
+    }
+    const deterministicRoute = deterministicWorkspaceRouteDecision(context);
+    if (deterministicRoute) {
+      if (isDirectWorkspaceResponse(deterministicRoute)) {
+        return streamWorkspaceChatRoute(context, deterministicRoute);
+      }
+      return runTaskFlowRoute(context, deterministicRoute);
     }
     if (context.loadingEl) context.loadingEl.textContent = '正在判断…';
     let routeDecision: Record<string, any> | null = null;
@@ -978,7 +1035,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   function taskCardCheckLine(value: unknown): string {
     let text = String(value || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
-    if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return '';
+    if (/详细内容见总结与回答|较长内容.*总结与回答/u.test(text)) return '';
     text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
     if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
     if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
@@ -1010,10 +1067,10 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
         checks,
       };
     }).filter((step: any) => step.id || step.title || step.checks.length);
-    const terminal = String(dataset.taskTerminalStatus || '').trim();
+    const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
     const completed = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted')
       ? String(dataset.taskCompleted || '').trim().toLowerCase() === 'true'
-      : terminal === 'completed' || terminal === 'verified';
+      : ['completed', 'done', 'verified'].includes(terminal);
     const summaryEl = loadingEl.querySelector('[data-role="summary"]') as HTMLElement | null;
     const finalSummary = previewText(
       String(dataset.taskSummary || (summaryEl && (summaryEl.innerText || summaryEl.textContent)) || '').replace(/\s+/g, ' ').trim(),
@@ -1075,7 +1132,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const assistantText = terminalTaskAnswer(
       payload,
       String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim(),
-    ) || '文件任务流已完成。';
+    ) || '文件任务流已结束。';
     if (loadingEl && loadingEl.dataset) loadingEl.dataset.rawText = assistantText;
     const turnMetadata = Object.assign({
       content: assistantText, loadingEl, task_kind: 'file_task',
@@ -1095,16 +1152,17 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const explicitTaskPayload = cloneTaskPayload(requestOverrides.taskPayload);
     const overrideOptions: Record<string, any> = requestOverrides.options && typeof requestOverrides.options === 'object'
       ? Object.assign({}, requestOverrides.options) : {};
-    if (!Object.prototype.hasOwnProperty.call(overrideOptions, 'enable_ai_intent_adjudicator')) {
-      overrideOptions.enable_ai_intent_adjudicator = true;
+    const routingDecision = normalizeFileTaskRoutingDecision(
+      requestOverrides.routing_decision || requestOverrides.workspace_route_intent || overrideOptions.workspace_route_intent,
+    );
+    if (routingDecision && routingDecision.skip_ai_intent_adjudicator === true) {
+      overrideOptions.disable_ai_intent_adjudicator = true;
+      delete overrideOptions.enable_ai_intent_adjudicator;
     }
     overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';
     if (!overrideOptions.selection_context && requestOverrides.selectionContext && typeof requestOverrides.selectionContext === 'object') {
       overrideOptions.selection_context = compactJsonValue(requestOverrides.selectionContext, 0, 1200);
     }
-    const routingDecision = normalizeFileTaskRoutingDecision(
-      requestOverrides.routing_decision || requestOverrides.workspace_route_intent || overrideOptions.workspace_route_intent,
-    );
     if (routingDecision && !routingDecision.router_policy) {
       routingDecision.router_policy = String(overrideOptions.router_policy || '').trim();
     }

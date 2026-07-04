@@ -7,7 +7,6 @@ declare function $(id: string): HTMLElement | null;
 declare var state: any;
 declare var WA: any;
 declare var lastSelectionText: string;
-declare var _docxMouseIsDown: boolean;
 declare function _resetDocxSelection(): void;
 
 export interface SplitConfig {
@@ -29,13 +28,20 @@ export interface PanelLayout {
 // ── selectionchange: collapse detection ONLY ─────────────────────────
 let _selChangeTimer: any = null;
 
+function _isDocxMouseDown(): boolean {
+  return Boolean(
+    (state && state._docxMouseIsDown)
+    || (window as any)._docxMouseIsDown,
+  );
+}
+
 document.addEventListener('selectionchange', () => {
   if (state.fileType !== 'docx') return;
   clearTimeout(_selChangeTimer);
   _selChangeTimer = setTimeout(() => {
     const _ae = document.activeElement;
     if (_ae && (_ae.closest('#wa-pdf-tooltip') || _ae.closest('#wa-docx-hoverbar') || _ae.closest('#wa-docx-cp') || _ae.closest('#wa-review-shell') || _ae.closest('#wa-review-selection-launcher'))) return;
-    if (_docxMouseIsDown && document.querySelector('#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover')) return;
+    if (_isDocxMouseDown() && document.querySelector('#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover')) return;
     const _ws = window.getSelection();
     if (!_ws || _ws.isCollapsed || !_ws.rangeCount) {
       _resetDocxSelection();

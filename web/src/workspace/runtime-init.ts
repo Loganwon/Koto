@@ -17,6 +17,7 @@ import {
   _setStreamBtn,
 } from './ai-review';
 import { _applyRouteEvent, _selectedCloudModelId } from './model-settings';
+import { fileTaskTerminalUiStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
 
 let _waAiResultsRuntime: any = (window as any)._waAiResultsRuntime || null;
 let _waQuickActionRuntime: any = (window as any)._waQuickActionRuntime || null;
@@ -54,11 +55,32 @@ export function _waRenderMarkdown(text: string): string {
   if ((window as any).marked) {
     try { return _sanitizeRenderedHtml((window as any).marked.parse(text || '')); } catch (_) { /* noop */ }
   }
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\n/g, '<br>');
+  const source = String(text || '').trim().replace(/^(?:---|\*\*\*)\s*\n+(?=#{1,6}\s+)/, '').trim();
+  return source
+    .split(/\r?\n/)
+    .map((line) => {
+      const trimmed = line.trim();
+      const heading = /^(#{1,4})\s+(.+)$/.exec(trimmed);
+      const escaped = trimmed
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/`([^`]+)`/g, '<code>$1</code>')
+        .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      if (heading) {
+        const level = Math.min(4, heading[1].length + 1);
+        const body = heading[2]
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;')
+          .replace(/`([^`]+)`/g, '<code>$1</code>')
+          .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+        return '<h' + level + '>' + body + '</h' + level + '>';
+      }
+      return escaped;
+    })
+    .filter(Boolean)
+    .join('<br>');
 }
 
 function _hostChatSession(): string {
@@ -347,6 +369,12 @@ export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<a
   if (!userText || !assistantText) return Promise.resolve(null);
   dataset.taskTerminalPersisting = 'true';
   const WA = (window as any).WA || {};
+  const hasCompletedAttr = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted');
+  const completedTask = hasCompletedAttr
+    ? String(dataset.taskCompleted || '').trim().toLowerCase() === 'true'
+    : ['completed', 'done', 'verified'].includes(normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || ''));
+  const terminalStatus = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || (completedTask ? 'completed' : 'needs_attention'));
+  const uiStatus = fileTaskTerminalUiStatus(terminalStatus, completedTask);
   const metadata: Record<string, any> = {
     turn_id: String(dataset.turnId || '').trim(),
     task_kind: 'file_task',
@@ -354,9 +382,9 @@ export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<a
     skip_model_context: false,
     task_title: String(dataset.taskTitle || '').trim() || '文件任务结果',
     task_request: userText,
-    status: String(dataset.taskTerminalStatus || 'done').trim() || 'done',
-    task_terminal_status: String(dataset.taskTerminalStatus || 'completed').trim() || 'completed',
-    completed_task: String(dataset.taskCompleted || '').trim().toLowerCase() !== 'false',
+    status: uiStatus,
+    task_terminal_status: terminalStatus,
+    completed_task: completedTask,
   };
   if (taskPayload && Object.keys(taskPayload).length) {
     metadata.task_request_payload = taskPayload;

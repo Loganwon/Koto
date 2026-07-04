@@ -4574,6 +4574,10 @@
     const state = getSessionState(sessionName);
     return state.abortController;
   }
+  function isSessionLoadInterruption(error) {
+    const text = String(error instanceof Error ? error.message : error || "").trim();
+    return /failed to fetch|networkerror|aborted|load failed/i.test(text);
+  }
   async function loadSessions() {
     try {
       const response = await fetch("/api/sessions?preview=1");
@@ -4591,6 +4595,10 @@
       const query = q ? q.value.trim() : "";
       renderSessions(query ? window._projectSessions.filter((s) => toSessionDisplayName(s).toLowerCase().includes(query.toLowerCase())) : window._projectSessions);
     } catch (error) {
+      if (isSessionLoadInterruption(error)) {
+        console.debug("Session list refresh interrupted:", error);
+        return;
+      }
       console.error("Failed to load sessions:", error);
     }
   }

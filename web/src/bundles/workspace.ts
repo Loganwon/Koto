@@ -9,13 +9,15 @@ installFrontendObserver();
 import { $, showToast, _escHtml, _fileIcon, _CHAT_SVG, _PIN_SVG, _CLIPBOARD_SVG } from '../workspace/infrastructure';
 import { state } from '../workspace/state';
 
+// AI context must be installed before file-tree action buttons can attach files.
+import '../workspace/ai-context';
+
 // File system
 import '../workspace/fs-tree';
 import '../workspace/fs-context-menu';
 import '../workspace/fs-actions';
 
 // AI / task modules
-import '../workspace/ai-context';
 import '../workspace/ai-review';
 import '../workspace/model-settings';
 import '../workspace/task-runner';

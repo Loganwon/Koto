@@ -66,6 +66,12 @@ export interface PinnedSelectionContext {
   sourcePath: string;
   sourceName: string;
   sourceType: string;
+  kind?: string;
+  rawText?: string;
+  sheetName?: string;
+  rangeA1?: string;
+  rows?: number;
+  cols?: number;
 }
 
 export interface DocxSelectionPayload {
@@ -192,6 +198,12 @@ export function _createPinnedSelectionContext(text: any, sourceMeta?: any): Pinn
       sourcePath,
       sourceName: sourceName || (sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : ''),
       sourceType,
+      kind: String(text.kind || text.selectionKind || '').trim(),
+      rawText: String(text.rawText || text.raw_text || '').trim(),
+      sheetName: String(text.sheetName || text.sheet_name || '').trim(),
+      rangeA1: String(text.rangeA1 || text.range_a1 || '').trim(),
+      rows: Number(text.rows || 0) || 0,
+      cols: Number(text.cols || 0) || 0,
     };
   }
 
@@ -220,7 +232,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   const tableInfo = (opts && opts.table) || '';
   const pinnedSelectionText = _selectionContextText(state.pinnedSelection);
   const pinnedSelectionSource = _selectionContextSourceLabel(state.pinnedSelection);
-  const clearSelectionButton = '<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="\u53d6\u6d88\u6587\u672c\u6ce8\u5165" aria-label="\u53d6\u6d88\u6587\u672c\u6ce8\u5165">&times;</button>';
+  const clearSelectionButton = '<button type="button" class="ctx-bar-clear ctx-bar-clear-selection" onclick="WA.clearSelection()" title="\u53d6\u6d88\u9009\u4e2d\u6587\u672c\u4e0a\u4e0b\u6587" aria-label="\u53d6\u6d88\u9009\u62e9">\u53d6\u6d88\u9009\u62e9</button>';
 
   const parts: string[] = [];
 
@@ -238,7 +250,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   }
 
   if (nFiles > 0) {
-    parts.push(`<span class="ctx-bar-files">\u5df2\u9644\u52a0 <b>${nFiles} \u4efd\u6587\u4ef6</b><button class="ctx-bar-clear" onclick="WA.clearAIFileContext()" title="\u6e05\u9664\u6587\u4ef6">&times;</button></span>`);
+    parts.push(`<span class="ctx-bar-files">\u5df2\u9644\u52a0 <b>${nFiles} \u4efd\u6587\u4ef6</b><button type="button" class="ctx-bar-clear ctx-bar-clear-files" onclick="WA.clearAIFileContext()" title="\u6e05\u9664\u5168\u90e8\u9644\u52a0\u6587\u4ef6" aria-label="\u6e05\u9664\u9644\u52a0\u6587\u4ef6">\u6e05\u9664\u6587\u4ef6</button></span>`);
   }
 
   if (parts.length) {
@@ -505,8 +517,22 @@ export function _getLiveEditorSelectionForAI(options?: { allowStaleFallback?: bo
   if (state.fileType === 'docx') {
     const docxSelection = _getDocxSelectionPayload({ allowStaleFallback });
     return docxSelection
-      ? { text: docxSelection.aiText, previewText: docxSelection.previewText }
+      ? Object.assign({}, docxSelection, {
+          text: docxSelection.aiText,
+          sourceType: 'docx',
+          selectionKind: docxSelection.kind,
+        })
       : null;
+  }
+  if (state.fileType === 'xlsx' && state.activeEditor && typeof state.activeEditor.getSelectionPayload === 'function') {
+    const payload = state.activeEditor.getSelectionPayload();
+    if (payload && String(payload.aiText || payload.text || '').trim()) {
+      return Object.assign({}, payload, {
+        text: String(payload.aiText || payload.text || '').trim(),
+        sourceType: 'xlsx',
+        selectionKind: payload.kind || 'xlsx-range',
+      });
+    }
   }
   let sel: string = _getActiveTextEditorSelectionForAI();
   if (!sel && allowStaleFallback) sel = lastSelectionText;
@@ -801,6 +827,13 @@ export function sendSelectionToAI(): void {
   if (input) input.focus();
 }
 
+export function closeSelectionToolbar(): void {
+  state._selectionDismissed = true;
+  const tt = $('wa-pdf-tooltip');
+  if (tt) tt.style.display = 'none';
+  try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+}
+
 export function clearSelection(): void {
   state.pinnedSelection = null;
   state.lastPinnedSel = null;
@@ -932,6 +965,7 @@ if (typeof window !== 'undefined') {
   (window as any).WA._clearPinnedHighlight = _clearPinnedHighlight;
   (window as any).WA._applyTemporaryHighlight = _applyTemporaryHighlight;
   (window as any).WA.sendSelectionToAI = sendSelectionToAI;
+  (window as any).WA.closeSelectionToolbar = closeSelectionToolbar;
   (window as any).WA.clearSelection = clearSelection;
   (window as any)._hideDocxHoverBar = _hideDocxHoverBar;
   (window as any)._resetDocxSelection = _resetDocxSelection;

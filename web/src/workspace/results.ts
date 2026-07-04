@@ -2,6 +2,8 @@
  * Results renderer for workspace AI — proposals, diffs, artifacts, tool calls.
  */
 
+import { fileTaskStatusLabel } from './file-task-status';
+
 interface Proposal {
   id?: string;
   action?: string;
@@ -79,7 +81,6 @@ interface ResultsState {
   pinnedSelection?: any;
   lastPinnedSel?: any;
   pendingToolCall?: ToolCall | null;
-  aiOutputMode?: string;
   [key: string]: any;
 }
 
@@ -518,7 +519,7 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     execWriteToDoc(mode, {
       pinnedSel: state.lastPinnedSel,
       toolCall: state.pendingToolCall || undefined,
-      outputMode: state.aiOutputMode,
+      outputMode: 'inline',
     }, bar);
     state.pendingToolCall = null;
     state.lastPinnedSel = null;
@@ -542,11 +543,7 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
   }
 
   function statusLabel(status: string): string {
-    const value = String(status || '').toLowerCase();
-    if (value === 'completed') return '已完成';
-    if (value === 'needs_review') return '待确认';
-    if (value === 'failed') return '失败';
-    return '进行中';
+    return fileTaskStatusLabel(status, '进行中');
   }
 
   function artifactTypeLabel(type: string): string {

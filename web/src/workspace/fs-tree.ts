@@ -144,7 +144,7 @@ export function _workspaceRelativePath(rawPath: string): string {
   if (workspaceRoot && (normalized === workspaceRoot || normalized.startsWith(workspaceRoot + '/'))) {
     return normalized.slice(workspaceRoot.length).replace(/^\/+/, '');
   }
-  return normalized.replace(/^\/+/, '');
+  return normalized.replace(/^\/+/, '').replace(/^workspace\//i, '');
 }
 
 function _mergeSearchResults(indexedResults: SearchResult[], liveResults: SearchResult[], limit: number = 60): SearchResult[] {
@@ -178,13 +178,15 @@ function _fileOpenHitDragAttrs(): string {
 }
 
 function _fileActionButtons(supported: boolean): string {
+  const isolatedPressAttrs = 'draggable="false" onpointerdown="event.stopPropagation()" onmousedown="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()"';
+  const sendPressAttrs = 'draggable="false" onpointerdown="window.WA._sendBrowserFileButton(event,this)" onmousedown="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()"';
   const sendButton = supported
-    ? `<button type="button" class="wa-file-send-ai" onclick="event.preventDefault();event.stopPropagation();WA.sendBrowserFileToAI(this.closest('.wa-file-item').dataset.path)" title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>`
+    ? `<button type="button" class="wa-file-send-ai" data-wa-file-action="send-ai" ${sendPressAttrs} onclick="window.WA._sendBrowserFileButton(event,this)" title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>`
     : '';
   return (
     `<div class="wa-file-actions">` +
     sendButton +
-    `<button type="button" class="wa-file-more" onclick="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button>` +
+    `<button type="button" class="wa-file-more" ${isolatedPressAttrs} onclick="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button>` +
     `</div>`
   );
 }
@@ -220,6 +222,43 @@ async function _sendBrowserFileToAI(path: string): Promise<void> {
     console.warn('[WA] send browser file to AI failed:', error);
     showToast(error && error.message ? error.message : '发送给 AI 失败', 'error');
   }
+}
+
+let _lastBrowserFileSendPath = '';
+let _lastBrowserFileSendAt = 0;
+
+function _sendBrowserFileButtonToAI(event: Event, button: HTMLElement | null): void {
+  if (event) {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+  const row = button ? button.closest('.wa-file-item') as HTMLElement | null : null;
+  const path = String(row && row.dataset ? row.dataset.path || '' : '').trim();
+  if (!path) {
+    showToast('缺少文件路径，无法发送给 AI', 'error');
+    return;
+  }
+  const now = Date.now();
+  if (path === _lastBrowserFileSendPath && now - _lastBrowserFileSendAt < 700) return;
+  _lastBrowserFileSendPath = path;
+  _lastBrowserFileSendAt = now;
+  _sendBrowserFileToAI(path).catch((error) => {
+    console.warn('[WA] send browser file button to AI failed:', error);
+    showToast(error && error.message ? error.message : '发送给 AI 失败', 'error');
+  });
+}
+
+let _browserFileActionDelegationInstalled = false;
+
+function _installBrowserFileActionDelegation(): void {
+  if (_browserFileActionDelegationInstalled) return;
+  _browserFileActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const sendButton = target ? target.closest('.wa-file-send-ai[data-wa-file-action="send-ai"]') as HTMLElement | null : null;
+    if (!sendButton) return;
+    _sendBrowserFileButtonToAI(event, sendButton);
+  }, true);
 }
 
 function _browserFileDragEnd(event: DragEvent, el: HTMLElement): void {
@@ -270,8 +309,14 @@ function _endBrowserPointerDrag(): void {
   document.body.classList.remove('wa-file-dragging');
 }
 
+function _isBrowserFileActionTarget(target: EventTarget | null): boolean {
+  const el = target instanceof Element ? target : null;
+  return !!(el && el.closest('.wa-file-actions, .wa-file-check, input, select, textarea, a'));
+}
+
 function _startBrowserPointerDrag(event: MouseEvent | PointerEvent, el: HTMLElement): void {
   if (!el || event.button !== 0 || state.selectMode) return;
+  if (_isBrowserFileActionTarget(event.target)) return;
   const path = String(el.dataset.path || '').trim();
   if (!path) return;
   _browserPointerDrag = {
@@ -1117,6 +1162,7 @@ wa._browserFileRowPointerDown = (event: PointerEvent, el: HTMLElement): void => 
   _startBrowserPointerDrag(event, el);
 };
 wa.sendBrowserFileToAI = _sendBrowserFileToAI;
+wa._sendBrowserFileButton = _sendBrowserFileButtonToAI;
 wa._browserFileRowMouseDown = (event: MouseEvent, el: HTMLElement): void => {
   if (!el) return;
   _startBrowserPointerDrag(event, el);
@@ -1216,11 +1262,13 @@ wa.openRecentFile = async (filePath: string) => {
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
+    _installBrowserFileActionDelegation();
     _installBrowserPointerDragFallback();
     _bindLocalFilePickers();
     _autoLoadStandaloneFileBrowser();
   }, { once: true });
 } else {
+  _installBrowserFileActionDelegation();
   _installBrowserPointerDragFallback();
   _bindLocalFilePickers();
   _autoLoadStandaloneFileBrowser();

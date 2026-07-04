@@ -3,6 +3,9 @@
  * Manages turn history, rendering, and session hydration.
  */
 
+import { fileTaskStatusLabel, isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import { taskReportStageTitle } from './task-report-layout';
+
 interface WATurn {
   id: string;
   role: string;
@@ -202,35 +205,27 @@ function testStructureText(value: unknown, limit: number): string {
 }
 
 function testStructureStatusLabel(value: unknown, completed?: boolean): string {
-  const status = String(value || '').trim().toLowerCase();
-  if (completed || status === 'completed' || status === 'verified' || status === 'done' || status === 'success') return '已完成';
-  if (status === 'failed' || status === 'error') return '未通过';
-  if (status === 'cancelled' || status === 'canceled') return '已取消';
-  if (status === 'running' || status === 'in_progress') return '执行中';
-  if (status === 'pending' || status === 'waiting') return '待处理';
-  return status ? testStructureText(value, 28) : '待处理';
+  const status = normalizeFileTaskTerminalStatus(value);
+  if (completed || status === 'completed' || status === 'done') return '已完成';
+  return status ? fileTaskStatusLabel(status, testStructureText(value, 28)) : '待处理';
 }
 
 function testStructureStepTitle(value: unknown, fallback?: unknown): string {
   const key = String(value || fallback || '').trim().toLowerCase();
   const labels: Record<string, string> = {
-    route: '识别任务',
-    intent: '识别任务',
-    plan: '制定方案',
+    intent: taskReportStageTitle('route'),
     context: '读取上下文',
-    execute: '执行处理',
-    execution: '执行处理',
-    check: '核验完成',
-    verify: '核验完成',
+    execution: taskReportStageTitle('execute'),
+    verify: taskReportStageTitle('check'),
     run: '任务状态',
   };
-  return labels[key] || testStructureText(value || fallback || '步骤', 80);
+  return labels[key] || taskReportStageTitle(key, testStructureText(value || fallback || '步骤', 80));
 }
 
 function testStructureCheckText(value: unknown): string {
   let text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
-  if (/完整结果见总结与回答|结果见总结与回答|任务已完成，?完整结果/u.test(text)) return '';
+  if (/详细内容见总结与回答|较长内容.*总结与回答/u.test(text)) return '';
   text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
   if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
   if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
@@ -246,8 +241,9 @@ function taskTurnIsTerminal(turn: WATurn): boolean {
   const structure = turn && turn.test_structure;
   const terminal = String(structure && structure.terminal_status || '').trim().toLowerCase();
   return structure && structure.completed_task === true
-    || ['done', 'completed', 'verified', 'success', 'failed', 'error', 'cancelled', 'canceled'].includes(status)
-    || ['completed', 'verified', 'failed', 'error', 'cancelled', 'canceled'].includes(terminal);
+    || isFileTaskTerminalStatus(status)
+    || status === 'success'
+    || isFileTaskTerminalStatus(terminal);
 }
 
 function renderTestStructure(structure?: TaskTestStructure): HTMLElement | null {

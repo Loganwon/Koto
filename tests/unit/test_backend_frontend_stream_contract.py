@@ -106,9 +106,23 @@ def test_chart_validation_errors_use_same_sse_headers():
 @pytest.mark.unit
 def test_frontend_task_runner_matches_backend_stream_contract():
     runner = Path("web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
+    parser = Path("web/src/workspace/file-task-sse.ts").read_text(encoding="utf-8")
+    dispatcher = Path("web/src/workspace/file-task-dispatch.ts").read_text(encoding="utf-8")
     bundle = Path("web/static/js/build/workspace-bundle.js").read_text(encoding="utf-8")
 
-    assert "function parseSseEvents" in runner
+    assert "from './file-task-sse';" in runner
+    assert "from './file-task-dispatch';" in runner
+    assert "export function parseSseEvents" in parser
+    assert "export interface SseParseResult" in parser
+    assert "export function dispatchFileTaskEvent" in dispatcher
+    assert "state.processedEventKeys.has(eventKey)" in dispatcher
+    assert "afterDispatch?: (_card: Card) => void;" in dispatcher
+    assert "dispatchFileTaskEvent(card, evt, {" in runner
+    assert "afterDispatch: notifyTaskWorkbenchForCard" in runner
+    assert "dataset.taskStreamIssueCount" in runner
+    assert "检测到任务进度事件缺失" not in runner
+    assert "检测到任务进度事件顺序异常" not in runner
+    assert "检测到重复进度事件" not in runner
     assert "WA.parseSseEvents = parseSseEvents" in runner
     assert "csrfFetch('/api/editor/ai/task-stream'" in runner
     assert "'Accept': 'text/event-stream'" in runner

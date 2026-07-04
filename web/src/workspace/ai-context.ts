@@ -24,6 +24,7 @@ export interface FileChipConfig {
   expandPanel?: boolean;
   focusInput?: boolean;
   duplicateToast?: boolean;
+  replaceExisting?: boolean;
   source?: string;
 }
 
@@ -338,6 +339,11 @@ export async function _attachFilesToTask(paths: string | string[], options: File
 }> {
   const filePaths = _normalizeTaskFilePaths(paths);
   const duplicateToast = options.duplicateToast !== false && filePaths.length === 1;
+  if (options.replaceExisting && state._aiFileContext.length) {
+    state._aiFileContext = [];
+    state._aiTargetFileIdx = -1;
+    _renderAIFileChips();
+  }
   let added = 0;
   let skipped = 0;
   for (const path of filePaths) {
@@ -490,8 +496,8 @@ export function _renderAIFileChips(): void {
         (isLoading || hasError
           ? ''
           : `<button class="ctx-row-pin${isTarget ? ' active' : ''}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) +
-        (hasError ? `<button class="ctx-row-retry" onclick="WA.retryAIFileContext(${i})" title="重试">重试</button>` : '') +
-        (isLoading ? '' : `<span class="ctx-row-remove" onclick="WA.removeAIFileContext(${i})" title="移除">×</span>`) +
+        (hasError ? `<button type="button" class="ctx-row-retry" onclick="event.stopPropagation(); WA.retryAIFileContext(${i})" title="重试">重试</button>` : '') +
+        (isLoading ? '' : `<button type="button" class="ctx-row-remove" onclick="event.stopPropagation(); WA.removeAIFileContext(${i})" title="移除附加文件" aria-label="移除 ${_escHtml(f.name)}">×</button>`) +
         `</div>`
       );
     })
@@ -506,7 +512,7 @@ export function _renderAIFileChips(): void {
         `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>` +
         `<span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div>` +
         `<div class="wa-multidoc-actions">` +
-        `<button onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button>` +
+        `<button type="button" onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button>` +
         `</div>`;
     }
     wrap.style.display = '';
@@ -529,18 +535,31 @@ export function _renderAIFileChips(): void {
 const wa = (window as any).WA || {};
 (window as any).WA = wa;
 
-wa.removeAIFileContext = (idx: number) => {
-  state._aiFileContext.splice(idx, 1);
-  if (state._aiTargetFileIdx === idx) state._aiTargetFileIdx = -1;
-  else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
+export function removeAIFileContext(idx: number): boolean {
+  const index = Number(idx);
+  if (!Number.isInteger(index) || index < 0 || index >= state._aiFileContext.length) {
+    showToast('未找到要移除的附加文件', 'warning');
+    _renderAIFileChips();
+    return false;
+  }
+  const removed = state._aiFileContext.splice(index, 1)[0];
+  if (state._aiTargetFileIdx === index) state._aiTargetFileIdx = -1;
+  else if (state._aiTargetFileIdx > index) state._aiTargetFileIdx--;
   _renderAIFileChips();
-};
+  if (removed && removed.name) showToast(`已移除附加文件：${removed.name}`, 'info');
+  return true;
+}
 
-wa.clearAIFileContext = () => {
+export function clearAIFileContext(): void {
+  const hadFiles = !!(state._aiFileContext && state._aiFileContext.length);
   state._aiFileContext = [];
   state._aiTargetFileIdx = -1;
   _renderAIFileChips();
-};
+  if (hadFiles) showToast('已清除全部附加文件', 'info');
+}
+
+wa.removeAIFileContext = removeAIFileContext;
+wa.clearAIFileContext = clearAIFileContext;
 
 wa.retryAIFileContext = (idx: number) => {
   const file = state._aiFileContext[idx];
@@ -564,6 +583,21 @@ wa.setAITargetFile = (idx: number) => {
 wa.attachFilesToTask = _attachFilesToTask;
 wa.pickAIContextFiles = _pickAIContextFiles;
 wa.addLocalFilesToAIContext = _addLocalFilesToAIContext;
+
+const pendingBrowserFilesToAI = Array.isArray(wa._pendingSendBrowserFilesToAI)
+  ? wa._pendingSendBrowserFilesToAI.splice(0)
+  : [];
+if (pendingBrowserFilesToAI.length) {
+  setTimeout(() => {
+    _attachFilesToTask(pendingBrowserFilesToAI, {
+      source: 'file_tree_inline_action',
+      focusInput: true,
+      duplicateToast: false,
+    }).catch((error: any) => {
+      console.warn('[WA] drain pending browser files to AI failed:', error);
+    });
+  }, 0);
+}
 
 const aiContextFileInput = document.getElementById('wa-ai-context-file-input') as HTMLInputElement | null;
 if (aiContextFileInput) {

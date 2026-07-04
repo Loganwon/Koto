@@ -2,19 +2,36 @@
 from pathlib import Path
 
 
+ROOT = Path(__file__).resolve().parents[2]
+
+
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return ROOT
 
 
 def _read(rel_path: str) -> str:
-    path = _repo_root() / rel_path
+    path = ROOT / rel_path
     return path.read_text(encoding="utf-8")
+
+
+def _assert_contains_all(source: str, fragments: tuple[str, ...]) -> None:
+    for fragment in fragments:
+        assert fragment in source
+
+
+def _assert_excludes_all(source: str, fragments: tuple[str, ...]) -> None:
+    for fragment in fragments:
+        assert fragment not in source
+
+
+# Section: core task-flow entrypoints and workspace surfaces.
 
 
 def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     assistant_js = _read("web/src/workspace/ai-review.ts")
     dispatcher_js = _read("web/src/workspace/task-dispatcher.ts")
     task_js = _read("web/src/workspace/task-runner.ts")
+    final_report_js = _read("web/src/workspace/task-final-report.ts")
     quick_actions_js = _read("web/src/workspace/quick-actions.ts")
 
     assert "WA.createTaskDispatcher = createTaskDispatcher" in dispatcher_js
@@ -25,6 +42,47 @@ def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     assert "fetch('/api/editor/ai/task-stream'" not in assistant_js
     assert "legacyEditorFallback: true" not in quick_actions_js
     assert "legacyEditorFallback" not in quick_actions_js
+
+
+def test_workspace_task_memory_uses_unified_session_pipeline_only():
+    assert not (_repo_root() / "app/core/agent/workspace_session.py").exists()
+    sources = [
+        _read("web/blueprints/sessions.py"),
+        _read("web/session_manager.py"),
+        _read("web/src/workspace/task-dispatcher.ts"),
+        _read("web/src/workspace/runtime-init.ts"),
+    ]
+    assert all("WorkspaceSessionMemory" not in source for source in sources)
+    assert "def _start_task_memory_reflection(" in sources[0]
+    assert "turn.get(\"skip_model_context\") is True" in sources[1]
+
+
+def test_workspace_selection_context_reaches_ai_chat_and_tasks():
+    xlsx_editor = _read("web/src/editors/xlsx-editor.ts")
+    sheets_main = _read("web/univer-editor/sheets-main.js")
+    selection_toolbar = _read("web/src/ui/selection-toolbar.ts")
+    ai_review = _read("web/src/workspace/ai-review.ts")
+    dispatcher = _read("web/src/workspace/task-dispatcher.ts")
+    quick_actions = _read("web/src/workspace/quick-actions.ts")
+    stream_orchestrator = _read("web/services/chat_stream/orchestrator.py")
+
+    assert "getSelectionPayload()" in sheets_main
+    assert "sheetName" in sheets_main
+    assert "rangeA1" in sheets_main
+    assert "数据格式: TSV" in sheets_main
+    assert "getSelectionPayload(): any" in xlsx_editor
+    assert "sourceType: 'xlsx'" in xlsx_editor
+
+    assert "selectionContext?: Record<string, any> | null;" in dispatcher
+    assert "selectionContext: explicitSelection || null" in ai_review
+    assert "selectionContext: payload.selectionContext || null" in quick_actions
+    assert "state.activeEditor.getSelectionPayload" in selection_toolbar
+
+    assert "function buildWorkspaceChatFileContext" in dispatcher
+    assert "file_context: buildWorkspaceChatFileContext(context)" in dispatcher
+    assert "selection_meta" in dispatcher
+    assert "def _workspace_file_context_block(file_context):" in stream_orchestrator
+    assert "文件助手上下文" in stream_orchestrator
 
 
 def test_workspace_static_js_only_task_renderer_calls_file_task_stream():
@@ -139,9 +197,13 @@ def test_unified_workspace_restores_pdf_annotation_toolbar_and_ai_bridge():
     assert "window.WA.pdfAIAnnotate" in workspace_bundle
 
 
+# Section: task workbench, session history, and persistence.
+
+
 def test_workspace_task_workbench_is_split_and_mounted():
     workbench_js = _read("web/src/workspace/task-workbench.ts")
     task_js = _read("web/src/workspace/task-runner.ts")
+    final_report_js = _read("web/src/workspace/task-final-report.ts")
     asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
     workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
@@ -188,25 +250,37 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "state.activeTaskId && !state.loading" in workbench_js
     assert "等待文件任务" in workbench_js
     assert "当请求需要读取、修改或生成文件时，这里会直接展开任务识别、执行方案、进度和核验结果。" in workbench_js
-    assert "任务识别" in workbench_js
-    assert "完成核验" in workbench_js
-    assert "FLOW_STAGE_DEFS" in workbench_js
+    assert "TASK_REPORT_STAGE_DEFS.map((def)" in workbench_js
+    assert "FLOW_STAGE_DEFS" not in workbench_js
+    assert "<span>模型调用</span>" not in workbench_js
     assert "function renderStageOverview(steps: WorkbenchStep[]): string" in workbench_js
     assert "function normalizedWorkbenchSteps(steps: any[], task: any): WorkbenchStep[]" in workbench_js
     assert "wa-task-workbench-stage-grid" in workbench_js
-    assert "任务步骤" in workbench_js
+    assert "function renderWorkbenchStep(" not in workbench_js
+    assert "visibleSteps.map((step, index) => renderWorkbenchStep(step, index)).join('')" not in workbench_js
+    assert "任务步骤" not in workbench_js
     assert "详细过程" not in workbench_js
     assert "(window as any).WA.notifyTaskFlowChanged(taskId)" in task_js
     assert "function notifyTaskWorkbenchForCard(card: TaskCardElement, options?: { delayed?: boolean }): void" in task_js
     assert "if (options && options.delayed)" in task_js
     assert "seedRouteModelContext(card, payload)" in task_js
     assert "模型调用" in task_js
-    assert "function compactFlowSummary(value: string, fallback = '完整结果见对话汇报。'): string" in task_js
-    assert "function supervisorAuditHtml(data: Record<string, any>): string" in task_js
+    assert "from './task-final-report';" in task_js
+    assert "export function compactFlowSummary(value: string, fallback = '详细内容见总结与回答。'): string" in final_report_js
+    assert "function supervisorAuditHtml(data: Record<string, any>, options: { compact?: boolean } = {})" in task_js
+    assert "const showDetails = !options.compact || status === 'blocked';" in task_js
+    assert "supervisorAuditHtml(data, { compact: true })" in task_js
+    assert "const auditHtml = supervisorAuditHtml(data);" in task_js
     assert "function supervisorAuditStatusLabel(status: unknown): string" in task_js
     assert "需关注" in task_js
     assert "supervisor_audit" in task_js
-    assert "完整结果见对话汇报" in task_js
+    assert "audit.execution_constraints" in task_js
+    assert "audit.user_actions" in task_js
+    assert "执行约束：" in task_js
+    assert "需要补充：" in task_js
+    assert "actions.map((item) => `要求：" not in task_js
+    assert "完整结果见总结与回答" not in task_js
+    assert "详细内容见总结与回答" in task_js
     assert "${esc(payload.summary || '')}${criteriaHtml}${runtimeHtml}" not in task_js
     assert "import '../workspace/results';" in workspace_bundle_entry
     assert "import '../workspace/task-runner';" in workspace_bundle_entry
@@ -219,8 +293,8 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert 'id="wa-task-workbench"' not in index_template
     assert 'id="wa-artifact-panel"' in workspace_template
     assert 'id="wa-artifact-panel"' in index_template
-    assert workspace_template.index('id="wa-ai-messages"') < workspace_template.index('id="wa-artifact-panel"') < workspace_template.index('id="wa-task-live-progress"')
-    assert index_template.index('id="wa-ai-messages"') < index_template.index('id="wa-artifact-panel"') < index_template.index('id="wa-task-live-progress"')
+    assert workspace_template.index('id="wa-artifact-panel"') < workspace_template.index('id="wa-ai-messages"') < workspace_template.index('id="wa-task-live-progress"')
+    assert index_template.index('id="wa-artifact-panel"') < index_template.index('id="wa-ai-messages"') < index_template.index('id="wa-task-live-progress"')
     assert 'id="wa-task-column"' not in workspace_template
     assert 'id="wa-task-column"' not in index_template
     assert "revealTaskColumn(panel)" not in _read("web/src/workspace/results.ts")
@@ -228,6 +302,7 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert ".wa-task-workbench-body" in workspace_css
     assert ".wa-task-workbench-artifacts" in workspace_css
     assert ".wa-task-workbench-stage-grid" in workspace_css
+    assert "grid-template-columns: repeat(auto-fit, minmax(136px, 1fr));" in workspace_css
     assert ".wa-task-workbench-stage-top" in workspace_css
     assert ".wa-task-workbench-section-title" in workspace_css
     assert ".wa-task-workbench-step-headline" in workspace_css
@@ -240,10 +315,17 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "查看流程" not in workspace_bundle
     assert "openTaskWorkbenchForCurrentRun" in workbench_js
     assert "openTaskWorkbenchForCurrentRun" in workspace_bundle
+    assert "查看产物" in workbench_js
+    assert "['产物', Array.isArray(result.artifacts) ? result.artifacts.length : 0]" in workbench_js
+    assert "['引用', Array.isArray(result.sources) ? result.sources.length : 0]" in workbench_js
+    assert "['过程记录', Array.isArray(result.logs) ? result.logs.length : 0]" in workbench_js
+    assert "['来源', Array.isArray(result.sources)" not in workbench_js
+    assert "['日志', Array.isArray(result.logs)" not in workbench_js
+    assert workbench_js.index("stats,") < workbench_js.index("body,")
     assert "whitebox-task" not in _read("web/src/workspace/task-dispatcher.ts")
     assert "白盒任务渲染器未加载" not in _read("web/src/workspace/task-dispatcher.ts")
     assert "task-flow" in _read("web/src/workspace/task-dispatcher.ts")
-    assert "revealTaskWorkbenchForCard(card, { scroll: true });" in _read("web/src/workspace/task-runner.ts")
+    assert "revealTaskWorkbenchForCard(card, { scroll: false });" in _read("web/src/workspace/task-runner.ts")
     assert ".wa-task-run.is-workbench-focused" in workspace_css
 
 
@@ -290,6 +372,10 @@ def test_workspace_conversation_hydrates_persisted_session_history():
     conversation_ts = _read("web/src/workspace/conversation.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
+    assert "const WA_HISTORY_SCHEMA_VERSION = 2;" in conversation_ts
+    assert "function migrateLegacyTurn(raw: any): Record<string, any>" in conversation_ts
+    assert "turn.schema_version = WA_HISTORY_SCHEMA_VERSION;" in conversation_ts
+    assert "turn.task_kind = 'file_task';" in conversation_ts
     assert "loadSessionHistory?: (sessionId: string) => Promise<any[]>;" in conversation_ts
     assert "const loadSessionHistory = typeof options.loadSessionHistory === 'function'" in conversation_ts
     assert "await loadSessionHistory(sessionId)" in conversation_ts
@@ -366,8 +452,17 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert "function _openLatestTaskFlowForSession(sessionId: string): void" in conversation_list_ts
     assert "function _syncHistoricalTaskLiveProgress(session?: AiSessionPreview): void" in conversation_list_ts
     assert "WA.openTaskWorkbenchForCurrentRun({" in conversation_list_ts
-    assert "查看下方步骤" in conversation_list_ts
+    assert "查看执行过程" in conversation_list_ts
+    assert "查看下方步骤" not in conversation_list_ts
+    assert "在输入框输入即可开始新对话" in conversation_list_ts
+    assert "在底部输入" not in conversation_list_ts
     assert "latest_task_id" in conversation_list_ts
+    assert "latest_task_title?: string;" in conversation_sessions_ts
+    assert "latest_task_title: String(record.latest_task_title || '').trim()" in conversation_sessions_ts
+    assert "const taskTitle = String(session.latest_task_title || '').trim();" in conversation_list_ts
+    assert "const title = taskTitle || sessionTitle(session, _activeAiSessionId);" in conversation_list_ts
+    assert "data-latest-task-title" in conversation_list_ts
+    assert "if (taskTitle) return taskTitle;" in conversation_sessions_ts
     assert "const sessionId = await createAiSessionRecord();" in conversation_list_ts
     assert "await openAiSession(sessionId, { force: true });" in conversation_list_ts
     assert "WA.sendMessage();" in conversation_list_ts
@@ -394,6 +489,7 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert "session_files = _get_session_manager().list_sessions()" in sessions_bp
     assert '"task_count": len(task_entries)' in sessions_bp
     assert '"has_task_flow": bool(task_entries)' in sessions_bp
+    assert '"latest_task_title": latest_task_title' in sessions_bp
     assert '"latest_task_status": latest_task_status' in sessions_bp
     assert ".wa-ai-session-list-view" in workspace_css
     assert ".wa-ai-session-list-composer" in workspace_css
@@ -411,6 +507,26 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert "z-index: 190;" in workspace_css
     assert "openAiSession" in workspace_bundle
     assert "sendSessionListComposer" in workspace_bundle
+
+
+def test_workspace_main_view_inerts_legacy_chat_entrypoint():
+    embedded_mode_ts = _read("web/src/ui/embedded-mode.ts")
+    index_template = _read("web/templates/index.html")
+    workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
+
+    assert 'id="messageInput"' in index_template
+    assert 'id="wa-user-input"' in index_template
+    assert 'id="workspaceView" class="wa-embedded" style="display:none" aria-hidden="true" inert' in index_template
+    assert "function setMainViewActive(view: HTMLElement | null, active: boolean): void" in embedded_mode_ts
+    assert "view.setAttribute('aria-hidden', active ? 'false' : 'true');" in embedded_mode_ts
+    assert "view.removeAttribute('inert');" in embedded_mode_ts
+    assert "view.setAttribute('inert', '');" in embedded_mode_ts
+    assert "(view as any).inert = !active;" in embedded_mode_ts
+    assert "setMainViewActive(chatView, false);" in embedded_mode_ts
+    assert "setMainViewActive(wsView, true);" in embedded_mode_ts
+    assert "setMainViewActive(wsView, false);" in embedded_mode_ts
+    assert "setMainViewActive(chatView, true);" in embedded_mode_ts
+    assert "function setMainViewActive" in workspace_bundle
 
 
 def test_unified_session_api_includes_workspace_and_editor_sessions(monkeypatch):
@@ -444,6 +560,137 @@ def test_unified_session_api_includes_workspace_and_editor_sessions(monkeypatch)
         "editor_doc_review",
     ]
     assert all(item["has_task_flow"] for item in preview_payload["sessions"])
+
+
+def test_unified_session_preview_filters_mock_browser_task_sessions(monkeypatch):
+    from flask import Flask
+    from web.blueprints import sessions as sessions_mod
+
+    class FakeSessionManager:
+        def list_sessions(self):
+            return ["real_task.json", "browser_mock.json"]
+
+        def load_full(self, filename):
+            if filename == "browser_mock.json":
+                return [
+                    {"role": "user", "parts": ["总结当前文件"], "timestamp": "2026-06-17T10:00:00"},
+                    {
+                        "role": "model",
+                        "parts": ["模拟监管任务已完成"],
+                        "task": "file_task",
+                        "run_id": "browser_supervisor",
+                        "task_card_snapshot": {"html": '<div class="wa-task-run" data-task-run-id="browser_supervisor">mocked file task</div>'},
+                        "timestamp": "2026-06-17T10:01:00",
+                    },
+                ]
+            return [
+                {"role": "user", "parts": ["处理真实文件"], "timestamp": "2026-06-17T10:00:00"},
+                {"role": "model", "parts": ["已完成"], "task": "file_task", "status": "done", "timestamp": "2026-06-17T10:01:00"},
+            ]
+
+    monkeypatch.setattr(sessions_mod, "get_session_manager", lambda: FakeSessionManager())
+
+    app = Flask(__name__)
+    app.register_blueprint(sessions_mod.sessions_bp)
+    client = app.test_client()
+
+    preview_payload = client.get("/api/sessions?preview=1").get_json()
+    assert [item["id"] for item in preview_payload["sessions"]] == ["real_task"]
+
+
+def test_workspace_turn_persistence_upserts_by_turn_id(monkeypatch):
+    from flask import Flask
+    from web.blueprints import sessions as sessions_mod
+
+    class FakeSessionManager:
+        def __init__(self):
+            self.history = []
+
+        def list_sessions(self):
+            return ["demo.json"]
+
+        def load_full(self, filename):
+            return list(self.history)
+
+        def save(self, filename, history):
+            self.history = list(history)
+
+    manager = FakeSessionManager()
+    title_calls = []
+    memory_reflections = []
+
+    class FakeBrain:
+        def chat(self, history, prompt, model=None, auto_model=True):
+            title_calls.append({"prompt": prompt, "model": model, "auto_model": auto_model})
+            return {"response": "合同风险审查"}
+
+    monkeypatch.setattr(sessions_mod, "get_session_manager", lambda: manager)
+    monkeypatch.setattr(sessions_mod, "_get_brain", lambda: FakeBrain())
+    monkeypatch.setattr(sessions_mod, "_get_model_map", lambda: {"CHAT": "title-model"})
+    monkeypatch.setattr(sessions_mod, "_start_task_memory_reflection", lambda **kwargs: memory_reflections.append(kwargs))
+
+    app = Flask(__name__)
+    app.register_blueprint(sessions_mod.sessions_bp)
+    client = app.test_client()
+
+    first = client.post(
+        "/api/sessions/demo/workspace-turn",
+        json={
+            "user": "总结当前文件",
+            "assistant": "文件任务已启动，正在执行…",
+            "metadata": {"turn_id": "task_1", "task_kind": "file_task", "status": "streaming", "partial": True},
+        },
+    )
+    second = client.post(
+        "/api/sessions/demo/workspace-turn",
+        json={
+            "user": "总结当前文件",
+            "assistant": "最终总结完成",
+            "metadata": {
+                "turn_id": "task_1",
+                "task_kind": "file_task",
+                "status": "done",
+                "partial": False,
+                "task_context": {"selection": "合同第 4 条 风险条款", "rangeA1": "Sheet1!A1:B2"},
+            },
+            "task_card_snapshot": {"html": '<div class="wa-task-run">done</div>'},
+        },
+    )
+
+    assert first.status_code == 200
+    assert "task_title" not in first.get_json()
+    assert second.status_code == 200
+    second_json = second.get_json()
+    assert second_json["task_title"] == "合同风险审查"
+    assert "合同第 4 条" in second_json["memory_summary"]
+    assert len(manager.history) == 2
+    assert manager.history[0]["role"] == "user"
+    assert manager.history[0]["schema_version"] == 2
+    assert manager.history[1]["parts"] == ["最终总结完成"]
+    assert manager.history[1]["schema_version"] == 2
+    assert manager.history[1]["turn_id"] == "task_1"
+    assert manager.history[1]["task_title"] == "合同风险审查"
+    assert manager.history[1]["skip_model_context"] is not True
+    assert manager.history[1]["task_context"]["selection"] == "合同第 4 条 风险条款"
+    assert "合同第 4 条" in manager.history[1]["memory_summary"]
+    assert len(title_calls) == 1
+    assert title_calls[-1]["model"] == "title-model"
+    assert title_calls[-1]["auto_model"] is False
+    assert "不要编号" in title_calls[-1]["prompt"]
+    assert len(memory_reflections) == 1
+    assert "合同风险审查" in memory_reflections[0]["assistant_text"]
+    assert manager.history[1]["task_card_snapshot"]["html"] == '<div class="wa-task-run">done</div>'
+
+    preview_payload = client.get("/api/sessions?preview=1").get_json()
+    assert preview_payload["sessions"][0]["title"] == "合同风险审查"
+    assert preview_payload["sessions"][0]["latest_task_title"] == "合同风险审查"
+
+    history_payload = client.get("/api/sessions/demo").get_json()
+    assert history_payload["schema_version"] == 2
+    assert history_payload["history"][1]["schema_version"] == 2
+
+
+# Section: model routing and file-task contracts.
 
 
 def test_workspace_find_replace_tools_are_split_from_assistant_shell():
@@ -496,9 +743,11 @@ def test_editor_ai_blueprint_exposes_single_file_task_endpoint():
 
 def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     dispatcher_ts = _read("web/src/workspace/task-dispatcher.ts")
+    task_runner_ts = _read("web/src/workspace/task-runner.ts")
     runtime_init_ts = _read("web/src/workspace/runtime-init.ts")
     editor_ai = _read("web/blueprints/editor_ai.py")
     sessions_bp = _read("web/blueprints/sessions.py")
+    workspace_css = _read("web/static/css/workspace.css")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert '@editor_ai_bp.route("/api/workspace/ai/route-intent", methods=["POST"])' in editor_ai
@@ -522,10 +771,53 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "function persistTaskTurn" in dispatcher_ts
     assert "taskCardSnapshotFromElement(taskCard)" in dispatcher_ts
     assert "record.task_card_snapshot = snapshot" in dispatcher_ts
-    assert "persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || [], loadingEl)" in dispatcher_ts
-    assert "persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || [], loadingEl)" in dispatcher_ts
+    assert "persistTaskTurn(context.text, '文件任务已启动，正在执行…'" in dispatcher_ts
+    assert "startTerminalPersistWatch();" in dispatcher_ts
+    assert "persistTaskTurn(context.text, '文件任务正在执行…'" not in dispatcher_ts
+    assert "turn_id: taskTurnId" in dispatcher_ts
+    assert "partial: true" in dispatcher_ts
+    assert "partial: false" in dispatcher_ts
+    assert "skip_model_context: true" in dispatcher_ts
+    assert "skip_model_context: false" in dispatcher_ts
+    assert "_workspaceTurnPersistQueue" in runtime_init_ts
+    assert "WORKSPACE_TURN_RETRY_KEY = 'wa_workspace_turn_retry_queue_v1'" in runtime_init_ts
+    assert "function _queueWorkspaceTurnRetry" in runtime_init_ts
+    assert "showToast('对话保存失败，已暂存并自动重试'" in runtime_init_ts
+    assert "export async function retryWorkspaceConversationPersistence" in runtime_init_ts
+    assert "WA.retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence" in runtime_init_ts
+    assert "async function _ensureWorkspacePersistenceSession()" in runtime_init_ts
+    assert "_hostSessionId = sessionId;" in runtime_init_ts
+    assert "ensureSessionId: _ensureWorkspacePersistenceSession" in runtime_init_ts
+    assert "ensureSessionId?: () => Promise<string>;" in dispatcher_ts
+    assert "await options.ensureSessionId()" in dispatcher_ts
+    assert "_sendWorkspaceConversationTurn(sessionId, requestPayload)" in runtime_init_ts
+    assert "function _applyPersistedTaskMetadata" in runtime_init_ts
+    assert "card.dataset.taskTitle = taskTitle" in runtime_init_ts
+    assert "const memorySummary = String(data && (data.memory_summary || data.model_context_text) || '').trim();" in runtime_init_ts
+    assert "card.dataset.taskMemorySummary = memorySummary" in runtime_init_ts
+    assert "WA.syncTaskInteractionSummary(card)" in runtime_init_ts
     assert "task_card_snapshot: payload.task_card_snapshot" in runtime_init_ts
+    assert "function renderTaskUnderstandingCard(card: TaskCardElement): string" in task_runner_ts
+    assert "function renderTaskMemoryCard(card: TaskCardElement): string" in task_runner_ts
+    assert "function syncTaskInteractionSummary(card: TaskCardElement): void" in task_runner_ts
+    assert "const semanticTitle = String(card.dataset.taskTitle || '').trim();" in task_runner_ts
+    assert "WA.syncTaskInteractionSummary = syncTaskInteractionSummary" in task_runner_ts
+    assert "+ renderTaskMemoryCard(card)\n      + auditHtml\n      + taskArtifactsSummaryHtml(card)\n      + taskResultActionsHtml(card)\n      + '<div class=\"wa-task-final-report\"" in task_runner_ts
+    assert ".wa-task-interaction-card" in workspace_css
+    assert ".wa-task-memory-card" in workspace_css
+    assert "_SESSION_HISTORY_SCHEMA_VERSION = 2" in sessions_bp
+    assert "def _normalize_history_entry(entry: object) -> object:" in sessions_bp
+    assert '"schema_version": _SESSION_HISTORY_SCHEMA_VERSION' in sessions_bp
     assert 'assistant_entry["task_card_snapshot"]' in sessions_bp
+    assert '"skip_model_context"' in sessions_bp
+    assert '"task_context"' in sessions_bp
+    assert "def _build_task_memory_summary(" in sessions_bp
+    assert "def _start_task_memory_reflection(" in sessions_bp
+    assert 'response_payload["memory_summary"] = memory_summary' in sessions_bp
+    assert '"partial"' in sessions_bp
+    assert "_is_mock_workspace_history" in sessions_bp
+    assert "turn.get(\"skip_model_context\") is True" in _read("web/session_manager.py")
+    assert "os.replace(tmp_path, path)" in _read("web/session_manager.py")
     assert "/api/workspace/ai/route-intent" in workspace_bundle
     assert "persistTaskTurn" in workspace_bundle
     assert "task_card_snapshot" in workspace_bundle
@@ -555,14 +847,31 @@ def test_workspace_route_intent_collapses_file_subtypes_to_whitebox_contract():
     assert "source_task_type: sourceTaskType," in dispatcher_ts
     assert "route_kind: WORKSPACE_FILE_TASK_KIND," in dispatcher_ts
     assert "task_type: 'FILE_TASK'," in dispatcher_ts
+    assert "const EXPLICIT_FILE_REFERENCE_RE" in dispatcher_ts
+    assert "function mentionsExplicitTaskFile(" in dispatcher_ts
+    assert "frontend_deterministic_explicit_file_reference" in dispatcher_ts
 
 
 def test_workspace_file_task_steps_are_user_visible_whitebox_stages():
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
+    task_report_layout_ts = _read("web/src/workspace/task-report-layout.ts")
+    task_step_labels_ts = _read("web/src/workspace/task-step-labels.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
+    assert "import { taskReportStageDoneText } from './task-report-layout';" in task_runner_ts
+    assert "from './task-step-labels';" in task_runner_ts
+    assert "const PRIMARY_STEP_TITLES" not in task_runner_ts
+    assert "export function taskReportStageTitle(stageId: string, fallback = '步骤'): string" in task_report_layout_ts
+    assert "export function taskReportStageDoneText(stageId: string, fallback = ''): string" in task_report_layout_ts
+    assert "const sharedDoneText = taskReportStageDoneText(stepId);" in task_runner_ts
+    assert "const EXTRA_STEP_TITLES: Record<string, string> = {" not in task_runner_ts
+    assert "const EXTRA_STEP_TITLES: Record<string, string> = {" in task_step_labels_ts
+    assert "export function taskStepTitle(stepId: string, fallback?: string): string" in task_step_labels_ts
+    assert "export function taskPlanViolationLabel(code: string): string" in task_step_labels_ts
+    assert "export function taskToolLabel(name: string): string" in task_step_labels_ts
+    assert "export function shouldAlwaysSuppressTaskToolFinished(name: string): boolean" in task_step_labels_ts
     for label in ("任务识别", "执行方案", "执行进度", "完成核验"):
-        assert label in task_runner_ts
+        assert label in task_report_layout_ts
         assert label in workspace_bundle
     assert "function handleEvent_task_classified" in task_runner_ts
     assert "'task.classified': handleEvent_task_classified" in task_runner_ts
@@ -572,30 +881,241 @@ def test_workspace_file_task_steps_are_user_visible_whitebox_stages():
     assert "const step = taskStageStep(card, 'check');" in task_runner_ts
 
 
+def test_workspace_blocked_plan_checked_is_not_rendered_as_confirmation_wait():
+    task_runner_ts = _read("web/src/workspace/task-runner.ts")
+    status_ts = _read("web/src/workspace/file-task-status.ts")
+
+    assert "from './file-task-status';" in task_runner_ts
+    assert "export function normalizeFileTaskTerminalStatus(value: unknown): string" in status_ts
+    assert "export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = false): FileTaskOutcomeCopy" in status_ts
+    assert "export const FILE_TASK_CONFIRMATION_TERMINAL_STATUSES = new Set([" in status_ts
+    assert "export function isFileTaskConfirmationStatus(status: string): boolean" in status_ts
+    assert "export function isFileTaskAttentionStatus(status: string): boolean" in status_ts
+    assert "export function isFileTaskTerminalStatus(status: string): boolean" in status_ts
+    assert "export function fileTaskTerminalUiStatus(status: string, completedTask: boolean, fatalSummary = ''): string" in status_ts
+    assert "export function isFileTaskIncompleteBlockedStatus(status: string, completedTask: boolean): boolean" in status_ts
+    assert "export function normalizedResumeStatus(status: string): string" in status_ts
+    assert "if (status === 'waiting') return 'awaiting_confirmation';" not in status_ts
+    assert "return (terminalStatus === 'plan_checked' && !completedTask) || isFileTaskFailureStatus(terminalStatus);" in status_ts
+    assert "if (isFileTaskConfirmationStatus(terminalStatus)) return 'pending';" in status_ts
+    assert "return terminalStatus === 'needs_attention' || terminalStatus === 'context_summary_fallback';" in status_ts
+    assert "if (isFileTaskAttentionStatus(terminalStatus)) return 'pending';" in status_ts
+    assert "if (isFileTaskWaitingStatus(terminalStatus)) return 'pending';" not in status_ts
+    assert "const status = fileTaskTerminalUiStatus(terminalStatus, completedTask, fatalSummary);" in task_runner_ts
+    assert ": ['completed', 'done', 'verified'].includes(terminalStatus);" in task_runner_ts
+    assert "Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted') ? boolAttr(dataset.taskCompleted) : true" not in task_runner_ts
+    assert "function taskResultRequiresUserConfirmation(result: TerminalResult): boolean" in task_runner_ts
+    assert "const incompleteBlocked = isFileTaskIncompleteBlockedStatus(terminal, completedTask);" in task_runner_ts
+    assert "improveText = '重新发起'" in task_runner_ts
+    assert "setStatus(card, data.tool_name === 'ask_user' || isFileTaskConfirmationStatus(data.status || data.terminal_status || '') ? '待确认' : '已阻止');" in task_runner_ts
+    assert "isFileTaskAttentionStatus(result && result.terminal_status)" in task_runner_ts
+    assert "normalizeFileTaskTerminalStatus(result && result.terminal_status) === 'context_summary_fallback'" in task_runner_ts
+    assert "fileTaskOutcomeCopy(result && result.status || 'done'" in task_runner_ts
+    assert "const copy = taskResultOutcomeCopy(result);" in task_runner_ts
+    assert "result.status === 'pending') return '任务等待确认。';" not in task_runner_ts
+    assert "任务仍在处理中或等待同步" in status_ts
+    assert "当前进度已保留，可查看过程并继续处理。" in status_ts
+    assert "if (normalized === 'needs_attention') {" in status_ts
+    assert "任务需要处理，请查看总结与回答" in status_ts
+    assert "失败原因和可继续处理的建议已整理到总结与回答区域。" in status_ts
+    assert "任务已完成，结果已显示在步骤下方" in status_ts
+    assert "任务需要复核：当前只是临时摘要" in status_ts
+    assert "已完成核验，总结与回答已更新。" not in task_runner_ts
+    assert "核验已结束，结论已同步到总结与回答。" in _read("web/src/workspace/task-report-layout.ts")
+    assert "总结与回答见下方" not in task_runner_ts
+
+
+def test_workspace_system_action_has_whitelisted_app_fast_path():
+    dispatcher_ts = _read("web/src/workspace/task-dispatcher.ts")
+    local_executor = _read("web/local_executor.py")
+    system_handler = _read("web/services/chat_stream/generate/system_handler.py")
+
+    assert "const WHITELISTED_APP_LAUNCH_RE" in dispatcher_ts
+    assert "WHITELISTED_APP_LAUNCH_RE.test(text)" in dispatcher_ts
+    assert '"wechat"' in local_executor
+    assert "def open_whitelisted_app(cls, app_key):" in local_executor
+    assert "subprocess.Popen([value], close_fds=True)" in local_executor
+    assert "exec_result.get(\"retryable\") is not False" in system_handler
+
+
+def test_workspace_completed_task_actions_are_not_labeled_as_confirmation_flow():
+    task_runner_ts = _read("web/src/workspace/task-runner.ts")
+    workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
+
+    for source in (task_runner_ts, workspace_bundle):
+        assert "任务已完成，后续操作会作为新请求发送。" in source
+        assert 'data-task-followup-action="question">追问</button>' not in source
+        assert "询问结果" in source
+        assert "继续处理" in source
+    assert "let questionText = completed ? '询问结果' : '追问原因';" in task_runner_ts
+    assert "let improveText = completed ? '继续处理' : '继续修复';" in task_runner_ts
+    assert "let improveText = completed ? '继续优化' : '继续修复';" not in task_runner_ts
+
+
+def test_workspace_non_confirmation_status_labels_do_not_say_pending_confirmation():
+    workbench_js = _read("web/src/workspace/task-workbench.ts")
+    results_js = _read("web/src/workspace/results.ts")
+    conversation_ts = _read("web/src/workspace/conversation.ts")
+    sessions_ts = _read("web/src/workspace/conversation-sessions.ts")
+    sessions_bp = _read("web/blueprints/sessions.py")
+    status_ts = _read("web/src/workspace/file-task-status.ts")
+
+    assert "export function fileTaskStatusLabel(status: unknown, fallback = '任务'): string" in status_ts
+    assert "if (status === 'in_progress') return 'running';" in status_ts
+    assert "if (normalized === 'waiting') return '待处理';" in status_ts
+    assert "if (normalized === 'awaiting_confirmation') return '等待确认';" in status_ts
+    assert "import { fileTaskStatusLabel, isFileTaskAttentionStatus, normalizeFileTaskTerminalStatus } from './file-task-status';" in workbench_js
+    assert "return fileTaskStatusLabel(normalized, '任务');" in workbench_js
+    assert "metadata.task_terminal_status || metadata.terminal_status || metadata.status || (task && task.status)" in workbench_js
+    assert "return normalizeFileTaskTerminalStatus(task && task.status) || 'running';" not in workbench_js
+    assert "terminal === 'verified'" not in workbench_js
+    assert "waiting: '待处理'" not in workbench_js
+    assert "waiting: '待确认'" not in workbench_js
+    assert "import { fileTaskStatusLabel } from './file-task-status';" in results_js
+    assert "return fileTaskStatusLabel(status, '进行中');" in results_js
+    assert "if (isFileTaskFailureStatus(normalized)) return '失败';" in status_ts
+    assert "if (normalized === 'failed' || normalized === 'error') return '失败';" not in status_ts
+    assert "if (normalized === 'needs_review') return '需复核';" in status_ts
+    assert "if (value === 'needs_review') return '待确认';" not in results_js
+    assert "import { fileTaskStatusLabel, isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';" in conversation_ts
+    assert "import { taskReportStageTitle } from './task-report-layout';" in conversation_ts
+    assert "return status ? fileTaskStatusLabel(status, testStructureText(value, 28)) : '待处理';" in conversation_ts
+    assert "taskReportStageTitle(key, testStructureText(value || fallback || '步骤', 80))" in conversation_ts
+    assert "route: '识别任务'" not in conversation_ts
+    assert "plan: '制定方案'" not in conversation_ts
+    assert "execute: '执行处理'" not in conversation_ts
+    assert "check: '核验完成'" not in conversation_ts
+    assert "if (status === 'running' || status === 'in_progress') return '执行中';" not in conversation_ts
+    assert "import { fileTaskStatusLabel } from './file-task-status';" in sessions_ts
+    assert "return fileTaskStatusLabel(status, '任务');" in sessions_ts
+    assert "if (normalized === 'waiting' || normalized === 'awaiting_confirmation') return '等待确认';" not in sessions_ts
+    assert 'if normalized in {"awaiting_confirmation", "waiting"}:' not in sessions_bp
+    assert 'if normalized == "awaiting_confirmation":' in sessions_bp
+    assert 'if normalized == "waiting":' in sessions_bp
+    assert '"quality_gate_failed",' in sessions_bp
+    assert '"no_file_change",' in sessions_bp
+    assert '"model_unavailable",' in sessions_bp
+
+
+def test_workspace_restored_waiting_task_is_not_forced_into_confirmation_copy():
+    task_runner_ts = _read("web/src/workspace/task-runner.ts")
+    file_utils_ts = _read("web/src/workspace/file-utils.ts")
+
+    assert "const waiting = isFileTaskWaitingStatus(settings.initialStatus);" in task_runner_ts
+    assert "const confirmation = isFileTaskConfirmationStatus(settings.initialStatus);" in task_runner_ts
+    assert "statusEl.textContent = confirmation ? '待确认' : (waiting ? '待处理' : '恢复中');" in task_runner_ts
+    assert "已恢复待处理的后台任务，正在同步最新进度" in task_runner_ts
+    assert "if (isFileTaskWaitingStatus(settings.initialStatus)) { cardEl.classList.add('pending'); }" in task_runner_ts
+    assert "from './file-task-status';" in file_utils_ts
+    assert "isFileTaskConfirmationStatus" in file_utils_ts
+    assert "isFileTaskAttentionStatus" in file_utils_ts
+    assert "fileTaskTerminalUiStatus" in file_utils_ts
+    assert "normalizeFileTaskTerminalStatus" in file_utils_ts
+    assert "const awaitingConfirmation = isFileTaskConfirmationStatus(terminalStatus);" in file_utils_ts
+    assert "const needsAttention = isFileTaskAttentionStatus(terminalStatus);" in file_utils_ts
+    assert "initialStatus: terminalStatus || taskStatus," in file_utils_ts
+    assert "initialStatus: String(task.status || '').trim().toLowerCase()," not in file_utils_ts
+    assert "needsAttention || taskStatus === 'waiting' ? '\\u5df2\\u6062\\u590d\\u5f85\\u5904\\u7406\\u7684\\u540e\\u53f0\\u4efb\\u52a1\\u3002'" in file_utils_ts
+    assert "\\u6587\\u4ef6\\u4efb\\u52a1\\u6d41\\u5df2\\u7ed3\\u675f\\u3002" in file_utils_ts
+    assert "\\u6587\\u4ef6\\u4efb\\u52a1\\u6d41\\u5df2\\u5b8c\\u6210\\u3002" not in file_utils_ts
+
+
+def test_workspace_file_task_terminal_status_has_single_shared_frontend_contract():
+    dispatcher_ts = _read("web/src/workspace/task-dispatcher.ts")
+    runtime_init_ts = _read("web/src/workspace/runtime-init.ts")
+    conversation_ts = _read("web/src/workspace/conversation.ts")
+
+    assert "import { isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';" in dispatcher_ts
+    assert "if (isFileTaskTerminalStatus(status)) return true;" in dispatcher_ts
+    assert "['completed', 'done', 'verified'].includes(terminal)" in dispatcher_ts
+    assert "['completed', 'done', 'verified', 'failed', 'error', 'cancelled', 'canceled', 'awaiting_confirmation', 'blocked']" not in dispatcher_ts
+
+    assert "import { fileTaskTerminalUiStatus, normalizeFileTaskTerminalStatus } from './file-task-status';" in runtime_init_ts
+    assert "const terminalStatus = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || (completedTask ? 'completed' : 'needs_attention'));" in runtime_init_ts
+    assert "const uiStatus = fileTaskTerminalUiStatus(terminalStatus, completedTask);" in runtime_init_ts
+    assert "status: String(dataset.taskTerminalStatus || 'done')" not in runtime_init_ts
+    assert "task_terminal_status: String(dataset.taskTerminalStatus || 'completed')" not in runtime_init_ts
+
+    assert "function taskTurnIsTerminal(turn: WATurn): boolean" in conversation_ts
+    assert "isFileTaskTerminalStatus(status)" in conversation_ts
+    assert "isFileTaskTerminalStatus(terminal)" in conversation_ts
+
+
+def test_file_task_artifact_status_preserves_attention_diagnostics():
+    from web.file_task_stream import _file_task_artifact_status
+
+    assert _file_task_artifact_status(
+        "run.finished",
+        {
+            "completed_task": False,
+            "runtime": {"terminal_status": "needs_attention"},
+        },
+    ) == "needs_attention"
+    assert _file_task_artifact_status(
+        "run.finished",
+        {
+            "completed_task": False,
+            "runtime": {"terminal_status": "context_summary_fallback"},
+        },
+    ) == "context_summary_fallback"
+    assert _file_task_artifact_status(
+        "run.finished",
+        {
+            "completed_task": False,
+            "runtime": {"terminal_status": "quality_gate_failed"},
+        },
+    ) == "quality_gate_failed"
+    assert _file_task_artifact_status(
+        "run.finished",
+        {
+            "completed_task": False,
+            "runtime": {"terminal_status": "no_file_change"},
+        },
+    ) == "no_file_change"
+
+
+def test_workspace_docx_selection_mouse_state_uses_safe_lookup():
+    panel_layout_ts = _read("web/src/ui/panel-layout.ts")
+
+    assert "function _isDocxMouseDown()" in panel_layout_ts
+    assert "_isDocxMouseDown() && document.querySelector" in panel_layout_ts
+    assert "if (_docxMouseIsDown &&" not in panel_layout_ts
+
+
 def test_workspace_task_renderer_compacts_tool_result_details():
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
+    task_final_report_ts = _read("web/src/workspace/task-final-report.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert "function toolPreviewSummary" in task_runner_ts
     assert "function summarizeParsedResult" in task_runner_ts
-    assert "function looksLikeFullAnswerText" in task_runner_ts
-    assert "function compactFlowSummary" in task_runner_ts
+    assert "export function looksLikeFullAnswerText" in task_final_report_ts
+    assert "export function compactFlowSummary" in task_final_report_ts
     assert "读取到 ' + parsed.length + ' 个工作区条目" in task_runner_ts
     assert "payload.result_preview || payload.result_text || payload.result" in task_runner_ts
-    assert "结果已生成，完整内容见对话汇报。" in task_runner_ts
-    assert "步骤已完成，结果见对话汇报。" in task_runner_ts
-    assert "任务已完成，完整结果见对话汇报。" in task_runner_ts
+    assert "已收到较长内容，详细内容见总结与回答。" in task_runner_ts
+    assert "步骤已结束，详细内容见总结与回答。" in task_runner_ts
+    assert "任务已完成，完整结果见总结与回答。" not in task_runner_ts
+    assert "'文件任务流已结束。'" in task_runner_ts
+    assert "'文件任务流已完成。'" not in task_runner_ts
     assert "data-full-content" in task_runner_ts
     assert "lazyDetails.querySelector('pre')" in task_runner_ts
     assert "esc(data.result_text || data.error || '')" not in task_runner_ts
 
     assert "data-full-content" in workspace_bundle
-    assert "查看完整结果" in workspace_bundle
-    assert "结果已生成，完整内容见对话汇报。" in workspace_bundle
+    assert "已收到较长内容，详细内容见总结与回答。" in workspace_bundle
+
+
+def test_workspace_task_dispatcher_uses_neutral_stream_end_fallback():
+    task_dispatcher_ts = _read("web/src/workspace/task-dispatcher.ts")
+
+    assert "|| '文件任务流已结束。';" in task_dispatcher_ts
+    assert "'文件任务流已完成。'" not in task_dispatcher_ts
 
 
 def test_workspace_task_workbench_filters_internal_progress_messages():
     workbench_js = _read("web/src/workspace/task-workbench.ts")
+    task_report_layout_ts = _read("web/src/workspace/task-report-layout.ts")
 
     assert "function userFacingTaskText(value: any, stageId?: string): string" in workbench_js
     assert "function normalizedFlowStages(rawSteps: any[], task: any): WorkbenchStep[]" in workbench_js
@@ -611,8 +1131,9 @@ def test_workspace_task_workbench_filters_internal_progress_messages():
         "后端 SmartDispatcher 兜底",
     ):
         assert phrase in workbench_js
+    assert "TASK_REPORT_STAGE_DEFS.map((def)" in workbench_js
     for label in ("任务识别", "执行方案", "执行进度", "完成核验"):
-        assert label in workbench_js
+        assert label in task_report_layout_ts
 
 
 def test_workspace_task_payload_does_not_attach_current_open_file_by_default():
@@ -630,6 +1151,9 @@ def test_workspace_task_payload_does_not_attach_current_open_file_by_default():
     assert "mentionsAttachedFileContext" in workspace_bundle
     assert "currentOpenTaskFile" in workspace_bundle
     assert "current_file: currentFile" in workspace_bundle
+
+
+# Section: editor context, selection, and save safety.
 
 
 def test_workspace_docx_review_runtime_restores_structured_review_bridge():
@@ -665,6 +1189,7 @@ def test_workspace_docx_review_runtime_restores_structured_review_bridge():
         "onDocxCommentsChanged",
     ]:
         assert symbol in workspace_bundle
+    assert '.replace(/^workspace\\//i, \'\')' in runtime_ts
 
 
 def test_workspace_selection_toolbar_restores_pin_and_context_bridge():
@@ -691,7 +1216,14 @@ def test_workspace_selection_toolbar_restores_pin_and_context_bridge():
     assert "this._ta.addEventListener('keyup', this._handleSelectionChange)" in text_editor_ts
     assert "WA._showSelectionToolbarForCurrentSelection" in text_editor_ts
     assert "已注入选中文本" in workspace_bundle
-    assert "取消文本注入" in workspace_bundle
+    assert "取消选择" in workspace_bundle
+    assert "ctx-bar-clear-selection" in selection_ts
+    assert "ctx-bar-clear-files" in selection_ts
+    assert "清除文件" in workspace_bundle
+    assert "export function removeAIFileContext" in ai_context_ts
+    assert "export function clearAIFileContext" in ai_context_ts
+    assert '<button type="button" class="ctx-row-remove"' in ai_context_ts
+    assert "WA.removeAIFileContext" in workspace_bundle
     assert "window._resetDocxSelection = _resetDocxSelection" in workspace_bundle
     assert "window._hideDocxHoverBar = _hideDocxHoverBar" in workspace_bundle
     assert 'data-selection-injected="true"' in selection_ts
@@ -708,12 +1240,16 @@ def test_workspace_unified_shell_restores_save_contract():
     assert "(window as any).WA.saveFile = saveFile" in save_ts
     assert "(window as any).WA.saveAs = saveAs" in save_ts
     assert "(window as any).WA.scheduleAutoSave = scheduleAutoSave" in save_ts
+    assert "(window as any).WA.markExternalFileChange = markExternalFileChange" in save_ts
+    assert "(window as any).WA.clearExternalFileChange = clearExternalFileChange" in save_ts
+    assert "文件已被任务更新，请重新打开后再保存，避免覆盖任务结果。" in save_ts
     assert "(window as any).WA.autoSave = autoSave" in save_ts
     assert "/api/v1/workspace/auto_save" in save_ts
     assert "/api/v1/workspace/raw/" in save_ts
     assert "showSaveFilePicker" in save_ts
     assert "window.WA.saveFile = saveFile" in workspace_bundle
     assert "window.WA.saveAs = saveAs" in workspace_bundle
+    assert "window.WA.markExternalFileChange = markExternalFileChange" in workspace_bundle
 
 
 def test_workspace_unified_shell_hides_retained_legacy_skill_surfaces():
@@ -741,6 +1277,8 @@ def test_workspace_task_payload_enables_model_primary_intent_router():
     dispatcher_js = _read("web/src/workspace/task-dispatcher.ts")
 
     assert "enable_ai_intent_adjudicator" in dispatcher_js
+    assert "overrideOptions.enable_ai_intent_adjudicator = true;" not in dispatcher_js
+    assert "delete overrideOptions.enable_ai_intent_adjudicator;" in dispatcher_js
     assert "model_primary_intent" in dispatcher_js
 
 
@@ -782,6 +1320,20 @@ def test_workspace_quick_actions_do_not_keyword_route_freeform_tasks():
     assert "return quickActionHandlers.has(source) ? source : '';" in dispatcher_js
 
 
+def test_workspace_quick_action_aliases_keep_hoverbars_wired():
+    quick_actions_js = _read("web/src/workspace/quick-actions.ts")
+    selection_toolbar_js = _read("web/src/ui/selection-toolbar.ts")
+    index_template = _read("web/templates/index.html")
+
+    assert "polish: '润色'" in quick_actions_js
+    assert "translate: '翻译'" in quick_actions_js
+    assert "explain: '解释'" in quick_actions_js
+    assert "aliasesForAction(action.action).forEach" in quick_actions_js
+    assert "normalizeQuickActionId(actionId)" in quick_actions_js
+    assert "WA.docxHoverAI('polish')" in index_template
+    assert "WA.closeSelectionToolbar = closeSelectionToolbar" in selection_toolbar_js
+
+
 def test_workspace_task_payload_extracts_explicit_text_write_target():
     dispatcher_ts = _read("web/src/workspace/task-dispatcher.ts")
     dispatcher_js = _read("web/src/workspace/task-dispatcher.ts")
@@ -821,6 +1373,9 @@ def test_workspace_task_renderer_surfaces_supervisor_status():
     for source in (renderer_js, workspace_template, index_template, workspace_bundle):
         assert "按计划 0/0" not in source
         assert "准备识别任务" in source
+
+
+# Section: retired system side effects.
 
 
 def test_workspace_assistant_does_not_open_files_with_os_native_apps():
@@ -945,21 +1500,34 @@ def test_system_fix_script_generation_stays_removed():
         assert dangerous_text not in agent_routes
 
 
-def test_local_executor_no_longer_performs_system_side_effects():
+def test_local_executor_only_performs_whitelisted_system_side_effects():
     local_executor = _read("web/local_executor.py")
+    chat_system_instruction = _read("web/chat_system_instruction.py")
+    context_injector = _read("web/context_injector.py")
 
-    assert "APP_ALIASES" not in local_executor
-    assert "SYSTEM_KEYWORDS" not in local_executor
-    assert "def extract_app_name" not in local_executor
-    assert "def find_app_in_start_menu" not in local_executor
-    assert "def find_app_smart" not in local_executor
-    assert "def open_file_or_directory" not in local_executor
-    assert "def send_keystroke" not in local_executor
-    assert ("os." + "startfile") not in local_executor
-    assert "shutdown /" not in local_executor
-    assert "snippingtool" not in local_executor
-    assert "webbrowser.open" not in local_executor
-    assert "keyboard.hotkey" not in local_executor
+    _assert_excludes_all(
+        local_executor,
+        (
+            "APP_ALIASES",
+            "SYSTEM_KEYWORDS",
+            "def extract_app_name",
+            "def find_app_in_start_menu",
+            "def find_app_smart",
+            "def open_file_or_directory",
+            "def send_keystroke",
+            "shutdown /",
+            "snippingtool",
+            "webbrowser.open",
+            "keyboard.hotkey",
+        ),
+    )
+    assert "APP_LAUNCHERS = {" in local_executor
+    assert "def open_whitelisted_app(cls, app_key):" in local_executor
+    assert '"wechat"' in local_executor
+    for instruction_source in (chat_system_instruction, context_injector):
+        assert "联动本地应用" not in instruction_source
+        assert "可以执行 Koto 白名单内的简单应用启动" in instruction_source
+        assert "不发送消息、不截图、不代替用户操作应用内容" in instruction_source
 
 
 def test_agent_tool_router_does_not_offer_system_side_effect_tools():
@@ -977,17 +1545,34 @@ def test_agent_tool_router_does_not_offer_system_side_effect_tools():
     assert "shell_command" not in tool_router
 
 
-def test_routing_layer_does_not_fast_track_app_control_as_system():
+def test_routing_layer_only_fast_tracks_whitelisted_app_launch_as_system():
     rule_router = _read("app/core/routing/rule_router.py")
     smart_dispatcher = _read("app/core/routing/smart_dispatcher.py")
     ai_router = _read("app/core/routing/ai_router.py")
+    synthetic_data = _read("app/core/learning/synthetic_data_generator.py")
+    training_builder = _read("app/core/learning/training_data_builder.py")
+    local_model_router = _read("app/core/routing/local_model_router.py")
 
     assert "_sys_starters" not in rule_router
     assert "_sys_action_starters" not in smart_dispatcher
     assert "_fb_sys_starters" not in smart_dispatcher
     assert "Action-Direct" not in smart_dispatcher
     assert "Fallback-ActionVerb" not in smart_dispatcher
-    assert "打开微信/Chrome/某应用" not in ai_router
+    assert "启动白名单应用" in ai_router
+    assert "启动白名单应用" in local_model_router
+    assert '("打开微信", "SYSTEM"' in synthetic_data
+    assert '("open WeChat", "SYSTEM"' in synthetic_data
+    assert '("打开微信", "SYSTEM"' in training_builder
+    assert '("帮我打开微信，然后截图", "AGENT"' in synthetic_data
+    _assert_excludes_all(
+        synthetic_data,
+        (
+            '("帮我打开微信，然后截图", "SYSTEM"',
+        ),
+    )
+
+
+# Section: file browser, bundle wiring, and runtime actions.
 
 
 def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
@@ -995,6 +1580,7 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     fs_tree = _read("web/src/workspace/fs-tree.ts")
     embedded = _read("web/src/ui/embedded-mode.ts")
     ai_context = _read("web/src/workspace/ai-context.ts")
+    asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
     workspace_template = _read("web/templates/index.html")
     index_template = _read("web/templates/index.html")
     workspace_css = _read("web/static/css/workspace.css")
@@ -1003,6 +1589,11 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert "application/wa-file-path" in assistant_js
     assert "_getAIAttachmentDropPayload" in embedded
     assert "wa.attachFilesToTask = _attachFilesToTask" in ai_context
+    assert "WA._pendingSendBrowserFilesToAI = WA._pendingSendBrowserFilesToAI || []" in asset_scripts
+    assert "WA.sendBrowserFileToAI = WA.sendBrowserFileToAI || function(path)" in asset_scripts
+    assert "WA._pendingSendBrowserFilesToAI.push(path)" in asset_scripts
+    assert "const pendingBrowserFilesToAI = Array.isArray(wa._pendingSendBrowserFilesToAI)" in ai_context
+    assert "_attachFilesToTask(pendingBrowserFilesToAI" in ai_context
     assert "await _attachFilesToTask([payload.filePath], { source, focusInput: !_isAiSessionListVisible() })" in embedded
     assert "'ai_panel_drop'" in embedded
     assert "function _fileDragAttrs()" in fs_tree
@@ -1020,11 +1611,25 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert "wa._browserFileDragStart = _browserFileDragStart" in fs_tree
     assert "async function _attachBrowserFileToAI" in fs_tree
     assert "async function _sendBrowserFileToAI" in fs_tree
+    assert "function _installBrowserFileActionDelegation()" in fs_tree
+    assert 'data-wa-file-action="send-ai"' in fs_tree
+    assert "target.closest('.wa-file-send-ai[data-wa-file-action=\"send-ai\"]')" in fs_tree
+    assert "onpointerdown=\"window.WA._sendBrowserFileButton(event,this)\"" in fs_tree
+    assert "onclick=\"window.WA._sendBrowserFileButton(event,this)\"" in fs_tree
+    assert "function _sendBrowserFileButtonToAI(event: Event, button: HTMLElement | null): void" in fs_tree
+    assert "wa._sendBrowserFileButton = _sendBrowserFileButtonToAI" in fs_tree
+    assert "onclick=\"event.preventDefault();event.stopPropagation();window.WA.sendBrowserFileToAI" not in fs_tree
+    assert "onclick=\"event.preventDefault();event.stopPropagation();WA.sendBrowserFileToAI" not in fs_tree
+
     assert "wa.sendBrowserFileToAI = _sendBrowserFileToAI" in fs_tree
+    assert "WA = window.WA = window.WA || {}" in asset_scripts
+    workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
+    assert workspace_bundle_entry.index("import '../workspace/ai-context';") < workspace_bundle_entry.index("import '../workspace/fs-tree';")
     assert "class=\"wa-file-send-ai\"" in fs_tree
     assert "file_tree_inline_action" in fs_tree
     assert "_attachBrowserFileToAI(path, 'file_tree_dragend_drop')" in fs_tree
     assert "_attachBrowserFileToAI(drag.path, 'file_tree_pointer_drop')" in fs_tree
+    assert "_installBrowserFileActionDelegation();" in fs_tree
     assert "_installBrowserPointerDragFallback();" in fs_tree
     assert "` ${_fileDragAttrs()}`" in fs_tree
     assert "`${_fileDragAttrs()} `" in fs_tree
@@ -1039,6 +1644,38 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert ".wa-session-list-drag-over" in workspace_css
     assert "#wa-ai-file-chips" in workspace_css
     assert ".wa-file-actions .wa-file-send-ai" in workspace_css
+
+
+def test_mcp_attach_task_file_replaces_previous_frontend_context_by_default():
+    ai_context = _read("web/src/workspace/ai-context.ts")
+    frontend_observer = _read("web/src/mcp/frontend-observer.ts")
+
+    assert "replaceExisting?: boolean" in ai_context
+    assert "if (options.replaceExisting && state._aiFileContext.length)" in ai_context
+    assert "state._aiFileContext = []" in ai_context
+    assert "state._aiTargetFileIdx = -1" in ai_context
+    assert "function _normalizeFrontendTaskPath(path: string): string" in frontend_observer
+    assert "value.replace(/^\\.\\//, '')" in frontend_observer
+    assert "/^workspace\\//i.test(value)" in frontend_observer
+    assert "value.slice('workspace/'.length)" in frontend_observer
+    assert "replaceExisting: action.options?.replaceExisting !== false" in frontend_observer
+
+
+def test_mcp_frontend_action_exposes_stable_task_result_evidence():
+    frontend_observer = _read("web/src/mcp/frontend-observer.ts")
+
+    assert "| 'task_result_evidence'" in frontend_observer
+    assert "function _taskResultEvidence(action: FrontendAction): Record<string, unknown>" in frontend_observer
+    assert "if (action.action === 'task_result_evidence') return _taskResultEvidence(action);" in frontend_observer
+    assert ".wa-task-run[data-task-id=" in frontend_observer
+    assert ".wa-task-run[data-task-run-id=" in frontend_observer
+    assert "finalAnswer: finalReport ? _visibleText(finalReport, limit) : ''" in frontend_observer
+    assert "screenshotClip: _elementViewportClip(card, Number(opts.padding || 8))" in frontend_observer
+    assert "chips = Array.from(document.querySelectorAll('#wa-ai-file-chip-list .wa-ctx-file-row'))" in frontend_observer
+    assert "function _renderTaskEvidenceOverlay(evidence: Record<string, unknown>): HTMLElement" in frontend_observer
+    assert "overlay.id = 'koto-task-evidence-capture'" in frontend_observer
+    assert "if (opts.renderOverlay)" in frontend_observer
+    assert "evidence.overlayClip = _elementViewportClip(overlay, 4)" in frontend_observer
 
 
 def test_workspace_file_row_handlers_keep_drag_fallback_owner():
@@ -1064,6 +1701,20 @@ def test_workspace_task_run_finished_closes_run_stage_step():
     assert 'data-step-id="run"' in workspace_bundle
     assert "markStepFailed(runStep)" in workspace_bundle
     assert "markStepDone(runStep)" in workspace_bundle
+
+
+def test_workspace_file_task_refresh_normalizes_paths_and_blocks_stale_save():
+    fs_tree = _read("web/src/workspace/fs-tree.ts")
+    task_refresh = _read("web/src/workspace/task-refresh.ts")
+    task_runner = _read("web/src/workspace/task-runner.ts")
+    file_open = _read("web/src/workspace/file-open.ts")
+
+    assert ".replace(/^workspace\\//i, '')" in fs_tree
+    assert "const rawPath = payload.path || payload.file_path || payload.output_path || payload.target_path;" in task_refresh
+    assert "const path = normalizePath(rawPath || '') || rawPath;" in task_refresh
+    assert "WA.markExternalFileChange(refreshPath || path)" in task_runner
+    assert "reload(refreshPath || path, true)" in task_runner
+    assert "WA.clearExternalFileChange(resolvedPath)" in file_open
 
 
 def test_workspace_file_browser_folder_actions_are_available():
@@ -1383,6 +2034,41 @@ def test_workspace_task_stream_requests_include_csrf_token():
             start = idx + len(method_marker)
 
     assert direct_unsafe_fetches == []
+
+
+def test_workspace_visible_ai_runtime_actions_are_registered():
+    ai_review = _read("web/src/workspace/ai-review.ts")
+    pdf_viewer = _read("web/src/editors/pdf-viewer.ts")
+    state_js = _read("web/src/workspace/state.ts")
+    fs_actions = _read("web/src/workspace/fs-actions.ts")
+
+    assert "WA.sendCustomMessage" in pdf_viewer
+    assert "export function sendCustomMessage(text: string): void" in ai_review
+    assert "(window as any).WA.sendCustomMessage = sendCustomMessage" in ai_review
+
+    assert "WA.stopStream" in ai_review
+    assert "export function stopStream(): boolean" in ai_review
+    assert "(window as any).WA.stopStream = stopStream" in ai_review
+    assert "state._streamAbortCtrl" in ai_review
+    assert "ctrl.abort()" in ai_review
+
+    assert "WA?._removeOpenTabAfterFileDeleted" in fs_actions
+    assert "export async function _removeOpenTabAfterFileDeleted(path: string): Promise<boolean>" in state_js
+    assert "wa._removeOpenTabAfterFileDeleted = _removeOpenTabAfterFileDeleted" in state_js
+
+
+def test_workspace_file_row_actions_do_not_start_drag_fallback():
+    fs_tree = _read("web/src/workspace/fs-tree.ts")
+
+    assert 'const isolatedPressAttrs = \'draggable="false"' in fs_tree
+    assert 'onpointerdown="event.stopPropagation()"' in fs_tree
+    assert 'ondragstart="event.preventDefault();event.stopPropagation()"' in fs_tree
+    assert "function _isBrowserFileActionTarget(target: EventTarget | null): boolean" in fs_tree
+    assert "el.closest('.wa-file-actions, .wa-file-check, input, select, textarea, a')" in fs_tree
+    assert "if (_isBrowserFileActionTarget(event.target)) return;" in fs_tree
+
+
+# Section: HTTP safety, progress, resume, and browser selection.
 
 
 def test_http_wiring_exposes_csrf_refresh_endpoint():
