@@ -159,8 +159,13 @@ class KotoSheetsAPIClass {
     return String(cell);  // primitive: number, string, boolean
   }
 
-  /** Get current selection as tab-separated text. Returns null if nothing is selected or data is empty. */
-  getSelectionText() {
+  _valuesToTsv(values) {
+    return (Array.isArray(values) ? values : [])
+      .map(row => (Array.isArray(row) ? row : []).map(c => this._cellToStr(c)).join('\t'))
+      .join('\n');
+  }
+
+  _activeRange() {
     try {
       const wb = this._api.getActiveWorkbook();
       if (!wb) return null;
@@ -188,20 +193,62 @@ class KotoSheetsAPIClass {
         } catch (_) {}
       }
 
-      if (!range) return null;
+      return range;
+    } catch (e) {
+      console.warn('[KotoSheets] active range error', e);
+      return null;
+    }
+  }
 
+  /** Get current selection with address metadata and TSV text. */
+  getSelectionPayload() {
+    try {
+      const range = this._activeRange();
+      if (!range) return null;
       const values = range.getValues();
       if (!values || values.length === 0) return null;
 
-      // getValues() returns raw CellValue primitives (string|number|boolean|null),
-      // NOT ICellData objects. Do NOT use cell.v here.
-      const rows = values
-        .map(row => (Array.isArray(row) ? row : []).map(c => this._cellToStr(c)).join('\t'))
-        .filter(l => l.replace(/\t/g, '').trim() !== '');
+      const tsv = this._valuesToTsv(values);
+      if (!tsv.replace(/\t/g, '').trim()) return null;
 
-      if (rows.length === 0) return null;
-      console.log(`[KotoSheets] getSelectionText: ${rows.length} rows, notation=${typeof range.getA1Notation === 'function' ? range.getA1Notation() : '?'}`);
-      return rows.join('\n');
+      let sheetName = '';
+      let rangeA1 = '';
+      try { sheetName = typeof range.getSheetName === 'function' ? range.getSheetName() : ''; } catch (_) {}
+      try { rangeA1 = typeof range.getA1Notation === 'function' ? range.getA1Notation() : ''; } catch (_) {}
+
+      const rows = Array.isArray(values) ? values.length : 0;
+      const cols = values.reduce((max, row) => Math.max(max, Array.isArray(row) ? row.length : 0), 0);
+      const location = [sheetName, rangeA1].filter(Boolean).join('!');
+      const sizeLabel = rows > 0 && cols > 0 ? `${rows}行×${cols}列` : '';
+      const previewText = [location, sizeLabel].filter(Boolean).join(' · ') || '选中表格区域';
+      const aiText =
+        `[当前选中表格区域${location ? `: ${location}` : ''}${sizeLabel ? `, ${sizeLabel}` : ''}]\n` +
+        `数据格式: TSV（制表符分隔，换行分隔行）\n` +
+        `${tsv}\n`;
+
+      console.log(`[KotoSheets] getSelectionPayload: ${rows} rows x ${cols} cols, notation=${rangeA1 || '?'}`);
+      return {
+        kind: 'xlsx-range',
+        sheetName,
+        rangeA1,
+        rows,
+        cols,
+        values,
+        tsv,
+        aiText,
+        previewText,
+      };
+    } catch (e) {
+      console.warn('[KotoSheets] getSelectionPayload error', e);
+      return null;
+    }
+  }
+
+  /** Get current selection as tab-separated text. Returns null if nothing is selected or data is empty. */
+  getSelectionText() {
+    try {
+      const payload = this.getSelectionPayload();
+      return payload ? payload.tsv : null;
     } catch (e) {
       console.warn('[KotoSheets] getSelectionText error', e);
       return null;
