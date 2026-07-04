@@ -491,6 +491,27 @@ class TestLocalExecutorExecute:
         result = self._cls().execute("打开")
         assert result["success"] is False
 
+    def test_open_wechat_stays_outside_local_executor(self):
+        with patch("subprocess.Popen") as mock_popen, patch(
+            "os.startfile", create=True
+        ) as mock_startfile:
+            result = self._cls().execute("打开微信")
+        assert result["success"] is False
+        assert result["action"] == ""
+        assert "无法识别" in result["message"]
+        mock_popen.assert_not_called()
+        mock_startfile.assert_not_called()
+
+    def test_arbitrary_open_app_stays_blocked(self):
+        with patch("subprocess.Popen") as mock_popen, patch(
+            "os.startfile", create=True
+        ) as mock_startfile:
+            result = self._cls().execute("打开myapp")
+        assert result["success"] is False
+        assert result["action"] == ""
+        mock_popen.assert_not_called()
+        mock_startfile.assert_not_called()
+
 
 @pytest.mark.unit
 class TestLocalExecutorClipboard:

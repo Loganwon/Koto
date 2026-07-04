@@ -96,9 +96,6 @@ class LocalExecutor:
         if len(text_lower) > 30:
             return False
 
-        if cls._match_app_launch(text_lower):
-            return True
-
         action_keywords = [
             "时间",
             "几点",
@@ -143,10 +140,6 @@ class LocalExecutor:
         """执行系统操作"""
         text_lower = user_input.lower()
         result = {"success": False, "action": "", "message": "", "details": ""}
-
-        app_key = cls._match_app_launch(text_lower)
-        if app_key:
-            return cls.open_whitelisted_app(app_key)
 
         # === 系统时间/日期 ===
         if any(
