@@ -30,8 +30,10 @@ export function selectTheme(theme: string): void {
 }
 
 export function setUIZoom(zoomStr: string, suppressSave: boolean = false): void {
-  const zoom = parseFloat(zoomStr);
-  if (isNaN(zoom) || zoom <= 0) return;
+  const rawZoom = parseFloat(zoomStr);
+  if (isNaN(rawZoom) || rawZoom <= 0) return;
+  const zoom = Math.max(0.7, Math.min(1.5, rawZoom));
+  const normalizedZoom = zoom.toFixed(2).replace(/\.?0+$/, '');
   const pct = Math.round(zoom * 100);
   const root = document.documentElement;
   root.style.fontSize = `${16 * zoom}px`;
@@ -43,18 +45,18 @@ export function setUIZoom(zoomStr: string, suppressSave: boolean = false): void 
   document.querySelectorAll('.fs-preset-btn').forEach((btn: Element) => {
     (btn as HTMLElement).classList.toggle('active', parseInt((btn.textContent || '').trim()) === pct);
   });
+  localStorage.setItem('koto.uiZoom', normalizedZoom);
   // Persist to server (unless loading)
   if (!suppressSave) {
-    localStorage.setItem('koto.uiZoom', zoomStr);
     if (typeof (window as any).updateSetting === 'function') {
-      (window as any).updateSetting('appearance', 'ui_zoom', zoomStr);
+      (window as any).updateSetting('appearance', 'ui_zoom', normalizedZoom);
     }
   }
 }
 
 export function changeUIScale(delta: number): void {
   const currentZoom = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
-  const newZoom = Math.max(0.5, Math.min(2.0, currentZoom + delta));
+  const newZoom = Math.max(0.7, Math.min(1.5, currentZoom + delta));
   setUIZoom(newZoom.toFixed(2));
 }
 

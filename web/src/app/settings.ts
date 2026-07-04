@@ -73,8 +73,10 @@ export function applySettingsToUI(): void {
   const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
   if (localOnlyEl) { const localOnly = s.ai?.use_local_only === true; localOnlyEl.checked = localOnly; applyLocalOnlyMode(localOnly); }
 
-  const savedZoom = parseFloat(s.appearance?.ui_zoom || '1');
-  if (savedZoom && savedZoom !== 1) { if (typeof (window as any).setUIZoom === 'function') (window as any).setUIZoom(String(savedZoom), true); }
+  const savedZoom = parseFloat(String(s.appearance?.ui_zoom || '1'));
+  if (Number.isFinite(savedZoom) && typeof (window as any).setUIZoom === 'function') {
+    (window as any).setUIZoom(String(savedZoom), true);
+  }
 
   const proxyEnabledEl = document.getElementById('settingProxyEnabled') as HTMLInputElement | null;
   if (proxyEnabledEl) proxyEnabledEl.checked = s.proxy?.enabled !== false;
@@ -105,8 +107,6 @@ export function openSettings(): void {
   document.body.classList.add('settings-panel-open');
   markSidePanelOpen('settingsPanel');
   setActivityActive('navSettingsBtn');
-  const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
-  if (typeof (window as any).setUIZoom === 'function') (window as any).setUIZoom(String(savedZ), true);
 }
 
 export function closeSettings(): void {
@@ -177,14 +177,35 @@ export async function saveSettingsApiKey(): Promise<void> {
   }
 }
 
-export async function updateSetting(section: string, key: string, value: any): Promise<void> {
+function rememberSetting(category: string, key: string, value: any): void {
+  currentSettings = {
+    ...(currentSettings || {}),
+    [category]: {
+      ...(((currentSettings as any)?.[category]) || {}),
+      [key]: value,
+    },
+  };
+  (window as any).currentSettings = currentSettings;
+}
+
+export async function updateSetting(category: string, key: string, value: any): Promise<void> {
   try {
-    await csrfFetch('/api/settings', {
+    const response = await csrfFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section, key, value })
+      body: JSON.stringify({ category, key, value })
     });
-  } catch (e) { /* ignore */ }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || '设置保存失败');
+    }
+    rememberSetting(category, key, value);
+  } catch (e: any) {
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(e?.message || '设置保存失败', 'error', 2200);
+    }
+    console.warn('Failed to update setting', category, key, e);
+  }
 }
 
 export function applyLocalOnlyMode(enabled: boolean): void {

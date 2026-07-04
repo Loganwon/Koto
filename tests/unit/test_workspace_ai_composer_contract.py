@@ -43,6 +43,8 @@ def test_workspace_ai_composer_has_one_final_style_owner() -> None:
     assert "wa-session-list-send" not in html
     assert ".wa-ai-composer-input," in css
     assert "#wa-user-input {" in css
+    assert "min-height: 112px;" in css[css.index("#wa-user-input {") :]
+    assert "max-height: min(360px, 42vh);" in css[css.index("#wa-user-input {") :]
     assert "flex: 1 1 240px;" in css
     assert "flex: 0 0 auto;" in css[css.index(".wa-ctx-drop-hint svg"):]
     assert "@media (max-width: 860px)" in css
@@ -153,6 +155,7 @@ def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
     bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert "export function resizeWorkspaceAiComposer" in composer
+    assert "fallbackMaxHeight: 360" in composer
     assert "requestAnimationFrame(() => applyWorkspaceAiComposerResize(input))" in composer
     assert "pendingComposerResizeFrames" in composer
     assert "export function mountWorkspaceAiComposer" in composer

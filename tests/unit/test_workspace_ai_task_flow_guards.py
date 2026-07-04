@@ -1682,6 +1682,24 @@ def test_mcp_frontend_action_exposes_stable_task_result_evidence():
     assert "evidence.overlayClip = _elementViewportClip(overlay, 4)" in frontend_observer
 
 
+def test_mcp_frontend_submit_prompt_targets_unified_workspace_composer():
+    frontend_observer = _read("web/src/mcp/frontend-observer.ts")
+
+    assert "function _ensureUnifiedAiComposerVisible()" in frontend_observer
+    assert "wa.showAiWorkspace();" in frontend_observer
+    assert "function _assistantComposerTargets()" in frontend_observer
+    assert "_findFirstVisible(['#wa-user-input'])" in frontend_observer
+    assert "_findFirstVisible(['#wa-send-btn'])" in frontend_observer
+    assert "_findFirstVisible(['#messageInput'])" in frontend_observer
+    assert "_findFirstVisible(['#sendBtn'])" in frontend_observer
+    submit_block = frontend_observer[
+        frontend_observer.index("if (action.action === 'submit_prompt')") :
+    ]
+    assert "'textarea'" not in submit_block
+    assert "'[contenteditable=\"true\"]'" not in submit_block
+    assert "legacyFallback: targets.legacy" in submit_block
+
+
 def test_workspace_file_row_handlers_keep_drag_fallback_owner():
     fs_tree = _read("web/src/workspace/fs-tree.ts")
     fs_actions = _read("web/src/workspace/fs-actions.ts")

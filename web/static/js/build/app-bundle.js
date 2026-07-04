@@ -3655,9 +3655,9 @@
       localOnlyEl.checked = localOnly;
       applyLocalOnlyMode(localOnly);
     }
-    const savedZoom = parseFloat(s.appearance?.ui_zoom || "1");
-    if (savedZoom && savedZoom !== 1) {
-      if (typeof window.setUIZoom === "function") window.setUIZoom(String(savedZoom), true);
+    const savedZoom = parseFloat(String(s.appearance?.ui_zoom || "1"));
+    if (Number.isFinite(savedZoom) && typeof window.setUIZoom === "function") {
+      window.setUIZoom(String(savedZoom), true);
     }
     const proxyEnabledEl = document.getElementById("settingProxyEnabled");
     if (proxyEnabledEl) proxyEnabledEl.checked = s.proxy?.enabled !== false;
@@ -3684,8 +3684,6 @@
     document.body.classList.add("settings-panel-open");
     markSidePanelOpen("settingsPanel");
     setActivityActive("navSettingsBtn");
-    const savedZ = parseFloat(localStorage.getItem("koto.uiZoom") || "1");
-    if (typeof window.setUIZoom === "function") window.setUIZoom(String(savedZ), true);
   }
   function closeSettings() {
     const panel = document.getElementById("settingsPanel");
@@ -3772,14 +3770,33 @@
       }
     }
   }
-  async function updateSetting(section, key, value) {
+  function rememberSetting(category, key, value) {
+    currentSettings = {
+      ...currentSettings || {},
+      [category]: {
+        ...currentSettings?.[category] || {},
+        [key]: value
+      }
+    };
+    window.currentSettings = currentSettings;
+  }
+  async function updateSetting(category, key, value) {
     try {
-      await csrfFetch("/api/settings", {
+      const response = await csrfFetch("/api/settings", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ section, key, value })
+        body: JSON.stringify({ category, key, value })
       });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) {
+        throw new Error(data.error || "设置保存失败");
+      }
+      rememberSetting(category, key, value);
     } catch (e) {
+      if (typeof window.showNotification === "function") {
+        window.showNotification(e?.message || "设置保存失败", "error", 2200);
+      }
+      console.warn("Failed to update setting", category, key, e);
     }
   }
   function applyLocalOnlyMode(enabled) {
@@ -5153,8 +5170,10 @@
     }
   }
   function setUIZoom(zoomStr, suppressSave = false) {
-    const zoom = parseFloat(zoomStr);
-    if (isNaN(zoom) || zoom <= 0) return;
+    const rawZoom = parseFloat(zoomStr);
+    if (isNaN(rawZoom) || rawZoom <= 0) return;
+    const zoom = Math.max(0.7, Math.min(1.5, rawZoom));
+    const normalizedZoom = zoom.toFixed(2).replace(/\.?0+$/, "");
     const pct = Math.round(zoom * 100);
     const root = document.documentElement;
     root.style.fontSize = `${16 * zoom}px`;
@@ -5165,16 +5184,16 @@
     document.querySelectorAll(".fs-preset-btn").forEach((btn) => {
       btn.classList.toggle("active", parseInt((btn.textContent || "").trim()) === pct);
     });
+    localStorage.setItem("koto.uiZoom", normalizedZoom);
     if (!suppressSave) {
-      localStorage.setItem("koto.uiZoom", zoomStr);
       if (typeof window.updateSetting === "function") {
-        window.updateSetting("appearance", "ui_zoom", zoomStr);
+        window.updateSetting("appearance", "ui_zoom", normalizedZoom);
       }
     }
   }
   function changeUIScale(delta) {
     const currentZoom = parseFloat(localStorage.getItem("koto.uiZoom") || "1");
-    const newZoom = Math.max(0.5, Math.min(2, currentZoom + delta));
+    const newZoom = Math.max(0.7, Math.min(1.5, currentZoom + delta));
     setUIZoom(newZoom.toFixed(2));
   }
   window.applyTheme = applyTheme;

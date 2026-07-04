@@ -21,7 +21,7 @@ const COMPOSERS: Record<WorkspaceAiComposerKind, ComposerConfig> = {
     hostId: 'wa-chat-composer-host',
     placeholder: '输入问题，或让 Koto 处理当前文件',
     sendTitle: '发送',
-    fallbackMaxHeight: 180,
+    fallbackMaxHeight: 360,
   },
   sessionList: {
     inputId: 'wa-user-input',
@@ -29,7 +29,7 @@ const COMPOSERS: Record<WorkspaceAiComposerKind, ComposerConfig> = {
     hostId: 'wa-session-list-composer-host',
     placeholder: '输入问题，新建对话',
     sendTitle: '发送并新建对话',
-    fallbackMaxHeight: 180,
+    fallbackMaxHeight: 360,
   },
 };
 

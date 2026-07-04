@@ -360,6 +360,32 @@
     }
     return null;
   }
+  function _ensureUnifiedAiComposerVisible() {
+    const existing = _findFirstVisible(["#wa-user-input"]);
+    if (existing) return existing;
+    const wa2 = window.WA;
+    if (wa2 && typeof wa2.showAiWorkspace === "function") {
+      try {
+        wa2.showAiWorkspace();
+      } catch (_) {
+      }
+    } else {
+      const panelTarget = _findFirstVisible(["#navAiSessionsBtn", '[data-action="show-ai-workspace"]']);
+      if (panelTarget) panelTarget.click();
+    }
+    return _findFirstVisible(["#wa-user-input"]);
+  }
+  function _assistantComposerTargets() {
+    const input = _ensureUnifiedAiComposerVisible();
+    if (input) {
+      return { input, send: _findFirstVisible(["#wa-send-btn"]), legacy: false };
+    }
+    return {
+      input: _findFirstVisible(["#messageInput"]),
+      send: _findFirstVisible(["#sendBtn"]),
+      legacy: true
+    };
+  }
   function _selectedTexts(selector, limit = 10) {
     return Array.from(document.querySelectorAll(selector)).slice(0, limit).map((item) => _visibleText(item, 200)).filter(Boolean);
   }
@@ -1443,16 +1469,18 @@
       return { target: _targetSummary(target2), valueLength: value.length };
     }
     if (action.action === "submit_prompt") {
-      const input = _findFirstVisible(["#wa-user-input", 'textarea[name="message"]', "textarea", '[contenteditable="true"]']);
+      const targets = _assistantComposerTargets();
+      const input = targets.input;
       if (!input) throw new Error("Assistant prompt input not found");
       const prompt = action.value || action.text || "";
       _setElementValue(input, prompt, false);
-      const send = _findFirstVisible(["#wa-send-btn", '[data-action="send"]', 'button[aria-label="发送"]', 'button[title="发送"]']);
+      const send = targets.send;
       if (!send) throw new Error("Assistant send button not found");
       send.click();
       return {
         input: _targetSummary(input),
         send: _targetSummary(send),
+        legacyFallback: targets.legacy,
         promptLength: prompt.length,
         submitted: true
       };
@@ -5511,7 +5539,7 @@ ${f.warning}` : f.path;
       hostId: "wa-chat-composer-host",
       placeholder: "输入问题，或让 Koto 处理当前文件",
       sendTitle: "发送",
-      fallbackMaxHeight: 180
+      fallbackMaxHeight: 360
     },
     sessionList: {
       inputId: "wa-user-input",
@@ -5519,7 +5547,7 @@ ${f.warning}` : f.path;
       hostId: "wa-session-list-composer-host",
       placeholder: "输入问题，新建对话",
       sendTitle: "发送并新建对话",
-      fallbackMaxHeight: 180
+      fallbackMaxHeight: 360
     }
   };
   const pendingComposerResizeFrames = /* @__PURE__ */ new WeakMap();

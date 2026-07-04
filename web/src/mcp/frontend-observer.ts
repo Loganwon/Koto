@@ -464,6 +464,31 @@ function _findFirstVisible(selectors: string[]): Element | null {
   return null;
 }
 
+function _ensureUnifiedAiComposerVisible(): Element | null {
+  const existing = _findFirstVisible(['#wa-user-input']);
+  if (existing) return existing;
+  const wa = (window as any).WA;
+  if (wa && typeof wa.showAiWorkspace === 'function') {
+    try { wa.showAiWorkspace(); } catch (_) { /* keep fallback below */ }
+  } else {
+    const panelTarget = _findFirstVisible(['#navAiSessionsBtn', '[data-action="show-ai-workspace"]']);
+    if (panelTarget) (panelTarget as HTMLElement).click();
+  }
+  return _findFirstVisible(['#wa-user-input']);
+}
+
+function _assistantComposerTargets(): { input: Element | null; send: Element | null; legacy: boolean } {
+  const input = _ensureUnifiedAiComposerVisible();
+  if (input) {
+    return { input, send: _findFirstVisible(['#wa-send-btn']), legacy: false };
+  }
+  return {
+    input: _findFirstVisible(['#messageInput']),
+    send: _findFirstVisible(['#sendBtn']),
+    legacy: true,
+  };
+}
+
 function _selectedTexts(selector: string, limit = 10): string[] {
   return Array.from(document.querySelectorAll(selector))
     .slice(0, limit)
@@ -1662,16 +1687,18 @@ async function _executeFrontendAction(action: FrontendAction): Promise<Record<st
     return { target: _targetSummary(target), valueLength: value.length };
   }
   if (action.action === 'submit_prompt') {
-    const input = _findFirstVisible(['#wa-user-input', 'textarea[name="message"]', 'textarea', '[contenteditable="true"]']);
+    const targets = _assistantComposerTargets();
+    const input = targets.input;
     if (!input) throw new Error('Assistant prompt input not found');
     const prompt = action.value || action.text || '';
     _setElementValue(input, prompt, false);
-    const send = _findFirstVisible(['#wa-send-btn', '[data-action="send"]', 'button[aria-label="发送"]', 'button[title="发送"]']);
+    const send = targets.send;
     if (!send) throw new Error('Assistant send button not found');
     (send as HTMLElement).click();
     return {
       input: _targetSummary(input),
       send: _targetSummary(send),
+      legacyFallback: targets.legacy,
       promptLength: prompt.length,
       submitted: true,
     };
