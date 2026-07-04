@@ -21,10 +21,10 @@ python scripts\audit_code_baseline.py --json
 | `app/core/agent` recursive `.py` files | 147 |
 | Production TODO/FIXME count | 11 |
 | Production files >= 1500 lines | 33 |
-| Lines inside files >= 1500 lines | 94752 |
+| Lines inside files >= 1500 lines | 94705 |
 | Production files >= 2000 lines | 18 |
-| Lines inside files >= 2000 lines | 69606 |
-| `workspace-bundle.js` size | 1128117 bytes |
+| Lines inside files >= 2000 lines | 69559 |
+| `workspace-bundle.js` size | 1128127 bytes |
 | `web/static/vendor` size | 6510883 bytes |
 
 The working tree is already mid-refactor. Treat these numbers as the current
@@ -57,7 +57,7 @@ Top hotspots from the current audit:
 | `web/app.py` | 3501 | Runtime-context shrink |
 | `web/document_feedback.py` | 3375 | Document feedback service split |
 | `web/tiptap-editor/docx-extensions.js` | 3325 | DOCX extension packaging |
-| `web/src/workspace/task-runner.ts` | 2696 | Task presentation split |
+| `web/src/workspace/task-runner.ts` | 2649 | Task presentation split |
 
 ## Deletion Rules
 
