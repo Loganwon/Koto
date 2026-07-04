@@ -233,7 +233,9 @@ def readonly_run_python_write_block_message(
     if not code.strip():
         return ""
     has_strong_write = any(pattern.search(code) for pattern in strong_write_patterns)
-    has_artifact_write = any(pattern.search(code) for pattern in artifact_write_patterns)
+    has_artifact_write = any(
+        pattern.search(code) for pattern in artifact_write_patterns
+    )
     if not has_strong_write and not (explicit_readonly and has_artifact_write):
         return ""
     return (

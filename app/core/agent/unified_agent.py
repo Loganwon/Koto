@@ -211,7 +211,10 @@ class UnifiedAgent(Agent):
             filtered = [t for t in tools if t.get("name") in executor_whitelist]
             if filtered:
                 tools = filtered
-                logger.debug("[UnifiedAgent] executor_tools filtered: %s", [t.get("name") for t in tools])
+                logger.debug(
+                    "[UnifiedAgent] executor_tools filtered: %s",
+                    [t.get("name") for t in tools],
+                )
 
         if skill_id:
             try:
@@ -225,7 +228,9 @@ class UnifiedAgent(Agent):
                         tools = et_filtered
                         logger.debug(
                             "[UnifiedAgent] Skill '%s' executor_tools: %d -> %d",
-                            skill_id, len(all_tools), len(tools),
+                            skill_id,
+                            len(all_tools),
+                            len(tools),
                         )
             except Exception as e:
                 logger.debug("[UnifiedAgent] executor_tools filter skip: %s", e)
@@ -353,7 +358,9 @@ class UnifiedAgent(Agent):
             _hook_ctx = None
             _hook_mgr = None
         except Exception as _hk_err:
-            logger.warning(f"[UnifiedAgent] pre_message 钩子异常: {_hk_err}", exc_info=True)
+            logger.warning(
+                f"[UnifiedAgent] pre_message 钩子异常: {_hk_err}", exc_info=True
+            )
             _hook_ctx = None
             _hook_mgr = None
 
@@ -371,7 +378,9 @@ class UnifiedAgent(Agent):
 
         # ── Skill 注入：将启用的 Skills 注入到 system_instruction ──────────────
         _effective_instruction = self.base_system_instruction
-        _auto_skill_ids: list = self._resolve_auto_skills(safe_input, _task_type or "CHAT")
+        _auto_skill_ids: list = self._resolve_auto_skills(
+            safe_input, _task_type or "CHAT"
+        )
 
         try:
             from app.core.skills.skill_manager import SkillManager
@@ -544,7 +553,9 @@ class UnifiedAgent(Agent):
                     _pub("THOUGHT", safe_thought_text)
                     assistant_turn = {"role": "model", "content": content_text}
                     if response.get("reasoning_content"):
-                        assistant_turn["reasoning_content"] = response.get("reasoning_content")
+                        assistant_turn["reasoning_content"] = response.get(
+                            "reasoning_content"
+                        )
                     current_history.append(assistant_turn)
 
                 if not tool_calls:
@@ -827,9 +838,15 @@ class UnifiedAgent(Agent):
                         tool_name=tool_name,
                         tool_args=tool_args,
                     )
-                    tool_turn = {"role": "model", "content": "", "tool_calls": [tool_call]}
+                    tool_turn = {
+                        "role": "model",
+                        "content": "",
+                        "tool_calls": [tool_call],
+                    }
                     if response.get("reasoning_content"):
-                        tool_turn["reasoning_content"] = response.get("reasoning_content")
+                        tool_turn["reasoning_content"] = response.get(
+                            "reasoning_content"
+                        )
                     current_history.append(tool_turn)
 
                 # 2. 并行执行所有工具（多工具时可大幅减少等待时间）

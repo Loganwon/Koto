@@ -69,7 +69,7 @@ def with_runtime_context(
 
 
 def step_result_file_changes(
-    file_changes: list[dict[str, Any]]
+    file_changes: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     items: list[dict[str, Any]] = []
     for change in file_changes[:8]:

@@ -1948,7 +1948,9 @@ def upload_skill_template():
         if runtime_entry:
             sm.update_runtime_fields(
                 skill_id,
-                template_path=str(Path("config") / "skill_templates" / skill_id / "template.docx"),
+                template_path=str(
+                    Path("config") / "skill_templates" / skill_id / "template.docx"
+                ),
                 bound_tools=list(
                     set(runtime_entry.get("bound_tools", []))
                     | {"fill_skill_template", "get_template_fields"}
@@ -2044,7 +2046,9 @@ def delete_skill_template(skill_id: str):
                 skill_id,
                 remove_fields=["template_path"],
                 bound_tools=[
-                    t for t in bt if t not in {"fill_skill_template", "get_template_fields"}
+                    t
+                    for t in bt
+                    if t not in {"fill_skill_template", "get_template_fields"}
                 ],
             )
 

@@ -13,21 +13,34 @@ def test_add_pptx_slides_accepts_list_content_and_bullet_dicts(tmp_path):
     slide.shapes.title.text = "原始页"
     presentation.save(pptx_path)
 
-    payload = json.loads(add_pptx_slides(
-        str(pptx_path),
-        slides=[
-            {"title": "总结一", "content": ["市场需求明确", "替代成本是关键"]},
-            {"title": {"text": "总结二"}, "bullets": [{"text": "本地文件交付"}, {"content": "高质量生成"}]},
-            {"title": "总结三", "content": {"points": ["下一步做规格核验", "确认客户使用场景"]}},
-        ],
-    ))
+    payload = json.loads(
+        add_pptx_slides(
+            str(pptx_path),
+            slides=[
+                {"title": "总结一", "content": ["市场需求明确", "替代成本是关键"]},
+                {
+                    "title": {"text": "总结二"},
+                    "bullets": [{"text": "本地文件交付"}, {"content": "高质量生成"}],
+                },
+                {
+                    "title": "总结三",
+                    "content": {"points": ["下一步做规格核验", "确认客户使用场景"]},
+                },
+            ],
+        )
+    )
 
     assert payload["success"] is True
     assert payload["slides_added"] == 3
     assert payload["total_slides"] == 4
 
     saved = Presentation(str(pptx_path))
-    all_text = "\n".join(shape.text for slide in saved.slides for shape in slide.shapes if hasattr(shape, "text"))
+    all_text = "\n".join(
+        shape.text
+        for slide in saved.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text")
+    )
     assert "总结一" in all_text
     assert "市场需求明确" in all_text
     assert "本地文件交付" in all_text
@@ -50,11 +63,13 @@ def test_design_pptx_theme_layout_applies_theme_without_changing_slide_count(tmp
         slide.placeholders[1].text = body
     presentation.save(pptx_path)
 
-    payload = json.loads(design_pptx_theme_layout(
-        str(pptx_path),
-        style_brief="科技感但适合商业 BP",
-        density="compact",
-    ))
+    payload = json.loads(
+        design_pptx_theme_layout(
+            str(pptx_path),
+            style_brief="科技感但适合商业 BP",
+            density="compact",
+        )
+    )
 
     assert payload["success"] is True
     assert payload["operation"] == "design_pptx_theme_layout"
@@ -66,7 +81,12 @@ def test_design_pptx_theme_layout_applies_theme_without_changing_slide_count(tmp
 
     saved = Presentation(str(pptx_path))
     assert len(saved.slides) == 2
-    all_text = "\n".join(shape.text for slide in saved.slides for shape in slide.shapes if hasattr(shape, "text"))
+    all_text = "\n".join(
+        shape.text
+        for slide in saved.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text")
+    )
     assert "产品路线" in all_text
     assert "下一步行动" in all_text
     assert any(
@@ -88,10 +108,12 @@ def test_add_pptx_slides_clears_readonly_target_before_save(tmp_path):
     presentation.save(pptx_path)
     pptx_path.chmod(stat.S_IREAD)
 
-    payload = json.loads(add_pptx_slides(
-        str(pptx_path),
-        slides=[{"title": "总结页", "content": ["第一点", "第二点"]}],
-    ))
+    payload = json.loads(
+        add_pptx_slides(
+            str(pptx_path),
+            slides=[{"title": "总结页", "content": ["第一点", "第二点"]}],
+        )
+    )
 
     assert payload["success"] is True
     assert payload["slides_added"] == 1
@@ -99,6 +121,11 @@ def test_add_pptx_slides_clears_readonly_target_before_save(tmp_path):
 
     saved = Presentation(str(pptx_path))
     assert len(saved.slides) == 2
-    all_text = "\n".join(shape.text for slide in saved.slides for shape in slide.shapes if hasattr(shape, "text"))
+    all_text = "\n".join(
+        shape.text
+        for slide in saved.slides
+        for shape in slide.shapes
+        if hasattr(shape, "text")
+    )
     assert "总结页" in all_text
     assert "第一点" in all_text

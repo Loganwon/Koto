@@ -43,9 +43,7 @@ def docx_compare_annotate_guidance(enabled: bool, docx_files: list[str]) -> str:
 def followup_guidance(followup_context: dict[str, Any]) -> str:
     if str(followup_context.get("kind") or "").strip() != "review_last_task":
         return ""
-    followup_action = str(
-        followup_context.get("followup_action") or ""
-    ).strip().lower()
+    followup_action = str(followup_context.get("followup_action") or "").strip().lower()
     if followup_action == "apply":
         return (
             "当前输入是用户要求把上一轮文件任务中的建议直接应用到文件。这不是一个无关的新任务，而是同一任务的写回续跑。\n"
@@ -77,9 +75,7 @@ def followup_guidance(followup_context: dict[str, Any]) -> str:
 def followup_prompt_prefix(followup_context: dict[str, Any]) -> str:
     if str(followup_context.get("kind") or "").strip() != "review_last_task":
         return "请完成这个文件任务。"
-    followup_action = str(
-        followup_context.get("followup_action") or ""
-    ).strip().lower()
+    followup_action = str(followup_context.get("followup_action") or "").strip().lower()
     if followup_action == "apply":
         return (
             "用户要求把上一轮文件任务中已经给出的建议直接应用到目标文件。"

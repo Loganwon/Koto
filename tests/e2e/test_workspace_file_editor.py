@@ -742,8 +742,12 @@ class TestWorkspaceAssistantJsSource:
         root = Path(__file__).parents[2]
         return "\n".join(
             [
-                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(encoding="utf-8"),
-                (root / "web" / "src" / "workspace" / "infrastructure.ts").read_text(encoding="utf-8"),
+                (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(
+                    encoding="utf-8"
+                ),
+                (root / "web" / "src" / "workspace" / "infrastructure.ts").read_text(
+                    encoding="utf-8"
+                ),
             ]
         )
 
@@ -864,38 +868,60 @@ class TestWorkspaceAssistantJsSource:
         fn_start = self.src.find("openRecentFile = async")
         assert fn_start >= 0, "WA.openRecentFile bridge function not found"
         fn_body = self.src[fn_start : fn_start + 2200]
-        assert "openWorkspaceFile" in fn_body, (
-            "WA.openRecentFile must route workspace-relative paths back through openWorkspaceFile"
-        )
-        assert "openBrowserFile" in fn_body, (
-            "WA.openRecentFile must route absolute paths back through openBrowserFile"
-        )
-        assert "state._workspacePath" in fn_body, (
-            "WA.openRecentFile must compare against the active workspace root before routing"
-        )
+        assert (
+            "openWorkspaceFile" in fn_body
+        ), "WA.openRecentFile must route workspace-relative paths back through openWorkspaceFile"
+        assert (
+            "openBrowserFile" in fn_body
+        ), "WA.openRecentFile must route absolute paths back through openBrowserFile"
+        assert (
+            "state._workspacePath" in fn_body
+        ), "WA.openRecentFile must compare against the active workspace root before routing"
 
     def test_file_type_icons_are_mapped_to_distinct_svgs(self):
         """Workspace file list should keep colored Office-style icon mappings for common file types."""
         src = self.src
-        assert "function _waBrandFileSvg(label: string" in src, "Brand-style file SVG helper should exist"
-        assert "export const _WORD_FILE_SVG" in src, "Word files should have a dedicated colored icon definition"
-        assert "export const _EXCEL_FILE_SVG" in src, "Excel files should have a dedicated colored icon definition"
-        assert "export const _POWERPOINT_FILE_SVG" in src, "PowerPoint files should have a dedicated colored icon definition"
-        assert "export const _PDF_SVG" in src, "PDF should have a dedicated colored icon definition"
+        assert (
+            "function _waBrandFileSvg(label: string" in src
+        ), "Brand-style file SVG helper should exist"
+        assert (
+            "export const _WORD_FILE_SVG" in src
+        ), "Word files should have a dedicated colored icon definition"
+        assert (
+            "export const _EXCEL_FILE_SVG" in src
+        ), "Excel files should have a dedicated colored icon definition"
+        assert (
+            "export const _POWERPOINT_FILE_SVG" in src
+        ), "PowerPoint files should have a dedicated colored icon definition"
+        assert (
+            "export const _PDF_SVG" in src
+        ), "PDF should have a dedicated colored icon definition"
         assert "#185ABD" in src, "Word icon should keep Office blue branding"
         assert "#107C41" in src, "Excel icon should keep Office green branding"
         assert "#D24726" in src, "PowerPoint icon should keep Office orange branding"
         assert "#E53935" in src, "PDF icon should keep red branding"
         assert "docx: _WORD_FILE_SVG" in src, "DOCX extension should map to Word icon"
         assert "xlsx: _EXCEL_FILE_SVG" in src, "XLSX extension should map to Excel icon"
-        assert "pptx: _POWERPOINT_FILE_SVG" in src, "PPTX extension should map to PowerPoint icon"
+        assert (
+            "pptx: _POWERPOINT_FILE_SVG" in src
+        ), "PPTX extension should map to PowerPoint icon"
         assert "pdf: _PDF_SVG" in src, "PDF extension should map to PDF icon"
-        assert src.count("export const _PDF_SVG") == 1, "PDF icon constant must not be declared twice"
-        assert src.count("export const _TEXT_SVG") == 1, "Text icon constant must not be declared twice"
-        assert src.count("export const _CODE_SVG") == 1, "Code icon constant must not be declared twice"
-        assert src.count("export const _IMAGE_SVG") == 1, "Image icon constant must not be declared twice"
+        assert (
+            src.count("export const _PDF_SVG") == 1
+        ), "PDF icon constant must not be declared twice"
+        assert (
+            src.count("export const _TEXT_SVG") == 1
+        ), "Text icon constant must not be declared twice"
+        assert (
+            src.count("export const _CODE_SVG") == 1
+        ), "Code icon constant must not be declared twice"
+        assert (
+            src.count("export const _IMAGE_SVG") == 1
+        ), "Image icon constant must not be declared twice"
 
-    def test_reload_file_by_path_routes_workspace_relative_paths_through_open_file_by_path(self):
+    def test_reload_file_by_path_routes_workspace_relative_paths_through_open_file_by_path(
+        self,
+    ):
         """
         Task-stream refresh uses WA.reloadFileByPath(). When file-change events
         carry workspace-relative paths, reloadFileByPath must still route them
@@ -906,9 +932,9 @@ class TestWorkspaceAssistantJsSource:
         assert fn_start >= 0, "WA.reloadFileByPath function not found"
         fn_body = self.src[fn_start : fn_start + 2200]
         assert "return openWorkspaceFile(filePath, supported)" in fn_body
-        assert "_isAbsolutePath" in fn_body, (
-            "WA.reloadFileByPath must treat non-absolute file-change paths as workspace-relative"
-        )
-        assert "openBrowserFile(filePath, supported)" in fn_body, (
-            "WA.reloadFileByPath must still support absolute-path refreshes for external files"
-        )
+        assert (
+            "_isAbsolutePath" in fn_body
+        ), "WA.reloadFileByPath must treat non-absolute file-change paths as workspace-relative"
+        assert (
+            "openBrowserFile(filePath, supported)" in fn_body
+        ), "WA.reloadFileByPath must still support absolute-path refreshes for external files"

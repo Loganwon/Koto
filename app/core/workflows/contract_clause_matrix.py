@@ -79,7 +79,9 @@ class ContractClauseMatrix(WorkflowExecutor):
         # ── 构建条款类型列表 ──────────────────────────────────────────
         clause_types = list(_DEFAULT_CLAUSE_TYPES)
         if custom:
-            extras = [c.strip() for c in custom.replace("，", ",").split(",") if c.strip()]
+            extras = [
+                c.strip() for c in custom.replace("，", ",").split(",") if c.strip()
+            ]
             clause_types.extend(extras)
 
         # ── Step 1: 逐份解析 + LLM 提取 ─────────────────────────────
@@ -95,10 +97,21 @@ class ContractClauseMatrix(WorkflowExecutor):
             text = self.parse_file(fpath)
             if not text.strip():
                 logger.warning("[ClauseMatrix] 文件无内容: %s", fpath)
-                all_rows.append({ct: {"clause_text": "解析失败", "risk_level": "none", "notes": ""} for ct in clause_types})
+                all_rows.append(
+                    {
+                        ct: {
+                            "clause_text": "解析失败",
+                            "risk_level": "none",
+                            "notes": "",
+                        }
+                        for ct in clause_types
+                    }
+                )
                 continue
 
-            extracted = self._extract_clauses(text[:_MAX_DOC_CHARS], clause_types, model_mode)
+            extracted = self._extract_clauses(
+                text[:_MAX_DOC_CHARS], clause_types, model_mode
+            )
             all_rows.append(extracted)
 
         yield sse_step_done("extract", f"📑 已分析 {len(all_rows)} 份合同")
@@ -115,15 +128,23 @@ class ContractClauseMatrix(WorkflowExecutor):
 
         # ── 输出 ─────────────────────────────────────────────────────
         risk_count = sum(
-            1 for row in all_rows for ct in clause_types
+            1
+            for row in all_rows
+            for ct in clause_types
             if row.get(ct, {}).get("risk_level") in ("high", "critical")
         )
-        yield sse_output("xlsx_data", workbook, f"条款矩阵（{len(filenames)} 份合同，{risk_count} 处高风险）")
+        yield sse_output(
+            "xlsx_data",
+            workbook,
+            f"条款矩阵（{len(filenames)} 份合同，{risk_count} 处高风险）",
+        )
         yield sse_output("markdown", summary, "风险摘要")
 
     # ── 辅助方法 ──────────────────────────────────────────────────────
 
-    def _extract_clauses(self, text: str, clause_types: list[str], model_mode: str) -> dict:
+    def _extract_clauses(
+        self, text: str, clause_types: list[str], model_mode: str
+    ) -> dict:
         """调用 LLM 提取各条款。"""
         types_json = json.dumps(clause_types, ensure_ascii=False)
         prompt = (
@@ -131,14 +152,26 @@ class ContractClauseMatrix(WorkflowExecutor):
             f"合同内容：\n---\n{text}\n---"
         )
         try:
-            result = self.llm_json(prompt, system=_EXTRACT_SYSTEM, model_mode=model_mode)
+            result = self.llm_json(
+                prompt, system=_EXTRACT_SYSTEM, model_mode=model_mode
+            )
             if isinstance(result, dict):
-                return {ct: result.get(ct, {"clause_text": "未找到", "risk_level": "none", "notes": ""}) for ct in clause_types}
+                return {
+                    ct: result.get(
+                        ct, {"clause_text": "未找到", "risk_level": "none", "notes": ""}
+                    )
+                    for ct in clause_types
+                }
         except Exception as e:
             logger.warning("[ClauseMatrix] LLM 提取失败: %s", e)
-        return {ct: {"clause_text": "提取失败", "risk_level": "none", "notes": ""} for ct in clause_types}
+        return {
+            ct: {"clause_text": "提取失败", "risk_level": "none", "notes": ""}
+            for ct in clause_types
+        }
 
-    def _build_workbook(self, clause_types: list[str], filenames: list[str], rows: list[dict]) -> dict:
+    def _build_workbook(
+        self, clause_types: list[str], filenames: list[str], rows: list[dict]
+    ) -> dict:
         """构建 Univer IWorkbookData。行=合同，列=条款类型。"""
         wb_id = str(_uuid.uuid4())[:8]
         sheet_id = "clause_matrix"
@@ -146,10 +179,10 @@ class ContractClauseMatrix(WorkflowExecutor):
         # 风险等级 → 背景色
         risk_colors = {
             "critical": "#ffcdd2",  # 红
-            "high": "#ffe0b2",      # 橙
-            "medium": "#fff9c4",    # 黄
-            "low": "#c8e6c9",       # 绿
-            "none": "#f5f5f5",      # 灰
+            "high": "#ffe0b2",  # 橙
+            "medium": "#fff9c4",  # 黄
+            "low": "#c8e6c9",  # 绿
+            "none": "#f5f5f5",  # 灰
         }
 
         all_cols = ["合同文件"] + clause_types
@@ -205,10 +238,18 @@ class ContractClauseMatrix(WorkflowExecutor):
             "styles": {},
         }
 
-    def _build_summary(self, clause_types: list[str], filenames: list[str], rows: list[dict]) -> str:
+    def _build_summary(
+        self, clause_types: list[str], filenames: list[str], rows: list[dict]
+    ) -> str:
         """生成 Markdown 风险摘要。"""
         lines = ["# 合同条款风险摘要\n"]
-        risk_icon = {"critical": "🔴", "high": "🟠", "medium": "🟡", "low": "🟢", "none": "⚪"}
+        risk_icon = {
+            "critical": "🔴",
+            "high": "🟠",
+            "medium": "🟡",
+            "low": "🟢",
+            "none": "⚪",
+        }
 
         for r, (fname, row) in enumerate(zip(filenames, rows)):
             lines.append(f"\n## {fname}\n")

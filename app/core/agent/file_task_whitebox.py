@@ -24,7 +24,11 @@ def _clean_text(value: Any, limit: int = 0) -> str:
 
 
 def _tool_name(definition: Dict[str, Any]) -> str:
-    function_payload = definition.get("function") if isinstance(definition.get("function"), dict) else {}
+    function_payload = (
+        definition.get("function")
+        if isinstance(definition.get("function"), dict)
+        else {}
+    )
     return str(definition.get("name") or function_payload.get("name") or "").strip()
 
 
@@ -34,11 +38,25 @@ def _target_type(request: FileTaskRequest, files: Sequence[FileTaskFile]) -> str
         return candidate
     for file_info in files:
         if file_info.target:
-            candidate = str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")).lower().strip()
+            candidate = (
+                str(
+                    file_info.type
+                    or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
+                )
+                .lower()
+                .strip()
+            )
             if candidate:
                 return candidate
     for file_info in files:
-        candidate = str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")).lower().strip()
+        candidate = (
+            str(
+                file_info.type
+                or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
+            )
+            .lower()
+            .strip()
+        )
         if candidate:
             return candidate
     return ""
@@ -62,7 +80,9 @@ class WhiteboxExecutionPlan:
             "source": self.source,
         }
         if self.risks:
-            payload["risks"] = [str(item) for item in self.risks if str(item or "").strip()]
+            payload["risks"] = [
+                str(item) for item in self.risks if str(item or "").strip()
+            ]
         return payload
 
     def why_for_tool(self, tool_name: str) -> str:
@@ -115,27 +135,44 @@ def build_recipe_skeleton(
     recipe_match = select_task_recipe(request, files, write_intent=write_intent)
     allowed_tools = [_tool_name(definition) for definition in tool_defs]
     allowed_tools = [name for name in allowed_tools if name]
-    target_file_type = str(classification.target_file_type or "").strip().lower() or _target_type(request, files)
+    target_file_type = str(
+        classification.target_file_type or ""
+    ).strip().lower() or _target_type(request, files)
 
     required_steps: List[Dict[str, Any]] = []
     success_criteria: List[str] = []
     quality_gates: List[Dict[str, Any]] = []
     required_tools: List[str] = []
     recipe_id = ""
-    task_family = str(classification.task_family or intent_plan.intent_type or "analyze").strip() or "analyze"
+    task_family = (
+        str(classification.task_family or intent_plan.intent_type or "analyze").strip()
+        or "analyze"
+    )
     operation_kind = str(classification.operation_kind or "read").strip() or "read"
 
     if recipe_match:
         recipe = recipe_match.recipe
         recipe_id = recipe.id
         task_family = recipe.task_family or task_family
-        operation_kind = recipe.write_operation_kind if write_intent else recipe.read_operation_kind
-        required_steps = [dict(step) for step in recipe.plan_steps if isinstance(step, dict)]
-        success_criteria = [str(item) for item in recipe.success_criteria if str(item or "").strip()]
-        quality_gates = [dict(item) for item in recipe.quality_gates if isinstance(item, dict)]
-        required_tools = [str(item) for item in recipe.matched_capabilities if str(item or "").strip()]
+        operation_kind = (
+            recipe.write_operation_kind if write_intent else recipe.read_operation_kind
+        )
+        required_steps = [
+            dict(step) for step in recipe.plan_steps if isinstance(step, dict)
+        ]
+        success_criteria = [
+            str(item) for item in recipe.success_criteria if str(item or "").strip()
+        ]
+        quality_gates = [
+            dict(item) for item in recipe.quality_gates if isinstance(item, dict)
+        ]
+        required_tools = [
+            str(item) for item in recipe.matched_capabilities if str(item or "").strip()
+        ]
     elif intent_plan.dynamic_steps:
-        required_steps = [dict(step) for step in intent_plan.dynamic_steps if isinstance(step, dict)]
+        required_steps = [
+            dict(step) for step in intent_plan.dynamic_steps if isinstance(step, dict)
+        ]
 
     if write_intent and not success_criteria:
         success_criteria = ["必须产生真实 file.changed 事件"]
@@ -145,7 +182,8 @@ def build_recipe_skeleton(
         "recipe_id": recipe_id or "generic_file_task",
         "task_family": task_family,
         "operation_kind": operation_kind,
-        "output_mode": str(classification.output_mode or "answer").strip().lower() or "answer",
+        "output_mode": str(classification.output_mode or "answer").strip().lower()
+        or "answer",
         "write_intent": write_intent,
         "target_file_type": target_file_type,
         "required_steps": required_steps,
@@ -155,13 +193,23 @@ def build_recipe_skeleton(
         "quality_gates": quality_gates,
         "completion_check": {
             "must_have_file_change": write_intent,
-            "required_operations": _required_operations(required_tools, quality_gates, write_intent),
+            "required_operations": _required_operations(
+                required_tools, quality_gates, write_intent
+            ),
         },
-        "model_freedom": "constrained_fill_and_execute" if str(request.model_mode or "").lower() == "local" else "constrained_plan_and_execute",
+        "model_freedom": (
+            "constrained_fill_and_execute"
+            if str(request.model_mode or "").lower() == "local"
+            else "constrained_plan_and_execute"
+        ),
     }
 
 
-def _required_operations(required_tools: Sequence[str], quality_gates: Sequence[Dict[str, Any]], write_intent: bool) -> List[str]:
+def _required_operations(
+    required_tools: Sequence[str],
+    quality_gates: Sequence[Dict[str, Any]],
+    write_intent: bool,
+) -> List[str]:
     operations: List[str] = []
     for tool in required_tools:
         if is_write_tool(str(tool)) and str(tool) not in operations:
@@ -179,7 +227,9 @@ def _required_operations(required_tools: Sequence[str], quality_gates: Sequence[
     return operations
 
 
-def extract_whitebox_execution_plan(response: Any, content_text: str = "") -> Optional[WhiteboxExecutionPlan]:
+def extract_whitebox_execution_plan(
+    response: Any, content_text: str = ""
+) -> Optional[WhiteboxExecutionPlan]:
     candidate: Any = None
     if isinstance(response, dict):
         if isinstance(response.get("execution_plan"), dict):
@@ -191,7 +241,9 @@ def extract_whitebox_execution_plan(response: Any, content_text: str = "") -> Op
     elif content_text:
         candidate = extract_first_json_value(content_text)
 
-    if isinstance(candidate, dict) and isinstance(candidate.get("execution_plan"), dict):
+    if isinstance(candidate, dict) and isinstance(
+        candidate.get("execution_plan"), dict
+    ):
         candidate = candidate.get("execution_plan")
     if not isinstance(candidate, dict):
         return None
@@ -204,25 +256,47 @@ def extract_whitebox_execution_plan(response: Any, content_text: str = "") -> Op
                 continue
             step = {
                 "id": _clean_text(item.get("id") or f"step_{index}", 80),
-                "title": _clean_text(item.get("title") or item.get("name") or item.get("step"), 160),
+                "title": _clean_text(
+                    item.get("title") or item.get("name") or item.get("step"), 160
+                ),
                 "tool": _clean_text(item.get("tool") or item.get("tool_name"), 120),
                 "required": bool(item.get("required", True)),
                 "why": _clean_text(item.get("why") or item.get("reason"), 600),
-                "expected_result": _clean_text(item.get("expected_result") or item.get("expected"), 500),
-                "args_strategy": _clean_text(item.get("args_strategy") or item.get("args"), 500),
+                "expected_result": _clean_text(
+                    item.get("expected_result") or item.get("expected"), 500
+                ),
+                "args_strategy": _clean_text(
+                    item.get("args_strategy") or item.get("args"), 500
+                ),
             }
-            steps.append({key: value for key, value in step.items() if value not in ("", None)})
+            steps.append(
+                {key: value for key, value in step.items() if value not in ("", None)}
+            )
 
     plan = WhiteboxExecutionPlan(
         goal=_clean_text(candidate.get("goal") or candidate.get("objective"), 800),
-        plan_summary=_clean_text(candidate.get("plan_summary") or candidate.get("summary"), 800),
+        plan_summary=_clean_text(
+            candidate.get("plan_summary") or candidate.get("summary"), 800
+        ),
         steps=steps,
-        completion_check=dict(candidate.get("completion_check") or {}) if isinstance(candidate.get("completion_check"), dict) else {},
-        risks=[_clean_text(item, 240) for item in (candidate.get("risks") or []) if _clean_text(item, 240)]
-        if isinstance(candidate.get("risks"), list)
-        else [],
+        completion_check=(
+            dict(candidate.get("completion_check") or {})
+            if isinstance(candidate.get("completion_check"), dict)
+            else {}
+        ),
+        risks=(
+            [
+                _clean_text(item, 240)
+                for item in (candidate.get("risks") or [])
+                if _clean_text(item, 240)
+            ]
+            if isinstance(candidate.get("risks"), list)
+            else []
+        ),
     )
-    if not any((plan.goal, plan.plan_summary, plan.steps, plan.completion_check, plan.risks)):
+    if not any(
+        (plan.goal, plan.plan_summary, plan.steps, plan.completion_check, plan.risks)
+    ):
         return None
     return plan
 
@@ -288,14 +362,18 @@ def validate_whitebox_plan(
         if tool_name and allowed and tool_name not in allowed:
             violations.append(f"tool_call_{index}_not_allowed:{tool_name}")
     if write_intent and calls:
-        has_write_or_code = any(is_write_tool(str(call.get("name") or "")) for call in calls)
+        has_write_or_code = any(
+            is_write_tool(str(call.get("name") or "")) for call in calls
+        )
         if not has_write_or_code:
             warnings.append("write_task_current_tool_batch_has_no_write_tool")
 
     return {
         "passed": not violations,
         "status": "pass" if not violations else "blocked",
-        "summary": "白盒计划审查通过。" if not violations else "白盒计划审查发现阻断问题。",
+        "summary": (
+            "白盒计划审查通过。" if not violations else "白盒计划审查发现阻断问题。"
+        ),
         "violations": violations,
         "warnings": warnings,
     }
@@ -311,7 +389,9 @@ def build_decision_audit(
     tool_index: int,
     execution_plan: Optional[WhiteboxExecutionPlan] = None,
 ) -> Dict[str, Any]:
-    target = write_target_for_tool(tool_name, tool_args) if is_write_tool(tool_name) else ""
+    target = (
+        write_target_for_tool(tool_name, tool_args) if is_write_tool(tool_name) else ""
+    )
     why = execution_plan.why_for_tool(tool_name) if execution_plan else ""
     if not why:
         if is_write_tool(tool_name):
@@ -337,13 +417,18 @@ def build_decision_audit(
     }
 
 
-def _alternatives_rejected(request: FileTaskRequest, skeleton: Dict[str, Any], tool_name: str) -> List[str]:
+def _alternatives_rejected(
+    request: FileTaskRequest, skeleton: Dict[str, Any], tool_name: str
+) -> List[str]:
     rejected: List[str] = []
     if bool(skeleton.get("write_intent")) and is_write_tool(tool_name):
         rejected.append("只返回文本：不满足写入型任务的真实落盘要求")
     if bool(skeleton.get("write_intent")) and not is_write_tool(tool_name):
         rejected.append("直接结束：尚未满足写入型任务的完成检查")
-    if str(skeleton.get("target_file_type") or "").lower() in {"docx", "doc"} and tool_name == "run_python_code":
+    if (
+        str(skeleton.get("target_file_type") or "").lower() in {"docx", "doc"}
+        and tool_name == "run_python_code"
+    ):
         rejected.append("用脚本文本替代 Office 专用写入：不满足格式感知工作流")
     if not rejected:
         rejected.append("跳过该步骤：会降低后续完成检查的可验证性")

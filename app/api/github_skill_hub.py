@@ -20,8 +20,6 @@ import requests
 import yaml
 from flask import jsonify, request, send_file
 
-from app.api.skill_marketplace_routes import marketplace_bp
-
 # ── Re-use parent module helpers (lazy-loading and path constants) ────────
 from app.api.skill_marketplace_routes import (
     _BASE_DIR,
@@ -32,6 +30,7 @@ from app.api.skill_marketplace_routes import (
     _recorder,
     _schema,
     _sm,
+    marketplace_bp,
 )
 
 logger = logging.getLogger(__name__)
@@ -1758,7 +1757,12 @@ def community_catalog():
             k: v for k, v in skill.items() if k != "prompt"
         }  # 不暴露 prompt 在列表接口
         entry["is_installed"] = skill["id"] in installed_ids
-        _h = int(_hl.md5(skill.get("name", "").encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
+        _h = int(
+            _hl.md5(
+                skill.get("name", "").encode("utf-8"), usedforsecurity=False
+            ).hexdigest(),
+            16,
+        )
         entry["likes"] = 100 + (_h % 900)
         if "source_name" not in entry:
             entry["source_name"] = "Koto 社区精选"
@@ -1810,7 +1814,12 @@ def community_skill_detail(skill_id: str):
     if "likes" not in entry:
         import hashlib as _hl
 
-        _h = int(_hl.md5(entry.get("name", "").encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
+        _h = int(
+            _hl.md5(
+                entry.get("name", "").encode("utf-8"), usedforsecurity=False
+            ).hexdigest(),
+            16,
+        )
         entry["likes"] = 100 + (_h % 900)
 
     # 确保 source_name 始终存在
@@ -1933,7 +1942,10 @@ def fetch_online_prompts():
                         import hashlib as _hl2
 
                         _hv = int(
-                            _hl2.md5(row[0].strip().encode("utf-8"), usedforsecurity=False).hexdigest(), 16
+                            _hl2.md5(
+                                row[0].strip().encode("utf-8"), usedforsecurity=False
+                            ).hexdigest(),
+                            16,
                         )
                         prompts.append(
                             {
@@ -1985,7 +1997,10 @@ def fetch_online_prompts():
                 author = (m.group("author") or "linexjlin/GPTs contributors").strip()
                 import hashlib as _hl3
 
-                _hv2 = int(_hl3.md5(title.encode("utf-8"), usedforsecurity=False).hexdigest(), 16)
+                _hv2 = int(
+                    _hl3.md5(title.encode("utf-8"), usedforsecurity=False).hexdigest(),
+                    16,
+                )
                 prompts.append(
                     {
                         "id": f"online_gpts_{idx}",

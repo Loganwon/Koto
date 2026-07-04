@@ -33,8 +33,8 @@ def test_task_agent_call_llm_uses_extended_file_task_timeout(monkeypatch):
 
 
 def test_task_agent_get_provider_uses_ollama_for_local_mode(monkeypatch):
-    from app.core.agent.task_agent import TaskAgent
     import app.core.llm.ollama_llm_provider as ollama_llm_provider
+    from app.core.agent.task_agent import TaskAgent
 
     captured = {}
 

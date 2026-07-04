@@ -108,7 +108,12 @@ class OpenAIProvider(LLMProvider):
             "max_tokens": kwargs.get("max_tokens", 8192),
             "stream": stream,
         }
-        for passthrough_key in ("extra_body", "extra_headers", "response_format", "timeout"):
+        for passthrough_key in (
+            "extra_body",
+            "extra_headers",
+            "response_format",
+            "timeout",
+        ):
             if kwargs.get(passthrough_key) is not None:
                 call_kwargs[passthrough_key] = kwargs[passthrough_key]
         if oai_tools:
@@ -218,7 +223,9 @@ class OpenAIProvider(LLMProvider):
                 # model turn with tool calls
                 oai_tool_calls = []
                 for i, tc in enumerate(tool_calls_raw):
-                    tool_call_id = str(tc.get("id") or f"call_{i}").strip() or f"call_{i}"
+                    tool_call_id = (
+                        str(tc.get("id") or f"call_{i}").strip() or f"call_{i}"
+                    )
                     oai_tool_calls.append(
                         {
                             "id": tool_call_id,
@@ -237,7 +244,9 @@ class OpenAIProvider(LLMProvider):
                     "tool_calls": oai_tool_calls,
                 }
                 if turn.get("reasoning_content"):
-                    assistant_message["reasoning_content"] = str(turn.get("reasoning_content"))
+                    assistant_message["reasoning_content"] = str(
+                        turn.get("reasoning_content")
+                    )
                 messages.append(assistant_message)
             elif role == "tool":
                 # function result
@@ -276,7 +285,10 @@ class OpenAIProvider(LLMProvider):
                 }
                 tool_messages: List[Dict[str, Any]] = []
                 next_index = index + 1
-                while next_index < len(messages) and messages[next_index].get("role") == "tool":
+                while (
+                    next_index < len(messages)
+                    and messages[next_index].get("role") == "tool"
+                ):
                     tool_messages.append(messages[next_index])
                     next_index += 1
 
@@ -294,10 +306,16 @@ class OpenAIProvider(LLMProvider):
                 if expected_ids and seen_ids == expected_ids:
                     sanitized.append(message)
                     sanitized.extend(matched)
-                    sanitized.extend(self._tool_message_as_context(item) for item in extra)
+                    sanitized.extend(
+                        self._tool_message_as_context(item) for item in extra
+                    )
                 else:
-                    sanitized.append(self._assistant_message_without_tool_calls(message))
-                    sanitized.extend(self._tool_message_as_context(item) for item in tool_messages)
+                    sanitized.append(
+                        self._assistant_message_without_tool_calls(message)
+                    )
+                    sanitized.extend(
+                        self._tool_message_as_context(item) for item in tool_messages
+                    )
                 index = next_index
                 continue
 
@@ -316,7 +334,9 @@ class OpenAIProvider(LLMProvider):
         if not content:
             names: List[str] = []
             for tool_call in message.get("tool_calls") or []:
-                function = tool_call.get("function") if isinstance(tool_call, dict) else None
+                function = (
+                    tool_call.get("function") if isinstance(tool_call, dict) else None
+                )
                 if isinstance(function, dict):
                     name = str(function.get("name") or "").strip()
                 elif isinstance(tool_call, dict):
@@ -400,7 +420,11 @@ class OpenAIProvider(LLMProvider):
                     except json.JSONDecodeError:
                         args = {}
                     tool_calls.append(
-                        {"id": str(getattr(tc, "id", "") or ""), "name": tc.function.name, "args": args}
+                        {
+                            "id": str(getattr(tc, "id", "") or ""),
+                            "name": tc.function.name,
+                            "args": args,
+                        }
                     )
 
         usage = {}

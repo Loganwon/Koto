@@ -117,9 +117,7 @@ class TestSkillJsonCompleteness:
             values = data.get(field, [])
             if not values:
                 continue
-            assert (
-                isinstance(values, list)
-            ), f"{skill_path.name} {field} 必须是 list"
+            assert isinstance(values, list), f"{skill_path.name} {field} 必须是 list"
             for value in values:
                 assert (
                     isinstance(value, str) and value.strip()
@@ -147,9 +145,9 @@ class TestSkillJsonCompleteness:
             pytest.skip(f"{skill_path.name} 未声明 examples")
         assert isinstance(examples, list), f"{skill_path.name} examples 必须是 list"
         for ex in examples:
-            assert _is_valid_example(ex), (
-                f"{skill_path.name} 示例必须包含 input/output 或 role/content: {ex}"
-            )
+            assert _is_valid_example(
+                ex
+            ), f"{skill_path.name} 示例必须包含 input/output 或 role/content: {ex}"
 
     @pytest.mark.parametrize("skill_path", _all_skill_files(), ids=lambda p: p.stem)
     def test_id_matches_filename(self, skill_path):
@@ -553,18 +551,32 @@ class TestSkillStateSync:
         from app.core.skills.skill_manager import SkillManager
 
         skill_id = "debug_python"
-        assert SkillManager.update_runtime_fields(
-            skill_id,
-            template_path="config/skill_templates/debug_python/template.docx",
-            bound_tools=["fill_skill_template", "get_template_fields"],
-        ) is True
+        assert (
+            SkillManager.update_runtime_fields(
+                skill_id,
+                template_path="config/skill_templates/debug_python/template.docx",
+                bound_tools=["fill_skill_template", "get_template_fields"],
+            )
+            is True
+        )
 
         runtime_entry = SkillManager.get_runtime_entry(skill_id)
         assert runtime_entry is not None
-        assert runtime_entry["template_path"] == "config/skill_templates/debug_python/template.docx"
-        assert runtime_entry["bound_tools"] == ["fill_skill_template", "get_template_fields"]
+        assert (
+            runtime_entry["template_path"]
+            == "config/skill_templates/debug_python/template.docx"
+        )
+        assert runtime_entry["bound_tools"] == [
+            "fill_skill_template",
+            "get_template_fields",
+        ]
 
-        assert SkillManager.update_runtime_fields(skill_id, remove_fields=["template_path"]) is True
+        assert (
+            SkillManager.update_runtime_fields(
+                skill_id, remove_fields=["template_path"]
+            )
+            is True
+        )
         runtime_entry = SkillManager.get_runtime_entry(skill_id)
         assert runtime_entry is not None
         assert "template_path" not in runtime_entry

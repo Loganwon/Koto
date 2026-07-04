@@ -90,7 +90,9 @@ class DocAIReview(WorkflowExecutor):
         all_annotations: list[dict] = []
 
         focus_desc = _FOCUS_DESC.get(focus, _FOCUS_DESC["all"])
-        system = _REVIEW_SYSTEM.format(focus_desc=focus_desc, max_per_chunk=max_per_chunk)
+        system = _REVIEW_SYSTEM.format(
+            focus_desc=focus_desc, max_per_chunk=max_per_chunk
+        )
 
         for idx, chunk in enumerate(chunks):
             yield sse_progress(idx + 1, len(chunks), f"审阅第 {idx+1}/{len(chunks)} 段")
@@ -100,7 +102,11 @@ class DocAIReview(WorkflowExecutor):
         yield sse_step_done("review", f"🔍 审阅完成，共 {len(all_annotations)} 条建议")
 
         if not all_annotations:
-            yield sse_output("markdown", "# 审阅结果\n\n文档质量良好，未发现需要修改的地方。", "审阅完成")
+            yield sse_output(
+                "markdown",
+                "# 审阅结果\n\n文档质量良好，未发现需要修改的地方。",
+                "审阅完成",
+            )
             return
 
         # ── Step 3: 写入修订到 DOCX ────────────────────────────────
@@ -110,6 +116,7 @@ class DocAIReview(WorkflowExecutor):
 
         try:
             from web.track_changes_editor import TrackChangesEditor
+
             editor = TrackChangesEditor("Koto AI")
             result = editor.apply_tracked_changes(str(output_path), all_annotations)
             applied = result.get("applied", 0)
@@ -159,7 +166,9 @@ class DocAIReview(WorkflowExecutor):
             logger.warning("[DocReview] LLM 审阅失败: %s", e)
         return []
 
-    def _build_summary(self, annotations: list[dict], focus_desc: str, applied: int) -> str:
+    def _build_summary(
+        self, annotations: list[dict], focus_desc: str, applied: int
+    ) -> str:
         """生成 Markdown 审阅摘要。"""
         lines = [
             "# AI 文档审阅摘要\n",

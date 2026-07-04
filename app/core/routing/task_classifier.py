@@ -312,14 +312,23 @@ class TaskClassifier:
     @classmethod
     def _embed_text(cls, text: str):
         """Internal: compute embedding for text using loaded sentence-transformer."""
-        if isinstance(cls._st_model, dict) and cls._st_model.get("backend") == "transformers_mean_pool":
+        if (
+            isinstance(cls._st_model, dict)
+            and cls._st_model.get("backend") == "transformers_mean_pool"
+        ):
             import torch
             import torch.nn.functional as F
 
             tokenizer = cls._st_model["tokenizer"]
             model = cls._st_model["model"]
             model.eval()
-            encoded = tokenizer([text], padding=True, truncation=True, max_length=128, return_tensors="pt")
+            encoded = tokenizer(
+                [text],
+                padding=True,
+                truncation=True,
+                max_length=128,
+                return_tensors="pt",
+            )
             with torch.no_grad():
                 out = model(**encoded)
             mask_expanded = (

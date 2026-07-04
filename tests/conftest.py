@@ -19,7 +19,6 @@ from unittest import mock
 
 import pytest
 
-
 _CURRENT_PYTEST_TMP: Path | None = None
 
 
@@ -43,7 +42,6 @@ except ImportError:
             self._patchers.append(patcher)
             return started
 
-
     class _MiniMocker:
         Mock = mock.Mock
         MagicMock = mock.MagicMock
@@ -56,7 +54,6 @@ except ImportError:
         def stopall(self):
             while self._patchers:
                 self._patchers.pop().stop()
-
 
     @pytest.fixture
     def mocker():

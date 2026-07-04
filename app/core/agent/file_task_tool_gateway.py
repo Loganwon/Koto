@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
-import re
 from typing import Any, Callable, Dict, Iterable, List, Optional, Protocol
 
-from app.core.agent.file_task_tool_catalog import file_task_tool_specs, is_file_task_tool
+from app.core.agent.file_task_tool_catalog import (
+    file_task_tool_specs,
+    is_file_task_tool,
+)
 
 ToolExecutor = Callable[[str, Dict[str, Any]], Any]
 
@@ -23,18 +26,17 @@ class FileTaskToolContext:
 class FileTaskToolProvider(Protocol):
     """Stable provider interface for Koto file-task tools."""
 
-    def definitions(self) -> List[Dict[str, Any]]:
-        ...
+    def definitions(self) -> List[Dict[str, Any]]: ...
 
-    def allowed_names(self) -> set[str]:
-        ...
+    def allowed_names(self) -> set[str]: ...
 
-    def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
-        ...
+    def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Any: ...
 
 
 def _minimal_definition(tool_name: str) -> Dict[str, Any]:
-    spec = next((item for item in file_task_tool_specs() if item.name == tool_name), None)
+    spec = next(
+        (item for item in file_task_tool_specs() if item.name == tool_name), None
+    )
     return {
         "name": tool_name,
         "description": f"Koto file-task tool ({spec.family if spec else 'custom'}).",
@@ -47,12 +49,23 @@ def _minimal_definition(tool_name: str) -> Dict[str, Any]:
 class CallableFileTaskToolProvider:
     """Adapter used by tests and narrow integrations that only supply execute()."""
 
-    def __init__(self, executor: ToolExecutor, *, definitions: Optional[List[Dict[str, Any]]] = None):
+    def __init__(
+        self,
+        executor: ToolExecutor,
+        *,
+        definitions: Optional[List[Dict[str, Any]]] = None,
+    ):
         self._executor = executor
-        self._definitions = definitions or [_minimal_definition(spec.name) for spec in file_task_tool_specs()]
+        self._definitions = definitions or [
+            _minimal_definition(spec.name) for spec in file_task_tool_specs()
+        ]
 
     def definitions(self) -> List[Dict[str, Any]]:
-        return [dict(definition) for definition in self._definitions if is_file_task_tool(str(definition.get("name") or ""))]
+        return [
+            dict(definition)
+            for definition in self._definitions
+            if is_file_task_tool(str(definition.get("name") or ""))
+        ]
 
     def allowed_names(self) -> set[str]:
         return {str(definition.get("name") or "") for definition in self.definitions()}
@@ -111,7 +124,10 @@ class FileTaskToolGateway:
     ):
         self._context = context or FileTaskToolContext()
         self._task_file_types = {
-            str(item.get("type") or item.get("file_type") or "").strip().lower().lstrip(".")
+            str(item.get("type") or item.get("file_type") or "")
+            .strip()
+            .lower()
+            .lstrip(".")
             for item in (self._context.task_files or [])
             if isinstance(item, dict)
         }
@@ -121,7 +137,9 @@ class FileTaskToolGateway:
         if tool_executor is not None:
             provider_list.append(CallableFileTaskToolProvider(tool_executor))
         if not provider_list:
-            provider_list.append(RegistryBackedFileTaskToolProvider(context=self._context))
+            provider_list.append(
+                RegistryBackedFileTaskToolProvider(context=self._context)
+            )
 
         self._providers = provider_list
         self._provider_by_tool: Dict[str, FileTaskToolProvider] = {}
@@ -142,7 +160,9 @@ class FileTaskToolGateway:
             raise ValueError(f"Tool '{name}' has no registered Koto file-task provider")
         return provider.execute(name, dict(tool_args or {}))
 
-    def _merge_definitions(self, providers: List[FileTaskToolProvider]) -> List[Dict[str, Any]]:
+    def _merge_definitions(
+        self, providers: List[FileTaskToolProvider]
+    ) -> List[Dict[str, Any]]:
         definitions_by_name: Dict[str, Dict[str, Any]] = {}
         for provider in providers:
             provider_names = {
@@ -156,40 +176,79 @@ class FileTaskToolGateway:
 
             for definition in provider.definitions():
                 name = str(definition.get("name") or "").strip()
-                if is_file_task_tool(name) and self._tool_matches_context(name) and name not in definitions_by_name:
+                if (
+                    is_file_task_tool(name)
+                    and self._tool_matches_context(name)
+                    and name not in definitions_by_name
+                ):
                     definitions_by_name[name] = dict(definition)
 
         for name in self._provider_by_tool:
             definitions_by_name.setdefault(name, _minimal_definition(name))
 
         spec_order = [spec.name for spec in file_task_tool_specs()]
-        return [definitions_by_name[name] for name in spec_order if name in definitions_by_name]
+        return [
+            definitions_by_name[name]
+            for name in spec_order
+            if name in definitions_by_name
+        ]
 
     def _tool_matches_context(self, tool_name: str) -> bool:
         if not self._task_file_types:
             return True
 
-        spec = next((item for item in file_task_tool_specs() if item.name == tool_name), None)
+        spec = next(
+            (item for item in file_task_tool_specs() if item.name == tool_name), None
+        )
         if spec is None or not spec.file_types:
             return True
         return bool(self._task_file_types.intersection(spec.file_types))
 
     def _request_context_file_types(self) -> set[str]:
-        request_context = self._context.request_context if isinstance(self._context.request_context, dict) else {}
+        request_context = (
+            self._context.request_context
+            if isinstance(self._context.request_context, dict)
+            else {}
+        )
         inferred: set[str] = set()
         target_path = str(request_context.get("target_path") or "").strip()
         target_suffix = Path(target_path).suffix.lstrip(".").lower()
         if target_suffix:
             inferred.add(target_suffix)
-        options = request_context.get("options") if isinstance(request_context.get("options"), dict) else {}
-        option_type = str(options.get("inferred_target_file_type") or options.get("target_file_type") or "").strip().lower().lstrip(".")
+        options = (
+            request_context.get("options")
+            if isinstance(request_context.get("options"), dict)
+            else {}
+        )
+        option_type = (
+            str(
+                options.get("inferred_target_file_type")
+                or options.get("target_file_type")
+                or ""
+            )
+            .strip()
+            .lower()
+            .lstrip(".")
+        )
         if option_type:
             inferred.add(option_type)
         task_text = str(request_context.get("task") or "").strip().lower()
-        if re.search(r"(?:创建|新建|生成|输出|写入|加入|插入|整理成|create|generate|output|record|write).{0,24}(?:docx|word|文档)", task_text, re.IGNORECASE):
+        if re.search(
+            r"(?:创建|新建|生成|输出|写入|加入|插入|整理成|create|generate|output|record|write).{0,24}(?:docx|word|文档)",
+            task_text,
+            re.IGNORECASE,
+        ):
             inferred.add("docx")
-        if re.search(r"(?:创建|新建|生成|输出|写入|加入|插入|整理成).{0,24}(?:pptx|ppt|幻灯片|演示文稿|slides?)", task_text, re.IGNORECASE):
+        if re.search(
+            r"(?:创建|新建|生成|输出|写入|加入|插入|整理成).{0,24}(?:pptx|ppt|幻灯片|演示文稿|slides?)",
+            task_text,
+            re.IGNORECASE,
+        ):
             inferred.add("pptx")
-        if re.search(r"(?:创建|新建|生成|输出|写入|加入|插入|整理成).{0,24}(?:xlsx|excel|工作簿|表格)", task_text, re.IGNORECASE):
+        if re.search(
+            r"(?:创建|新建|生成|输出|写入|加入|插入|整理成).{0,24}(?:xlsx|excel|工作簿|表格)",
+            task_text,
+            re.IGNORECASE,
+        ):
             inferred.add("xlsx")
         return {item for item in inferred if item}

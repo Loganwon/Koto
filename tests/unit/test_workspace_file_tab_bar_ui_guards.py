@@ -13,7 +13,9 @@ def test_workspace_templates_keep_file_tab_bar_before_canvas_body():
     embedded_html = _read("web/templates/index.html")
 
     assert '<div id="wa-tab-bar"></div>' in embedded_html
-    assert embedded_html.index('<div id="wa-tab-bar"></div>') < embedded_html.index('<div id="wa-canvas-body">')
+    assert embedded_html.index('<div id="wa-tab-bar"></div>') < embedded_html.index(
+        '<div id="wa-canvas-body">'
+    )
 
 
 def test_workspace_tab_bar_js_renders_file_labels_without_capability_badges():
@@ -38,7 +40,10 @@ def test_workspace_frontend_tracks_capability_profile_in_tab_state_without_visib
         ]
     )
 
-    assert "capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, fileType, fileName)" in js
+    assert (
+        "capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, fileType, fileName)"
+        in js
+    )
     assert "state.capabilityProfile = tab.capabilityProfile || null;" in js
     assert "function _ensureSubjectBar()" not in js
     assert "_capabilityPrimaryBadge" not in js

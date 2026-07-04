@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 import pytest
 

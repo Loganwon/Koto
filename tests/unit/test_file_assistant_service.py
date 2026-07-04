@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 import pytest
 
@@ -137,7 +137,9 @@ def test_load_full_docx_uses_docx_parser_facade(tmp_path: Path, monkeypatch):
     }
 
 
-def test_parse_docx_for_workspace_open_retries_bad_tmp_copy(tmp_path: Path, monkeypatch):
+def test_parse_docx_for_workspace_open_retries_bad_tmp_copy(
+    tmp_path: Path, monkeypatch
+):
     tmp_docx = tmp_path / "tmp.docx"
     source_docx = tmp_path / "source.docx"
     tmp_docx.write_bytes(b"bad")

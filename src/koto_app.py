@@ -22,7 +22,10 @@ from pathlib import Path
 import psutil
 
 try:
-    from src.runtime_bootstrap import configure_process_environment, resolve_runtime_roots
+    from src.runtime_bootstrap import (
+        configure_process_environment,
+        resolve_runtime_roots,
+    )
 except ImportError:
     from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
 
@@ -206,9 +209,7 @@ def _set_window_icon(icon_path=None):
         # Use LoadImageW with IMAGE_ICON (1) | LR_LOADFROMFILE (16)
         LR_LOADFROMFILE = 0x00000010
         IMAGE_ICON = 1
-        hIcon = user32.LoadImageW(
-            None, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE
-        )
+        hIcon = user32.LoadImageW(None, icon_path, IMAGE_ICON, 0, 0, LR_LOADFROMFILE)
         if hIcon:
             WM_SETICON = 0x0080
             ICON_BIG = 1
@@ -1611,10 +1612,10 @@ def main():
                 ]
                 js_unsaved = _json_mod.dumps(unsaved)
                 window.evaluate_js(
-                    f'window.WA && window.WA.showCloseWarning && '
-                    f'window.WA.showCloseWarning({js_unsaved}).then(function(d){{'
+                    f"window.WA && window.WA.showCloseWarning && "
+                    f"window.WA.showCloseWarning({js_unsaved}).then(function(d){{"
                     f'  if(d!=="cancel") window.pywebview.api.force_close();'
-                    f'}})'
+                    f"}})"
                 )
             except Exception as _e:
                 _write_log(f"⚠️ close-warning JS error: {_e}")
@@ -1628,8 +1629,6 @@ def main():
 
     window.events.closing += _on_closing
     # ──────────────────────────────────────────────────────────────
-
-
 
     # 将 window_api 注入到 Flask app，供 HTTP 路由降级使用
     try:

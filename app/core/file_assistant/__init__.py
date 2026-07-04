@@ -3,20 +3,10 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-from app.core.file_assistant.service import (
-    ALLOWED_EXTENSIONS,
-    IMAGE_EXTENSIONS,
-    TEXT_EXTENSIONS,
-    ExportedEditorFile,
-    FileAssistantService,
-    FileTooLargeError,
-    ParsedEditorFile,
-    UnsupportedFileTypeError,
-)
-from app.core.file_assistant.save_service import (
-    AutoSavePermissionError,
-    AutoSavePersistenceService,
-    AutoSaveResult,
+from app.core.file_assistant.fs_service import (
+    WorkspaceFsError,
+    WorkspaceFsPathResult,
+    WorkspaceFsService,
 )
 from app.core.file_assistant.open_service import (
     OpenFileByPathService,
@@ -30,18 +20,28 @@ from app.core.file_assistant.open_service import (
     PreparedUploadedFile,
     UploadedOpenFileService,
 )
-from app.core.file_assistant.preview_service import (
-    FileContextPreview,
-    FileContextPreviewService,
-)
 from app.core.file_assistant.pptx_preflight_service import (
     PptxPreflightError,
     PptxPreflightService,
 )
-from app.core.file_assistant.fs_service import (
-    WorkspaceFsError,
-    WorkspaceFsPathResult,
-    WorkspaceFsService,
+from app.core.file_assistant.preview_service import (
+    FileContextPreview,
+    FileContextPreviewService,
+)
+from app.core.file_assistant.save_service import (
+    AutoSavePermissionError,
+    AutoSavePersistenceService,
+    AutoSaveResult,
+)
+from app.core.file_assistant.service import (
+    ALLOWED_EXTENSIONS,
+    IMAGE_EXTENSIONS,
+    TEXT_EXTENSIONS,
+    ExportedEditorFile,
+    FileAssistantService,
+    FileTooLargeError,
+    ParsedEditorFile,
+    UnsupportedFileTypeError,
 )
 from app.core.file_assistant.temp_store import (
     RawTempFile,

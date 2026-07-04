@@ -100,8 +100,9 @@ _RULES: List[Tuple[str, str, int]] = [
         0,
     ),
     # ─── 银行卡 ───────────────────────────────────────────────────
-    # 16-19位连续数字（非身份证覆盖区域）
-    ("银行卡", r"(?<!\d)\d{16,19}(?!\d)", 0),
+    # UnionPay cards commonly start with 62; avoid treating arbitrary long
+    # numeric identifiers as bank cards.
+    ("银行卡", r"(?<!\d)62\d{14,17}(?!\d)", 0),
     # ─── 电子邮箱 ─────────────────────────────────────────────────
     ("邮箱", r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}", 0),
     # ─── IPv4 地址 ────────────────────────────────────────────────
@@ -116,7 +117,12 @@ _RULES: List[Tuple[str, str, int]] = [
     (
         "姓名",
         r"(?:叫|是|给|向|找|告诉|通知|联系|发给|转发给|抄送|cc)[：:：\s]*"
-        r"([\u4e00-\u9fa5]{2,4})(?=[，。！？\s「」【】]|$)",
+        r"([\u4e00-\u9fa5]{2,4})(?=[，。！？\s「」【】]|来|去|到|$)",
+        re.UNICODE,
+    ),
+    (
+        "姓名",
+        r"(?<![\u4e00-\u9fa5])[\u4e00-\u9fa5]{2,3}(?=(?:去了|来|到|在|和|与|，|。|！|？|\s|$))",
         re.UNICODE,
     ),
     # ─── 家庭住址 ─────────────────────────────────────────────────
@@ -272,7 +278,7 @@ class PIIFilter:
                 placeholder = f"<<自定义-{counters['自定义']}>>"
                 mask_map[placeholder] = keyword
                 stats["自定义"] = stats.get("自定义", 0) + 1
-                result = result[:idx] + placeholder + result[idx + len(keyword):]
+                result = result[:idx] + placeholder + result[idx + len(keyword) :]
                 idx += len(placeholder)
 
         if stats:

@@ -12,7 +12,6 @@ from dataclasses import dataclass, field
 from pathlib import PurePosixPath
 from typing import Any, Dict, Iterable, List, Mapping, Optional
 
-
 _FILE_EXT_TO_TYPE = {
     ".doc": "docx",
     ".docx": "docx",
@@ -206,7 +205,9 @@ class ExecutionLog:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        self.level = self.level if self.level in {"debug", "info", "warn", "error"} else "info"
+        self.level = (
+            self.level if self.level in {"debug", "info", "warn", "error"} else "info"
+        )
         self.message = _clean_text(self.message, 800)
 
     def to_dict(self) -> Dict[str, Any]:
@@ -344,7 +345,9 @@ def _compact_metadata(payload: Mapping[str, Any], *, limit: int = 28) -> Dict[st
         if not key_text or key_text in skipped or value in (None, "", [], {}):
             continue
         if isinstance(value, (str, int, float, bool)):
-            metadata[key_text] = _clean_text(value, 400) if isinstance(value, str) else value
+            metadata[key_text] = (
+                _clean_text(value, 400) if isinstance(value, str) else value
+            )
         elif isinstance(value, list):
             cleaned = [
                 _clean_text(item, 200) if isinstance(item, str) else item
@@ -360,7 +363,9 @@ def _compact_metadata(payload: Mapping[str, Any], *, limit: int = 28) -> Dict[st
                     continue
                 if isinstance(sub_value, (str, int, float, bool)):
                     cleaned_map[str(sub_key)] = (
-                        _clean_text(sub_value, 200) if isinstance(sub_value, str) else sub_value
+                        _clean_text(sub_value, 200)
+                        if isinstance(sub_value, str)
+                        else sub_value
                     )
             if cleaned_map:
                 metadata[key_text] = cleaned_map
@@ -396,8 +401,12 @@ def _file_task_source_path(change: Mapping[str, Any]) -> str:
 
 def _file_task_change_key(change: Mapping[str, Any]) -> str:
     path = _file_task_output_path(change).lower()
-    operation = str(_field_value(change, "operation", "tool_name") or "").strip().lower()
-    summary = _clean_text(_field_value(change, "summary", "title", "message"), 160).lower()
+    operation = (
+        str(_field_value(change, "operation", "tool_name") or "").strip().lower()
+    )
+    summary = _clean_text(
+        _field_value(change, "summary", "title", "message"), 160
+    ).lower()
     return "|".join([path, operation, summary])
 
 
@@ -422,7 +431,9 @@ def _merge_file_task_changes(*change_groups: Iterable[Any]) -> List[Dict[str, An
 
 def _file_task_change_kind(change: Mapping[str, Any]) -> str:
     change_type = str(_field_value(change, "change_type") or "").strip().lower()
-    operation = str(_field_value(change, "operation", "tool_name") or "").strip().lower()
+    operation = (
+        str(_field_value(change, "operation", "tool_name") or "").strip().lower()
+    )
     text = " ".join(
         [
             operation,
@@ -491,9 +502,22 @@ def _file_task_result_status(status: str) -> str:
     value = str(status or "").strip().lower()
     if value in {"completed", "done", "success", "succeeded", "verified"}:
         return "completed"
-    if value in {"waiting", "awaiting_confirmation", "needs_review", "needs_attention", "pending"}:
+    if value in {
+        "waiting",
+        "awaiting_confirmation",
+        "needs_review",
+        "needs_attention",
+        "pending",
+    }:
         return "needs_review"
-    if value in {"failed", "error", "cancelled", "canceled", "write_blocked", "tool_gap"}:
+    if value in {
+        "failed",
+        "error",
+        "cancelled",
+        "canceled",
+        "write_blocked",
+        "tool_gap",
+    }:
         return "failed"
     return "running"
 
@@ -507,9 +531,16 @@ def _source_refs_from_files(
     refs: List[SourceRef] = []
     seen = set()
 
-    def add_ref(path: Any, title: Any = "", snippet: Any = "", metadata: Optional[Dict[str, Any]] = None) -> None:
+    def add_ref(
+        path: Any,
+        title: Any = "",
+        snippet: Any = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
         clean_path = _clean_path(path)
-        clean_title = _clean_text(title or PurePosixPath(clean_path).name or path or "来源", 200)
+        clean_title = _clean_text(
+            title or PurePosixPath(clean_path).name or path or "来源", 200
+        )
         key = (clean_path or clean_title).lower()
         if not key or key in seen:
             return
@@ -545,13 +576,19 @@ def _source_refs_from_files(
     return refs
 
 
-def _source_refs_from_event_payload(event_payload: Mapping[str, Any]) -> List[SourceRef]:
+def _source_refs_from_event_payload(
+    event_payload: Mapping[str, Any],
+) -> List[SourceRef]:
     refs: List[SourceRef] = []
     seen = set()
 
-    def add_ref(path: Any, title: Any = "", snippet: Any = "", locator: str = "") -> None:
+    def add_ref(
+        path: Any, title: Any = "", snippet: Any = "", locator: str = ""
+    ) -> None:
         clean_path = _clean_path(path)
-        clean_title = _clean_text(title or PurePosixPath(clean_path).name or path or "来源", 200)
+        clean_title = _clean_text(
+            title or PurePosixPath(clean_path).name or path or "来源", 200
+        )
         key = (clean_path or clean_title).lower()
         if not key or key in seen:
             return
@@ -584,7 +621,10 @@ def _source_refs_from_event_payload(event_payload: Mapping[str, Any]) -> List[So
             continue
         add_ref(
             item.get("file") or item.get("path") or item.get("url"),
-            item.get("title") or item.get("file") or item.get("path") or item.get("url"),
+            item.get("title")
+            or item.get("file")
+            or item.get("path")
+            or item.get("url"),
             item.get("snippet") or item.get("preview"),
             str(item.get("locator") or ""),
         )
@@ -620,11 +660,17 @@ def build_file_task_artifact_result(
 ) -> ArtifactResult:
     """Create an ArtifactResult view from file-task stream state."""
     payload = dict(event_payload or {})
-    event_changes = payload.get("file_changes") if isinstance(payload.get("file_changes"), list) else []
+    event_changes = (
+        payload.get("file_changes")
+        if isinstance(payload.get("file_changes"), list)
+        else []
+    )
     changes_payload = _merge_file_task_changes(file_changes or [], event_changes)
     result_status = _file_task_result_status(status)
     title = _clean_text(task, 200) or "文件任务结果"
-    result_summary = _clean_text(summary or payload.get("summary") or payload.get("text") or task, 2000)
+    result_summary = _clean_text(
+        summary or payload.get("summary") or payload.get("text") or task, 2000
+    )
 
     artifacts: List[Artifact] = []
     seen_artifacts = set()
@@ -696,7 +742,11 @@ def build_file_task_artifact_result(
         _source_refs_from_event_payload(payload),
     )
 
-    log_level = "error" if result_status == "failed" else ("warn" if result_status == "needs_review" else "info")
+    log_level = (
+        "error"
+        if result_status == "failed"
+        else ("warn" if result_status == "needs_review" else "info")
+    )
     logs = [
         ExecutionLog(
             level=log_level,
@@ -711,7 +761,9 @@ def build_file_task_artifact_result(
         logs.append(ExecutionLog(message=f"已记录 {len(changes_payload)} 个文件变更。"))
     if isinstance(next_action, Mapping) and next_action:
         next_message = _clean_text(
-            next_action.get("summary") or next_action.get("suggested_next_step") or "需要下一步处理。",
+            next_action.get("summary")
+            or next_action.get("suggested_next_step")
+            or "需要下一步处理。",
             800,
         )
         logs.append(ExecutionLog(level="warn", message=next_message))

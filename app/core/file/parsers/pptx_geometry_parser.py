@@ -10,10 +10,8 @@ import os
 import re
 from typing import Any
 
-from app.core.file.image_utils import (
-    MAX_BLOB_BYTES as _MAX_BLOB_BYTES,
-    compress_image_bytes as _compress_image_bytes,
-)
+from app.core.file.image_utils import MAX_BLOB_BYTES as _MAX_BLOB_BYTES
+from app.core.file.image_utils import compress_image_bytes as _compress_image_bytes
 
 logger = logging.getLogger(__name__)
 
@@ -72,15 +70,20 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 for _r2 in _mst_part.rels.values():
                     if "theme" in _r2.reltype:
                         import lxml.etree as _ET
+
                         _theme_el = _ET.fromstring(_r2.target_part.blob)
                         _cs = _theme_el.find(f".//{{{_NS_T}}}clrScheme")
                         if _cs is not None:
                             for _c in _cs:
-                                _name = _c.tag.split("}")[1]  # e.g. "dk1", "lt1", "accent1"
+                                _name = _c.tag.split("}")[
+                                    1
+                                ]  # e.g. "dk1", "lt1", "accent1"
                                 _srgb = _c.find(f"{{{_NS_T}}}srgbClr")
-                                _sys  = _c.find(f"{{{_NS_T}}}sysClr")
+                                _sys = _c.find(f"{{{_NS_T}}}sysClr")
                                 if _srgb is not None:
-                                    _theme_colors[_name] = "#" + _srgb.get("val", "000000").lower()
+                                    _theme_colors[_name] = (
+                                        "#" + _srgb.get("val", "000000").lower()
+                                    )
                                 elif _sys is not None:
                                     _last = _sys.get("lastClr", "")
                                     if _last:
@@ -131,13 +134,23 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             pass
         try:
             from pptx.enum.dml import MSO_THEME_COLOR
+
             # python-pptx theme_color names like DARK_1, LIGHT_1, ACCENT_1 etc.
             # Map to OOXML scheme names: DARK_1→dk1, LIGHT_1→lt1, ACCENT_N→accentN, etc.
             _tc = color_obj.theme_color
             _name_map = {
-                1: "dk1", 2: "lt1", 3: "dk2", 4: "lt2",
-                5: "accent1", 6: "accent2", 7: "accent3", 8: "accent4",
-                9: "accent5", 10: "accent6", 11: "hlink", 12: "folHlink",
+                1: "dk1",
+                2: "lt1",
+                3: "dk2",
+                4: "lt2",
+                5: "accent1",
+                6: "accent2",
+                7: "accent3",
+                8: "accent4",
+                9: "accent5",
+                10: "accent6",
+                11: "hlink",
+                12: "folHlink",
             }
             _hex = _theme_colors.get(_name_map.get(int(_tc), ""))
             if _hex:
@@ -194,21 +207,22 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         to avoid picking up shape images as backgrounds.
         """
         from pptx.oxml.ns import qn as _qn_bg
-        _R_NS = 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
-        _P_NS = 'http://schemas.openxmlformats.org/presentationml/2006/main'
+
+        _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+        _P_NS = "http://schemas.openxmlformats.org/presentationml/2006/main"
 
         def _resolve_blip_image(bg_pr_element: Any, part: Any) -> dict:
             """Find <a:blip r:embed="rIdN"/> in <p:bgPr> XML, resolve to compressed data URI."""
             try:
-                blip = bg_pr_element.find('.//' + _qn_bg('a:blip'))
+                blip = bg_pr_element.find(".//" + _qn_bg("a:blip"))
                 if blip is not None:
-                    rId = blip.get(f'{{{_R_NS}}}embed')
-                    if rId and hasattr(part, 'rels') and rId in part.rels:
+                    rId = blip.get(f"{{{_R_NS}}}embed")
+                    if rId and hasattr(part, "rels") and rId in part.rels:
                         img_part = part.rels[rId].target_part
                         img_bytes, mime = _compress_image_bytes(
-                            img_part.blob, img_part.content_type or 'image/png'
+                            img_part.blob, img_part.content_type or "image/png"
                         )
-                        b64 = base64.b64encode(img_bytes).decode('ascii')
+                        b64 = base64.b64encode(img_bytes).decode("ascii")
                         return {"image": f"data:{mime};base64,{b64}"}
             except Exception:
                 pass
@@ -217,18 +231,22 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         def _resolve_solid_color(bg_pr_element: Any) -> dict:
             """Find <a:solidFill><a:srgbClr val="..."/> in <p:bgPr> XML."""
             try:
-                solid = bg_pr_element.find('.//' + _qn_bg('a:solidFill'))
+                solid = bg_pr_element.find(".//" + _qn_bg("a:solidFill"))
                 if solid is not None:
-                    srgb = solid.find(_qn_bg('a:srgbClr'))
+                    srgb = solid.find(_qn_bg("a:srgbClr"))
                     if srgb is not None:
-                        val = srgb.get('val', '')
+                        val = srgb.get("val", "")
                         if len(val) == 6:
                             return {"color": "#" + val.lower()}
             except Exception:
                 pass
             return {}
 
-        for src in (slide, getattr(slide, "slide_layout", None), getattr(slide, "slide_master", None)):
+        for src in (
+            slide,
+            getattr(slide, "slide_layout", None),
+            getattr(slide, "slide_master", None),
+        ):
             if src is None:
                 continue
             try:
@@ -236,12 +254,12 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 # slide.background._element is <p:cSld>; searching it directly
                 # would also find <a:blip> inside shape tree → wrong image!
                 cSld = src.background._element
-                bg_el = cSld.find(f'{{{_P_NS}}}bg')
+                bg_el = cSld.find(f"{{{_P_NS}}}bg")
                 if bg_el is None:
                     continue  # this source has no background definition
 
-                bgPr = bg_el.find(f'{{{_P_NS}}}bgPr')
-                src_part = getattr(src, 'part', None)
+                bgPr = bg_el.find(f"{{{_P_NS}}}bgPr")
+                src_part = getattr(src, "part", None)
 
                 if bgPr is not None and src_part is not None:
                     # Check for image fill (blipFill)
@@ -254,22 +272,24 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         return result
                     # Check for gradient fill
                     f = src.background.fill
-                    if getattr(f.type, 'name', '') == 'GRADIENT':
+                    if getattr(f.type, "name", "") == "GRADIENT":
                         css = _extract_grad_css(f)
                         if css:
                             return {"gradient": css}
 
                 # bgRef (theme reference) — use python-pptx fill API
-                bgRef = bg_el.find(f'{{{_P_NS}}}bgRef')
+                bgRef = bg_el.find(f"{{{_P_NS}}}bgRef")
                 if bgRef is not None:
                     f = src.background.fill
-                    fill_name = getattr(f.type, 'name', '') if f.type is not None else ''
-                    if fill_name == 'SOLID':
+                    fill_name = (
+                        getattr(f.type, "name", "") if f.type is not None else ""
+                    )
+                    if fill_name == "SOLID":
                         try:
                             return {"color": "#" + str(f.fore_color.rgb).lower()}
                         except Exception:
                             pass
-                    if fill_name == 'GRADIENT':
+                    if fill_name == "GRADIENT":
                         css = _extract_grad_css(f)
                         if css:
                             return {"gradient": css}
@@ -277,7 +297,9 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 pass
         return {"color": "#FFFFFF"}
 
-    def _parse_tf(tf: Any, layout_defaults: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    def _parse_tf(
+        tf: Any, layout_defaults: dict[str, Any] | None = None
+    ) -> list[dict[str, Any]]:
         """Convert a python-pptx TextFrame into our [{align, runs:[...]}] format.
 
         Handles three common cases that cause text to disappear:
@@ -324,7 +346,9 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         if _sol is not None:
                             _srgb = _sol.find(f"{{{_NS}}}srgbClr")
                             if _srgb is not None and len(_srgb.get("val", "")) == 6:
-                                _body_defaults["color"] = "#" + _srgb.get("val", "").lower()
+                                _body_defaults["color"] = (
+                                    "#" + _srgb.get("val", "").lower()
+                                )
         except Exception:
             pass
 
@@ -381,7 +405,12 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 ea = rpr_el.find(f"{{{_NS}}}ea")
                 if ea is not None:
                     ea_tf = ea.get("typeface", "")
-                    if ea_tf and not ea_tf.startswith("+") and ea_tf != "+mj-ea" and ea_tf != "+mn-ea":
+                    if (
+                        ea_tf
+                        and not ea_tf.startswith("+")
+                        and ea_tf != "+mj-ea"
+                        and ea_tf != "+mn-ea"
+                    ):
                         out["eaFontName"] = ea_tf
             except Exception:
                 pass
@@ -504,7 +533,16 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     # Merge: run → paragraph → layout placeholder → body (lstStyle) defaults
                     _layout_defs = layout_defaults or {}
                     r: dict[str, Any] = {"text": text_val}
-                    for key in ("size", "bold", "italic", "underline", "fontName", "eaFontName", "color", "charSpacing"):
+                    for key in (
+                        "size",
+                        "bold",
+                        "italic",
+                        "underline",
+                        "fontName",
+                        "eaFontName",
+                        "color",
+                        "charSpacing",
+                    ):
                         if key in run_attrs:
                             r[key] = run_attrs[key]
                         elif key in para_defaults:
@@ -564,7 +602,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     fallback_run: dict[str, Any] = {"text": raw}
                     # Apply body defaults first, layout, then para defaults (higher priority)
                     _layout_defs = layout_defaults or {}
-                    for key, val in {**_body_defaults, **_layout_defs, **para_defaults}.items():
+                    for key, val in {
+                        **_body_defaults,
+                        **_layout_defs,
+                        **para_defaults,
+                    }.items():
                         fallback_run.setdefault(key, val)
                     p_obj["runs"] = [fallback_run]
 
@@ -575,11 +617,14 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # runs in the same paragraph (e.g.  sz=2100 | sz=None | sz=2100 →
             # the middle run should also be 2100, not the global default).
             _runs = p_obj["runs"]
-            if _runs and any("size" not in r for r in _runs if r.get("text", "").strip()):
+            if _runs and any(
+                "size" not in r for r in _runs if r.get("text", "").strip()
+            ):
                 _sibling_sizes = [r["size"] for r in _runs if "size" in r]
                 if _sibling_sizes:
                     # Use the most common size among siblings
                     from collections import Counter
+
                     _best_size = Counter(_sibling_sizes).most_common(1)[0][0]
                     for r in _runs:
                         if "size" not in r and r.get("text", "").strip():
@@ -614,9 +659,9 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # always explicitly sized, which is why only they were visible.
             # Fix: pull the real geometry from the matching layout placeholder.
             eff_left = shape.left
-            eff_top  = shape.top
-            eff_w    = shape.width
-            eff_h    = shape.height
+            eff_top = shape.top
+            eff_w = shape.width
+            eff_h = shape.height
 
             if None in (eff_left, eff_top, eff_w, eff_h):
                 try:
@@ -642,7 +687,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                     pass
                         # Walk slide master if layout didn't resolve everything
                         if None in (eff_left, eff_top, eff_w, eff_h):
-                            slide_master = getattr(slide_layout, "slide_master", None) if slide_layout else None
+                            slide_master = (
+                                getattr(slide_layout, "slide_master", None)
+                                if slide_layout
+                                else None
+                            )
                             if slide_master is not None:
                                 for mph in slide_master.placeholders:
                                     try:
@@ -661,29 +710,47 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         # If still None after layout+master, use standard widescreen EMU defaults
                         if None in (eff_left, eff_top, eff_w, eff_h):
                             _ph_idx = getattr(ph_fmt, "idx", -1)
-                            _prs_shape = getattr(getattr(shape, "part", None), "presentation", None)
-                            _sw = int(getattr(_prs_shape, "slide_width",  None) or 9144000)
-                            _sh = int(getattr(_prs_shape, "slide_height", None) or 6858000)
-                            if _ph_idx == 0:   # Title
-                                if eff_left is None: eff_left = 457200
-                                if eff_top  is None: eff_top  = 274638
-                                if eff_w    is None: eff_w    = 8229600
-                                if eff_h    is None: eff_h    = 1143000
+                            _prs_shape = getattr(
+                                getattr(shape, "part", None), "presentation", None
+                            )
+                            _sw = int(
+                                getattr(_prs_shape, "slide_width", None) or 9144000
+                            )
+                            _sh = int(
+                                getattr(_prs_shape, "slide_height", None) or 6858000
+                            )
+                            if _ph_idx == 0:  # Title
+                                if eff_left is None:
+                                    eff_left = 457200
+                                if eff_top is None:
+                                    eff_top = 274638
+                                if eff_w is None:
+                                    eff_w = 8229600
+                                if eff_h is None:
+                                    eff_h = 1143000
                             elif _ph_idx == 1:  # Body / Content
-                                if eff_left is None: eff_left = 457200
-                                if eff_top  is None: eff_top  = 1600200
-                                if eff_w    is None: eff_w    = 8229600
-                                if eff_h    is None: eff_h    = 4525963
+                                if eff_left is None:
+                                    eff_left = 457200
+                                if eff_top is None:
+                                    eff_top = 1600200
+                                if eff_w is None:
+                                    eff_w = 8229600
+                                if eff_h is None:
+                                    eff_h = 4525963
                             else:
-                                if eff_left is None: eff_left = 0
-                                if eff_top  is None: eff_top  = 0
-                                if eff_w    is None: eff_w    = _sw
-                                if eff_h    is None: eff_h    = _sh
+                                if eff_left is None:
+                                    eff_left = 0
+                                if eff_top is None:
+                                    eff_top = 0
+                                if eff_w is None:
+                                    eff_w = _sw
+                                if eff_h is None:
+                                    eff_h = _sh
                 except Exception:
                     pass
 
-            abs_left = off_left + round((( eff_left or 0) - grp_ch_off_x) * grp_scale_x)
-            abs_top  = off_top  + round((( eff_top  or 0) - grp_ch_off_y) * grp_scale_y)
+            abs_left = off_left + round(((eff_left or 0) - grp_ch_off_x) * grp_scale_x)
+            abs_top = off_top + round(((eff_top or 0) - grp_ch_off_y) * grp_scale_y)
             # Also scale the shape's own width/height when inside a group
             if grp_scale_x != 1.0 and eff_w is not None:
                 eff_w = round(eff_w * grp_scale_x)
@@ -704,9 +771,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     _NS_A2 = "http://schemas.openxmlformats.org/drawingml/2006/main"
                     xfrm = shape.element.find(
                         f"{{{_NS_P}}}grpSpPr/{{{_NS_A2}}}xfrm"
-                    ) or shape.element.find(
-                        f"{{{_NS_A2}}}grpSpPr/{{{_NS_A2}}}xfrm"
-                    )
+                    ) or shape.element.find(f"{{{_NS_A2}}}grpSpPr/{{{_NS_A2}}}xfrm")
                     ch_off_x = ch_off_y = 0
                     ch_ext_cx = eff_w or 1
                     ch_ext_cy = eff_h or 1
@@ -748,7 +813,10 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # MSO_SHAPE_TYPE.MEDIA = 16.  python-pptx cannot render video/audio
             # and attempting to read their blobs would base64-encode hundreds of MB.
             try:
-                if getattr(MSO_SHAPE_TYPE, 'MEDIA', None) is not None and shape.shape_type == MSO_SHAPE_TYPE.MEDIA:
+                if (
+                    getattr(MSO_SHAPE_TYPE, "MEDIA", None) is not None
+                    and shape.shape_type == MSO_SHAPE_TYPE.MEDIA
+                ):
                     continue
             except Exception:
                 pass
@@ -758,7 +826,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 "name": shape.name,
                 "left": abs_left,
                 "top": abs_top,
-                "width":  eff_w or 0,
+                "width": eff_w or 0,
                 "height": eff_h or 0,
                 "z_order": z_base + z_idx,
                 "fill": None,
@@ -767,29 +835,39 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # Shape fill — solid, gradient, or picture
             try:
                 fill = shape.fill
-                fill_name = getattr(fill.type, 'name', '') if fill.type is not None else ''
-                if fill_name == 'SOLID':
+                fill_name = (
+                    getattr(fill.type, "name", "") if fill.type is not None else ""
+                )
+                if fill_name == "SOLID":
                     _fc = _resolve_color(fill.fore_color)
                     if _fc:
                         s["fill"] = _fc
-                elif fill_name == 'GRADIENT':
+                elif fill_name == "GRADIENT":
                     css = _extract_grad_css(fill)
                     if css:
                         s["fillGradient"] = css
-                elif fill_name == 'PICTURE':
+                elif fill_name == "PICTURE":
                     try:
                         from pptx.oxml.ns import qn as _qn_sh
-                        blip = shape.element.find('.//' + _qn_sh('a:blip'))
+
+                        blip = shape.element.find(".//" + _qn_sh("a:blip"))
                         if blip is not None:
-                            rId = blip.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+                            rId = blip.get(
+                                "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+                            )
                             if rId:
                                 img_part = shape.part.related_parts[rId]
                                 _raw_blob = img_part.blob
-                                _raw_mime = img_part.content_type or 'image/png'
+                                _raw_mime = img_part.content_type or "image/png"
                                 # Skip non-image blobs (e.g. video used as fill) or oversized media
-                                if _raw_mime.startswith('image/') and len(_raw_blob) <= _MAX_BLOB_BYTES:
-                                    img_bytes, mime = _compress_image_bytes(_raw_blob, _raw_mime)
-                                    b64 = base64.b64encode(img_bytes).decode('ascii')
+                                if (
+                                    _raw_mime.startswith("image/")
+                                    and len(_raw_blob) <= _MAX_BLOB_BYTES
+                                ):
+                                    img_bytes, mime = _compress_image_bytes(
+                                        _raw_blob, _raw_mime
+                                    )
+                                    b64 = base64.b64encode(img_bytes).decode("ascii")
                                     s["fillImage"] = f"data:{mime};base64,{b64}"
                     except Exception:
                         pass
@@ -806,7 +884,10 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     except Exception:
                         pass
                     # line.width is in EMU; store as-is, frontend scales
-                    s["border"] = {"widthEmu": int(line.width), "color": _lc or "#000000"}
+                    s["border"] = {
+                        "widthEmu": int(line.width),
+                        "color": _lc or "#000000",
+                    }
             except Exception:
                 pass
 
@@ -824,13 +905,19 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     img_blob = shape.image.blob
                     img_mime = shape.image.content_type or "image/png"
                     # Guard: skip if non-image MIME (video poster frame) or oversized blob
-                    if not img_mime.startswith("image/") or len(img_blob) > _MAX_BLOB_BYTES:
+                    if (
+                        not img_mime.startswith("image/")
+                        or len(img_blob) > _MAX_BLOB_BYTES
+                    ):
                         logger.warning(
                             "[parse_pptx] skipping oversized/non-image blob: mime=%s size=%.1f MB",
-                            img_mime, len(img_blob) / 1048576,
+                            img_mime,
+                            len(img_blob) / 1048576,
                         )
                         s["_type"] = "PICTURE"
-                        s["image_b64"] = ""  # placeholder — too large or non-image media
+                        s["image_b64"] = (
+                            ""  # placeholder — too large or non-image media
+                        )
                         out.append(s)
                         continue
                     img_blob, img_mime = _compress_image_bytes(img_blob, img_mime)
@@ -867,11 +954,18 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                 )
                             except Exception:
                                 pass
-                            cell_d: dict[str, Any] = {"row": r_idx, "col": c_idx, "text": cell_text}
+                            cell_d: dict[str, Any] = {
+                                "row": r_idx,
+                                "col": c_idx,
+                                "text": cell_text,
+                            }
                             # Cell fill
                             try:
                                 cfill = cell.fill
-                                if cfill.type is not None and getattr(cfill.type, 'name', '') == 'SOLID':
+                                if (
+                                    cfill.type is not None
+                                    and getattr(cfill.type, "name", "") == "SOLID"
+                                ):
                                     _cf = _resolve_color(cfill.fore_color)
                                     if _cf:
                                         cell_d["fill"] = _cf
@@ -883,10 +977,19 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                     fp = cell.text_frame.paragraphs[0]
                                     if fp.runs:
                                         fr = fp.runs[0]
-                                        if fr.font.size:   cell_d["fontSize"] = round(fr.font.size.pt, 1)
-                                        if fr.font.bold:   cell_d["bold"] = True
-                                        if fr.font.color and fr.font.color.type is not None:
-                                            cell_d["color"] = "#" + str(fr.font.color.rgb).lower()
+                                        if fr.font.size:
+                                            cell_d["fontSize"] = round(
+                                                fr.font.size.pt, 1
+                                            )
+                                        if fr.font.bold:
+                                            cell_d["bold"] = True
+                                        if (
+                                            fr.font.color
+                                            and fr.font.color.type is not None
+                                        ):
+                                            cell_d["color"] = (
+                                                "#" + str(fr.font.color.rgb).lower()
+                                            )
                                     cell_d["align"] = (
                                         fp.alignment.name if fp.alignment else "LEFT"
                                     )
@@ -907,17 +1010,23 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # ── Generic Shapes / Icons / SVGs / Charts / Connectors ────────
             try:
                 _st = getattr(shape, "shape_type", None)
-                if _st in (MSO_SHAPE_TYPE.AUTO_SHAPE, MSO_SHAPE_TYPE.FREEFORM,
-                           MSO_SHAPE_TYPE.GRAPHIC_FRAME):
+                if _st in (
+                    MSO_SHAPE_TYPE.AUTO_SHAPE,
+                    MSO_SHAPE_TYPE.FREEFORM,
+                    MSO_SHAPE_TYPE.GRAPHIC_FRAME,
+                ):
                     s["_type"] = "SHAPE"
                     # Rounded rectangle: extract corner radius from XML
                     try:
                         from pptx.oxml.ns import qn as _qn_r
-                        prstGeom = shape.element.find('.//' + _qn_r('a:prstGeom'))
+
+                        prstGeom = shape.element.find(".//" + _qn_r("a:prstGeom"))
                         if prstGeom is not None:
                             s["autoShapeType"] = prstGeom.get("prst", "")
-                            avLst = prstGeom.find('.//' + _qn_r('a:gd'))
-                            if avLst is not None and avLst.get("fmla", "").startswith("val "):
+                            avLst = prstGeom.find(".//" + _qn_r("a:gd"))
+                            if avLst is not None and avLst.get("fmla", "").startswith(
+                                "val "
+                            ):
                                 s["cornerRadiusEmu"] = int(avLst.get("fmla").split()[1])
                     except Exception:
                         pass
@@ -940,6 +1049,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                     is_title = False
                     try:
                         from pptx.enum.shapes import PP_PLACEHOLDER
+
                         ph = shape.placeholder_format
                         if ph is not None:
                             is_title = ph.type in (
@@ -962,26 +1072,52 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                     _ph_fmt = getattr(shape, "placeholder_format", None)
                                     if _ph_fmt is not None:
                                         _ph_idx = _ph_fmt.idx
-                                        _sl_layout = getattr(getattr(shape, "part", None), "slide_layout", None)
+                                        _sl_layout = getattr(
+                                            getattr(shape, "part", None),
+                                            "slide_layout",
+                                            None,
+                                        )
                                         if _sl_layout is not None:
                                             for _lph in _sl_layout.placeholders:
                                                 try:
-                                                    if _lph.placeholder_format.idx == _ph_idx:
-                                                        _lbPr = _lph.text_frame._txBody.find(f"{{{_NS_A}}}bodyPr")
+                                                    if (
+                                                        _lph.placeholder_format.idx
+                                                        == _ph_idx
+                                                    ):
+                                                        _lbPr = _lph.text_frame._txBody.find(
+                                                            f"{{{_NS_A}}}bodyPr"
+                                                        )
                                                         if _lbPr is not None:
-                                                            anchor = _lbPr.get("anchor") or anchor
+                                                            anchor = (
+                                                                _lbPr.get("anchor")
+                                                                or anchor
+                                                            )
                                                         break
                                                 except Exception:
                                                     pass
                                         if not anchor:
-                                            _sl_master = getattr(_sl_layout, "slide_master", None) if _sl_layout else None
+                                            _sl_master = (
+                                                getattr(
+                                                    _sl_layout, "slide_master", None
+                                                )
+                                                if _sl_layout
+                                                else None
+                                            )
                                             if _sl_master is not None:
                                                 for _mph in _sl_master.placeholders:
                                                     try:
-                                                        if _mph.placeholder_format.idx == _ph_idx:
-                                                            _mbPr = _mph.text_frame._txBody.find(f"{{{_NS_A}}}bodyPr")
+                                                        if (
+                                                            _mph.placeholder_format.idx
+                                                            == _ph_idx
+                                                        ):
+                                                            _mbPr = _mph.text_frame._txBody.find(
+                                                                f"{{{_NS_A}}}bodyPr"
+                                                            )
                                                             if _mbPr is not None:
-                                                                anchor = _mbPr.get("anchor") or anchor
+                                                                anchor = (
+                                                                    _mbPr.get("anchor")
+                                                                    or anchor
+                                                                )
                                                             break
                                                     except Exception:
                                                         pass
@@ -1001,7 +1137,7 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                 "b": int(bIns) if bIns is not None else 45720,
                             }
                             # Text autofit mode: spAutoFit | normAutofit (with fontScale) | noAutofit
-                            _af_sp   = bodyPr.find(f"{{{_NS_A}}}spAutoFit")
+                            _af_sp = bodyPr.find(f"{{{_NS_A}}}spAutoFit")
                             _af_norm = bodyPr.find(f"{{{_NS_A}}}normAutofit")
                             if _af_sp is not None:
                                 s["autoFit"] = "sp"
@@ -1029,52 +1165,116 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         _ph_fmt2 = getattr(shape, "placeholder_format", None)
                         if _ph_fmt2 is not None:
                             _ph_idx2 = _ph_fmt2.idx
-                            _sl_layout2 = getattr(getattr(shape, "part", None), "slide_layout", None)
+                            _sl_layout2 = getattr(
+                                getattr(shape, "part", None), "slide_layout", None
+                            )
                             if _sl_layout2 is not None:
                                 for _lph2 in _sl_layout2.placeholders:
                                     try:
                                         if _lph2.placeholder_format.idx == _ph_idx2:
                                             _ltxBody = _lph2.text_frame._txBody
-                                            _llstStyle = _ltxBody.find(f"{{{_NS_A}}}lstStyle")
+                                            _llstStyle = _ltxBody.find(
+                                                f"{{{_NS_A}}}lstStyle"
+                                            )
                                             if _llstStyle is not None:
-                                                _llvl1 = _llstStyle.find(f"{{{_NS_A}}}lvl1pPr")
+                                                _llvl1 = _llstStyle.find(
+                                                    f"{{{_NS_A}}}lvl1pPr"
+                                                )
                                                 if _llvl1 is not None:
-                                                    _ldefRPr = _llvl1.find(f"{{{_NS_A}}}defRPr")
+                                                    _ldefRPr = _llvl1.find(
+                                                        f"{{{_NS_A}}}defRPr"
+                                                    )
                                                     if _ldefRPr is not None:
                                                         _lsz = _ldefRPr.get("sz")
                                                         if _lsz:
                                                             try:
                                                                 _lv = int(_lsz)
                                                                 if _lv > 0:
-                                                                    _layout_defaults["size"] = round(_lv / 100.0, 1)
+                                                                    _layout_defaults[
+                                                                        "size"
+                                                                    ] = round(
+                                                                        _lv / 100.0, 1
+                                                                    )
                                                             except Exception:
                                                                 pass
-                                                        for _lk, _la in (("bold", "b"), ("italic", "i")):
+                                                        for _lk, _la in (
+                                                            ("bold", "b"),
+                                                            ("italic", "i"),
+                                                        ):
                                                             _lav = _ldefRPr.get(_la)
-                                                            if _lav and _lav.lower() not in ("0", "false"):
-                                                                _layout_defaults[_lk] = True
-                                                        _llat = _ldefRPr.find(f"{{{_NS_A}}}latin")
+                                                            if (
+                                                                _lav
+                                                                and _lav.lower()
+                                                                not in ("0", "false")
+                                                            ):
+                                                                _layout_defaults[
+                                                                    _lk
+                                                                ] = True
+                                                        _llat = _ldefRPr.find(
+                                                            f"{{{_NS_A}}}latin"
+                                                        )
                                                         if _llat is not None:
-                                                            _ltf = _llat.get("typeface", "")
-                                                            if _ltf and not _ltf.startswith("+"):
-                                                                _layout_defaults["fontName"] = _ltf
-                                                        _lea = _ldefRPr.find(f"{{{_NS_A}}}ea")
+                                                            _ltf = _llat.get(
+                                                                "typeface", ""
+                                                            )
+                                                            if (
+                                                                _ltf
+                                                                and not _ltf.startswith(
+                                                                    "+"
+                                                                )
+                                                            ):
+                                                                _layout_defaults[
+                                                                    "fontName"
+                                                                ] = _ltf
+                                                        _lea = _ldefRPr.find(
+                                                            f"{{{_NS_A}}}ea"
+                                                        )
                                                         if _lea is not None:
-                                                            _leaf = _lea.get("typeface", "")
-                                                            if _leaf and not _leaf.startswith("+"):
-                                                                _layout_defaults["eaFontName"] = _leaf
-                                                        _lsol = _ldefRPr.find(f"{{{_NS_A}}}solidFill")
+                                                            _leaf = _lea.get(
+                                                                "typeface", ""
+                                                            )
+                                                            if (
+                                                                _leaf
+                                                                and not _leaf.startswith(
+                                                                    "+"
+                                                                )
+                                                            ):
+                                                                _layout_defaults[
+                                                                    "eaFontName"
+                                                                ] = _leaf
+                                                        _lsol = _ldefRPr.find(
+                                                            f"{{{_NS_A}}}solidFill"
+                                                        )
                                                         if _lsol is not None:
-                                                            _lsrgb = _lsol.find(f"{{{_NS_A}}}srgbClr")
-                                                            if _lsrgb is not None and len(_lsrgb.get("val", "")) == 6:
-                                                                _layout_defaults["color"] = "#" + _lsrgb.get("val", "").lower()
+                                                            _lsrgb = _lsol.find(
+                                                                f"{{{_NS_A}}}srgbClr"
+                                                            )
+                                                            if (
+                                                                _lsrgb is not None
+                                                                and len(
+                                                                    _lsrgb.get(
+                                                                        "val", ""
+                                                                    )
+                                                                )
+                                                                == 6
+                                                            ):
+                                                                _layout_defaults[
+                                                                    "color"
+                                                                ] = (
+                                                                    "#"
+                                                                    + _lsrgb.get(
+                                                                        "val", ""
+                                                                    ).lower()
+                                                                )
                                             break
                                     except Exception:
                                         pass
                     except Exception:
                         pass
 
-                    s["paragraphs"] = _parse_tf(shape.text_frame, layout_defaults=_layout_defaults)
+                    s["paragraphs"] = _parse_tf(
+                        shape.text_frame, layout_defaults=_layout_defaults
+                    )
                     out.append(s)
             except Exception:
                 pass
@@ -1083,7 +1283,6 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
             # TEXT, PICTURE, TABLE which already called out.append+continue).
             if s.get("_type") in ("SHAPE", "CHART"):
                 out.append(s)
-
 
     # ── Main loop ────────────────────────────────────────────────────────
 
@@ -1103,11 +1302,16 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         # These form the visual theme/background template visible behind slide content.
         try:
             _slide_layout = getattr(slide, "slide_layout", None)
-            _slide_master = getattr(_slide_layout, "slide_master", None) if _slide_layout else None
+            _slide_master = (
+                getattr(_slide_layout, "slide_master", None) if _slide_layout else None
+            )
             # Slide master shapes (z_base=-2000, bottom-most layer)
             if _slide_master is not None:
-                _mst_decos = [_s for _s in _slide_master.shapes
-                              if not getattr(_s, "is_placeholder", False)]
+                _mst_decos = [
+                    _s
+                    for _s in _slide_master.shapes
+                    if not getattr(_s, "is_placeholder", False)
+                ]
                 _mst_out: list[dict[str, Any]] = []
                 _collect_shapes(_mst_decos, _mst_out, z_base=-2000)
                 for _ms in _mst_out:
@@ -1115,8 +1319,11 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 shapes_data.extend(_mst_out)
             # Slide layout shapes (z_base=-1000, above master, below slide content)
             if _slide_layout is not None:
-                _lay_decos = [_s for _s in _slide_layout.shapes
-                              if not getattr(_s, "is_placeholder", False)]
+                _lay_decos = [
+                    _s
+                    for _s in _slide_layout.shapes
+                    if not getattr(_s, "is_placeholder", False)
+                ]
                 _lay_out: list[dict[str, Any]] = []
                 _collect_shapes(_lay_decos, _lay_out, z_base=-1000)
                 for _ls in _lay_out:
@@ -1135,20 +1342,25 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         _EXCL_BUFFER = 91440  # 1 EMU point of extra breathing room
         _MAX_EXCL_OVERLAP_RATIO = 0.6
         _text_shapes = [
-            s for s in shapes_data
+            s
+            for s in shapes_data
             if s.get("has_text") and s.get("textInsets") is not None
         ]
         for _a in _text_shapes:
-            _al  = _a["left"];  _at  = _a["top"]
-            _ar  = _al + _a["width"];  _ab  = _at + _a["height"]
+            _al = _a["left"]
+            _at = _a["top"]
+            _ar = _al + _a["width"]
+            _ab = _at + _a["height"]
             _acx = _al + _a["width"] / 2
             for _b in shapes_data:
                 if _b.get("z_order", 0) <= _a.get("z_order", 0):
                     continue  # only consider shapes rendered ON TOP of _a
                 if not _b.get("has_text"):
                     continue  # only exclude space for text-bearing shapes
-                _bl = _b["left"];  _bt = _b["top"]
-                _br = _bl + _b["width"];  _bb = _bt + _b["height"]
+                _bl = _b["left"]
+                _bt = _b["top"]
+                _br = _bl + _b["width"]
+                _bb = _bt + _b["height"]
                 # Must overlap in BOTH axes
                 if _bb <= _at or _bt >= _ab:
                     continue
@@ -1203,7 +1415,6 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
         "default_title_font_size_pt": _default_title_font_size_pt,
         "slides": slides_data,
     }
-
 
 
 # ─────────────────────────────────────────────────────────────────────────────

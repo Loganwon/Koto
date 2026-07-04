@@ -7,6 +7,7 @@ Bridges the existing ``sandbox.py`` (run_python / run_r) into the
 Agent ToolRegistry so the LLM can autonomously execute code during
 a ReAct loop.
 """
+
 import json
 import logging
 import os
@@ -129,9 +130,7 @@ class SandboxPlugin(AgentPlugin):
         files = result.get("files") or {}
         if files:
             fnames = list(files.keys())
-            parts.append(
-                f"Generated {len(fnames)} file(s): {', '.join(fnames)}"
-            )
+            parts.append(f"Generated {len(fnames)} file(s): {', '.join(fnames)}")
             # Include base64 references so downstream can render them
             for fname, b64 in files.items():
                 # Truncate very large payloads in the observation
@@ -141,4 +140,8 @@ class SandboxPlugin(AgentPlugin):
         if result.get("truncated"):
             parts.append("⚠️ Output was truncated (exceeded size limit)")
 
-        return "\n".join(parts) if parts else f"{lang} code executed successfully (no output)"
+        return (
+            "\n".join(parts)
+            if parts
+            else f"{lang} code executed successfully (no output)"
+        )

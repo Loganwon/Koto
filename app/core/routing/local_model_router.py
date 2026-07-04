@@ -76,12 +76,12 @@ class LocalModelRouter:
 
     # 推荐的快速分类模型（按优先级排序）
     OLLAMA_MODELS = [
-        "koto-router",   # LocalModelInstaller 创建的专用任务路由器
-        "qwen3:4b",      # 中英文分类质量好，速度适中
-        "qwen3:1.7b",    # 轻量备选
-        "qwen2.5:3b",    # 旧版快速
+        "koto-router",  # LocalModelInstaller 创建的专用任务路由器
+        "qwen3:4b",  # 中英文分类质量好，速度适中
+        "qwen3:1.7b",  # 轻量备选
+        "qwen2.5:3b",  # 旧版快速
         "qwen2.5:1.5b",  # 旧版轻量
-        "llama3.2:3b",   # 英文为主
+        "llama3.2:3b",  # 英文为主
         "gemma3:4b",
         "gemma3:1b",
         "qwen3:8b",
@@ -425,7 +425,10 @@ class LocalModelRouter:
             return ""
         try:
             import requests as _requests
-            resp = _requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+
+            resp = _requests.get(
+                f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY
+            )
             if resp.status_code != 200:
                 return ""
             models_data = resp.json().get("models", [])
@@ -453,7 +456,9 @@ class LocalModelRouter:
 
         # 获取已安装的模型
         try:
-            resp = requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+            resp = requests.get(
+                f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY
+            )
             if resp.status_code != 200:
                 return False
             installed = [
@@ -908,7 +913,7 @@ class LocalModelRouter:
         "qwen2.5:14b",
         "gemma3:12b",
         "qwen2.5:7b",  # 旧版质量好
-        "qwen3:4b",    # 快速备选
+        "qwen3:4b",  # 快速备选
         "gemma3:4b",
         "llama3.2:3b",
         "qwen3:1.7b",
@@ -927,7 +932,9 @@ class LocalModelRouter:
             return False
 
         try:
-            resp = requests.get(f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY)
+            resp = requests.get(
+                f"{_OLLAMA_API_BASE}/api/tags", timeout=2, proxies=_NO_PROXY
+            )
             if resp.status_code != 200:
                 return False
             installed = [m["name"] for m in resp.json().get("models", [])]
@@ -1367,7 +1374,9 @@ class LocalModelRouter:
                                 yield _think_buf
                             elif _think_buf and _in_think:
                                 # <think> 未正常关闭（网络截断等），紧急输出缓冲内容
-                                logger.warning("[LocalModelRouter] <think> unclosed at stream end, flushing buffer")
+                                logger.warning(
+                                    "[LocalModelRouter] <think> unclosed at stream end, flushing buffer"
+                                )
                                 yield _think_buf
                             break
                     except Exception:

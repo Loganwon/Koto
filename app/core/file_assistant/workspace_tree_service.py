@@ -76,7 +76,9 @@ class WorkspaceTreeService:
     ) -> list[dict]:
         items: list[dict] = []
         try:
-            children = sorted(dir_path.iterdir(), key=lambda path: (path.is_file(), path.name.lower()))
+            children = sorted(
+                dir_path.iterdir(), key=lambda path: (path.is_file(), path.name.lower())
+            )
             for path in children:
                 if path.name.startswith(".") or path.name in skip_names:
                     continue
@@ -88,7 +90,9 @@ class WorkspaceTreeService:
                             "name": path.name,
                             "type": "folder",
                             "path": rel_path,
-                            "children": self._build_tree(path, root_path, allowed_extensions, skip_names),
+                            "children": self._build_tree(
+                                path, root_path, allowed_extensions, skip_names
+                            ),
                         }
                     )
                 elif path.is_file():
@@ -98,7 +102,9 @@ class WorkspaceTreeService:
         return items
 
     @classmethod
-    def file_entry(cls, path: Path, display_path: str, allowed_extensions: Iterable[str]) -> dict:
+    def file_entry(
+        cls, path: Path, display_path: str, allowed_extensions: Iterable[str]
+    ) -> dict:
         ext = path.suffix.lower()
         size_str, mtime_ms = cls.file_stat_summary(path)
         allowed = frozenset(str(item).lower() for item in allowed_extensions)
@@ -125,9 +131,11 @@ class WorkspaceTreeService:
             size_str = (
                 f"{size_bytes}B"
                 if size_bytes < 1024
-                else f"{size_bytes / 1024:.1f}KB"
-                if size_bytes < 1048576
-                else f"{size_bytes / 1048576:.1f}MB"
+                else (
+                    f"{size_bytes / 1024:.1f}KB"
+                    if size_bytes < 1048576
+                    else f"{size_bytes / 1048576:.1f}MB"
+                )
             )
             return size_str, int(stat.st_mtime * 1000)
         except OSError:

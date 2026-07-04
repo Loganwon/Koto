@@ -168,7 +168,9 @@ class UploadedOpenFileService:
         save_upload(tmp_path)
         if tmp_path.stat().st_size == 0:
             tmp_path.unlink(missing_ok=True)
-            raise OpenFileEmptyError(f"{name} 文件内容为空，无法打开。请重新选择非空文件。")
+            raise OpenFileEmptyError(
+                f"{name} 文件内容为空，无法打开。请重新选择非空文件。"
+            )
 
         return PreparedUploadedFile(
             original_name=name,

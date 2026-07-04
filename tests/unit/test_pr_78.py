@@ -365,9 +365,9 @@ class TestRoutingConfigConstants(unittest.TestCase):
     def setUp(self):
         from app.core.routing.routing_config import (
             TASK_CORPUS,
+            TRIVIAL_EXCLUDE,
             TRIVIAL_GREETINGS,
             TRIVIAL_IDENTITY,
-            TRIVIAL_EXCLUDE,
         )
 
         self.TASK_CORPUS = TASK_CORPUS

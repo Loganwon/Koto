@@ -57,7 +57,11 @@ def test_file_task_artifact_result_maps_changes_and_sources():
             }
         ],
         source_files=[
-            {"path": "workspace/contracts/source.pdf", "name": "source.pdf", "type": "pdf"}
+            {
+                "path": "workspace/contracts/source.pdf",
+                "name": "source.pdf",
+                "type": "pdf",
+            }
         ],
     )
 
@@ -103,7 +107,14 @@ def test_file_task_stream_attaches_artifact_result_to_finished_event():
         task_id="task-stream-1",
         session_id="session-1",
         target_path="report.docx",
-        files=[{"path": "report.docx", "name": "report.docx", "type": "docx", "target": True}],
+        files=[
+            {
+                "path": "report.docx",
+                "name": "report.docx",
+                "type": "docx",
+                "target": True,
+            }
+        ],
         current_file=None,
         selection_source="",
     )
@@ -305,7 +316,9 @@ def test_bg_agent_status_serializer_includes_artifact_result():
 
     serialized = _serialize_status(agent.get_status(task_id))
     assert serialized["artifact_result"]["task_id"] == task_id
-    assert serialized["artifact_result"]["artifacts"][0]["path"] == "workspace/output.md"
+    assert (
+        serialized["artifact_result"]["artifacts"][0]["path"] == "workspace/output.md"
+    )
 
 
 def test_approve_plan_updates_artifact_result_status():

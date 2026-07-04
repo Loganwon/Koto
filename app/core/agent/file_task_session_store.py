@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
-
 _LOCK = threading.Lock()
 
 
@@ -60,11 +59,15 @@ def _load_records(path: Optional[str | Path] = None) -> List[Dict[str, Any]]:
     return [item for item in raw if isinstance(item, dict)]
 
 
-def _write_records(records: List[Dict[str, Any]], path: Optional[str | Path] = None) -> None:
+def _write_records(
+    records: List[Dict[str, Any]], path: Optional[str | Path] = None
+) -> None:
     store_path = Path(path) if path else _default_store_path()
     store_path.parent.mkdir(parents=True, exist_ok=True)
     temp_path = store_path.with_suffix(store_path.suffix + ".tmp")
-    temp_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp_path.write_text(
+        json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
     temp_path.replace(store_path)
 
 
@@ -139,7 +142,9 @@ def format_summaries_as_context(summaries: Iterable[Dict[str, Any]]) -> str:
         prefix_parts = [part for part in (file_path, outcome) if part]
         prefix = " / ".join(prefix_parts)
         task_part = f"；任务：{task}" if task else ""
-        lines.append(f"- {prefix}{task_part}；结果：{summary}" if prefix else f"- {summary}")
+        lines.append(
+            f"- {prefix}{task_part}；结果：{summary}" if prefix else f"- {summary}"
+        )
     if not lines:
         return ""
     return "最近相关文件任务记录：\n" + "\n".join(lines[:10])
@@ -220,7 +225,9 @@ def save_task_plan(
 
         records = records[-200:]
         temp_path = store_path.with_suffix(store_path.suffix + ".tmp")
-        temp_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temp_path.replace(store_path)
 
     return dict(plan)
@@ -267,7 +274,8 @@ def load_active_plans(limit: int = 10) -> List[Dict[str, Any]]:
         return []
 
     active = [
-        dict(r) for r in records
+        dict(r)
+        for r in records
         if isinstance(r, dict) and r.get("status") == "in_progress"
     ]
     return active[-limit:]
@@ -275,10 +283,12 @@ def load_active_plans(limit: int = 10) -> List[Dict[str, Any]]:
 
 def mark_plan_complete(run_id: str) -> bool:
     """Mark a task plan as completed."""
-    return bool(save_task_plan(
-        run_id=run_id,
-        status="completed",
-    ))
+    return bool(
+        save_task_plan(
+            run_id=run_id,
+            status="completed",
+        )
+    )
 
 
 def format_plan_as_context(plan: Optional[Dict[str, Any]]) -> str:
@@ -295,9 +305,13 @@ def format_plan_as_context(plan: Optional[Dict[str, Any]]) -> str:
     if plan.get("total_pages"):
         parts.append(f"- 总页数: {plan['total_pages']}")
     if plan.get("total_steps"):
-        parts.append(f"- 总步骤: {plan['total_steps']} / 已完成: {plan['completed_steps']}")
+        parts.append(
+            f"- 总步骤: {plan['total_steps']} / 已完成: {plan['completed_steps']}"
+        )
     if plan.get("current_page_end"):
-        parts.append(f"- 当前进度: 第 {plan['current_page_start']}-{plan['current_page_end']} 页已处理")
+        parts.append(
+            f"- 当前进度: 第 {plan['current_page_start']}-{plan['current_page_end']} 页已处理"
+        )
     if plan.get("total_paragraphs"):
         parts.append(f"- 已写入段落: {plan['total_paragraphs']}")
     if plan.get("extra"):

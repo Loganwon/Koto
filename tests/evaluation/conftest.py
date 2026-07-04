@@ -95,7 +95,11 @@ class OfflineEvaluator:
         return JudgeVerdict(
             pass_=passed,
             score=0.9 if passed else 0.35,
-            reason="offline heuristic judge" if passed else "offline heuristic judge failed",
+            reason=(
+                "offline heuristic judge"
+                if passed
+                else "offline heuristic judge failed"
+            ),
             issues=issues,
         )
 
@@ -121,11 +125,15 @@ class OfflineEvaluator:
 def _offline_model_response(request) -> dict[str, Any]:
     task = str(getattr(request, "task", "") or "")
     target_path = str(getattr(request, "target_path", "") or "").strip()
-    if target_path and any(token in task for token in ("润色", "修改", "写回", "批注", "标注")):
+    if target_path and any(
+        token in task for token in ("润色", "修改", "写回", "批注", "标注")
+    ):
         paragraphs = [
             {"text": "项目季度报告"},
             {"text": "本项目在第一季度取得显著进展，核心模块已完成并通过内部测试。"},
-            {"text": "财务方面，本季度营收增长 12%，下一阶段应继续优化性能并控制技术债。"},
+            {
+                "text": "财务方面，本季度营收增长 12%，下一阶段应继续优化性能并控制技术债。"
+            },
         ]
         return {
             "content": "",
@@ -169,7 +177,9 @@ def _offline_summary_for_task(task: str) -> str:
     if "翻译" in task:
         return "Artificial intelligence is changing our lifestyle and work patterns."
     if "销售" in task or "表格" in task:
-        return "销售分析：深圳鹏程电子有限公司贡献金额最高，MODULE-X3 产品销售金额最高。"
+        return (
+            "销售分析：深圳鹏程电子有限公司贡献金额最高，MODULE-X3 产品销售金额最高。"
+        )
     if "为什么" in task or "打不开" in task or "损坏" in task:
         return "可能原因包括文件格式不匹配、文件损坏、权限不足或软件版本不兼容。建议先备份文件，再尝试修复或重新导出。"
     if "建议" in task or "改进" in task:
@@ -277,6 +287,7 @@ def workspace(tmp_path):
 
 def _make_docx(path: Path, paragraphs: list[str]) -> Path:
     from docx import Document
+
     doc = Document()
     for text in paragraphs:
         doc.add_paragraph(text)
@@ -286,6 +297,7 @@ def _make_docx(path: Path, paragraphs: list[str]) -> Path:
 
 def _make_xlsx(path: Path, headers: list[str], rows: list[list]) -> Path:
     import openpyxl
+
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.append(headers)

@@ -118,10 +118,11 @@ def _get_embeddings(prefer_local: bool = False):
         )
         if api_key:
             try:
+                from langchain_google_genai import GoogleGenerativeAIEmbeddings
+
                 from app.core.llm.embedding_model_selector import (
                     resolve_gemini_embedding_model,
                 )
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
                 embedding_model = resolve_gemini_embedding_model(api_key)
                 emb = GoogleGenerativeAIEmbeddings(
@@ -257,6 +258,7 @@ class RAGService:
     def _split_text(self, text: str, source: str = "text") -> List[Any]:
         """将文本分块，返回 LangChain Document 对象列表。"""
         from langchain_core.documents import Document
+
         try:
             from langchain_text_splitters import RecursiveCharacterTextSplitter
 

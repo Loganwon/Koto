@@ -22,7 +22,14 @@ _TOOL_TIMEOUT_OVERRIDES: Dict[str, int] = {
 }
 
 _ARG_ALIASES = {
-    "path": ("file_path", "filepath", "xlsx_path", "docx_path", "pptx_path", "pdf_path"),
+    "path": (
+        "file_path",
+        "filepath",
+        "xlsx_path",
+        "docx_path",
+        "pptx_path",
+        "pdf_path",
+    ),
     "target_path": (
         "target",
         "target_file",
@@ -35,8 +42,23 @@ _ARG_ALIASES = {
         "docx_path",
         "pptx_path",
     ),
-    "source_path": ("source", "source_file", "src", "src_path", "input_path", "xlsx_path", "pdf_path"),
-    "destination": ("destination_path", "dest", "dst", "dst_path", "target_path", "output_path"),
+    "source_path": (
+        "source",
+        "source_file",
+        "src",
+        "src_path",
+        "input_path",
+        "xlsx_path",
+        "pdf_path",
+    ),
+    "destination": (
+        "destination_path",
+        "dest",
+        "dst",
+        "dst_path",
+        "target_path",
+        "output_path",
+    ),
     "source": ("source_path", "source_file", "src", "src_path", "input_path"),
     "file_paths": ("paths", "path_list"),
 }

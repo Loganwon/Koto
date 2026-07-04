@@ -29,9 +29,13 @@ logger = logging.getLogger(__name__)
 
 # ── Shared image compression settings ────────────────────────────────────────
 _MAX_IMG_DIMENSION = 1200  # px — max width or height
-_MAX_IMG_BYTES = 300 * 1024   # 300 KB threshold for triggering compression
-_MAX_BLOB_BYTES = 15 * 1024 * 1024  # 15 MB hard limit — blobs larger than this are skipped entirely
-_MAX_PPTX_BYTES = 100 * 1024 * 1024  # 100 MB PPTX size cap (likely contains embedded video)
+_MAX_IMG_BYTES = 300 * 1024  # 300 KB threshold for triggering compression
+_MAX_BLOB_BYTES = (
+    15 * 1024 * 1024
+)  # 15 MB hard limit — blobs larger than this are skipped entirely
+_MAX_PPTX_BYTES = (
+    100 * 1024 * 1024
+)  # 100 MB PPTX size cap (likely contains embedded video)
 _DOCX_PREVIEW_TARGET_PAGES = 3
 _DOCX_PREVIEW_UNITS_PER_PAGE = 34
 _DOCX_PREVIEW_MAX_TABLE_ROWS = 18
@@ -138,9 +142,13 @@ def parse_pptx(file_path: str) -> list[dict[str, Any]]:
 
 def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
     """Compatibility wrapper for the PPTX geometry parser."""
-    from app.core.file.parsers.pptx_geometry_parser import parse_pptx_geometry as _parse_pptx_geometry
+    from app.core.file.parsers.pptx_geometry_parser import (
+        parse_pptx_geometry as _parse_pptx_geometry,
+    )
 
     return _parse_pptx_geometry(file_path)
+
+
 def parse_pdf(file_path: str, file_id: str) -> dict[str, Any]:
     """
     提取 PDF 全量文本，供 AI RAG 使用。
@@ -172,16 +180,12 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     return _export_docx(docx_input, original_path=original_path)
 
 
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # XLSX 导出: Univer JSON → .xlsx
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def export_xlsx(
-    sheets_json: Any, images: list[dict] | None = None
-) -> bytes:
+def export_xlsx(sheets_json: Any, images: list[dict] | None = None) -> bytes:
     """
     将编辑器序列化数据重建为 .xlsx 字节流。
 

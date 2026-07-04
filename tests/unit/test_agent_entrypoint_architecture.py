@@ -40,7 +40,7 @@ def test_legacy_agent_loop_bridges_use_facade_only() -> None:
     doc_agent_executor = _read("app/core/agent/doc_websocket_agent_executor.py")
     doc_mapper = _read("app/core/agent/doc_websocket_event_mapper.py")
     editor_executor = _read("app/core/agent/editor_quick_action_executor.py")
-    legacy_executor = _read("app/core/agent/legacy_loop_executor.py")
+    editor_loop_executor = _read("app/core/agent/editor_loop_executor.py")
 
     assert "from app.core.agent.legacy_loop_facade import iter_editor_agent_events" in editor_ai
     assert "from app.core.agent.legacy_loop_facade import iter_doc_agent_events" in socket_handler
@@ -51,13 +51,13 @@ def test_legacy_agent_loop_bridges_use_facade_only() -> None:
     assert "from app.core.agent import agent_loop" not in editor_executor
     assert "KotoAgentLoop" not in code_executor
     assert "KotoAgentLoop" not in editor_executor
-    assert "KotoAgentLoop" not in legacy_executor
+    assert "KotoAgentLoop" not in editor_loop_executor
     assert "KotoAgentLoop" not in doc_mapper
     assert "KotoAgentLoop" not in doc_agent_executor
     assert "from app.core.agent.agent_loop import KotoAgentLoop" not in doc_executor
     assert "DocWebSocketAgentExecutor().iter_events(request)" in doc_executor
-    assert "EditorCodeActionExecutor.supports(request)" in legacy_executor
-    assert "EditorQuickActionExecutor().iter_events(request)" in legacy_executor
+    assert "EditorCodeActionExecutor.supports(request)" in editor_loop_executor
+    assert "EditorQuickActionExecutor().iter_events(request)" in editor_loop_executor
     assert "from app.core.agent.doc_websocket_event_mapper import emit_agent_event" in socket_handler
 
 
@@ -76,7 +76,7 @@ def test_agent_execution_entrypoint_matrix_documents_current_boundaries() -> Non
     assert "web/blueprints/editor_ai.py" in matrix
     assert "app/core/socket_handler.py" in matrix
     assert "app/core/agent/legacy_loop_facade.py" in matrix
-    assert "app/core/agent/legacy_loop_executor.py" in matrix
+    assert "app/core/agent/editor_loop_executor.py" in matrix
     assert "app/core/agent/doc_websocket_loop_executor.py" in matrix
     assert "app/core/agent/doc_websocket_agent_executor.py" in matrix
     assert "app/core/agent/doc_websocket_event_mapper.py" in matrix

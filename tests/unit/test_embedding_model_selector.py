@@ -41,9 +41,7 @@ def test_runtime_embedding_paths_drop_text_embedding_004_calls():
     rag_service = (root / "app" / "core" / "services" / "rag_service.py").read_text(
         encoding="utf-8"
     )
-    knowledge_base = (root / "web" / "knowledge_base.py").read_text(
-        encoding="utf-8"
-    )
+    knowledge_base = (root / "web" / "knowledge_base.py").read_text(encoding="utf-8")
     web_app = (root / "web" / "app.py").read_text(encoding="utf-8")
 
     assert 'model="models/text-embedding-004"' not in rag_service

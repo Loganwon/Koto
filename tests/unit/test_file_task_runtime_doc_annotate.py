@@ -3,7 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from app.core.agent.file_task_contract import FileTaskFile, FileTaskLedger, FileTaskRequest
+from app.core.agent.file_task_contract import (
+    FileTaskFile,
+    FileTaskLedger,
+    FileTaskRequest,
+)
 from app.core.agent.file_task_runtime import FileTaskRuntime
 
 
@@ -80,10 +84,19 @@ def test_file_task_runtime_routes_pdf_docx_review_to_doc_annotate_bridge(monkeyp
     assert run_started.payload["execution_mode"] == "doc_annotate_bridge"
     assert events[-1].payload["completed_task"] is True
     assert events[-1].payload["execution_mode"] == "doc_annotate_bridge"
-    assert events[-1].payload["completion_contract"]["contract_id"] == "pdf_docx_review_bridge"
+    assert (
+        events[-1].payload["completion_contract"]["contract_id"]
+        == "pdf_docx_review_bridge"
+    )
     assert events[-1].payload["completion_contract"]["write_required"] is True
-    assert "annotate_file" in events[-1].payload["completion_contract"]["required_operations"]
-    assert events[-1].payload["workflow_state"]["mainline"]["selected_recipe"] == "pdf_docx_review_bridge"
+    assert (
+        "annotate_file"
+        in events[-1].payload["completion_contract"]["required_operations"]
+    )
+    assert (
+        events[-1].payload["workflow_state"]["mainline"]["selected_recipe"]
+        == "pdf_docx_review_bridge"
+    )
 
 
 def test_file_task_runtime_routes_single_docx_annotation_to_doc_annotate_bridge(
@@ -159,10 +172,19 @@ def test_file_task_runtime_routes_single_docx_annotation_to_doc_annotate_bridge(
     assert events[-1].payload["completed_task"] is True
     assert events[-1].payload["execution_mode"] == "doc_annotate_bridge"
     assert events[-1].payload["summary"] == "已切入单 DOCX 审校批注桥接流程。"
-    assert events[-1].payload["completion_contract"]["contract_id"] == "single_docx_review_bridge"
+    assert (
+        events[-1].payload["completion_contract"]["contract_id"]
+        == "single_docx_review_bridge"
+    )
     assert events[-1].payload["completion_contract"]["write_required"] is True
-    assert "annotate_file" in events[-1].payload["completion_contract"]["required_operations"]
-    assert events[-1].payload["workflow_state"]["mainline"]["selected_recipe"] == "single_docx_review_bridge"
+    assert (
+        "annotate_file"
+        in events[-1].payload["completion_contract"]["required_operations"]
+    )
+    assert (
+        events[-1].payload["workflow_state"]["mainline"]["selected_recipe"]
+        == "single_docx_review_bridge"
+    )
 
 
 def test_file_task_runtime_does_not_external_fallback_after_doc_annotate_bridge_failure(
@@ -210,13 +232,16 @@ def test_file_task_runtime_does_not_external_fallback_after_doc_annotate_bridge_
             # Adjudicator calls: no tools, adjudicator system prompt
             if not tools and "任务意图裁判" in system:
                 return {
-                    "content": json.dumps({
-                        "intent": "edit_file",
-                        "confidence": 0.92,
-                        "should_write": True,
-                        "should_use_annotate_bridge": True,
-                        "reason": "用户要求批注DOCX文件"
-                    }, ensure_ascii=False),
+                    "content": json.dumps(
+                        {
+                            "intent": "edit_file",
+                            "confidence": 0.92,
+                            "should_write": True,
+                            "should_use_annotate_bridge": True,
+                            "reason": "用户要求批注DOCX文件",
+                        },
+                        ensure_ascii=False,
+                    ),
                     "tool_calls": [],
                 }
 
@@ -467,7 +492,9 @@ def test_explicit_docx_annotation_still_controls_bridge_mainline():
     assert classification.docx_annotation_request is True
     assert classification.execution_mode == "doc_annotate_bridge"
     assert classification.selected_recipe == "single_docx_review_bridge"
-    assert "mainline_contract:docx_annotation_demoted" not in classification.reason_codes
+    assert (
+        "mainline_contract:docx_annotation_demoted" not in classification.reason_codes
+    )
 
 
 def test_doc_annotate_bridge_does_not_resume_plain_continue_optimize_after_failed_polish():
@@ -702,26 +729,26 @@ def test_file_task_runtime_routes_doc_annotate_bridge_through_runner():
     runtime_source = Path("app/core/agent/file_task_runtime.py").read_text(
         encoding="utf-8"
     )
-    runner_source = Path(
-        "app/core/agent/file_task_doc_annotate_runner.py"
-    ).read_text(encoding="utf-8")
+    runner_source = Path("app/core/agent/file_task_doc_annotate_runner.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "FileTaskDocAnnotateRunner(self).stream_bridge_execution" in runtime_source
     assert "file_task_doc_annotate_boundary.stream_bridge_request" in runner_source
-    assert "execution_mode\": \"doc_annotate_bridge\"" in runner_source
+    assert 'execution_mode": "doc_annotate_bridge"' in runner_source
     assert "file_task_doc_annotate_boundary.stream_bridge_request" not in runtime_source
 
 
 def test_doc_annotate_intent_rules_are_outside_legacy_bridge():
-    bridge_source = Path(
-        "app/core/agent/file_task_doc_annotate_bridge.py"
-    ).read_text(encoding="utf-8")
+    bridge_source = Path("app/core/agent/file_task_doc_annotate_bridge.py").read_text(
+        encoding="utf-8"
+    )
     boundary_source = Path(
         "app/core/agent/file_task_doc_annotate_boundary.py"
     ).read_text(encoding="utf-8")
-    intent_source = Path(
-        "app/core/agent/file_task_doc_annotate_intent.py"
-    ).read_text(encoding="utf-8")
+    intent_source = Path("app/core/agent/file_task_doc_annotate_intent.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "file_task_doc_annotate_intent" in bridge_source
     assert "file_task_doc_annotate_intent" in boundary_source
@@ -732,12 +759,12 @@ def test_doc_annotate_intent_rules_are_outside_legacy_bridge():
 
 
 def test_doc_annotate_event_formatters_are_outside_legacy_bridge():
-    bridge_source = Path(
-        "app/core/agent/file_task_doc_annotate_bridge.py"
-    ).read_text(encoding="utf-8")
-    event_source = Path(
-        "app/core/agent/file_task_doc_annotate_events.py"
-    ).read_text(encoding="utf-8")
+    bridge_source = Path("app/core/agent/file_task_doc_annotate_bridge.py").read_text(
+        encoding="utf-8"
+    )
+    event_source = Path("app/core/agent/file_task_doc_annotate_events.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "file_task_doc_annotate_events" in bridge_source
     assert "def _build_review_progress_payload" not in bridge_source

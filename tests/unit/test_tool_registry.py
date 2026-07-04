@@ -108,9 +108,13 @@ class TestExecution:
 
     def test_execute_maps_destination_alias_to_target_path_parameter(self):
         reg = _get_registry()
-        reg.register_tool("writer", lambda source_path, target_path: [source_path, target_path])
+        reg.register_tool(
+            "writer", lambda source_path, target_path: [source_path, target_path]
+        )
 
-        result = reg.execute("writer", {"source": "sales.xlsx", "destination": "report.docx"})
+        result = reg.execute(
+            "writer", {"source": "sales.xlsx", "destination": "report.docx"}
+        )
 
         assert result == ["sales.xlsx", "report.docx"]
 
@@ -118,7 +122,11 @@ class TestExecution:
         reg = _get_registry()
         reg.register_tool(
             "insert",
-            lambda source_path, target_path, sheet_name="": [source_path, target_path, sheet_name],
+            lambda source_path, target_path, sheet_name="": [
+                source_path,
+                target_path,
+                sheet_name,
+            ],
         )
 
         result = reg.execute(

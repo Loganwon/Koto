@@ -397,7 +397,12 @@ class TestPptxAutoSaveRichFormat:
             json={
                 "file_type": "pptx",
                 "file_id": file_id,
-                "data": [{"slide_index": 0, "texts": [{"shape_id": shape_id, "text": "Legacy Text"}]}],
+                "data": [
+                    {
+                        "slide_index": 0,
+                        "texts": [{"shape_id": shape_id, "text": "Legacy Text"}],
+                    }
+                ],
             },
         )
         assert resp.status_code == 400

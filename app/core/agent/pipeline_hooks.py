@@ -56,7 +56,9 @@ def _preprocess_hook(ctx: HookContext) -> None:
     try:
         from app.core.editor_ai_pipeline import EditorAIPipeline
     except ImportError:
-        logger.debug("[PipelineHooks] EditorAIPipeline not available, skipping preprocess")
+        logger.debug(
+            "[PipelineHooks] EditorAIPipeline not available, skipping preprocess"
+        )
         return
 
     request = ctx.request
@@ -99,6 +101,7 @@ def _fallback_preprocess(ctx: HookContext) -> None:
     # Memory injection
     try:
         from app.core.app_context import ctx as _app_ctx
+
         mem_mgr = _app_ctx.memory_manager
         if mem_mgr is not None:
             mem_ctx = mem_mgr.get_context_string(raw_prompt, history=history)
@@ -111,12 +114,15 @@ def _fallback_preprocess(ctx: HookContext) -> None:
     try:
         from app.core.skills.skill_auto_matcher import SkillAutoMatcher
         from app.core.skills.skill_manager import SkillManager
+
         task_type = "CHAT" if output_mode == "chat" else "FILE_GEN"
         temp_ids = SkillAutoMatcher.match(raw_prompt, task_type=task_type)
         system_inst = ctx.metadata.get("system_instruction", system)
         ctx.metadata["system_instruction"] = SkillManager.inject_into_prompt(
-            system_inst, task_type=task_type,
-            user_input=raw_prompt, temp_skill_ids=temp_ids,
+            system_inst,
+            task_type=task_type,
+            user_input=raw_prompt,
+            temp_skill_ids=temp_ids,
         )
         ctx.metadata["skill_ids"] = temp_ids
     except Exception as e:

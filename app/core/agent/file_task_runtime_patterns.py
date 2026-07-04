@@ -7,7 +7,6 @@ import re
 
 from app.core.agent.file_task_review_intent import DOCX_REVIEW_INTENT_MARKERS
 
-
 _READ_LIMIT = 12_000
 _TASK_TEXT_FILE_EXTENSIONS = {
     ".csv",
@@ -44,7 +43,9 @@ _OUTPUT_PATH_CONTEXT_PATTERNS = (
         r"(?:创建|新建|生成|导出|保存为|另存为|保存在|保存到|保存至|写入|写入到|输出到|输出至|放到|放在|存到|存入|加入|target|output|create|generate|export|save as)",
         re.IGNORECASE,
     ),
-    re.compile(r"(?:新的|新|目标|输出|结果|产出).{0,12}(?:文件|文档|路径|path)", re.IGNORECASE),
+    re.compile(
+        r"(?:新的|新|目标|输出|结果|产出).{0,12}(?:文件|文档|路径|path)", re.IGNORECASE
+    ),
 )
 _SOURCE_PATH_CONTEXT_PATTERNS = (
     re.compile(
@@ -112,7 +113,9 @@ _WRITE_INTENT_PATTERNS = (
         r"\b(?:copy|put|place)\b.{0,80}\b(?:into|to|in)\b.{0,40}\b(?:target\s+)?(?:docx|word|document|file|pptx?|slides?|xlsx?|sheet)\b",
         re.IGNORECASE,
     ),
-    re.compile(r"(?:新增|添加|生成|新建).{0,12}(?:页|幻灯片|slide|slides)", re.IGNORECASE),
+    re.compile(
+        r"(?:新增|添加|生成|新建).{0,12}(?:页|幻灯片|slide|slides)", re.IGNORECASE
+    ),
     re.compile(
         r"(?:总结|概括).{0,20}(?:放(?:到|进|入)|生成).{0,20}(?:页|幻灯片|slide|slides)",
         re.IGNORECASE,

@@ -12,7 +12,6 @@ from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_runtime_utils import _compact_line, _json_payload
 from app.core.agent.file_task_tool_catalog import stringify_result
 
-
 DisplayPath = Callable[[Any], str]
 
 
@@ -246,7 +245,10 @@ def _build_readonly_content_summary(
 
 def _looks_like_summary_task(task: Any) -> bool:
     text = str(task or "").lower()
-    return any(token in text for token in ("总结", "摘要", "概括", "summar", "article", "文章", "文档"))
+    return any(
+        token in text
+        for token in ("总结", "摘要", "概括", "summar", "article", "文章", "文档")
+    )
 
 
 def _looks_like_investment_risk_opportunity_task(task: Any) -> bool:
@@ -586,7 +588,9 @@ def _readonly_source_names(
     for index, snippet in enumerate(snippets, start=1):
         if not isinstance(snippet, dict):
             continue
-        source = str(snippet.get("source") or snippet.get("path") or f"上下文 {index}").strip()
+        source = str(
+            snippet.get("source") or snippet.get("path") or f"上下文 {index}"
+        ).strip()
         label = display_path(source) or source
         if label and label not in seen:
             seen.add(label)
@@ -619,7 +623,11 @@ def _readonly_content_paragraphs(
         result = item.get("result")
         payload = result if isinstance(result, dict) else _json_payload(result)
         if isinstance(payload, dict):
-            raw_paragraphs = payload.get("paragraphs") if isinstance(payload.get("paragraphs"), list) else []
+            raw_paragraphs = (
+                payload.get("paragraphs")
+                if isinstance(payload.get("paragraphs"), list)
+                else []
+            )
             for paragraph in raw_paragraphs:
                 if isinstance(paragraph, dict):
                     add_text(paragraph.get("text"))
@@ -708,7 +716,10 @@ def _extract_thesis(paragraphs: List[str]) -> str:
         if match:
             return match.group(1)
     for sentence in _sentence_candidates(paragraphs):
-        if any(token in sentence for token in ("论点", "主张", "核心", "认为", "不是", "而是")):
+        if any(
+            token in sentence
+            for token in ("论点", "主张", "核心", "认为", "不是", "而是")
+        ):
             return sentence
     return ""
 
@@ -725,22 +736,43 @@ def _select_structure_points(paragraphs: List[str], *, limit: int) -> List[str]:
     return points
 
 
-def _select_key_points(paragraphs: List[str], *, limit: int, exclude: List[str] | None = None) -> List[str]:
-    keywords = ("论点", "关系", "身体", "技术", "艺术", "游戏", "电影", "观众", "主体", "框架", "失败", "条件")
+def _select_key_points(
+    paragraphs: List[str], *, limit: int, exclude: List[str] | None = None
+) -> List[str]:
+    keywords = (
+        "论点",
+        "关系",
+        "身体",
+        "技术",
+        "艺术",
+        "游戏",
+        "电影",
+        "观众",
+        "主体",
+        "框架",
+        "失败",
+        "条件",
+    )
     points: List[str] = []
     excluded = [item for item in (exclude or []) if item]
     for sentence in _sentence_candidates(paragraphs):
         if not any(keyword in sentence for keyword in keywords):
             continue
         compact = _compact_line(sentence, 190)
-        if compact and not _near_duplicate(compact, points) and not _near_duplicate(compact, excluded):
+        if (
+            compact
+            and not _near_duplicate(compact, points)
+            and not _near_duplicate(compact, excluded)
+        ):
             points.append(compact)
         if len(points) >= limit:
             break
     return points
 
 
-def _compose_overall_summary(overview: str, thesis: str, structure_points: List[str]) -> str:
+def _compose_overall_summary(
+    overview: str, thesis: str, structure_points: List[str]
+) -> str:
     lead = _strip_sentence_end(overview)
     claim = _clean_claim_text(_strip_sentence_end(thesis))
     if claim and claim != lead and claim not in lead:
@@ -767,7 +799,9 @@ def _without_leading_topic_marker(text: str) -> str:
 
 def _clean_claim_text(text: str) -> str:
     value = str(text or "").strip()
-    value = re.sub(r"^(我的论点是|本文的论点是|核心观点是|其论点是)[：:，,]?", "", value)
+    value = re.sub(
+        r"^(我的论点是|本文的论点是|核心观点是|其论点是)[：:，,]?", "", value
+    )
     return value.strip()
 
 
@@ -788,7 +822,9 @@ def _near_duplicate(candidate: str, existing: List[str]) -> bool:
 
 
 def _dedupe_key(text: str) -> str:
-    return re.sub(r"[\s，。！？；：:,.!?;、\"“”'‘’（）()\[\]《》<>]+", "", str(text or "").lower())
+    return re.sub(
+        r"[\s，。！？；：:,.!?;、\"“”'‘’（）()\[\]《》<>]+", "", str(text or "").lower()
+    )
 
 
 def _first_sentence_from_paragraph(paragraph: str) -> str:
@@ -825,7 +861,9 @@ def readonly_tool_points(item: Dict[str, Any]) -> List[str]:
             if isinstance(payload.get("paragraphs"), list)
             else []
         )
-        tables = payload.get("tables") if isinstance(payload.get("tables"), list) else []
+        tables = (
+            payload.get("tables") if isinstance(payload.get("tables"), list) else []
+        )
         total_paragraphs = payload.get("total_paragraphs")
         total_tables = payload.get("total_tables")
         if total_paragraphs is not None or total_tables is not None:

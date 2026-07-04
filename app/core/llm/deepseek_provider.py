@@ -61,14 +61,17 @@ class DeepSeekProvider(OpenAIProvider):
                 if isinstance(turn, dict)
             )
         thinking_allowed = (
-            os.getenv("DEEPSEEK_ENABLE_THINKING", "true").lower() not in {"0", "false", "no"}
+            os.getenv("DEEPSEEK_ENABLE_THINKING", "true").lower()
+            not in {"0", "false", "no"}
             and not tools
             and not has_assistant_turn
         )
         if thinking_allowed:
             extra_body = dict(kwargs.get("extra_body") or {})
             extra_body.setdefault("thinking", {"type": "enabled"})
-            extra_body.setdefault("reasoning_effort", os.getenv("DEEPSEEK_REASONING_EFFORT", "high"))
+            extra_body.setdefault(
+                "reasoning_effort", os.getenv("DEEPSEEK_REASONING_EFFORT", "high")
+            )
             kwargs["extra_body"] = extra_body
         return super().generate_content(
             prompt=prompt,

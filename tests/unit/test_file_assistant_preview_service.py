@@ -8,7 +8,10 @@ from pathlib import Path
 import pytest
 
 from app.core.file_assistant import FileContextPreviewService
-from app.core.file_assistant.open_service import OpenFileInConfigError, OpenFilePermissionError
+from app.core.file_assistant.open_service import (
+    OpenFileInConfigError,
+    OpenFilePermissionError,
+)
 
 
 def test_preview_service_builds_text_preview(tmp_path: Path):
@@ -36,7 +39,9 @@ def test_preview_service_builds_text_preview(tmp_path: Path):
     assert preview.preview_error == ""
 
 
-def test_preview_service_keeps_attachment_available_on_parser_error_string(tmp_path: Path):
+def test_preview_service_keeps_attachment_available_on_parser_error_string(
+    tmp_path: Path,
+):
     workspace = tmp_path / "workspace"
     config = tmp_path / "config"
     workspace.mkdir()

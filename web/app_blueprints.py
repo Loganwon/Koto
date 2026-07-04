@@ -44,6 +44,7 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.dev", "dev_bp", None, "Dev"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
+    ("web.blueprints.editor_compat", "editor_compat_bp", None, "EditorCompat"),
     (
         "web.blueprints.workspace_assistant",
         "workspace_assistant_bp",
@@ -172,7 +173,9 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
             from app.api.distill_routes import distill_bp as _distill_bp
 
             app.register_blueprint(_distill_bp, url_prefix="/api/distill")
-            logger.info("[DistillAPI] ✅ LoRA 蒸馏训练 API 已注册（开发模式）: /api/distill")
+            logger.info(
+                "[DistillAPI] ✅ LoRA 蒸馏训练 API 已注册（开发模式）: /api/distill"
+            )
         except ImportError as exc:
             logger.warning(f"[DistillAPI] ⚠️ 未能导入蒸馏训练模块: {exc}")
         except Exception as exc:

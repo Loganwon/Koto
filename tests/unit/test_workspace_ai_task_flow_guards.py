@@ -744,6 +744,7 @@ def test_editor_ai_blueprint_exposes_single_file_task_endpoint():
 def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     dispatcher_ts = _read("web/src/workspace/task-dispatcher.ts")
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
+    task_interaction_summary_ts = _read("web/src/workspace/task-interaction-summary.ts")
     runtime_init_ts = _read("web/src/workspace/runtime-init.ts")
     editor_ai = _read("web/blueprints/editor_ai.py")
     sessions_bp = _read("web/blueprints/sessions.py")
@@ -797,8 +798,10 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "card.dataset.taskMemorySummary = memorySummary" in runtime_init_ts
     assert "WA.syncTaskInteractionSummary(card)" in runtime_init_ts
     assert "task_card_snapshot: payload.task_card_snapshot" in runtime_init_ts
-    assert "function renderTaskUnderstandingCard(card: TaskCardElement): string" in task_runner_ts
-    assert "function renderTaskMemoryCard(card: TaskCardElement): string" in task_runner_ts
+    assert "from './task-interaction-summary';" in task_runner_ts
+    assert "export function taskContextSummaryText(context: any): string" in task_interaction_summary_ts
+    assert "export function renderTaskUnderstandingCard(card:" in task_interaction_summary_ts
+    assert "export function renderTaskMemoryCard(card:" in task_interaction_summary_ts
     assert "function syncTaskInteractionSummary(card: TaskCardElement): void" in task_runner_ts
     assert "const semanticTitle = String(card.dataset.taskTitle || '').trim();" in task_runner_ts
     assert "WA.syncTaskInteractionSummary = syncTaskInteractionSummary" in task_runner_ts
@@ -947,8 +950,9 @@ def test_workspace_completed_task_actions_are_not_labeled_as_confirmation_flow()
         assert 'data-task-followup-action="question">追问</button>' not in source
         assert "询问结果" in source
         assert "继续处理" in source
-    assert "let questionText = completed ? '询问结果' : '追问原因';" in task_runner_ts
+    assert "const questionText = completed ? '询问结果' : '追问原因';" in task_runner_ts
     assert "let improveText = completed ? '继续处理' : '继续修复';" in task_runner_ts
+    assert "const actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';" in task_runner_ts
     assert "let improveText = completed ? '继续优化' : '继续修复';" not in task_runner_ts
 
 

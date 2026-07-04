@@ -423,7 +423,10 @@ def test_file_task_runtime_xlsx_to_docx_write_loop_fails_without_file_change(tmp
     assert insert_finished.payload["success"] is False
     assert "File not found" in insert_finished.payload["result_preview"]
     assert check_events[0].payload["passed"] is False
-    assert check_events[0].payload["status"] in {"no_file_change", "quality_gate_failed"}
+    assert check_events[0].payload["status"] in {
+        "no_file_change",
+        "quality_gate_failed",
+    }
     assert run_finished.payload["completed_task"] is False
     assert len(Document(str(target_path)).tables) == 0
 

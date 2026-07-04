@@ -223,7 +223,9 @@ class TestOpenFile:
         file_id = resp.get_json()["file_id"]
         assert file_id.isalnum() and len(file_id) == 32
 
-    def test_open_file_by_path_retries_docx_after_tmp_zip_failure(self, wa_client, monkeypatch):
+    def test_open_file_by_path_retries_docx_after_tmp_zip_failure(
+        self, wa_client, monkeypatch
+    ):
         import zipfile
 
         client, tmp_dir, workspace_dir = wa_client
@@ -328,7 +330,9 @@ class TestAIContextPreview:
         assert body["content_preview"] == ""
         assert "simulated parser failure" in body["preview_error"]
 
-    def test_unexpected_parse_exception_keeps_attachment_available(self, wa_client, monkeypatch):
+    def test_unexpected_parse_exception_keeps_attachment_available(
+        self, wa_client, monkeypatch
+    ):
         client, _, workspace_dir = wa_client
         target = workspace_dir / "parse-exception.docx"
         target.write_bytes(_make_docx_bytes("body"))
@@ -382,9 +386,9 @@ class TestPdfLoading:
         body = resp.get_json()
         raw_url = body.get("data", {}).get("raw_url", "")
         file_id = body["file_id"]
-        assert f"/api/v1/workspace/raw/{file_id}" == raw_url, (
-            f"raw_url should be /api/v1/workspace/raw/<file_id>, got {raw_url!r}"
-        )
+        assert (
+            f"/api/v1/workspace/raw/{file_id}" == raw_url
+        ), f"raw_url should be /api/v1/workspace/raw/<file_id>, got {raw_url!r}"
 
     def test_pdf_file_type_is_pdf(self, wa_client):
         client, _, _ = wa_client
@@ -433,9 +437,9 @@ class TestPdfLoading:
         )
         data = resp.get_json().get("data", {})
         # raw_url must still be present so PDF.js can render
-        assert "/api/v1/workspace/raw/" in data.get("raw_url", ""), (
-            "raw_url must be present even when text extraction is skipped"
-        )
+        assert "/api/v1/workspace/raw/" in data.get(
+            "raw_url", ""
+        ), "raw_url must be present even when text extraction is skipped"
         # text/pages may be empty — that's fine
         assert isinstance(data.get("pages", []), list)
 
@@ -447,9 +451,9 @@ class TestPdfLoading:
         raw_url = resp.get_json()["data"]["raw_url"]
         raw_resp = client.get(raw_url)
         assert raw_resp.status_code == 200
-        assert raw_resp.data.startswith(b"%PDF"), (
-            f"{raw_url} did not return PDF bytes; first bytes: {raw_resp.data[:20]!r}"
-        )
+        assert raw_resp.data.startswith(
+            b"%PDF"
+        ), f"{raw_url} did not return PDF bytes; first bytes: {raw_resp.data[:20]!r}"
 
 
 # ── 3. GET /api/v1/workspace/file/<path> ─────────────────────────────────────
@@ -659,9 +663,7 @@ def _make_docx_bytes(text: str | list[str] = "Test") -> bytes:
             for item in text
         )
     else:
-        body = (
-            f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(str(text))}</w:t></w:r></w:p>'
-        )
+        body = f'<w:p><w:r><w:t xml:space="preserve">{_xml_escape(str(text))}</w:t></w:r></w:p>'
 
     ct = (
         '<?xml version="1.0"?>'
@@ -866,19 +868,21 @@ class TestAutoSave:
             '<span class="koto-hdr-col"><span class="koto-hdr-page-num">1</span></span>'
             '<span class="koto-hdr-col">内部使用</span></p>'
         )
-        footer_html = '<p>页脚说明</p>'
+        footer_html = "<p>页脚说明</p>"
         payload = {
             "html": "<p>更新后的正文</p>",
             "header_html": header_html,
             "footer_html": footer_html,
-            "sections": [{
-                "header_html": header_html,
-                "footer_html": footer_html,
-                "first_header_html": "",
-                "first_footer_html": "",
-                "even_header_html": "",
-                "even_footer_html": "",
-            }],
+            "sections": [
+                {
+                    "header_html": header_html,
+                    "footer_html": footer_html,
+                    "first_header_html": "",
+                    "first_footer_html": "",
+                    "even_header_html": "",
+                    "even_footer_html": "",
+                }
+            ],
         }
 
         resp = client.post(
@@ -905,8 +909,12 @@ class TestAutoSave:
         assert "更新后的正文" in body_text
 
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
-            header_parts = [name for name in archive.namelist() if name.startswith("word/header")]
-            assert header_parts, "expected DOCX export to generate at least one header part"
+            header_parts = [
+                name for name in archive.namelist() if name.startswith("word/header")
+            ]
+            assert (
+                header_parts
+            ), "expected DOCX export to generate at least one header part"
             header_xml = "".join(
                 archive.read(name).decode("utf-8", errors="ignore")
                 for name in header_parts
@@ -963,10 +971,18 @@ class TestAutoSave:
         with zipfile.ZipFile(io.BytesIO(raw)) as archive:
             names = archive.namelist()
             assert "word/comments.xml" in names
-            comments_xml = archive.read("word/comments.xml").decode("utf-8", errors="ignore")
-            document_xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
-            rels_xml = archive.read("word/_rels/document.xml.rels").decode("utf-8", errors="ignore")
-            content_types_xml = archive.read("[Content_Types].xml").decode("utf-8", errors="ignore")
+            comments_xml = archive.read("word/comments.xml").decode(
+                "utf-8", errors="ignore"
+            )
+            document_xml = archive.read("word/document.xml").decode(
+                "utf-8", errors="ignore"
+            )
+            rels_xml = archive.read("word/_rels/document.xml.rels").decode(
+                "utf-8", errors="ignore"
+            )
+            content_types_xml = archive.read("[Content_Types].xml").decode(
+                "utf-8", errors="ignore"
+            )
 
         assert "这里需要进一步说明" in comments_xml
         assert "审阅人" in comments_xml
@@ -1059,11 +1075,14 @@ class TestSaveFlowJsFixes:
     # (a) pre-await state capture -----------------------------------------
 
     def test_save_tab_captured_before_await(self):
-        assert "const tab = _activeTab();" in self.src, "saveFile must resolve the active tab before saving"
+        assert (
+            "const tab = _activeTab();" in self.src
+        ), "saveFile must resolve the active tab before saving"
 
     def test_save_fshandle_captured_before_await(self):
         assert (
-            "const fsHandle = (tab && tab.fsHandle) || _fsHandleMap.get(state.wsSourcePath || '') || null;" in self.src
+            "const fsHandle = (tab && tab.fsHandle) || _fsHandleMap.get(state.wsSourcePath || '') || null;"
+            in self.src
         ), "saveFile must resolve the File System Access handle before writing"
 
     def test_save_file_id_captured_before_await(self):
@@ -1136,8 +1155,9 @@ class TestSaveFlowJsFixes:
 def _make_xlsx_bytes() -> bytes:
     """Create a minimal real .xlsx file using openpyxl for testing."""
     try:
-        import openpyxl
         from io import BytesIO
+
+        import openpyxl
 
         wb = openpyxl.Workbook()
         ws = wb.active
@@ -1170,7 +1190,9 @@ class TestXlsxOpenFile:
         if not _make_xlsx_bytes():
             pytest.skip("openpyxl not available")
         resp = self._upload_xlsx(client)
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.get_json()}"
+        assert (
+            resp.status_code == 200
+        ), f"Expected 200, got {resp.status_code}: {resp.get_json()}"
 
     def test_xlsx_file_type_is_xlsx(self, wa_client):
         client, _, _ = wa_client
@@ -1188,7 +1210,16 @@ class TestXlsxOpenFile:
         resp = self._upload_xlsx(client, "myfile.xlsx")
         assert resp.status_code == 200
         data = resp.get_json()["data"]
-        for key in ("id", "name", "appVersion", "locale", "sheetOrder", "sheets", "styles", "resources"):
+        for key in (
+            "id",
+            "name",
+            "appVersion",
+            "locale",
+            "sheetOrder",
+            "sheets",
+            "styles",
+            "resources",
+        ):
             assert key in data, f"IWorkbookData missing required key: {key!r}"
 
     def test_xlsx_workbook_name_is_original_filename(self, wa_client):
@@ -1201,12 +1232,12 @@ class TestXlsxOpenFile:
         data = resp.get_json()["data"]
         wb_name = data.get("name", "")
         # Must be the stem of the original filename, not a 32-char UUID hex
-        assert wb_name == "MyReport", (
-            f"workbook name should be 'MyReport' (from 'MyReport.xlsx'), got {wb_name!r}"
-        )
-        assert len(wb_name) != 32 or not wb_name.isalnum(), (
-            f"workbook name looks like a UUID hex: {wb_name!r}"
-        )
+        assert (
+            wb_name == "MyReport"
+        ), f"workbook name should be 'MyReport' (from 'MyReport.xlsx'), got {wb_name!r}"
+        assert (
+            len(wb_name) != 32 or not wb_name.isalnum()
+        ), f"workbook name looks like a UUID hex: {wb_name!r}"
 
     def test_xlsx_app_version_is_set(self, wa_client):
         """appVersion must be '0.5.0' for Univer compatibility."""
@@ -1238,9 +1269,9 @@ class TestXlsxOpenFile:
         data = resp.get_json()["data"]
         sheet_order = data.get("sheetOrder", [])
         sheets = data.get("sheets", {})
-        assert set(sheet_order) == set(sheets.keys()), (
-            f"sheetOrder {sheet_order} != sheets keys {list(sheets.keys())}"
-        )
+        assert set(sheet_order) == set(
+            sheets.keys()
+        ), f"sheetOrder {sheet_order} != sheets keys {list(sheets.keys())}"
 
     def test_xlsx_sheet_has_required_fields(self, wa_client):
         """Each IWorksheetData must have id, name, rowCount, columnCount, cellData."""
@@ -1253,9 +1284,9 @@ class TestXlsxOpenFile:
         assert sheets, "sheets must not be empty"
         for sheet_id, sheet_data in sheets.items():
             for key in ("id", "name", "rowCount", "columnCount", "cellData"):
-                assert key in sheet_data, (
-                    f"IWorksheetData[{sheet_id!r}] missing required key: {key!r}"
-                )
+                assert (
+                    key in sheet_data
+                ), f"IWorksheetData[{sheet_id!r}] missing required key: {key!r}"
 
     def test_xlsx_sheet_id_matches_key(self, wa_client):
         """sheet.id must equal the key in the sheets dict."""
@@ -1266,9 +1297,9 @@ class TestXlsxOpenFile:
         assert resp.status_code == 200
         sheets = resp.get_json()["data"].get("sheets", {})
         for sheet_id, sheet_data in sheets.items():
-            assert sheet_data.get("id") == sheet_id, (
-                f"sheet.id {sheet_data.get('id')!r} != dict key {sheet_id!r}"
-            )
+            assert (
+                sheet_data.get("id") == sheet_id
+            ), f"sheet.id {sheet_data.get('id')!r} != dict key {sheet_id!r}"
 
     def test_xlsx_cell_data_has_expected_cell(self, wa_client):
         """
@@ -1286,16 +1317,20 @@ class TestXlsxOpenFile:
         assert cell_data, "cellData should not be empty for a populated sheet"
         # JSON keys must be strings
         row_keys = list(cell_data.keys())
-        assert all(isinstance(k, str) for k in row_keys), (
-            f"cellData row keys must be strings after JSON, got: {row_keys[:3]}"
-        )
+        assert all(
+            isinstance(k, str) for k in row_keys
+        ), f"cellData row keys must be strings after JSON, got: {row_keys[:3]}"
         # Row 0 must exist and have cell (0,0) with "Hello"
         row0 = cell_data.get("0", {})
         assert row0, "row 0 must be present"
         col0 = row0.get("0", {})
         assert col0, "cell (0,0) must be present"
-        assert col0.get("v") == "Hello", f"cell(0,0).v should be 'Hello', got {col0.get('v')!r}"
-        assert col0.get("t") == 1, f"cell(0,0).t should be 1 (string), got {col0.get('t')!r}"
+        assert (
+            col0.get("v") == "Hello"
+        ), f"cell(0,0).v should be 'Hello', got {col0.get('v')!r}"
+        assert (
+            col0.get("t") == 1
+        ), f"cell(0,0).t should be 1 (string), got {col0.get('t')!r}"
 
     def test_xlsx_numeric_cell_has_correct_type(self, wa_client):
         """Numeric cells must have t=2 (number type in Univer)."""
@@ -1309,8 +1344,12 @@ class TestXlsxOpenFile:
         cell_data = first_sheet.get("cellData", {})
         row0 = cell_data.get("0", {})
         col1 = row0.get("1", {})  # B1 = 123
-        assert col1.get("t") == 2, f"numeric cell type should be 2, got {col1.get('t')!r}"
-        assert col1.get("v") == 123, f"numeric cell value should be 123, got {col1.get('v')!r}"
+        assert (
+            col1.get("t") == 2
+        ), f"numeric cell type should be 2, got {col1.get('t')!r}"
+        assert (
+            col1.get("v") == 123
+        ), f"numeric cell value should be 123, got {col1.get('v')!r}"
 
     def test_xlsx_styles_is_dict(self, wa_client):
         """styles must be present as a dict (even if empty)."""
@@ -1342,7 +1381,9 @@ class TestXlsxOpenFile:
         sheets = resp.get_json()["data"].get("sheets", {})
         for sid, sheet in sheets.items():
             assert sheet.get("rowCount", 0) > 0, f"sheet {sid} rowCount should be > 0"
-            assert sheet.get("columnCount", 0) > 0, f"sheet {sid} columnCount should be > 0"
+            assert (
+                sheet.get("columnCount", 0) > 0
+            ), f"sheet {sid} columnCount should be > 0"
 
     def test_xlsx_merge_data_is_list(self, wa_client):
         """mergeData must be a list (empty list if no merged cells)."""
@@ -1353,9 +1394,9 @@ class TestXlsxOpenFile:
         assert resp.status_code == 200
         sheets = resp.get_json()["data"].get("sheets", {})
         for sid, sheet in sheets.items():
-            assert isinstance(sheet.get("mergeData"), list), (
-                f"sheet {sid} mergeData must be a list"
-            )
+            assert isinstance(
+                sheet.get("mergeData"), list
+            ), f"sheet {sid} mergeData must be a list"
 
 
 # ── PPTX parsing: slide geometry format compliance ───────────────────────────
@@ -1365,6 +1406,7 @@ def _make_pptx_bytes() -> bytes:
     """Create a minimal real .pptx file using python-pptx for testing."""
     try:
         from io import BytesIO
+
         from pptx import Presentation
         from pptx.util import Inches, Pt
 
@@ -1415,7 +1457,9 @@ class TestPptxOpenFile:
         if not _make_pptx_bytes():
             pytest.skip("python-pptx not available")
         resp = self._upload_pptx(client)
-        assert resp.status_code == 200, f"Expected 200, got {resp.status_code}: {resp.get_json()}"
+        assert (
+            resp.status_code == 200
+        ), f"Expected 200, got {resp.status_code}: {resp.get_json()}"
 
     def test_pptx_file_type_is_pptx(self, wa_client):
         client, _, _ = wa_client
@@ -1455,9 +1499,9 @@ class TestPptxOpenFile:
         resp = self._upload_pptx(client)
         assert resp.status_code == 200
         slides = resp.get_json()["data"].get("slides", [])
-        assert isinstance(slides, list) and len(slides) >= 1, (
-            f"slides must be a non-empty list, got: {slides!r}"
-        )
+        assert (
+            isinstance(slides, list) and len(slides) >= 1
+        ), f"slides must be a non-empty list, got: {slides!r}"
 
     def test_pptx_slide_count_matches_presentation(self, wa_client):
         """Our test PPTX has 2 slides; the response must reflect that."""
@@ -1508,9 +1552,9 @@ class TestPptxOpenFile:
                 for run in para.get("runs", []):
                     if run.get("text"):
                         all_text.append(run["text"])
-        assert "Test Title" in all_text, (
-            f"Expected 'Test Title' in slide 0 text runs, got: {all_text}"
-        )
+        assert (
+            "Test Title" in all_text
+        ), f"Expected 'Test Title' in slide 0 text runs, got: {all_text}"
 
     def test_pptx_table_shape_on_slide2(self, wa_client):
         """Slide 1 (index 1) has a table shape with cells."""
@@ -1535,8 +1579,12 @@ class TestPptxOpenFile:
         assert table_shapes
         cells = table_shapes[0].get("cells", [])
         cell_texts = [c["text"] for c in cells]
-        assert "Header1" in cell_texts, f"Expected 'Header1' in table cells, got: {cell_texts}"
-        assert "Value1" in cell_texts, f"Expected 'Value1' in table cells, got: {cell_texts}"
+        assert (
+            "Header1" in cell_texts
+        ), f"Expected 'Header1' in table cells, got: {cell_texts}"
+        assert (
+            "Value1" in cell_texts
+        ), f"Expected 'Value1' in table cells, got: {cell_texts}"
 
     def test_pptx_table_has_correct_dimensions(self, wa_client):
         """Table in slide 1 must have the right row/col counts."""
@@ -1549,8 +1597,12 @@ class TestPptxOpenFile:
         table_shapes = [s for s in slide1["shapes"] if s.get("_type") == "TABLE"]
         assert table_shapes
         table = table_shapes[0]
-        assert table.get("table_rows") == 2, f"Expected 2 rows, got {table.get('table_rows')}"
-        assert table.get("table_cols") == 3, f"Expected 3 cols, got {table.get('table_cols')}"
+        assert (
+            table.get("table_rows") == 2
+        ), f"Expected 2 rows, got {table.get('table_rows')}"
+        assert (
+            table.get("table_cols") == 3
+        ), f"Expected 3 cols, got {table.get('table_cols')}"
 
     def test_pptx_shapes_have_geometry(self, wa_client):
         """All shapes must have left, top, width, height (in EMU)."""
@@ -1562,9 +1614,9 @@ class TestPptxOpenFile:
         for slide in resp.get_json()["data"]["slides"]:
             for shape in slide["shapes"]:
                 for geo in ("left", "top", "width", "height"):
-                    assert geo in shape, (
-                        f"shape {shape.get('id')} missing geometry key {geo!r}"
-                    )
+                    assert (
+                        geo in shape
+                    ), f"shape {shape.get('id')} missing geometry key {geo!r}"
 
 
 # ── Embedded-mode render reliability: JS source contract ─────────────────────
@@ -1614,27 +1666,27 @@ class TestEmbeddedModeRenderGuards:
 
     def test_wait_for_editor_layout_function_exists(self):
         """_waitForEditorLayout must be defined — it is the central visibility guard."""
-        assert "_waitForEditorLayout" in self.src, (
-            "_waitForEditorLayout() is missing from the workspace runtime"
-        )
+        assert (
+            "_waitForEditorLayout" in self.src
+        ), "_waitForEditorLayout() is missing from the workspace runtime"
 
     def test_wait_for_editor_layout_handles_xlsx(self):
         """Guard must cover xlsx container id."""
-        assert "wa-xlsx-editor" in self.src and "_waitForEditorLayout" in self.src, (
-            "_waitForEditorLayout must reference 'wa-xlsx-editor'"
-        )
+        assert (
+            "wa-xlsx-editor" in self.src and "_waitForEditorLayout" in self.src
+        ), "_waitForEditorLayout must reference 'wa-xlsx-editor'"
 
     def test_wait_for_editor_layout_handles_pptx(self):
         """Guard must cover pptx container id."""
-        assert "wa-pptx-editor" in self.src and "_waitForEditorLayout" in self.src, (
-            "_waitForEditorLayout must reference 'wa-pptx-editor'"
-        )
+        assert (
+            "wa-pptx-editor" in self.src and "_waitForEditorLayout" in self.src
+        ), "_waitForEditorLayout must reference 'wa-pptx-editor'"
 
     def test_prime_editor_layout_helper_exists(self):
         """xlsx/pptx shells must be pre-activated before waiting for layout."""
-        assert "export function _primeEditorLayout" in self.src, (
-            "workspace state runtime must define _primeEditorLayout()"
-        )
+        assert (
+            "export function _primeEditorLayout" in self.src
+        ), "workspace state runtime must define _primeEditorLayout()"
 
     def test_prime_editor_layout_activates_hidden_shells(self):
         """The priming helper must add the active class so hidden shells can size."""
@@ -1642,20 +1694,20 @@ class TestEmbeddedModeRenderGuards:
         helper_start = src.find("export function _primeEditorLayout")
         helper_end = src.find("export function _waitForEditorLayout", helper_start)
         helper_body = src[helper_start:helper_end]
-        assert "classList.add('active')" in helper_body, (
-            "_primeEditorLayout must activate the editor shell before waiting"
-        )
+        assert (
+            "classList.add('active')" in helper_body
+        ), "_primeEditorLayout must activate the editor shell before waiting"
 
     def test_wait_for_editor_layout_timeout_resolve(self):
         """Guard must resolve (not reject) on timeout so editors receive a mount attempt."""
         # The guard should call resolve() on deadline, not reject()
         src = self.src
         guard_start = src.find("function _waitForEditorLayout")
-        guard_end   = src.find("\n  }", guard_start) + 4
-        guard_body  = src[guard_start:guard_end]
-        assert "resolve();" in guard_body, (
-            "_waitForEditorLayout must call resolve() on timeout (not reject)"
-        )
+        guard_end = src.find("\n  }", guard_start) + 4
+        guard_body = src[guard_start:guard_end]
+        assert (
+            "resolve();" in guard_body
+        ), "_waitForEditorLayout must call resolve() on timeout (not reject)"
 
     # ── Router.load guard ────────────────────────────────────────────────
 
@@ -1664,46 +1716,62 @@ class TestEmbeddedModeRenderGuards:
         src = self.src
         fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoXlsxEditor()", fn_start)
-        body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
-        assert "await _waitForEditorLayout" in body, (
-            "_mountEditor must await _waitForEditorLayout before creating editors"
+        body = (
+            src[fn_start : fn_end + 100]
+            if fn_end != -1
+            else src[fn_start : fn_start + 3000]
         )
+        assert (
+            "await _waitForEditorLayout" in body
+        ), "_mountEditor must await _waitForEditorLayout before creating editors"
 
     def test_router_load_guard_before_xlsx_editor(self):
         """The guard await must appear before new KotoXlsxEditor() in _applyFileJson."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new (window as any).KotoXlsxEditor()", fn_start)
-        body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
-        guard_pos = body.find("await _waitForEditorLayout")
-        xlsx_pos  = body.find("new (window as any).KotoXlsxEditor()")
-        assert guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos, (
-            "_waitForEditorLayout await must precede new KotoXlsxEditor()"
+        body = (
+            src[fn_start : fn_end + 100]
+            if fn_end != -1
+            else src[fn_start : fn_start + 3000]
         )
+        guard_pos = body.find("await _waitForEditorLayout")
+        xlsx_pos = body.find("new (window as any).KotoXlsxEditor()")
+        assert (
+            guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos
+        ), "_waitForEditorLayout await must precede new KotoXlsxEditor()"
 
     def test_router_load_primes_layout_before_waiting(self):
         """The file-open path must prime xlsx/pptx shells before waiting for size."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoXlsxEditor()", fn_start)
-        body = src[fn_start:fn_end + 120] if fn_end != -1 else src[fn_start:fn_start + 3200]
+        body = (
+            src[fn_start : fn_end + 120]
+            if fn_end != -1
+            else src[fn_start : fn_start + 3200]
+        )
         prime_pos = body.find("_primeEditorLayout(tab.fileType)")
         guard_pos = body.find("await _waitForEditorLayout(tab.fileType)")
-        assert prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos, (
-            "_mountEditor must prime the editor shell before waiting for layout"
-        )
+        assert (
+            prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos
+        ), "_mountEditor must prime the editor shell before waiting for layout"
 
     def test_router_load_guard_before_pptx_editor(self):
         """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
         fn_end = src.find("new KotoPptxEditor()", fn_start)
-        body = src[fn_start:fn_end + 100] if fn_end != -1 else src[fn_start:fn_start + 3000]
-        guard_pos = body.find("await _waitForEditorLayout")
-        pptx_pos  = body.find("new KotoPptxEditor()")
-        assert guard_pos != -1 and pptx_pos != -1 and guard_pos < pptx_pos, (
-            "_waitForEditorLayout await must precede new KotoPptxEditor()"
+        body = (
+            src[fn_start : fn_end + 100]
+            if fn_end != -1
+            else src[fn_start : fn_start + 3000]
         )
+        guard_pos = body.find("await _waitForEditorLayout")
+        pptx_pos = body.find("new KotoPptxEditor()")
+        assert (
+            guard_pos != -1 and pptx_pos != -1 and guard_pos < pptx_pos
+        ), "_waitForEditorLayout await must precede new KotoPptxEditor()"
 
     # ── _switchToTab guard ───────────────────────────────────────────────
 
@@ -1711,23 +1779,27 @@ class TestEmbeddedModeRenderGuards:
         """_switchToTab must also route tab-switch renders through _mountEditor."""
         src = self.src
         tab_start = src.find("async function _switchToTabImpl")
-        tab_end   = src.find("function _highlightActiveFile", tab_start)
-        tab_body  = src[tab_start:tab_end]
-        assert "await _mountEditor(tab, tab.serverData);" in tab_body, (
-            "_switchToTab must use _mountEditor so layout guards run before creating editors"
-        )
+        tab_end = src.find("function _highlightActiveFile", tab_start)
+        tab_body = src[tab_start:tab_end]
+        assert (
+            "await _mountEditor(tab, tab.serverData);" in tab_body
+        ), "_switchToTab must use _mountEditor so layout guards run before creating editors"
 
     def test_switch_to_tab_primes_layout_before_waiting(self):
         """Tab switches must use the shared mount path that primes before waiting."""
         src = self.src
         mount_start = src.find("async function _mountEditor")
         mount_end = src.find("new KotoXlsxEditor()", mount_start)
-        tab_body = src[mount_start:mount_end + 120] if mount_end != -1 else src[mount_start:mount_start + 2400]
+        tab_body = (
+            src[mount_start : mount_end + 120]
+            if mount_end != -1
+            else src[mount_start : mount_start + 2400]
+        )
         prime_pos = tab_body.find("_primeEditorLayout(tab.fileType)")
         guard_pos = tab_body.find("await _waitForEditorLayout(tab.fileType)")
-        assert prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos, (
-            "_mountEditor must prime the editor shell before waiting for layout"
-        )
+        assert (
+            prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos
+        ), "_mountEditor must prime the editor shell before waiting for layout"
 
     # ── KotoXlsxEditor size-polling ──────────────────────────────────────
 
@@ -1735,34 +1807,34 @@ class TestEmbeddedModeRenderGuards:
         """KotoXlsxEditor.render must use requestAnimationFrame before calling KotoSheetsAPI.create."""
         src = self.src
         xlsx_start = src.find("class KotoXlsxEditor")
-        xlsx_end   = src.find("\n  class Koto", xlsx_start)
-        xlsx_body  = src[xlsx_start:xlsx_end]
-        assert "requestAnimationFrame" in xlsx_body, (
-            "KotoXlsxEditor must use requestAnimationFrame before mounting Univer"
-        )
-        assert "KotoSheetsAPI.create" in xlsx_body, (
-            "KotoXlsxEditor must call KotoSheetsAPI.create"
-        )
+        xlsx_end = src.find("\n  class Koto", xlsx_start)
+        xlsx_body = src[xlsx_start:xlsx_end]
+        assert (
+            "requestAnimationFrame" in xlsx_body
+        ), "KotoXlsxEditor must use requestAnimationFrame before mounting Univer"
+        assert (
+            "KotoSheetsAPI.create" in xlsx_body
+        ), "KotoXlsxEditor must call KotoSheetsAPI.create"
 
     def test_xlsx_editor_has_mount_deadline(self):
         """KotoXlsxEditor.render must have error handling for create failures."""
         src = self.src
         xlsx_start = src.find("class KotoXlsxEditor")
-        xlsx_end   = src.find("\n  class Koto", xlsx_start)
-        xlsx_body  = src[xlsx_start:xlsx_end]
-        assert "catch" in xlsx_body and "初始化失败" in xlsx_body, (
-            "KotoXlsxEditor must catch errors from KotoSheetsAPI.create"
-        )
+        xlsx_end = src.find("\n  class Koto", xlsx_start)
+        xlsx_body = src[xlsx_start:xlsx_end]
+        assert (
+            "catch" in xlsx_body and "初始化失败" in xlsx_body
+        ), "KotoXlsxEditor must catch errors from KotoSheetsAPI.create"
 
     def test_xlsx_editor_resize_nudge_present(self):
         """KotoXlsxEditor.render must pass string container ID to KotoSheetsAPI.create."""
         src = self.src
         xlsx_start = src.find("class KotoXlsxEditor")
-        xlsx_end   = src.find("\n  class Koto", xlsx_start)
-        xlsx_body  = src[xlsx_start:xlsx_end]
-        assert "this._containerId" in xlsx_body, (
-            "KotoXlsxEditor must pass string container ID to KotoSheetsAPI.create"
-        )
+        xlsx_end = src.find("\n  class Koto", xlsx_start)
+        xlsx_body = src[xlsx_start:xlsx_end]
+        assert (
+            "this._containerId" in xlsx_body
+        ), "KotoXlsxEditor must pass string container ID to KotoSheetsAPI.create"
 
     # ── KotoPptxEditor size-polling ──────────────────────────────────────
 
@@ -1770,21 +1842,21 @@ class TestEmbeddedModeRenderGuards:
         """KotoPptxEditor.render must poll clientWidth before calling _renderSlide(0)."""
         src = self.pptx_src
         pptx_start = src.find("class KotoPptxEditor")
-        pptx_end   = len(src)
-        pptx_body  = src[pptx_start:pptx_end]
-        assert "_tryPptxRender" in pptx_body or "_pptxMountDeadline" in pptx_body, (
-            "KotoPptxEditor must use a polling strategy for first-slide render"
-        )
+        pptx_end = len(src)
+        pptx_body = src[pptx_start:pptx_end]
+        assert (
+            "_tryPptxRender" in pptx_body or "_pptxMountDeadline" in pptx_body
+        ), "KotoPptxEditor must use a polling strategy for first-slide render"
 
     def test_pptx_editor_has_mount_deadline(self):
         """KotoPptxEditor must have a deadline to prevent infinite polling."""
         src = self.pptx_src
         pptx_start = src.find("class KotoPptxEditor")
-        pptx_end   = len(src)
-        pptx_body  = src[pptx_start:pptx_end]
-        assert "_pptxMountDeadline" in pptx_body or "Date.now()" in pptx_body, (
-            "KotoPptxEditor mount polling must have a bounded deadline"
-        )
+        pptx_end = len(src)
+        pptx_body = src[pptx_start:pptx_end]
+        assert (
+            "_pptxMountDeadline" in pptx_body or "Date.now()" in pptx_body
+        ), "KotoPptxEditor mount polling must have a bounded deadline"
 
     # ── openInMainView reflow hook ───────────────────────────────────────
 
@@ -1792,24 +1864,24 @@ class TestEmbeddedModeRenderGuards:
         """openInMainView must trigger a ResizeObserver nudge for active XLSX editors."""
         src = self.src
         oim_start = src.find("export function openInMainView")
-        oim_end   = src.find("export function closeInMainView", oim_start)
-        oim_body  = src[oim_start:oim_end]
-        assert "wa-xlsx-sheet" in oim_body, (
-            "openInMainView must reference 'wa-xlsx-sheet' for the reflow nudge"
-        )
-        assert "style.width" in oim_body, (
-            "openInMainView must perform the width+1/reset nudge for XLSX after showing"
-        )
+        oim_end = src.find("export function closeInMainView", oim_start)
+        oim_body = src[oim_start:oim_end]
+        assert (
+            "wa-xlsx-sheet" in oim_body
+        ), "openInMainView must reference 'wa-xlsx-sheet' for the reflow nudge"
+        assert (
+            "style.width" in oim_body
+        ), "openInMainView must perform the width+1/reset nudge for XLSX after showing"
 
     def test_open_in_main_view_reflows_pptx(self):
         """openInMainView must trigger a re-render for active PPTX editors."""
         src = self.src
         oim_start = src.find("export function openInMainView")
-        oim_end   = src.find("export function closeInMainView", oim_start)
-        oim_body  = src[oim_start:oim_end]
-        assert "_renderSlide" in oim_body, (
-            "openInMainView must call _renderSlide for active PPTX editor after showing"
-        )
+        oim_end = src.find("export function closeInMainView", oim_start)
+        oim_body = src[oim_start:oim_end]
+        assert (
+            "_renderSlide" in oim_body
+        ), "openInMainView must call _renderSlide for active PPTX editor after showing"
 
     # ── XLSX API response still valid ────────────────────────────────────
 
@@ -1828,9 +1900,9 @@ class TestEmbeddedModeRenderGuards:
         body = resp.get_json()
         assert body["file_type"] == "xlsx"
         data = body["data"]
-        assert "sheets" in data or "sheetOrder" in data, (
-            "IWorkbookData must contain 'sheets' or 'sheetOrder'"
-        )
+        assert (
+            "sheets" in data or "sheetOrder" in data
+        ), "IWorkbookData must contain 'sheets' or 'sheetOrder'"
 
     def test_pptx_open_file_returns_slides(self, wa_client):
         """Backend must still return valid slide data after frontend changes."""
@@ -1848,4 +1920,3 @@ class TestEmbeddedModeRenderGuards:
         assert body["file_type"] == "pptx"
         assert isinstance(body["data"].get("slides"), list)
         assert len(body["data"]["slides"]) >= 1
-

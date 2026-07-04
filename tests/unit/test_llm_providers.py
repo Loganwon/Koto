@@ -190,11 +190,15 @@ class TestDeepSeekProvider:
         from app.core.llm.model_selection import get_configured_cloud_model
 
         assert (
-            get_configured_cloud_model("FILE_TASK", fallback_model="gemini-3.1-pro-preview")
+            get_configured_cloud_model(
+                "FILE_TASK", fallback_model="gemini-3.1-pro-preview"
+            )
             == "deepseek-v4-pro"
         )
         assert (
-            get_configured_cloud_model("VISION", fallback_model="gemini-3-flash-preview")
+            get_configured_cloud_model(
+                "VISION", fallback_model="gemini-3-flash-preview"
+            )
             == "gemini-3-flash-preview"
         )
 
@@ -216,11 +220,15 @@ class TestDeepSeekProvider:
         assert get_provider_for_model_mode("cloud") == "deepseek"
         assert get_provider_for_model_mode("") == "deepseek"
         assert (
-            get_configured_cloud_model("FILE_TASK", fallback_model="gemini-3.1-pro-preview")
+            get_configured_cloud_model(
+                "FILE_TASK", fallback_model="gemini-3.1-pro-preview"
+            )
             == "deepseek-v4-pro"
         )
         assert (
-            get_configured_cloud_model("PAINTER", fallback_model="gemini-3.1-flash-image-preview")
+            get_configured_cloud_model(
+                "PAINTER", fallback_model="gemini-3.1-flash-image-preview"
+            )
             == "gemini-3.1-flash-image-preview"
         )
 
@@ -443,9 +451,7 @@ class TestOpenAIProviderMessageFormatting:
             for msg in messages
             if msg["role"] == "assistant" and msg.get("tool_calls")
         ]
-        tool_ids = [
-            msg["tool_call_id"] for msg in messages if msg["role"] == "tool"
-        ]
+        tool_ids = [msg["tool_call_id"] for msg in messages if msg["role"] == "tool"]
         assert assistant_calls == ["call_first", "call_second"]
         assert tool_ids == ["call_first", "call_second"]
         assert messages[0]["reasoning_content"] == "thinking"

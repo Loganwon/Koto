@@ -3,8 +3,8 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-from pathlib import Path
 import zipfile
+from pathlib import Path
 
 
 class PptxPreflightError(ValueError):
@@ -18,9 +18,21 @@ class PptxPreflightError(ValueError):
 class PptxPreflightService:
     """Fast pre-parse checks for PPTX files opened by absolute path."""
 
-    VIDEO_EXTENSIONS = frozenset({
-        ".mp4", ".mov", ".wmv", ".avi", ".m4v", ".mkv", ".flv", ".webm", ".asf", ".mpg", ".mpeg",
-    })
+    VIDEO_EXTENSIONS = frozenset(
+        {
+            ".mp4",
+            ".mov",
+            ".wmv",
+            ".avi",
+            ".m4v",
+            ".mkv",
+            ".flv",
+            ".webm",
+            ".asf",
+            ".mpg",
+            ".mpeg",
+        }
+    )
     MAX_BYTES = 50 * 1024 * 1024
 
     def check(self, file_path: str | Path, ext: str) -> None:

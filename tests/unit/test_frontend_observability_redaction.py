@@ -42,6 +42,6 @@ def test_frontend_observability_api_redacts_sensitive_payloads(tmp_path, monkeyp
     assert details["apiKey"] == "[redacted]"
     assert details["nested"]["authorization"] == "[redacted]"
     assert details["safe"] == "visible"
-    assert "sk-live-secret" not in (tmp_path / "frontend_observability.jsonl").read_text(
-        encoding="utf-8"
-    )
+    assert "sk-live-secret" not in (
+        tmp_path / "frontend_observability.jsonl"
+    ).read_text(encoding="utf-8")

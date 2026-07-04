@@ -7,6 +7,7 @@ When set, TaskAgent can search the cloud catalog and fetch skills that aren't
 installed locally.  Fetched skills are registered as ephemeral sessions inside
 SkillManager and cleaned up after the task completes.
 """
+
 from __future__ import annotations
 
 import json
@@ -31,6 +32,7 @@ _ephemeral_skill_ids: set[str] = set()
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+
 def _ensure_cache_dir() -> None:
     _CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -39,6 +41,7 @@ def _http_get(url: str, timeout: int = 15) -> Optional[Dict[str, Any]]:
     """Fetch JSON from a URL.  Returns None on any failure."""
     try:
         import urllib.request
+
         req = urllib.request.Request(url, headers={"User-Agent": "Koto/1.0"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -48,6 +51,7 @@ def _http_get(url: str, timeout: int = 15) -> Optional[Dict[str, Any]]:
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
+
 
 class CloudSkillRegistry:
     """Lightweight community skill registry backed by a GitHub-hosted JSON index."""
@@ -192,7 +196,9 @@ class CloudSkillRegistry:
                 encoding="utf-8",
             )
         except Exception as exc:
-            logger.warning("[CloudSkillRegistry] Could not cache skill %s: %s", skill_id, exc)
+            logger.warning(
+                "[CloudSkillRegistry] Could not cache skill %s: %s", skill_id, exc
+            )
 
         return skill_json
 
@@ -215,7 +221,10 @@ class CloudSkillRegistry:
             # Block overwriting builtins
             existing = sm._def_registry.get(skill_id)  # type: ignore[attr-defined]
             if existing and getattr(existing, "author", "") == "builtin":
-                logger.warning("[CloudSkillRegistry] Blocked overwrite of builtin skill: %s", skill_id)
+                logger.warning(
+                    "[CloudSkillRegistry] Blocked overwrite of builtin skill: %s",
+                    skill_id,
+                )
                 return False
 
             skill_def.author = "cloud"
@@ -231,7 +240,9 @@ class CloudSkillRegistry:
             logger.info("[CloudSkillRegistry] Registered ephemeral skill: %s", skill_id)
             return True
         except Exception as exc:
-            logger.warning("[CloudSkillRegistry] Failed to register skill %s: %s", skill_id, exc)
+            logger.warning(
+                "[CloudSkillRegistry] Failed to register skill %s: %s", skill_id, exc
+            )
             return False
 
     # ── Cleanup ───────────────────────────────────────────────────────────────
@@ -260,9 +271,13 @@ class CloudSkillRegistry:
                     if hasattr(sm, "_registry"):
                         sm._registry.pop(sid, None)
                     _ephemeral_skill_ids.discard(sid)
-                    logger.info("[CloudSkillRegistry] Cleaned up ephemeral skill: %s", sid)
+                    logger.info(
+                        "[CloudSkillRegistry] Cleaned up ephemeral skill: %s", sid
+                    )
                 except Exception as exc:
-                    logger.warning("[CloudSkillRegistry] Cleanup failed for %s: %s", sid, exc)
+                    logger.warning(
+                        "[CloudSkillRegistry] Cleanup failed for %s: %s", sid, exc
+                    )
         except Exception as exc:
             logger.warning("[CloudSkillRegistry] Cleanup error: %s", exc)
 

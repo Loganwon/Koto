@@ -13,7 +13,10 @@ def test_workspace_ai_onboarding_copy_tracks_goal_first_task_flow():
     embedded_html = _read("web/templates/index.html")
 
     assert "Koto AI" in embedded_html
-    assert "能总结分析、改写润色、生成文档、整理文件。输入任务或附加文件，过程和结果都会显示在这里。" in embedded_html
+    assert (
+        "能总结分析、改写润色、生成文档、整理文件。输入任务或附加文件，过程和结果都会显示在这里。"
+        in embedded_html
+    )
     assert "wa-welcome-lede" not in embedded_html
     assert "wa-welcome-tip" not in embedded_html
     assert "读取并直接处理" not in embedded_html

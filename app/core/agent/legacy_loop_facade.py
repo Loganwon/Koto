@@ -4,9 +4,7 @@ from collections.abc import Iterator, Mapping
 from typing import Any
 
 from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor
-from app.core.agent.legacy_loop_executor import (
-    LegacyEditorLoopExecutor,
-)
+from app.core.agent.editor_loop_executor import EditorLoopExecutor
 from app.core.agent.lifecycle import AgentEvent, AgentRequest
 from app.core.agent.session_queue import SessionQueue
 from app.core.llm.model_mode import normalize_model_mode
@@ -14,7 +12,7 @@ from app.core.llm.model_mode import normalize_model_mode
 
 def iter_editor_agent_events(request: AgentRequest) -> Iterator[AgentEvent]:
     """Run the legacy editor AgentLoop behind a replaceable boundary."""
-    yield from LegacyEditorLoopExecutor().iter_events(request)
+    yield from EditorLoopExecutor().iter_events(request)
 
 
 def build_doc_agent_request(sid: str, data: Mapping[str, Any]) -> AgentRequest:

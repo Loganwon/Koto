@@ -59,8 +59,9 @@ def configure_http_wiring(app: Flask, logger: Logger):
 
             token = generate_csrf()
         except Exception:
-            token = ""
-        return jsonify({"csrf_token": token})
+            token = None
+        token = token or "csrf-disabled"
+        return jsonify({"csrf_token": token, "token": token})
 
     try:
         from flask_wtf.csrf import CSRFError as _CSRFError

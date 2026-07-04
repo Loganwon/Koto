@@ -14,7 +14,7 @@ def test_editor_facade_runs_legacy_loop(monkeypatch):
             captured["request"] = request
             yield evt_task_complete(result=f"ok:{request.prompt}")
 
-    monkeypatch.setattr(facade, "LegacyEditorLoopExecutor", FakeEditorExecutor)
+    monkeypatch.setattr(facade, "EditorLoopExecutor", FakeEditorExecutor)
 
     request = AgentRequest(prompt="polish this")
     events = list(facade.iter_editor_agent_events(request))

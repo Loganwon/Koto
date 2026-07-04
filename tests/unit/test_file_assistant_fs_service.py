@@ -4,8 +4,8 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 import types
+from pathlib import Path
 
 import pytest
 from werkzeug.datastructures import FileStorage
@@ -101,6 +101,26 @@ def test_create_file_rejects_traversal_folder(tmp_path: Path) -> None:
             name="note.txt",
             allowed_extensions={".txt"},
             seed_file=_seed_text,
+        )
+
+    assert exc.value.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "rel_path",
+    [
+        r"..\..\secret.txt",
+        r"C:\Windows\System32\drivers\etc\hosts",
+    ],
+)
+def test_workspace_relative_paths_reject_windows_traversal_forms(
+    tmp_path: Path, rel_path: str
+) -> None:
+    with pytest.raises(WorkspaceFsError) as exc:
+        WorkspaceFsService().delete_file(
+            workspace_dir=tmp_path,
+            rel_path=rel_path,
+            allowed_extensions={".txt"},
         )
 
     assert exc.value.status_code == 403

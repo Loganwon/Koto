@@ -11,7 +11,9 @@ def _repo_root() -> Path:
 
 def _unload_llm_package() -> None:
     root = str(_repo_root())
-    sys.path[:] = [entry for entry in sys.path if str(Path(entry or ".").resolve()) != root]
+    sys.path[:] = [
+        entry for entry in sys.path if str(Path(entry or ".").resolve()) != root
+    ]
     sys.path.insert(0, root)
 
     sys.modules.pop("app.core.llm.langchain_adapter", None)
@@ -26,9 +28,10 @@ def test_langchain_adapter_import_prefers_source_module():
 
     module = importlib.import_module("app.core.llm.langchain_adapter")
 
-    assert Path(module.__file__).resolve() == (
-        _repo_root() / "app" / "core" / "llm" / "langchain_adapter.py"
-    ).resolve()
+    assert (
+        Path(module.__file__).resolve()
+        == (_repo_root() / "app" / "core" / "llm" / "langchain_adapter.py").resolve()
+    )
     assert hasattr(module, "KotoLangChainLLM")
     assert callable(module.KotoLangChainLLM.get_num_tokens)
 

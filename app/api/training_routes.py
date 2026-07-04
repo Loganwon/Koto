@@ -10,7 +10,7 @@ import threading
 
 from flask import Blueprint, jsonify, request
 
-from app.core.learning.training_data_builder import TrainingDataBuilder, _OUT_DIR
+from app.core.learning.training_data_builder import _OUT_DIR, TrainingDataBuilder
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +96,9 @@ def training_push_ollama():
 
     if not routing_files or not full_files:
         return (
-            jsonify({"success": False, "error": "请先运行 /api/training/build 生成数据"}),
+            jsonify(
+                {"success": False, "error": "请先运行 /api/training/build 生成数据"}
+            ),
             400,
         )
 

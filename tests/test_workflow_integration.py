@@ -7,16 +7,18 @@ from __future__ import annotations
 
 import io
 import json
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
+import pytest
 
 # ── Fixture: full Flask app with all blueprints ──────────────────────────────
+
 
 @pytest.fixture(scope="module")
 def full_client():
     """Create a test client using the real Koto Flask app (with workflow_bp registered)."""
     from flask import Flask
+
     from web.blueprints.workflow_api import workflow_bp
 
     app = Flask(__name__)
@@ -27,6 +29,7 @@ def full_client():
 
 
 # ── Workflow API registration tests ──────────────────────────────────────────
+
 
 class TestWorkflowRegistration:
     """Verify the workflow blueprint is properly set up and reachable."""
@@ -83,6 +86,7 @@ class TestWorkflowRegistration:
 
 # ── File upload tests ────────────────────────────────────────────────────────
 
+
 class TestWorkflowUpload:
     def test_upload_returns_paths(self, full_client):
         data = {
@@ -125,18 +129,23 @@ class TestWorkflowUpload:
 
 # ── Executor instantiation tests ─────────────────────────────────────────────
 
+
 class TestExecutorFactory:
     """Verify each workflow executor can be instantiated without errors."""
 
-    @pytest.mark.parametrize("workflow_id", [
-        "cross_format_extractor",
-        "data_format_cleaner",
-        "questionnaire_filler",
-        "doc_smart_compare",
-        "comm_digest",
-    ])
+    @pytest.mark.parametrize(
+        "workflow_id",
+        [
+            "cross_format_extractor",
+            "data_format_cleaner",
+            "questionnaire_filler",
+            "doc_smart_compare",
+            "comm_digest",
+        ],
+    )
     def test_executor_instantiates(self, workflow_id):
         from web.blueprints.workflow_api import _get_executor
+
         executor = _get_executor(workflow_id)
         assert executor is not None
         assert hasattr(executor, "execute")
@@ -144,27 +153,39 @@ class TestExecutorFactory:
 
     def test_unknown_executor_returns_none(self):
         from web.blueprints.workflow_api import _get_executor
+
         assert _get_executor("nonexistent") is None
 
-    @pytest.mark.parametrize("workflow_id", [
-        "contract_diff_markup",
-        "email_thread_digest",
-    ])
+    @pytest.mark.parametrize(
+        "workflow_id",
+        [
+            "contract_diff_markup",
+            "email_thread_digest",
+        ],
+    )
     def test_legacy_executor_ids_removed(self, workflow_id):
         from web.blueprints.workflow_api import _get_executor
+
         assert _get_executor(workflow_id) is None
 
 
 # ── SSE format tests ─────────────────────────────────────────────────────────
+
 
 class TestSSEEventFormat:
     """Verify SSE event builders produce correct format."""
 
     def test_sse_events_are_valid_json(self):
         from app.core.workflow_engine import (
-            sse_status, sse_progress, sse_step_start, sse_step_done,
-            sse_output, sse_error, sse_done,
+            sse_done,
+            sse_error,
+            sse_output,
+            sse_progress,
+            sse_status,
+            sse_step_done,
+            sse_step_start,
         )
+
         events = [
             sse_status("处理中"),
             sse_progress(1, 5, "第一步"),
@@ -183,9 +204,11 @@ class TestSSEEventFormat:
 
 # ── Workflow executor core methods (non-LLM) ────────────────────────────────
 
+
 class TestCrossFormatExtractorMethods:
     def test_build_workbook_structure(self):
         from app.core.workflows.cross_format_extractor import CrossFormatExtractor
+
         ext = CrossFormatExtractor()
         fields = ["名称", "金额"]
         rows = [{"名称": "A", "金额": "100"}, {"名称": "B", "金额": "200"}]
@@ -198,6 +221,7 @@ class TestCrossFormatExtractorMethods:
 class TestDataFormatCleanerMethods:
     def test_diff_csv_identifies_changes(self):
         from app.core.workflows.data_format_cleaner import DataFormatCleaner
+
         cleaner = DataFormatCleaner()
         original = "名称,日期\n张三,2024/1/5\n李四,2024/2/10"
         cleaned = "名称,日期\n张三,2024-01-05\n李四,2024-02-10"
@@ -209,6 +233,7 @@ class TestDataFormatCleanerMethods:
 class TestDocSmartCompareMethods:
     def test_rule_split_produces_clauses(self):
         from app.core.workflows.doc_smart_compare import DocSmartCompare
+
         compare = DocSmartCompare()
         # Need >= 3 paragraphs (separated by \n\n) for paragraph split
         text = "第一条 甲方应于签约后10日内支付款项。\n\n第二条 乙方应提供发票并配合验收。\n\n第三条 争议依法由合同签订地仲裁委员会解决。"
@@ -217,12 +242,17 @@ class TestDocSmartCompareMethods:
 
     def test_generate_diff_html(self):
         from app.core.workflows.doc_smart_compare import DocSmartCompare
+
         compare = DocSmartCompare()
         alignments = [
-            {"原文片段": "第一条 甲方支付货款十万元整",
-             "修改建议": "第一条 甲方支付货款三万元整",
-             "修改原因": "金额从十万改为三万",
-             "diff_type": "modified", "severity": "critical", "risk_flag": True},
+            {
+                "原文片段": "第一条 甲方支付货款十万元整",
+                "修改建议": "第一条 甲方支付货款三万元整",
+                "修改原因": "金额从十万改为三万",
+                "diff_type": "modified",
+                "severity": "critical",
+                "risk_flag": True,
+            },
         ]
         html = compare._generate_diff_html(alignments)
         assert "甲方" in html
@@ -232,9 +262,18 @@ class TestDocSmartCompareMethods:
 class TestCommDigestMethods:
     def test_build_workbook_has_headers(self):
         from app.core.workflows.comm_digest import CommDigest
+
         ext = CommDigest()
-        items = [{"task": "做X", "owner": "A", "deadline": "2025-01-01",
-                  "status": "pending", "priority": "high", "source": "邮件"}]
+        items = [
+            {
+                "task": "做X",
+                "owner": "A",
+                "deadline": "2025-01-01",
+                "status": "pending",
+                "priority": "high",
+                "source": "邮件",
+            }
+        ]
         wb = ext._build_workbook(items)
         sheet = list(wb["sheets"].values())[0]
         assert sheet["columnCount"] >= 5
@@ -243,6 +282,7 @@ class TestCommDigestMethods:
 class TestQuestionnaireFillerMethods:
     def test_parse_questions(self, tmp_path):
         import openpyxl
+
         from app.core.workflows.questionnaire_filler import QuestionnaireFiller
 
         wb = openpyxl.Workbook()

@@ -179,7 +179,9 @@ class AppContext:
                         try:
                             method()
                         except Exception as e:
-                            logger.debug("[AppContext] %s.%s() 失败: %s", name, method_name, e)
+                            logger.debug(
+                                "[AppContext] %s.%s() 失败: %s", name, method_name, e
+                            )
                         break
 
     def register_custom(self, name: str, factory: Callable[[], Any]):

@@ -7,8 +7,8 @@ from app.core.agent.editor_quick_action_executor import EditorQuickActionExecuto
 from app.core.agent.lifecycle import AgentEvent, AgentRequest
 
 
-class LegacyEditorLoopExecutor:
-    """Legacy editor SSE executor behind the compatibility facade."""
+class EditorLoopExecutor:
+    """Editor SSE executor behind the compatibility facade."""
 
     def iter_events(self, request: AgentRequest) -> Iterator[AgentEvent]:
         if EditorCodeActionExecutor.supports(request):

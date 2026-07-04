@@ -51,11 +51,11 @@ _MAPPING_SYSTEM = """你是一个数据映射助手。
 
 # 支持的占位符格式
 _PLACEHOLDER_PATTERNS = [
-    r"\{\{(.+?)\}\}",       # {{字段名}}
-    r"<<(.+?)>>",           # <<字段名>>
-    r"\[(.+?)\]",           # [字段名]
-    r"__(.+?)__",           # __字段名__
-    r"\$\{(.+?)\}",         # ${字段名}
+    r"\{\{(.+?)\}\}",  # {{字段名}}
+    r"<<(.+?)>>",  # <<字段名>>
+    r"\[(.+?)\]",  # [字段名]
+    r"__(.+?)__",  # __字段名__
+    r"\$\{(.+?)\}",  # ${字段名}
 ]
 
 
@@ -80,7 +80,9 @@ class DataFillReport(WorkflowExecutor):
         model_mode: str = params.get("model_mode") or "auto"
 
         if not data_file or not template_file:
-            yield sse_error("请同时提供数据文件（data_file）和模板文件（template_file）")
+            yield sse_error(
+                "请同时提供数据文件（data_file）和模板文件（template_file）"
+            )
             return
 
         template_ext = Path(template_file).suffix.lower()
@@ -104,7 +106,9 @@ class DataFillReport(WorkflowExecutor):
             placeholders, template_texts = self._scan_pptx_placeholders(template_file)
 
         if not placeholders:
-            yield sse_error("模板中未找到占位符（支持格式：{{字段}}、<<字段>>、[字段]、__字段__、${字段}）")
+            yield sse_error(
+                "模板中未找到占位符（支持格式：{{字段}}、<<字段>>、[字段]、__字段__、${字段}）"
+            )
             return
         yield sse_step_done("scan", f"🔍 找到 {len(placeholders)} 个占位符")
 
@@ -113,7 +117,9 @@ class DataFillReport(WorkflowExecutor):
         data_preview = self._build_data_preview(headers, rows, model_mode)
         mappings = self._map_fields(placeholders, data_preview, instruction, model_mode)
         valid_mappings = [m for m in mappings if m.get("data_col")]
-        yield sse_step_done("mapping", f"🤖 成功映射 {len(valid_mappings)}/{len(placeholders)} 个字段")
+        yield sse_step_done(
+            "mapping", f"🤖 成功映射 {len(valid_mappings)}/{len(placeholders)} 个字段"
+        )
 
         if not valid_mappings:
             yield sse_error("无法将任何占位符映射到数据列")
@@ -146,11 +152,14 @@ class DataFillReport(WorkflowExecutor):
 
     # ── 数据加载 ──────────────────────────────────────────────────────
 
-    def _load_data(self, file_path: str, model_mode: str) -> tuple[list[str], list[list[str]]]:
+    def _load_data(
+        self, file_path: str, model_mode: str
+    ) -> tuple[list[str], list[list[str]]]:
         ext = Path(file_path).suffix.lower()
         try:
             if ext in (".xlsx", ".xls"):
                 import openpyxl
+
                 wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
                 ws = wb.active
                 all_rows = []
@@ -162,6 +171,7 @@ class DataFillReport(WorkflowExecutor):
                 return all_rows[0], all_rows[1:]
             elif ext == ".csv":
                 import csv
+
                 with open(file_path, "r", encoding="utf-8-sig", errors="replace") as f:
                     reader = csv.reader(f)
                     all_rows = list(reader)
@@ -177,6 +187,7 @@ class DataFillReport(WorkflowExecutor):
     def _scan_docx_placeholders(self, path: str) -> tuple[list[str], list[str]]:
         """扫描 DOCX 中的占位符。"""
         from docx import Document
+
         doc = Document(path)
         all_text = []
         for para in doc.paragraphs:
@@ -192,6 +203,7 @@ class DataFillReport(WorkflowExecutor):
     def _scan_pptx_placeholders(self, path: str) -> tuple[list[str], list[str]]:
         """扫描 PPTX 中的占位符。"""
         from pptx import Presentation
+
         prs = Presentation(path)
         all_text = []
         for slide in prs.slides:
@@ -219,7 +231,9 @@ class DataFillReport(WorkflowExecutor):
 
     # ── 字段映射 ──────────────────────────────────────────────────────
 
-    def _build_data_preview(self, headers: list[str], rows: list[list[str]], model_mode: str) -> str:
+    def _build_data_preview(
+        self, headers: list[str], rows: list[list[str]], model_mode: str
+    ) -> str:
         max_rows = 5 if model_mode == "local" else 20
         max_cols = 8 if model_mode == "local" else len(headers)
         preview_headers = headers[:max_cols]
@@ -230,8 +244,13 @@ class DataFillReport(WorkflowExecutor):
             lines.append("\t".join(r[:max_cols]))
         return "\n".join(lines)
 
-    def _map_fields(self, placeholders: list[str], data_preview: str,
-                    instruction: str, model_mode: str) -> list[dict]:
+    def _map_fields(
+        self,
+        placeholders: list[str],
+        data_preview: str,
+        instruction: str,
+        model_mode: str,
+    ) -> list[dict]:
         """LLM 映射占位符到数据列。"""
         inst_text = f"\n用户说明: {instruction}" if instruction else ""
         system = _MAPPING_SYSTEM.format(
@@ -248,7 +267,9 @@ class DataFillReport(WorkflowExecutor):
             logger.warning("[DataFill] LLM 映射失败: %s", e)
         return []
 
-    def _build_replacements(self, mappings: list[dict], headers: list[str], rows: list[list[str]]) -> dict[str, str]:
+    def _build_replacements(
+        self, mappings: list[dict], headers: list[str], rows: list[list[str]]
+    ) -> dict[str, str]:
         """构建 {占位符: 替换值} 字典。"""
         col_index = {h: i for i, h in enumerate(headers)}
         result: dict[str, str] = {}
@@ -274,7 +295,9 @@ class DataFillReport(WorkflowExecutor):
                 result[placeholder] = str(values[-1])
             elif selector == "sum":
                 try:
-                    result[placeholder] = str(sum(float(v.replace(",", "")) for v in values))
+                    result[placeholder] = str(
+                        sum(float(v.replace(",", "")) for v in values)
+                    )
                 except (ValueError, TypeError):
                     result[placeholder] = str(values[0])
             elif selector == "average":
@@ -285,12 +308,16 @@ class DataFillReport(WorkflowExecutor):
                     result[placeholder] = str(values[0])
             elif selector == "max":
                 try:
-                    result[placeholder] = str(max(float(v.replace(",", "")) for v in values))
+                    result[placeholder] = str(
+                        max(float(v.replace(",", "")) for v in values)
+                    )
                 except (ValueError, TypeError):
                     result[placeholder] = str(values[0])
             elif selector == "min":
                 try:
-                    result[placeholder] = str(min(float(v.replace(",", "")) for v in values))
+                    result[placeholder] = str(
+                        min(float(v.replace(",", "")) for v in values)
+                    )
                 except (ValueError, TypeError):
                     result[placeholder] = str(values[0])
             elif selector == "concat":
@@ -305,6 +332,7 @@ class DataFillReport(WorkflowExecutor):
     def _fill_docx(self, path: str, replacements: dict[str, str]) -> int:
         """在 DOCX 中执行替换（保留格式）。"""
         from docx import Document
+
         doc = Document(path)
         count = 0
 
@@ -355,6 +383,7 @@ class DataFillReport(WorkflowExecutor):
     def _fill_pptx(self, path: str, replacements: dict[str, str]) -> int:
         """在 PPTX 中执行替换。"""
         from pptx import Presentation
+
         prs = Presentation(path)
         count = 0
 
@@ -374,7 +403,9 @@ class DataFillReport(WorkflowExecutor):
                                 for run in para.runs:
                                     for placeholder, value in replacements.items():
                                         if placeholder in run.text:
-                                            run.text = run.text.replace(placeholder, value)
+                                            run.text = run.text.replace(
+                                                placeholder, value
+                                            )
                                             count += 1
 
         prs.save(path)
@@ -382,7 +413,9 @@ class DataFillReport(WorkflowExecutor):
 
     # ── 报告 ──────────────────────────────────────────────────────────
 
-    def _build_mapping_report(self, mappings: list[dict], replacements: dict[str, str]) -> str:
+    def _build_mapping_report(
+        self, mappings: list[dict], replacements: dict[str, str]
+    ) -> str:
         lines = ["# 数据填报映射报告\n"]
         lines.append("| 占位符 | 数据列 | 聚合方式 | 填入值 |")
         lines.append("|--------|--------|----------|--------|")

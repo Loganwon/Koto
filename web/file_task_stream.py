@@ -19,6 +19,7 @@ from typing import Any, Iterable
 
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
+from web.sse.protocol import sse
 
 logger = logging.getLogger("koto.app")
 

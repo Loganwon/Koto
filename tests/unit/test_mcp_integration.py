@@ -250,7 +250,10 @@ def test_supervision_read_file_snippet_is_project_scoped():
     from app.core.agent.koto_supervision import read_file_snippet, resolve_project_path
 
     result = read_file_snippet("app/api/mcp_routes.py", start_line=1, max_chars=500)
-    assert result["path"] == "app\\api\\mcp_routes.py" or result["path"] == "app/api/mcp_routes.py"
+    assert (
+        result["path"] == "app\\api\\mcp_routes.py"
+        or result["path"] == "app/api/mcp_routes.py"
+    )
     assert "MCP routes for Koto" in result["snippet"]
 
     try:
@@ -794,7 +797,10 @@ def test_mcp_frontend_action_queue_round_trip(tmp_path, monkeypatch):
                 "arguments": {
                     "action": "replace_docx_anchor_text",
                     "value": "Updated heading",
-                    "options": {"anchorText": "Original heading", "anchorOccurrence": 0},
+                    "options": {
+                        "anchorText": "Original heading",
+                        "anchorOccurrence": 0,
+                    },
                     "wait_ms": 0,
                 },
             },
@@ -845,8 +851,15 @@ def test_mcp_frontend_action_targets_latest_visible_session(tmp_path, monkeypatc
     action = queued["action"]
 
     assert action["target_session_id"] == "newer-visible"
-    assert frontend_observability.next_frontend_action(session_id="older-visible")["action"] is None
-    delivered = frontend_observability.next_frontend_action(session_id="newer-visible")["action"]
+    assert (
+        frontend_observability.next_frontend_action(session_id="older-visible")[
+            "action"
+        ]
+        is None
+    )
+    delivered = frontend_observability.next_frontend_action(session_id="newer-visible")[
+        "action"
+    ]
     assert delivered["id"] == action["id"]
 
 
@@ -951,7 +964,12 @@ def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypat
     second = frontend_observability.enqueue_frontend_action(action="current_file_state")
 
     assert second["action"]["target_session_id"] == "first-visible"
-    assert frontend_observability.next_frontend_action(session_id="second-visible")["action"] is None
+    assert (
+        frontend_observability.next_frontend_action(session_id="second-visible")[
+            "action"
+        ]
+        is None
+    )
 
 
 def test_mcp_frontend_action_long_poll_waits_until_action(tmp_path, monkeypatch):

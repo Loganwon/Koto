@@ -43,9 +43,7 @@ def stepwise_docx_polish_target_path(
     return ""
 
 
-def read_docx_paragraph_window(
-    request: FileTaskRequest, path: str
-) -> dict[str, Any]:
+def read_docx_paragraph_window(request: FileTaskRequest, path: str) -> dict[str, Any]:
     from docx import Document  # type: ignore
 
     doc = Document(path)
@@ -74,9 +72,7 @@ def read_docx_paragraph_window(
     }
 
 
-def docx_polish_window_prompt(
-    request: FileTaskRequest, paragraphs: list[str]
-) -> str:
+def docx_polish_window_prompt(request: FileTaskRequest, paragraphs: list[str]) -> str:
     numbered = "\n".join(
         f"{index}. {text}" for index, text in enumerate(paragraphs, start=1)
     )
@@ -91,9 +87,7 @@ def docx_polish_window_prompt(
     )
 
 
-def parse_polished_docx_paragraphs(
-    content: str, *, expected_count: int
-) -> list[str]:
+def parse_polished_docx_paragraphs(content: str, *, expected_count: int) -> list[str]:
     text = str(content or "").strip()
     if not text:
         return []

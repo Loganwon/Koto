@@ -17,8 +17,8 @@ import re as _re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 # ── File Change Extraction ────────────────────────────────────────────────────
+
 
 def extract_file_change(
     tool_name: str,
@@ -54,7 +54,7 @@ def extract_file_change(
     target_path = str(Path(target_path).resolve())
 
     file_type = _infer_file_type(str(target_path), tool_name)
-    change_type = _get_file_change_type(text, tool_name=B"write" in tool_name.encode())
+    change_type = _get_file_change_type(text, tool_name=b"write" in tool_name.encode())
 
     return {
         "path": target_path,
@@ -103,7 +103,14 @@ def extract_koto_paths(result: Any) -> List[str]:
 
 def _resolve_path(args: Dict[str, Any], workspace_root: str) -> Optional[str]:
     """Resolve the target file path from tool arguments."""
-    for key in ("path", "file_path", "target_path", "output_path", "xlsx_path", "image_path"):
+    for key in (
+        "path",
+        "file_path",
+        "target_path",
+        "output_path",
+        "xlsx_path",
+        "image_path",
+    ):
         val = str(args.get(key, "") or "").strip()
         if not val:
             continue
@@ -162,6 +169,7 @@ def _truncate_preview(text: str, max_len: int = 200) -> str:
 
 # ── Error Classification ──────────────────────────────────────────────────────
 
+
 def is_error_result(result: Any) -> bool:
     """Return True if the tool result indicates an error.
 
@@ -201,6 +209,7 @@ def extract_tool_error_text(result: Any) -> str:
 
 
 # ── Write Deduplication ───────────────────────────────────────────────────────
+
 
 class WriteDedupGuard:
     """Shared write operation deduplication across file_task_runtime and task_agent.

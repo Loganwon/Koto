@@ -91,7 +91,9 @@ def verification_precheck(
     if runtime_status in {"blocked", "write_blocked"}:
         outcome = tool_runtime_outcome or {}
         suggested = str(outcome.get("suggested_next_step") or "").strip()
-        remaining = [suggested] if suggested else ["关闭占用目标文件的程序或页签后重试。"]
+        remaining = (
+            [suggested] if suggested else ["关闭占用目标文件的程序或页签后重试。"]
+        )
         return {
             "passed": False,
             "status": runtime_status,

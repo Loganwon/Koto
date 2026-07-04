@@ -7,7 +7,6 @@ import sys
 from typing import List, Optional
 from urllib.parse import urlparse
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -25,7 +24,11 @@ def normalize_proxy_url(proxy_value: str) -> str:
 def get_default_proxy_candidates() -> List[str]:
     custom = os.environ.get("KOTO_PROXY_PORTS", "")
     if custom.strip():
-        return [normalize_proxy_url(f"http://127.0.0.1:{p.strip()}") for p in custom.split(",") if p.strip().isdigit()]
+        return [
+            normalize_proxy_url(f"http://127.0.0.1:{p.strip()}")
+            for p in custom.split(",")
+            if p.strip().isdigit()
+        ]
     return [
         "http://127.0.0.1:7890",
         "http://127.0.0.1:10809",
@@ -105,7 +108,9 @@ def collect_proxy_candidates(include_defaults: bool = True) -> List[str]:
     return deduped
 
 
-def detect_live_proxy(candidates: Optional[List[str]] = None, timeout: float = 0.1) -> Optional[str]:
+def detect_live_proxy(
+    candidates: Optional[List[str]] = None, timeout: float = 0.1
+) -> Optional[str]:
     if candidates is None:
         candidates = collect_proxy_candidates()
 

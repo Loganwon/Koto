@@ -4,7 +4,6 @@ from xml.etree import ElementTree as ET
 
 import pytest
 
-
 W_NS = {"w": "http://schemas.openxmlformats.org/wordprocessingml/2006/main"}
 
 
@@ -55,10 +54,18 @@ def test_export_docx_writes_native_comments_xml():
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         names = archive.namelist()
         assert "word/comments.xml" in names
-        comments_xml = archive.read("word/comments.xml").decode("utf-8", errors="ignore")
-        document_xml = archive.read("word/document.xml").decode("utf-8", errors="ignore")
-        rels_xml = archive.read("word/_rels/document.xml.rels").decode("utf-8", errors="ignore")
-        content_types_xml = archive.read("[Content_Types].xml").decode("utf-8", errors="ignore")
+        comments_xml = archive.read("word/comments.xml").decode(
+            "utf-8", errors="ignore"
+        )
+        document_xml = archive.read("word/document.xml").decode(
+            "utf-8", errors="ignore"
+        )
+        rels_xml = archive.read("word/_rels/document.xml.rels").decode(
+            "utf-8", errors="ignore"
+        )
+        content_types_xml = archive.read("[Content_Types].xml").decode(
+            "utf-8", errors="ignore"
+        )
 
     assert "这里需要进一步说明" in comments_xml
     assert "审阅人" in comments_xml
@@ -219,13 +226,13 @@ def test_exported_docx_comment_roundtrips_anchor_metadata(tmp_path):
 
 
 def test_extract_docx_comments_reads_modern_comment_metadata(tmp_path):
-        from app.core.file.file_parser import _extract_docx_comments
+    from app.core.file.file_parser import _extract_docx_comments
 
-        docx_path = tmp_path / "modern-comments.docx"
-        with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr(
-                        "word/comments.xml",
-                        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    docx_path = tmp_path / "modern-comments.docx"
+    with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "word/comments.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:comments xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"
                         xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">
     <w:comment w:id="0" w:author="甲作者" w:initials="甲" w:date="2026-05-16T10:00:00Z" w14:paraId="00AA11">
@@ -235,10 +242,10 @@ def test_extract_docx_comments_reads_modern_comment_metadata(tmp_path):
         <w:p><w:r><w:t>回复批注</w:t></w:r></w:p>
     </w:comment>
 </w:comments>""",
-                )
-                archive.writestr(
-                        "word/document.xml",
-                        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        )
+        archive.writestr(
+            "word/document.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
     <w:body>
         <w:p>
@@ -250,46 +257,46 @@ def test_extract_docx_comments_reads_modern_comment_metadata(tmp_path):
         </w:p>
     </w:body>
 </w:document>""",
-                )
-                archive.writestr(
-                        "word/commentsExtended.xml",
-                        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        )
+        archive.writestr(
+            "word/commentsExtended.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w14:commentExs xmlns:w14="http://schemas.microsoft.com/office/word/2010/wordml">
     <w14:commentEx w14:paraId="00AA11" w14:done="1"/>
     <w14:commentEx w14:paraId="00BB22" w14:paraIdParent="00AA11"/>
 </w14:commentExs>""",
-                )
-                archive.writestr(
-                        "word/commentsIds.xml",
-                        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+        )
+        archive.writestr(
+            "word/commentsIds.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w16cid:commentsIds xmlns:w16cid="http://schemas.microsoft.com/office/word/2016/wordml/cid">
     <w16cid:commentId w16cid:paraId="00AA11" w16cid:durableId="durable-main"/>
     <w16cid:commentId w16cid:paraId="00BB22" w16cid:durableId="durable-reply"/>
 </w16cid:commentsIds>""",
-                )
+        )
 
-        comments = _extract_docx_comments(str(docx_path))
+    comments = _extract_docx_comments(str(docx_path))
 
-        assert len(comments) == 2
-        assert comments[0]["initials"] == "甲"
-        assert comments[0]["para_id"] == "00AA11"
-        assert comments[0]["durable_id"] == "durable-main"
-        assert comments[0]["done"] is True
-        assert comments[0]["anchor_text"] == "批注锚点"
-        assert comments[1]["initials"] == "乙"
-        assert comments[1]["parent_para_id"] == "00AA11"
-        assert comments[1]["parent_id"] == "0"
-        assert comments[1]["durable_id"] == "durable-reply"
+    assert len(comments) == 2
+    assert comments[0]["initials"] == "甲"
+    assert comments[0]["para_id"] == "00AA11"
+    assert comments[0]["durable_id"] == "durable-main"
+    assert comments[0]["done"] is True
+    assert comments[0]["anchor_text"] == "批注锚点"
+    assert comments[1]["initials"] == "乙"
+    assert comments[1]["parent_para_id"] == "00AA11"
+    assert comments[1]["parent_id"] == "0"
+    assert comments[1]["durable_id"] == "durable-reply"
 
 
 def test_extract_docx_revisions_reads_native_tracked_changes(tmp_path):
-        from app.core.file.file_parser import _extract_docx_revisions
+    from app.core.file.file_parser import _extract_docx_revisions
 
-        docx_path = tmp_path / "native-revisions.docx"
-        with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                archive.writestr(
-                        "word/document.xml",
-                        """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    docx_path = tmp_path / "native-revisions.docx"
+    with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr(
+            "word/document.xml",
+            """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
     <w:body>
         <w:p>
@@ -304,34 +311,35 @@ def test_extract_docx_revisions_reads_native_tracked_changes(tmp_path):
         </w:p>
     </w:body>
 </w:document>""",
-                )
+        )
 
-        revisions = _extract_docx_revisions(str(docx_path))
+    revisions = _extract_docx_revisions(str(docx_path))
 
-        assert len(revisions) == 2
-        assert revisions[0]["action"] == "replace"
-        assert revisions[0]["original_text"] == "旧句子"
-        assert revisions[0]["proposed_text"] == "新句子"
-        assert revisions[0]["author"] == "审阅人"
-        assert revisions[0]["read_only"] is True
-        assert revisions[0]["apply_disabled"] is True
-        assert revisions[1]["action"] == "insert"
-        assert revisions[1]["original_text"] == ""
-        assert revisions[1]["proposed_text"] == "补充"
+    assert len(revisions) == 2
+    assert revisions[0]["action"] == "replace"
+    assert revisions[0]["original_text"] == "旧句子"
+    assert revisions[0]["proposed_text"] == "新句子"
+    assert revisions[0]["author"] == "审阅人"
+    assert revisions[0]["read_only"] is True
+    assert revisions[0]["apply_disabled"] is True
+    assert revisions[1]["action"] == "insert"
+    assert revisions[1]["original_text"] == ""
+    assert revisions[1]["proposed_text"] == "补充"
 
 
 def test_parse_docx_renders_native_tracked_changes_inline_markup(tmp_path):
-        pytest.importorskip("docx", reason="python-docx 未安装")
+    pytest.importorskip("docx", reason="python-docx 未安装")
 
-        from docx import Document
-        from app.core.file.file_parser import parse_docx
+    from docx import Document
 
-        docx_path = tmp_path / "native-revisions-inline.docx"
-        base_doc = Document()
-        base_doc.add_paragraph("占位")
-        base_doc.save(docx_path)
+    from app.core.file.file_parser import parse_docx
 
-        replacement_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    docx_path = tmp_path / "native-revisions-inline.docx"
+    base_doc = Document()
+    base_doc.add_paragraph("占位")
+    base_doc.save(docx_path)
+
+    replacement_xml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
     <w:body>
         <w:p>
@@ -347,19 +355,21 @@ def test_parse_docx_renders_native_tracked_changes_inline_markup(tmp_path):
     </w:body>
 </w:document>"""
 
-        with zipfile.ZipFile(docx_path, "r") as archive:
-                existing = {name: archive.read(name) for name in archive.namelist()}
+    with zipfile.ZipFile(docx_path, "r") as archive:
+        existing = {name: archive.read(name) for name in archive.namelist()}
 
-        with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as archive:
-                for name, raw in existing.items():
-                        archive.writestr(name, replacement_xml if name == "word/document.xml" else raw)
+    with zipfile.ZipFile(docx_path, "w", zipfile.ZIP_DEFLATED) as archive:
+        for name, raw in existing.items():
+            archive.writestr(
+                name, replacement_xml if name == "word/document.xml" else raw
+            )
 
-        parsed = parse_docx(str(docx_path))
-        html = str(parsed.get("html") or "")
+    parsed = parse_docx(str(docx_path))
+    html = str(parsed.get("html") or "")
 
-        assert 'data-koto-review-id="docx-revision-1"' in html
-        assert 'data-koto-review-action="replace"' in html
-        assert 'koto-docx-track-change-delete' in html
-        assert 'koto-docx-track-change-insert' in html
-        assert '旧句子' in html
-        assert '新句子' in html
+    assert 'data-koto-review-id="docx-revision-1"' in html
+    assert 'data-koto-review-action="replace"' in html
+    assert "koto-docx-track-change-delete" in html
+    assert "koto-docx-track-change-insert" in html
+    assert "旧句子" in html
+    assert "新句子" in html

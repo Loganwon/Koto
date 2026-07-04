@@ -7,7 +7,6 @@ from pathlib import Path
 
 import pytest
 
-
 _PROJECT_ROOT = str(Path(__file__).resolve().parents[2])
 if _PROJECT_ROOT not in sys.path:
     sys.path.insert(0, _PROJECT_ROOT)
@@ -20,7 +19,7 @@ os.environ.setdefault("GEMINI_API_KEY", "test-key-for-unit-tests")
 def _parse_sse_payload(frame: str) -> dict:
     prefix = "data: "
     assert frame.startswith(prefix)
-    return json.loads(frame[len(prefix):].strip())
+    return json.loads(frame[len(prefix) :].strip())
 
 
 @pytest.mark.unit
@@ -32,7 +31,7 @@ def test_safe_sse_hides_sensitive_error_message():
             {
                 "type": "error",
                 "message": (
-                    'Traceback (most recent call last):\n'
+                    "Traceback (most recent call last):\n"
                     '  File "app.py", line 1\n'
                     "ConnectError: boom"
                 ),
@@ -54,7 +53,7 @@ def test_safe_sse_hides_sensitive_detail_when_marked_error_like():
                 "type": "progress",
                 "message": "正在回退到标准模式",
                 "detail": (
-                    'Traceback (most recent call last):\n'
+                    "Traceback (most recent call last):\n"
                     '  File "app.py", line 1\n'
                     "ConnectError: boom"
                 ),

@@ -5,9 +5,9 @@ from __future__ import annotations
 
 
 def test_xlsx_parser_facade_owns_workbook_parse(tmp_path):
-    from app.core.file.parsers.xlsx_parser import parse_xlsx
-
     import openpyxl
+
+    from app.core.file.parsers.xlsx_parser import parse_xlsx
 
     path = tmp_path / "book.xlsx"
     wb = openpyxl.Workbook()

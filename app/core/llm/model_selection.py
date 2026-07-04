@@ -21,7 +21,11 @@ def normalize_cloud_provider(value: Any, default: str = DEFAULT_CLOUD_PROVIDER) 
     if provider in CLOUD_PROVIDER_NAMES:
         return provider
     default_provider = str(default or DEFAULT_CLOUD_PROVIDER).strip().lower()
-    return default_provider if default_provider in CLOUD_PROVIDER_NAMES else DEFAULT_CLOUD_PROVIDER
+    return (
+        default_provider
+        if default_provider in CLOUD_PROVIDER_NAMES
+        else DEFAULT_CLOUD_PROVIDER
+    )
 
 
 def get_configured_cloud_provider(default: str = DEFAULT_CLOUD_PROVIDER) -> str:
@@ -37,7 +41,9 @@ def get_configured_cloud_provider(default: str = DEFAULT_CLOUD_PROVIDER) -> str:
         return normalize_cloud_provider(default, default=DEFAULT_CLOUD_PROVIDER)
 
 
-def get_provider_for_model_mode(model_mode: str, default: str = DEFAULT_CLOUD_PROVIDER) -> str:
+def get_provider_for_model_mode(
+    model_mode: str, default: str = DEFAULT_CLOUD_PROVIDER
+) -> str:
     normalized = str(model_mode or "").strip().lower()
     if normalized in CLOUD_PROVIDER_NAMES:
         return normalized
@@ -69,16 +75,17 @@ def get_configured_cloud_model(
         from web.settings import SettingsManager
 
         settings = SettingsManager()
-        configured = (
-            settings.get("ai", f"{provider_name}_model")
-            or settings.get("ai", "cloud_model")
+        configured = settings.get("ai", f"{provider_name}_model") or settings.get(
+            "ai", "cloud_model"
         )
         if configured:
             return str(configured).strip()
     except Exception:
         pass
 
-    return _PROVIDER_MODEL_DEFAULTS.get(provider_name, str(fallback_model or "").strip())
+    return _PROVIDER_MODEL_DEFAULTS.get(
+        provider_name, str(fallback_model or "").strip()
+    )
 
 
 def is_deepseek_model(model_id: str) -> bool:

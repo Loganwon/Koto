@@ -23,9 +23,7 @@ def build_supervisor_step_verification_payload(
 ) -> Dict[str, Any]:
     name = str(tool_name or "").strip()
     changes = [dict(item) for item in (file_changes or []) if isinstance(item, dict)]
-    artifact_list = [
-        dict(item) for item in (artifacts or []) if isinstance(item, dict)
-    ]
+    artifact_list = [dict(item) for item in (artifacts or []) if isinstance(item, dict)]
     allowlisted = is_file_task_tool(name)
     finished_or_guarded = bool(success or blocked or skipped or summary)
     write_evidence = True
@@ -52,11 +50,7 @@ def build_supervisor_step_verification_payload(
     outcome = (
         "blocked"
         if blocked
-        else "skipped"
-        if skipped
-        else "succeeded"
-        if success
-        else "failed"
+        else "skipped" if skipped else "succeeded" if success else "failed"
     )
     return {
         "passed": passed,

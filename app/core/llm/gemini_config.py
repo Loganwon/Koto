@@ -37,7 +37,9 @@ def find_gemini_config_path() -> Optional[Path]:
         root / "gemini_config.env",
     ]
     if getattr(sys, "frozen", False):
-        candidates.append(Path(sys.executable).resolve().parent / "config" / "gemini_config.env")
+        candidates.append(
+            Path(sys.executable).resolve().parent / "config" / "gemini_config.env"
+        )
     candidates.extend(
         [
             Path.cwd() / "gemini_config.env",

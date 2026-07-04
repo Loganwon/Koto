@@ -50,7 +50,11 @@ def run_builtin_tool(
     payload: dict[str, Any]
     try:
         parsed = json.loads(stringify_result(result))
-        payload = parsed if isinstance(parsed, dict) else {"summary": stringify_result(result)}
+        payload = (
+            parsed
+            if isinstance(parsed, dict)
+            else {"summary": stringify_result(result)}
+        )
     except Exception:
         payload = {"summary": stringify_result(result)}
 

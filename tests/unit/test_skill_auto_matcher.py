@@ -66,7 +66,12 @@ class TestMatchContract:
             sm_mod.SkillManager,
             "list_skills",
             return_value=[
-                {"id": "s1", "enabled": True, "skill_nature": "custom", "task_types": []}
+                {
+                    "id": "s1",
+                    "enabled": True,
+                    "skill_nature": "custom",
+                    "task_types": [],
+                }
             ],
         )
         mocker.patch.object(

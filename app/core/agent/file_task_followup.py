@@ -8,7 +8,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-
 _ALLOWED_STATUSES = {"open", "accepted", "done", "dismissed"}
 
 
@@ -33,11 +32,17 @@ def _safe_str(value: Any, limit: int = 0) -> str:
 
 
 def _canonical_json(value: Any) -> str:
-    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":"))
+    return json.dumps(
+        value, ensure_ascii=False, sort_keys=True, default=str, separators=(",", ":")
+    )
 
 
 def _record_id_for(artifact: Dict[str, Any]) -> str:
-    proposed_tool = artifact.get("proposed_tool") if isinstance(artifact.get("proposed_tool"), dict) else {}
+    proposed_tool = (
+        artifact.get("proposed_tool")
+        if isinstance(artifact.get("proposed_tool"), dict)
+        else {}
+    )
     identity = {
         "artifact_type": artifact.get("artifact_type"),
         "category": artifact.get("category"),
@@ -60,7 +65,9 @@ def _public_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "session_id": _safe_str(record.get("session_id")),
         "source": _safe_str(record.get("source")) or "file_task_runtime",
         "occurrences": int(record.get("occurrences") or 1),
-        "artifact": record.get("artifact") if isinstance(record.get("artifact"), dict) else {},
+        "artifact": (
+            record.get("artifact") if isinstance(record.get("artifact"), dict) else {}
+        ),
     }
 
 
@@ -73,8 +80,15 @@ class FileTaskFollowupStore:
         with self._lock:
             records = self._load_unlocked()
         if status:
-            records = [item for item in records if str(item.get("status") or "") == status]
-        records.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+            records = [
+                item for item in records if str(item.get("status") or "") == status
+            ]
+        records.sort(
+            key=lambda item: str(
+                item.get("updated_at") or item.get("created_at") or ""
+            ),
+            reverse=True,
+        )
         safe_limit = max(1, min(int(limit or 100), 500))
         return [_public_record(item) for item in records[:safe_limit]]
 
@@ -97,8 +111,12 @@ class FileTaskFollowupStore:
                 if item.get("id") != record_id:
                     continue
                 item["artifact"] = dict(artifact)
-                item["run_id"] = _safe_str(run_id, 128) or _safe_str(item.get("run_id"), 128)
-                item["session_id"] = _safe_str(session_id, 128) or _safe_str(item.get("session_id"), 128)
+                item["run_id"] = _safe_str(run_id, 128) or _safe_str(
+                    item.get("run_id"), 128
+                )
+                item["session_id"] = _safe_str(session_id, 128) or _safe_str(
+                    item.get("session_id"), 128
+                )
                 item["source"] = _safe_str(source, 64) or "file_task_runtime"
                 item["updated_at"] = now
                 item["occurrences"] = int(item.get("occurrences") or 1) + 1
@@ -151,9 +169,13 @@ class FileTaskFollowupStore:
     def _write_unlocked(self, records: List[Dict[str, Any]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp_path = self.path.with_suffix(self.path.suffix + ".tmp")
-        temp_path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp_path.write_text(
+            json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
         temp_path.replace(self.path)
 
 
-def get_file_task_followup_store(path: Optional[str | Path] = None) -> FileTaskFollowupStore:
+def get_file_task_followup_store(
+    path: Optional[str | Path] = None,
+) -> FileTaskFollowupStore:
     return FileTaskFollowupStore(path)

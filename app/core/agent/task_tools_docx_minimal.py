@@ -8,8 +8,8 @@ import io
 import json
 import os
 import re
-from typing import Any, Dict, List
 import zipfile
+from typing import Any, Dict, List
 
 
 def _plain_text_to_docx_paragraphs(content: str) -> List[Dict[str, str]]:

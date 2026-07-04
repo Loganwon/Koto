@@ -7,7 +7,6 @@ import threading
 import time
 from typing import Any, Dict, Optional
 
-
 _CANCELLED_RUNS: Dict[str, float] = {}
 _CANCEL_LOCK = threading.Lock()
 _CANCEL_TTL_SECONDS = 60 * 60

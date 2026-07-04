@@ -11,15 +11,14 @@ pytest targets inside the repository.
 
 from __future__ import annotations
 
-import os
 import json
+import os
 import subprocess
 import sys
 import threading
 import time
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
-
 
 _LAST_TEST_RUN: Dict[str, Any] = {}
 _TEST_LOCK = threading.Lock()
@@ -169,7 +168,11 @@ def search_code(
             "stderr": _tail(proc.stderr, 2000),
         }
     except FileNotFoundError:
-        return {"success": False, "error": "ripgrep (rg) is not installed", "matches": []}
+        return {
+            "success": False,
+            "error": "ripgrep (rg) is not installed",
+            "matches": [],
+        }
 
 
 def recent_events(limit: int = 30, **_: Any) -> Dict[str, Any]:
@@ -214,13 +217,21 @@ def route_map(limit: int = 300, **_: Any) -> Dict[str, Any]:
             {
                 "rule": str(rule.rule),
                 "endpoint": rule.endpoint,
-                "methods": sorted(m for m in rule.methods if m not in {"HEAD", "OPTIONS"}),
+                "methods": sorted(
+                    m for m in rule.methods if m not in {"HEAD", "OPTIONS"}
+                ),
             }
         )
-    return {"count": len(rules), "returned": min(len(rules), limit), "routes": rules[:limit]}
+    return {
+        "count": len(rules),
+        "returned": min(len(rules), limit),
+        "routes": rules[:limit],
+    }
 
 
-def agent_tool_inventory(full: bool = False, limit: int = 300, **_: Any) -> Dict[str, Any]:
+def agent_tool_inventory(
+    full: bool = False, limit: int = 300, **_: Any
+) -> Dict[str, Any]:
     """Build a Koto agent tool registry and return available tool definitions."""
 
     from app.core.agent.factory import _build_registry
@@ -355,7 +366,9 @@ def _normalize_test_targets(targets: Any) -> List[str]:
             raise ValueError(f"pytest target must be under tests/: {raw}")
         if not target_path.exists():
             raise ValueError(f"pytest target not found: {raw}")
-        normalized.append(str(target_path.relative_to(root)) + (sep + node_part if sep else ""))
+        normalized.append(
+            str(target_path.relative_to(root)) + (sep + node_part if sep else "")
+        )
     return normalized
 
 

@@ -119,7 +119,11 @@ def _resolve_cell_style(data: dict, sheet_idx_or_id, row: int, col: int) -> dict
     cd = data["sheets"][sid_key]["cellData"]
     # cellData keys can be int (parse_xlsx direct) or str (API JSON response)
     rk = str(row) if str(row) in cd else row
-    ck = str(col) if (rk in cd and isinstance(cd[rk], dict) and str(col) in cd[rk]) else col
+    ck = (
+        str(col)
+        if (rk in cd and isinstance(cd[rk], dict) and str(col) in cd[rk])
+        else col
+    )
     cell = cd[rk][ck]
     s = cell.get("s")
     if isinstance(s, str):
@@ -364,8 +368,9 @@ class TestExportXlsx:
 
     def _export_and_reload(self, wb_data, images=None):
         """Export to bytes, then reload with openpyxl for inspection."""
-        from app.core.file.file_parser import export_xlsx
         import openpyxl
+
+        from app.core.file.file_parser import export_xlsx
 
         raw = export_xlsx(wb_data, images)
         assert raw[:2] == b"PK", "Output must be a valid ZIP (xlsx)"
@@ -837,6 +842,7 @@ def xlsx_client(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)

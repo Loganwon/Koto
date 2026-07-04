@@ -5,7 +5,11 @@ from typing import Any, Dict, Optional
 
 
 def _event_type(event: Any) -> str:
-    return str(getattr(event, "type", "") or (event.get("type") if isinstance(event, dict) else "") or "").strip()
+    return str(
+        getattr(event, "type", "")
+        or (event.get("type") if isinstance(event, dict) else "")
+        or ""
+    ).strip()
 
 
 def _event_payload(event: Any) -> Dict[str, Any]:
@@ -79,27 +83,60 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
     if raw_type == "plan.created":
         return FileTaskUiState("plan", "准备计划", "running", 28)
     if raw_type == "step.started":
-        return FileTaskUiState(str(event.get("step_id") if isinstance(event, dict) else getattr(event, "step_id", "")) or "step", _text(payload.get("title") or "执行步骤", 80), "running", 36)
+        return FileTaskUiState(
+            str(
+                event.get("step_id")
+                if isinstance(event, dict)
+                else getattr(event, "step_id", "")
+            )
+            or "step",
+            _text(payload.get("title") or "执行步骤", 80),
+            "running",
+            36,
+        )
     if raw_type == "tool.started":
-        return FileTaskUiState("tool", _text(payload.get("tool_name") or "执行工具", 80), "running", 52)
+        return FileTaskUiState(
+            "tool", _text(payload.get("tool_name") or "执行工具", 80), "running", 52
+        )
     if raw_type in {"tool.finished", "step.finished", "step.result"}:
         success = payload.get("success")
-        failed = success is False or str(payload.get("status") or "").strip().lower() in {"failed", "error"}
-        return FileTaskUiState("execute", _text(payload.get("title") or payload.get("tool_name") or "执行任务", 80), "failed" if failed else "running", 68)
+        failed = success is False or str(
+            payload.get("status") or ""
+        ).strip().lower() in {"failed", "error"}
+        return FileTaskUiState(
+            "execute",
+            _text(payload.get("title") or payload.get("tool_name") or "执行任务", 80),
+            "failed" if failed else "running",
+            68,
+        )
     if raw_type in {"check.started", "check.finished"}:
         status = "running"
         progress = 84 if raw_type == "check.started" else 92
         if raw_type == "check.finished" and payload.get("passed") is False:
             status = "warning"
-        return FileTaskUiState("check", _text(payload.get("title") or "检查结果", 80), status, progress)
+        return FileTaskUiState(
+            "check", _text(payload.get("title") or "检查结果", 80), status, progress
+        )
     if raw_type == "run.finished":
-        runtime = payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
+        runtime = (
+            payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
+        )
         terminal_status = _text(runtime.get("terminal_status"), 80).lower()
         completed = bool(payload.get("completed_task"))
         if terminal_status == "awaiting_confirmation":
             return FileTaskUiState("waiting", "等待确认", "waiting", 100, True, True)
-        failed = terminal_status in {"failed", "blocked", "write_blocked", "tool_gap"} or not completed
-        return FileTaskUiState("done", "任务完成" if not failed else "任务需要处理", "failed" if failed else "succeeded", 100, True, True)
+        failed = (
+            terminal_status in {"failed", "blocked", "write_blocked", "tool_gap"}
+            or not completed
+        )
+        return FileTaskUiState(
+            "done",
+            "任务完成" if not failed else "任务需要处理",
+            "failed" if failed else "succeeded",
+            100,
+            True,
+            True,
+        )
     if raw_type == "run.error":
         return FileTaskUiState("error", "任务失败", "failed", 100, True, True)
     if raw_type == "run.cancelled":
@@ -168,4 +205,9 @@ def normalize_event(event: Any) -> Optional[FileTaskUiMessage]:
     return None
 
 
-__all__ = ["FileTaskUiMessage", "FileTaskUiState", "normalize_event", "normalize_ui_state"]
+__all__ = [
+    "FileTaskUiMessage",
+    "FileTaskUiState",
+    "normalize_event",
+    "normalize_ui_state",
+]

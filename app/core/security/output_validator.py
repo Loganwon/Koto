@@ -221,7 +221,9 @@ def sanitize_user_visible_text(
     try:
         validation = OutputValidator.validate(text=raw)
         if validation.is_blocked:
-            logger.warning("[OutputValidator] user-visible text blocked; using fallback")
+            logger.warning(
+                "[OutputValidator] user-visible text blocked; using fallback"
+            )
             return fallback
         safe_text = str(validation.text or "").strip() or raw
     except Exception as exc:
@@ -645,6 +647,49 @@ class OutputValidator:
             reasons=[],
             skill_id=skill_id,
         )
+
+    @classmethod
+    def validate_fast(
+        cls,
+        text: str,
+        skill_id: Optional[str] = None,
+        original_prompt: Optional[str] = None,
+    ) -> ValidationResult:
+        """Run local deterministic validation without the optional LLM judge."""
+        return cls.validate(text=text, skill_id=skill_id, original_prompt=None)
+
+    @classmethod
+    def validate_judge_async(
+        cls,
+        text: str,
+        original_prompt: str,
+        *,
+        callback=None,
+        trace_id: str = "",
+    ) -> None:
+        """Optionally run semantic judge in the background."""
+        if not original_prompt or len(str(text or "")) < cls._judge_min_len:
+            return
+
+        def _run() -> None:
+            try:
+                result = cls.validate(
+                    text=text,
+                    skill_id=None,
+                    original_prompt=original_prompt,
+                )
+                if callback:
+                    callback(result, trace_id)
+            except Exception as exc:
+                logger.debug("[OutputValidator] async judge skipped: %s", exc)
+
+        import threading
+
+        threading.Thread(
+            target=_run,
+            daemon=True,
+            name=f"output-validator-{trace_id or 'async'}",
+        ).start()
 
     # ── 私有检测方法 ──────────────────────────────────────────────
 

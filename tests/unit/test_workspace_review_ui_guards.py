@@ -16,11 +16,11 @@ def test_review_shell_entry_is_present_without_ai_comment_entrypoints():
     assert "{% include '_workspace_asset_scripts.html' %}" in embedded_html
     assert 'id="wa-review-shell"' in embedded_html
     assert 'id="wa-review-mode-group"' in embedded_html
-    assert '>批注模式<' in embedded_html
+    assert ">批注模式<" in embedded_html
     assert 'id="wa-review-toggle-btn"' not in embedded_html
     assert "onclick=\"WA.sendQuickAction('批注')\"" not in embedded_html
-    assert "onclick=\"WA.addSelectionComment()\"" not in embedded_html
-    assert '>AI 批注<' not in embedded_html
+    assert 'onclick="WA.addSelectionComment()"' not in embedded_html
+    assert ">AI 批注<" not in embedded_html
 
     assert "review-bundle.js" in asset_partial
     assert "docx-review-layout.js" not in asset_partial
@@ -50,13 +50,18 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "function _syncDocCommentStateForActiveFile" in js
     assert "function _ensureTabReviewState(tab: any = _activeReviewTab()): any" in js
     assert "function _normalizeReviewComment(comment: any, index = 0): any" in js
-    assert "function _mergeReviewProposals(existing: any[], incoming: any[]): any[]" in js
+    assert (
+        "function _mergeReviewProposals(existing: any[], incoming: any[]): any[]" in js
+    )
     assert "reviewState: existingTab && existingTab.reviewState" in js
     assert "return Promise.resolve(reviewState);" in js
     assert "_syncReviewStateForActiveFile().catch(() => {});" in js
     assert "function _isImportedDocxRevisionProposal" in js
     assert "source: _clean(raw.source) || 'ai_proposal'," in js
-    assert "tab.serverData.proposals = reviewState.proposals.map((proposal: any) => _clone(proposal, {}) || {});" in js
+    assert (
+        "tab.serverData.proposals = reviewState.proposals.map((proposal: any) => _clone(proposal, {}) || {});"
+        in js
+    )
     assert "function _isReviewCommentModeEnabled" in js
     assert "function _findReviewEntry" in js
     assert "(window as any).WA.focusReviewThread" in js
@@ -71,81 +76,166 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "(window as any).KotoDocxReviewLayout" in layout_js
     assert "factory.create({ state })" in js
     assert "function _ensureReviewShellHost" in js
-    assert "shell.style.display = state._reviewCenterOpen === false ? 'none' : 'flex';" in js
+    assert (
+        "shell.style.display = state._reviewCenterOpen === false ? 'none' : 'flex';"
+        in js
+    )
     assert "ensureReviewShellHost" in js
     assert "const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;" in layout_js
-    assert "function _shiftReviewRailLeft(value: number, host: HTMLElement | null): number" in layout_js
+    assert (
+        "function _shiftReviewRailLeft(value: number, host: HTMLElement | null): number"
+        in layout_js
+    )
     assert "const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;" in layout_js
-    assert "function _reviewRailRightShift(host: HTMLElement | null): number" in layout_js
-    assert "function _positionReviewRail(value: number, host: HTMLElement | null): number" in layout_js
-    assert "function _reviewLayoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutScale" in layout_js
-    assert "function _screenDeltaToLayout(delta: number, scale: number): number" in layout_js
+    assert (
+        "function _reviewRailRightShift(host: HTMLElement | null): number" in layout_js
+    )
+    assert (
+        "function _positionReviewRail(value: number, host: HTMLElement | null): number"
+        in layout_js
+    )
+    assert (
+        "function _reviewLayoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutScale"
+        in layout_js
+    )
+    assert (
+        "function _screenDeltaToLayout(delta: number, scale: number): number"
+        in layout_js
+    )
     assert "const minRailWidth  = 220;" in layout_js
     assert "const minRailWidth = 220;" in geometry_js
-    assert "parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'))" in layout_js
-    assert "host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);" not in layout_js
+    assert (
+        "parseFloat(hostStyles.getPropertyValue('--wa-review-rail-width'))" in layout_js
+    )
+    assert (
+        "host.style.setProperty('--wa-review-rail-width', `${Math.round(railWidth)}px`);"
+        not in layout_js
+    )
     assert "_setDocxReviewRailWidth(host, railWidth);" in layout_js
-    assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot as HTMLElement);" in layout_js
-    assert "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot);" in review_bundle
+    assert (
+        "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot as HTMLElement);"
+        in layout_js
+    )
+    assert (
+        "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot);"
+        in review_bundle
+    )
     assert "function _ensureReviewAnchorHighlightLayer" in layout_js
     assert "function _drawReviewAnchorHighlight" in layout_js
     assert "wa-review-anchor-highlight-layer" in review_bundle
     assert "wa-review-anchor-highlight-rect" in review_bundle
-    assert "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);" in layout_js
-    assert "const textColRight     = Math.round(pageContentRight - (pagePaddingRight * (transformScale.x || 1)));" in layout_js
+    assert (
+        "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);"
+        in layout_js
+    )
+    assert (
+        "const textColRight     = Math.round(pageContentRight - (pagePaddingRight * (transformScale.x || 1)));"
+        in layout_js
+    )
     assert "const laneLeft         = Math.round(textColRight + anchorGap);" in layout_js
     assert "railWidth," in layout_js
     assert "laneLeft," in layout_js
-    assert "const desiredCardColLeft = Math.max(12, _positionReviewRail(rawCardColLeft, host));" in layout_js
-    assert "const maxVisibleCardColLeft = Math.round(viewportRight2 - cardColWidth - 12);" in layout_js
+    assert (
+        "const desiredCardColLeft = Math.max(12, _positionReviewRail(rawCardColLeft, host));"
+        in layout_js
+    )
+    assert (
+        "const maxVisibleCardColLeft = Math.round(viewportRight2 - cardColWidth - 12);"
+        in layout_js
+    )
     assert "minCardColFromText," in layout_js
     assert "Math.min(desiredCardColLeft, maxVisibleCardColLeft)" in layout_js
     assert "shell.style.width = Math.max(0, viewportWidth) + 'px';" in layout_js
     assert "shell.style.overflow = 'hidden';" in layout_js
-    assert "function layoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutScale" in geometry_js
+    assert (
+        "function layoutScale(element: HTMLElement | null, rect: DOMRect | null): LayoutScale"
+        in geometry_js
+    )
     assert "const ls = layoutScale(viewport, viewportRect);" in geometry_js
-    assert "textColRight = toContentX(pageRect.right) - Math.round(pagePaddingRight * (zoom.x || 1));" in geometry_js
+    assert (
+        "textColRight = toContentX(pageRect.right) - Math.round(pagePaddingRight * (zoom.x || 1));"
+        in geometry_js
+    )
     assert "viewportRight: Math.round(scrollLeft + viewportWidth)" in geometry_js
     assert "function _resolveReviewPageBoundsForScreenY" in layout_js
     assert "function _collectReviewVisualPageBounds" in layout_js
     assert "pageRoot.querySelectorAll('.koto-page-break')" in layout_js
-    assert "upperBottom: _screenYToReviewContentY(endRect.bottom, layoutState)" in layout_js
+    assert (
+        "upperBottom: _screenYToReviewContentY(endRect.bottom, layoutState)"
+        in layout_js
+    )
     assert "nextTop: _screenYToReviewContentY(startRect.top, layoutState)" in layout_js
     assert "pageTop: pageBounds ? pageBounds.top : null" in layout_js
     assert "pageBottom: pageBounds ? pageBounds.bottom : null" in layout_js
-    assert "function _reviewAnchorHeight(anchorGeometry: AnchorGeometry | null): number" in layout_js
-    assert "function _clampReviewConnectorOffsetY(anchorGeometry: AnchorGeometry | null, cardHeight: number): number" in layout_js
-    assert "function _reviewLayoutEntryBottom(entry: LayoutEntry | null): number" in layout_js
+    assert (
+        "function _reviewAnchorHeight(anchorGeometry: AnchorGeometry | null): number"
+        in layout_js
+    )
+    assert (
+        "function _clampReviewConnectorOffsetY(anchorGeometry: AnchorGeometry | null, cardHeight: number): number"
+        in layout_js
+    )
+    assert (
+        "function _reviewLayoutEntryBottom(entry: LayoutEntry | null): number"
+        in layout_js
+    )
     assert "entry.collisionHeight || 0" in layout_js
     assert "function _resolveNonOverlappingCardTop(" in layout_js
     assert "const effectiveCardHeight = Math.max(" in layout_js
     assert "let resolvedByCollision = false;" in layout_js
     assert "resolvedByCollision = true;" in layout_js
-    assert "const driftMaxTop = Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)" in layout_js
-    assert "const measuredCards: MeasuredCard[] = cards.map((card, index) =>" in layout_js
-    assert "(card as HTMLElement).style.removeProperty('--wa-review-card-anchor-min-height');" in layout_js
+    assert (
+        "const driftMaxTop = Number.isFinite(maxAnchorDrift) && Number.isFinite(desiredTop)"
+        in layout_js
+    )
+    assert (
+        "const measuredCards: MeasuredCard[] = cards.map((card, index) =>" in layout_js
+    )
+    assert (
+        "(card as HTMLElement).style.removeProperty('--wa-review-card-anchor-min-height');"
+        in layout_js
+    )
     assert "const anchorHeight = _reviewAnchorHeight(anchorGeometry);" in layout_js
-    assert "(card as HTMLElement).style.setProperty('--wa-review-card-anchor-min-height'" in layout_js
-    assert "const cardCollisionHeight = Math.max(cardHeight, anchorHeight);" in layout_js
+    assert (
+        "(card as HTMLElement).style.setProperty('--wa-review-card-anchor-min-height'"
+        in layout_js
+    )
+    assert (
+        "const cardCollisionHeight = Math.max(cardHeight, anchorHeight);" in layout_js
+    )
     assert "Math.round(anchorGeometry.top - 2)" in layout_js
     assert "}).sort((a, b) =>" in layout_js
     assert "const peerEntries = item.pageBounds" in layout_js
     assert "entry.pageTop === item.pageBounds!.minTop" in layout_js
     assert "item.cardCollisionHeight," in layout_js
     assert "collisionHeight: item.cardCollisionHeight" in layout_js
-    assert "Math.max(...layoutEntries.map((entry) => _reviewLayoutEntryBottom(entry))) + 24" in layout_js
+    assert (
+        "Math.max(...layoutEntries.map((entry) => _reviewLayoutEntryBottom(entry))) + 24"
+        in layout_js
+    )
     assert "card.classList.add('is-page-bounded');" in layout_js
-    assert "(card as HTMLElement).style.setProperty('--wa-review-card-page-max-height'" in layout_js
+    assert (
+        "(card as HTMLElement).style.setProperty('--wa-review-card-page-max-height'"
+        in layout_js
+    )
     assert "min-height: var(--wa-review-card-anchor-min-height, 54px);" in css
     assert "min-height: var(--wa-review-card-anchor-min-height, 72px);" in css
     assert "scheduleReviewShellLayout" in js
     assert "function ensureReviewSelectionLauncher()" in layout_js
     assert "const selectionRight = Number.isFinite(cursorRight)" in layout_js
-    assert "const launcherLeft = Math.min(selectionRight, maxLauncherLeft);" in layout_js
+    assert (
+        "const launcherLeft = Math.min(selectionRight, maxLauncherLeft);" in layout_js
+    )
     assert "function _handleReviewShellClick(event: Event): void" in js
     assert "document.addEventListener('click', (event) =>" in js
-    assert "if (!tab || !reviewState || !Array.isArray(reviewState.proposals)) return;" in js
-    assert "tab.serverData = tab.serverData && typeof tab.serverData === 'object' ? tab.serverData : {};" in js
+    assert (
+        "if (!tab || !reviewState || !Array.isArray(reviewState.proposals)) return;"
+        in js
+    )
+    assert (
+        "tab.serverData = tab.serverData && typeof tab.serverData === 'object' ? tab.serverData : {};"
+        in js
+    )
     assert "(window as any).WA.openReviewCenter" in js
     assert "(window as any).WA.toggleReviewCommentMode" in js
     assert "(window as any).WA.createReviewComment" in js
@@ -167,15 +257,23 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "let minLeft = Infinity, maxRight = -Infinity;" in js
     assert "right: maxRight !== -Infinity ? maxRight : centerX," in js
     assert "state._editingReviewCommentId" in layout_js
-    assert "if (!shell || !host || !viewport || !listEl || shell.style.display === 'none')" in layout_js
+    assert (
+        "if (!shell || !host || !viewport || !listEl || shell.style.display === 'none')"
+        in layout_js
+    )
     assert "|| !_isReviewCommentModeEnabled()" in layout_js
-    assert "(window as any)._syncReviewSelectionSnapshot = _captureReviewSelection;" in js
+    assert (
+        "(window as any)._syncReviewSelectionSnapshot = _captureReviewSelection;" in js
+    )
     assert "function _getReviewCommentSelectionState(): any" in js
     assert "_getReviewCommentSelectionState()" in layout_js
     assert "_coerceReviewModeForVisibleContent(reviewState, 'comment')" in js
     assert "_coerceReviewModeForVisibleContent(reviewState, 'proposal')" in js
     assert "const shell = $('wa-review-shell');" in js
-    assert "return source === 'docx_revision' && ['replace', 'delete', 'insert'].includes(actionType);" in js
+    assert (
+        "return source === 'docx_revision' && ['replace', 'delete', 'insert'].includes(actionType);"
+        in js
+    )
     assert "data-review-id" in js
     assert "_syncReviewStateForActiveFile().catch" in js
     assert "(window as any).WA.onDocxCommentsChanged" in js
@@ -215,8 +313,8 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert ".koto-docx-comment-edit" in css
     assert ".koto-docx-comment-head-end" in css
     assert ".koto-docx-comment-inline-action" in css
-    assert "[data-comment-ui=\"wps\"] .koto-docx-comment-card" in css
-    assert "[data-comment-ui=\"wps\"] .koto-docx-comment-badge" in css
+    assert '[data-comment-ui="wps"] .koto-docx-comment-card' in css
+    assert '[data-comment-ui="wps"] .koto-docx-comment-badge' in css
     assert "--wa-review-rail-gap" in css
     assert "--wa-review-rail-width: clamp(220px, 22vw, 300px);" in css
     assert ".wa-review-anchor-highlight-layer" in css
@@ -250,7 +348,10 @@ def test_workspace_review_css_keeps_native_comment_surfaces():
     assert ".is-page-bounded" in css
     assert "--wa-review-card-page-max-height" in css
     assert "overflow: auto !important;" in css
-    assert "overflow: visible; /* keep review nav menu dropdown from being clipped */" in css
+    assert (
+        "overflow: visible; /* keep review nav menu dropdown from being clipped */"
+        in css
+    )
     assert "overflow-y: auto;" in css
     assert ".koto-docx-track-change" in css
     assert ".koto-docx-track-change-insert" in css
@@ -267,7 +368,10 @@ def test_docx_editor_render_preserves_review_shell_and_launcher_on_rerender():
     ext_js = _read("web/tiptap-editor/docx-extensions.js")
 
     assert "const _reviewShell = wrap.querySelector('#wa-review-shell');" in editor_js
-    assert "const _reviewLauncher = wrap.querySelector('#wa-review-selection-launcher');" in editor_js
+    assert (
+        "const _reviewLauncher = wrap.querySelector('#wa-review-selection-launcher');"
+        in editor_js
+    )
     assert "if (_reviewShell) wrap.appendChild(_reviewShell);" in editor_js
     assert "if (_reviewLauncher) wrap.appendChild(_reviewLauncher);" in editor_js
     assert "window.WA.relayoutDocxReviewRail" in editor_js

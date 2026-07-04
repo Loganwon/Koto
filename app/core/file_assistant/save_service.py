@@ -124,10 +124,16 @@ class AutoSavePersistenceService:
             from app.core.file.file_registry import get_file_registry
 
             registry = get_file_registry()
-            registry.batch_register([str(src_path)], source="editor", extract_content=False)
-            logger.debug("[WorkspaceAssistant] auto_save registry synced: %s", src_path.name)
+            registry.batch_register(
+                [str(src_path)], source="editor", extract_content=False
+            )
+            logger.debug(
+                "[WorkspaceAssistant] auto_save registry synced: %s", src_path.name
+            )
         except Exception as exc:
-            logger.debug("[WorkspaceAssistant] auto_save registry sync skipped: %s", exc)
+            logger.debug(
+                "[WorkspaceAssistant] auto_save registry sync skipped: %s", exc
+            )
 
     @staticmethod
     def _write_version_snapshot(src_path: Path, raw_bytes: bytes, suffix: str) -> None:

@@ -580,7 +580,15 @@ def _choose_installed_model(models: List[str]) -> Optional[str]:
     if not models:
         return None
     normalized = [(model, model.lower()) for model in models]
-    for preferred in ("qwen3.5", "qwen3", "qwen2.5", "qwen", "llama3.2", "llama3.1", "llama"):
+    for preferred in (
+        "qwen3.5",
+        "qwen3",
+        "qwen2.5",
+        "qwen",
+        "llama3.2",
+        "llama3.1",
+        "llama",
+    ):
         for original, lowered in normalized:
             if lowered.startswith(preferred) or preferred in lowered:
                 return original
@@ -602,7 +610,9 @@ def _resolve_model_from_settings() -> Optional[str]:
         if settings_path.exists():
             with open(settings_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
-            configured = data.get("local_model") or data.get("ai", {}).get("local_model")
+            configured = data.get("local_model") or data.get("ai", {}).get(
+                "local_model"
+            )
             if configured:
                 return str(configured).strip()
     except Exception as e:

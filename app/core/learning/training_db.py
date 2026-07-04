@@ -136,7 +136,9 @@ class DBSample:
 
 
 def _hash(text: str) -> str:
-    return hashlib.md5(text.strip().lower().encode("utf-8"), usedforsecurity=False).hexdigest()
+    return hashlib.md5(
+        text.strip().lower().encode("utf-8"), usedforsecurity=False
+    ).hexdigest()
 
 
 # ══════════════════════════════════════════════════════════════════════════════

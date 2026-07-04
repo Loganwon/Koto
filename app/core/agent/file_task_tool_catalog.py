@@ -235,6 +235,7 @@ def write_target_for_tool(tool_name: str, tool_args: Dict[str, Any]) -> str:
 # (FileTaskToolCatalog removed — was an unused wrapper around FileTaskToolGateway.
 #  The runtime instantiates its own gateway directly.)
 
+
 def tool_result_preview(tool_name: str, result: Any, limit: int = 900) -> str:
     result_text = stringify_result(result)
     try:
@@ -461,7 +462,9 @@ def extract_sandbox_artifacts(result: Any) -> List[Dict[str, Any]]:
             "mime_type": mime,
             "data": str(data or ""),
         }
-        path = str(generated_paths.get(name) or generated_paths.get(filename) or "").strip()
+        path = str(
+            generated_paths.get(name) or generated_paths.get(filename) or ""
+        ).strip()
         if path:
             artifact["path"] = path
         artifacts.append(artifact)

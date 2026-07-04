@@ -34,7 +34,7 @@ def test_task_stream_route_declares_non_buffered_sse(monkeypatch):
 
     def fake_stream_file_task_request(data: dict):
         assert data["task"] == "整理文件"
-        yield "data: {\"type\":\"run.started\"}\n\n"
+        yield 'data: {"type":"run.started"}\n\n'
 
     monkeypatch.setattr(
         editor_ai,
@@ -52,7 +52,9 @@ def test_task_stream_route_declares_non_buffered_sse(monkeypatch):
     assert "text/event-stream" in response.content_type
     assert response.headers["Cache-Control"] == "no-cache"
     assert response.headers["X-Accel-Buffering"] == "no"
-    assert _parse_compact_sse(response.get_data(as_text=True)) == {"type": "run.started"}
+    assert _parse_compact_sse(response.get_data(as_text=True)) == {
+        "type": "run.started"
+    }
 
 
 @pytest.mark.unit
@@ -63,7 +65,9 @@ def test_task_stream_route_rejects_missing_task():
     app.register_blueprint(editor_ai.editor_ai_bp)
 
     with app.test_client() as client:
-        response = client.post("/api/editor/ai/task-stream", json={"selection": "hello"})
+        response = client.post(
+            "/api/editor/ai/task-stream", json={"selection": "hello"}
+        )
 
     assert response.status_code == 400
     assert response.get_json()["error"] == "Missing 'task' parameter"
@@ -133,16 +137,23 @@ def test_frontend_task_runner_matches_backend_stream_contract():
 
 @pytest.mark.unit
 def test_workspace_chat_stream_detaches_skills_by_request_contract():
-    dispatcher = Path("web/src/workspace/task-dispatcher.ts").read_text(encoding="utf-8")
+    dispatcher = Path("web/src/workspace/task-dispatcher.ts").read_text(
+        encoding="utf-8"
+    )
     bundle = Path("web/static/js/build/workspace-bundle.js").read_text(encoding="utf-8")
-    orchestrator = Path("web/services/chat_stream/orchestrator.py").read_text(encoding="utf-8")
+    orchestrator = Path("web/services/chat_stream/orchestrator.py").read_text(
+        encoding="utf-8"
+    )
 
     assert "skills_enabled: false" in dispatcher
     assert "skills_enabled: false" in bundle
     assert "def _request_allows_skill_injection(data):" in orchestrator
     assert "system_instruction = _inject_skills_for_stream(" in orchestrator
     assert "SkillManager.inject_into_prompt(" in orchestrator
-    assert "app_logger.debug(\"[STREAM] Skills injection disabled by request\")" in orchestrator
+    assert (
+        'app_logger.debug("[STREAM] Skills injection disabled by request")'
+        in orchestrator
+    )
 
 
 @pytest.mark.unit

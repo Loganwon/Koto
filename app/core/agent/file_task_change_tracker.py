@@ -30,7 +30,9 @@ class FileTaskChangeTracker:
         return result
 
 
-def _coordinator_changes_for_file_change(change: dict[str, Any]) -> list[dict[str, Any]]:
+def _coordinator_changes_for_file_change(
+    change: dict[str, Any],
+) -> list[dict[str, Any]]:
     path = str(
         change.get("file_path")
         or change.get("path")

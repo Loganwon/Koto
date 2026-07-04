@@ -192,7 +192,10 @@ def _make_skill_id(name: str) -> str:
     """生成 URL 安全、小写、无空格的 skill id"""
     slug = re.sub(r"[^\w\u4e00-\u9fff]", "_", name.lower().strip())
     slug = re.sub(r"_+", "_", slug).strip("_")
-    return slug or f"skill_{hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()[:8]}"
+    return (
+        slug
+        or f"skill_{hashlib.md5(name.encode(), usedforsecurity=False).hexdigest()[:8]}"
+    )
 
 
 def _auto_register_intent_binding(skill_def) -> None:

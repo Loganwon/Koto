@@ -227,6 +227,35 @@ def test_task_runner_uses_shared_performance_helpers() -> None:
     assert "intent_adjudication_ms" in performance
 
 
+def test_task_runner_uses_shared_interaction_summary_helpers() -> None:
+    runner = _read("web/src/workspace/task-runner.ts")
+    interaction = _read("web/src/workspace/task-interaction-summary.ts")
+
+    for local_helper in [
+        "function firstContextText(",
+        "function taskContextSummaryText(",
+        "function renderTaskInteractionLine(",
+        "function renderTaskUnderstandingCard(",
+        "function renderTaskMemoryCard(",
+    ]:
+        assert local_helper not in runner
+
+    for exported in [
+        "export function taskContextSummaryText(",
+        "export function renderTaskInteractionLine(",
+        "export function renderTaskUnderstandingCard(",
+        "export function renderTaskMemoryCard(",
+    ]:
+        assert exported in interaction
+
+    assert "from './task-interaction-summary';" in runner
+    assert "const contextSummary = taskContextSummaryText(taskContext);" in runner
+    assert "{ role: 'task-understanding', html: renderTaskUnderstandingCard(card) }" in runner
+    assert "{ role: 'task-memory-summary', html: renderTaskMemoryCard(card) }" in runner
+    assert "function syncTaskInteractionSummary(card: TaskCardElement): void" in runner
+    assert "WA.syncTaskInteractionSummary = syncTaskInteractionSummary" in runner
+
+
 def test_task_runner_has_no_dead_presentation_helpers() -> None:
     runner = _read("web/src/workspace/task-runner.ts")
 

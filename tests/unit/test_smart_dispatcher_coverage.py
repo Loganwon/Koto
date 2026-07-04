@@ -677,10 +677,7 @@ class TestResolveWorkflow:
     def test_normalize_workflow_route_maps_legacy_to_standard(self):
         assert self.SD.normalize_workflow_route("legacy") == "standard"
         assert self.SD.normalize_workflow_route("") == "standard"
-        assert (
-            self.SD.normalize_workflow_route("langgraph_react")
-            == "langgraph_react"
-        )
+        assert self.SD.normalize_workflow_route("langgraph_react") == "langgraph_react"
 
     def test_import_error_returns_standard(self):
         with patch.dict("sys.modules", {"app.core.workflow.langgraph_workflow": None}):

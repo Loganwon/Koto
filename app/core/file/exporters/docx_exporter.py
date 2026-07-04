@@ -75,10 +75,12 @@ def _set_run_east_asian_font(run: Any, font_name: str) -> None:
     """Set East Asian font on a run via direct XML manipulation."""
     try:
         from docx.oxml.ns import qn as _qn
+
         rPr = run._element.get_or_add_rPr()
         rFonts = rPr.find(_qn("w:rFonts"))
         if rFonts is None:
             from lxml import etree
+
             rFonts = etree.SubElement(rPr, _qn("w:rFonts"))
         rFonts.set(_qn("w:eastAsia"), font_name)
     except Exception:
@@ -102,10 +104,22 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
             else:
                 # Check if the single font is a CJK font — also set as eastAsia
                 _CJK_FONTS = {
-                    "SimHei", "SimSun", "KaiTi", "FangSong",
-                    "Microsoft YaHei", "STZhongsong", "STSong", "STHeiti",
-                    "STKaiti", "STFangsong", "FZShuSong-Z01", "FZHei-B01",
-                    "NSimSun", "DengXian", "YouYuan", "LiSu",
+                    "SimHei",
+                    "SimSun",
+                    "KaiTi",
+                    "FangSong",
+                    "Microsoft YaHei",
+                    "STZhongsong",
+                    "STSong",
+                    "STHeiti",
+                    "STKaiti",
+                    "STFangsong",
+                    "FZShuSong-Z01",
+                    "FZHei-B01",
+                    "NSimSun",
+                    "DengXian",
+                    "YouYuan",
+                    "LiSu",
                 }
                 if fonts[0] in _CJK_FONTS:
                     _set_run_east_asian_font(run, fonts[0])
@@ -131,7 +145,11 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
     # ── Text color ───────────────────────────────────────────────────────
     color_hex = _css_color_to_hex(css.get("color", ""))
     if color_hex:
-        r, g, b = int(color_hex[0:2], 16), int(color_hex[2:4], 16), int(color_hex[4:6], 16)
+        r, g, b = (
+            int(color_hex[0:2], 16),
+            int(color_hex[2:4], 16),
+            int(color_hex[4:6], 16),
+        )
         run.font.color.rgb = RGBColor(r, g, b)
 
     # ── Highlight / background color ─────────────────────────────────────
@@ -141,6 +159,7 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
         try:
             from docx.oxml.ns import qn as _qn
             from lxml import etree
+
             rPr = run._element.get_or_add_rPr()
             shd = rPr.find(_qn("w:shd"))
             if shd is None:
@@ -162,10 +181,12 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
     if ls_pt is not None:
         try:
             from docx.oxml.ns import qn as _qn
+
             rPr = run._element.get_or_add_rPr()
             spacing = rPr.find(_qn("w:spacing"))
             if spacing is None:
                 from lxml import etree
+
                 spacing = etree.SubElement(rPr, _qn("w:spacing"))
             # OOXML spacing is in half-points (1/144 inch)
             spacing.set(_qn("w:val"), str(int(ls_pt * 20)))
@@ -175,8 +196,8 @@ def _apply_run_inline(run: Any, css: dict[str, str]) -> None:
 
 def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
     """Apply paragraph-level CSS properties to a python-docx Paragraph."""
-    from docx.shared import Pt, Twips
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt, Twips
 
     # Text alignment
     align = pcss.get("text-align", "")
@@ -206,11 +227,14 @@ def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
     if lh:
         try:
             # Only use _css_length_to_pt if the value has a unit suffix
-            has_unit = any(lh.rstrip().endswith(u) for u in ("pt", "px", "em", "cm", "mm", "in"))
+            has_unit = any(
+                lh.rstrip().endswith(u) for u in ("pt", "px", "em", "cm", "mm", "in")
+            )
             if has_unit:
                 lh_pt = _css_length_to_pt(lh)
                 if lh_pt is not None and lh_pt > 0:
                     from docx.enum.text import WD_LINE_SPACING
+
                     pf.line_spacing_rule = WD_LINE_SPACING.EXACTLY
                     pf.line_spacing = Pt(lh_pt)
             else:
@@ -239,8 +263,8 @@ def _apply_para_format(para: Any, pcss: dict[str, str]) -> None:
 
 def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
     """Convert a single <p>/<h1>-<h6>/<li> BS4 tag into a python-docx paragraph."""
-    from docx.shared import Pt
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Pt
 
     tag_name = tag.name.lower()
     if tag_name in ("h1", "h2", "h3", "h4", "h5", "h6"):
@@ -274,6 +298,7 @@ def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
                 if img_bytes:
                     try:
                         from docx.shared import Inches, Pt
+
                         run = para.add_run()
 
                         img_css = _parse_css_inline(child.get("style", ""))
@@ -281,10 +306,14 @@ def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
                         w_val = None
                         if w_str:
                             try:
-                                if w_str.endswith("px"): w_val = Pt(float(w_str.replace("px", "")) * 0.75)
-                                elif w_str.endswith("in"): w_val = Inches(float(w_str.replace("in", "")))
-                                elif w_str.isdigit(): w_val = Pt(float(w_str) * 0.75)
-                            except: pass
+                                if w_str.endswith("px"):
+                                    w_val = Pt(float(w_str.replace("px", "")) * 0.75)
+                                elif w_str.endswith("in"):
+                                    w_val = Inches(float(w_str.replace("in", "")))
+                                elif w_str.isdigit():
+                                    w_val = Pt(float(w_str) * 0.75)
+                            except:
+                                pass
 
                         if w_val:
                             run.add_picture(io.BytesIO(img_bytes), width=w_val)
@@ -333,6 +362,7 @@ def _set_cell_shading(cell: Any, fill_hex: str) -> None:
 def _apply_border_xml(tcBorders: Any, side: str, val: str, sz: str, color: str) -> None:
     """Helper to add/update an individual border to tcBorders xml."""
     from lxml import etree
+
     WNS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
     el = tcBorders.find(f"{{{WNS}}}{side}")
     if el is None:
@@ -345,10 +375,12 @@ def _apply_border_xml(tcBorders: Any, side: str, val: str, sz: str, color: str) 
         if color:
             el.set(f"{{{WNS}}}color", color.upper())
 
+
 def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
     """Apply borders to a cell by parsing border/border-* CSS."""
-    from lxml import etree
     import re
+
+    from lxml import etree
 
     tc = cell._tc
     tcPr = tc.get_or_add_tcPr()
@@ -366,16 +398,19 @@ def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
         parts = val_str.split()
         for p in parts:
             if "px" in p:
-                try: # 1px is approx 4 eighths-of-a-point
+                try:  # 1px is approx 4 eighths-of-a-point
                     sz = str(int(float(p.replace("px", "")) * 4))
-                except Exception: pass
+                except Exception:
+                    pass
             elif "pt" in p:
-                try: # 1pt is 8 eighths-of-a-point
+                try:  # 1pt is 8 eighths-of-a-point
                     sz = str(int(float(p.replace("pt", "")) * 8))
-                except Exception: pass
+                except Exception:
+                    pass
             elif p.startswith("#") or p.startswith("rgb"):
                 h = _css_color_to_hex(p)
-                if h: color = h.upper()
+                if h:
+                    color = h.upper()
         return "single", sz, color
 
     # Apply general border
@@ -395,7 +430,6 @@ def _set_cell_borders(cell: Any, css: dict[str, str]) -> None:
         if css_prop in css:
             val, sz, color = parse_border(css[css_prop])
             _apply_border_xml(tcBorders, w_side, val, sz, color)
-
 
 
 def _resolve_img_src(src: str) -> bytes | None:
@@ -423,11 +457,13 @@ def _resolve_img_src(src: str) -> bytes | None:
         # expected: ['', 'api', 'v1', 'workspace', 'tmp_image', '{sid}', '{fname}']
         if len(parts) == 7:
             session_id, filename = parts[5], parts[6]
-            if (len(session_id) == 32
-                    and all(c in "0123456789abcdef" for c in session_id)
-                    and "/" not in filename
-                    and "\\" not in filename
-                    and ".." not in filename):
+            if (
+                len(session_id) == 32
+                and all(c in "0123456789abcdef" for c in session_id)
+                and "/" not in filename
+                and "\\" not in filename
+                and ".." not in filename
+            ):
                 img_path = Path("workspace") / "tmp" / session_id / "images" / filename
                 if img_path.is_file():
                     try:
@@ -462,13 +498,18 @@ def _insert_block_image(doc: Any, tag: Any) -> None:
     img_css = _parse_css_inline(img_el.get("style", ""))
     w_str = img_css.get("width", img_el.get("width", ""))
     from docx.shared import Pt
+
     w_val = None
     if w_str:
         try:
-            if w_str.endswith("px"): w_val = Pt(float(w_str.replace("px", "")) * 0.75)
-            elif w_str.endswith("in"): w_val = Inches(float(w_str.replace("in", "")))
-            elif w_str.isdigit(): w_val = Pt(float(w_str) * 0.75)
-        except: pass
+            if w_str.endswith("px"):
+                w_val = Pt(float(w_str.replace("px", "")) * 0.75)
+            elif w_str.endswith("in"):
+                w_val = Inches(float(w_str.replace("in", "")))
+            elif w_str.isdigit():
+                w_val = Pt(float(w_str) * 0.75)
+        except:
+            pass
 
     try:
         if w_val:
@@ -481,19 +522,20 @@ def _insert_block_image(doc: Any, tag: Any) -> None:
 
 def _setup_blank_doc_defaults(doc: Any) -> None:
     """Configure default styles for a blank python-docx Document."""
-    from docx.shared import Pt
     from docx.oxml.ns import qn as _qn
+    from docx.shared import Pt
 
-    doc_style = doc.styles['Normal']
-    doc_style.font.name = 'Calibri'
+    doc_style = doc.styles["Normal"]
+    doc_style.font.name = "Calibri"
     doc_style.font.size = Pt(10.5)  # 五号 — standard Chinese document size
     try:
         rPr = doc_style.element.get_or_add_rPr()
-        rFonts = rPr.find(_qn('w:rFonts'))
+        rFonts = rPr.find(_qn("w:rFonts"))
         if rFonts is None:
             from lxml import etree
-            rFonts = etree.SubElement(rPr, _qn('w:rFonts'))
-        rFonts.set(_qn('w:eastAsia'), 'DengXian')
+
+            rFonts = etree.SubElement(rPr, _qn("w:rFonts"))
+        rFonts.set(_qn("w:eastAsia"), "DengXian")
     except Exception:
         pass
     # Remove default empty paragraph
@@ -510,12 +552,30 @@ def _extract_docx_save_parts(docx_input: Any) -> tuple[str, dict[str, Any]]:
         payload = {
             "header_html": str(docx_input.get("header_html") or ""),
             "footer_html": str(docx_input.get("footer_html") or ""),
-            "sections": docx_input.get("sections") if isinstance(docx_input.get("sections"), list) else [],
-            "comments": docx_input.get("comments") if isinstance(docx_input.get("comments"), list) else [],
-            "footnotes": docx_input.get("footnotes") if isinstance(docx_input.get("footnotes"), list) else [],
+            "sections": (
+                docx_input.get("sections")
+                if isinstance(docx_input.get("sections"), list)
+                else []
+            ),
+            "comments": (
+                docx_input.get("comments")
+                if isinstance(docx_input.get("comments"), list)
+                else []
+            ),
+            "footnotes": (
+                docx_input.get("footnotes")
+                if isinstance(docx_input.get("footnotes"), list)
+                else []
+            ),
         }
         return str(html_content or ""), payload
-    return str(docx_input or ""), {"header_html": "", "footer_html": "", "sections": [], "comments": [], "footnotes": []}
+    return str(docx_input or ""), {
+        "header_html": "",
+        "footer_html": "",
+        "sections": [],
+        "comments": [],
+        "footnotes": [],
+    }
 
 
 def _xml_local_name(tag: Any) -> str:
@@ -760,7 +820,9 @@ def _apply_run_marks(run: Any, marks: dict[str, bool] | None) -> None:
         run.font.subscript = True
 
 
-def _add_page_number_field(para: Any, css: dict[str, str] | None = None, marks: dict[str, bool] | None = None) -> None:
+def _add_page_number_field(
+    para: Any, css: dict[str, str] | None = None, marks: dict[str, bool] | None = None
+) -> None:
     from docx.oxml import OxmlElement
     from docx.oxml.ns import qn
 
@@ -794,7 +856,12 @@ def _add_page_number_field(para: Any, css: dict[str, str] | None = None, marks: 
     end_run._r.append(fld_end)
 
 
-def _append_inline_html_to_paragraph(para: Any, node: Any, inherited_css: dict[str, str] | None = None, marks: dict[str, bool] | None = None) -> None:
+def _append_inline_html_to_paragraph(
+    para: Any,
+    node: Any,
+    inherited_css: dict[str, str] | None = None,
+    marks: dict[str, bool] | None = None,
+) -> None:
     from bs4.element import NavigableString, Tag
     from docx.shared import Inches, Pt
 
@@ -876,12 +943,20 @@ def _configure_header_footer_tabs(para: Any, section: Any) -> None:
         from docx.enum.text import WD_TAB_ALIGNMENT, WD_TAB_LEADER
         from docx.shared import Emu
 
-        usable_width = int(section.page_width) - int(section.left_margin) - int(section.right_margin)
+        usable_width = (
+            int(section.page_width)
+            - int(section.left_margin)
+            - int(section.right_margin)
+        )
         if usable_width <= 0:
             return
         tab_stops = para.paragraph_format.tab_stops
-        tab_stops.add_tab_stop(Emu(usable_width // 2), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES)
-        tab_stops.add_tab_stop(Emu(usable_width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES)
+        tab_stops.add_tab_stop(
+            Emu(usable_width // 2), WD_TAB_ALIGNMENT.CENTER, WD_TAB_LEADER.SPACES
+        )
+        tab_stops.add_tab_stop(
+            Emu(usable_width), WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.SPACES
+        )
     except Exception:
         pass
 
@@ -893,7 +968,8 @@ def _add_header_footer_paragraph(container: Any, tag: Any, section: Any) -> None
         _apply_para_format(para, pcss)
 
     direct_cols = [
-        child for child in list(getattr(tag, "children", []))
+        child
+        for child in list(getattr(tag, "children", []))
         if getattr(child, "name", None) and "koto-hdr-col" in (child.get("class") or [])
     ]
     if direct_cols:
@@ -910,7 +986,9 @@ def _add_header_footer_paragraph(container: Any, tag: Any, section: Any) -> None
     _append_inline_html_to_paragraph(para, tag, pcss, {})
 
 
-def _write_docx_header_footer_html(container: Any, html_content: str, section: Any) -> None:
+def _write_docx_header_footer_html(
+    container: Any, html_content: str, section: Any
+) -> None:
     from bs4 import BeautifulSoup
 
     _clear_block_container(container)
@@ -950,7 +1028,9 @@ def _write_docx_header_footer_html(container: Any, html_content: str, section: A
         container.add_paragraph("")
 
 
-def _payload_value(section_payload: dict[str, Any] | None, key: str, fallback: str = "") -> str:
+def _payload_value(
+    section_payload: dict[str, Any] | None, key: str, fallback: str = ""
+) -> str:
     if isinstance(section_payload, dict) and key in section_payload:
         return str(section_payload.get(key) or "")
     return fallback
@@ -969,18 +1049,26 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
     try:
         from bs4 import BeautifulSoup
         from docx import Document
-        from docx.shared import Inches, Pt, RGBColor
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.enum.table import WD_ALIGN_VERTICAL
+        from docx.enum.text import WD_ALIGN_PARAGRAPH
         from docx.oxml.ns import qn
+        from docx.shared import Inches, Pt, RGBColor
     except ImportError as exc:
         raise RuntimeError(f"python-docx 或 beautifulsoup4 未安装: {exc}") from exc
 
     html_content, docx_payload = _extract_docx_save_parts(docx_input)
     default_header_html = docx_payload.get("header_html", "")
     default_footer_html = docx_payload.get("footer_html", "")
-    sections_payload = docx_payload.get("sections") if isinstance(docx_payload.get("sections"), list) else []
-    comments_payload = docx_payload.get("comments") if isinstance(docx_payload.get("comments"), list) else []
+    sections_payload = (
+        docx_payload.get("sections")
+        if isinstance(docx_payload.get("sections"), list)
+        else []
+    )
+    comments_payload = (
+        docx_payload.get("comments")
+        if isinstance(docx_payload.get("comments"), list)
+        else []
+    )
 
     # ── Open original as template, or create blank ────────────────────────
     if original_path and os.path.isfile(original_path):
@@ -988,13 +1076,17 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
             doc = Document(original_path)
             # Clear body content but keep section properties
             body = doc.element.body
-            sect_pr = body.findall(qn('w:sectPr'))
+            sect_pr = body.findall(qn("w:sectPr"))
             for child in list(body):
-                if child.tag != qn('w:sectPr'):
+                if child.tag != qn("w:sectPr"):
                     body.remove(child)
-            logger.info("[export_docx] using original DOCX as template: %s", original_path)
+            logger.info(
+                "[export_docx] using original DOCX as template: %s", original_path
+            )
         except Exception as exc:
-            logger.warning("[export_docx] failed to open original (%s), creating blank", exc)
+            logger.warning(
+                "[export_docx] failed to open original (%s), creating blank", exc
+            )
             doc = Document()
             _setup_blank_doc_defaults(doc)
     else:
@@ -1108,7 +1200,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                     is_header = cell_tag.name.lower() == "th"
 
                     # Check if cell contains <p> sub-elements (TipTap style)
-                    p_tags = cell_tag.find_all(["p", "h1", "h2", "h3", "h4", "h5", "h6"], recursive=False)
+                    p_tags = cell_tag.find_all(
+                        ["p", "h1", "h2", "h3", "h4", "h5", "h6"], recursive=False
+                    )
                     if p_tags:
                         # Multi-paragraph cell: each <p> becomes a paragraph
                         for pi, p_tag in enumerate(p_tags):
@@ -1127,14 +1221,18 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                             run.bold = True
                                         _apply_run_inline(run, merged_p)
                                 else:
-                                    child_name = child.name.lower() if child.name else ""
+                                    child_name = (
+                                        child.name.lower() if child.name else ""
+                                    )
                                     text = child.get_text()
                                     if not text:
                                         continue
                                     run = cell_para.add_run(text)
                                     if is_header:
                                         run.bold = True
-                                    child_css_inner = _parse_css_inline(child.get("style", ""))
+                                    child_css_inner = _parse_css_inline(
+                                        child.get("style", "")
+                                    )
                                     merged = dict(merged_p)
                                     merged.update(child_css_inner)
                                     if child_name in ("strong", "b"):
@@ -1173,7 +1271,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                 run = cell_para.add_run(text)
                                 if is_header:
                                     run.bold = True
-                                child_css_inner = _parse_css_inline(child.get("style", ""))
+                                child_css_inner = _parse_css_inline(
+                                    child.get("style", "")
+                                )
                                 merged = dict(cell_css)
                                 merged.update(child_css_inner)
                                 if child_name in ("strong", "b"):
@@ -1187,7 +1287,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                 _apply_run_inline(run, merged)
 
                     # ── Cell background colour ───────────────────────────
-                    bg = cell_css.get("background-color", "") or cell_css.get("background", "")
+                    bg = cell_css.get("background-color", "") or cell_css.get(
+                        "background", ""
+                    )
                     bg_hex = _css_color_to_hex(bg)
                     if not bg_hex and is_header:
                         bg_hex = "EEF1F8"  # default header shading
@@ -1218,12 +1320,13 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                 try:
                     tbl.allow_autofit = False
                     from docx.oxml.ns import qn
-                    tblPr = tbl._element.xpath('w:tblPr')
+
+                    tblPr = tbl._element.xpath("w:tblPr")
                     if tblPr:
-                        tblW = tblPr[0].xpath('w:tblW')
+                        tblW = tblPr[0].xpath("w:tblW")
                         if tblW:
-                            tblW[0].set(qn('w:type'), 'pct')
-                            tblW[0].set(qn('w:w'), '5000') # 100%
+                            tblW[0].set(qn("w:type"), "pct")
+                            tblW[0].set(qn("w:w"), "5000")  # 100%
                 except Exception:
                     pass
 
@@ -1233,7 +1336,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                     if width_str:
                         try:
                             if width_str.endswith("px"):
-                                emu = int(float(width_str[:-2]) * 9144)  # 1px ≈ 9144 EMU
+                                emu = int(
+                                    float(width_str[:-2]) * 9144
+                                )  # 1px ≈ 9144 EMU
                                 for r in range(len(rows_tags)):
                                     tbl.cell(r, idx).width = emu
                             elif width_str.endswith("%"):
@@ -1243,7 +1348,7 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                                     try:
                                         tc = tbl.cell(r, idx)._tc
                                         tcW = tc.get_or_add_tcPr().get_or_add_tcW()
-                                        tcW.type = 'pct'
+                                        tcW.type = "pct"
                                         tcW.w = w_val
                                     except Exception:
                                         pass
@@ -1259,7 +1364,8 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
 
     try:
         has_even = any(
-            _payload_value(section_payload, "even_header_html") or _payload_value(section_payload, "even_footer_html")
+            _payload_value(section_payload, "even_header_html")
+            or _payload_value(section_payload, "even_footer_html")
             for section_payload in sections_payload
             if isinstance(section_payload, dict)
         )
@@ -1269,9 +1375,17 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
         has_even = False
 
     for idx, section in enumerate(doc.sections):
-        section_payload = sections_payload[idx] if idx < len(sections_payload) and isinstance(sections_payload[idx], dict) else None
-        section_header_html = _payload_value(section_payload, "header_html", default_header_html)
-        section_footer_html = _payload_value(section_payload, "footer_html", default_footer_html)
+        section_payload = (
+            sections_payload[idx]
+            if idx < len(sections_payload) and isinstance(sections_payload[idx], dict)
+            else None
+        )
+        section_header_html = _payload_value(
+            section_payload, "header_html", default_header_html
+        )
+        section_footer_html = _payload_value(
+            section_payload, "footer_html", default_footer_html
+        )
         first_header_html = _payload_value(section_payload, "first_header_html", "")
         first_footer_html = _payload_value(section_payload, "first_footer_html", "")
         even_header_html = _payload_value(section_payload, "even_header_html", "")
@@ -1289,7 +1403,9 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
         _write_docx_header_footer_html(section.footer, section_footer_html, section)
 
         try:
-            section.different_first_page_header_footer = bool(first_header_html or first_footer_html)
+            section.different_first_page_header_footer = bool(
+                first_header_html or first_footer_html
+            )
         except Exception:
             pass
         try:
@@ -1300,8 +1416,12 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
             section.first_page_footer.is_linked_to_previous = False
         except Exception:
             pass
-        _write_docx_header_footer_html(section.first_page_header, first_header_html, section)
-        _write_docx_header_footer_html(section.first_page_footer, first_footer_html, section)
+        _write_docx_header_footer_html(
+            section.first_page_header, first_header_html, section
+        )
+        _write_docx_header_footer_html(
+            section.first_page_footer, first_footer_html, section
+        )
 
         if has_even:
             try:
@@ -1312,13 +1432,19 @@ def _export_docx_python(docx_input: Any, original_path: str | None = None) -> by
                 section.even_page_footer.is_linked_to_previous = False
             except Exception:
                 pass
-            _write_docx_header_footer_html(section.even_page_header, even_header_html, section)
-            _write_docx_header_footer_html(section.even_page_footer, even_footer_html, section)
+            _write_docx_header_footer_html(
+                section.even_page_header, even_header_html, section
+            )
+            _write_docx_header_footer_html(
+                section.even_page_footer, even_footer_html, section
+            )
 
     applied_comment_count = 0
     comments_el = None
     if comments_payload:
-        applied_comment_count, comments_el = _apply_docx_export_comments(doc, comments_payload)
+        applied_comment_count, comments_el = _apply_docx_export_comments(
+            doc, comments_payload
+        )
         logger.info(
             "[export_docx] comment payload=%d applied=%d",
             len(comments_payload),
@@ -1369,7 +1495,10 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     try:
         return _export_docx_python(docx_input, original_path=original_path)
     except Exception as exc:
-        logger.warning("[export_docx] python-docx builder failed (%s), falling back to html2docx", exc)
+        logger.warning(
+            "[export_docx] python-docx builder failed (%s), falling back to html2docx",
+            exc,
+        )
 
     # ── Fallback: html2docx (handles edge cases the builder misses) ─────────
     try:
@@ -1390,6 +1519,9 @@ def export_docx(docx_input: Any, original_path: str | None = None) -> bytes:
     except ImportError:
         pass
 
-    raise RuntimeError("export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装")
+    raise RuntimeError(
+        "export_docx: 所有路径均失败，请确认 python-docx 和 beautifulsoup4 已安装"
+    )
+
 
 __all__ = ["export_docx"]

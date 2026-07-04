@@ -30,6 +30,7 @@ Usage::
         aspect="content",
     )
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -43,7 +44,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 if TYPE_CHECKING:
     from app.core.agent.doc_agent import FileHandle
@@ -59,15 +60,16 @@ logger = logging.getLogger(__name__)
 @dataclass
 class FileChange:
     """Represents a change made to a file."""
+
     file_path: str
-    change_type: str           # add/modify/delete
-    range_start: int           # Character offset start
-    range_end: int             # Character offset end
-    original: str              # Original content
-    modified: str              # New content
+    change_type: str  # add/modify/delete
+    range_start: int  # Character offset start
+    range_end: int  # Character offset end
+    original: str  # Original content
+    modified: str  # New content
     timestamp: float = field(default_factory=time.time)
     step_id: str = ""
-    operation: str = ""        # e.g., "extract_inject", "compare", "annotate"
+    operation: str = ""  # e.g., "extract_inject", "compare", "annotate"
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -85,6 +87,7 @@ class FileChange:
 @dataclass
 class FileSnapshot:
     """Point-in-time snapshot of a file's content."""
+
     path: str
     content: str
     content_hash: str
@@ -95,7 +98,9 @@ class FileSnapshot:
         """Create snapshot from file on disk."""
         content = ""
         if not os.path.exists(path):
-            content_hash = hashlib.md5(content.encode(), usedforsecurity=False).hexdigest()
+            content_hash = hashlib.md5(
+                content.encode(), usedforsecurity=False
+            ).hexdigest()
             return cls(path=path, content=content, content_hash=content_hash)
         try:
             if path.endswith((".xlsx", ".xls")):
@@ -119,8 +124,9 @@ class FileSnapshot:
 @dataclass
 class CompareResult:
     """Result of comparing multiple documents."""
+
     files: List[str]
-    aspect: str                # content/structure/metadata
+    aspect: str  # content/structure/metadata
     similarities: Dict[str, float]  # pairwise similarity scores
     differences: List[Dict[str, Any]]  # list of specific differences
     summary: str
@@ -265,10 +271,13 @@ class MultiFileCoordinator:
         target_lock = self._get_async_lock(target.path)
 
         # Lock both files (ordered to prevent deadlock)
-        locks = sorted([
-            (source.path, source_lock),
-            (target.path, target_lock),
-        ], key=lambda x: x[0])
+        locks = sorted(
+            [
+                (source.path, source_lock),
+                (target.path, target_lock),
+            ],
+            key=lambda x: x[0],
+        )
 
         for _, lock in locks:
             await lock.acquire()
@@ -279,7 +288,9 @@ class MultiFileCoordinator:
             target_snapshot = self.take_snapshot(target.path)
 
             # Extract data from source
-            extracted_data = await self._extract_data(source, query, source_snapshot.content)
+            extracted_data = await self._extract_data(
+                source, query, source_snapshot.content
+            )
 
             if not extracted_data:
                 return FileChange(
@@ -306,7 +317,11 @@ class MultiFileCoordinator:
             # Track the change
             change = self.track_change(
                 path=target.path,
-                original=target_snapshot.content[range_start:range_end] if range_start < range_end else "",
+                original=(
+                    target_snapshot.content[range_start:range_end]
+                    if range_start < range_end
+                    else ""
+                ),
                 modified=extracted_data,
                 change_type="modify",
                 range_start=range_start,
@@ -386,6 +401,7 @@ class MultiFileCoordinator:
         """Write content to DOCX file."""
         try:
             from docx import Document
+
             doc = Document()
             for para in content.split("\n"):
                 doc.add_paragraph(para)
@@ -398,6 +414,7 @@ class MultiFileCoordinator:
         """Write content to XLSX file (simplified - appends to first sheet)."""
         try:
             import openpyxl
+
             wb = openpyxl.load_workbook(path)
             ws = wb.active
             # Find next empty row
@@ -500,7 +517,8 @@ class MultiFileCoordinator:
         lines2 = text2.splitlines(keepends=True)
 
         diff = difflib.unified_diff(
-            lines1, lines2,
+            lines1,
+            lines2,
             fromfile=Path(path1).name,
             tofile=Path(path2).name,
             lineterm="",
@@ -604,6 +622,7 @@ def _read_excel_as_text(path: str) -> str:
     """Read Excel file as plain text."""
     try:
         import openpyxl
+
         wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
         parts = []
         for sheet_name in wb.sheetnames:
@@ -623,6 +642,7 @@ def _read_docx_as_text(path: str) -> str:
     """Read DOCX file as plain text."""
     try:
         from docx import Document
+
         doc = Document(path)
         parts = [p.text for p in doc.paragraphs]
         return "\n".join(parts)
@@ -635,6 +655,7 @@ def _read_pptx_as_text(path: str) -> str:
     """Read PPTX file as plain text."""
     try:
         from pptx import Presentation
+
         prs = Presentation(path)
         parts = []
         for i, slide in enumerate(prs.slides):
@@ -652,6 +673,7 @@ def _read_pdf_as_text(path: str) -> str:
     """Read PDF file as plain text."""
     try:
         import fitz  # PyMuPDF
+
         doc = fitz.open(path)
         parts = []
         for page in doc:

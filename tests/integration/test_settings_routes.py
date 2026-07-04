@@ -89,16 +89,13 @@ class TestUpdateSettings:
         assert data["success"] is True
 
     def test_missing_category_returns_error(self, client):
-        resp = _post(
-            client, "/api/settings", json={"key": "theme", "value": "dark"}
-        )
+        resp = _post(client, "/api/settings", json={"key": "theme", "value": "dark"})
         data = resp.get_json()
         assert data["success"] is False
 
     def test_missing_key_returns_error(self, client):
         resp = _post(
-            client,
-            "/api/settings", json={"category": "appearance", "value": "dark"}
+            client, "/api/settings", json={"category": "appearance", "value": "dark"}
         )
         data = resp.get_json()
         assert data["success"] is False

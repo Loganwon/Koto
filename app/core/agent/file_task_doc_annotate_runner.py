@@ -5,7 +5,11 @@ from __future__ import annotations
 
 from typing import Any, Dict, Iterable, Optional
 
-from app.core.agent.file_task_contract import FileTaskEvent, FileTaskLedger, FileTaskRequest
+from app.core.agent.file_task_contract import (
+    FileTaskEvent,
+    FileTaskLedger,
+    FileTaskRequest,
+)
 
 
 class FileTaskDocAnnotateRunner:

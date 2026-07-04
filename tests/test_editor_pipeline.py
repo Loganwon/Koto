@@ -27,9 +27,9 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
 GREEN = "\033[92m"
-RED   = "\033[91m"
+RED = "\033[91m"
 YELLOW = "\033[93m"
-CYAN  = "\033[96m"
+CYAN = "\033[96m"
 RESET = "\033[0m"
 
 _pass = 0
@@ -60,7 +60,12 @@ def section(title):
 # Import modules under test
 # ─────────────────────────────────────────────
 try:
-    from app.core.editor_ai_pipeline import EditorAIPipeline, ProcessedInput, ProcessedOutput
+    from app.core.editor_ai_pipeline import (
+        EditorAIPipeline,
+        ProcessedInput,
+        ProcessedOutput,
+    )
+
     ok("EditorAIPipeline 导入成功")
 except Exception as e:
     fail(f"EditorAIPipeline 导入失败: {e}")
@@ -68,6 +73,7 @@ except Exception as e:
 
 try:
     from app.core.skills.skill_manager import BUILTIN_SKILLS
+
     ok("BUILTIN_SKILLS 导入成功")
 except Exception as e:
     fail(f"BUILTIN_SKILLS 导入失败: {e}")
@@ -75,6 +81,7 @@ except Exception as e:
 
 try:
     from app.core.skills.skill_trigger_binding import _RECOMMENDED_INTENT_BINDINGS
+
     ok("_RECOMMENDED_INTENT_BINDINGS 导入成功")
 except Exception as e:
     fail(f"_RECOMMENDED_INTENT_BINDINGS 导入失败: {e}")
@@ -82,6 +89,7 @@ except Exception as e:
 
 try:
     from app.core.skills.skill_auto_matcher import SkillAutoMatcher
+
     ok("SkillAutoMatcher 导入成功")
 except Exception as e:
     fail(f"SkillAutoMatcher 导入失败: {e}")
@@ -156,10 +164,19 @@ try:
         file_type="xlsx",
         output_mode="analyze",
     )
-    excel_skill_ids = {"excel_formula_expert", "excel_data_cleaner", "pivot_advisor",
-                       "spreadsheet_analyst", "data_analysis"}
+    excel_skill_ids = {
+        "excel_formula_expert",
+        "excel_data_cleaner",
+        "pivot_advisor",
+        "spreadsheet_analyst",
+        "data_analysis",
+    }
     if result.skill_ids:
-        matched = [sid for sid in result.skill_ids if any(k in sid for k in ["excel", "data", "pivot", "spread"])]
+        matched = [
+            sid
+            for sid in result.skill_ids
+            if any(k in sid for k in ["excel", "data", "pivot", "spread"])
+        ]
         if matched:
             ok(f"xlsx 文件类型匹配到 excel 相关技能: {matched}")
         else:
@@ -177,8 +194,10 @@ section("Test 4: 历史压缩（超长 history 被截断）")
 
 try:
     long_history = [
-        {"role": "user" if i % 2 == 0 else "assistant",
-         "content": "这是第 %d 条消息，内容比较长：" % i + "测试文本" * 50}
+        {
+            "role": "user" if i % 2 == 0 else "assistant",
+            "content": "这是第 %d 条消息，内容比较长：" % i + "测试文本" * 50,
+        }
         for i in range(30)
     ]
     result = EditorAIPipeline.preprocess(
@@ -219,7 +238,15 @@ try:
     # Simulate AI response that contains the masked placeholder
     if pre_result.mask_result and pre_result.safe_prompt != pii_prompt2:
         # PII was actually masked — use whatever masked form was produced
-        masked_response = "关于 " + pre_result.safe_prompt[pre_result.safe_prompt.find("["):pre_result.safe_prompt.find("]")+1] + " 的合同审阅，建议检查主体条款。" if "[" in pre_result.safe_prompt else "合同审阅建议：检查主体条款。"
+        masked_response = (
+            "关于 "
+            + pre_result.safe_prompt[
+                pre_result.safe_prompt.find("[") : pre_result.safe_prompt.find("]") + 1
+            ]
+            + " 的合同审阅，建议检查主体条款。"
+            if "[" in pre_result.safe_prompt
+            else "合同审阅建议：检查主体条款。"
+        )
     else:
         masked_response = "合同审阅建议：检查主体条款。"
 
@@ -274,18 +301,31 @@ except Exception as e:
 section("Test 7: 16 个文档技能在 BUILTIN_SKILLS 中注册")
 
 DOC_SKILL_IDS = [
-    "doc_format_fixer", "doc_structure_optimizer", "table_enhancer",
-    "doc_tone_adjuster", "doc_fact_checker", "doc_readability", "doc_dedup",
-    "legal_doc_review", "financial_doc_review", "academic_paper_polish", "marketing_copy",
-    "excel_formula_expert", "excel_data_cleaner", "pivot_advisor",
-    "slide_storyteller", "slide_data_viz",
+    "doc_format_fixer",
+    "doc_structure_optimizer",
+    "table_enhancer",
+    "doc_tone_adjuster",
+    "doc_fact_checker",
+    "doc_readability",
+    "doc_dedup",
+    "legal_doc_review",
+    "financial_doc_review",
+    "academic_paper_polish",
+    "marketing_copy",
+    "excel_formula_expert",
+    "excel_data_cleaner",
+    "pivot_advisor",
+    "slide_storyteller",
+    "slide_data_viz",
 ]
 
 all_skill_ids = {s["id"] for s in BUILTIN_SKILLS}
 missing_skills = [sid for sid in DOC_SKILL_IDS if sid not in all_skill_ids]
 
 if not missing_skills:
-    ok(f"所有 {len(DOC_SKILL_IDS)} 个文档技能均已注册（总技能数: {len(all_skill_ids)}）")
+    ok(
+        f"所有 {len(DOC_SKILL_IDS)} 个文档技能均已注册（总技能数: {len(all_skill_ids)}）"
+    )
 else:
     fail(f"以下技能未在 BUILTIN_SKILLS 中注册: {missing_skills}")
 
@@ -298,7 +338,9 @@ binding_ids = {b["skill_id"] for b in _RECOMMENDED_INTENT_BINDINGS}
 missing_bindings = [sid for sid in DOC_SKILL_IDS if sid not in binding_ids]
 
 if not missing_bindings:
-    ok(f"所有 {len(DOC_SKILL_IDS)} 个文档技能均有意图绑定（总绑定数: {len(binding_ids)}）")
+    ok(
+        f"所有 {len(DOC_SKILL_IDS)} 个文档技能均有意图绑定（总绑定数: {len(binding_ids)}）"
+    )
 else:
     fail(f"以下技能缺少意图绑定: {missing_bindings}")
 
@@ -311,7 +353,9 @@ pattern_ids = {e["skill_id"] for e in SkillAutoMatcher._PATTERN_MAP}
 missing_patterns = [sid for sid in DOC_SKILL_IDS if sid not in pattern_ids]
 
 if not missing_patterns:
-    ok(f"所有 {len(DOC_SKILL_IDS)} 个文档技能均有模式匹配规则（总规则数: {len(pattern_ids)}）")
+    ok(
+        f"所有 {len(DOC_SKILL_IDS)} 个文档技能均有模式匹配规则（总规则数: {len(pattern_ids)}）"
+    )
 else:
     fail(f"以下技能缺少 _PATTERN_MAP 条目: {missing_patterns}")
 

@@ -25,8 +25,8 @@ New coverage:
 
 from __future__ import annotations
 
-import json
 import io
+import json
 import os
 import shutil
 import sys
@@ -70,6 +70,7 @@ def _app_bundle(tmp_path_factory):
     _shared.WORKSPACE_DIR = str(workspace_dir)
 
     from flask import Flask
+
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
@@ -176,7 +177,9 @@ class TestDeleteWorkspaceFile:
         assert resp.status_code == 200
         assert not (sub / "inner.txt").exists()
 
-    def test_delete_file_send2trash_error_after_path_removed(self, _app_bundle, monkeypatch):
+    def test_delete_file_send2trash_error_after_path_removed(
+        self, _app_bundle, monkeypatch
+    ):
         """If send2trash removes the file before raising, fallback must not 500."""
         client, _, ws = _app_bundle
         fname = f"vanished_{uuid.uuid4().hex[:6]}.txt"
@@ -406,7 +409,9 @@ class TestDeleteWorkspaceFolder:
         assert resp.status_code == 200
         assert not folder.exists()
 
-    def test_delete_folder_send2trash_error_after_path_removed(self, _app_bundle, monkeypatch):
+    def test_delete_folder_send2trash_error_after_path_removed(
+        self, _app_bundle, monkeypatch
+    ):
         client, _, ws = _app_bundle
         name = f"folder_vanished_{uuid.uuid4().hex[:6]}"
         folder = ws / name
@@ -484,7 +489,9 @@ class TestAutoSaveTraversalGuard:
             pytest.skip("docx parse not available")
         return resp.get_json()["file_id"]
 
-    def _upload_text(self, client, name: str = "autosave_test.txt", content: str = "seed") -> str:
+    def _upload_text(
+        self, client, name: str = "autosave_test.txt", content: str = "seed"
+    ) -> str:
         """Return a valid file_id from a lightweight text upload."""
         resp = client.post(
             "/api/v1/workspace/open_file",
@@ -699,9 +706,7 @@ class TestAbsoluteFsWriteRoutes:
         assert upload_resp.status_code == 200
         assert (dst / "upload.txt").is_file()
 
-        delete_resp = client.delete(
-            "/api/v1/workspace/fs_delete?path=" + str(copied)
-        )
+        delete_resp = client.delete("/api/v1/workspace/fs_delete?path=" + str(copied))
         assert delete_resp.status_code == 200
         assert not copied.exists()
 

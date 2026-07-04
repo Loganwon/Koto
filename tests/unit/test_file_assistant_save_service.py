@@ -34,13 +34,17 @@ def test_persist_implicit_save_writes_tmp_only(tmp_path: Path):
     assert not (workspace / "notes.txt").exists()
 
 
-def test_persist_explicit_workspace_save_writes_source_and_snapshot(tmp_path: Path, monkeypatch):
+def test_persist_explicit_workspace_save_writes_source_and_snapshot(
+    tmp_path: Path, monkeypatch
+):
     workspace = tmp_path / "workspace"
     tmp_dir = tmp_path / "tmp"
     workspace.mkdir()
     tmp_dir.mkdir()
 
-    monkeypatch.setattr(AutoSavePersistenceService, "_sync_registry", staticmethod(lambda path: None))
+    monkeypatch.setattr(
+        AutoSavePersistenceService, "_sync_registry", staticmethod(lambda path: None)
+    )
 
     result = AutoSavePersistenceService().persist(
         tmp_dir=tmp_dir,
