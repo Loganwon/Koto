@@ -364,7 +364,6 @@ export function initSocket(): void {
     localStorage.setItem('wa_locked_model', state.lockedModel);
     _clearActiveRoute();
   }
-  state.aiOutputMode = 'inline';
   localStorage.removeItem('wa_ai_output_mode');
   _syncModelStatusUi();
   _refreshModelCatalog();
