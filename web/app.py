@@ -77,7 +77,6 @@ from web.services.chat_stream.orchestrator import setup_chat_stream_context
 from web.services.chat_stream.generate.tot_handler import handle_tree_of_thought
 from web.services.chat_stream.generate.research_handler import handle_research
 from web.services.chat_stream.generate.painter_handler import handle_painter
-from web.file_task_stream import stream_file_task_chat_request
 from web.llm_runtime_helpers import (
     FakeGenerateContentResponse as _FakeGenerateContentResponse,
     extract_prompt_text as _extract_prompt_text,
@@ -2983,7 +2982,7 @@ def chat_stream():
                         return
                 return
 
-            # === FILE TASKS — unified through FileTaskRuntime ===
+            # === FILE TASKS — workspace task-stream only ===
             _file_task_types = ("FILE_OP", "FILE_EDIT", "FILE_SEARCH", "FILE_GEN",
                                "DOC_ANNOTATE", "MEETING_EXTRACT")
             _is_file_task = task_type in _file_task_types
@@ -2996,29 +2995,29 @@ def chat_stream():
                 and _uses_standard_workflow_route()
             )
             if _is_file_task or _is_file_direct:
-                for chunk in stream_file_task_chat_request(
-                    task_type=task_type,
-                    user_input=user_input,
-                    effective_input=effective_input,
-                    session_name=session_name,
-                    workspace_dir=WORKSPACE_DIR,
-                    yield_thinking=yield_thinking,
-                    _app_logger=_app_logger,
-                    session_manager=session_manager,
-                    settings_manager=settings_manager,
-                    MODEL_MAP=MODEL_MAP,
-                    context_info=context_info,
-                    system_instruction=system_instruction,
-                    _rag_context_block=_rag_context_block,
-                    history=history,
-                    request=request,
-                    client=client,
-                    _interrupt_manager=_interrupt_manager,
-                    _safe_sse=_safe_sse,
-                ):
-                    yield chunk
-                    if interrupted():
-                        return
+                message = (
+                    "文件任务已统一到工作区任务流执行。请从工作区文件任务入口启动，"
+                    "旧聊天流不再执行文件任务，以避免产生不完整的完成状态。"
+                )
+                _app_logger.warning(
+                    "[CHAT] blocked legacy file-task execution via /api/chat/stream "
+                    "(task_type=%s, session=%s)",
+                    task_type,
+                    session_name,
+                )
+                yield _safe_sse({
+                    "type": "error",
+                    "message": message,
+                    "_message_as_error": True,
+                })
+                yield _safe_sse({
+                    "type": "done",
+                    "images": [],
+                    "saved_files": [],
+                    "total_time": round(time.time() - start_time, 1),
+                    "had_error": True,
+                    "legacy_file_task_blocked": True,
+                })
                 return
 
             # === WEB_SEARCH handler — delegated ===
@@ -3095,7 +3094,7 @@ def chat_stream():
             error_str = str(e)
             _app_logger.debug(f"[CHAT] Exception: {error_str}")
 
-            from app.core.socket_handler import _is_online_failure as _iof2, _is_ollama_alive as _ioav2
+            from app.core.shared.llm_helpers import is_online_failure as _iof2, is_ollama_alive as _ioav2
             from app.core.routing import LocalModelRouter as _LMR_fb2
             _OLLAMA_TEXT_TASKS2 = {"CHAT", "CODER", "RESEARCH", "FILE_GEN", "MULTI_STEP", "AGENT"}
 
@@ -3358,6 +3357,9 @@ if __name__ == "__main__":
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+    debug_mode = os.environ.get("KOTO_DEBUG", "false").lower() == "true"
+    port = int(os.environ.get("KOTO_PORT", "5000"))
+
     print("\n🚀 Koto Web Server Starting...")
     print(f"📁 Chat Directory: {os.path.abspath(CHAT_DIR)}")
     print(f"📁 Workspace: {os.path.abspath(WORKSPACE_DIR)}")
@@ -3377,7 +3379,7 @@ if __name__ == "__main__":
 
     print("⚠️ 本地模型任务路由器已禁用，使用远程 AI")
 
-    print("\n🌐 Open http://localhost:5000 in your browser\n")
+    print(f"\n🌐 Open http://localhost:{port} in your browser\n")
 
     # 启动后台服务（异步，不阻塞启动）
     def start_background_services():
@@ -3411,8 +3413,6 @@ if __name__ == "__main__":
     threading.Thread(target=start_background_services, daemon=True).start()
 
     try:
-        debug_mode = os.environ.get("KOTO_DEBUG", "false").lower() == "true"
-        port = int(os.environ.get("KOTO_PORT", "5000"))
         # Must use socketio.run() (not app.run()) so Flask-SocketIO controls the
         # server event loop and WebSocket connections can be established.
         if socketio is not None:

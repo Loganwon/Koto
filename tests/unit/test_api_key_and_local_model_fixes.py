@@ -265,6 +265,13 @@ class TestStdoutEncodingFix:
         encoded = emoji.encode("utf-8")
         assert b"\xf0\x9f\x9a\x80" in encoded
 
+    def test_startup_url_uses_runtime_koto_port(self):
+        """Startup output should point to the actual configured server port."""
+        source = Path("web/app.py").read_text(encoding="utf-8")
+        assert 'port = int(os.environ.get("KOTO_PORT", "5000"))' in source
+        assert 'print(f"\\n🌐 Open http://localhost:{port} in your browser\\n")' in source
+        assert 'print("\\n🌐 Open http://localhost:5000 in your browser\\n")' not in source
+
 
 # ── 3. API key settings panel HTML ─────────────────────────────────────────
 
