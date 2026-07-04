@@ -716,10 +716,21 @@ class EnhancedMemoryManager:
         if os.path.exists(self.memory_path):
             try:
                 with open(self.memory_path, "r", encoding="utf-8") as f:
-                    self.memories = json.load(f)
+                    self.memories = self._coerce_memory_list(json.load(f))
             except Exception as e:
                 logger.info(f"[EnhancedMemory] 加载失败: {e}")
                 self.memories = []
+
+    @staticmethod
+    def _coerce_memory_list(raw) -> List[Dict]:
+        if isinstance(raw, list):
+            return [item for item in raw if isinstance(item, dict)]
+        if isinstance(raw, dict):
+            candidates = raw.get("memories")
+            if isinstance(candidates, list):
+                return [item for item in candidates if isinstance(item, dict)]
+            return [item for item in raw.values() if isinstance(item, dict)]
+        return []
 
     def _save(self):
         """保存记忆"""
@@ -932,6 +943,9 @@ class EnhancedMemoryManager:
         content = (content or "").strip()
         if not content:
             return None
+
+        if not isinstance(self.memories, list):
+            self.memories = self._coerce_memory_list(self.memories)
 
         # 去重：跳过与现有记忆高度相似的条目
         if self._is_duplicate(content):

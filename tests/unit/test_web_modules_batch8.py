@@ -776,6 +776,31 @@ class TestMemoryIntegration:
         )
         assert "Base instruction." in result
 
+    def test_enhanced_memory_manager_coerces_dict_memories_before_append(self, tmp_path):
+        from web.enhanced_memory_manager import EnhancedMemoryManager
+
+        memory_path = tmp_path / "memory.json"
+        profile_path = tmp_path / "profile.json"
+        summary_path = tmp_path / "summaries.json"
+        vector_path = tmp_path / "vectors.json"
+        memory_path.write_text(
+            '{"old": {"id": 1, "content": "旧记忆", "category": "fact"}}',
+            encoding="utf-8",
+        )
+
+        manager = EnhancedMemoryManager(
+            memory_path=str(memory_path),
+            profile_path=str(profile_path),
+            summary_path=str(summary_path),
+            vector_path=str(vector_path),
+        )
+        manager._memory_rag = False
+        item = manager.add_memory("用户偏好真实前端验证", category="user_preference", source="extraction")
+
+        assert item is not None
+        assert isinstance(manager.memories, list)
+        assert any(mem["content"] == "用户偏好真实前端验证" for mem in manager.memories)
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # 10. DocumentPlanner / doc_planner
