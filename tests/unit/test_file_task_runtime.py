@@ -3809,6 +3809,65 @@ def test_file_task_runtime_ai_intent_adjudicator_preserves_create_file_with_sour
     assert any(name == "write_docx_content" for name, _args in tool_calls)
 
 
+def test_file_task_runtime_ai_intent_adjudicator_preserves_explicit_table_write_contract():
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        model_client=lambda **kwargs: {"content": "ok", "tool_calls": []},
+    )
+    request = FileTaskRequest(
+        task=(
+            "请读取 workspace/koto_live_task_matrix/live_sales.xlsx，"
+            "并把 Budget 工作表作为真实 Word 表格追加写入 "
+            "workspace/koto_live_task_matrix/live_report.docx 末尾。"
+            "不要修改源 xlsx；写入后核验目标 DOCX 表格数量。"
+        ),
+        run_id="ai_intent_adjudicator_preserves_table_write_contract",
+        target_path="workspace/koto_live_task_matrix/live_report.docx",
+        files=[
+            FileTaskFile(
+                path="workspace/koto_live_task_matrix/live_sales.xlsx",
+                name="live_sales.xlsx",
+                type="xlsx",
+            ),
+            FileTaskFile(
+                path="workspace/koto_live_task_matrix/live_report.docx",
+                name="live_report.docx",
+                type="docx",
+                target=True,
+            ),
+        ],
+        options={"enable_ai_intent_adjudicator": True},
+    )
+
+    classification = runtime._classify_request(request, runtime._context_files(request))
+    adjudicated = runtime._apply_intent_adjudication(
+        request,
+        runtime._context_files(request),
+        classification,
+        {
+            "status": "ok",
+            "intent": "answer_only",
+            "confidence": 0.94,
+            "should_write": False,
+            "needs_clarification": False,
+            "target_file_type": "docx",
+            "operation": "summarize",
+            "reason": "模型误把源文件保护理解成只读分析。",
+        },
+    )
+    details = adjudicated.public_dict()
+
+    assert adjudicated.output_mode == "write", details
+    assert adjudicated.write_intent is True, details
+    assert adjudicated.selected_recipe == "xlsx_table_to_docx", details
+    assert "readonly_write_negation" not in adjudicated.reason_codes, details
+    assert (
+        "ai_intent_adjudicator_preserved_explicit_write_contract"
+        in adjudicated.reason_codes
+    ), details
+    assert "ai_intent_adjudicator_override" not in adjudicated.reason_codes, details
+
+
 def test_file_task_runtime_quality_gate_rejects_ppt_beautify_without_design_pass():
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(

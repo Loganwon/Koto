@@ -60,6 +60,11 @@ _TARGET_SCOPED_WRITE_PATTERNS = (
         r".{0,24}(?P<action>修复|修改|更新|补全|完善|写入|写回|保存|edit|modify|repair|update|complete|write|save)",
         re.IGNORECASE,
     ),
+    re.compile(
+        r"(?P<action>写入|写回|追加|添加|插入|保存|导出|write|append|insert|save|export)"
+        r".{0,80}(?:\.(?:docx|xlsx|pptx|pdf|md|txt|csv)|docx|word|excel|ppt|目标\s*(?:文件|文档|表格|幻灯片|docx|xlsx|pptx)|target\s+(?:file|document|spreadsheet|slides?))",
+        re.IGNORECASE,
+    ),
 )
 _NEGATED_TARGET_ACTION_PREFIX = re.compile(
     r"(?:不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without)"
