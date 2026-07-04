@@ -2,12 +2,13 @@
 
 This repo now has a dedicated regression system for the workspace AI assistant and whitebox file-task flow.
 
-The suite is organized into seven lanes:
+The suite is organized into eight lanes:
 
 - `smoke`: critical routing and runtime regressions that should stay green on every AI assistant flow change.
 - `contracts`: source-level guards for the bundled TypeScript workspace task chain (`ai-review.ts`, `task-dispatcher.ts`, `task-runner.ts`, and related renderer contracts).
 - `backend`: Flask `POST /api/editor/ai/task-stream` behavior, SSE event contract, request normalization, and session/memory persistence.
 - `runtime`: file-task runtime, planner routing, tool-gap normalization, and provider fallback behavior.
+- `matrix`: task-family routing matrix, recipe coverage, and completion-contract guards for common write/read task families.
 - `browser-mock`: Playwright smoke for the real workspace page, including a mocked `task-stream` response so task cards render without a real model. The old `browser` name remains as a compatibility alias.
 - `mcp`: MCP route, WebSocket, frontend-action, and stdio bridge contract checks.
 - `evaluation`: deterministic offline intent-accuracy and execution-quality checks for daily regression runs. Set `KOTO_LIVE_EVALUATION=1` to run the same lane with real LLM calls and AI-as-Judge.
@@ -37,7 +38,7 @@ If those prerequisites are missing:
 
 Two composite lanes are defined in [scripts/run_ai_assistant_flow_tests.py](scripts/run_ai_assistant_flow_tests.py):
 
-- `full`: `smoke + contracts + backend + runtime`
+- `full`: `smoke + contracts + backend + runtime + matrix`
 - `release`: `full + browser-mock`
 - `test-ready`: `smoke + mcp + browser-mock`
 
@@ -59,6 +60,12 @@ Run the full non-browser regression pack:
 
 ```powershell
 python scripts/run_ai_assistant_flow_tests.py full -vv
+```
+
+Run the task-family matrix only:
+
+```powershell
+python scripts/run_ai_assistant_flow_tests.py matrix -vv
 ```
 
 Run the mocked browser smoke lane only:
@@ -107,6 +114,7 @@ The runner passes extra arguments through to `pytest`, so `-k`, `-x`, `-vv`, or 
 - Workspace send-message entry and payload wiring: [tests/test_ai_stream.py](tests/test_ai_stream.py) and [tests/unit/test_ai_task_chain_architecture.py](tests/unit/test_ai_task_chain_architecture.py)
 - Whitebox task-stream SSE contract and persistence: [tests/test_ai_stream.py](tests/test_ai_stream.py)
 - File-task runtime and native routing: [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py)
+- Task-family routing and completion-contract coverage: [tests/unit/test_ai_task_family_matrix.py](tests/unit/test_ai_task_family_matrix.py), [tests/unit/test_file_task_recipes.py](tests/unit/test_file_task_recipes.py), and [tests/unit/test_file_task_classification_recipes.py](tests/unit/test_file_task_classification_recipes.py)
 - Provider timeout and local routing behavior: [tests/unit/test_llm_providers.py](tests/unit/test_llm_providers.py) and [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py)
 - Browser-level assistant shell and mocked task-card rendering: [tests/e2e/test_workspace_ai_assistant.py](tests/e2e/test_workspace_ai_assistant.py)
 - MCP route, frontend-action, WebSocket, and stdio bridge contracts: [tests/unit/test_mcp_integration.py](tests/unit/test_mcp_integration.py)
