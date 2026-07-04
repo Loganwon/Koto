@@ -91,7 +91,8 @@ def app_client():
     with patch.dict("sys.modules", {}):
         # We need to patch the client object in web.app
         try:
-            import app.core.agent.agent_loop as agent_loop_module
+            from app.core.agent import llm_provider_helpers
+            from app.core.agent.editor_quick_action_executor import EditorQuickActionExecutor
             from app.core.security.output_validator import OutputValidator
             from app.core.agent.lifecycle import (
                 evt_error,
@@ -109,7 +110,7 @@ def app_client():
             original_api_key = getattr(web_app_module, "API_KEY", None)
             original_types = getattr(web_app_module, "types", None)
             original_llm_judge = getattr(OutputValidator, "_llm_judge")
-            original_loop_run = agent_loop_module.KotoAgentLoop.run
+            original_quick_iter_events = EditorQuickActionExecutor.iter_events
             mock_types = MagicMock()
             mock_types.GenerateContentConfig.return_value = MagicMock()
 
@@ -125,14 +126,14 @@ def app_client():
                 "custom_instruction": "已按要求处理当前内容。",
             }
 
-            def fake_loop_run(self, request):
+            def fake_quick_iter_events(self, request):
                 model_mode = (getattr(request, "model_mode", "") or "").strip().lower()
                 action_name = (
                     (getattr(request, "action_type", "") or "").strip().lower()
                 )
 
                 if model_mode == "local":
-                    if not agent_loop_module._is_ollama_alive():
+                    if not llm_provider_helpers.is_ollama_alive():
                         yield evt_error("Ollama not running")
                         return
                     result_text = "本地Ollama响应"
@@ -152,14 +153,14 @@ def app_client():
             OutputValidator._llm_judge = classmethod(
                 lambda cls, text, original_prompt: None
             )
-            agent_loop_module.KotoAgentLoop.run = fake_loop_run
+            EditorQuickActionExecutor.iter_events = fake_quick_iter_events
             yield app.test_client()
             # Restore
             web_app_module.client = original_client
             web_app_module.API_KEY = original_api_key
             web_app_module.types = original_types
             OutputValidator._llm_judge = original_llm_judge
-            agent_loop_module.KotoAgentLoop.run = original_loop_run
+            EditorQuickActionExecutor.iter_events = original_quick_iter_events
         except ImportError as e:
             pytest.skip(f"Cannot import web.app: {e}")
 
@@ -2198,7 +2199,7 @@ class TestEditorAIStream:
         assert data["temp_path"].endswith(".txt")
 
     def test_main_stream_forwards_plan_and_step_events(self, app_client):
-        """主 editor_ai_stream 应转发 KotoAgentLoop 的 plan/step 事件。"""
+        """主 editor_ai_stream 应转发 editor executor 的 plan/step 事件。"""
         from app.core.agent.lifecycle import (
             evt_plan,
             evt_step_done,
@@ -2214,7 +2215,10 @@ class TestEditorAIStream:
             yield evt_step_done("understand", "理解需求完成")
             yield evt_task_complete(result="处理完成")
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run):
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_run,
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2252,7 +2256,10 @@ class TestEditorAIStream:
             web_app_module.session_manager, "append_and_save", fake_append
         )
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run):
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_run,
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2276,7 +2283,7 @@ class TestEditorAIStream:
     def test_non_task_stream_passes_preferred_and_local_model_into_agent_request(
         self, app_client
     ):
-        """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 AgentLoop。"""
+        """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 editor executor。"""
         captured = {}
         from app.core.agent.lifecycle import evt_task_complete
 
@@ -2284,9 +2291,10 @@ class TestEditorAIStream:
             captured["request"] = request
             yield evt_task_complete(result="ok")
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run), patch(
-            "web.app._get_configured_local_model_id", return_value="qwen3.5:9b"
-        ):
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_run,
+        ), patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2303,6 +2311,43 @@ class TestEditorAIStream:
         assert req.model_mode == "cloud"
         assert req.extra["preferred_model"] == "gemini-2.5-pro"
         assert req.extra["local_model"] == "qwen3.5:9b"
+
+    def test_main_stream_code_mode_uses_editor_code_executor_not_quick_executor(
+        self, app_client
+    ):
+        fake_result = {
+            "stdout": "chart",
+            "stderr": "",
+            "files": {"chart.png": "ZmFrZQ=="},
+            "error": "",
+        }
+
+        def fail_quick_executor(self, request):
+            raise AssertionError("editor code mode should not use EditorQuickActionExecutor")
+
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fail_quick_executor,
+        ), patch(
+            "app.core.agent.llm_provider_helpers.call_llm_sync",
+            return_value="print('chart')",
+        ), patch("app.core.sandbox.run_python", return_value=fake_result):
+            resp = app_client.post(
+                "/api/editor/ai/stream",
+                json={
+                    "action": "chart",
+                    "instruction": "生成图表",
+                    "data_context": "类别,值\nA,10",
+                    "lang": "python",
+                },
+            )
+            payload = resp.get_data()
+
+        assert resp.status_code == 200
+        events = parse_sse_events(payload)
+        assert any(event.get("type") == "code_result" for event in events)
+        code_result = [event for event in events if event.get("type") == "code_result"][-1]
+        assert code_result["files"] == {"chart.png": "ZmFrZQ=="}
 
 
 class TestEditorAIAgent:
@@ -2523,26 +2568,16 @@ class TestLocalModelMode:
 
     def test_local_mode_uses_ollama_when_alive(self, app_client):
         """model_mode=local + Ollama alive → response comes from Ollama, not cloud."""
-        from unittest.mock import patch, MagicMock
+        from app.core.agent.lifecycle import evt_stream_chunk, evt_task_complete
 
-        # Mock Ollama provider to return a known response
-        mock_provider = MagicMock()
-        mock_provider.generate_content.return_value = iter(
-            [
-                {"content": "本地", "tool_calls": [], "usage": {}},
-                {"content": "Ollama", "tool_calls": [], "usage": {}},
-                {"content": "响应", "tool_calls": [], "usage": {}},
-            ]
-        )
+        def fake_iter_events(self, request):
+            assert request.model_mode == "local"
+            yield evt_stream_chunk("本地Ollama响应")
+            yield evt_task_complete(result="本地Ollama响应")
 
         with patch(
-            "app.core.socket_handler._is_ollama_alive", return_value=True
-        ), patch(
-            "app.core.socket_handler._get_local_provider", return_value=mock_provider
-        ), patch(
-            "app.core.agent.agent_loop._is_ollama_alive", return_value=True
-        ), patch(
-            "app.core.agent.agent_loop._get_local_provider", return_value=mock_provider
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_iter_events,
         ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -2564,11 +2599,16 @@ class TestLocalModelMode:
 
     def test_local_mode_ollama_not_running_returns_error(self, app_client):
         """model_mode=local + Ollama not running → returns error event."""
-        from unittest.mock import patch
+        from app.core.agent.lifecycle import evt_error
+
+        def fake_iter_events(self, request):
+            assert request.model_mode == "local"
+            yield evt_error("Ollama not running")
 
         with patch(
-            "app.core.socket_handler._is_ollama_alive", return_value=False
-        ), patch("app.core.agent.agent_loop._is_ollama_alive", return_value=False):
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_iter_events,
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2627,12 +2667,12 @@ class TestLocalModelMode:
                 )
 
         with patch("web.settings.SettingsManager.get", return_value=True), patch(
-            "app.core.agent.agent_loop._get_provider", return_value=FakeCloudProvider()
+            "app.core.agent.llm_provider_helpers.get_provider", return_value=FakeCloudProvider()
         ), patch(
-            "app.core.agent.agent_loop._get_local_provider",
+            "app.core.agent.llm_provider_helpers.get_local_provider",
             return_value=FakeLocalProvider(),
         ), patch(
-            "app.core.agent.agent_loop._is_ollama_alive", return_value=True
+            "app.core.agent.llm_provider_helpers.is_ollama_alive", return_value=True
         ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -2780,11 +2820,15 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_keeps_write_tool_milestones_visible(self):
         """Successful file-writing tool events should remain visible instead of being fully suppressed."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        labels = _read_frontend_source("web/src/workspace/task-step-labels.ts")
 
-        assert "return isInternalTool(name) || isReadTool(name);" in renderer
-        assert "ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name)" in renderer
-        assert "'repair_guard'" in renderer
-        assert "'readonly_answer_guard'" in renderer
+        assert "return isInternalTaskTool(name) || isReadTaskTool(name);" in renderer
+        assert "shouldAlwaysSuppressTaskToolFinished(name)" in renderer
+        assert "export function isInternalTaskTool(name: string): boolean" in labels
+        assert "export function isReadTaskTool(name: string): boolean" in labels
+        assert "export function shouldAlwaysSuppressTaskToolFinished(name: string): boolean" in labels
+        assert "'repair_guard'" in labels
+        assert "'readonly_answer_guard'" in labels
         assert "return false;" in renderer
         assert "function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void" in renderer
         assert (
@@ -2853,7 +2897,7 @@ class TestLocalModelMode:
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
         assert "const runtime = data.runtime && typeof data.runtime === 'object' ? data.runtime : {};" in renderer
-        assert "const terminalStatus = String(runtime.terminal_status || '').trim();" in renderer
+        assert "const terminalStatus = normalizeFileTaskTerminalStatus(runtime.terminal_status || '');" in renderer
         assert "terminal_status: terminalStatus" in renderer
         assert "fatal_error_text: String((element as any)._fatalErrorText || '')" in dispatcher
 
@@ -2864,7 +2908,11 @@ class TestLocalModelMode:
 
         assert "function normalizedTaskLifecyclePayload(payload: any): Record<string, any>" in renderer
         assert (
-            "const classification = data.classification && typeof data.classification === 'object'"
+            "const classification = decisionContext && decisionContext.classification && typeof decisionContext.classification === 'object'"
+            in renderer
+        )
+        assert (
+            "(data.classification && typeof data.classification === 'object' ? data.classification : null)"
             in renderer
         )
         assert "'task.classified': handleEvent_task_classified" in renderer
@@ -3267,42 +3315,10 @@ class TestLegacyDocumentCompatRoutes:
         assert body["revised_file"] == str(revised_path)
         assert body["applied"] == 3
 
-    def test_document_analyze_annotations_route_uses_chunked_feedback_path(
-        self, monkeypatch, tmp_path
-    ):
-        import web.document_feedback as feedback_module
-
-        docx_path = tmp_path / "legacy-analyze.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
+    def test_document_analyze_annotations_route_is_removed(self, monkeypatch, tmp_path):
         client = self._make_document_client(monkeypatch, tmp_path)
-
-        class FakeFeedback:
-            def __init__(self, gemini_client=None, default_model_id="gemini-2.5-pro"):
-                self.gemini_client = gemini_client
-                self.default_model_id = default_model_id
-
-            def analyze_for_annotation_chunked(self, *args, **kwargs):
-                return {
-                    "success": True,
-                    "annotations": [{"原文片段": "foo", "修改建议": "bar"}],
-                    "annotation_count": 1,
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        resp = client.post(
-            "/api/document/analyze-annotations",
-            json={
-                "file_path": str(docx_path),
-                "requirement": "请只分析并标出问题",
-            },
-        )
-
-        body = resp.get_json()
-        assert resp.status_code == 200
-        assert body["success"] is True
-        assert body["annotation_count"] == 1
-        assert body["annotations"][0]["原文片段"] == "foo"
+        resp = client.post("/api/document/analyze-annotations", json={})
+        assert resp.status_code == 404
 
     def test_document_batch_annotate_stream_route_uses_feedback_streaming_path(
         self, monkeypatch, tmp_path
@@ -4311,6 +4327,35 @@ class TestTaskAgentDocumentEdits:
         assert result.get("error") == ""
         assert result.get("stdout", "").strip() == "ok"
 
+    def test_run_python_in_sandbox_syncs_target_basename_without_marker(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        source_path = workspace / "sales_sample.xlsx"
+        source_path.write_bytes(b"source")
+
+        monkeypatch.setattr(task_tools, "_get_workspace_root", lambda: str(workspace))
+
+        result = task_tools.run_python_in_sandbox(
+            (
+                "from pathlib import Path\n"
+                "Path('sales_profit_report.xlsx').write_bytes(b'report')\n"
+                "print('saved report')\n"
+            ),
+            timeout=10,
+            task_files=[{"path": str(source_path), "name": source_path.name}],
+            target_path="codex_real_task_20260701/sales_profit_report.xlsx",
+        )
+
+        target = workspace / "codex_real_task_20260701" / "sales_profit_report.xlsx"
+        assert result.get("error") == ""
+        assert target.read_bytes() == b"report"
+        assert str(target) in result.get("__koto_created__", [])
+        assert "KOTO_CREATED" in result.as_text()
+
     def test_task_agent_run_python_code_syncs_modified_attached_file_and_emits_file_change(
         self, tmp_path, monkeypatch
     ):
@@ -4656,10 +4701,13 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
 
         assert "function explicitWriteTargetPathFromText(text: string): string" in dispatcher
+        assert "function joinSplitDirectoryTargetPath(source: string, rawPath: string, start: number, end: number): string" in dispatcher
+        assert "splitOutputDirectoryAfterFile(after)" in dispatcher
         assert "function hasReadOnlyHint(text: string): boolean" in dispatcher
         assert "const readSourcePattern" in dispatcher
         assert "const explicitOutputBeforePattern" in dispatcher
-        assert "overrideOptions.enable_ai_intent_adjudicator = true;" in dispatcher
+        assert "overrideOptions.enable_ai_intent_adjudicator = true;" not in dispatcher
+        assert "delete overrideOptions.enable_ai_intent_adjudicator;" in dispatcher
         assert "overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';" in dispatcher
 
     def test_workspace_dispatcher_marks_short_task_critiques_as_followup_context(self):
@@ -4881,9 +4929,12 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
         assert (
-            "turn.task_card_snapshot && !taskTurnIsTerminal(turn) && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function'"
+            "turn.task_card_snapshot && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function'"
             in conversation
         )
+        assert "!taskTurnIsTerminal(turn) && (window as any).WA.restoreTaskRunCard" not in conversation
+        assert "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void" in conversation
+        assert "element.dataset.taskMemorySummary = memorySummary" in conversation
         assert "task_card_snapshot:" in conversation
         assert "function beginAssistantTaskTurn(metadata?: Record<string, any>): WATurn | null" in conversation
         assert "function syncAssistantTaskTurn(turnId: string, metadata?: Record<string, any>): WATurn | null" in conversation
@@ -5082,9 +5133,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "white-space: nowrap;" in css
         assert "min-height: 34px;" in css
 
-    def test_agent_loop_sends_sanitized_proposal_summary(self):
+    def test_doc_executor_sends_sanitized_proposal_summary(self):
         """Structured proposal summary should reuse the sanitized note, not raw clean_text."""
-        src = _read_frontend_source("app/core/agent/agent_loop.py")
+        src = _read_frontend_source("app/core/agent/doc_websocket_agent_executor.py")
         assert 'proposal_summary = proposals[0].get("rationale", "")' in src
         assert "yield evt_proposal(proposals, proposal_summary)" in src
 
