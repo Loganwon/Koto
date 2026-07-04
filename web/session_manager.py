@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
 import time
 from datetime import datetime
 
@@ -66,12 +67,25 @@ class SessionManager:
 
     def _trim_history(self, history, max_turns=20):
         """保留最多 20 轮对话（约 12000+ tokens），确保上下文足够但不过长"""
-        if len(history) <= max_turns:
-            return history
+        model_history = [
+            turn
+            for turn in history
+            if not (
+                isinstance(turn, dict)
+                and (
+                    turn.get("skip_model_context") is True
+                    or str(turn.get("skip_model_context") or "").strip().lower() in {"1", "true", "yes"}
+                    or turn.get("partial") is True
+                    or str(turn.get("partial") or "").strip().lower() in {"1", "true", "yes"}
+                )
+            )
+        ]
+        if len(model_history) <= max_turns:
+            return model_history
         # 只保留最后 N 轮对话
-        trimmed = history[-max_turns:]
+        trimmed = model_history[-max_turns:]
         logger.debug(
-            f"[HISTORY] Trimmed to last {max_turns} turns (was {len(history)})"
+            f"[HISTORY] Trimmed to last {max_turns} turns (was {len(model_history)})"
         )
         return trimmed
 
@@ -89,8 +103,27 @@ class SessionManager:
 
     def save(self, filename, history):
         path = os.path.join(_chat_dir(), filename)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2, ensure_ascii=False)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=os.path.dirname(path),
+                delete=False,
+                suffix=".tmp",
+            ) as f:
+                tmp_path = f.name
+                json.dump(history, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
     def append_and_save(self, filename, user_msg, model_msg, **extra_fields):
         """追加消息并保存 - 基于磁盘完整历史，避免截断导致数据丢失"""
