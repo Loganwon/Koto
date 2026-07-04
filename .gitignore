@@ -24,6 +24,8 @@ config/deepseek_config.env
 config/user_settings.json
 config/user_profile.json
 config/memory.json
+config/macro_suggestions.json
+config/personality_matrix.json
 config/token_usage.json
 config/skill_bindings.json
 config/model_setup_done.json
