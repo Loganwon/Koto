@@ -1,6 +1,6 @@
 # Legacy Code Path Audit
 
-Date: 2026-06-20
+Date: 2026-06-28
 
 This audit tracks production code paths that still look old, compatibility-only,
 or migrated-but-retained. The goal is to avoid deleting current runtime
@@ -21,7 +21,11 @@ assistant overlap.
 | Task PPT multi-step execution | PPT planning, quality gate, and rendering now delegate to `web.task_orchestrator_ppt.execute_ppt_multi_step`, keeping heavy PPT execution details out of the orchestrator class. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_ppt_multi_step_lives_outside_orchestrator_class` |
 | Task Web search execution | `_execute_web_search` now delegates to `web.task_orchestrator_search.execute_web_search`, keeping `WebSearcher` and async search progress details out of the orchestrator class. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_web_search_lives_outside_orchestrator_class` |
 | Task quality scoring | `_validate_quality` now delegates to `web.task_orchestrator_quality.validate_quality`, isolating Gemini scoring and runtime client access from the orchestrator class. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_quality_scoring_lives_outside_orchestrator_class` |
-| Removed native file open route | `/api/files/open` still returns 404 for old callers, but the function is now named `removed_native_open_file` instead of `retired_open_file`. | `tests/unit/test_architecture_guardrails.py::test_removed_file_hub_open_endpoint_is_explicitly_named` |
+| Removed native file open route | The `/api/files/open` compatibility handler has been deleted; no frontend caller remains. | `tests/unit/test_architecture_guardrails.py::test_removed_file_hub_open_endpoint_has_no_compatibility_route` |
+| Retired document annotation alias | Removed non-streaming `/api/document/analyze-annotations`; current callers use the streaming annotation flow or the unified file-task endpoint. | `tests/unit/test_architecture_guardrails.py::test_retired_api_aliases_stay_removed` |
+| Retired Skill toggle alias | Removed `/api/skills/<id>/enable`; `/toggle` is the single supported endpoint. | `tests/unit/test_architecture_guardrails.py::test_retired_api_aliases_stay_removed` |
+| Frontend orphan assets | Removed two unbundled TS modules, an unrendered template, two unloaded stylesheets, and two unrouted static debug pages. | `tests/unit/test_frontend_button_route_contract.py::test_all_typescript_sources_are_reachable_from_a_bundle_entrypoint` |
+| AI panel CSS ownership | Removed duplicate composer/session selectors from `workspace.css`; `workspace-ai-panel.css` is now the only final owner. | `tests/unit/test_workspace_ai_composer_contract.py` |
 | Migrated class tests | Unit tests for `WebSearcher`, `ContextAnalyzer`, `Utils`, and `SessionManager` now import their real modules instead of `web.app`, reducing test pressure on old app compatibility exports. | `tests/unit/test_architecture_guardrails.py::test_migrated_app_class_tests_use_real_modules` |
 | Migrated helper tests | Unit tests for stream interrupts, SSE sanitization, filename sanitization, proxy normalization, prompt extraction, fake Gemini responses, and interactions-only model checks now target helper modules instead of `web.app`. | `tests/unit/test_architecture_guardrails.py::test_migrated_app_class_tests_use_real_modules` |
 | Chat/filegen helpers | Chat system instruction generation and FILE_GEN time parsing/context building now live in `web.chat_system_instruction` and `web.filegen_time_context`, reducing `web.app` to runtime aliases for those helpers. | `tests/unit/test_architecture_guardrails.py::test_migrated_app_class_tests_use_real_modules` |
@@ -31,10 +35,7 @@ assistant overlap.
 
 | Path | Current role | Cleanup condition |
 | --- | --- | --- |
-| `app/api/agent_routes.py::process_compat` | Phase 2 compatibility endpoint for old AdaptiveAgent clients. | Remove only after frontend and external callers no longer use `/api/adaptive-agent/process`. |
-| `app/api/agent_routes.py::process_stream_compat` | SSE compatibility endpoint delegated to `ChatPipeline`. | Remove with the non-streaming AdaptiveAgent compatibility endpoint. |
 | `web/blueprints/pages.py:/workspace-assistant` | Redirect-only legacy URL alias to `/`. | Remove after installer/tests/docs and old bookmarks no longer require the alias. |
-| `web/file_operator.py` | Small helper retained for the chat `FILE_OP` branch. | Remove after chat file operations fully route through FileTaskRuntime or file-assistant services. |
 | `web.memory_runtime` compatibility exports through `web.app` | Runtime implementation has moved out, but old import names still exist on `web.app`. | Remove after chat stream handlers, tests, and external imports target `web.memory_runtime` or `web.runtime_context` directly. |
 | `web/app.py` chat wrappers (`chat`, `chat_stream`, `chat_with_file`) | Non-route compatibility wrappers after blueprint migration. | Remove after tests and import callers stop importing these names from `web.app`. |
 
@@ -57,7 +58,6 @@ built bundle references instead of these removed paths.
 
 | Path | Observation | Suggested next action |
 | --- | --- | --- |
-| `app/api/file_hub_routes.py::removed_native_open_file` | Intentional 404 route for removed `/api/files/open` native-open behavior. | Keep until callers stop probing the old endpoint; then remove the route entirely. |
 | `app/core/routing/local_model_router.py::to_legacy_tuple` | Structured decision still exposes a legacy tuple view. | Keep while SmartDispatcher or tests consume tuple format; otherwise migrate consumers to the object contract. |
 | `app/core/workflow/interactive_planner.py` legacy dataclasses | Old planner compatibility data classes remain. | Confirm production callers before removing; likely tied to workflow UI compatibility. |
 | `app/core/agent/task_tools.py` legacy marker text helpers | Structured sandbox results still provide marker-text compatibility. | Keep until every file-task consumer reads structured results. |
@@ -80,5 +80,5 @@ replacement path exists.
 1. Replace `web.app` chat wrapper imports in tests with blueprint/runtime module imports.
 2. Move remaining `web.app` model/client globals into explicit runtime modules.
 3. Move `TaskOrchestrator._merge_results` into a small result assembly service or convert it to a pure function.
-4. Revisit AdaptiveAgent compatibility endpoints after route telemetry or grep confirms no callers.
-5. Remove `/api/files/open` after telemetry confirms no old native-open clients remain.
+4. Revisit the `/workspace` and `/workspace-assistant` redirect aliases after installer and bookmark compatibility no longer matters.
+5. Migrate the remaining tuple-based local-router tests before removing `to_legacy_tuple`.

@@ -109,9 +109,8 @@ hidden imports, and regression tests agree.
   the orchestrator class no longer imports `WebSearcher` directly.
 - Compound-task quality scoring now lives in `web.task_orchestrator_quality`;
   the orchestrator class no longer imports the Gemini client/runtime proxy.
-- The removed `/api/files/open` native-open endpoint remains a deliberate 404
-  compatibility boundary and is named `removed_native_open_file`; the old
-  `retired_open_file` name is guarded against.
+- The removed `/api/files/open` native-open endpoint no longer has a
+  compatibility handler; guards prevent the route from returning.
 - `docs/LEGACY_CODE_PATH_AUDIT.md` records the remaining compatibility paths
   and separates real old-code candidates from normal fallback behavior.
 - External file-task planner adapters have been removed; native file-task
