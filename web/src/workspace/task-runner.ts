@@ -47,7 +47,7 @@ export interface TaskCardElement extends HTMLElement {
   _completedChunkRows?: Map<string, HTMLElement>;
   _singletonRows?: Map<string, HTMLElement>;
   _fileRefreshHashes?: Map<string, string>;
-  _terminalSnapshotHandler?: (card: TaskCardElement) => void;
+  _terminalSnapshotHandler?: (_card: TaskCardElement) => void;
 }
 
 export interface FileTaskUiState {
@@ -89,7 +89,7 @@ export interface StreamFileTaskOptions {
   loadingEl?: HTMLElement | null;
   signal?: AbortSignal;
   abortController?: AbortController;
-  onTaskCardSnapshot?: (card: TaskCardElement) => void;
+  onTaskCardSnapshot?: (_card: TaskCardElement) => void;
 }
 
 export interface ResumeFileTaskOptions {
@@ -102,7 +102,7 @@ export interface ResumeFileTaskOptions {
   taskCardSnapshot?: Record<string, any>;
   initialStatus?: string;
   status?: string;
-  onTaskCardSnapshot?: (card: TaskCardElement) => void;
+  onTaskCardSnapshot?: (_card: TaskCardElement) => void;
   replay?: boolean;
   taskPayload?: Record<string, any>;
   actionLabel?: string;
@@ -121,7 +121,7 @@ export interface TaskContract {
 }
 
 export interface CompactTextOptions {
-  text?: (value: string, limit: number) => string;
+  text?: (_value: string, _limit: number) => string;
 }
 
 const FILE_TASK_LOG_PREFIX = '[WA fileTask]';
@@ -1835,7 +1835,7 @@ function handleEvent_tool_started(card: TaskCardElement, evt: Record<string, any
   const argStr = args ? ' ' + esc(String(args).trim()) : '';
   const content = '<span class="wa-task-chip">' + esc(toolTitle) + '</span>' + esc('准备执行') + argStr;
   const tag = 'tool:' + toolName + ':' + String(data.tool_use_id || data.execution_id || '');
-  const row = upsertStepSingletonRow(step, tag, 'tool-start', content);
+  upsertStepSingletonRow(step, tag, 'tool-start', content);
   markTaskActivity(card);
 }
 
@@ -1858,7 +1858,7 @@ function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, an
     upsertStepSingletonRow(step, tag, 'warn', content);
     setStatus(card, data.tool_name === 'ask_user' || isFileTaskConfirmationStatus(data.status || data.terminal_status || '') ? '待确认' : '已阻止');
   } else {
-    const row = upsertStepSingletonRow(step, tag, kind, content);
+    upsertStepSingletonRow(step, tag, kind, content);
   }
   appendToolArtifacts(step, data);
   markTaskActivity(card);
@@ -1914,7 +1914,7 @@ function handleEvent_read_changed(card: TaskCardElement, evt: Record<string, any
   const key = 'read:' + path;
   if (state.readKeys.has(key)) return;
   state.readKeys.add(key);
-  let row = state.readSummaries.get(key);
+  const row = state.readSummaries.get(key);
   if (row) return;
   const shortPath = path.split('/').pop() || path;
   const content = '<span class="wa-task-chip">读取</span><a class="wa-task-file-link" href="javascript:void(0)" data-file-path="' + escAttr(path) + '">' + esc(shortPath) + '</a>';
@@ -2033,7 +2033,7 @@ function handleEvent_code_summary(card: TaskCardElement, evt: Record<string, any
   if (!file && !summary) return;
   const codeKey = 'code:' + (file || 'file:' + Date.now());
   if (file) {
-    let row = state.codeSummaryRows.get(codeKey);
+    const row = state.codeSummaryRows.get(codeKey);
     if (row) return;
     const shortFile = file.split('/').pop() || file;
     const content = '<span class="wa-task-chip success">' + esc(action === 'delete' ? '删除' : '写入') + '</span><a class="wa-task-file-link" href="javascript:void(0)" data-file-path="' + escAttr(file) + '">' + esc(shortFile) + '</a>';
@@ -2096,7 +2096,7 @@ function handleEvent_file_refresh(card: TaskCardElement, evt: Record<string, any
   }
 }
 
-const EVENT_HANDLERS: Record<string, (card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>) => void> = {
+const EVENT_HANDLERS: Record<string, (_card: TaskCardElement, _evt: Record<string, any>, _payload: Record<string, any>) => void> = {
   'plan': handleEvent_plan,
   'task.classified': handleEvent_task_classified,
   'plan.created': handleEvent_plan,
@@ -2204,7 +2204,6 @@ function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, bod
   streamingCard.dataset.taskUrl = url;
   appendTaskRunCardIfDetached(streamingCard);
   revealTaskWorkbenchForCard(streamingCard, { scroll: true });
-  const options = opts && typeof opts === 'object' ? opts : {};
   const httpMethod = String(method || 'POST').toUpperCase() || 'POST';
   const fetchAbort = new AbortController();
   const signal: AbortSignal = fetchAbort.signal;
@@ -2411,7 +2410,7 @@ function markTaskRunCardAsHistory(card: TaskCardElement, options?: Record<string
   return card;
 }
 
-function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>, initialSummary?: string | Record<string, any>, initialStatus?: string, recoveryPayload?: Record<string, any>): TaskCardElement | null {
+function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>, initialSummary?: string | Record<string, any>, initialStatus?: string, _recoveryPayload?: Record<string, any>): TaskCardElement | null {
   if (cardOrSnapshot && !isTaskCardElement(cardOrSnapshot as TaskCardElement) && typeof cardOrSnapshot === 'object' && (cardOrSnapshot as Record<string, any>).html) {
     const wrapper = document.createElement('div');
     wrapper.innerHTML = String((cardOrSnapshot as Record<string, any>).html || '').trim();
