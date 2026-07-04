@@ -175,6 +175,72 @@ class TestWorkspaceAiAssistantSmoke:
         assert "模拟任务已完成" in card_text
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
+    @pytest.mark.parametrize(
+        ("terminal_status", "expected_title", "expected_detail"),
+        [
+            ("needs_attention", "需处理", "当前任务未完成"),
+            ("context_summary_fallback", "需复核", "临时摘要"),
+        ],
+    )
+    def test_workspace_ai_task_card_renders_incomplete_terminal_states(
+        self,
+        e2e_page,
+        console_errors,
+        e2e_base_url,
+        terminal_status,
+        expected_title,
+        expected_detail,
+    ):
+        summary_text = "模型未返回完整答案，当前只保留临时结果。"
+        sse_events = [
+            {"type": "run.started", "run_id": f"browser_{terminal_status}", "seq": 1, "payload": {"mode": "whitebox_v1"}},
+            {"type": "plan.created", "run_id": f"browser_{terminal_status}", "seq": 2, "payload": {"summary": "准备处理任务。"}},
+            {
+                "type": "run.finished",
+                "run_id": f"browser_{terminal_status}",
+                "seq": 3,
+                "payload": {
+                    "summary": summary_text,
+                    "completed_task": False,
+                    "runtime": {"terminal_status": terminal_status},
+                },
+            },
+        ]
+
+        _mock_file_task_route(e2e_page)
+        e2e_page.route(
+            "**/api/editor/ai/task-stream",
+            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+        )
+
+        _open_workspace_ai(e2e_page, e2e_base_url)
+
+        e2e_page.locator("#wa-user-input").fill("分析文件但模型返回不完整")
+        e2e_page.locator("#wa-send-btn").click()
+
+        task_card = e2e_page.locator(".wa-task-run").first
+        task_card.wait_for(timeout=PAGE_TIMEOUT)
+        e2e_page.wait_for_function(
+            """([expectedTitle, expectedDetail, terminalStatus]) => {
+                const card = document.querySelector('.wa-task-run');
+                const text = card && (card.textContent || '');
+                return !!card
+                    && card.dataset.taskCompleted === 'false'
+                    && card.dataset.taskTerminalStatus === terminalStatus
+                    && text.includes(expectedTitle)
+                    && text.includes(expectedDetail)
+                    && !/任务完成/.test(text);
+            }""",
+            arg=[expected_title, expected_detail, terminal_status],
+            timeout=PAGE_TIMEOUT,
+        )
+
+        card_text = task_card.evaluate("(el) => el.textContent || ''")
+        assert expected_title in card_text
+        assert expected_detail in card_text
+        assert "任务完成" not in card_text
+        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+
     def test_workspace_ai_task_card_renders_supervisor_audit(self, e2e_page, console_errors, e2e_base_url):
         supervisor_audit = {
             "version": "file_task_supervisor_audit_v1",
@@ -416,4 +482,176 @@ class TestWorkspaceAiAssistantSmoke:
         assert second_payload.get("session_id") == first_payload.get("session_id")
         assert any(item.get("role") == "user" and item.get("content") == "先分析文档A" for item in second_history)
         assert any(item.get("role") == "assistant" and item.get("content") == "模拟任务1已完成" for item in second_history)
+        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+
+    def test_workspace_ai_completed_task_persists_and_restores_final_answer_last(self, e2e_page, console_errors, e2e_base_url):
+        summary_text = "browser final answer is last"
+        sse_events = [
+            {"type": "run.started", "run_id": "browser_history_restore", "seq": 1, "payload": {"mode": "whitebox_v1"}},
+            {"type": "plan.created", "run_id": "browser_history_restore", "seq": 2, "payload": {"summary": "准备处理任务。"}},
+            {"type": "step.started", "run_id": "browser_history_restore", "seq": 3, "step_id": "execute", "payload": {"title": "执行处理"}},
+            {"type": "step.result", "run_id": "browser_history_restore", "seq": 4, "step_id": "execute", "payload": {"title": "执行处理", "summary": "步骤完成，结果见总结与回答。", "status": "completed"}},
+            {"type": "run.finished", "run_id": "browser_history_restore", "seq": 5, "payload": {"summary": summary_text, "completed_task": True, "status": "completed"}},
+        ]
+
+        _mock_file_task_route(e2e_page)
+        e2e_page.route(
+            "**/api/editor/ai/task-stream",
+            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+        )
+
+        _open_workspace_ai(e2e_page, e2e_base_url)
+        session_id = e2e_page.evaluate("""() => window._waSession && window._waSession()""")
+        assert session_id and not str(session_id).startswith("workspace_runtime_")
+
+        e2e_page.locator("#wa-user-input").fill("生成一份任务总结")
+        e2e_page.locator("#wa-send-btn").click()
+        e2e_page.wait_for_function(
+            """(summaryText) => {
+                const summary = document.querySelector('.wa-task-run:not([data-history-snapshot="true"]) [data-role="summary"]');
+                const report = summary && summary.querySelector('[data-role="final-report"]');
+                return !!report
+                    && report.textContent.includes(summaryText)
+                    && summary.lastElementChild === report;
+            }""",
+            arg=summary_text,
+            timeout=PAGE_TIMEOUT,
+        )
+
+        persisted = None
+        for _ in range(30):
+            persisted = e2e_page.evaluate(
+                """async ([sessionId, summaryText]) => {
+                    const response = await fetch(`/api/sessions/${encodeURIComponent(sessionId)}`, { cache: 'no-store' });
+                    if (!response.ok) return null;
+                    const data = await response.json();
+                    const history = Array.isArray(data.history) ? data.history : [];
+                    const assistant = history.find((entry) => {
+                        const parts = Array.isArray(entry.parts) ? entry.parts.join('\\n') : '';
+                        return String(entry.role || '').toLowerCase() === 'model'
+                            && String(parts || entry.content || '').includes(summaryText);
+                    });
+                    return assistant ? { schema: data.schema_version, entry_schema: assistant.schema_version, has_structure: !!assistant.test_structure } : null;
+                }""",
+                [session_id, summary_text],
+            )
+            if persisted and persisted.get("schema") == 2 and persisted.get("entry_schema") == 2 and persisted.get("has_structure"):
+                break
+            e2e_page.wait_for_timeout(250)
+
+        assert persisted
+        assert persisted["schema"] == 2
+        assert persisted["entry_schema"] == 2
+        assert persisted["has_structure"] is True
+
+        _goto(e2e_page, f"{e2e_base_url}/")
+        e2e_page.wait_for_function(
+            """() => window.WA
+                && typeof window.WA.openInMainView === 'function'
+                && typeof window.WA.openAiSession === 'function'""",
+            timeout=PAGE_TIMEOUT,
+        )
+        e2e_page.evaluate("""() => window.WA.openInMainView()""")
+        e2e_page.evaluate("""(sessionId) => window.WA.openAiSession(sessionId, { force: true })""", session_id)
+        e2e_page.wait_for_function(
+            """(summaryText) => {
+                const host = document.querySelector('.wa-task-report-turn');
+                const process = host && host.querySelector('.wa-task-process-report');
+                const answer = host && host.querySelector('.wa-task-final-answer');
+                if (!host || !process || !answer) return false;
+                const children = Array.from(host.children);
+                return answer.textContent.includes(summaryText)
+                    && children.indexOf(process) >= 0
+                    && children.indexOf(answer) > children.indexOf(process)
+                    && host.lastElementChild === answer;
+            }""",
+            arg=summary_text,
+            timeout=PAGE_TIMEOUT,
+        )
+
+        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+
+    def test_workspace_ai_multichart_artifacts_render_as_grid_and_guard_is_readable(self, e2e_page, console_errors, e2e_base_url):
+        chart_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
+        final_summary = "仍有生成图表未插入 DOCX：chart2_product_mix.png"
+        sse_events = [
+            {"type": "run.started", "run_id": "browser_multichart_guard", "seq": 1, "payload": {"mode": "whitebox_v1"}},
+            {"type": "plan.created", "run_id": "browser_multichart_guard", "seq": 2, "payload": {"summary": "准备生成多张财务图表并写入 Word。"}},
+            {"type": "step.started", "run_id": "browser_multichart_guard", "seq": 3, "step_id": "execute", "payload": {"title": "执行代码生成图表"}},
+            {
+                "type": "tool.finished",
+                "run_id": "browser_multichart_guard",
+                "seq": 4,
+                "step_id": "execute",
+                "payload": {
+                    "tool_name": "run_python_code",
+                    "success": True,
+                    "result_preview": "已生成 2 张图表",
+                    "artifacts": [
+                        {"kind": "image", "name": "chart1_revenue_profit_trend.png", "mime_type": "image/png", "data": chart_png},
+                        {"kind": "image", "name": "chart2_product_mix.png", "mime_type": "image/png", "data": chart_png},
+                        {"kind": "image", "name": "chart2_product_mix.png", "mime_type": "image/png", "data": chart_png},
+                    ],
+                },
+            },
+            {
+                "type": "tool.finished",
+                "run_id": "browser_multichart_guard",
+                "seq": 5,
+                "step_id": "execute",
+                "payload": {
+                    "tool_name": "image_insert_guard",
+                    "success": False,
+                    "result_preview": final_summary,
+                    "pending_image_count": 1,
+                },
+            },
+            {"type": "run.finished", "run_id": "browser_multichart_guard", "seq": 6, "payload": {"summary": final_summary, "completed_task": False, "status": "quality_gate_failed"}},
+        ]
+
+        _mock_file_task_route(e2e_page)
+        e2e_page.route(
+            "**/api/editor/ai/task-stream",
+            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+        )
+
+        _open_workspace_ai(e2e_page, e2e_base_url)
+
+        e2e_page.locator("#wa-user-input").fill("分析 xlsx 财务预测，生成多张图并加入 docx")
+        e2e_page.locator("#wa-send-btn").click()
+
+        e2e_page.wait_for_function(
+            """() => document.querySelectorAll('.wa-task-artifact-image').length >= 2""",
+            timeout=PAGE_TIMEOUT,
+        )
+        e2e_page.wait_for_function(
+            """() => /chart2_product_mix\\.png/.test(document.body.textContent || '')""",
+            timeout=PAGE_TIMEOUT,
+        )
+
+        layout = e2e_page.evaluate(
+            """() => {
+                const host = document.querySelector('.wa-task-artifacts');
+                const images = Array.from(document.querySelectorAll('.wa-task-artifact-image'));
+                const card = document.querySelector('.wa-task-run');
+                const hostStyle = host ? getComputedStyle(host) : null;
+                const imageStyle = images[0] ? getComputedStyle(images[0]) : null;
+                return {
+                    imageCount: images.length,
+                    display: hostStyle ? hostStyle.display : '',
+                    gap: hostStyle ? hostStyle.gap : '',
+                    objectFit: imageStyle ? imageStyle.objectFit : '',
+                    aspectRatio: imageStyle ? imageStyle.aspectRatio : '',
+                    cardText: card ? (card.textContent || '') : '',
+                };
+            }"""
+        )
+
+        assert layout["imageCount"] == 2
+        assert layout["display"] == "grid"
+        assert layout["gap"] in {"10px", "10px 10px"}
+        assert layout["objectFit"] == "contain"
+        assert layout["aspectRatio"] == "16 / 10"
+        assert "image_insert_guard" not in layout["cardText"]
+        assert "chart2_product_mix.png" in layout["cardText"]
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
