@@ -871,6 +871,27 @@ def test_mcp_frontend_action_allows_task_file_attachment(tmp_path, monkeypatch):
     assert queued["action"]["path"] == "reports/input.docx"
 
 
+def test_mcp_frontend_action_allows_task_result_evidence(tmp_path, monkeypatch):
+    from app.core.agent import frontend_observability
+
+    monkeypatch.setattr(
+        frontend_observability,
+        "_event_log_path",
+        lambda: tmp_path / "frontend_observability.jsonl",
+    )
+    frontend_observability.clear_frontend_events()
+
+    queued = frontend_observability.enqueue_frontend_action(
+        action="task_result_evidence",
+        target_session_id="visible-session",
+        options={"limit": 1200, "padding": 10},
+    )
+
+    assert queued["success"] is True
+    assert queued["action"]["action"] == "task_result_evidence"
+    assert queued["action"]["options"]["limit"] == 1200
+
+
 def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypatch):
     from app.core.agent import frontend_observability
 

@@ -20,11 +20,13 @@ type FrontendAction = {
     | 'press'
     | 'snapshot'
     | 'read_dom'
+    | 'task_result_evidence'
     | 'surface_inventory'
     | 'wait_for'
     | 'open_panel'
     | 'search_workspace'
     | 'submit_prompt'
+    | 'attach_task_file'
     | 'list_workspace_files'
     | 'open_workspace_file'
     | 'current_file_state'
@@ -71,6 +73,39 @@ function _now(): number {
 
 function _route(): string {
   return `${location.pathname}${location.search}${location.hash}`;
+}
+
+function _normalizeFrontendTaskPath(path: string): string {
+  let value = String(path || '').trim().replace(/\\/g, '/');
+  value = value.replace(/^\.\//, '');
+  if (/^workspace\//i.test(value)) {
+    value = value.slice('workspace/'.length);
+  }
+  return value;
+}
+
+function _elementViewportClip(el: Element, padding = 8): Record<string, number> {
+  const rect = el.getBoundingClientRect();
+  const x = Math.max(0, Math.floor(rect.x - padding));
+  const y = Math.max(0, Math.floor(rect.y - padding));
+  const maxWidth = Math.max(1, window.innerWidth - x);
+  const maxHeight = Math.max(1, window.innerHeight - y);
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(Math.ceil(rect.width + padding * 2), maxWidth)),
+    height: Math.max(1, Math.min(Math.ceil(rect.height + padding * 2), maxHeight)),
+  };
+}
+
+function _elementRect(el: Element): Record<string, number> {
+  const rect = el.getBoundingClientRect();
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
 }
 
 function _getSessionId(): string {
@@ -1267,6 +1302,63 @@ function _snapshotDetails(): Record<string, unknown> {
   };
 }
 
+function _taskResultEvidence(action: FrontendAction): Record<string, unknown> {
+  const opts = action.options || {};
+  const limit = Math.max(200, Math.min(Number(opts.limit || 2400), 8000));
+  const taskId = String(opts.taskId || opts.task_id || action.value || action.text || '').trim();
+  const runId = String(opts.runId || opts.run_id || action.path || '').trim();
+  const selectors: string[] = [];
+  if (taskId) selectors.push(`.wa-task-run[data-task-id="${CSS.escape(taskId)}"]`);
+  if (runId) selectors.push(`.wa-task-run[data-task-run-id="${CSS.escape(runId)}"]`);
+  selectors.push('.wa-task-run:not([data-history-snapshot="true"])', '.wa-task-run');
+
+  let card: HTMLElement | null = null;
+  let selector = '';
+  for (const candidateSelector of selectors) {
+    const matches = Array.from(document.querySelectorAll(candidateSelector))
+      .filter((item) => _isVisible(item)) as HTMLElement[];
+    if (matches.length) {
+      card = matches[matches.length - 1];
+      selector = candidateSelector;
+      break;
+    }
+  }
+  if (!card) {
+    return {
+      found: false,
+      reason: 'No visible task result card found',
+      chips: Array.from(document.querySelectorAll('#wa-ai-file-chip-list .wa-ctx-file-row'))
+        .map((item) => _visibleText(item, 180)),
+    };
+  }
+  if (opts.scroll !== false) {
+    card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  const finalReport = card.querySelector('.wa-task-final-report, .wa-task-final-answer');
+  const chips = Array.from(document.querySelectorAll('#wa-ai-file-chip-list .wa-ctx-file-row')).map((item) => ({
+    text: _visibleText(item, 180),
+    title: item.getAttribute('title') || '',
+  }));
+  const dataset = (card as HTMLElement).dataset || {};
+  return {
+    found: true,
+    selector,
+    taskId: dataset.taskId || '',
+    runId: dataset.taskRunId || '',
+    terminalStatus: dataset.taskTerminalStatus || '',
+    text: _visibleText(card, limit),
+    finalAnswer: finalReport ? _visibleText(finalReport, limit) : '',
+    chips,
+    elementRect: _elementRect(card),
+    screenshotClip: _elementViewportClip(card, Number(opts.padding || 8)),
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    },
+  };
+}
+
 function _enqueue(event: FrontendEvent): void {
   const enriched = {
     ...event,
@@ -1469,6 +1561,7 @@ async function _waitForTarget(action: FrontendAction): Promise<Element> {
 async function _executeFrontendAction(action: FrontendAction): Promise<Record<string, unknown>> {
   if (action.action === 'snapshot') return _snapshotDetails();
   if (action.action === 'surface_inventory') return _surfaceInventoryDetails(action);
+  if (action.action === 'task_result_evidence') return _taskResultEvidence(action);
   if (action.action === 'read_dom') {
     return {
       snapshot: _snapshotDetails(),
@@ -1520,6 +1613,24 @@ async function _executeFrontendAction(action: FrontendAction): Promise<Record<st
       promptLength: prompt.length,
       submitted: true,
     };
+  }
+  if (action.action === 'attach_task_file') {
+    const rawPath = String(action.path || action.value || action.text || '').trim();
+    const rawPaths = Array.isArray(action.options?.paths) ? action.options.paths : [];
+    const paths = rawPaths.length
+      ? rawPaths.map((item: unknown) => _normalizeFrontendTaskPath(String(item || ''))).filter(Boolean)
+      : [_normalizeFrontendTaskPath(rawPath)].filter(Boolean);
+    if (!paths.length) throw new Error('Task file path is required');
+    const attachFilesToTask = (window as any).WA?.attachFilesToTask;
+    if (typeof attachFilesToTask !== 'function') throw new Error('WA.attachFilesToTask is not available');
+    const result = await attachFilesToTask(paths, {
+      source: 'frontend_action',
+      expandPanel: action.options?.expandPanel !== false,
+      focusInput: action.options?.focusInput !== false,
+      duplicateToast: false,
+      replaceExisting: action.options?.replaceExisting !== false,
+    });
+    return { attached: true, paths, result: _safeJsonClone(result, {}) };
   }
   const target = await _waitForTarget(action);
   if (action.action === 'click') {

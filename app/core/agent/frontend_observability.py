@@ -257,6 +257,7 @@ def enqueue_frontend_action(
         "press",
         "snapshot",
         "read_dom",
+        "task_result_evidence",
         "surface_inventory",
         "wait_for",
         "open_panel",
