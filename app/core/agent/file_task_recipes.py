@@ -57,7 +57,11 @@ _CHART_PATTERN = re.compile(
     re.IGNORECASE,
 )
 _PROBLEM_PATTERN = re.compile(r"(?:问题|风险|缺陷|异常|分析|审计|检查|issue|risk|problem|analy[sz]e|audit)", re.IGNORECASE)
-_TABLE_PATTERN = re.compile(r"(?:表格|工作表|数据表|sheet|table|spreadsheet)", re.IGNORECASE)
+_TABLE_PATTERN = re.compile(
+    r"(?:表格|工作表|数据表|对照表|明细表|汇总表|一致性表|风险矩阵|矩阵|清单|列表|"
+    r"sheet|table|spreadsheet|matrix|checklist)",
+    re.IGNORECASE,
+)
 _TABLE_PRESERVE_PATTERN = re.compile(
     r"(?:保留|保持).{0,24}(?:已有|现有|原有|当前).{0,16}(?:表格|工作表|数据表|table).{0,16}(?:不变|不修改|不要改|原样)"
     r"|(?:preserve|keep).{0,32}(?:existing|current|original).{0,24}(?:table|sheet|spreadsheet)",

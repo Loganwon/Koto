@@ -3372,7 +3372,10 @@ class FileTaskRuntime:
         diagnostic_request = classification_state.diagnostic_request
         request_kind = classification_flow.request_kind
         execution_mode = classification_flow.execution_mode
-        reason_codes: List[str] = list(classification_flow.reason_codes)
+        reason_codes: List[str] = [
+            *classification_flow.reason_codes,
+            *classification_signals.reason_codes,
+        ]
         stepwise_pdf_docx_resume = classification_flow.stepwise_pdf_docx_resume
         followup_action = classification_flow.followup_action
         previous_task_family = classification_flow.previous_task_family

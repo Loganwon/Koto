@@ -112,24 +112,38 @@ def apply_intent_adjudication(
         classification.reason_codes.append("ai_intent_adjudicator_diagnostic_guard")
         return classification
 
+    preservable_write_contract = _has_preservable_write_contract(
+        classification,
+        artifact_creation_intent=artifact_creation_intent,
+        strong_write_intent=strong_write_intent,
+    )
     output_override = ""
     write_override: bool | None = None
     if intent in {"edit_file", "create_file", "resume_stepwise"} or should_write:
         output_override = "write"
         write_override = True
     elif intent == "analyze_then_confirm":
-        if (
-            classification.write_intent
-            and artifact_creation_intent
-            and not global_readonly_write_negation
-        ):
+        if preservable_write_contract and not global_readonly_write_negation:
             classification.reason_codes.append(
-                "ai_intent_adjudicator_preserved_explicit_artifact_write"
+                "ai_intent_adjudicator_preserved_explicit_write_contract"
             )
+            if artifact_creation_intent:
+                classification.reason_codes.append(
+                    "ai_intent_adjudicator_preserved_explicit_artifact_write"
+                )
             return classification
         output_override = "hybrid"
         write_override = False
     elif intent in {"answer_only", "diagnose_failure"}:
+        if preservable_write_contract and not global_readonly_write_negation:
+            classification.reason_codes.append(
+                "ai_intent_adjudicator_preserved_explicit_write_contract"
+            )
+            if artifact_creation_intent:
+                classification.reason_codes.append(
+                    "ai_intent_adjudicator_preserved_explicit_artifact_write"
+                )
+            return classification
         if not strong_write_intent:
             output_override = "answer"
             write_override = False
@@ -173,6 +187,45 @@ def apply_intent_adjudication(
             if code not in classification.reason_codes:
                 classification.reason_codes.append(code)
     return classification
+
+
+def _has_preservable_write_contract(
+    classification: FileTaskClassification,
+    *,
+    artifact_creation_intent: bool,
+    strong_write_intent: bool,
+) -> bool:
+    if not classification.write_intent:
+        return False
+    if str(classification.selected_recipe or "").strip():
+        return True
+    if artifact_creation_intent or strong_write_intent:
+        return True
+    contract_reason_prefixes = (
+        "docx_",
+        "spreadsheet_",
+        "ppt_",
+        "text_selection_",
+        "file_copy_",
+        "cross_file_",
+        "financial_",
+        "long_",
+        "stepwise_",
+    )
+    contract_reason_codes = {
+        "write_intent",
+        "ai_intent_adjudicator_override",
+        "ai_intent_adjudicator:edit_file",
+        "ai_intent_adjudicator:create_file",
+        "ai_intent_adjudicator:resume_stepwise",
+    }
+    for code in classification.reason_codes:
+        item = str(code or "").strip()
+        if item in contract_reason_codes:
+            return True
+        if item.startswith(contract_reason_prefixes):
+            return True
+    return False
 
 
 def normalize_mainline_contract(
@@ -258,6 +311,8 @@ def write_has_contract_anchor(
         "long_pdf_stepwise_docx_summary",
         "long_docx_stepwise_polish_writeback",
     }:
+        return True
+    if str(classification.selected_recipe or "").strip() and classification.write_intent:
         return True
     if strong_write_intent:
         return True

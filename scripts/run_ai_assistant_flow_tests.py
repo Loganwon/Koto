@@ -67,6 +67,17 @@ SUITES = OrderedDict(
             },
         ),
         (
+            "matrix",
+            {
+                "description": "Task-family routing matrix and completion-contract coverage.",
+                "nodes": [
+                    "tests/unit/test_ai_task_family_matrix.py",
+                    "tests/unit/test_file_task_recipes.py",
+                    "tests/unit/test_file_task_classification_recipes.py",
+                ],
+            },
+        ),
+        (
             "browser-mock",
             {
                 "description": "Playwright browser smoke for the workspace AI assistant shell and mocked task-card rendering.",
@@ -100,8 +111,8 @@ SUITES = OrderedDict(
 
 COMPOSITE_SUITES = OrderedDict(
     [
-        ("full", ["smoke", "contracts", "backend", "runtime"]),
-        ("release", ["smoke", "contracts", "backend", "runtime", "browser-mock"]),
+        ("full", ["smoke", "contracts", "backend", "runtime", "matrix"]),
+        ("release", ["smoke", "contracts", "backend", "runtime", "matrix", "browser-mock"]),
         ("test-ready", ["smoke", "mcp", "browser-mock"]),
     ]
 )

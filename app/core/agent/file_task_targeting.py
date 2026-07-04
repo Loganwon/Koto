@@ -658,7 +658,40 @@ def files_explicitly_mentioned_in_task(
                 type=path.suffix.lower().lstrip("."),
             )
         )
+    resolved.extend(
+        _weak_files_explicitly_mentioned_in_task(
+            task_text,
+            output_reference_names=output_reference_names,
+            existing_keys={_context_file_key(item) for item in resolved},
+        )
+    )
     return resolved
+
+
+def _weak_files_explicitly_mentioned_in_task(
+    task_text: str,
+    *,
+    output_reference_names: set[str],
+    existing_keys: set[str],
+) -> List[FileTaskFile]:
+    result: List[FileTaskFile] = []
+    seen = set(existing_keys)
+    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
+        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+        normalized_path = raw_path.replace("\\", "/").rstrip("/")
+        suffix = Path(normalized_path).suffix.lower().lstrip(".")
+        if suffix not in _TASK_TEXT_FILE_EXTENSIONS and f".{suffix}" not in _TASK_TEXT_FILE_EXTENSIONS:
+            continue
+        name = Path(normalized_path).name
+        if name.casefold() in output_reference_names:
+            continue
+        file_info = FileTaskFile(path=raw_path, name=name, type=suffix, target=False)
+        key = _context_file_key(file_info)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(file_info)
+    return result
 
 
 def resolved_workspace_root(workspace_root: str) -> Optional[Path]:
