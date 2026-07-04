@@ -466,6 +466,45 @@ python -m pytest tests\unit\test_workspace_task_presentation_architecture.py -q 
 git diff --check
 ```
 
+### Batch 12: Task Interaction Summary Split
+
+Status: completed.
+
+Goal: keep task-understanding and task-memory card rendering out of the task
+stream event runner while leaving DOM insertion and WA exposure local to the
+runner.
+
+Completed in this pass:
+
+- Added `web/src/workspace/task-interaction-summary.ts` as the owner for task
+  context summary text, interaction-line HTML, task-understanding card HTML, and
+  task-memory card HTML.
+- Moved local context summary and interaction-card helpers out of
+  `web/src/workspace/task-runner.ts`.
+- Kept `syncTaskInteractionSummary()` in `task-runner.ts` because it owns live
+  DOM replacement and the `WA.syncTaskInteractionSummary` bridge.
+- Updated AI task-flow guards to check the new owner while preserving the
+  runtime bridge contract.
+- Added architecture guards so interaction summary helpers do not drift back
+  into `task-runner.ts`.
+- Rebuilt the workspace bundle from the TypeScript source.
+
+Candidate owners:
+
+- `web/src/workspace/task-runner.ts`
+- `web/src/workspace/task-interaction-summary.ts`
+
+Acceptance:
+
+```powershell
+npm --prefix web run typecheck
+npm --prefix web run build
+Push-Location web; npx eslint src/workspace/task-runner.ts src/workspace/task-interaction-summary.ts --ext .ts; Pop-Location
+python -m pytest tests\unit\test_workspace_task_presentation_architecture.py -q --tb=short
+python -m pytest tests\unit\test_workspace_ai_task_flow_guards.py::test_workspace_unified_assistant_uses_model_route_before_whitebox -q --tb=short
+git diff --check
+```
+
 ## Stop Conditions
 
 Pause a cleanup batch if one of these happens:
