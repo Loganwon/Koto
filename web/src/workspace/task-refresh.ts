@@ -109,7 +109,8 @@ export function createFileTaskRefreshController(options: RefreshControllerDeps =
 
   function queue(card: TaskCard, payload: RefreshPayload, queueOptions: QueueOptions = {}): RefreshEntry | null {
     if (!card || !payload) return null;
-    const path = payload.path || payload.file_path || payload.output_path || payload.target_path;
+    const rawPath = payload.path || payload.file_path || payload.output_path || payload.target_path;
+    const path = normalizePath(rawPath || '') || rawPath;
     if (!path) return null;
     const supported = payload.supported !== false && payload.refresh_supported !== false;
     const entry = upsertEntry(card, {

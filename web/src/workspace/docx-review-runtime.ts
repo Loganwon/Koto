@@ -441,7 +441,7 @@ function _normalizeWorkspaceFilePath(path: any): string {
     const markerIndex = normalizedPath.toLowerCase().lastIndexOf(marker);
     if (markerIndex >= 0) return normalizedPath.slice(markerIndex + marker.length).replace(/^\//, '');
   }
-  return normalizedPath.replace(/^\//, '');
+  return normalizedPath.replace(/^\//, '').replace(/^workspace\//i, '');
 }
 
 function _reviewPathsMatch(lhs: any, rhs: any): boolean {
