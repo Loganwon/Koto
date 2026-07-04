@@ -5,6 +5,7 @@
     "moduleResolution": "bundler",
     "strict": false,
     "noImplicitAny": false,
+    "noFallthroughCasesInSwitch": true,
     "outDir": "./static/js/dist",
     "rootDir": "./src",
     "declaration": true,

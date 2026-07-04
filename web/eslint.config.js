@@ -6,6 +6,11 @@ export default [
     ignores: ['node_modules/**', 'static/**'],
   },
   {
+    linterOptions: {
+      reportUnusedDisableDirectives: 'warn',
+    },
+  },
+  {
     files: ['src/**/*.ts', 'src/**/*.tsx'],
     languageOptions: {
       ecmaVersion: 'latest',
@@ -16,6 +21,17 @@ export default [
         ...globals.es2024,
       },
     },
-    rules: {},
+    rules: {
+      'eqeqeq': ['warn', 'always', { null: 'ignore' }],
+      'no-constant-binary-expression': 'warn',
+      'no-duplicate-imports': 'warn',
+      'no-fallthrough': 'warn',
+      'no-unused-vars': ['warn', {
+        argsIgnorePattern: '^_',
+        caughtErrorsIgnorePattern: '^_',
+        varsIgnorePattern: '^_',
+      }],
+      'prefer-const': 'warn',
+    },
   },
 ];
