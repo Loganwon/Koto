@@ -8234,9 +8234,9 @@ ${defaultPrompt}`;
         "</div>"
       ].join("");
     }
-    let questionText = completed ? "询问结果" : "追问原因";
+    const questionText = completed ? "询问结果" : "追问原因";
     let improveText = completed ? "继续处理" : "继续修复";
-    let actionHint = completed ? "任务已完成，后续操作会作为新请求发送。" : "可继续补充要求或重新处理。";
+    const actionHint = completed ? "任务已完成，后续操作会作为新请求发送。" : "可继续补充要求或重新处理。";
     let applyActionHtml = "";
     if (incompleteBlocked) improveText = "重新发起";
     const artifactButtonHtml = card.dataset.taskArtifactResult ? '    <button type="button" class="wa-task-followup-action" data-task-artifacts-open="1">查看产物</button>' : "";
@@ -9166,7 +9166,7 @@ ${defaultPrompt}`;
     const key = "read:" + path;
     if (state2.readKeys.has(key)) return;
     state2.readKeys.add(key);
-    let row = state2.readSummaries.get(key);
+    const row = state2.readSummaries.get(key);
     if (row) return;
     const shortPath = path.split("/").pop() || path;
     const content = '<span class="wa-task-chip">读取</span><a class="wa-task-file-link" href="javascript:void(0)" data-file-path="' + escAttr(path) + '">' + esc$1(shortPath) + "</a>";
@@ -9277,7 +9277,7 @@ ${defaultPrompt}`;
     if (!file && !summary) return;
     const codeKey = "code:" + (file || "file:" + Date.now());
     if (file) {
-      let row = state2.codeSummaryRows.get(codeKey);
+      const row = state2.codeSummaryRows.get(codeKey);
       if (row) return;
       const shortFile = file.split("/").pop() || file;
       const content = '<span class="wa-task-chip success">' + esc$1(action === "delete" ? "删除" : "写入") + '</span><a class="wa-task-file-link" href="javascript:void(0)" data-file-path="' + escAttr(file) + '">' + esc$1(shortFile) + "</a>";
@@ -9423,7 +9423,7 @@ ${defaultPrompt}`;
     const msgs = document.getElementById("wa-ai-messages");
     if (msgs) msgs.appendChild(card);
   }
-  function streamTaskSse(cardOrLoadingEl, url, body, method, opts) {
+  function streamTaskSse(cardOrLoadingEl, url, body, method, _opts) {
     const streamingCard = makeRunCard(cardOrLoadingEl);
     streamingCard.dataset.taskUrl = url;
     appendTaskRunCardIfDetached(streamingCard);
@@ -9668,7 +9668,7 @@ ${defaultPrompt}`;
     }
     return card;
   }
-  function restoreTaskRunCard(cardOrSnapshot, initialSummary, initialStatus, recoveryPayload) {
+  function restoreTaskRunCard(cardOrSnapshot, initialSummary, initialStatus, _recoveryPayload) {
     if (cardOrSnapshot && !isTaskCardElement(cardOrSnapshot) && typeof cardOrSnapshot === "object" && cardOrSnapshot.html) {
       const wrapper = document.createElement("div");
       wrapper.innerHTML = String(cardOrSnapshot.html || "").trim();

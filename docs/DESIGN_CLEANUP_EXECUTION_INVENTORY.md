@@ -428,6 +428,44 @@ python -m pytest tests\unit\test_workspace_ai_task_flow_guards.py::test_workspac
 git diff --check
 ```
 
+### Batch 11: Task Runner Dead-Code Cleanup
+
+Status: completed.
+
+Goal: remove stale local helpers and unused variables left behind after the
+task-runner ownership splits.
+
+Completed in this pass:
+
+- Removed unused helpers from `web/src/workspace/task-runner.ts`:
+  `eventPayload`, `normalizeTaskContractText`, `rowsColsText`,
+  `isReviewChangePayload`, `upsertMultiTargetTerminalRow`, and
+  `renderPlanStepItem`.
+- Removed unused `row` assignments around tool-start and tool-finished rows.
+- Converted read-only task action labels from `let` to `const`.
+- Renamed unused callback/type parameters to `_...` where the parameter names
+  are only documentation for the function type.
+- Kept the external `streamTaskFlow` compatibility signature intact while
+  marking the internal SSE `opts` argument as intentionally unused.
+- Added an architecture guard so the removed helpers do not return to
+  `task-runner.ts`.
+- Rebuilt the workspace bundle from the TypeScript source.
+
+Candidate owners:
+
+- `web/src/workspace/task-runner.ts`
+- `tests/unit/test_workspace_task_presentation_architecture.py`
+
+Acceptance:
+
+```powershell
+Push-Location web; npx eslint src/workspace/task-runner.ts --ext .ts; Pop-Location
+npm --prefix web run typecheck
+npm --prefix web run build
+python -m pytest tests\unit\test_workspace_task_presentation_architecture.py -q --tb=short
+git diff --check
+```
+
 ## Stop Conditions
 
 Pause a cleanup batch if one of these happens:

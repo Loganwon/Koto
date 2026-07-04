@@ -225,3 +225,22 @@ def test_task_runner_uses_shared_performance_helpers() -> None:
     assert "const summary = updateModelSummaryState(state.modelSummary, data);" in runner
     assert "route_decision_ms" in performance
     assert "intent_adjudication_ms" in performance
+
+
+def test_task_runner_has_no_dead_presentation_helpers() -> None:
+    runner = _read("web/src/workspace/task-runner.ts")
+
+    for removed_helper in [
+        "function eventPayload(",
+        "function normalizeTaskContractText(",
+        "function rowsColsText(",
+        "function isReviewChangePayload(",
+        "function upsertMultiTargetTerminalRow(",
+        "function renderPlanStepItem(",
+    ]:
+        assert removed_helper not in runner
+
+    assert "const questionText = completed ? '询问结果' : '追问原因';" in runner
+    assert "const actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';" in runner
+    assert "const row = upsertStepSingletonRow(step, tag, 'tool-start', content);" not in runner
+    assert "const row = upsertStepSingletonRow(step, tag, kind, content);" not in runner
