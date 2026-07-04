@@ -24,7 +24,7 @@ def handle_system(yield_thinking, user_input, session_name, start_time, client, 
     if exec_result.get("details"):
         response_text += f"\n\n{exec_result['details']}"
 
-    if Utils.is_failure_output(response_text):
+    if Utils.is_failure_output(response_text) and exec_result.get("retryable") is not False:
         t = yield_thinking(
             "系统指令执行失败，使用 AI 修正后重试", "validating"
         )
