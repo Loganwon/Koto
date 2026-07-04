@@ -528,6 +528,39 @@ class TestFileService:
         assert not os.path.exists(src)
         assert os.path.exists(dst)
 
+    def test_copy_move_delete_directory_paths(self, tmp_dir):
+        svc = self._make_svc(tmp_dir)
+        src_dir = Path(tmp_dir) / "src_dir"
+        src_dir.mkdir()
+        (src_dir / "nested.txt").write_text("nested", encoding="utf-8")
+
+        copied_dir = Path(tmp_dir) / "copied_dir"
+        copy_result = svc.copy_path(str(src_dir), str(copied_dir))
+        assert copy_result["success"] is True
+        assert (copied_dir / "nested.txt").read_text(encoding="utf-8") == "nested"
+
+        moved_dir = Path(tmp_dir) / "moved_dir"
+        move_result = svc.move_path(str(copied_dir), str(moved_dir))
+        assert move_result["success"] is True
+        assert not copied_dir.exists()
+        assert (moved_dir / "nested.txt").is_file()
+
+        delete_result = svc.delete_path(str(moved_dir))
+        assert delete_result["success"] is True
+        assert not moved_dir.exists()
+
+    def test_path_operations_reject_existing_destination_without_overwrite(self, tmp_dir):
+        svc = self._make_svc(tmp_dir)
+        src_dir = Path(tmp_dir) / "src_existing"
+        dst_dir = Path(tmp_dir) / "dst_existing"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+
+        result = svc.copy_path(str(src_dir), str(dst_dir), overwrite=False)
+
+        assert result["success"] is False
+        assert "已存在" in result["error"]
+
     # -- rename_file ---------------------------------------------------
 
     def test_rename_file(self, tmp_dir):
