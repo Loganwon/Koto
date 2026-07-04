@@ -309,7 +309,8 @@ def test_docx_ai_selection_prefers_editor_table_payloads_over_native_last_cell_t
     assert "editorHost.getCellSelectionInfo" in js
     assert "editorHost.getSelectionTextForAI" in js
     assert "aiText: `[" in js and "${wholeTableText}\\n`," in js
-    assert "? { text: docxSelection.aiText, previewText: docxSelection.previewText }" in js
+    assert "Object.assign({}, docxSelection" in js
+    assert "selectionKind: docxSelection.kind" in js
     assert "_updateContextBar({ table: docxSelection.previewText });" in js
 
 
