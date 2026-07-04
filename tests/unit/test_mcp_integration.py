@@ -904,6 +904,19 @@ def test_mcp_frontend_observer_can_render_task_result_evidence_overlay():
     assert "evidence.overlayClip = _elementViewportClip(overlay, 4)" in source
 
 
+def test_deferred_blueprint_registration_exempts_mcp_api_from_csrf():
+    source = (Path(__file__).resolve().parents[2] / "web/app_blueprints.py").read_text(
+        encoding="utf-8"
+    )
+    mcp_registration = source[source.index("from app.api.mcp_routes import mcp_bp as _mcp_bp") :]
+
+    assert "app.register_blueprint(_mcp_bp)" in mcp_registration
+    assert "_exempt_csrf_blueprint(app, _mcp_bp)" in mcp_registration
+    assert mcp_registration.index("app.register_blueprint(_mcp_bp)") < mcp_registration.index(
+        "_exempt_csrf_blueprint(app, _mcp_bp)"
+    )
+
+
 def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypatch):
     from app.core.agent import frontend_observability
 

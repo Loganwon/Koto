@@ -236,6 +236,7 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         from app.api.mcp_routes import mcp_bp as _mcp_bp
 
         app.register_blueprint(_mcp_bp)
+        _exempt_csrf_blueprint(app, _mcp_bp)
         logger.info("[MCPAPI] ✅ MCP 监管入口已注册: /api/mcp")
     except ImportError as exc:
         logger.warning(f"[MCPAPI] ⚠️ 未能导入 MCP API 蓝图: {exc}")
