@@ -751,6 +751,7 @@ def _build_file_task_orchestrator(*, workspace_root, gemini_client):
         workspace_root=workspace_root,
         gemini_client=gemini_client,
         model_client=FileTaskModelClient(),
+        yield_thinking=None,
     )
 
 

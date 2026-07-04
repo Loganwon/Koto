@@ -332,6 +332,7 @@ class FileTaskRuntime:
         gemini_client: Any = None,
         workspace_root: str = "",
         task_supervisor: Optional[TaskSupervisor] = None,
+        yield_thinking: Any = None,
         max_rounds: int = _MAX_MODEL_ROUNDS,
     ):
         self._tool_executor = tool_executor
@@ -343,6 +344,7 @@ class FileTaskRuntime:
         self._workspace_root = workspace_root
         self._max_rounds = max(1, int(max_rounds or _MAX_MODEL_ROUNDS))
         self._task_supervisor = task_supervisor
+        self._yield_thinking = yield_thinking
 
 
 # ═══════════════════════════════════════════════════════════════
