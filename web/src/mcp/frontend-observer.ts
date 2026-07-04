@@ -108,6 +108,62 @@ function _elementRect(el: Element): Record<string, number> {
   };
 }
 
+function _htmlEscape(value: unknown): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function _removeTaskEvidenceOverlay(): void {
+  document.getElementById('koto-task-evidence-capture')?.remove();
+}
+
+function _renderTaskEvidenceOverlay(evidence: Record<string, unknown>): HTMLElement {
+  _removeTaskEvidenceOverlay();
+  const overlay = document.createElement('div');
+  overlay.id = 'koto-task-evidence-capture';
+  overlay.style.cssText = [
+    'position:fixed',
+    'left:12px',
+    'top:12px',
+    'z-index:2147483647',
+    'box-sizing:border-box',
+    'width:min(720px, calc(100vw - 24px))',
+    'max-height:calc(100vh - 24px)',
+    'overflow:auto',
+    'padding:16px',
+    'border:1px solid #d0d7de',
+    'border-radius:8px',
+    'background:#ffffff',
+    'color:#17202a',
+    'box-shadow:0 16px 48px rgba(15, 23, 42, 0.22)',
+    'font:13px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    'white-space:normal',
+  ].join(';');
+  const chips = Array.isArray(evidence.chips) ? evidence.chips : [];
+  const chipText = chips
+    .map((item: any) => String(item && (item.title || item.text) || '').trim())
+    .filter(Boolean)
+    .join(', ');
+  const status = String(evidence.terminalStatus || '').trim() || 'unknown';
+  const taskId = String(evidence.taskId || '').trim();
+  const runId = String(evidence.runId || '').trim();
+  const finalAnswer = String(evidence.finalAnswer || evidence.text || '').trim();
+  overlay.innerHTML = [
+    '<div style="font-weight:700;font-size:15px;margin-bottom:8px;">Koto Task Result Evidence</div>',
+    `<div><strong>Status:</strong> ${_htmlEscape(status)}</div>`,
+    taskId ? `<div><strong>Task ID:</strong> ${_htmlEscape(taskId)}</div>` : '',
+    runId ? `<div><strong>Run ID:</strong> ${_htmlEscape(runId)}</div>` : '',
+    chipText ? `<div><strong>Attached:</strong> ${_htmlEscape(chipText)}</div>` : '',
+    '<div style="height:1px;background:#e5e7eb;margin:12px 0;"></div>',
+    `<div style="white-space:pre-wrap;">${_htmlEscape(finalAnswer || 'No final answer text captured.')}</div>`,
+  ].join('');
+  document.body.appendChild(overlay);
+  return overlay;
+}
+
 function _getSessionId(): string {
   if (_sessionId) return _sessionId;
   try {
@@ -1340,7 +1396,7 @@ function _taskResultEvidence(action: FrontendAction): Record<string, unknown> {
     title: item.getAttribute('title') || '',
   }));
   const dataset = (card as HTMLElement).dataset || {};
-  return {
+  const evidence: Record<string, unknown> = {
     found: true,
     selector,
     taskId: dataset.taskId || '',
@@ -1357,6 +1413,12 @@ function _taskResultEvidence(action: FrontendAction): Record<string, unknown> {
       devicePixelRatio: window.devicePixelRatio,
     },
   };
+  if (opts.renderOverlay) {
+    const overlay = _renderTaskEvidenceOverlay(evidence);
+    evidence.overlaySelector = '#koto-task-evidence-capture';
+    evidence.overlayClip = _elementViewportClip(overlay, 4);
+  }
+  return evidence;
 }
 
 function _enqueue(event: FrontendEvent): void {

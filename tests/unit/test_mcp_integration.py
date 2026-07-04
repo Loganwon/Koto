@@ -892,6 +892,18 @@ def test_mcp_frontend_action_allows_task_result_evidence(tmp_path, monkeypatch):
     assert queued["action"]["options"]["limit"] == 1200
 
 
+def test_mcp_frontend_observer_can_render_task_result_evidence_overlay():
+    source = (Path(__file__).resolve().parents[2] / "web/src/mcp/frontend-observer.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert "function _renderTaskEvidenceOverlay(evidence: Record<string, unknown>): HTMLElement" in source
+    assert "overlay.id = 'koto-task-evidence-capture'" in source
+    assert "if (opts.renderOverlay)" in source
+    assert "evidence.overlaySelector = '#koto-task-evidence-capture'" in source
+    assert "evidence.overlayClip = _elementViewportClip(overlay, 4)" in source
+
+
 def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypatch):
     from app.core.agent import frontend_observability
 
