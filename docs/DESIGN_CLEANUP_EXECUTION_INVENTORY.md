@@ -20,11 +20,11 @@ python scripts\audit_code_baseline.py --json
 | `app/core/agent` top-level `.py` files | 121 |
 | `app/core/agent` recursive `.py` files | 147 |
 | Production TODO/FIXME count | 11 |
-| Production files >= 1500 lines | 33 |
-| Lines inside files >= 1500 lines | 94705 |
+| Production files >= 1500 lines | 35 |
+| Lines inside files >= 1500 lines | 98760 |
 | Production files >= 2000 lines | 18 |
-| Lines inside files >= 2000 lines | 69559 |
-| `workspace-bundle.js` size | 1128127 bytes |
+| Lines inside files >= 2000 lines | 70401 |
+| `workspace-bundle.js` size | 1128971 bytes |
 | `web/static/vendor` size | 6510883 bytes |
 
 The working tree is already mid-refactor. Treat these numbers as the current
@@ -52,12 +52,14 @@ Top hotspots from the current audit:
 | `app/core/agent/task_tools.py` | 6716 | File-task tool contract |
 | `app/core/agent/file_task_runtime.py` | 5854 | File-task runtime split |
 | `web/static/css/style.css` | 5782 | Global style ownership |
-| `app/core/file/parsers/docx_parser.py` | 4118 | DOCX parser service split |
+| `app/core/file/parsers/docx_parser.py` | 4573 | DOCX parser service split |
 | `web/tiptap-editor/koto-docx-editor.js` | 3607 | DOCX editor guards |
 | `web/app.py` | 3501 | Runtime-context shrink |
 | `web/document_feedback.py` | 3375 | Document feedback service split |
 | `web/tiptap-editor/docx-extensions.js` | 3325 | DOCX extension packaging |
-| `web/src/workspace/task-runner.ts` | 2649 | Task presentation split |
+| `web/templates/index.html` | 2802 | Workspace shell ownership |
+| `web/blueprints/workspace_assistant.py` | 2613 | File assistant boundary |
+| `web/src/workspace/task-runner.ts` | 2596 | Task presentation split |
 
 ## Deletion Rules
 
