@@ -3,23 +3,22 @@ from __future__ import annotations
 import json
 import logging
 import re
+import time
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
 from web.runtime_context import (
-    get_brain,
     get_configured_local_model_id,
     get_client_proxy,
     get_create_client,
+    get_local_executor,
     get_model_id,
-    get_model_map,
     get_smart_dispatcher,
     get_types,
     normalize_model_mode,
     resolve_requested_model_id,
     safe_editor_sse,
     stream_file_task_request,
-    get_web_searcher,
 )
 
 
@@ -39,8 +38,19 @@ _EDITOR_AI_STREAM_ACTIONS = {
     "chart",
 }
 
-_WORKSPACE_ROUTE_NAMES = {"light_chat", "web_search", "file_task", "open_file"}
-_WORKSPACE_DIRECT_RESPONSE_ROUTES = {"light_chat", "web_search", "open_file"}
+_WORKSPACE_ROUTE_NAMES = {
+    "light_chat",
+    "web_search",
+    "file_task",
+    "open_file",
+    "system_action",
+}
+_WORKSPACE_DIRECT_RESPONSE_ROUTES = {
+    "light_chat",
+    "web_search",
+    "open_file",
+    "system_action",
+}
 _WORKSPACE_FILE_TASK_ROUTE_TYPES = {
     "AGENT",
     "CODER",
@@ -54,7 +64,6 @@ _WORKSPACE_FILE_TASK_ROUTE_TYPES = {
     "MULTI_STEP",
     "PAINTER",
     "RESEARCH",
-    "SYSTEM",
     "VISION",
 }
 
@@ -63,13 +72,14 @@ _WORKSPACE_ROUTE_JUDGE_INSTRUCTION = """你是 Koto 文件助手的统一路由�
 你的任务是根据用户输入、当前文件上下文、选区和最近对话，判断应该进入哪条产品路径。
 
 第一层只允许两类 route_kind:
-- direct_response: 只需要直接回应或轻量产品动作，不需要结构化任务流程。包括 chat、web_search、能确定目标的 open_file。
+- direct_response: 只需要直接回应或轻量产品动作，不需要结构化任务流程。包括 chat、web_search、能确定目标的 open_file、受控本地系统动作 system_action。
 - complex_task: 涉及文件内容读取、文件生成/修改/批注/转换/对比，或需要多步骤处理、监管、核验的任务。
 
 第二层 route 只表示 direct_response 或 complex_task 内的具体执行路径:
 - light_chat: direct_response，普通对话、概念解释、追问、无需文件执行过程的回答。
 - web_search: direct_response，需要外部实时信息、网页资料、来源核查或联网检索的回答。
 - open_file: direct_response，用户的主要意图是打开本地文件，且上下文中能确定目标文件。
+- system_action: direct_response，用户的主要意图是执行受控本地系统动作，例如查看时间/系统状态，或打开白名单桌面应用。
 - file_task: complex_task，需要读取、分析、生成、修改、批注、转换、对比或保存文件；或者需要展示结构化任务流程。
 
 重要原则:
@@ -83,8 +93,8 @@ _WORKSPACE_ROUTE_JUDGE_INSTRUCTION = """你是 Koto 文件助手的统一路由�
 只输出 JSON:
 {
   "route_kind": "direct_response | complex_task",
-  "route": "light_chat | web_search | file_task | open_file",
-  "task_type": "CHAT | WEB_SEARCH | FILE_TASK",
+  "route": "light_chat | web_search | file_task | open_file | system_action",
+  "task_type": "CHAT | WEB_SEARCH | FILE_TASK | SYSTEM",
   "confidence": 0.0,
   "reason": "一句话说明",
   "target_path": null,
@@ -95,6 +105,14 @@ _WORKSPACE_ROUTE_JUDGE_INSTRUCTION = """你是 Koto 文件助手的统一路由�
 
 def _safe_sse(payload: dict) -> str:
     return safe_editor_sse(payload)
+
+
+def _sse_response(stream):
+    return Response(
+        stream_with_context(stream),
+        mimetype="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
 
 
 def _compact_route_text(value, limit: int = 1200) -> str:
@@ -194,6 +212,8 @@ def _normalize_workspace_route(data: dict | None, *, source: str, fallback_task_
     if route not in _WORKSPACE_ROUTE_NAMES:
         return None
     raw_task_type = str(data.get("task_type") or fallback_task_type or "").strip().upper()
+    if raw_task_type == "SYSTEM" and route == "file_task":
+        route = "system_action"
     target_path = str(data.get("target_path") or "").strip()
     if route == "open_file" and not target_path:
         route = "file_task"
@@ -204,7 +224,7 @@ def _normalize_workspace_route(data: dict | None, *, source: str, fallback_task_
     except (TypeError, ValueError):
         confidence = 0.0
     confidence = min(max(confidence, 0.0), 1.0)
-    return {
+    normalized = {
         "ok": True,
         "route_kind": route_kind,
         "base_task_type": "DIRECT_RESPONSE" if route_kind == "direct_response" else "COMPLEX_TASK",
@@ -218,6 +238,9 @@ def _normalize_workspace_route(data: dict | None, *, source: str, fallback_task_
         "route_source": source,
         "keyword_policy": "hint_only",
     }
+    if data.get("skip_ai_intent_adjudicator") is True:
+        normalized["skip_ai_intent_adjudicator"] = True
+    return normalized
 
 
 def _canonical_workspace_route_kind(route: str, route_kind: str = "") -> str:
@@ -239,6 +262,8 @@ def _canonical_workspace_task_type(route: str, task_type: str = "") -> str:
     normalized_task = str(task_type or "").strip().upper()
     if normalized_route == "web_search":
         return "WEB_SEARCH"
+    if normalized_route == "system_action":
+        return "SYSTEM"
     if normalized_route == "light_chat":
         return "CHAT"
     if normalized_route in {"file_task", "open_file"}:
@@ -254,11 +279,90 @@ def _workspace_route_from_task_type(task_type: str) -> str:
     normalized = str(task_type or "").strip().upper()
     if normalized == "WEB_SEARCH":
         return "web_search"
+    if normalized == "SYSTEM":
+        return "system_action"
     if normalized == "CHAT":
         return "light_chat"
     if normalized in _WORKSPACE_FILE_TASK_ROUTE_TYPES:
         return "file_task"
     return "file_task"
+
+
+_FILE_CONTEXT_TASK_RE = re.compile(
+    r"(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|"
+    r"已打开|附件|选区|读取|阅读|查看|总结|概括|归纳|分析|检查|提取|改写|润色|"
+    r"翻译|批注|修订|写入|写回|修改|更新|处理|基于|文件|文档|表格|演示稿|"
+    r"pdf|docx?|xlsx?|pptx?|txt|md|csv)",
+    re.IGNORECASE,
+)
+_EXPLICIT_FILE_REFERENCE_RE = re.compile(
+    r"[\w\u4e00-\u9fff ._()\[\]{}~@#$%^&+=,;!-]{1,180}"
+    r"\.(?:pdf|docx?|xlsx?|xlsm|pptx?|txt|md|csv)\b",
+    re.IGNORECASE,
+)
+
+
+def _workspace_has_file_context(data: dict) -> bool:
+    files = data.get("files") if isinstance(data.get("files"), list) else []
+    current_file = data.get("current_file") if isinstance(data.get("current_file"), dict) else None
+    if files or data.get("has_selection"):
+        return True
+    if not current_file:
+        return False
+    return any(
+        str(current_file.get(key) or "").strip()
+        for key in ("path", "name", "id", "type", "file_type", "content")
+    )
+
+
+def _workspace_mentions_explicit_task_file(text: str) -> bool:
+    return bool(_EXPLICIT_FILE_REFERENCE_RE.search(str(text or "")))
+
+
+def _deterministic_workspace_route(data: dict) -> dict | None:
+    text = str(data.get("text") or data.get("message") or "").strip()
+    if not text:
+        return None
+    try:
+        local_executor = get_local_executor()
+    except Exception:
+        from web.local_executor import LocalExecutor as local_executor
+    if local_executor and local_executor.is_system_command(text):
+        return _normalize_workspace_route(
+            {
+                "route_kind": "direct_response",
+                "route": "system_action",
+                "task_type": "SYSTEM",
+                "confidence": 0.99,
+                "reason": "确定性系统动作短路，无需模型路由。",
+            },
+            source="deterministic:system",
+        )
+    if _workspace_has_file_context(data) and _FILE_CONTEXT_TASK_RE.search(text):
+        return _normalize_workspace_route(
+            {
+                "route_kind": "complex_task",
+                "route": "file_task",
+                "task_type": "FILE_TASK",
+                "confidence": 0.99,
+                "reason": "已有文件上下文且请求明确处理文件，无需模型路由。",
+                "skip_ai_intent_adjudicator": True,
+            },
+            source="deterministic:file_context",
+        )
+    if _workspace_mentions_explicit_task_file(text) and _FILE_CONTEXT_TASK_RE.search(text):
+        return _normalize_workspace_route(
+            {
+                "route_kind": "complex_task",
+                "route": "file_task",
+                "task_type": "FILE_TASK",
+                "confidence": 0.99,
+                "reason": "请求中明确包含文件名且需要文件处理，无需模型路由。",
+                "skip_ai_intent_adjudicator": True,
+            },
+            source="deterministic:explicit_file_reference",
+        )
+    return None
 
 
 def _fallback_workspace_route(data: dict) -> dict:
@@ -580,79 +684,34 @@ def workspace_ai_route_intent():
     text = str(data.get("text") or data.get("message") or "").strip()
     if not text:
         return jsonify({"ok": False, "error": "Missing message"}), 400
+    started_at = time.perf_counter()
+
+    def _timed_route_response(payload: dict, route_path: str):
+        result = dict(payload)
+        performance = (
+            dict(result.get("performance"))
+            if isinstance(result.get("performance"), dict)
+            else {}
+        )
+        performance.update(
+            {
+                "route_path": route_path,
+                "route_decision_ms": round((time.perf_counter() - started_at) * 1000, 2),
+            }
+        )
+        result["performance"] = performance
+        return jsonify(result)
+
+    deterministic_route = _deterministic_workspace_route(data)
+    if deterministic_route:
+        return _timed_route_response(deterministic_route, "deterministic")
     try:
         model_route = _model_workspace_route(data)
         if model_route:
-            return jsonify(model_route)
+            return _timed_route_response(model_route, "model")
     except Exception as exc:
         _logger.warning("[workspace-route] model route failed: %s", exc)
-    return jsonify(_fallback_workspace_route(data))
-
-
-@editor_ai_bp.route("/api/workspace/ai/direct-response", methods=["POST"])
-def workspace_ai_direct_response():
-    """Direct workspace chat/search path after model-first route judgment."""
-    data = request.get_json(silent=True) or {}
-    text = str(data.get("text") or data.get("message") or "").strip()
-    if not text:
-        return jsonify({"ok": False, "error": "Missing message"}), 400
-
-    route = str(data.get("route") or "").strip().lower()
-    task_type = str(data.get("task_type") or "").strip().upper()
-    if route == "web_search":
-        task_type = "WEB_SEARCH"
-    elif route == "light_chat":
-        task_type = "CHAT"
-    elif task_type not in {"CHAT", "WEB_SEARCH"}:
-        task_type = "CHAT"
-
-    try:
-        if task_type == "WEB_SEARCH":
-            search_result = get_web_searcher().search_with_grounding(
-                text,
-                skill_prompt=str(data.get("hint") or "").strip() or None,
-            )
-            response_text = str(search_result.get("response") or "").strip()
-            if not response_text:
-                response_text = "没有获得可用的搜索结果。"
-            return jsonify(
-                {
-                    "ok": bool(search_result.get("success", True)),
-                    "response": response_text,
-                    "model": str(search_result.get("model") or "web_search"),
-                    "task_type": "WEB_SEARCH",
-                    "route": "web_search",
-                }
-            )
-
-        history = data.get("history") if isinstance(data.get("history"), list) else []
-        requested_model = str(data.get("model_id") or "").strip()
-        model_map = get_model_map()
-        fallback_model = get_model_id("CHAT", model_map.get("CHAT", ""))
-        model = resolve_requested_model_id(
-            requested_model,
-            fallback_model=fallback_model,
-            task_type="CHAT",
-        )
-        result = get_brain().chat(
-            history,
-            text,
-            model=model,
-            auto_model=not bool(requested_model),
-            task_type="CHAT",
-        )
-        return jsonify(
-            {
-                "ok": True,
-                "response": str(result.get("response") or "").strip(),
-                "model": str(result.get("model") or model),
-                "task_type": "CHAT",
-                "route": "light_chat",
-            }
-        )
-    except Exception as exc:
-        _logger.exception("[workspace-direct-response] failed")
-        return jsonify({"ok": False, "error": f"AI 回答失败：{exc}"}), 500
+    return _timed_route_response(_fallback_workspace_route(data), "fallback")
 
 
 @editor_ai_bp.route("/api/editor/ai/agent", methods=["POST"])
@@ -676,7 +735,7 @@ def editor_ai_agent():
           _logger.exception("[editor-ai] structured agent failed")
           yield _safe_sse({"type": "error", "text": f"Agent 处理失败：{exc}"})
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _sse_response(generate())
 
 
 @editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])
@@ -692,15 +751,9 @@ def editor_ai_stream():
     instruction = str(data.get("instruction") or "").strip()
     if action in {"polish", "translate", "summary", "check", "rewrite", "continue"}:
         if not selection and not full_text:
-            return Response(
-                stream_with_context(iter([_safe_sse({"type": "error", "text": "没有选中文本或全文上下文"})])),
-                mimetype="text/event-stream",
-            )
+            return _sse_response(iter([_safe_sse({"type": "error", "text": "没有选中文本或全文上下文"})]))
     if action == "custom_instruction" and not (selection or full_text or instruction):
-        return Response(
-            stream_with_context(iter([_safe_sse({"type": "error", "text": "请输入指令或选择文本"})])),
-            mimetype="text/event-stream",
-        )
+        return _sse_response(iter([_safe_sse({"type": "error", "text": "请输入指令或选择文本"})]))
 
     def generate():
         try:
@@ -713,7 +766,7 @@ def editor_ai_stream():
             _logger.exception("[editor-ai] stream failed")
             yield _safe_sse({"type": "error", "text": f"AI 处理失败：{exc}"})
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _sse_response(generate())
 
 
 @editor_ai_bp.route("/api/editor/ai/task-stream", methods=["POST"])
@@ -724,10 +777,7 @@ def editor_ai_task_stream():
     if not task:
         return jsonify({"error": "Missing 'task' parameter"}), 400
     data["task"] = task
-    return Response(
-        stream_with_context(stream_file_task_request(data)),
-        mimetype="text/event-stream",
-    )
+    return _sse_response(stream_file_task_request(data))
 
 
 @editor_ai_bp.route("/api/editor/ai/task-stream/cancel", methods=["POST"])
@@ -753,10 +803,7 @@ def editor_ai_chart():
     if lang not in {"python", "r"}:
         lang = "python"
     if not data_context:
-        return Response(
-            stream_with_context(iter([_safe_sse({"type": "error", "text": "缺少数据内容"})])),
-            mimetype="text/event-stream",
-        )
+        return _sse_response(iter([_safe_sse({"type": "error", "text": "缺少数据内容"})]))
 
     def _default_python_code() -> str:
         csv_literal = repr(data_context)
@@ -808,7 +855,7 @@ def editor_ai_chart():
             _logger.exception("[editor-ai] chart failed")
             yield _safe_sse({"type": "error", "text": f"图表生成失败：{exc}"})
 
-    return Response(stream_with_context(generate()), mimetype="text/event-stream")
+    return _sse_response(generate())
 
 
 @editor_ai_bp.route("/api/editor/ai/chart-rerun", methods=["POST"])
