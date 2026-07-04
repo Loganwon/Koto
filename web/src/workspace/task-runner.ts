@@ -2199,7 +2199,7 @@ function appendTaskRunCardIfDetached(card: TaskCardElement): void {
   if (msgs) msgs.appendChild(card);
 }
 
-function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, body: Record<string, any> | FormData, method?: string, opts?: Record<string, any>): Promise<TaskCardElement> {
+function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, body: Record<string, any> | FormData, method?: string, _opts?: Record<string, any>): Promise<TaskCardElement> {
   const streamingCard = makeRunCard(cardOrLoadingEl);
   streamingCard.dataset.taskUrl = url;
   appendTaskRunCardIfDetached(streamingCard);
