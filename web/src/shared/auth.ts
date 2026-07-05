@@ -1,4 +1,7 @@
 /**
+import { installErrorBoundary } from '../shared/error-boundary';
+installErrorBoundary();
+
  * Koto Auth Module - 前端认证管理
  * 处理 JWT 令牌存储、请求拦截、登录状态检查
  */
@@ -105,7 +108,7 @@ const KotoAuth = {
       const res = await fetch('/api/auth/status');
       const data = await res.json();
       if (!data.auth_enabled) {
-        console.log('[Auth] 本地模式，跳过认证');
+        // '[Auth] 本地模式，跳过认证');
         return true;
       }
     } catch {

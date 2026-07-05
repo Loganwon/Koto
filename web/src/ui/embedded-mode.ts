@@ -8,8 +8,8 @@ import { _initSplit } from './panel-layout';
 import { _addLocalFilesToAIContext, _attachFilesToTask } from '../workspace/ai-context';
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
+declare let state: any;
+declare let WA: any;
 declare function showToast(message: string, kind?: string, duration?: number): void;
 declare function loadFiles(files: FileList | File[]): void;
 declare function loadFileBrowser(): void;
@@ -78,7 +78,7 @@ export function _getAIAttachmentDropPayload(e: DragEvent): AIAttachmentDropPaylo
     if (filePath) return { kind: 'workspace', filePath };
     const files = Array.from(e.dataTransfer!.files || []).filter(Boolean);
     if (files.length) return { kind: 'local', files };
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
   return { kind: null };
 }
 

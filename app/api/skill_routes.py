@@ -80,7 +80,7 @@ def _tracer():
 
 
 def _token_tracker():
-    import web.token_tracker as token_tracker
+    import app.core.analytics.token_tracker as token_tracker
 
     return token_tracker
 

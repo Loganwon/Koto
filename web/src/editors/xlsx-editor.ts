@@ -64,7 +64,7 @@ export class KotoXlsxEditor implements WorkspaceEditor {
 
       try {
         this._api = window.KotoSheetsAPI.create(sheetEl, workbookData);
-        console.log('[KotoXlsxEditor] Univer Sheets 挂载成功');
+        // '[KotoXlsxEditor] Univer Sheets 挂载成功');
 
         setTimeout(() => {
           const cssW = sheetEl.clientWidth;
@@ -72,10 +72,10 @@ export class KotoXlsxEditor implements WorkspaceEditor {
           if (!cssW || !bcrW) return;
           const browserZoom = bcrW / cssW;
 
-          console.log(`[KotoXlsxEditor] container CSS=${cssW} BCR=${bcrW.toFixed(1)} zoom=${browserZoom.toFixed(3)} DPR=${devicePixelRatio}`);
+          // `[KotoXlsxEditor] container CSS=${cssW} BCR=${bcrW.toFixed(1)} zoom=${browserZoom.toFixed(3)} DPR=${devicePixelRatio}`);
 
           if (Math.abs(browserZoom - 1) > 0.05) {
-            console.log(`[KotoXlsxEditor] DPI counter-zoom: 1/${browserZoom.toFixed(3)}`);
+            // `[KotoXlsxEditor] DPI counter-zoom: 1/${browserZoom.toFixed(3)}`);
             sheetEl.style.zoom = String(1 / browserZoom);
             sheetEl.style.width = (browserZoom * 100) + '%';
             sheetEl.style.height = (browserZoom * 100) + '%';

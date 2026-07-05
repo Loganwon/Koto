@@ -1,8 +1,5 @@
-function escapeHtml(value: unknown): string {
-  return String(value == null ? '' : value)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
+import { _escHtml } from './infrastructure';
+
 
 export function previewText(value: string, limit: number): string {
   const text = String(value || '').trim();
@@ -101,7 +98,7 @@ export function renderReadableMarkdownFallback(value: string): string {
   let paragraph: string[] = [];
   let listItems: string[] = [];
 
-  const inline = (source: string): string => escapeHtml(source)
+  const inline = (source: string): string => _escHtml(source)
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
   const flushParagraph = () => {

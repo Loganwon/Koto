@@ -1,4 +1,4 @@
-﻿import re
+import re
 from pathlib import Path
 
 
@@ -1298,7 +1298,7 @@ def test_workspace_model_controls_default_to_deepseek_primary_path():
     assert "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek')" in state_ts
     assert "_cloudProvider: 'deepseek'" in state_ts
     assert "state._cloudProvider || 'deepseek'" in model_settings_ts
-    assert "return _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');" in model_settings_ts
+    assert "return _modelDisplayName('deepseek-chat', 'DeepSeek V4 Pro');" in model_settings_ts
     assert 'id="wa-model-mode-gemini-btn"' not in controls_html
     assert 'id="wa-model-mode-deepseek-btn" type="button" class="wa-model-mode-toggle-btn active"' in controls_html
     assert "mode:'deepseek'" in controls_html

@@ -20,11 +20,7 @@ import {
 } from './state';
 import { _escHtml } from './infrastructure';
 import { _ensurePdfJS, _ensureTipTap, _ensureUniverSheets, _ensureWorkbookDefaults } from '../editors/cdn-loaders';
-import { KotoImageViewer } from '../editors/image-viewer';
-import { KotoPdfViewer } from '../editors/pdf-viewer';
-import { KotoPptxEditor } from '../editors/pptx-editor';
-import { KotoTextEditor } from '../editors/text-editor';
-import { _setupDocOutline } from '../editors/docx-outline';
+import { KotoTextEditor, _setupDocOutline, loadPptxEditor, loadPdfViewer, loadXlsxEditor, loadImageViewer } from '../editors/lazy-loaders';
 
 function _fileExt(fileName: string): string {
   return (String(fileName || '').split('.').pop() || '').toLowerCase();
@@ -100,11 +96,11 @@ export function _rememberSavedSnapshotForTab(tab: TabInfo | null, editor: any = 
 
 async function _mountDocx(tab: TabInfo, data: any): Promise<void> {
   await _ensureTipTap();
-  const html = typeof tab.cache === 'string' && tab.cache.trim()
+  const html = typeof tab.cache === 'string' && (tab.cache as string).trim()
     ? tab.cache
     : (data && data.html) || '';
-  state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor();
-  state.activeEditor.render(html, data || {});
+  state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor() as any;
+  state.activeEditor!.render(html, data || {});
   setTimeout(() => _setupDocOutline((data && data.headings) || []), 0);
   setTimeout(() => {
     const syncReviewState = (window as any)._syncReviewStateForActiveFile;
@@ -120,27 +116,27 @@ async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
     await _mountDocx(tab, data);
   } else if (tab.fileType === 'xlsx') {
     await _ensureUniverSheets();
-    state.activeEditor = new (window as any).KotoXlsxEditor();
+    state.activeEditor = new (window as any).KotoXlsxEditor() as any;
     const workbook = tab.cache && tab.cache.snapshot ? tab.cache.snapshot : data;
-    state.activeEditor.render(_ensureWorkbookDefaults(workbook));
+    state.activeEditor!.render(_ensureWorkbookDefaults(workbook));
   } else if (tab.fileType === 'pptx') {
-    state.activeEditor = new KotoPptxEditor();
-    state.activeEditor.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
+    state.activeEditor = new (await loadPptxEditor()).KotoPptxEditor() as any;
+    state.activeEditor!.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
   } else if (tab.fileType === 'pdf') {
     try {
       await _ensurePdfJS();
-      state.activeEditor = new KotoPdfViewer();
-      await state.activeEditor.render(data && data.raw_url, data);
+      state.activeEditor = new (await loadPdfViewer()).KotoPdfViewer() as any;
+      await state.activeEditor!.render(data && data.raw_url, data);
     } catch (error) {
       console.error('[WA] PDF 打开失败:', error);
       _showPdfOpenError(error);
     }
   } else if (tab.fileType === 'image') {
-    state.activeEditor = new KotoImageViewer();
-    state.activeEditor.render(data && data.raw_url);
+    state.activeEditor = new (await loadImageViewer()).KotoImageViewer() as any;
+    state.activeEditor!.render(data && data.raw_url);
   } else if (tab.fileType === 'text' || tab.fileType === 'code') {
-    state.activeEditor = new KotoTextEditor(tab.fileType);
-    state.activeEditor.render(data);
+    state.activeEditor = new KotoTextEditor(tab.fileType) as any;
+    state.activeEditor!.render(data);
   } else {
     const textEditor = document.getElementById('wa-text-editor');
     const textArea = document.getElementById('wa-text-content') as HTMLTextAreaElement | null;
@@ -217,7 +213,7 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
     fileType,
     fileId: json.file_id || null,
     serverData: json.data,
-    cache: null,
+    cache: undefined,
     savedSnapshot: null,
     modified: false,
     capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, fileType, fileName),

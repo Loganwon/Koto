@@ -1,4 +1,4 @@
-﻿/**
+/**
  * AI Runtime Init & Registration — lazy initialization of AI runtimes,
  * conversation hydration, task registration.
  * Workspace AI runtime initialization.
@@ -223,7 +223,7 @@ async function _sendWorkspaceConversationTurn(sessionId: string, payload: Record
     body: JSON.stringify(payload),
   });
   if (!response.ok) return null;
-  const data = await response.json().catch(() => null);
+  const data = await response.json().catch((): any => null);
   _applyPersistedTaskMetadata(data, payload);
   const bridge = (window as any).KotoSessionBridge;
   if (bridge && typeof bridge.refreshSessions === 'function') {
@@ -294,7 +294,7 @@ async function _ensureWorkspacePersistenceSession(): Promise<string> {
     body: JSON.stringify({ name: `对话_${stamp}` }),
   });
   if (!response.ok) return '';
-  const data = await response.json().catch(() => null);
+  const data = await response.json().catch((): any => null);
   const sessionId = String(data && data.session || '').trim();
   if (!sessionId) return '';
   _hostSessionId = sessionId;
@@ -317,7 +317,7 @@ export async function _persistWorkspaceConversationTurn(record: any): Promise<an
     metadata: Object.assign({ source: 'workspace' }, payload.metadata || {}),
   };
   _workspaceTurnPersistQueue = _workspaceTurnPersistQueue
-    .catch(() => null)
+    .catch((): any => null)
     .then(async () => {
       try {
         const sessionId = await _ensureWorkspacePersistenceSession();
@@ -540,7 +540,7 @@ export function _initWorkspaceAiRuntimes(): void {
         if (!normalized || /^workspace_runtime_/i.test(normalized)) return [];
         const response = await fetch(`/api/sessions/${encodeURIComponent(normalized)}`);
         if (!response.ok) return [];
-        const data = await response.json().catch(() => null);
+        const data = await response.json().catch((): any => null);
         return data && Array.isArray(data.history) ? data.history : [];
       },
     });

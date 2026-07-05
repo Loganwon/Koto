@@ -100,7 +100,7 @@ function generatedSessionName(): string {
 export async function fetchAiSessionPreviews(): Promise<AiSessionPreview[]> {
   const response = await fetch('/api/sessions?preview=1', { cache: 'no-store' });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
-  const data = await response.json().catch(() => null);
+  const data = await response.json().catch((): any => null);
   const raw = data && Array.isArray(data.sessions) ? data.sessions : [];
   return raw.map(normalizeSession).filter(Boolean) as AiSessionPreview[];
 }
@@ -112,7 +112,7 @@ export async function createAiSessionRecord(): Promise<string> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   });
-  const data = await response.json().catch(() => null);
+  const data = await response.json().catch((): any => null);
   if (!response.ok || !data || data.success === false) {
     throw new Error(data && data.error ? data.error : '创建对话失败');
   }
@@ -123,7 +123,7 @@ export async function deleteAiSessionRecord(sessionId: string): Promise<void> {
   const normalized = normalizeSessionId(sessionId);
   if (!normalized) throw new Error('缺少对话 ID');
   const response = await _csrfFetch(`/api/sessions/${encodeURIComponent(normalized)}`, { method: 'DELETE' });
-  const data = await response.json().catch(() => null);
+  const data = await response.json().catch((): any => null);
   if (!response.ok || !data || data.success === false) {
     throw new Error(data && data.error ? data.error : '删除对话失败');
   }

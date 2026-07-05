@@ -51,7 +51,7 @@ export function _waitForRuntimeGlobal(check: () => boolean, label: string, timeo
           resolve();
           return;
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
       if (Date.now() > deadline) {
         reject(new Error(`${label} 加载后未就绪`));
         return;
@@ -85,7 +85,7 @@ export async function _ensureUniverSheets(): Promise<void> {
     if (!window.KotoSheetsAPI) {
       throw new Error('Univer Sheets 加载失败 — window.KotoSheetsAPI 未定义');
     }
-    console.log('[WA] KotoSheetsAPI 已就绪');
+    // '[WA] KotoSheetsAPI 已就绪');
     _libsLoaded.sheets = true;
   })().finally(() => { _libLoadPromises.sheets = null; });
   return _libLoadPromises.sheets;

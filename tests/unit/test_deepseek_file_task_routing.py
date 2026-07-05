@@ -20,7 +20,7 @@ def test_doc_annotate_bridge_uses_deepseek_provider_client(monkeypatch):
     monkeypatch.setattr(
         model_selection,
         "get_configured_cloud_model",
-        lambda **kwargs: "deepseek-v4-pro",
+        lambda **kwargs: "deepseek-chat",
     )
 
     class FakeProvider:
@@ -51,19 +51,19 @@ def test_doc_annotate_bridge_uses_deepseek_provider_client(monkeypatch):
 
     bridge._build_feedback_system(request, gemini_client="gemini-client")
 
-    assert captured["default_model_id"] == "deepseek-v4-pro"
+    assert captured["default_model_id"] == "deepseek-chat"
     assert captured["provider_kwargs"]["provider"] == "deepseek"
-    assert captured["provider_kwargs"]["model"] == "deepseek-v4-pro"
+    assert captured["provider_kwargs"]["model"] == "deepseek-chat"
     assert captured["feedback_client"] != "gemini-client"
 
     response = captured["feedback_client"].models.generate_content(
-        model="deepseek-v4-pro",
+        model="deepseek-chat",
         contents="ping",
         config=SimpleNamespace(temperature=0.1, max_output_tokens=12),
     )
 
     assert response.text == "ok"
-    assert captured["provider_call"]["model"] == "deepseek-v4-pro"
+    assert captured["provider_call"]["model"] == "deepseek-chat"
     assert captured["provider_call"]["prompt"] == "ping"
     assert captured["provider_call"]["temperature"] == 0.1
     assert captured["provider_call"]["max_tokens"] == 12
@@ -86,7 +86,7 @@ def test_file_task_model_client_deepseek_mode_uses_deepseek_provider(monkeypatch
     monkeypatch.setattr(
         file_task_model,
         "get_configured_cloud_model",
-        lambda **kwargs: "deepseek-v4-pro",
+        lambda **kwargs: "deepseek-chat",
     )
 
     class FakeProvider:
@@ -123,10 +123,10 @@ def test_file_task_model_client_deepseek_mode_uses_deepseek_provider(monkeypatch
         tools=[],
     )
 
-    assert result["model"] == "deepseek-v4-pro"
+    assert result["model"] == "deepseek-chat"
     assert captured["provider_kwargs"]["provider"] == "deepseek"
-    assert captured["provider_kwargs"]["model"] == "deepseek-v4-pro"
-    assert captured["fallback_kwargs"]["preferred_model"] == "deepseek-v4-pro"
+    assert captured["provider_kwargs"]["model"] == "deepseek-chat"
+    assert captured["fallback_kwargs"]["preferred_model"] == "deepseek-chat"
     assert captured["fallback_kwargs"]["task_type"] == "FILE_TASK"
 
 
@@ -139,7 +139,7 @@ def test_file_task_request_defaults_to_deepseek_when_mode_omitted(monkeypatch):
     assert request.model_mode == "deepseek"
     assert (
         file_task_model.FileTaskModelClient()._cloud_model_id(request)
-        == "deepseek-v4-pro"
+        == "deepseek-chat"
     )
 
 

@@ -178,6 +178,6 @@ def test_select_best_prefers_gemini31_pro_for_file_task_when_available():
 
 def test_static_default_map_includes_file_task_route():
     manager = ModelManager(client=None)
-    assert manager._static_default_map()["FILE_TASK"] == "deepseek-v4-pro"
-    assert manager._static_default_map()["CHAT"] == "deepseek-v4-pro"
+    assert manager._static_default_map()["FILE_TASK"] == "deepseek-chat"
+    assert manager._static_default_map()["CHAT"] == "deepseek-chat"
     assert manager._static_default_map()["VISION"] == "gemini-3-flash-preview"

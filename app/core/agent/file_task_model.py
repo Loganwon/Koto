@@ -13,7 +13,7 @@ from app.core.llm.model_selection import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_FILE_TASK_MODEL = "deepseek-v4-pro"
+_DEFAULT_FILE_TASK_MODEL = "deepseek-chat"
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
 
 

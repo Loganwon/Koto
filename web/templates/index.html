@@ -10,6 +10,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260625">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-ai-panel.css') }}?v=20260628-ai-panel-layout">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/utilities.css') }}?v=20260705">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
         var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
@@ -32,8 +33,23 @@
     </noscript>
     <script defer src="{{ url_for('static', filename='vendor/marked/12.0.0/marked.min.js') }}"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.css') }}">
-    <!-- highlight.js & KaTeX: lazy-load on idle to avoid blocking initial render -->
-    <script>(function(){var h="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}",k="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}",l=function(u){var s=document.createElement("script");s.src=u;s.defer=true;document.head.appendChild(s)};if(window.requestIdleCallback){requestIdleCallback(function(){l(h);l(k)},{timeout:2000})}else{setTimeout(function(){l(h);l(k)},300)}})();</script>
+    <!-- highlight.js & KaTeX: lazy-load on demand when content needs them -->
+    <script>(function(){
+        var h="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}";
+        var k="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}";
+        var loaded={h:false,k:false};
+        var load=function(u,cb){var s=document.createElement("script");s.src=u;s.defer=true;s.onload=cb;document.head.appendChild(s)};
+        window._kotoEnsureHighlight=function(cb){
+            if(loaded.h){cb&&cb();return}
+            load(h,function(){loaded.h=true;if(window.hljs)window.hljs.configure({cssSelector:'pre code:not(.nohighlight)'});cb&&cb()});
+        };
+        window._kotoEnsureKatex=function(cb){
+            if(loaded.k){cb&&cb();return}
+            load(k,function(){loaded.k=true;cb&&cb()});
+        };
+        // Preload after 3s idle as fallback
+        if(window.requestIdleCallback){requestIdleCallback(function(){window._kotoEnsureHighlight();window._kotoEnsureKatex()},{timeout:3000})}
+    })();</script>
     <!-- ── Token 使用监测嵌入式样式 ── -->
     <!-- Mermaid 图表渲染：按需懒加载（3.2MB，不在启动时阻塞 DOMContentLoaded） -->
 </head>
@@ -2316,7 +2332,7 @@
                         ? 'opacity:.45;text-decoration:line-through;cursor:help;'
                         : '';
                     const suppressNote = isSuppressed
-                        ? `<br><span style="color:#ffb86c;font-size:11px">⚠️ 已被「${suppressedBy}」覆盖，本次不生效</span>`
+                        ? `<br><span style="color:#ffb86c;font-size:11px">⚠️ 已被「${safeSuppressedBy}」覆盖，本次不生效</span>`
                         : '';
                     return `<span class="csb-pill" style="${suppressStyle}" title="${isSuppressed ? '与「'+suppressedBy+'」冲突，被抑制' : ''}">
                         <span class="csb-pill-tip">
@@ -2488,7 +2504,7 @@
 
                 // Show parsed fields
                 const fieldsEl = document.getElementById('templateFieldsList');
-                fieldsEl.innerHTML = (data.fields || []).map(f =>
+                fieldsEl.innerHTML = (data.fields || []).map(function(f){ return _escapeHtml(f); }).map(f =>
                     {% raw %}`<span style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.35);border-radius:4px;padding:2px 7px;font-size:11px;color:#7ecfff;">{{${f}}}</span>`{% endraw %}
                 ).join('');
                 document.getElementById('templateFieldsPreview').style.display = 'block';
@@ -2602,8 +2618,8 @@
         function _showToast(suggestion) {
             _currentSuggestion = suggestion;
 
-            const actions_txt = suggestion.actions.join('、') || '该操作';
-            const objects_txt = suggestion.objects.length ? suggestion.objects.slice(0,2).join('、') : '';
+            const actions_txt = _escapeHtml(suggestion.actions.join('、') || '该操作');
+            const objects_txt = suggestion.objects.length ? _escapeHtml(suggestion.objects.slice(0,2).join('、')) : '';
             const body_el = document.getElementById('macroToastBody');
             if (body_el) {
                 body_el.innerHTML =
@@ -2796,6 +2812,8 @@
 
     <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
     {% include '_workspace_asset_scripts.html' %}
+
+</div><!-- /app-shell -->
 
 <!-- Koto main app logic (real sendMessage + chat + settings) -->
 </body>

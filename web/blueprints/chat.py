@@ -51,6 +51,27 @@ def chat() -> Response:
     data = request.get_json(silent=True) or {}
     session_name = data.get("session")
     user_input = data.get("message", "")
+    file_path = data.get("file_path", "")
+
+    # Support direct file path reading via FileProcessor (same format as upload)
+    _file_data_for_brain = None
+    if file_path:
+        try:
+            import os as _chat_os
+            _resolved = _chat_os.path.abspath(_chat_os.path.expanduser(file_path))
+            if not _chat_os.path.exists(_resolved):
+                return jsonify({"error": f"File not found: {_resolved}"}), 404
+            _size_mb = _chat_os.path.getsize(_resolved) / (1024 * 1024)
+            if _size_mb > 10:
+                return jsonify({"error": f"File too large ({_size_mb:.1f}MB). Max 10MB for direct reads."}), 413
+            from web.file_processor import FileProcessor as _FP
+            _raw = _FP.process_file(_resolved)
+            _formatted, _fd = _FP.format_result_for_chat(_raw, user_input or "")
+            user_input = _formatted
+            _file_data_for_brain = _fd
+        except Exception as _e:
+            return jsonify({"error": f"Failed to read file: {str(_e)}"}), 500
+    
     locked_task = data.get("locked_task")
     locked_model = data.get("locked_model", "auto")
 
@@ -80,6 +101,7 @@ def chat() -> Response:
     result = get_brain().chat(
         history,
         user_input,
+        file_data=_file_data_for_brain,
         model=model,
         auto_model=auto_model,
         task_type=task_type,

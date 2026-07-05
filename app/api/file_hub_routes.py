@@ -60,7 +60,7 @@ import threading
 from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
-from web.settings import settings as user_settings
+from app.core.config.user_settings import settings as user_settings
 
 logger = logging.getLogger(__name__)
 
@@ -1039,7 +1039,7 @@ _WATCH_SETTINGS_PATH = str(
 def _read_user_settings() -> dict:
     """Read settings via SettingsManager (thread-safe)."""
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
         return SettingsManager().get_all()
     except Exception:
         import json as _json
@@ -1056,7 +1056,7 @@ def _write_user_settings(data: dict) -> None:
     Only the 'file_watcher' sub-key is updated to avoid clobbering other
     settings that may have been changed concurrently.
     """
-    from web.settings import SettingsManager
+    from app.core.config.user_settings import SettingsManager
     sm = SettingsManager()
     fw = data.get("file_watcher", {})
     sm.update("file_watcher", fw)

@@ -4,9 +4,9 @@
  */
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
-declare var lastSelectionText: string;
+declare let state: any;
+declare let WA: any;
+declare let lastSelectionText: string;
 declare function _resetDocxSelection(): void;
 
 export interface SplitConfig {
@@ -91,7 +91,7 @@ export function _initSplit(): void {
   try {
     const raw = localStorage.getItem(splitKey);
     savedSizes = raw ? JSON.parse(raw) : null;
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
 
   const targets = embedded ? ['#wa-canvas', '#wa-ai'] : ['#wa-left', '#wa-canvas', '#wa-ai'];
   (window as any)._waSplit = (window as any).Split(targets, {
@@ -141,7 +141,7 @@ export function _expandWAPanel(): void {
       if ((window as any)._waSplit && typeof (window as any)._waSplit.setSizes === 'function') {
         (window as any)._waSplit.setSizes(document.getElementById('workspaceView') ? [68, 32] : [15, 55, 30]);
       }
-    } catch (_) {}
+    } catch (e) { console.warn("[Koto]", e) }
   }
 }
 

@@ -757,10 +757,10 @@ def editor_ai_stream():
 
     def generate():
         try:
-            from app.core.agent.legacy_loop_facade import iter_editor_agent_events
+            from app.core.agent.editor_loop_executor import EditorLoopExecutor
 
             agent_request = _editor_agent_request_from_payload(data)
-            for event in iter_editor_agent_events(agent_request):
+            for event in EditorLoopExecutor().iter_events(agent_request):
                 yield _safe_sse(_agent_event_payload(event))
         except Exception as exc:
             _logger.exception("[editor-ai] stream failed")

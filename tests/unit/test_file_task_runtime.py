@@ -6861,7 +6861,7 @@ def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
     monkeypatch.setattr(
         file_task_model_module,
         "get_configured_cloud_model",
-        lambda **kwargs: "deepseek-v4-pro",
+        lambda **kwargs: "deepseek-chat",
     )
     monkeypatch.setattr(provider_factory, "get_llm_provider", fake_get_llm_provider)
     monkeypatch.setattr(
@@ -6879,9 +6879,9 @@ def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
     assert response["content"] == "deepseek ok"
     assert captured["provider_kwargs"] == {
         "provider": "deepseek",
-        "model": "deepseek-v4-pro",
+        "model": "deepseek-chat",
     }
-    assert captured["fallback"]["preferred_model"] == "deepseek-v4-pro"
+    assert captured["fallback"]["preferred_model"] == "deepseek-chat"
     assert captured["fallback"]["task_type"] == "FILE_TASK"
     assert captured["fallback"]["system_instruction"] == "system"
     assert captured["fallback"]["tools"] == [{"name": "parse_file_to_text"}]

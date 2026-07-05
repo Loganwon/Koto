@@ -127,74 +127,34 @@ TASK_REQUIREMENTS: Dict[str, Dict[str, Any]] = {
 # - Gemini 保留为视觉/图片生成，以及显式选择 Gemini 时的备选
 _TASK_MODEL_PREFERENCES: Dict[str, List[str]] = {
     "CHAT": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
+        "deepseek-chat",
     ],
     "WEB_SEARCH": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
+        "deepseek-chat",
     ],
     "VISION": [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
+        "deepseek-chat",
     ],
     "CODER": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-3-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
+        "deepseek-chat",
     ],
     "RESEARCH": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
+        "deepseek-chat",
     ],
     "FILE_GEN": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-pro",
-        "gemini-3-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-3-flash-preview",
+        "deepseek-chat",
     ],
     "FILE_TASK": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
+        "deepseek-chat",
     ],
     "AGENT": [
-        "deepseek-v4-pro",
-        "deepseek-v4-flash",
-        "gemini-3.1-pro-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-pro",
-        "gemini-3-flash-preview",
-        "gemini-3-pro-preview",
+        "deepseek-chat",
     ],
     "PAINTER": [
-        "gemini-3.1-flash-image-preview",
-        "gemini-2.5-flash-image",
+        "deepseek-chat",
     ],
 }
+
 
 # ─── 本地执行任务（无需 API 模型）────────────────────────────────────────────
 LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
@@ -206,7 +166,7 @@ LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
 # interactions_only: True 表示必须走 Interactions API（而非 generate_content）
 KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
     # ── DeepSeek primary cloud stack ─────────────────────────────
-    "deepseek-v4-pro": {
+    "deepseek-chat": {
         "provider": "deepseek",
         "tier": 10,
         "speed": 7,
@@ -218,10 +178,10 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "grounding": True,
         "image_gen": False,
         "interactions_only": False,
-        "display": "DeepSeek V4 Pro",
+        "display": "DeepSeek Chat",
         "strengths": ["推理", "代码", "工具调用", "复杂文件任务"],
     },
-    "deepseek-v4-flash": {
+    "deepseek-chat": {
         "provider": "deepseek",
         "tier": 8,
         "speed": 9,
@@ -233,7 +193,7 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "grounding": True,
         "image_gen": False,
         "interactions_only": False,
-        "display": "DeepSeek V4 Flash",
+        "display": "DeepSeek Chat (Fast)",
         "strengths": ["快速", "对话", "代码", "工具调用"],
     },
     # ── Gemini 3.x preview (preferred text stack) ──────────────────
@@ -621,11 +581,7 @@ class ModelManager:
         self.get_model_map()
         # 优先选用已知稳定的 Flash 模型，避免 pro-preview 等访问受限的模型
         _PREFERRED_FALLBACKS = [
-            "gemini-3-flash-preview",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.5-pro",
-            "gemini-3-pro-preview",
+            "deepseek-chat",
         ]
         for mid in _PREFERRED_FALLBACKS:
             caps = self._cached_caps.get(mid)
@@ -645,7 +601,7 @@ class ModelManager:
             and mid != "local-executor"
         ]
         if not candidates:
-            return "gemini-2.5-flash"
+            return "deepseek-chat"
         best = max(
             candidates,
             key=lambda x: (
@@ -666,16 +622,27 @@ class ModelManager:
 
     def _rebuild(self):
         """从 API 获取可用模型列表，重新构建 model_map 和 capabilities 缓存。"""
+        # 只有 Gemini 才需要通过 API 发现模型列表
         try:
-            discovered = self._fetch_available_model_ids()
-        except Exception as exc:
-            logger.warning(f"[ModelManager] 模型列表获取失败: {exc}")
-            self._last_fail_ts = time.time()
-            # 如无缓存，使用静态默认
-            if self._cached_map is None:
-                self._cached_map = self._static_default_map()
-                self._preload_static_caps()
-            return
+            from app.core.llm.model_selection import get_configured_cloud_provider
+            _cloud_provider = get_configured_cloud_provider()
+        except Exception:
+            _cloud_provider = "gemini"
+
+        if _cloud_provider == "gemini":
+            try:
+                discovered = self._fetch_available_model_ids()
+            except Exception as exc:
+                logger.warning(f"[ModelManager] 模型列表获取失败: {exc}")
+                self._last_fail_ts = time.time()
+                if self._cached_map is None:
+                    self._cached_map = self._static_default_map()
+                    self._preload_static_caps()
+                return
+        else:
+            # 非 Gemini 提供者使用静态默认列表
+            discovered = list(self._static_default_map().values())
+            self._last_fail_ts = 0.0
 
         try:
             from app.core.llm.model_selection import (
@@ -689,8 +656,7 @@ class ModelManager:
                     configured_model = get_configured_cloud_model(task_type=task, provider=cloud_provider)
                     if configured_model:
                         discovered.append(configured_model)
-                if cloud_provider == "deepseek":
-                    discovered.extend(["deepseek-v4-pro", "deepseek-v4-flash"])
+                # DeepSeek models already covered by static defaults + configured model above
         except Exception as exc:
             logger.debug("[ModelManager] configured cloud model injection skipped: %s", exc)
 
@@ -727,6 +693,10 @@ class ModelManager:
                 new_map[task] = static_defaults[task]
         for task in LOCAL_EXECUTOR_TASKS:
             new_map[task] = "local-executor"
+        # 补充静态默认中未被 TASK_REQUIREMENTS 覆盖的任务（如 FILE_SEARCH）
+        for task, default_model in static_defaults.items():
+            if task not in new_map:
+                new_map[task] = default_model
 
         self._cached_map = new_map
         self._last_refresh = time.time()
@@ -851,20 +821,22 @@ class ModelManager:
     def _static_default_map() -> Dict[str, str]:
         """API 不可用时的静态兜底映射。"""
         defaults = {
-            "CHAT": "deepseek-v4-pro",
-            "CODER": "deepseek-v4-pro",
-            "WEB_SEARCH": "deepseek-v4-pro",
-            "VISION": "gemini-3-flash-preview",
-            "RESEARCH": "deepseek-v4-pro",
-            "FILE_GEN": "deepseek-v4-pro",
-            "FILE_TASK": "deepseek-v4-pro",
-            "DOC_ANNOTATE": "deepseek-v4-pro",
-            "MEETING_EXTRACT": "deepseek-v4-pro",
-            "PAINTER": "gemini-3.1-flash-image-preview",
-            "AGENT": "deepseek-v4-pro",
+            "CHAT": "deepseek-chat",
+            "CODER": "deepseek-chat",
+            "WEB_SEARCH": "deepseek-chat",
+            "VISION": "deepseek-chat",
+            "RESEARCH": "deepseek-chat",
+            "FILE_GEN": "deepseek-chat",
+            "FILE_TASK": "deepseek-chat",
+            "FILE_EDIT": "deepseek-chat",
+            "FILE_SEARCH": "deepseek-chat",
+            "DOC_ANNOTATE": "deepseek-chat",
+            "MEETING_EXTRACT": "deepseek-chat",
+            "PAINTER": "deepseek-chat",
+            "AGENT": "deepseek-chat",
             "SYSTEM": "local-executor",
             "FILE_OP": "local-executor",
-            "COMPLEX": "deepseek-v4-pro",
+            "COMPLEX": "deepseek-chat",
         }
         return defaults
 

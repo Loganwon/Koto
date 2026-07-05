@@ -24,7 +24,7 @@ const _DEFAULT_PROJECT_OPTIONS: Array<{ key: string; label: string }> = [
 // ── Session state management ──
 const sessionStates = new Map<string, { isGenerating: boolean; abortController: AbortController | null; taskId?: string | null }>();
 const sessionDomCache = new Map<string, DocumentFragment>();
-let isScrollLocked = false;
+const isScrollLocked = false;
 
 export { currentSession, sessionStates, sessionDomCache, isScrollLocked };
 (window as any).currentSession = currentSession;

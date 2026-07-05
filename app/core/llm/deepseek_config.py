@@ -13,7 +13,7 @@ DEEPSEEK_KEY_ENV_NAMES = (
 )
 
 DEEPSEEK_DEFAULT_BASE_URL = "https://api.deepseek.com"
-DEEPSEEK_DEFAULT_MODEL = "deepseek-v4-pro"
+DEEPSEEK_DEFAULT_MODEL = "deepseek-chat"
 
 _PLACEHOLDER_VALUES = {
     "",

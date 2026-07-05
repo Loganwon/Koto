@@ -137,7 +137,7 @@ function _cleanupDocumentListeners(): void {
     _docListeners.push({ type, listener, options });
     return _origDocAddEventListener(type, listener, options);
   };
-  if (removed > 0) console.log('[WA] Cleaned up ' + removed + ' document event listeners');
+  if (removed > 0) { /* listeners cleaned up */ }
 }
 
 // Toast

@@ -4,11 +4,11 @@
  */
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var _waAiResultsRuntime: any;
-declare var _waQuickActionRuntime: any;
-declare var _waConversationRuntime: any;
-declare var _waTaskDispatcher: any;
+declare let state: any;
+declare let _waAiResultsRuntime: any;
+declare let _waQuickActionRuntime: any;
+declare let _waConversationRuntime: any;
+declare let _waTaskDispatcher: any;
 
 declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
 declare function _normalizeWorkspaceModelMode(mode: string, fallback: string): string;
@@ -90,7 +90,7 @@ export function toggleTheme(): void {
 export const _MODEL_LABELS: Record<string, string> = {
   cloud: '\u4e91\u7aef',
   local: '\u672c\u5730',
-  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+  'deepseek-chat': 'DeepSeek Chat',
   'deepseek-v4-flash': 'DeepSeek V4 Flash',
 };
 
@@ -152,7 +152,7 @@ export function _currentCloudModelHint(): string {
   if (explicitCloudModel) return _modelDisplayName(explicitCloudModel, explicitCloudModel);
 
   if (state.lockedModel === 'deepseek') {
-    return _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+    return _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
   }
 
   if (state.lockedModel !== 'local' && state._activeRoute?.modelId && state._activeRoute.modelId !== 'local') {
@@ -162,7 +162,7 @@ export function _currentCloudModelHint(): string {
   const mappedFileTaskModel = state._modelMap?.FILE_TASK || state._modelMap?.DOC_ANNOTATE || state._modelMap?.FILE_GEN || state._modelMap?.AGENT || state._modelMap?.CHAT || '';
   if (mappedFileTaskModel) return _modelDisplayName(mappedFileTaskModel, mappedFileTaskModel);
 
-  return _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+  return _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
 }
 
 export function _syncModelStatusUi(): void {
@@ -172,7 +172,7 @@ export function _syncModelStatusUi(): void {
   const routeInfo = $('wa-ai-route-info');
   const explicitCloudModel = _selectedCloudModelId();
   const activeRoute = state._activeRoute || null;
-  const deepseekModelHint = _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+  const deepseekModelHint = _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
   const localModelHint = state._localRuntimeModel || '\u672a\u542f\u52a8';
   const lockedMode = _normalizeWorkspaceModelMode(state.lockedModel, 'deepseek');
   const rawActiveMode = lockedMode === 'cloud'
@@ -278,7 +278,7 @@ export function _refreshModelCatalog(force: boolean = false): Promise<any> {
       _syncModelStatusUi();
       return data;
     })
-    .catch((error) => {
+    .catch((error: any): any => {
       console.warn('[WA] model catalog fetch failed:', error);
       state._modelsReady = false;
       state._modelMap = {};
@@ -355,7 +355,7 @@ export function _syncLockedModelFromServer(): Promise<any> {
       _syncModelStatusUi();
       return data;
     })
-    .catch(() => null);
+    .catch((): any => null);
 }
 
 export function initSocket(): void {

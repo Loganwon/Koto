@@ -6,7 +6,7 @@ declare const state: any;
 declare const _PENCIL_SVG: string;
 declare const _TRASH_SVG: string;
 declare const _CLIPBOARD_SVG: string;
-declare var lastSelectionText: string;
+declare let lastSelectionText: string;
 declare function showToast(msg: string, type?: string, duration?: number): void;
 declare function $(id: string): any;
 declare function _hexLuma(hex: string): number;
@@ -1492,7 +1492,7 @@ export class KotoPptxEditor implements WorkspaceEditor {
 
     _clearTableSelection({ restoreWholeTableSummary = true } = {}) {
       if (this._tableSelectionCleanup) {
-        try { this._tableSelectionCleanup(); } catch (_) {}
+        try { this._tableSelectionCleanup(); } catch (_) { /* allowed to fail */ }
         this._tableSelectionCleanup = null;
       }
 
@@ -1769,7 +1769,7 @@ export class KotoPptxEditor implements WorkspaceEditor {
           r.collapse(false);   // collapse to end
           const sel = window.getSelection();
           if (sel) { sel.removeAllRanges(); sel.addRange(r); }
-        } catch (_) {}
+        } catch (e) { console.warn("[Koto]", e) }
       }
     }
 

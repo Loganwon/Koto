@@ -1,33 +1,62 @@
 {
-  "compilerOptions": {
-    "target": "ES2020",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
-    "strict": false,
-    "noImplicitAny": false,
-    "noFallthroughCasesInSwitch": true,
-    "outDir": "./static/js/dist",
-    "rootDir": "./src",
-    "declaration": true,
-    "declarationDir": "./static/js/types",
-    "sourceMap": true,
-    "lib": ["ES2020", "DOM", "DOM.Iterable"],
-    "allowJs": true,
-    "checkJs": false,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true,
-    "baseUrl": "./src",
-    "paths": {
-      "@workspace/*": ["workspace/*"],
-      "@chat/*": ["chat/*"],
-      "@skills/*": ["skills/*"],
-      "@review/*": ["review/*"],
-      "@shared/*": ["shared/*"]
-    }
-  },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "static", "univer-editor", "tiptap-editor"]
+    "compilerOptions":  {
+                            "target":  "ES2020",
+                            "module":  "ESNext",
+                            "moduleResolution":  "bundler",
+                            "noFallthroughCasesInSwitch":  true,
+                            "outDir":  "./static/js/dist",
+                            "rootDir":  "./src",
+                            "declaration":  true,
+                            "declarationDir":  "./static/js/types",
+                            "sourceMap":  true,
+                            "lib":  [
+                                        "ES2020",
+                                        "DOM",
+                                        "DOM.Iterable"
+                                    ],
+                            "allowJs":  true,
+                            "checkJs":  false,
+                            "resolveJsonModule":  true,
+                            "isolatedModules":  true,
+                            "esModuleInterop":  true,
+                            "skipLibCheck":  true,
+                            "forceConsistentCasingInFileNames":  true,
+                            "baseUrl":  "./src",
+                            "paths":  {
+                                          "@workspace/*":  [
+                                                               "workspace/*"
+                                                           ],
+                                          "@chat/*":  [
+                                                          "chat/*"
+                                                      ],
+                                          "@skills/*":  [
+                                                            "skills/*"
+                                                        ],
+                                          "@review/*":  [
+                                                            "review/*"
+                                                        ],
+                                          "@shared/*":  [
+                                                            "shared/*"
+                                                        ]
+                                      },
+                            "alwaysStrict":  true,
+                            "noImplicitThis":  true,
+                            "strictBindCallApply":  true,
+                            "useUnknownInCatchVariables":  true,
+                            "strictFunctionTypes":  true,
+                            "noImplicitAny":  true,
+                            "strictNullChecks":  true,
+                            "strictPropertyInitialization":  true,
+                            "strict":  true
+                        },
+    "include":  [
+                    "src/**/*.ts"
+                ],
+    "exclude":  [
+                    "node_modules",
+                    "static",
+                    "univer-editor",
+                    "tiptap-editor",
+        "**/*.test.ts"
+                ]
 }

@@ -80,7 +80,7 @@ def _augment_models_for_cloud_provider(payload: dict) -> dict:
             pass
         model_entry = {
             "id": model_id,
-            "display": "DeepSeek V4 Pro",
+            "display": "DeepSeek Chat",
             "tier": 10,
             "provider": "deepseek",
             "strengths": ["reasoning", "coding", "tool_calling", "file_task"],
@@ -107,7 +107,7 @@ def _augment_models_for_cloud_provider(payload: dict) -> dict:
                     current.update(
                         {
                             "model_id": model_id,
-                            "display": "DeepSeek V4 Pro",
+                            "display": "DeepSeek Chat",
                             "provider": "deepseek",
                             "tier": 10,
                         }
@@ -272,7 +272,7 @@ def local_model_switch() -> Response:
                 if mode in {"gemini", "deepseek"}:
                     ai_settings["cloud_provider"] = mode
                 elif mode == "cloud":
-                    ai_settings.setdefault("cloud_provider", "gemini")
+                    ai_settings.setdefault("cloud_provider", "deepseek")
             if model_tag:
                 sm._settings["local_model"] = model_tag
             save_ok = sm._save_settings()
@@ -501,7 +501,7 @@ def setup_api_key() -> Response:
     mod = _app()
     data = request.json
     api_key = data.get("api_key", "").strip()
-    provider = str(data.get("provider") or "").strip().lower() or "gemini"
+    provider = str(data.get("provider") or "").strip().lower() or "deepseek"
 
     if not api_key or len(api_key) < 10:
         return jsonify({"success": False, "error": "Invalid API key"})
@@ -517,7 +517,7 @@ def setup_api_key() -> Response:
             set_runtime_deepseek_api_key(api_key)
             sm = _get_settings_manager()
             sm.set("ai", "cloud_provider", "deepseek")
-            sm.set("ai", "deepseek_model", "deepseek-v4-pro")
+            sm.set("ai", "deepseek_model", "deepseek-chat")
         else:
             from app.core.llm.gemini_config import (
                 set_runtime_gemini_api_key,

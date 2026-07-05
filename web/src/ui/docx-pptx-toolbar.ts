@@ -3,13 +3,13 @@
  */
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
-declare var lastSelectionText: string;
-declare var _docxCpEl: HTMLElement | null;
-declare var _docxHbEl: HTMLElement | null;
-declare var _docxNativeSelBottom: number;
-declare var _docxMouseUpY: number;
+declare let state: any;
+declare let WA: any;
+declare let lastSelectionText: string;
+declare let _docxCpEl: HTMLElement | null;
+declare let _docxHbEl: HTMLElement | null;
+declare let _docxNativeSelBottom: number;
+declare let _docxMouseUpY: number;
 
 declare function _escHtml(s: any): string;
 declare function showToast(message: string, kind?: string, duration?: number): void;
@@ -106,7 +106,7 @@ export function _getDocxNativeSelectionBounds(pm?: HTMLElement | null, editorLef
       : range.endContainer.parentElement);
     if ((start && !pm.contains(start)) || (end && !pm.contains(end))) return null;
   }
-  const rects = range.getClientRects ? range.getClientRects() : [];
+  const rects: DOMRectList | DOMRect[] = range.getClientRects ? range.getClientRects() : [];
   const bounds = _boundsFromRects(rects, editorLeft);
   if (bounds) {
     (window as any)._docxNativeSelBottom = bounds.bottom;
@@ -512,19 +512,19 @@ export function _docxPickColor(color: string, keepOpen?: boolean): void {
 
 export function docxHoverAI(action: string): void {
   _hideDocxHoverBar();
-  const selText = (window as any).WA._getDocxSelectionTextForAI ? (window as any).WA._getDocxSelectionTextForAI() : (window.getSelection ? window.getSelection().toString().trim() : '');
+  const selText = (window as any).WA._getDocxSelectionTextForAI ? (window as any).WA._getDocxSelectionTextForAI() : (window.getSelection()?.toString().trim() || '');
   if (selText) lastSelectionText = selText;
   if (!lastSelectionText) { showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info'); return; }
   WA.sendQuickAction(action);
 }
 
 export function closeDocxHoverBar(): void {
-  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection ? window.getSelection().toString().trim() : '');
+  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
   _resetDocxSelection();
 }
 
 export function closeSelectionToolbar(): void {
-  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection ? window.getSelection().toString().trim() : '');
+  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
   const tt = $('wa-pdf-tooltip');
   if (tt) tt.style.display = 'none';
   if (state.fileType === 'docx') _resetDocxSelection();
@@ -921,7 +921,7 @@ export function _pptxPickColor(color: string, keepOpen?: boolean): void {
 export function pptxHoverAI(action: string): void {
   const hoverBar = $('wa-pptx-hoverbar');
   if (hoverBar) hoverBar.style.display = 'none';
-  const selText = window.getSelection ? window.getSelection().toString().trim() : '';
+  const selText = window.getSelection()?.toString().trim() || '';
   if (selText) lastSelectionText = selText;
   if (!lastSelectionText) {
     showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info');

@@ -1,141 +1,146 @@
-# Koto Architecture
+# Koto Architecture & Developer Guide
 
-> Last updated: 2025
+## Overview
 
-## System Overview
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Web Browser / pywebview                │
-│                   (HTML/CSS/JS Frontend)                     │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ HTTP/REST + SSE
-┌──────────────────────────▼──────────────────────────────────┐
-│                     Flask Application (web/app.py)          │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────┐  │
-│  │ Auth     │  │ CORS     │  │ CSRF      │  │ Rate      │  │
-│  │ Middleware│  │          │  │ Protection│  │ Limiting  │  │
-│  └──────────┘  └──────────┘  └───────────┘  └───────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│                     API Routes Layer                         │
-│  /api/chat  /api/auth  /api/files  /api/goals  /api/jobs   │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│                  Unified Agent Framework                     │
-│                  (app/core/agent/)                           │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Plugin System (AgentPlugin)             │    │
-│  │  ┌──────────┐ ┌───────────┐ ┌───────────────────┐   │    │
-│  │  │ Basic    │ │ System    │ │ Data Process      │   │    │
-│  │  │ Tools    │ │ Tools     │ │ Plugin            │   │    │
-│  │  └──────────┘ └───────────┘ └───────────────────┘   │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                             │
-│  ┌──────────────────┐  ┌──────────────────────────────┐     │
-│  │ LangGraph        │  │ Gemini / LLM Provider       │     │
-│  │ State Machine    │  │ (google-genai)               │     │
-│  └──────────────────┘  └──────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│                    Services Layer                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐   │
-│  │ File     │  │ Document │  │ Goal     │  │ Job       │   │
-│  │ Registry │  │ Processing│  │ Manager  │  │ Runner    │   │
-│  └──────────┘  └──────────┘  └──────────┘  └───────────┘   │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Key Components
-
-### 1. Web Layer (`web/`)
-
-| File | Responsibility |
-|------|----------------|
-| `app.py` | Flask app factory, route registration, middleware |
-| `auth.py` | JWT authentication, rate limiting, user management |
-
-### 2. Agent Framework (`app/core/agent/`)
-
-The agent system uses a **plugin architecture**:
-
-- **`base.py`** — `AgentPlugin` abstract base class
-- **Plugins** register tools that the LLM can invoke
-- **Sandboxing** — All code execution plugins use AST validation to block
-  dangerous operations (imports, builtins, dunder access)
-
-### 3. Plugin Security Model
+Koto (?) is a desktop AI assistant built with a Python backend and TypeScript
+frontend, rendered via WebView2. It combines AI chat with a file workstation
+(DOCX/XLSX/PPTX/PDF editing, review, and generation).
 
 ```
-User prompt → LLM → Tool call → AST validation → Sandboxed exec/eval
-                                      │
-                                      ├─ Blocked AST nodes (Import, ImportFrom)
-                                      ├─ Blocked names (os, sys, subprocess...)
-                                      ├─ Blocked attributes (__builtins__, __globals__...)
-                                      └─ Safe builtins (no exec, eval, open...)
+????????????????????????????????????????????????????????
+?                    WebView2 Shell                     ?
+?  ??????????????????????????????????????????????????  ?
+?  ?              index.html (Flask/Jinja2)          ?  ?
+?  ?  ????????????  ?????????????  ??????????????  ?  ?
+?  ?  ? Chat View?  ? Workspace ?  ?Skills Panel?  ?  ?
+?  ?  ? (legacy) ?  ? (TS/Vite) ?  ?  (TS/Vite) ?  ?  ?
+?  ?  ????????????  ?????????????  ??????????????  ?  ?
+?  ??????????????????????????????????????????????????  ?
+?                       ? HTTP + SSE                    ?
+?  ??????????????????????????????????????????????????  ?
+?  ?              Flask Application                  ?  ?
+?  ?  ????????????  ?????????????  ??????????????  ?  ?
+?  ?  ?Blueprints?  ?   app/    ?  ?   web/      ?  ?  ?
+?  ?  ?(routes)  ?  ?  core/    ?  ?  services   ?  ?  ?
+?  ?  ????????????  ?????????????  ??????????????  ?  ?
+?  ??????????????????????????????????????????????????  ?
+?                       ?                               ?
+?  ??????????????????????????????????????????????????  ?
+?  ?         Python Backend Services                 ?  ?
+?  ?  LLM ? File I/O ? Skills ? Agents ? Memory     ?  ?
+?  ??????????????????????????????????????????????????  ?
+????????????????????????????????????????????????????????
 ```
 
-### 4. Authentication & Authorization
-
-- **JWT-based** authentication with configurable expiry
-- **3-tier rate limiting**: strict (10/min), standard (30/min), relaxed (120/min)
-- **CSRF protection** via Flask-WTF on form-based routes
-- Auth is **enabled by default**; set `KOTO_AUTH_ENABLED=false` for local dev
-
-### 5. Data Flow
+## Directory Map
 
 ```
-1. Client sends request → Flask middleware (auth, rate limit, CSRF)
-2. Route handler invokes UnifiedAgent
-3. Agent selects tool via LLM reasoning
-4. Plugin validates input (AST check) → executes in sandbox
-5. Result returned through SSE stream or JSON response
+Koto/
+??? app/                    # Core backend (Python)
+?   ??? api/               # Agent, MCP, goals, tasks, skills APIs
+?   ??? core/              # LLM, file I/O, config, hooks, planning
+??? web/                    # Web layer (Flask + TypeScript)
+?   ??? blueprints/        # Flask route blueprints
+?   ??? src/               # TypeScript source (Vite bundles)
+?   ?   ??? app/           # Chat UI, router, settings, theme
+?   ?   ??? bundles/       # Bundle entry points
+?   ?   ??? workspace/     # File workspace (tabs, AI, save, review)
+?   ?   ??? skills/        # Skills panel & marketplace
+?   ?   ??? editors/       # DOCX, PDF, PPTX, XLSX, image viewers
+?   ?   ??? shared/        # CSRF, auth, side-panels
+?   ?   ??? ui/            # Shared UI components
+?   ??? static/            # Built JS, CSS, vendor libs
+?   ??? templates/         # Jinja2 HTML templates
+?   ??? services/          # Python service layer
+??? config/                # Application configuration
+??? workspace/             # Default workspace directory
+??? tests/                 # Python tests (pytest)
+??? docs/                  # Documentation
 ```
 
-## Architecture Decision Records (ADRs)
+## Frontend Entry Points
 
-### ADR-001: Plugin-based Agent Architecture
+| Bundle | Entry | Size | Purpose |
+|--------|-------|------|---------|
+| `workspace-bundle.js` | `src/bundles/workspace.ts` | ~1.1MB | File workstation + AI panel |
+| `app-bundle.js` | `src/bundles/app.ts` | ~259KB | Chat view, routing, settings |
+| `skills-panel-bundle.js` | `src/skills/skills-panel.ts` | ~64KB | Skills library panel |
+| `review-bundle.js` | `src/bundles/review.ts` | ~68KB | DOCX review annotations |
 
-**Decision**: Use a plugin system where each capability is an independent
-`AgentPlugin` subclass.
+**Build**: `node scripts/build-bundles.mjs` (uses Vite + esbuild)
 
-**Rationale**: Allows adding new tools without modifying the core agent loop.
-Plugins are self-contained and testable in isolation.
+## Backend Blueprints
 
-### ADR-002: AST-based Sandbox for Code Execution
+| Blueprint | Prefix | Purpose |
+|-----------|--------|---------|
+| `chat_bp` | `/api/chat` | Chat, file-chat, interrupt |
+| `workspace_assistant_bp` | `/api/v1/workspace` | File open/save/download |
+| `editor_ai_bp` | `/api/editor-ai` | AI-powered document editing |
+| `sessions_bp` | `/api/sessions` | Session CRUD |
+| `settings_bp` | `/api/settings` | User preferences |
+| `document_bp` | `/api/document` | DOCX batch annotate, convert |
+| `pptx_editor_bp` | `/api/pptx` | PPTX generation & editing |
+| `knowledge_bp` | `/api/knowledge` | Knowledge base operations |
 
-**Decision**: Validate all user-supplied code via `ast.parse()` + node
-whitelist/blocklist before `exec()`/`eval()`.
+## Key Patterns
 
-**Rationale**: String-based blocklists are easy to bypass. AST walking catches
-obfuscated attacks (e.g., `getattr(os, 'system')`) at the structural level.
+### Service Access
+```python
+# New code: use the service registry
+from web.runtime_context import service_registry
+session_mgr = service_registry.session_manager
 
-### ADR-003: Auth Enabled by Default
+# Legacy code (still supported):
+from web.runtime_context import get_session_manager
+session_mgr = get_session_manager()
+```
 
-**Decision**: `KOTO_AUTH_ENABLED` defaults to `"true"`.
+### Frontend Module Organization
+```typescript
+// Each workspace module exports via the WA namespace
+import { state } from './state';
+// Modules attach public APIs to (window as any).WA
+// Bundles import modules for side effects only
+```
 
-**Rationale**: Secure-by-default prevents accidental exposure when deploying.
-Local developers can opt out with `KOTO_AUTH_ENABLED=false`.
+### CSS Variables
+```css
+/* z-index layers ? use these instead of raw numbers */
+--z-base: 1;       /* default content */
+--z-above: 2;      /* slightly elevated */
+--z-dropdown: 100; /* context menus, tooltips */
+--z-sticky: 200;   /* sticky headers */
+--z-panel: 300;    /* side panels */
+--z-overlay: 1000; /* modal backdrops */
+--z-modal: 5000;   /* modal dialogs */
+--z-toast: 9999;   /* toast notifications */
+--z-max: 99999;    /* critical system */
+```
 
-### ADR-004: Sliding-Window Rate Limiting
+## Development
 
-**Decision**: Replace daily counter with per-minute sliding window buckets.
+```bash
+# Install Python deps
+pip install -r requirements.txt
 
-**Rationale**: Daily counters don't prevent burst abuse. Sliding windows
-provide smoother traffic shaping and allow tiered limits per endpoint
-sensitivity.
+# Install Node deps
+cd web && npm install
 
-## Environment Variables
+# Run dev server
+python run.py
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `KOTO_AUTH_ENABLED` | `true` | Enable/disable authentication |
-| `KOTO_DEPLOY_MODE` | `local` | `local` or `cloud` |
-| `KOTO_JWT_SECRET` | (ephemeral) | JWT signing secret |
-| `KOTO_JWT_EXPIRY_HOURS` | `72` | Token lifetime |
-| `KOTO_MAX_DAILY_REQUESTS` | `100` | Legacy daily request cap |
-| `KOTO_CORS_ORIGINS` | `*` | Allowed CORS origins |
-| `KOTO_SECRET_KEY` | (random) | Flask secret key for CSRF |
-| `SENTRY_DSN` | (none) | Sentry error tracking DSN |
+# Build frontend
+cd web && npm run build
+
+# Run Python tests
+pytest tests/
+
+# Run frontend tests
+cd web && npm test
+```
+
+## Testing
+
+- **Python**: pytest in `tests/` (run with `pytest`)
+- **Frontend**: Vitest + jsdom (run with `cd web && npm test`)
+- Write tests alongside source: `web/src/**/*.test.ts`

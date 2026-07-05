@@ -41,7 +41,6 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.file_editor", "file_editor_bp", None, "FileEditor"),
     ("web.blueprints.file_organize", "file_organize_bp", None, "FileOrganize"),
     ("web.blueprints.token_stats", "token_stats_bp", None, "TokenStats"),
-    ("web.blueprints.dev", "dev_bp", None, "Dev"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
     ("web.blueprints.editor_compat", "editor_compat_bp", None, "EditorCompat"),
@@ -342,6 +341,17 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
             logger.warning(f"[{tag}] ⚠️ 蓝图导入失败: {exc}")
         except Exception as exc:
             logger.error(f"[{tag}] ❌ 蓝图注册失败: {exc}")
+
+    # Conditionally register dev blueprint only in debug mode
+    if app.debug:
+        try:
+            from web.blueprints.dev import dev_bp as _dev_bp
+            app.register_blueprint(_dev_bp)
+            logger.info("[Dev] ✅ 开发蓝图已注册 (debug 模式)")
+        except ImportError as exc:
+            logger.warning(f"[Dev] ⚠️ 开发蓝图导入失败: {exc}")
+        except Exception as exc:
+            logger.error(f"[Dev] ❌ 开发蓝图注册失败: {exc}")
 
     logger.info("[INIT] ✅ 所有蓝图注册完成")
     return agent_blueprint

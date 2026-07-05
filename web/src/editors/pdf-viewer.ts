@@ -4,7 +4,7 @@ import { _updatePdfZoomUI } from './cdn-loaders';
 
 declare const WA: any;
 declare const state: any;
-declare var lastSelectionText: string;
+declare let lastSelectionText: string;
 declare function showToast(msg: string, type?: string, duration?: number): void;
 declare function $(id: string): any;
 declare function _csrfFetch(url: string, opts?: RequestInit): Promise<Response>;
@@ -13,9 +13,9 @@ declare function _expandWAPanel(): void;
 declare function _initWorkspaceAiRuntimes(): void;
 declare function _hideWelcome(): void;
 declare function _setStreamBtn(isLoading: boolean): void;
-declare var _waTaskDispatcher: any;
-declare var _waConversationRuntime: any;
-declare var pdfjsLib: any;
+declare let _waTaskDispatcher: any;
+declare let _waConversationRuntime: any;
+declare let pdfjsLib: any;
 
 export class KotoPdfViewer implements WorkspaceEditor {
     constructor() {
@@ -360,7 +360,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
       try {
         const tc = await page.getTextContent();
         this._textContent[pageNum] = tc.items.map(it => it.str).join(' ');
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     // ─── _buildThumbs ────────────────────────────────────────────────────────
@@ -410,7 +410,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         canvas.style.width  = Math.floor(vp.width) + 'px';
         canvas.style.height = Math.floor(vp.height) + 'px';
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     _drawThumbForPage(pageNum, page, baseViewport) {
@@ -740,7 +740,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
           if (isCurrent) rect.classList.add('current');
           svg.appendChild(rect);
         });
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     _clearSearchHighlights() {
@@ -1388,7 +1388,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
           // Re-render all loaded pages
           this._renderedPgs.forEach(pg => this._renderAnnotationsOnPage(pg));
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     _normalizeTextWithMap(text) {
@@ -1426,7 +1426,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
               : []);
           const normalized = list.map((item) => this._normalizeAiAnnotationSuggestion(item)).filter(Boolean);
           if (normalized.length) return normalized;
-        } catch (_) {}
+        } catch (e) { console.warn("[Koto]", e) }
       }
       return [];
     }
@@ -1799,7 +1799,7 @@ async function _pdfPageMgrRenderThumb(ed: any, pageNum: number, canvas: HTMLCanv
     canvas.width = vp.width;
     canvas.height = vp.height;
     await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
 }
 
 function _setupPageMgrDrag(card: HTMLElement): void {

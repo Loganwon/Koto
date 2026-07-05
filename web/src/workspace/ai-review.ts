@@ -10,15 +10,15 @@ import {
 } from './ai-composer';
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
-declare var _LIGHTBULB_SVG: string;
-declare var _CLIPBOARD_SVG: string;
-declare var _PIN_SVG: string;
-declare var _CHAT_SVG: string;
-declare var _PENCIL_SVG: string;
-declare var _PAUSE_SVG: string;
-declare var _SEND_SVG: string;
+declare let state: any;
+declare let WA: any;
+declare let _LIGHTBULB_SVG: string;
+declare let _CLIPBOARD_SVG: string;
+declare let _PIN_SVG: string;
+declare let _CHAT_SVG: string;
+declare let _PENCIL_SVG: string;
+declare let _PAUSE_SVG: string;
+declare let _SEND_SVG: string;
 
 declare function _escHtml(s: any): string;
 declare function showToast(message: string, kind?: string, duration?: number): void;
@@ -689,17 +689,17 @@ function _syncReviewModeButtons(): void {
 function _refreshReviewShell(): void {
   const renderReviewShell = (window as any)._renderReviewShell;
   if (typeof renderReviewShell === 'function') {
-    try { renderReviewShell(); } catch (_) {}
+    try { renderReviewShell(); } catch (e) { console.warn("[Koto]", e) }
   }
   const layoutReviewRail = (window as any)._positionDocxReviewRail || (window as any)._layoutReviewShellInDocx;
   if (typeof layoutReviewRail === 'function') {
-    try { layoutReviewRail(); } catch (_) {}
+    try { layoutReviewRail(); } catch (e) { console.warn("[Koto]", e) }
   }
 }
 
 export function closeReviewCenter(): void {
   state._reviewCenterOpen = false;
-  try { localStorage.setItem('wa_review_center_open', '0'); } catch (_) {}
+  try { localStorage.setItem('wa_review_center_open', '0'); } catch (_) { /* allowed to fail */ }
   const shell = $('wa-review-shell');
   if (shell) shell.style.display = 'none';
   const host = $('wa-docx-editor');
@@ -713,7 +713,7 @@ export function setReviewMode(mode: string): void {
   try {
     localStorage.setItem('wa_review_mode', state._reviewMode);
     localStorage.setItem('wa_review_center_open', '1');
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
   _syncReviewModeButtons();
   const shell = $('wa-review-shell');
   if (shell) shell.style.display = '';
@@ -723,7 +723,7 @@ export function setReviewMode(mode: string): void {
 
 // ── Task artifact resume ──
 export function _resolveTaskArtifactResume(payload: ArtifactResumePayload): ArtifactResumeResult {
-  let taskPayload = payload.taskPayload && typeof payload.taskPayload === 'object'
+  const taskPayload = payload.taskPayload && typeof payload.taskPayload === 'object'
     ? JSON.parse(JSON.stringify(payload.taskPayload))
     : null;
   if (!taskPayload) return { valid: false };
@@ -932,7 +932,7 @@ export async function resumePersistedTaskArtifact(details: ArtifactResumePayload
         comment: String(details.comment || '').trim() || undefined,
       }),
     });
-    responsePayload = await response.json().catch(() => null);
+    responsePayload = await response.json().catch((): any => null);
     if (!response.ok || !responsePayload || responsePayload.ok === false) {
       throw new Error(responsePayload && responsePayload.error ? responsePayload.error : '\u4efb\u52a1\u6062\u590d\u5931\u8d25');
     }
@@ -1136,9 +1136,10 @@ export function sendQuickAction(action: string): void {
     state.pinnedSelection = null;
   }
   (window as any).lastSelectionText = '';
-  try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+  try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
 
   const msgs = $('wa-ai-messages');
+  if (!msgs) return;
   const preview = hasSelection
     ? ((docxSelection && docxSelection.previewText)
       ? docxSelection.previewText

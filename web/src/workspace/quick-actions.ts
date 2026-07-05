@@ -249,7 +249,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
       throw new Error('快捷动作任务流程运行时未加载，请刷新后重试。');
     }
-    const taskText = buildSimpleTaskFlowTask(payload, action);
+    const taskText = buildSimpleTaskFlowTask(payload, action || undefined);
     if (!taskText) throw new Error(`快捷动作 ${payload.action || ''} 未生成可执行任务`);
     return attachedDispatcher.dispatchMessage({
       text: taskText,
@@ -271,7 +271,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
       throw new Error('快捷动作任务流程运行时未加载，请刷新后重试。');
     }
-    const taskText = buildProposalTaskFlowTask(payload, action);
+    const taskText = buildProposalTaskFlowTask(payload, action || undefined);
     if (!taskText) throw new Error(`快捷动作 ${payload.action || ''} 未生成可执行任务`);
     const selectionText = String(payload.selectionText || '').trim();
     const hasSelection = !!selectionText;

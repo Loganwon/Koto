@@ -181,9 +181,9 @@ from web.config import (
 
 
 if not API_KEY:
-    _app_logger.warning("⚠️ Warning: Gemini API key not found in gemini_config.env")
-    _app_logger.info("   请在 config/gemini_config.env 中配置 API 密钥")
-    _app_logger.info("   应用将继续启动，但 AI 功能不可用")
+    _app_logger.warning("⚠️ Warning: No cloud API key found in deepseek_config.env or gemini_config.env")
+    _app_logger.info("   请在 config/deepseek_config.env 中配置 DeepSeek API 密钥")
+    _app_logger.info("   应用将继续启动，但云端 AI 功能不可用")
 
 if GEMINI_API_BASE:
     _app_logger.info(f"📡 使用自定义 API 端点: {GEMINI_API_BASE}")
@@ -347,6 +347,17 @@ def _warmup_proxy():
 
 
 threading.Thread(target=_warmup_proxy, daemon=True).start()
+
+
+# Preload TaskClassifier in background to avoid first-request latency
+# NOTE: Disabled due to memory constraints - model loads on first classify() call instead
+# def _warmup_classifier():
+#     try:
+#         from app.core.routing.task_classifier import TaskClassifier
+#         _ = TaskClassifier.classify("warmup")
+#     except Exception:
+#         pass
+# threading.Thread(target=_warmup_classifier, daemon=True).start()
 
 
 # 创建 GenAI 客户端 (配置代理和自定义端点)
@@ -1162,21 +1173,21 @@ except ImportError:
 # 静态默认值（API 不可用时的兜底，也是启动时的初始值）
 # 注意：只有 deep-research-pro-preview-* 是 Interactions API agent，其他模型均用 generate_content
 MODEL_MAP = {
-    "CHAT": "deepseek-v4-pro",
-    "CODER": "deepseek-v4-pro",
-    "WEB_SEARCH": "deepseek-v4-pro",
-    "VISION": "gemini-3-flash-preview",
-    "RESEARCH": "deepseek-v4-pro",
-    "FILE_GEN": "deepseek-v4-pro",
-    "FILE_TASK": "deepseek-v4-pro",
-    "PAINTER": "gemini-3.1-flash-image-preview",
+    "CHAT": "deepseek-chat",
+    "CODER": "deepseek-chat",
+    "WEB_SEARCH": "deepseek-chat",
+    "VISION": "deepseek-chat",
+    "RESEARCH": "deepseek-chat",
+    "FILE_GEN": "deepseek-chat",
+    "FILE_TASK": "deepseek-chat",
+    "PAINTER": "deepseek-chat",
     "SYSTEM": "local-executor",
     "FILE_OP": "local-executor",
-    "AGENT": "deepseek-v4-pro",
-    "FILE_SEARCH": "deepseek-v4-pro",
-    "DOC_ANNOTATE": "deepseek-v4-pro",
-    "MEETING_EXTRACT": "deepseek-v4-pro",
-    "COMPLEX": "deepseek-v4-pro",
+    "AGENT": "deepseek-chat",
+    "FILE_SEARCH": "deepseek-chat",
+    "DOC_ANNOTATE": "deepseek-chat",
+    "MEETING_EXTRACT": "deepseek-chat",
+    "COMPLEX": "deepseek-chat",
 }
 
 # ─── Interactions-API-only 模型（动态更新，静态默认兜底）──────────────────────
@@ -1188,7 +1199,7 @@ _INTERACTIONS_ONLY_MODELS = {
 # 当前 Interactions API 模型均支持 background=True
 _NO_BACKGROUND_MODELS: set = set()
 # 当 Interactions API 也失败时的最终降级模型
-_INTERACTIONS_FALLBACK_MODEL = "gemini-3-flash-preview"
+_INTERACTIONS_FALLBACK_MODEL = "deepseek-chat"
 
 # ── Interactions API 轮询状态常量 ────────────────────────────────────────────
 _INTERACTION_TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "error"})
@@ -1210,163 +1221,25 @@ _INTERACTION_STATUS_MSGS: dict = {
 # 全局模型管理器实例（后台初始化）
 _model_manager = None
 
-_MODEL_ALIASES = {}
+# ── 模型解析函数（已提取至 web/models/resolver.py）────────────────────────
+from web.models.resolver import (
+    resolve_model_alias as _resolve_model_alias,
+    resolve_model_lock_task as _resolve_model_lock_task,
+    model_supports_locked_task as _model_supports_locked_task,
+    pick_available_fallback_model as _pick_available_fallback_model,
+    resolve_requested_model_id as _resolve_requested_model_id,
+    init_resolver as _init_model_resolver,
+)
 
-
-def _resolve_model_alias(model_id: str) -> str:
-    normalized = _normalize_model_id(str(model_id or "").strip())
-    if not normalized:
-        return ""
-    return _MODEL_ALIASES.get(normalized, normalized)
-
-
-def _get_configured_local_model_id() -> str:
-    _mode, local_model = _get_local_model_config()
-    return str(local_model or "").strip()
-
-
-_MODEL_LOCK_TASK_ALIASES = {
-    "DOC_ANNOTATE": "FILE_TASK",
-    "FILE_SEARCH": "AGENT",
-    "MEETING_EXTRACT": "FILE_TASK",
-    "MULTI_STEP": "AGENT",
-    "COMPLEX": "AGENT",
-}
-
-
-def _resolve_model_lock_task(task_type: str) -> str:
-    normalized = str(task_type or "").strip().upper()
-    if not normalized:
-        return ""
-    if normalized in _MODEL_TASK_REQUIREMENTS:
-        return normalized
-    return _MODEL_LOCK_TASK_ALIASES.get(normalized, "")
-
-
-def _model_supports_locked_task(model_id: str, task_type: str) -> bool:
-    if _model_manager is None:
-        return True
-
-    resolved_task = _resolve_model_lock_task(task_type)
-    if not resolved_task:
-        return True
-
-    caps = _model_manager._cached_caps.get(model_id)
-    if not caps:
-        return True
-
-    if caps.get("image_gen", False) and resolved_task != "PAINTER":
-        return False
-
-    return _score_model_for_task(caps, resolved_task) >= 0
-
-
-def _pick_available_fallback_model(
-    fallback_model: str,
-    task_type: str,
-    available_model_ids,
-) -> str:
-    fallback = _resolve_model_alias(fallback_model)
-    ordered_ids = [str(item or "").strip() for item in (available_model_ids or []) if str(item or "").strip()]
-    available_ids = set(ordered_ids)
-
-    if not ordered_ids:
-        return fallback
-
-    if fallback and fallback in available_ids:
-        return fallback
-
-    task_candidates = []
-    resolved_task = _resolve_model_lock_task(task_type)
-    if resolved_task:
-        task_candidates.append(resolved_task)
-
-    normalized_task = str(task_type or "").strip().upper()
-    if normalized_task and normalized_task not in task_candidates:
-        task_candidates.append(normalized_task)
-
-    if _model_manager is not None:
-        for candidate_task in task_candidates:
-            try:
-                routed_model = _model_manager.get_model_for_task(candidate_task)
-            except Exception:
-                routed_model = None
-            routed_model = _resolve_model_alias(routed_model or "")
-            if routed_model and routed_model in available_ids:
-                return routed_model
-
-    for candidate_task in task_candidates + ["FILE_TASK", "AGENT", "CHAT"]:
-        routed_model = _resolve_model_alias(MODEL_MAP.get(candidate_task, ""))
-        if routed_model and routed_model in available_ids:
-            return routed_model
-
-    return ordered_ids[0]
-
-
-def _resolve_requested_model_id(
-    requested_model: str,
-    fallback_model: str = "",
-    task_type: str = "",
-) -> str:
-    normalized = _resolve_model_alias(requested_model)
-    resolved_fallback = _resolve_model_alias(fallback_model)
-    try:
-        from app.core.llm.model_selection import get_configured_cloud_model
-
-        cloud_fallback = get_configured_cloud_model(
-            task_type=task_type,
-            fallback_model=resolved_fallback,
-        )
-    except Exception:
-        cloud_fallback = resolved_fallback
-
-    if _model_manager is None:
-        if not normalized or normalized in {"auto", "local", "cloud"}:
-            return cloud_fallback
-        return normalized
-
-    try:
-        available_ids = [
-            str(item.get("id", "")).strip()
-            for item in _model_manager.get_available_models()
-            if item.get("id")
-        ]
-    except Exception as exc:
-        _app_logger.debug(
-            "[ModelLock] 获取可用模型列表失败，跳过显式模型校验: %s", exc
-        )
-        if not normalized or normalized in {"auto", "local", "cloud"}:
-            return cloud_fallback
-        return normalized
-
-    if not normalized or normalized in {"auto", "local", "cloud"}:
-        if cloud_fallback and cloud_fallback not in available_ids and cloud_fallback.lower().startswith("deepseek"):
-            return cloud_fallback
-        return _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
-
-    if available_ids and normalized not in set(available_ids):
-        if normalized.lower().startswith("deepseek"):
-            return normalized
-        resolved_target = _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
-        _app_logger.warning(
-            "[ModelLock] 请求的模型 %s 当前不可用，回退到 %s",
-            normalized,
-            resolved_target or "cloud",
-        )
-        return resolved_target
-
-    if not _model_supports_locked_task(normalized, task_type):
-        resolved_target = _pick_available_fallback_model(resolved_fallback, task_type, available_ids)
-        _app_logger.warning(
-            "[ModelLock] 请求的模型 %s 不满足任务 %s 的能力约束，回退到 %s",
-            normalized,
-            task_type or "unknown",
-            resolved_target or "cloud",
-        )
-        return resolved_target
-
-    return normalized
-
+# 静态种子：确保模型解析器在动态管理器就绪前也能工作
+try:
+    _init_model_resolver(
+        model_map=MODEL_MAP,
+        model_task_requirements=_MODEL_TASK_REQUIREMENTS,
+        score_model_for_task=_score_model_for_task,
+    )
+except Exception:
+    pass
 
 from web.sse.sanitizer import sanitize_sse_text_field as _sanitize_sse_text_field
 from web.sse.sanitizer import safe_sse as _safe_sse
@@ -1384,6 +1257,13 @@ def _sync_model_routes_from_manager(force_refresh: bool = False) -> bool:
         return False
 
     MODEL_MAP.update(dynamic_map)
+    # 同步模型解析器状态
+    _init_model_resolver(
+        model_manager=_model_manager,
+        model_map=MODEL_MAP,
+        model_task_requirements=_MODEL_TASK_REQUIREMENTS,
+        score_model_for_task=_score_model_for_task,
+    )
     _INTERACTIONS_ONLY_MODELS = _get_interactions_only_model_set(
         _model_manager.get_interactions_only_models()
     )
@@ -1474,61 +1354,20 @@ def _model_manager_refresh_loop():
 
 # 模型能力矩阵（用于显示，动态模型自动补充）
 MODEL_INFO = {
-    "gemini-3-pro-preview": {
-        "name": "Gemini 3 Pro Preview",
+    "deepseek-chat": {
+        "name": "DeepSeek Chat",
         "speed": "🚀",
         "tier": 8,
-        "strengths": ["推理", "分析", "代码", "复杂任务"],
-    },
-    "gemini-3-flash-preview": {
-        "name": "Gemini 3 Flash Preview",
-        "speed": "⚡",
-        "tier": 7,
-        "strengths": ["快速", "对话", "多模态", "联网搜索"],
-    },
-    "gemini-2.5-pro": {
-        "name": "Gemini 2.5 Pro",
-        "speed": "🚀",
-        "tier": 7,
-        "strengths": ["推理", "分析", "代码", "复杂任务"],
-    },
-    "gemini-2.5-flash": {
-        "name": "Gemini 2.5 Flash",
-        "speed": "⚡",
-        "tier": 6,
-        "strengths": ["快速", "对话", "多模态", "联网搜索"],
-    },
-    "gemini-2.5-flash-lite": {
-        "name": "Gemini 2.5 Flash Lite",
-        "speed": "⚡",
-        "tier": 5,
-        "strengths": ["快速", "经济", "轻量"],
-    },
-    "deep-research-pro-preview-12-2025": {
-        "name": "Deep Research Pro",
-        "speed": "🔬",
-        "tier": 7,
-        "strengths": ["深度研究", "学术分析", "综合报告"],
-    },
-    "gemini-3.1-flash-image-preview": {
-        "name": "Gemini 3.1 Flash Image",
-        "speed": "🎨",
-        "tier": 6,
-        "strengths": ["图像生成", "创意绘画", "艺术风格"],
-    },
-    "gemini-2.5-flash-image": {
-        "name": "Gemini 2.5 Flash Image",
-        "speed": "🎨",
-        "tier": 5,
-        "strengths": ["图像生成", "多模态"],
+        "strengths": ["推理", "分析", "代码", "复杂任务", "对话"],
     },
     "local-executor": {
-        "name": "Local Executor",
+        "name": "本地执行器",
         "speed": "🖥️",
         "tier": 0,
         "strengths": ["系统操作", "打开应用", "文件管理"],
     },
 }
+
 
 
 def get_model_display_name(model_id):
@@ -2015,9 +1854,9 @@ class KotoBrain:
 
                     # 调用 Gemini 生成代码（带回退）
                     edit_models = [
-                        "gemini-2.5-flash",
-                        "gemini-2.5-pro",
-                        "gemini-2.5-flash-lite",
+                        "deepseek-chat",
+                        "deepseek-chat",
+                        "deepseek-chat",
                     ]
                     code_response = None
                     last_error = None
@@ -2205,8 +2044,8 @@ class KotoBrain:
                             f"用户请求: {user_input}\n\n"
                             f"失败信息/输出: {result['response']}\n"
                         )
-                        retry_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
-                        for retry_model in retry_models:
+                    retry_models = ["deepseek-chat", "deepseek-chat"]
+                    for retry_model in retry_models:
                             try:
                                 _app_logger.debug(
                                     f"[IMAGE_EDIT] Retry with model: {retry_model}"
@@ -2614,7 +2453,7 @@ class KotoBrain:
             ):
                 result["response"] = (
                     "❌ **API 密钥无效**\n\n"
-                    "请检查您的 Gemini API 密钥：\n"
+                    "请检查您的 云端 API 密钥：\n"
                     "1. 前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 获取有效密钥\n"
                     "2. 在 Koto 设置页面更新 API 密钥\n"
                     "3. 确保密钥所在项目已启用 Generative Language API\n\n"
@@ -3149,7 +2988,7 @@ def chat_stream():
             ):
                 error_response = (
                     "❌ **API 密钥无效**\n\n"
-                    "请检查您的 Gemini API 密钥：\n"
+                    "请检查您的 云端 API 密钥：\n"
                     "1. 前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 获取有效密钥\n"
                     "2. 在 Koto 设置页面更新 API 密钥（设置 → API 配置）\n"
                     "3. 确保密钥所在 Google 项目已启用 Generative Language API\n\n"

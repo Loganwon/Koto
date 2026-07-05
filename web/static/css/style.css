@@ -23,6 +23,16 @@
     --shadow-sm: 0 4px 14px rgba(0, 0, 0, 0.28);
     --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.38);
     --shadow-lg: 0 18px 52px rgba(0, 0, 0, 0.50);
+    /* --- Z-index layers --- */
+    --z-base: 1;
+    --z-above: 2;
+    --z-dropdown: 100;
+    --z-sticky: 200;
+    --z-panel: 300;
+    --z-overlay: 1000;
+    --z-modal: 5000;
+    --z-toast: 9999;
+    --z-max: 99999;
     /* --- Shape --- */
     --radius-sm: 10px;
     --radius-md: 14px;
@@ -379,7 +389,7 @@ a { color: var(--accent-primary); }
 .tp-close-btn:hover { color: rgba(230, 170, 255, 0.95); background: rgba(192,132,252,0.1); }
 
 /* Header */
-.tp-header-area { margin-bottom: 20px; position: relative; z-index: 1; }
+.tp-header-area { margin-bottom: 20px; position: relative; z-index: var(--z-base); }
 .tp-deco-row {
     font-size: 12px;
     color: rgba(192, 132, 252, 0.55);
@@ -405,7 +415,7 @@ a { color: var(--accent-primary); }
     gap: 10px;
     padding: 8px 0 18px;
     position: relative;
-    z-index: 1;
+    z-index: var(--z-base);
 }
 
 /* Single Card Wrapper */
@@ -478,7 +488,7 @@ a { color: var(--accent-primary); }
     font-size: 24px;
     color: rgba(220, 170, 255, 0.88);
     text-shadow: 0 0 18px rgba(192, 132, 252, 0.7), 0 0 36px rgba(192, 132, 252, 0.35);
-    z-index: 1;
+    z-index: var(--z-base);
     animation: tp-back-pulse 3s ease-in-out infinite;
 }
 @keyframes tp-back-pulse {
@@ -534,7 +544,7 @@ a { color: var(--accent-primary); }
     align-items: center;
     gap: 12px;
     margin-top: 6px;
-    position: relative; z-index: 1;
+    position: relative; z-index: var(--z-base);
     animation: tp-actions-in 0.4s ease both;
 }
 @keyframes tp-actions-in {
@@ -607,7 +617,7 @@ a { color: var(--accent-primary); }
     gap: 8px;
     margin: 0 0 8px;
     position: relative;
-    z-index: 1;
+    z-index: var(--z-base);
 }
 
 .tp-slot {
@@ -669,7 +679,7 @@ a { color: var(--accent-primary); }
     color: rgba(192, 132, 252, 0.55);
     letter-spacing: 0.04em;
     position: relative;
-    z-index: 1;
+    z-index: var(--z-base);
 }
 #tp-progress-n {
     font-weight: 700;
@@ -697,7 +707,7 @@ a { color: var(--accent-primary); }
     gap: 8px;
     padding: 4px 0 8px;
     position: relative;
-    z-index: 1;
+    z-index: var(--z-base);
 }
 .tp-spread-option {
     position: relative;
@@ -791,7 +801,7 @@ a { color: var(--accent-primary); }
 /* ── 问题引导输入区（Step 2）──────────────────────────────────────────────── */
 .tp-question-area {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-base);
     padding: 0 2px;
     margin-top: 10px;
 }
@@ -1055,7 +1065,7 @@ a { color: var(--accent-primary); }
 /* ===== Layout ===== */
 .app-shell {
     position: relative;
-    z-index: 1;
+    z-index: var(--z-base);
     display: grid;
     grid-template-columns: var(--sidebar-width, 280px) 1fr;
     grid-template-rows: 1fr;
@@ -1222,25 +1232,11 @@ a { color: var(--accent-primary); }
 .session-search::placeholder { color: var(--text-muted); }
 
 /* \u804a\u5929\u65e5\u671f\u5206\u9694\u7ebf */
-.chat-date-sep {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    color: var(--text-muted);
-    font-size: 11.5px;
-    padding: 14px 0 4px;
-    text-align: center;
-    user-select: none;
-}
 .chat-date-sep::before,
-.chat-date-sep::after {
-    content: '';
-    flex: 1;
-    height: 1px;
-    background: var(--border-color);
-}
 
 .session-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 52px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1468,25 +1464,8 @@ a { color: var(--accent-primary); }
 }
 .danger-btn:hover { background: rgba(239, 107, 107, 0.12); }
 
-.capability-toolbar {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    padding: 12px 20px;
-    border-bottom: 1px solid var(--border-color);
-    background: rgba(255,255,255,0.02);
-}
 .toolbar-title { font-size: 12px; text-transform: uppercase; letter-spacing: 0.6px; color: var(--text-muted); }
 .capability-chips { display: flex; flex-wrap: wrap; gap: 10px; }
-.capability-chip {
-    flex-direction: row;
-    gap: 8px;
-    padding: 10px 14px;
-    background: var(--bg-card);
-    border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-}
 .capability {
     display: inline-flex;
     align-items: center;
@@ -2621,7 +2600,7 @@ body.skills-panel-open .main-content {
 
 /* ===== KotoDialog — custom modal replacing browser alert/confirm/prompt ===== */
 .koto-dialog-overlay {
-    position: fixed; inset: 0; z-index: 20000;
+    position: fixed; inset: 0; z-index: var(--z-max);
     display: flex; align-items: center; justify-content: center;
     background: rgba(0,0,0,0); transition: background 0.25s;
     pointer-events: none;
@@ -2646,30 +2625,6 @@ body.skills-panel-open .main-content {
 .koto-dialog-confirm:hover { opacity: 0.9; }
 
 /* 返回底部浮动按钮（仅生成中+用户上滑时显示） */
-.back-to-bottom-btn {
-    position: absolute;
-    bottom: 16px;
-    right: 20px;
-    z-index: 50;
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    padding: 6px 14px;
-    background: var(--bg-card);
-    border: 1px solid var(--border-color);
-    border-radius: 999px;
-    color: var(--text-secondary);
-    font-size: 12px;
-    cursor: pointer;
-    box-shadow: var(--shadow-md);
-    transition: all 0.2s;
-    animation: slideIn 0.2s ease;
-}
-.back-to-bottom-btn:hover {
-    background: var(--bg-hover);
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
-}
 
 /* 消息操作栏（悬浮时显示） */
 .message-actions {
@@ -2927,7 +2882,7 @@ body.desktop-mode .pill-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: var(--z-overlay);
 }
 
 .suggestion-panel {
@@ -3009,7 +2964,7 @@ body.desktop-mode .pill-btn {
     display: flex;
     align-items: center;
     justify-content: center;
-    z-index: 1000;
+    z-index: var(--z-overlay);
 }
 
 .batch-panel {
@@ -3252,12 +3207,6 @@ body.desktop-mode .pill-btn {
     margin-bottom: 12px;
 }
 
-.diff-original, .diff-modified {
-    padding: 10px 12px;
-    border-radius: var(--radius-sm);
-    font-size: 13px;
-    line-height: 1.5;
-}
 
 .diff-original {
     background: rgba(239, 68, 68, 0.1);
@@ -3377,87 +3326,17 @@ body.desktop-mode .pill-btn {
 }
 
 /* ========== Agent Step Panel ========== */
-.agent-steps-panel {
-    margin: 8px 0 12px 0;
-    padding: 12px;
-    background: var(--bg-tertiary, rgba(255,255,255,0.03));
-    border: 1px solid var(--border-color, #333);
-    border-radius: var(--radius-sm);
-    font-size: 0.9em;
-}
-.agent-steps-panel summary {
-    cursor: pointer;
-    color: var(--text-muted);
-    font-size: 0.85em;
-    user-select: none;
-    padding: 2px 0;
-}
 .agent-steps-panel summary:hover { color: var(--text-primary); }
 .agent-steps-panel[open] summary { margin-bottom: 8px; }
 
-.agent-step-card {
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 8px 10px;
-    margin: 4px 0;
-    border-radius: var(--radius-sm);
-    background: var(--bg-card, rgba(0,0,0,0.15));
-    border-left: 3px solid var(--accent-primary, #4ca6ff);
-}
 .agent-step-card.step-success { border-left-color: #4CAF50; }
 .agent-step-card.step-fail { border-left-color: #ff5555; }
 .agent-step-card.step-pending { border-left-color: #FFA500; opacity: 0.7; }
-.agent-step-number {
-    min-width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    background: var(--accent-primary, #4ca6ff);
-    color: #000;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-weight: bold;
-    font-size: 0.8em;
-    flex-shrink: 0;
-}
 .agent-step-card.step-success .agent-step-number { background: #4CAF50; }
 .agent-step-card.step-fail .agent-step-number { background: #ff5555; }
 .agent-step-card.step-pending .agent-step-number { background: #FFA500; }
 .agent-step-info { flex: 1; min-width: 0; }
-.agent-step-tool {
-    font-weight: 600;
-    color: var(--text-primary);
-    font-family: var(--font-mono, monospace);
-    font-size: 0.9em;
-}
-.agent-step-status {
-    color: var(--text-muted);
-    font-size: 0.85em;
-    margin-top: 2px;
-    word-break: break-word;
-}
 
-.agent-status-bar {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    padding: 4px 10px;
-    background: rgba(91, 157, 245, 0.10);
-    border: 1px solid rgba(91, 157, 245, 0.30);
-    border-radius: 6px;
-    font-size: 0.85em;
-    color: var(--accent-primary, #4ca6ff);
-    margin-bottom: 8px;
-    flex-wrap: wrap;
-}
-.agent-status-bar .agent-spinner {
-    width: 12px; height: 12px;
-    border: 2px solid rgba(91, 157, 245, 0.30);
-    border-top-color: var(--accent-primary, #4ca6ff);
-    border-radius: 50%;
-    animation: spin 0.8s linear infinite;
-}
 .planning-skills {
     display: inline-flex;
     gap: 4px;
@@ -3834,7 +3713,7 @@ body.desktop-mode .pill-btn {
 
 .agent-dialog-overlay {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-    background: rgba(0,0,0,0.6); z-index: 9999;
+    background: rgba(0,0,0,0.6); z-index: var(--z-toast);
     display: flex; align-items: center; justify-content: center;
 }
 .agent-confirm-dialog, .agent-choice-dialog {
@@ -3949,22 +3828,8 @@ body.desktop-mode .pill-btn {
     color: var(--accent-primary);
 }
 
-.assessment-content {
-    padding: 12px;
-    border-top: 1px solid var(--border-color);
-}
 
-.assessment-score {
-    font-size: 1.1em;
-    font-weight: 600;
-    margin-bottom: 12px;
-    padding-bottom: 12px;
-    border-bottom: 1px solid var(--border-color);
-}
 
-.assessment-section {
-    margin-bottom: 12px;
-}
 
 .section-title {
     font-weight: 600;
@@ -3973,16 +3838,7 @@ body.desktop-mode .pill-btn {
     font-size: 0.95em;
 }
 
-.assessment-list {
-    margin: 0 0 0 20px;
-    padding: 0;
-    color: var(--text-secondary);
-}
 
-.assessment-list li {
-    margin-bottom: 4px;
-    line-height: 1.4;
-}
 
 /* ===== Markdown 表格样式 ===== */
 .table-wrapper {
@@ -4250,7 +4106,7 @@ body.desktop-mode .pill-btn {
     display: none;
     align-items: center;
     justify-content: center;
-    z-index: 9999;
+    z-index: var(--z-toast);
 }
 .notification-panel,
 .trigger-panel {
@@ -4698,7 +4554,7 @@ body.desktop-mode .pill-btn {
     align-items: center;
     overflow: visible;  /* allow token panel to drop below topbar */
     position: relative;
-    z-index: 100;
+    z-index: var(--z-dropdown);
 }
 
 .title-stack { gap: 2px; }
@@ -4821,7 +4677,7 @@ body.desktop-mode .pill-btn {
 }
 
 /* ── File/voice buttons: match Apple feel ── */
-.file-upload-btn, .voice-btn {
+.file-upload-btn {
     width: 36px;
     height: 36px;
     border-radius: var(--radius-sm);
@@ -4829,7 +4685,7 @@ body.desktop-mode .pill-btn {
     background: transparent;
     opacity: 0.7;
 }
-.file-upload-btn:hover, .voice-btn:hover {
+.file-upload-btn:hover {
     background: var(--bg-hover);
     opacity: 1;
     border: none;
@@ -4875,6 +4731,8 @@ body.desktop-mode .pill-btn {
 
 /* ── Session list items: cleaner ── */
 .session-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 52px;
     border-radius: var(--radius-md) !important;
     padding: 8px 10px !important;
     font-size: 13px;
@@ -5056,11 +4914,6 @@ body.desktop-mode .pill-btn {
     min-width: 16px; height: 16px; padding: 0 4px;
     background: var(--accent-primary); color: #fff;
     border-radius: 10px; font-size: 10px; font-weight: 700; line-height: 1;
-}
-.sb-chevron, .sb-arrow {
-    flex-shrink: 0;
-    color: var(--text-muted);
-    transition: transform 0.2s;
 }
 .sb-nav-item.expanded .sb-chevron { transform: rotate(180deg); }
 
@@ -5303,7 +5156,7 @@ body.desktop-mode .pill-btn {
     color: var(--text-primary);
     white-space: nowrap;
     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    z-index: 1000;
+    z-index: var(--z-overlay);
     pointer-events: none;
     font-weight: 400;
 }
@@ -5515,22 +5368,6 @@ mark.cs-hl-active {
 #auth-user-name {
     color: var(--text-secondary);
 }
-#auth-logout-btn {
-    float: right;
-    background: transparent;
-    border: 1px solid var(--border-color);
-    border-radius: 6px;
-    padding: 2px 10px;
-    color: var(--text-muted);
-    cursor: pointer;
-    font-size: 11px;
-    transition: var(--transition);
-}
-#auth-logout-btn:hover {
-    color: var(--accent-danger);
-    border-color: var(--accent-danger);
-    background: rgba(239, 107, 107, 0.08);
-}
 #shadowBanner {
     display: none;
     border-bottom: 1px solid var(--border-color);
@@ -5582,7 +5419,7 @@ mark.cs-hl-active {
 #atFileSuggest {
     display: none;
     position: absolute;
-    z-index: 1000;
+    z-index: var(--z-overlay);
     background: var(--bg-primary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);

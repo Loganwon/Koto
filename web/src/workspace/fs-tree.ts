@@ -4,21 +4,8 @@
  */
 
 import { _fileIcon, _escHtml, showToast, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG, _FOLDER_SVG } from './infrastructure';
-import { state, _forgetRecentPath, _trackUserOpen, loadRecentFiles } from './state';
+import { state, _forgetRecentPath, _trackUserOpen, loadRecentFiles, BrowserNode } from './state';
 
-// ── Interfaces ──
-
-export interface BrowserNode {
-  path: string;
-  name: string;
-  type: 'folder' | 'file' | 'drive' | 'quick';
-  ext?: string;
-  category?: string;
-  mtime?: number;
-  size_bytes?: number;
-  supported?: boolean;
-  children?: BrowserNode[];
-}
 
 export interface SortConfig {
   sortKey: string;
@@ -426,7 +413,7 @@ async function _loadBrowserFolderEntries(absPath: string): Promise<any[]> {
   const key = _browserPathKey(path);
   if (!path || !key) return [];
   state._browserLoading = state._browserLoading || {};
-  if (state._browserLoading[key]) return state._browserLoading[key];
+  if (state._browserLoading[key] !== undefined) return state._browserLoading[key];
   state._browserLoading[key] = fetch('/api/v1/workspace/browse_local?path=' + encodeURIComponent(path), { cache: 'no-store' })
     .then(async (res) => {
       const data = await res.json().catch(() => ({}));
@@ -512,7 +499,7 @@ function _renderSearchResults(results: SearchResult[], query: string): void {
   }
   const rows = results.map((f) => {
     const name = f.name || (f.path || '').split(/[\\/]/).pop() || '';
-    const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+    const ext = (name.includes('.') ? (name.split('.').pop() || '') : '').toLowerCase();
     const path = f.path || '';
     const dir = path.replace(/[\\/][^\\/]+$/, '');
     const cat = f.category || '';
@@ -549,7 +536,7 @@ export async function loadFileBrowser(): Promise<void> {
   try {
     const wsMeta = await fetch('/api/v1/workspace/current_dir')
       .then((r) => (r.ok ? r.json() : null))
-      .catch(() => null);
+      .catch((): any => null);
     if (wsMeta) {
       state._workspaceName = wsMeta.name || 'workspace';
       state._workspacePath = wsMeta.path || '';

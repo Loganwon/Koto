@@ -1,6 +1,9 @@
 // Workspace bundle entry — imports all workspace, editors, and ui modules
 // Order: infrastructure → state → everything else (depends on WA namespace)
 
+import { installErrorBoundary } from '../shared/error-boundary';
+installErrorBoundary();
+
 import { installFrontendObserver } from '../mcp/frontend-observer';
 
 installFrontendObserver();
@@ -42,15 +45,13 @@ import '../ui/panel-layout';
 import '../ui/selection-toolbar';
 import '../ui/docx-pptx-toolbar';
 
-// Editors
+// Editors ? heavy ones are lazy-loaded via editors/lazy-loaders.ts
 import '../editors/types';
 import '../editors/cdn-loaders';
 import '../editors/docx-outline';
-import '../editors/xlsx-editor';
-import '../editors/pptx-editor';
-import '../editors/pdf-viewer';
-import '../editors/image-viewer';
 import '../editors/text-editor';
+// PPTX, PDF, XLSX, Image viewers are loaded on demand
+import '../editors/lazy-loaders';
 
 // File mounting must load after editor classes are registered.
 import '../workspace/file-open';

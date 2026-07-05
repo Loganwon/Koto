@@ -135,8 +135,8 @@ export function syncCloudProviderUi(provider: string): void {
   const input = document.getElementById('settingsApiKeyInput') as HTMLInputElement | null;
   const providerEl = document.getElementById('settingCloudProvider') as HTMLSelectElement | null;
   if (providerEl) providerEl.value = normalized;
-  if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek V4 Pro。';
-  if (hint) hint.textContent = '云端模式下使用 DeepSeek V4 Pro，支持文字对话、代码和文件任务规划。';
+  if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek Chat。';
+  if (hint) hint.textContent = '云端模式下使用 DeepSeek Chat，支持文字对话、代码和文件任务规划。';
   if (input) input.placeholder = '粘贴 DeepSeek API Key…';
 }
 
@@ -144,7 +144,7 @@ export async function onCloudProviderChange(provider: string): Promise<void> {
   const normalized = 'deepseek';
   syncCloudProviderUi(normalized);
   await updateSetting('ai', 'cloud_provider', normalized);
-  if (normalized === 'deepseek') { await updateSetting('ai', 'deepseek_model', 'deepseek-v4-pro'); }
+  if (normalized === 'deepseek') { await updateSetting('ai', 'deepseek_model', 'deepseek-chat'); }
   csrfFetch('/api/local-model/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'cloud' }) }).catch(() => {});
   if ((window as any).WA && typeof (window as any).WA.refreshModelCatalog === 'function') { (window as any).WA.refreshModelCatalog(true); }
 }
@@ -291,7 +291,7 @@ export async function detectLocalModels(): Promise<void> {
     renderLocalModelOptions((document.getElementById('localModelSearch') as HTMLInputElement | null)?.value || '');
     if (container) {
       container.innerHTML = models.length
-        ? models.map((m: string) => `<div style="font-size:12px;padding:4px 0;">${escapeHtml(m)}</div>`).join('')
+        ? models.map((m: string) => `<div style="font-size:12px;padding:4px 0;">${escHtml(m)}</div>`).join('')
         : '<div style="color:var(--text-muted);font-size:12px;">未检测到本地模型</div>';
     }
     if (badgeEl) {
@@ -327,7 +327,7 @@ function renderLocalModelOptions(query: string): void {
   }
   selectEl.innerHTML = filtered.map((model) => {
     const selected = model === saved ? ' selected' : '';
-    return `<option value="${escapeHtml(model)}"${selected}>${escapeHtml(model)}</option>`;
+    return `<option value="${escHtml(model)}"${selected}>${escHtml(model)}</option>`;
   }).join('');
   if (!selectEl.value && filtered[0]) selectEl.value = filtered[0];
   if (hintEl) hintEl.textContent = q ? `过滤结果：${filtered.length} / ${allLocalModels.length} 个模型` : `共 ${filtered.length} 个本地模型`;
@@ -707,7 +707,7 @@ export async function refreshBatchJobs(): Promise<void> {
       const outputDir = job.output_dir || '';
       const encodedOutput = encodeURIComponent(outputDir);
       const status = job.status || 'unknown';
-      return `<div class="batch-job-card"><div class="batch-job-title">${escapeHtml(job.name || job.job_id)}</div><div class="batch-job-meta"><span>状态: ${escapeHtml(status)}</span><span>${processed}/${total}</span></div><div class="batch-job-progress"><div class="batch-job-progress-fill" style="width:${percent}%"></div></div><div class="batch-job-meta" style="margin-top:6px;"><span>${escapeHtml(outputDir)}</span><button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">复制路径</button></div></div>`;
+      return `<div class="batch-job-card"><div class="batch-job-title">${escHtml(job.name || job.job_id)}</div><div class="batch-job-meta"><span>状态: ${escHtml(status)}</span><span>${processed}/${total}</span></div><div class="batch-job-progress"><div class="batch-job-progress-fill" style="width:${percent}%"></div></div><div class="batch-job-meta" style="margin-top:6px;"><span>${escHtml(outputDir)}</span><button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">复制路径</button></div></div>`;
     }).join('');
   } catch (error) { /* ignore */ }
 }
@@ -796,7 +796,7 @@ function copyPathToClipboard(path: string, label: string = '路径'): void {
   }).catch(() => { prompt(`复制${label}：`, path); });
 }
 
-function escapeHtml(str: string): string {
+function escHtml(str: string): string {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 

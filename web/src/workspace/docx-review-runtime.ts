@@ -267,12 +267,12 @@ function _scheduleReviewLayout(): void {
 function _setStoredReviewMode(mode: string): void {
   const normalized = ['all', 'comments', 'proposals'].includes(mode) ? mode : 'all';
   state._reviewMode = normalized;
-  try { localStorage.setItem('wa_review_mode', normalized); } catch (_) {}
+  try { localStorage.setItem('wa_review_mode', normalized); } catch (_) { /* allowed to fail */ }
 }
 
 function _setReviewCenterOpen(open: boolean): void {
   state._reviewCenterOpen = !!open;
-  try { localStorage.setItem('wa_review_center_open', open ? '1' : '0'); } catch (_) {}
+  try { localStorage.setItem('wa_review_center_open', open ? '1' : '0'); } catch (_) { /* allowed to fail */ }
 }
 
 function _reviewCounts(reviewState = _ensureTabReviewState()): { comments: number; proposals: number; total: number } {
@@ -467,9 +467,9 @@ function _resolveStructuredReviewTargetTab(payload: any): any {
 }
 
 function _activeDocxPlainText(): string {
-  const doc = state.activeEditor?.editor?.state?.doc;
+  const doc = (state.activeEditor as any)?.editor?.state?.doc;
   if (doc && typeof doc.textBetween === 'function') {
-    try { return _clean(doc.textBetween(0, doc.content.size, '\n', '\n')).replace(/\u00a0/g, ' '); } catch (_) {}
+    try { return _clean(doc.textBetween(0, doc.content.size, '\n', '\n')).replace(/\u00a0/g, ' '); } catch (e) { console.warn("[Koto]", e) }
   }
   const root = document.querySelector('#wa-docx-editor .ProseMirror');
   return _clean(root?.textContent || '').replace(/\u00a0/g, ' ');

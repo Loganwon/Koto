@@ -3,6 +3,7 @@
  */
 
 import { fileTaskStatusLabel } from './file-task-status';
+import { _escHtml } from './infrastructure';
 
 interface Proposal {
   id?: string;
@@ -125,12 +126,6 @@ declare global {
   }
 }
 
-function escHtml(text: unknown): string {
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-}
 
 function normalizeProposalText(text: unknown): string {
   return String(text || '')
@@ -235,7 +230,7 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     const rationale = document.createElement('div');
     rationale.className = 'wa-proposal-rationale';
     if (rationaleText && rationaleText.length > 5) {
-      rationale.innerHTML = `${lightbulbIcon} ${escHtml(rationaleText.length > 150 ? rationaleText.substring(0, 150) + '…' : rationaleText)}`;
+      rationale.innerHTML = `${lightbulbIcon} ${_escHtml(rationaleText.length > 150 ? rationaleText.substring(0, 150) + '…' : rationaleText)}`;
     }
 
     const actions = document.createElement('div');
@@ -594,8 +589,8 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     main.className = 'wa-artifact-row-main';
     const title = artifact.title || basename(artifact.path) || '任务产物';
     main.innerHTML = `
-      <div class="wa-artifact-row-title">${escHtml(title)}</div>
-      <div class="wa-artifact-row-meta">${escHtml(artifactTypeLabel(artifact.type))}${artifact.path ? ' · ' + escHtml(artifact.path) : ''}</div>
+      <div class="wa-artifact-row-title">${_escHtml(title)}</div>
+      <div class="wa-artifact-row-meta">${_escHtml(artifactTypeLabel(artifact.type))}${artifact.path ? ' · ' + _escHtml(artifact.path) : ''}</div>
     `;
 
     const actions = document.createElement('div');
@@ -635,9 +630,9 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     const kind = change.kind || 'update';
     row.innerHTML = `
       <div class="wa-artifact-row-main">
-        <div class="wa-artifact-row-title">${escHtml(change.summary || '文件变更')}</div>
-        <div class="wa-artifact-row-meta">${escHtml(kind)}${change.file ? ' · ' + escHtml(change.file) : ''}${change.status ? ' · ' + escHtml(change.status) : ''}</div>
-        ${change.after_preview ? '<div class="wa-artifact-preview">' + escHtml(change.after_preview) + '</div>' : ''}
+        <div class="wa-artifact-row-title">${_escHtml(change.summary || '文件变更')}</div>
+        <div class="wa-artifact-row-meta">${_escHtml(kind)}${change.file ? ' · ' + _escHtml(change.file) : ''}${change.status ? ' · ' + _escHtml(change.status) : ''}</div>
+        ${change.after_preview ? '<div class="wa-artifact-preview">' + _escHtml(change.after_preview) + '</div>' : ''}
       </div>
     `;
     return row;
@@ -650,9 +645,9 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     const locator = source.locator ? ` · ${source.locator}` : '';
     row.innerHTML = `
       <div class="wa-artifact-row-main">
-        <div class="wa-artifact-row-title">${escHtml(source.title || source.file || source.url || '来源')}</div>
-        <div class="wa-artifact-row-meta">${escHtml((source.file || source.url || '') + locator)}</div>
-        ${source.snippet ? '<div class="wa-artifact-preview">' + escHtml(source.snippet) + '</div>' : ''}
+        <div class="wa-artifact-row-title">${_escHtml(source.title || source.file || source.url || '来源')}</div>
+        <div class="wa-artifact-row-meta">${_escHtml((source.file || source.url || '') + locator)}</div>
+        ${source.snippet ? '<div class="wa-artifact-preview">' + _escHtml(source.snippet) + '</div>' : ''}
       </div>
     `;
     return row;
@@ -719,11 +714,11 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     header.innerHTML = `
       <div class="wa-artifact-title-group">
         <span class="wa-artifact-kicker">结果</span>
-        <strong>${escHtml(result.title)}</strong>
-        ${result.summary ? '<span class="wa-artifact-summary">' + escHtml(result.summary) + '</span>' : ''}
+        <strong>${_escHtml(result.title)}</strong>
+        ${result.summary ? '<span class="wa-artifact-summary">' + _escHtml(result.summary) + '</span>' : ''}
       </div>
       <div class="wa-artifact-head-actions">
-        <span class="wa-artifact-status">${escHtml(statusLabel(result.status))}</span>
+        <span class="wa-artifact-status">${_escHtml(statusLabel(result.status))}</span>
         <button type="button" class="wa-artifact-close" title="收起结果面板">收起</button>
       </div>
     `;

@@ -163,7 +163,7 @@ class TestOpenAIProviderTracking:
 
         provider.generate_content(
             prompt="hi",
-            model="deepseek-v4-pro",
+            model="deepseek-chat",
             extra_body={"thinking": {"type": "enabled"}},
         )
 
@@ -193,7 +193,7 @@ class TestDeepSeekProvider:
             get_configured_cloud_model(
                 "FILE_TASK", fallback_model="gemini-3.1-pro-preview"
             )
-            == "deepseek-v4-pro"
+            == "deepseek-chat"
         )
         assert (
             get_configured_cloud_model(
@@ -223,7 +223,7 @@ class TestDeepSeekProvider:
             get_configured_cloud_model(
                 "FILE_TASK", fallback_model="gemini-3.1-pro-preview"
             )
-            == "deepseek-v4-pro"
+            == "deepseek-chat"
         )
         assert (
             get_configured_cloud_model(
@@ -236,9 +236,9 @@ class TestDeepSeekProvider:
         from app.core.llm.model_fallback import ModelFallbackExecutor
 
         executor = ModelFallbackExecutor()
-        candidates = executor._build_candidate_list("deepseek-v4-pro", "FILE_TASK")
+        candidates = executor._build_candidate_list("deepseek-chat", "FILE_TASK")
 
-        assert "deepseek-v4-pro" in candidates
+        assert "deepseek-chat" in candidates
         assert "deepseek-v4-flash" in candidates
         assert "deepseek-chat" not in candidates
         assert "deepseek-reasoner" not in candidates
@@ -250,7 +250,7 @@ class TestDeepSeekProvider:
         executor = ModelFallbackExecutor()
         candidates = executor._build_candidate_list("", "FILE_TASK")
 
-        assert candidates[:2] == ["deepseek-v4-pro", "deepseek-v4-flash"]
+        assert candidates[:2] == ["deepseek-chat", "deepseek-v4-flash"]
         assert all(not model.startswith("gemini-") for model in candidates)
 
 

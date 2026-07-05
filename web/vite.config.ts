@@ -10,7 +10,7 @@ export default defineConfig({
     sourcemap: true,
     emptyOutDir: true,
     target: 'es2020',
-    minify: false,
+    minify: 'esbuild',
     rollupOptions: {
       input: resolve(__dirname, 'src/bundles/app.ts'),
       output: {

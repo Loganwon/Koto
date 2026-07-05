@@ -267,11 +267,11 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         pagePaddingRight:   0,
       };
     }
-    const zoomWrapper = pageEl.closest('.koto-zoom-wrapper') || pageEl;
+    const zoomWrapper = pageEl!.closest('.koto-zoom-wrapper') || pageEl;
     const transformScale = _parseScaleFromTransform(
       zoomWrapper ? window.getComputedStyle(zoomWrapper as HTMLElement).transform : ''
     ) || { x: 1, y: 1 };
-    const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);
+    const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl!).paddingRight) || 0);
     const pageContentLeft  = Math.max(0, Math.round(viewportScrollLeft + ((pageRect.left - viewportRect.left) / layoutScale.x)));
     const pageContentTop   = Math.max(0, Math.round(viewportScrollTop  + ((pageRect.top  - viewportRect.top) / layoutScale.y)));
     const pageContentRight = Math.round(viewportScrollLeft + ((pageRect.right - viewportRect.left) / layoutScale.x));

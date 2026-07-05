@@ -12,13 +12,13 @@ import {
 } from './file-task-status';
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var _DOWNLOAD_SVG: string;
-declare var _EXT_ICON: Record<string, string>;
-declare var _DEFAULT_FILE_SVG: string;
-declare var _FOLDER_PICK_SVG: string;
-declare var _waConversationRuntime: any;
-declare var _waTaskDispatcher: any;
+declare let state: any;
+declare let _DOWNLOAD_SVG: string;
+declare let _EXT_ICON: Record<string, string>;
+declare let _DEFAULT_FILE_SVG: string;
+declare let _FOLDER_PICK_SVG: string;
+declare let _waConversationRuntime: any;
+declare let _waTaskDispatcher: any;
 
 declare function _escHtml(s: any): string;
 declare function showToast(message: string, kind?: string, duration?: number): void;
@@ -91,10 +91,10 @@ function _currentSnapshotForTab(tab: any): string {
 function _notifyDesktopModified(tab: any, modified: boolean): void {
   const waNotify = (window as any).WA && (window as any).WA._notifyPyModified;
   if (typeof waNotify === 'function') {
-    try { waNotify(tab, modified); return; } catch (_) {}
+    try { waNotify(tab, modified); return; } catch (e) { console.warn("[Koto]", e) }
   }
   if (typeof _notifyPyModified === 'function') {
-    try { _notifyPyModified(tab, modified); } catch (_) {}
+    try { _notifyPyModified(tab, modified); } catch (e) { console.warn("[Koto]", e) }
   }
 }
 
@@ -221,7 +221,7 @@ function _settleCloseWarn(decision: string): void {
   const lastFocus = overlay ? overlay._lastFocus : null;
   if (overlay) overlay._lastFocus = null;
   if (lastFocus && typeof lastFocus.focus === 'function') {
-    try { lastFocus.focus(); } catch (_) {}
+    try { lastFocus.focus(); } catch (_) { /* allowed to fail */ }
   }
   if (resolver) resolver(decision);
 }
@@ -319,8 +319,8 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
   if (!msgs) return [];
 
   const taskGroups = await Promise.all([
-    _listRecoverableFileTasks('running').catch(() => []),
-    _listRecoverableFileTasks('waiting').catch(() => []),
+    _listRecoverableFileTasks('running').catch((): any[] => []),
+    _listRecoverableFileTasks('waiting').catch((): any[] => []),
   ]);
   const candidates: any[] = [];
   const seen = new Set<string>();
@@ -332,10 +332,10 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
   });
 
   const activeIds = new Set(candidates.map((task: any) => String(task && task.task_id || '').trim()).filter(Boolean));
-  Array.from(state._activeTaskReconnectors.entries()).forEach(([taskId, reconnector]: [string, any]) => {
+  (Array.from(state._activeTaskReconnectors.entries()) as [string, any][]).forEach(([taskId, reconnector]) => {
     if (activeIds.has(taskId)) return;
     if (reconnector && typeof reconnector.close === 'function') {
-      try { reconnector.close(); } catch (_) {}
+      try { reconnector.close(); } catch (e) { console.warn("[Koto]", e) }
     }
     state._activeTaskReconnectors.delete(taskId);
   });

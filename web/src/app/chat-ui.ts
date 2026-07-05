@@ -8,16 +8,16 @@ import { csrfFetch } from '../shared/csrf';
 let selectedFiles: File[] = [];
 let lockedTaskType: string | null = null;
 let selectedModel: string = 'auto';
-let enableMiniGame: boolean = true;
+const enableMiniGame: boolean = true;
 const MAX_UPLOAD_FILES = 10;
 
 const TASK_MODELS: Record<string, string> = {
-  CHAT: 'deepseek-v4-pro',
-  CODER: 'deepseek-v4-pro',
-  VISION: 'deepseek-v4-pro',
+  CHAT: 'deepseek-chat',
+  CODER: 'deepseek-chat',
+  VISION: 'deepseek-chat',
   PAINTER: 'nano-banana-pro-preview',
   RESEARCH: 'deep-research-pro-preview-12-2025',
-  FILE_GEN: 'deepseek-v4-pro'
+  FILE_GEN: 'deepseek-chat'
 };
 
 (window as any).selectedFiles = selectedFiles;
@@ -300,7 +300,7 @@ function renderMessage(role: string, content: string, meta: Record<string, any> 
     'gemini-3-pro-image-preview': 'DeepSeek',
     'gemini-2.5-flash': 'DeepSeek',
     'gemini-2.5-pro': 'DeepSeek',
-    'deepseek-v4-pro': 'DeepSeek V4 Pro',
+    'deepseek-chat': 'DeepSeek Chat',
     'nano-banana-pro-preview': 'Nano Banana Pro 🎨',
     'imagen-4.0-generate-001': 'Imagen 4 🖼️', 'deep-research-pro-preview-12-2025': 'Deep Research 🔬',
     'local-executor': 'Local Executor 🖥️',
@@ -421,7 +421,7 @@ export function removeSingleFile(index: number): void {
 }
 
 export function setSelectedFiles(files: File[], appendMode: boolean = false): void {
-  let newFiles = appendMode ? [...selectedFiles, ...files] : files;
+  const newFiles = appendMode ? [...selectedFiles, ...files] : files;
   const uniqueFiles: File[] = [];
   const seen = new Set<string>();
   for (const file of newFiles) {

@@ -1,10 +1,7 @@
+import { _escHtml } from './infrastructure';
+
 import { previewText } from './task-final-report';
 
-function escapeHtml(value: unknown): string {
-  return String(value == null ? '' : value)
-    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
-}
 
 function basename(path: string): string {
   const text = String(path || '').trim();
@@ -56,7 +53,7 @@ export function taskContextSummaryText(context: any): string {
 export function renderTaskInteractionLine(label: string, text: string): string {
   const value = String(text || '').trim();
   if (!value) return '';
-  return '<div class="wa-task-interaction-line"><span>' + escapeHtml(label) + '</span><p>' + escapeHtml(value).replace(/\n/g, '<br>') + '</p></div>';
+  return '<div class="wa-task-interaction-line"><span>' + _escHtml(label) + '</span><p>' + _escHtml(value).replace(/\n/g, '<br>') + '</p></div>';
 }
 
 export function renderTaskUnderstandingCard(card: { dataset?: Record<string, any> } | null): string {

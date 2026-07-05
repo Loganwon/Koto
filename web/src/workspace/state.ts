@@ -4,6 +4,7 @@
  */
 
 import { _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
+import { logger } from '../shared/logger';
 
 // ── Interfaces ──
 
@@ -14,13 +15,13 @@ export interface TabInfo {
   fileType: string;
   fileId?: string | null;
   filePath?: string | null;
-  serverData: any;
-  cache?: any;
+  serverData: ServerFileData;
+  cache?: Record<string, unknown>;
   savedSnapshot?: string | null;
   modified?: boolean;
-  capabilityProfile?: any;
-  reviewState?: any;
-  fsHandle?: any;
+  capabilityProfile?: CapabilityProfile | null;
+  reviewState?: Record<string, unknown>;
+  fsHandle?: FileSystemHandle;
 }
 
 export interface CapabilityProfile {
@@ -47,9 +48,22 @@ export interface FsClipboardEntry {
   mode: 'copy' | 'cut';
 }
 
+
+export interface BrowserNode {
+  path: string;
+  name: string;
+  type: 'folder' | 'file' | 'drive' | 'quick';
+  ext?: string;
+  category?: string;
+  mtime?: number;
+  size_bytes?: number;
+  supported?: boolean;
+  children?: BrowserNode[];
+}
+
 export interface BrowserRoots {
-  drives: any[];
-  quick_access: any[];
+  drives: BrowserNode[];
+  quick_access: BrowserNode[];
 }
 
 export interface RecentFileEntry {
@@ -67,6 +81,62 @@ export interface MyWorkspaceFile {
   addedAt: number;
 }
 
+// ?? Domain type interfaces ??
+
+export interface ServerFileData {
+  file_id?: string;
+  file_name?: string;
+  file_type?: string;
+  file_path?: string;
+  content?: unknown;
+  text?: string;
+  html?: string;
+  pages?: unknown[];
+  preview?: string;
+  error?: string;
+  capability?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  [key: string]: unknown;
+}
+
+export interface AiFileContext {
+  path: string;
+  name: string;
+  ext?: string;
+  content?: string | null;
+  loading?: boolean;
+  error?: string;
+  warning?: string;
+  requestId?: string;
+  originalChars?: number;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface TaskPayload {
+  prompt?: string;
+  files?: string[];
+  task_type?: string;
+  model?: string;
+  feedback?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface EditorInstance {
+  destroy?: () => void;
+  getContent?: () => unknown;
+  setContent?: (data: unknown) => void;
+  render: (...args: unknown[]) => unknown;
+  editor?: unknown;
+  [key: string]: unknown;
+}
+
 export interface WorkspaceState {
   fileId: string | null;
   fileType: string | null;
@@ -74,16 +144,16 @@ export interface WorkspaceState {
   filePath: string | null;
   wsSourcePath: string | null;
   capabilityProfile: CapabilityProfile | null;
-  activeEditor: any;
+  activeEditor: EditorInstance | null;
   socket: WebSocket | null;
   isLoading: boolean;
   conversation: Array<{ role: string; content: string }>;
   sortBy: string;
   sectionOpen: Record<string, boolean>;
   searchQuery: string;
-  _allFiles: any[];
-  pinnedSelection: any;
-  lastPinnedSel: any;
+  _allFiles: Record<string, unknown>[];
+  pinnedSelection: Record<string, unknown> | null;
+  lastPinnedSel: Record<string, unknown> | null;
   selectMode: boolean;
   selectedFiles: Set<string>;
   openTabs: TabInfo[];
@@ -93,16 +163,16 @@ export interface WorkspaceState {
   _reviewMode: string;
   _editingReviewCommentId: string;
   _editingReviewProposalId: string;
-  _reviewSelectionSnapshot: any;
-  _reviewToolbarSelectionSnapshot: any;
+  _reviewSelectionSnapshot: Record<string, unknown> | null;
+  _reviewToolbarSelectionSnapshot: Record<string, unknown> | null;
   _reviewToolbarSelectionCapturedAt: number;
   _reviewNavQuery: string;
   _reviewLauncherVisible: boolean;
-  _activeProposalBatch: any[];
+  _activeProposalBatch: Record<string, unknown>[];
   _streamAbortCtrl: AbortController | null;
-  _pendingTaskPayload: any;
+  _pendingTaskPayload: TaskPayload | null;
   _pendingTaskPayloadUsesFeedback: boolean;
-  _pendingTaskFollowupContext: any;
+  _pendingTaskFollowupContext: Record<string, unknown> | null;
   _pendingTaskFollowupPrompt: string | null;
   _recentOpen: boolean;
   _workspacePath: string;
@@ -116,21 +186,21 @@ export interface WorkspaceState {
   _searchActive: boolean;
   _browserSort: string;
   _livePollTimer: ReturnType<typeof setInterval> | null;
-  _availableModels: any[];
-  _modelMap: Record<string, any>;
+  _availableModels: ModelInfo[];
+  _modelMap: Record<string, unknown>;
   _modelsReady: boolean;
   _cloudProvider: string;
   _modelCatalogPromise: Promise<any> | null;
-  _activeRoute: any;
+  _activeRoute: Record<string, unknown> | null;
   _activeTaskReconnectors: Map<string, any>;
   _localRuntimeModel: string;
   _hasExplicitModelChoice: boolean;
   _modelChoicePendingMode?: string;
   _modelChoiceUpdatedAt?: number;
   useAgentMode: boolean;
-  _aiFileContext: any[];
+  _aiFileContext: AiFileContext[];
   _aiTargetFileIdx: number;
-  _tempWorkspace: any[];
+  _tempWorkspace: Record<string, unknown>[];
   _reviewEntryLookup?: Map<string, any>;
   _activeProposals?: any[];
 }
@@ -379,9 +449,9 @@ export function _syncCurrentFileChrome(): void {
 export function _destroyActiveEditorForClosedFile(): void {
   if (state.activeEditor) {
     try {
-      state.activeEditor.destroy();
+      state.activeEditor.destroy?.();
     } catch (error) {
-      console.error('Editor destroy failed:', error);
+      logger.error('state', 'Editor destroy failed', error);
     }
   }
   state.activeEditor = null;
@@ -548,7 +618,7 @@ export function _waitForEditorLayout(fileType: string, timeoutMs: number = 800):
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     function check() {
-      const el = document.getElementById(containerId);
+      const el = document.getElementById(containerId!);
       if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
         resolve();
         return;
@@ -772,7 +842,7 @@ export async function loadRecentFiles(): Promise<void> {
 
   list.innerHTML = userRecent.slice(0, 20).map((file) => {
     const name = file.name || (file.path || '').split(/[\\/]/).pop() || '';
-    const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+    const ext = (name.includes('.') ? (name.split('.').pop() || '') : '').toLowerCase();
     const icon = _fileIcon(ext, file.category || '');
     const date = file.ts ? new Date(file.ts).toLocaleDateString('zh-CN') : '';
     const size = file.size_bytes ? ' · ' + _formatRecentSize(file.size_bytes) : '';
@@ -855,7 +925,7 @@ export function _renderMyWorkspace(): void {
     })
     .join('');
   list.querySelectorAll('.wa-myws-item[draggable]').forEach((element) => {
-    element.addEventListener('dragstart', (event: DragEvent) => {
+    (element as HTMLElement).addEventListener('dragstart', (event: DragEvent) => {
       const el = element as HTMLElement;
       const path = el.dataset.path;
       if (event.dataTransfer) {
@@ -866,7 +936,7 @@ export function _renderMyWorkspace(): void {
       el.classList.add('dragging');
       document.body.classList.add('wa-file-dragging');
     });
-    element.addEventListener('dragend', () => {
+    (element as HTMLElement).addEventListener('dragend', () => {
       element.classList.remove('dragging');
       document.body.classList.remove('wa-file-dragging');
     });
@@ -923,7 +993,7 @@ export function _renderTempWorkspace(): void {
     })
     .join('');
   list.querySelectorAll('.wa-myws-item[draggable]').forEach((element) => {
-    element.addEventListener('dragstart', (event: DragEvent) => {
+    (element as HTMLElement).addEventListener('dragstart', (event: DragEvent) => {
       const el = element as HTMLElement;
       const path = el.dataset.path;
       if (event.dataTransfer) {
@@ -934,7 +1004,7 @@ export function _renderTempWorkspace(): void {
       el.classList.add('dragging');
       document.body.classList.add('wa-file-dragging');
     });
-    element.addEventListener('dragend', () => {
+    (element as HTMLElement).addEventListener('dragend', () => {
       element.classList.remove('dragging');
       document.body.classList.remove('wa-file-dragging');
     });
@@ -1020,7 +1090,7 @@ wa._closeTab = async (path: string) => {
   } else if (tab.modified) {
     tab.modified = false;
     if (typeof wa._notifyPyModified === 'function') {
-      try { wa._notifyPyModified(tab, false); } catch (_) {}
+      try { wa._notifyPyModified(tab, false); } catch (e) { console.warn("[Koto]", e) }
     }
   }
 
@@ -1120,7 +1190,7 @@ wa.toggleRecentSection = () => {
 
 wa.addToMyWorkspace = (path: string) => {
   let targetPath = path;
-  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath;
+  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath || '';
   if (!targetPath) {
     showToast('请先打开一个文件', 'info');
     return;
@@ -1146,7 +1216,7 @@ wa.removeFromMyWorkspace = (path: string) => {
 
 wa.addToTempWorkspace = (path: string) => {
   let targetPath = path;
-  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath;
+  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath || '';
   if (!targetPath) {
     showToast('请先打开一个文件', 'info');
     return;

@@ -280,7 +280,15 @@ class SmartDispatcher:
         early_model_result = None
 
         # --- Cloud AI Router (primary, fastest cloud model) ---
-        if cls._dependencies and cls._dependencies.get("client"):
+        # Only use Gemini-based AIRouter when Gemini is the active cloud provider.
+        # DeepSeek users skip this to avoid a pointless 2s timeout.
+        _use_airouter = False
+        try:
+            from app.core.llm.model_selection import get_configured_cloud_provider
+            _use_airouter = (get_configured_cloud_provider() == "gemini")
+        except Exception:
+            _use_airouter = False
+        if cls._dependencies and cls._dependencies.get("client") and _use_airouter:
             from app.core.routing.ai_router import AIRouter
             try:
                 _ai_type, _ai_conf, _ai_source = AIRouter.classify(

@@ -34,7 +34,6 @@ def test_koto_agent_loop_production_entrypoints_are_allowlisted() -> None:
 def test_legacy_agent_loop_bridges_use_facade_only() -> None:
     editor_ai = _read("web/blueprints/editor_ai.py")
     socket_handler = _read("app/core/socket_handler.py")
-    facade = _read("app/core/agent/legacy_loop_facade.py")
     code_executor = _read("app/core/agent/editor_code_action_executor.py")
     doc_executor = _read("app/core/agent/doc_websocket_loop_executor.py")
     doc_agent_executor = _read("app/core/agent/doc_websocket_agent_executor.py")
@@ -42,11 +41,10 @@ def test_legacy_agent_loop_bridges_use_facade_only() -> None:
     editor_executor = _read("app/core/agent/editor_quick_action_executor.py")
     editor_loop_executor = _read("app/core/agent/editor_loop_executor.py")
 
-    assert "from app.core.agent.legacy_loop_facade import iter_editor_agent_events" in editor_ai
-    assert "from app.core.agent.legacy_loop_facade import iter_doc_agent_events" in socket_handler
+    assert "from app.core.agent.editor_loop_executor import EditorLoopExecutor" in editor_ai
+    assert "from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor" in socket_handler
     assert "app.core.agent.agent_loop import KotoAgentLoop" not in editor_ai
     assert "app.core.agent.agent_loop import KotoAgentLoop" not in socket_handler
-    assert "app.core.agent.agent_loop import KotoAgentLoop" not in facade
     assert "from app.core.agent import agent_loop" not in code_executor
     assert "from app.core.agent import agent_loop" not in editor_executor
     assert "KotoAgentLoop" not in code_executor
@@ -75,7 +73,6 @@ def test_agent_execution_entrypoint_matrix_documents_current_boundaries() -> Non
     assert "llm_provider_helpers.py" in matrix
     assert "web/blueprints/editor_ai.py" in matrix
     assert "app/core/socket_handler.py" in matrix
-    assert "app/core/agent/legacy_loop_facade.py" in matrix
     assert "app/core/agent/editor_loop_executor.py" in matrix
     assert "app/core/agent/doc_websocket_loop_executor.py" in matrix
     assert "app/core/agent/doc_websocket_agent_executor.py" in matrix

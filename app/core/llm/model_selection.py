@@ -5,7 +5,7 @@ from typing import Any
 
 from .deepseek_config import DEEPSEEK_DEFAULT_MODEL
 
-CLOUD_PROVIDER_NAMES = {"gemini", "deepseek", "openai", "anthropic"}
+CLOUD_PROVIDER_NAMES = {"gemini", "deepseek"}
 PROVIDER_MODEL_MODES = CLOUD_PROVIDER_NAMES | {"ollama"}
 DEFAULT_CLOUD_PROVIDER = "deepseek"
 
@@ -59,7 +59,7 @@ def get_configured_cloud_model(
 ) -> str:
     provider_name = normalize_cloud_provider(
         provider or get_configured_cloud_provider(),
-        default="gemini",
+        default="deepseek",
     )
     task = str(task_type or "").strip().upper()
     if provider_name == "gemini":

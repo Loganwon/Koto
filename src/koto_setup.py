@@ -595,7 +595,7 @@ def _write_cloud_provider_setting(provider: str):
         if isinstance(ai, dict):
             ai["cloud_provider"] = provider
             if provider == "deepseek":
-                ai.setdefault("deepseek_model", "deepseek-v4-pro")
+                ai.setdefault("deepseek_model", "deepseek-chat")
         data.setdefault("model_mode", "cloud")
         settings_path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),

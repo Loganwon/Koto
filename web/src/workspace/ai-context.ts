@@ -4,7 +4,7 @@
  */
 
 import { _fileIcon, _escHtml, showToast, _PIN_SVG } from './infrastructure';
-import { state, _trackUserOpen } from './state';
+import { state, _trackUserOpen, AiFileContext } from './state';
 
 // ── Interfaces ──
 
@@ -58,7 +58,7 @@ function _findAIContextFileIndex(path: string): number {
   const normalizedPath = _normalizeAIContextPath(path);
   if (!normalizedPath) return -1;
   return (state._aiFileContext || []).findIndex(
-    (file: AIContextFile) => _normalizeAIContextPath(file.path || (file as any).name || '') === normalizedPath
+    (file: AiFileContext) => _normalizeAIContextPath(file.path || file.name || '') === normalizedPath
   );
 }
 
@@ -169,7 +169,7 @@ function _readFileAsBase64(file: File, timeoutMs: number = _WA_AI_LOCAL_SAVE_TIM
 // ── Save Local File to Workspace for AI ──
 
 async function _saveLocalFileToWorkspaceForAI(file: File): Promise<string> {
-  const ext = (file?.name ? file.name.split('.').pop() : '').toLowerCase();
+  const ext = (file?.name ? (file.name.split('.').pop() || '') : '').toLowerCase();
   if (!_isSupportedExt(ext)) {
     throw new Error('不支持的文件格式');
   }
@@ -210,7 +210,7 @@ function _normalizeTaskFilePaths(paths: string | string[]): string[] {
 // ── Mark AI Context File Failed ──
 
 function _markAIContextFileFailed(path: string, requestId: string, message: string): boolean {
-  const file = (state._aiFileContext || []).find((item: AIContextFile) => item.path === path);
+  const file = (state._aiFileContext || []).find((item: AiFileContext) => item.path === path);
   if (!file || (file as any).requestId !== requestId || !file.loading) return false;
   file.loading = false;
   file.error = message || '读取失败';
@@ -235,7 +235,7 @@ function _startAIContextWatchdog(path: string, requestId: string, timeoutMs: num
 
 async function _addFileToAIContext(absPath: string): Promise<void> {
   const name = absPath.split(/[\\/]/).pop() || absPath;
-  const existingIdx = state._aiFileContext.findIndex((f: AIContextFile) => f.path === absPath);
+  const existingIdx = state._aiFileContext.findIndex((f: AiFileContext) => f.path === absPath);
   if (existingIdx >= 0) {
     const existing = state._aiFileContext[existingIdx];
     if (existing && existing.error && !existing.loading) {
@@ -246,7 +246,7 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
     return;
   }
   const requestId = `ai_ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  state._aiFileContext.push({ path: absPath, name, content: null, loading: true, requestId } as AIContextFile);
+  state._aiFileContext.push({ ext: _waInferFileType(absPath), path: absPath, name, content: null, loading: true, requestId } as unknown as AiFileContext);
   _renderAIFileChips();
   const watchdog = _startAIContextWatchdog(absPath, requestId, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS);
   try {
@@ -262,11 +262,11 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
     );
     if (!previewRes.ok) throw new Error(data.error || `HTTP ${previewRes.status}`);
 
-    let content = _waSampleTaskContext(String(data.content_preview || ''));
+    const content = _waSampleTaskContext(String(data.content_preview || ''));
     const originalChars = Number.isFinite(Number(data.original_chars))
       ? Number(data.original_chars)
       : content.replace(/\s/g, '').length;
-    const placeholder = state._aiFileContext.find((f: AIContextFile) => f.path === absPath);
+    const placeholder = state._aiFileContext.find((f: AiFileContext) => f.path === absPath);
     if (placeholder && (placeholder as any).requestId === requestId) {
       placeholder.content = content;
       placeholder.originalChars = originalChars;
@@ -353,14 +353,14 @@ export async function _attachFilesToTask(paths: string | string[], options: File
       skipped++;
       continue;
     }
-    const existing = state._aiFileContext.find((file: AIContextFile) => file.path === path);
+    const existing = state._aiFileContext.find((file: AiFileContext) => file.path === path);
     if (existing && !existing.error && !existing.loading) {
       skipped++;
       if (duplicateToast) showToast(`"${name}" 已在分析列表中`, 'info');
       continue;
     }
     await _addFileToAIContext(path);
-    const attached = state._aiFileContext.find((file: AIContextFile) => file.path === path);
+    const attached = state._aiFileContext.find((file: AiFileContext) => file.path === path);
     if (attached && !attached.error) added++;
     else skipped++;
   }
@@ -376,7 +376,7 @@ export async function _attachFilesToTask(paths: string | string[], options: File
 
 export async function _addLocalFilesToAIContext(files: FileList | File[]): Promise<void> {
   const candidates = Array.from(files || []).filter((file) => {
-    const ext = (file?.name ? file.name.split('.').pop() : '').toLowerCase();
+    const ext = (file?.name ? (file.name.split('.').pop() || '') : '').toLowerCase();
     return _isSupportedExt(ext);
   });
   if (!candidates.length) {
@@ -470,7 +470,7 @@ export function _renderAIFileChips(): void {
   _hideWelcome();
 
   const rowsHtml = state._aiFileContext
-    .map((f: AIContextFile, i: number) => {
+    .map((f: AiFileContext, i: number) => {
       const isTarget = i === tIdx;
       const isLoading = !!f.loading;
       const hasError = !!f.error;
@@ -522,7 +522,7 @@ export function _renderAIFileChips(): void {
   _updateContextBar({ files: n });
 
   document.querySelectorAll('.wa-file-item.ai-queued').forEach((el) => el.classList.remove('ai-queued'));
-  state._aiFileContext.forEach((f: AIContextFile) => {
+  state._aiFileContext.forEach((f: AiFileContext) => {
     const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(f.path)}"]`);
     if (el) el.classList.add('ai-queued');
   });

@@ -285,7 +285,7 @@ function showSpreadScreen(): void {
       const opt = (e.target as HTMLElement).closest('[data-spread-id]') as HTMLElement | null;
       if (opt) onSpreadChosen(opt.dataset['spreadId']!);
     });
-    grid.addEventListener('keydown', (e: KeyboardEvent) => {
+    (grid as HTMLElement).addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
         const opt = (e.target as HTMLElement).closest('[data-spread-id]') as HTMLElement | null;
         if (opt) onSpreadChosen(opt.dataset['spreadId']!);

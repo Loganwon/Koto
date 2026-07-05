@@ -1,5 +1,8 @@
 /** skill-community.ts — Koto Skill 社区 v4 */
 
+import { installErrorBoundary } from '../shared/error-boundary';
+installErrorBoundary();
+
 import { csrfFetch } from '../shared/csrf';
 
 export interface CommunitySkill {
@@ -83,7 +86,7 @@ const CATS = [
   { id: "coding", label: "代码工程", icon: "💻" },
 ];
 const CAT_LABELS: Record<string, string> = {};
-CATS.forEach(function (c) { CAT_LABELS[c.id] = c.label; });
+CATS.forEach((c) => { CAT_LABELS[c.id] = c.label; });
 
 // ── Init ─────────────────────────────────────────────
 buildSidebar();
@@ -104,7 +107,7 @@ function escAttr(s: string): string {
 // ── Build sidebar categories ─────────────────────────
 function buildSidebar(): void {
   catList.innerHTML = "";
-  CATS.forEach(function (c) {
+  CATS.forEach((c) => {
     const btn = document.createElement("button");
     btn.className = "sc-cat-btn" + (c.id === currentCat ? " active" : "");
     btn.dataset.cat = c.id;
@@ -112,7 +115,7 @@ function buildSidebar(): void {
       '<span class="sc-cat-icon">' + c.icon + '</span>' +
       '<span class="sc-cat-label">' + c.label + '</span>' +
       '<span class="sc-cat-count" data-cat-count="' + c.id + '">-</span>';
-    btn.addEventListener("click", function () {
+    btn.addEventListener("click", () => {
       currentCat = c.id;
       const btns = catList.querySelectorAll(".sc-cat-btn");
       for (let i = 0; i < btns.length; i++) btns[i].classList.remove("active");
@@ -144,14 +147,14 @@ function showSkeleton(): void {
 // ── Load catalog ────────────────────────────────────
 function loadCatalog(): void {
   fetch(API + "/community/catalog")
-    .then(function (r) { return r.json(); })
-    .then(function (d: CatalogResponse) {
+    .then((r) => { return r.json(); })
+    .then((d: CatalogResponse) => {
       if (!d.success) throw new Error(d.error || "未知错误");
       allSkills = d.skills || [];
       updateStats();
       renderGrid();
     })
-    .catch(function (err: Error) {
+    .catch((err: Error) => {
       console.error("[skill_community] loadCatalog error:", err);
       gridEl.innerHTML =
         '<div class="sc-empty">' +
@@ -166,7 +169,7 @@ function loadCatalog(): void {
 // ── Stats ───────────────────────────────────────────
 function updateStats(): void {
     statTotal.textContent = String(allSkills.length);
-    var instCount = 0;
+    let instCount = 0;
     for (let i = 0; i < allSkills.length; i++) {
       if (allSkills[i].is_installed) instCount++;
     }
@@ -177,7 +180,7 @@ function updateStats(): void {
     const cat = allSkills[j].category || "domain";
     if (counts[cat] !== undefined) counts[cat]++;
   }
-  CATS.forEach(function (c) {
+  CATS.forEach((c) => {
     const el = document.querySelector('[data-cat-count="' + c.id + '"]');
       if (el) el.textContent = String(counts[c.id]);
   });
@@ -187,19 +190,19 @@ function updateStats(): void {
 function getFiltered(): CommunitySkill[] {
   let list = allSkills.slice();
   if (currentCat !== "all") {
-    list = list.filter(function (s) { return s.category === currentCat; });
+    list = list.filter((s) => { return s.category === currentCat; });
   }
   if (currentSearch) {
     const q = currentSearch.toLowerCase();
-    list = list.filter(function (s) {
+    list = list.filter((s) => {
       const hay = (s.name || "") + " " + (s.description || "") + " " + (s.tags || []).join(" ") + " " + (s.author || "");
       return hay.toLowerCase().indexOf(q) >= 0;
     });
   }
   if (currentSort === "name") {
-    list.sort(function (a, b) { return (a.name || "").localeCompare(b.name || ""); });
+    list.sort((a, b) => { return (a.name || "").localeCompare(b.name || ""); });
   } else if (currentSort === "installed") {
-    list.sort(function (a, b) { return (b.is_installed ? 1 : 0) - (a.is_installed ? 1 : 0); });
+    list.sort((a, b) => { return (b.is_installed ? 1 : 0) - (a.is_installed ? 1 : 0); });
   }
   return list;
 }
@@ -220,20 +223,20 @@ function renderGrid(): void {
 
   const ordered: Array<{ type: string; cat?: string; count?: number; skill?: CommunitySkill }> = [];
   if (currentCat === "all") {
-    ["behavior", "domain", "coding"].forEach(function (cat) {
-      const group = list.filter(function (s) { return s.category === cat; });
+    ["behavior", "domain", "coding"].forEach((cat) => {
+      const group = list.filter((s) => { return s.category === cat; });
       if (group.length > 0) {
         ordered.push({ type: "header", cat: cat, count: group.length });
-        group.forEach(function (s) { ordered.push({ type: "card", skill: s }); });
+        group.forEach((s) => { ordered.push({ type: "card", skill: s }); });
       }
     });
-    const uncategorized = list.filter(function (s) { return !s.category || ["behavior", "domain", "coding"].indexOf(s.category) < 0; });
+    const uncategorized = list.filter((s) => { return !s.category || ["behavior", "domain", "coding"].indexOf(s.category) < 0; });
     if (uncategorized.length > 0) {
       ordered.push({ type: "header", cat: "other", count: uncategorized.length });
-      uncategorized.forEach(function (s) { ordered.push({ type: "card", skill: s }); });
+      uncategorized.forEach((s) => { ordered.push({ type: "card", skill: s }); });
     }
   } else {
-    list.forEach(function (s) { ordered.push({ type: "card", skill: s }); });
+    list.forEach((s) => { ordered.push({ type: "card", skill: s }); });
   }
 
   const catIcons: Record<string, string> = { behavior: "🧠", domain: "💼", coding: "💻", other: "📦" };
@@ -300,10 +303,10 @@ function toast(type: string, msg: string): void {
   el.className = "sc-toast " + type;
   el.textContent = (type === "ok" ? "✅ " : "❌ ") + msg;
   toasts.appendChild(el);
-  setTimeout(function () {
+  setTimeout(() => {
     el.style.opacity = "0";
     el.style.transition = "opacity .3s";
-    setTimeout(function () { el.remove(); }, 300);
+    setTimeout(() => { el.remove(); }, 300);
   }, 3000);
 }
 
@@ -319,8 +322,8 @@ function quickInstall(skillId: string, btnEl: HTMLElement): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d: any) {
+    .then((r) => { return r.json(); })
+    .then((d: any) => {
       if (d.success) {
         btnEl.classList.remove("busy");
         btnEl.classList.add("done");
@@ -332,7 +335,7 @@ function quickInstall(skillId: string, btnEl: HTMLElement): void {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ overwrite: true })
-        }).then(function (r2) { return r2.json(); }).then(function (d2: any) {
+        }).then((r2) => { return r2.json(); }).then((d2: any) => {
           btnEl.classList.remove("busy");
           if (d2.success) {
             btnEl.classList.add("done");
@@ -352,7 +355,7 @@ function quickInstall(skillId: string, btnEl: HTMLElement): void {
         toast("err", d.error || "安装失败");
       }
     })
-    .catch(function (err: Error) {
+    .catch((err: Error) => {
       btnEl.classList.remove("busy");
       btnEl.classList.add("inst");
       btnEl.textContent = "安装";
@@ -387,8 +390,8 @@ function onlineInstall(resultIndex: string, btnEl: HTMLElement): void {
       tags: result.tags || []
     })
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d: any) {
+    .then((r) => { return r.json(); })
+    .then((d: any) => {
       btnEl.classList.remove("busy");
       if (d.success) {
         btnEl.classList.add("done");
@@ -400,7 +403,7 @@ function onlineInstall(resultIndex: string, btnEl: HTMLElement): void {
         toast("err", d.error || "安装失败");
       }
     })
-    .catch(function (err: Error) {
+    .catch((err: Error) => {
       btnEl.classList.remove("busy");
       btnEl.classList.add("inst");
       btnEl.textContent = "安装";
@@ -442,8 +445,8 @@ function doAiRecommend(): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query: query })
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d: any) {
+    .then((r) => { return r.json(); })
+    .then((d: any) => {
       aiLoading.style.display = "none";
       aiBtn.removeAttribute("disabled");
       const results = d.results || [];
@@ -454,7 +457,7 @@ function doAiRecommend(): void {
       }
       renderAiResults(results);
     })
-    .catch(function (err: Error) {
+    .catch((err: Error) => {
       aiLoading.style.display = "none";
       aiBtn.removeAttribute("disabled");
       toast("err", "AI 推荐失败: " + err.message);
@@ -494,14 +497,14 @@ function openDetail(skillId: string): void {
   if (!local) return;
   showModal(local);
   fetch(API + "/community/skill/" + encodeURIComponent(skillId))
-    .then(function (r) { return r.json(); })
-    .then(function (d: any) {
+    .then((r) => { return r.json(); })
+    .then((d: any) => {
       if (d.success && d.skill) {
         modalSkill = d.skill;
         mPrompt.textContent = d.skill.prompt || "(无 prompt)";
       }
     })
-    .catch(function () { /* ignore */ });
+    .catch(() => { /* ignore */ });
 }
 
 function showModal(s: CommunitySkill): void {
@@ -515,7 +518,7 @@ function showModal(s: CommunitySkill): void {
 
   const cm = s.community_meta || {};
   mCases.innerHTML = "";
-  (cm.use_cases || []).forEach(function (c) {
+  (cm.use_cases || []).forEach((c) => {
     const chip = document.createElement("span");
     chip.className = "sc-chip";
     chip.textContent = c;
@@ -528,7 +531,7 @@ function showModal(s: CommunitySkill): void {
   mDiff.innerHTML = '<span class="sc-dot ' + dotClass + '"></span> ' + escHtml(diff);
 
   mTags.innerHTML = "";
-  (s.tags || []).forEach(function (t) {
+  (s.tags || []).forEach((t) => {
     const tag = document.createElement("span");
     tag.className = "sc-tag sc-tag-plain";
     tag.textContent = t;
@@ -570,8 +573,8 @@ function doInstall(skill: CommunitySkill): void {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({})
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d: any) {
+    .then((r) => { return r.json(); })
+    .then((d: any) => {
       (mInstall as HTMLButtonElement).disabled = false;
       if (d.success) {
         mInstall.textContent = "✅ 已安装";
@@ -586,7 +589,7 @@ function doInstall(skill: CommunitySkill): void {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ overwrite: true })
-        }).then(function (r2) { return r2.json(); }).then(function (d2: any) {
+        }).then((r2) => { return r2.json(); }).then((d2: any) => {
           if (d2.success) {
             mInstall.textContent = "✅ 已安装";
             mInstall.classList.add("done");
@@ -605,7 +608,7 @@ function doInstall(skill: CommunitySkill): void {
         toast("err", d.error || "安装失败");
       }
     })
-    .catch(function (err: Error) {
+    .catch((err: Error) => {
       (mInstall as HTMLButtonElement).disabled = false;
       mInstall.textContent = "⬇️ 安装到 Koto";
       toast("err", "网络错误: " + err.message);
@@ -619,8 +622,8 @@ function doUninstall(skill: CommunitySkill): void {
     method: "DELETE",
     headers: { "Content-Type": "application/json" }
   })
-    .then(function (r) { return r.json(); })
-    .then(function (d: any) {
+    .then((r) => { return r.json(); })
+    .then((d: any) => {
       if (d.success) {
         mInstall.textContent = "⬇️ 安装到 Koto";
         mInstall.classList.remove("done");
@@ -633,7 +636,7 @@ function doUninstall(skill: CommunitySkill): void {
         toast("err", d.error || "卸载失败");
       }
     })
-    .catch(function (err: Error) {
+    .catch((err: Error) => {
       toast("err", "网络错误: " + err.message);
     });
 }
@@ -641,12 +644,12 @@ function doUninstall(skill: CommunitySkill): void {
 // ── Bind events ─────────────────────────────────────
 function bindEvents(): void {
   // Search
-  searchInput!.addEventListener("input", function () {
+  searchInput!.addEventListener("input", () => {
     currentSearch = searchInput!.value.trim();
     searchClear.classList.toggle("show", currentSearch.length > 0);
     renderGrid();
   });
-  searchClear.addEventListener("click", function () {
+  searchClear.addEventListener("click", () => {
     searchInput!.value = "";
     currentSearch = "";
     searchClear.classList.remove("show");
@@ -654,7 +657,7 @@ function bindEvents(): void {
   });
 
   // Sort
-  sortList.addEventListener("click", function (e) {
+  sortList.addEventListener("click", (e) => {
     const btn = (e.target as HTMLElement).closest(".sc-sort-btn") as HTMLElement | null;
     if (!btn) return;
     currentSort = btn.dataset.sort || "default";
@@ -665,19 +668,19 @@ function bindEvents(): void {
   });
 
   // View toggle
-  viewGridBtn.addEventListener("click", function () {
+  viewGridBtn.addEventListener("click", () => {
     viewGridBtn.classList.add("active");
     viewListBtn.classList.remove("active");
     document.querySelector(".sc-main")!.classList.remove("list-view");
   });
-  viewListBtn.addEventListener("click", function () {
+  viewListBtn.addEventListener("click", () => {
     viewListBtn.classList.add("active");
     viewGridBtn.classList.remove("active");
     document.querySelector(".sc-main")!.classList.add("list-view");
   });
 
   // Card click → detail modal (delegate)
-  gridEl.addEventListener("click", function (e) {
+  gridEl.addEventListener("click", (e) => {
     const installBtn = (e.target as HTMLElement).closest("[data-install]") as HTMLElement | null;
     if (installBtn) {
       e.stopPropagation();
@@ -689,7 +692,7 @@ function bindEvents(): void {
   });
 
   // AI grid same delegation
-  aiGrid.addEventListener("click", function (e) {
+  aiGrid.addEventListener("click", (e) => {
     const installBtn = (e.target as HTMLElement).closest("[data-install]") as HTMLElement | null;
     if (installBtn) {
       e.stopPropagation();
@@ -700,28 +703,28 @@ function bindEvents(): void {
 
   // AI recommend
   aiBtn.addEventListener("click", doAiRecommend);
-  aiInput!.addEventListener("keydown", function (e) {
+  aiInput!.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); doAiRecommend(); }
   });
-  aiClose.addEventListener("click", function () { aiResults.style.display = "none"; });
+  aiClose.addEventListener("click", () => { aiResults.style.display = "none"; });
 
   // Modal close
   mClose.addEventListener("click", closeModal);
-  overlay.addEventListener("click", function (e) { if (e.target === overlay) closeModal(); });
-  document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeModal(); });
+  overlay.addEventListener("click", (e) => { if (e.target === overlay) closeModal(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
 
   // Prompt toggle
-  mPromptHdr.addEventListener("click", function () {
+  mPromptHdr.addEventListener("click", () => {
     mPromptBody.classList.toggle("open");
     mChevron.textContent = mPromptBody.classList.contains("open") ? "▲" : "▼";
   });
 
   // Modal install / uninstall
-  mInstall.addEventListener("click", function () {
+  mInstall.addEventListener("click", () => {
     if (!modalSkill) return;
     doInstall(modalSkill);
   });
-  mUninstall.addEventListener("click", function () {
+  mUninstall.addEventListener("click", () => {
     if (!modalSkill) return;
     doUninstall(modalSkill);
   });

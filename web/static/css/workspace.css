@@ -126,14 +126,6 @@
     #wa-autosave-status.saved  { color: var(--success); }
 
     /* Archive category buttons inside popover */
-    .wa-archive-cat-btn {
-      display: flex; align-items: center; gap: 8px;
-      padding: 7px 10px; border-radius: 6px; border: 1px solid var(--border);
-      background: transparent; color: var(--text); font-size: 13px;
-      cursor: pointer; text-align: left; transition: background 0.15s, border-color 0.15s;
-      width: 100%;
-    }
-    .wa-archive-cat-btn:hover { background: var(--surface-hover); border-color: var(--accent); color: var(--accent); }
 
     /* Auto-save toggle — active (on) state */
     #wa-autosave-toggle.toggle-on {
@@ -443,7 +435,7 @@
       border-radius: 8px;
       box-shadow: 0 6px 20px rgba(0,0,0,0.12);
       padding: 4px 0;
-      z-index: 300;
+      z-index: var(--z-panel);
     }
     .wa-save-opt {
       display: flex;
@@ -465,7 +457,7 @@
     }
 
     /* ── Icon buttons — Clean toolbar style ── */
-    .wa-icon-btn, .wa-add-btn {
+.wa-icon-btn {
       width: 28px; height: 28px;
       border: none;
       background: transparent;
@@ -482,7 +474,7 @@
       user-select: none;
       transition: all 0.15s cubic-bezier(0.2, 0, 0.2, 1);
     }
-    .wa-icon-btn:hover, .wa-add-btn:hover {
+.wa-icon-btn:hover {
       background: var(--hover);
       color: var(--text);
     }
@@ -718,17 +710,9 @@
     }
 
     /* ── Archive result cards ── */
-    .wa-archive-success { font-size: 12px; padding: 6px 0; }
     .wa-archive-group {
       background: var(--surface); border: 1px solid var(--border);
       border-radius: 6px; padding: 8px 10px; margin-top: 6px;
-    }
-    .wa-archive-group-title {
-      font-size: 12px; font-weight: 600; display: flex; align-items: center;
-      gap: 5px; margin-bottom: 4px;
-    }
-    .wa-archive-group-files {
-      display: flex; flex-wrap: wrap; gap: 3px; font-size: 11px; color: var(--text-muted);
     }
     .wa-archive-group-files span {
       background: var(--hover); padding: 1px 5px;
@@ -750,7 +734,7 @@
     .wa-dlg-overlay {
       position: fixed; inset: 0;
       background: rgba(17, 24, 39, 0.38);
-      z-index: 9999;
+      z-index: var(--z-toast);
       display: flex; align-items: center; justify-content: center;
       padding: 18px;
       overflow: auto;
@@ -1029,8 +1013,10 @@
 
     /* ── File rows — 32px height, spacious ── */
     .wa-file-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 32px;
       position: relative;
-      z-index: 1;
+      z-index: var(--z-base);
       height: 32px;
       padding: 0;
       cursor: pointer;
@@ -1058,7 +1044,7 @@
       background: transparent;
       color: inherit;
       cursor: pointer;
-      z-index: 1;
+      z-index: var(--z-base);
     }
     body.select-mode .wa-file-open-hit { display: none; }
 
@@ -1077,7 +1063,7 @@
       justify-content: center;
       margin-right: 7px;
       position: relative;
-      z-index: 2;
+      z-index: var(--z-above);
       pointer-events: none;
     }
     .wa-file-icon svg { width: 18px; height: 18px; display: block; }
@@ -1106,7 +1092,7 @@
       min-width: 0;
       line-height: 32px;
       position: relative;
-      z-index: 2;
+      z-index: var(--z-above);
       pointer-events: none;
     }
     .wa-file-item.file .wa-file-label { padding-right: 30px; }
@@ -1577,7 +1563,7 @@
       display: none;
       position: absolute;
       inset: 0;
-      z-index: 9999;
+      z-index: var(--z-toast);
       cursor: copy;
     }
     body.wa-file-dragging #wa-drag-canvas-shield {
@@ -2264,13 +2250,13 @@
       background: #ffffff;
       border: 1px solid #ccd5ee;
       border-radius: 14px;
-      z-index: 9999;
+      z-index: var(--z-toast);
       white-space: normal;
       box-shadow: 0 8px 28px rgba(15, 23, 42, .16), 0 2px 8px rgba(15, 23, 42, .08);
     }
     /* is-toolbar-open still raises the wrapper/trigger button z-index */
     .koto-img-wrapper.is-toolbar-open {
-      z-index: 100;
+      z-index: var(--z-dropdown);
     }
 
     .koto-img-toolbar-header {
@@ -2587,7 +2573,7 @@
       display: block;
       box-sizing: border-box;
       overflow: hidden;
-      z-index: 1;
+      z-index: var(--z-base);
     }
 
     #wa-docx-editor .koto-page-break[data-koto-compact-break="true"] .koto-pb-end,
@@ -2646,7 +2632,7 @@
       display: block;
       box-sizing: border-box;
       overflow: hidden;
-      z-index: 1;
+      z-index: var(--z-base);
     }
     #wa-docx-editor .koto-pb-start::before,
     #wa-docx-editor .koto-pb-start::after {
@@ -2712,7 +2698,7 @@
       letter-spacing: 0.2px;
       pointer-events: none;
       white-space: nowrap;
-      z-index: 2;
+      z-index: var(--z-above);
     }
     #wa-docx-editor .koto-pb-header.is-editing::after,
     #wa-docx-editor .koto-page-header-first.is-editing::after {
@@ -3077,7 +3063,7 @@
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-search {
       position: sticky;
       top: 0;
-      z-index: 1;
+      z-index: var(--z-base);
       display: grid;
       grid-template-columns: minmax(0, 1fr) 24px;
       align-items: center;
@@ -3968,45 +3954,10 @@
     .wa-pptx-ctx-item.danger:hover { background: rgba(255, 59, 48, 0.10); }
     .wa-pptx-ctx-sep { height: 1px; background: var(--wa-pptx-divider); margin: 4px 0; }
 
-    .wa-slide-card {
-      background: #fff;
-      border: none;
-      border-radius: 6px;
-      overflow: hidden;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.12), 0 1px 4px rgba(0,0,0,0.06);
-    }
 
-    .wa-slide-card-header {
-      padding: 8px 16px;
-      background: var(--surface2);
-      border-bottom: 1px solid var(--border);
-      font-size: 11.5px;
-      font-weight: 600;
-      color: var(--text);
-      display: flex;
-      align-items: center;
-      gap: 8px;
-    }
 
-    .wa-slide-num { white-space: nowrap; }
 
-    .wa-slide-title-preview {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-      color: var(--text-muted);
-      font-weight: 400;
-      font-size: 11px;
-    }
 
-    .wa-slide-badge {
-      background: var(--accent);
-      color: #fff;
-      font-size: 10px;
-      padding: 1px 7px;
-      border-radius: 10px;
-    }
 
     /* 16:9 canvas — shapes are absolutely positioned inside */
     .wa-slide-canvas {
@@ -4181,7 +4132,7 @@
       padding: 2px 7px;
       border-radius: 4px;
       pointer-events: none;
-      z-index: 1;
+      z-index: var(--z-base);
     }
 
     #wa-text-content {
@@ -4239,7 +4190,7 @@
               text-size-adjust: none;
       forced-color-adjust: none;
       transform-origin: 0 0;           /* required: span transforms align with canvas */
-      z-index: 2;                      /* above canvas (z:auto), below annot layer (z:3) */
+      z-index: var(--z-above);                      /* above canvas (z:auto), below annot layer (z:3) */
     }
     .wa-pdf-text-layer :is(span, br) {
       color: transparent;
@@ -4278,7 +4229,7 @@
       left: 0; top: 0;
       pointer-events: none;
       overflow: visible;
-      z-index: 1;  /* below text layer (z:2) so text selection is not blocked */
+      z-index: var(--z-base);  /* below text layer (z:2) so text selection is not blocked */
     }
     .wa-pdf-annot-layer .wa-annot-hi { opacity: 0.45; pointer-events: auto; cursor: pointer; }
     .wa-pdf-annot-layer .wa-annot-ul { opacity: 0.85; pointer-events: auto; cursor: pointer; }
@@ -4315,7 +4266,7 @@
       box-shadow: 0 4px 16px rgba(0,0,0,.25);
       min-width: 200px;
       max-width: 280px;
-      z-index: 1000;
+      z-index: var(--z-overlay);
       pointer-events: auto;
     }
     .wa-pdf-note-header {
@@ -4687,7 +4638,7 @@
       position: absolute;
       inset: 0;
       background: rgba(0, 0, 0, 0.55);
-      z-index: 200;
+      z-index: var(--z-sticky);
       display: flex;
       align-items: center;
       justify-content: center;
@@ -4836,7 +4787,7 @@
       border: 1px solid #363845;
       border-radius: 6px;
       min-width: 160px;
-      z-index: 300;
+      z-index: var(--z-panel);
       box-shadow: 0 6px 20px rgba(0,0,0,0.4);
       overflow: hidden;
     }
@@ -4866,7 +4817,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       box-shadow: 0 6px 24px rgba(0,0,0,0.14), 0 1px 4px rgba(0,0,0,0.08);
-      z-index: 9999;
+      z-index: var(--z-toast);
       pointer-events: all;
       user-select: none;
       animation: wa-float-in 0.16s cubic-bezier(0.22, 0.61, 0.36, 1);
@@ -5008,19 +4959,6 @@
       flex-shrink: 0;
     }
 
-    .wa-dhb-font-input {
-      width: 72px;
-      height: 24px;
-      background: var(--hover);
-      border: 1px solid var(--border);
-      border-radius: 5px;
-      color: var(--text);
-      font-size: 11px;
-      padding: 2px 6px;
-      outline: none;
-      transition: border-color 0.15s;
-    }
-    .wa-dhb-font-input:focus { border-color: var(--accent); }
 
     .wa-dhb-font-select {
       width: 52px;
@@ -8014,41 +7952,6 @@
     }
 
     /* ── Chart image result ── */
-    .wa-chart-img-wrap {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      align-self: stretch;
-      max-width: 100%;
-    }
-    .wa-chart-img {
-      max-width: 100%;
-      border-radius: 6px;
-      border: 1px solid var(--ai-border);
-      display: block;
-    }
-    .wa-chart-img-draggable {
-      cursor: grab;
-      transition: box-shadow 0.15s, opacity 0.15s;
-    }
-    .wa-chart-img-draggable:hover {
-      box-shadow: 0 0 0 2px var(--accent, #4b9eff);
-    }
-    .wa-chart-img-draggable:active {
-      cursor: grabbing;
-      opacity: 0.75;
-    }
-    .wa-chart-drag-hint {
-      font-size: 11px;
-      color: var(--text-muted);
-      text-align: center;
-      letter-spacing: 0.03em;
-    }
-    .wa-chart-img-bar {
-      display: flex;
-      gap: 6px;
-      flex-wrap: wrap;
-    }
     #wa-canvas-body.wa-drop-active {
       outline: 2px dashed var(--accent, #4b9eff);
       outline-offset: -4px;
@@ -8113,15 +8016,6 @@
     }
 
     /* ── Display Mode Toggle (面板 | 内嵌) ── */
-    .wa-display-mode-toggle {
-      display: flex;
-      background: var(--hover);
-      border-radius: 6px;
-      padding: 2px;
-      gap: 1px;
-      margin-left: 4px;
-      flex-shrink: 0;
-    }
     .wa-display-mode-toggle button {
       background: transparent;
       border: none;
@@ -8161,47 +8055,10 @@
       border-top: 1px solid var(--ai-border);
       border-radius: 12px 12px 0 0;
       box-shadow: 0 -4px 24px rgba(0,0,0,0.08);
-      z-index: 100;
+      z-index: var(--z-dropdown);
       overflow: hidden;
     }
-    .wa-iai-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 8px 12px 4px;
-      flex-shrink: 0;
-    }
-    .wa-iai-brand {
-      font-size: 11px;
-      font-weight: 600;
-      color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 4px;
-    }
-    .wa-iai-close {
-      width: 22px;
-      height: 22px;
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      border-radius: 4px;
-      transition: background 0.12s;
-    }
-    .wa-iai-close:hover { background: var(--surface-hover); color: var(--text); }
 
-    .wa-iai-messages {
-      flex: 1;
-      min-height: 0;
-      overflow-y: auto;
-      padding: 4px 12px 8px;
-      font-size: 13px;
-      line-height: 1.55;
-    }
     .wa-iai-messages .wa-iai-msg {
       margin-bottom: 6px;
       padding: 6px 10px;
@@ -8226,26 +8083,6 @@
     }
     @keyframes iai-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
 
-    .wa-iai-input-row {
-      flex-shrink: 0;
-      padding: 6px 12px 10px;
-      border-top: 1px solid color-mix(in srgb, var(--ai-border) 40%, transparent);
-    }
-    #wa-iai-selection-chip {
-      display: flex;
-      align-items: flex-start;
-      gap: 6px;
-      margin-bottom: 6px;
-      padding: 5px 8px;
-      background: var(--accent-subtle);
-      border-radius: 6px;
-      border: 1px solid var(--accent-medium);
-      max-height: 50px;
-      overflow: hidden;
-      font-size: 11px;
-      font-style: italic;
-      color: var(--accent);
-    }
     #wa-iai-selection-chip .chip-clear {
       flex-shrink: 0;
       background: transparent; border: none; color: var(--text-muted);
@@ -8260,57 +8097,7 @@
       border-radius: 10px;
       padding: 6px 8px;
     }
-    #wa-iai-input {
-      flex: 1;
-      border: none;
-      background: transparent;
-      resize: none;
-      font-size: 13px;
-      color: var(--text);
-      outline: none;
-      min-height: 20px;
-      max-height: 80px;
-      line-height: 1.4;
-      font-family: inherit;
-    }
-    .wa-iai-send {
-      width: 28px;
-      height: 28px;
-      border-radius: 8px;
-      background: var(--accent);
-      border: none;
-      color: #fff;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      flex-shrink: 0;
-      transition: background 0.15s;
-    }
-    .wa-iai-send:hover { background: var(--accent-hover); }
 
-    .wa-iai-quick-row {
-      display: flex;
-      gap: 4px;
-      margin-top: 6px;
-      flex-wrap: wrap;
-    }
-    .wa-iai-qbtn {
-      padding: 3px 10px;
-      border: 1px solid var(--ai-border);
-      background: transparent;
-      border-radius: 12px;
-      font-size: 11px;
-      color: var(--text-muted);
-      cursor: pointer;
-      transition: all 0.12s;
-      white-space: nowrap;
-    }
-    .wa-iai-qbtn:hover {
-      background: var(--accent-subtle);
-      color: var(--accent);
-      border-color: var(--accent-medium);
-    }
 
     /* Canvas needs position:relative for inline AI absolute positioning */
     #wa-canvas {
@@ -8334,10 +8121,6 @@
     }
 
     /* ── Chart result ── */
-    .wa-chart-result {
-      align-self: flex-start;
-      max-width: 95%;
-    }
     .wa-chart-result img {
       max-width: 100%;
       border-radius: 8px;
@@ -8390,14 +8173,6 @@
     @keyframes fadeInDown { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
 
     /* ── Chart insert button ── */
-    .wa-chart-insert {
-      font-size: 11px;
-      color: var(--success);
-      cursor: pointer;
-      padding: 3px 0;
-      user-select: none;
-    }
-    .wa-chart-insert:hover { text-decoration: underline; }
 
     /* ── AI image drag-to-doc hint overlay ── */
     #wa-ai-img-drop-hint {
@@ -8409,7 +8184,7 @@
       background: var(--accent-subtle);
       border: 2px dashed var(--accent);
       border-radius: 6px;
-      z-index: 300;
+      z-index: var(--z-panel);
       pointer-events: none;
       transition: opacity 0.15s;
     }
@@ -8435,14 +8210,6 @@
       transform: scale(1.01);
     }
     .wa-ai-draggable-img:active { cursor: grabbing; }
-    .wa-chart-drag-hint {
-      font-size: 10px;
-      color: var(--text-muted);
-      text-align: center;
-      margin-top: 3px;
-      opacity: 0.7;
-      user-select: none;
-    }
 
     /* CSS Custom Highlight API */
     ::highlight(wa-pinned) { background-color: var(--accent-medium); }
@@ -8471,7 +8238,7 @@
       border-radius: 12px;
       font-size: 13px;
       font-weight: 500;
-      z-index: 9999;
+      z-index: var(--z-toast);
       opacity: 0;
       transition: opacity 0.28s, transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
       pointer-events: none;
@@ -8551,7 +8318,7 @@
       align-items: center;
       justify-content: center;
       gap: 14px;
-      z-index: 200;
+      z-index: var(--z-sticky);
       backdrop-filter: blur(6px);
       -webkit-backdrop-filter: blur(6px);
     }
@@ -8587,6 +8354,8 @@
     .wa-myws-list::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.4); border-radius: 2px; }
 
     .wa-myws-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 32px;
       display: flex;
       align-items: center;
       gap: 6px;
@@ -8815,20 +8584,6 @@
     }
 
 /* ── Grounded citation chips in AI messages ──────────────────── */
-    .wa-citation-chip {
-      display: inline-block;
-      background: rgba(255,171,0,0.14);
-      border: 1px solid rgba(255,171,0,0.45);
-      border-radius: 10px;
-      padding: 1px 8px;
-      font-size: 11px;
-      color: #c89b30;
-      cursor: pointer;
-      margin: 0 2px;
-      white-space: nowrap;
-      transition: background 0.15s;
-    }
-    .wa-citation-chip:hover { background: rgba(255,171,0,0.28); }
 
 /* ── Source preview drawer ───────────────────────────────────── */
     #wa-source-preview {
@@ -8865,36 +8620,7 @@
     }
 
 /* ── Audio Overview Modal ────────────────────────────────────── */
-    #wa-audio-modal.wa-dlg-overlay { z-index: 5000; }
-    .wa-audio-modal-box {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      width: min(560px, 95vw);
-      max-height: 80vh;
-      display: flex;
-      flex-direction: column;
-      overflow: hidden;
-    }
-    .wa-audio-modal-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 12px 16px;
-      font-size: 15px;
-      font-weight: 600;
-      border-bottom: 1px solid var(--border);
-      flex-shrink: 0;
-    }
-    #wa-audio-modal-body { flex: 1; overflow-y: auto; padding: 14px 16px; }
-    .wa-audio-loading {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      padding: 20px;
-      font-size: 13px;
-      color: var(--text-muted);
-    }
+    #wa-audio-modal.wa-dlg-overlay { z-index: var(--z-modal); }
     .wa-spinner {
       display: inline-block;
       width: 16px; height: 16px;
@@ -8904,29 +8630,8 @@
       animation: wa-spin 0.8s linear infinite;
     }
 
-    .wa-audio-player-wrap { padding: 10px 0; }
-    .wa-audio-player { width: 100%; accent-color: var(--accent); }
-    .wa-audio-no-tts {
-      background: rgba(255,171,0,0.08);
-      border: 1px solid rgba(255,171,0,0.22);
-      border-radius: 6px;
-      padding: 10px 14px;
-      font-size: 12px;
-      color: var(--text-muted);
-      margin-bottom: 12px;
-    }
-    .wa-audio-script { display: flex; flex-direction: column; gap: 10px; }
-    .wa-audio-line {
-      display: flex;
-      flex-direction: column;
-      gap: 3px;
-      padding: 8px 12px;
-      border-radius: 8px;
-    }
     .wa-audio-line.host-a { background: var(--accent-subtle); border-left: 3px solid var(--accent); }
     .wa-audio-line.host-b { background: rgba(100,200,100,0.09); border-left: 3px solid rgba(100,200,100,0.5); }
-    .wa-audio-name { font-size: 10px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; }
-    .wa-audio-text { font-size: 13px; line-height: 1.55; color: var(--text); }
 
 /* ── Notebook Guide Drawer ───────────────────────────────────── */
     #wa-notebook-guide {
@@ -8952,10 +8657,6 @@
       font-weight: 600;
       border-bottom: 1px solid var(--border);
       flex-shrink: 0;
-    }
-    .wa-nb-close {
-      background: none; border: none; cursor: pointer; font-size: 18px;
-      color: var(--text-muted); padding: 0 3px;
     }
     .wa-source-search-box {
       padding: 10px 12px;
@@ -9000,40 +8701,7 @@
     }
     #wa-notebook-body { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 8px; }
 
-    .wa-nb-card {
-      background: var(--input-bg, var(--hover));
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-    .wa-nb-card-header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 9px 12px;
-      cursor: pointer;
-      font-size: 13px;
-      font-weight: 600;
-      user-select: none;
-      transition: background 0.1s;
-    }
-    .wa-nb-card-header:hover { background: var(--hover); }
-    .wa-nb-card-btns { display: flex; align-items: center; gap: 4px; }
-    .wa-nb-copy-btn, .wa-nb-send-btn {
-      background: none; border: none; cursor: pointer; font-size: 13px;
-      padding: 2px 5px; border-radius: 4px; opacity: 0.6;
-      transition: opacity 0.15s, background 0.15s;
-    }
-    .wa-nb-copy-btn:hover, .wa-nb-send-btn:hover { opacity: 1; background: var(--hover); }
-    .wa-nb-chevron { font-size: 11px; opacity: 0.5; margin-left: 4px; transition: transform 0.2s; }
     .wa-nb-card.collapsed .wa-nb-chevron { transform: rotate(-90deg); }
-    .wa-nb-card-body {
-      padding: 10px 14px;
-      font-size: 13px;
-      line-height: 1.65;
-      color: var(--text);
-      border-top: 1px solid var(--border);
-    }
     .wa-nb-card.collapsed .wa-nb-card-body { display: none; }
 
 /* ═══════════════════════════════════════════════════════════════
@@ -9043,7 +8711,7 @@
     #wa-ai-file-drop {
       position: absolute;
       inset: 0;
-      z-index: 100;
+      z-index: var(--z-dropdown);
       background: rgba(30,33,49,0.88);
       display: flex;
       align-items: center;
@@ -9214,30 +8882,6 @@
   gap: 1px;
   flex-shrink: 0;
 }
-.wa-qat-sep {
-  width: 1px;
-  height: 20px;
-  background: var(--border);
-  margin: 0 4px;
-  flex-shrink: 0;
-}
-.wa-qat-btn {
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  color: var(--text-secondary);
-  cursor: pointer;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background .12s, color .12s;
-  flex-shrink: 0;
-}
-.wa-qat-btn:hover { background: var(--hover); color: var(--text-primary); }
-.wa-qat-btn:disabled { opacity: 0.3; cursor: not-allowed; }
-.wa-qat-btn:disabled:hover { background: transparent; color: var(--text-secondary); }
 /* "文件" ribbon button */
 .wa-ribbon-file-btn {
   height: 100%;
@@ -9264,7 +8908,7 @@
   top: 44px;
   left: 0;
   min-width: 220px;
-  z-index: 200;
+  z-index: var(--z-sticky);
   background: var(--surface2);
   border: 1px solid var(--border);
   border-radius: 4px;
@@ -9511,10 +9155,6 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   }
 
   .wa-icon-btn,
-  .wa-add-btn {
-    min-width: 32px;
-    min-height: 32px;
-  }
 }
 
 .koto-activity-bar {
@@ -9855,27 +9495,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 /* ═══════════════════════════════════════════════════════════════
    AI Progress Step Indicator
    ═══════════════════════════════════════════════════════════════ */
-.wa-progress-indicator {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  margin: 6px 0;
-  background: var(--hover);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  flex-wrap: wrap;
-  font-size: 11.5px;
-  color: var(--text-muted);
-  transition: opacity 0.4s;
-}
 .wa-progress-indicator.done { opacity: 0.4; }
-.wa-progress-step {
-  padding: 3px 8px;
-  border-radius: 5px;
-  transition: all 0.25s;
-  white-space: nowrap;
-}
 .wa-progress-step.active {
   background: var(--accent-medium);
   color: var(--accent);
@@ -9940,27 +9560,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 /* ═══════════════════════════════════════════════════════════════
    AI Progress Step Indicator
    ═══════════════════════════════════════════════════════════════ */
-.wa-progress-indicator {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 8px 12px;
-  margin: 6px 0;
-  background: var(--hover);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  flex-wrap: wrap;
-  font-size: 11.5px;
-  color: var(--text-muted);
-  transition: opacity 0.4s;
-}
 .wa-progress-indicator.done { opacity: 0.4; }
-.wa-progress-step {
-  padding: 3px 8px;
-  border-radius: 5px;
-  transition: all 0.25s;
-  white-space: nowrap;
-}
 .wa-progress-step.active {
   background: var(--accent-medium);
   color: var(--accent);
@@ -10315,33 +9915,6 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 }
 
 /* ── Agent ReAct Timeline ──────────────────────────────────────────────── */
-.wa-agent-timeline {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 8px 0;
-  border-left: 2px solid rgba(100,140,255,0.2);
-  margin-left: 6px;
-}
-.wa-agent-step {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 10px;
-  font-size: 12.5px;
-  color: var(--text-secondary, #aaa);
-  position: relative;
-}
-.wa-agent-step::before {
-  content: '';
-  position: absolute;
-  left: -7px;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--bg-secondary, #333);
-  border: 2px solid rgba(100,140,255,0.4);
-}
 .wa-agent-step.step-done::before { border-color: #50c878; background: #50c878; }
 .wa-agent-step.step-error::before { border-color: #ef4444; background: #ef4444; }
 .wa-agent-step.step-action::before { border-color: #648cff; background: #648cff; }
@@ -10353,51 +9926,11 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   opacity: 0.8;
 }
 .wa-agent-step.step-thinking::before { display: none; }
-.wa-step-icon { flex-shrink: 0; font-size: 13px; }
-.wa-step-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.wa-step-spinner {
-  display: inline-block;
-  width: 12px; height: 12px;
-  border: 2px solid rgba(100,140,255,0.3);
-  border-top-color: #648cff;
-  border-radius: 50%;
-  animation: wa-spin 0.8s linear infinite;
-  flex-shrink: 0;
-}
 
-.wa-agent-answer {
-  padding: 10px 0 4px;
-  font-size: 13.5px;
-  line-height: 1.6;
-  color: var(--text-primary, #e0e0e0);
-}
 .wa-agent-answer p:first-child { margin-top: 0; }
 .wa-agent-answer p:last-child { margin-bottom: 0; }
 
-.wa-agent-footer {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 0 0;
-  font-size: 11px;
-  color: var(--text-muted, #666);
-  border-top: 1px solid rgba(255,255,255,0.06);
-  margin-top: 4px;
-}
 /* ── Phase bar ──────────────────────────────────────────────── */
-.wa-phase-bar {
-  display: flex;
-  align-items: center;
-  gap: 0;
-  padding: 4px 0 8px;
-  font-size: 11px;
-  color: var(--text-muted, #888);
-}
-.wa-phase-dot {
-  padding: 2px 8px;
-  border-radius: 10px;
-  transition: background 0.2s, color 0.2s;
-}
 .wa-phase-dot.active {
   background: rgba(100,140,255,0.18);
   color: #8ab4f8;
@@ -10405,11 +9938,6 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 }
 .wa-phase-dot.done {
   color: #6bcf8f;
-}
-.wa-phase-sep {
-  color: var(--text-muted, #666);
-  font-size: 10px;
-  padding: 0 2px;
 }
 
 /* ── File change preview snippet ───────────────────────────── */
@@ -10435,97 +9963,13 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   padding-left: 6px;
   width: 100%;
 }
-.wa-code-block-label {
-  font-size: 10px;
-  font-weight: 600;
-  color: var(--text-muted, #888);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 2px;
-  margin-top: 4px;
-}
-.wa-code-pre {
-  margin: 0;
-  padding: 6px 8px;
-  background: rgba(0,0,0,0.3);
-  border-radius: 4px;
-  font-size: 11px;
-  font-family: var(--font-mono, monospace);
-  color: #c8e6c9;
-  white-space: pre-wrap;
-  word-break: break-all;
-  max-height: 180px;
-  overflow-y: auto;
-}
-.wa-code-output { color: #e0e0e0; }
-.wa-code-error { color: #ef9a9a; border-left: 2px solid #ef4444; }
 
 /* ── Verification step variants ─────────────────────────────── */
 .wa-agent-step.step-warn::before { background: #f59e0b; }
 
 /* ── Approval Card ──────────────────────────────────────────── */
-.wa-approval-card {
-  background: rgba(255,170,0,0.08);
-  border: 1px solid rgba(255,170,0,0.25);
-  border-radius: 8px;
-  padding: 12px 14px;
-  margin-top: 8px;
-}
-.wa-approval-header {
-  font-weight: 600;
-  font-size: 13px;
-  margin-bottom: 4px;
-}
-.wa-approval-desc {
-  font-size: 12px;
-  color: var(--text-secondary, #888);
-  margin-bottom: 10px;
-}
-.wa-approval-actions {
-  display: flex;
-  gap: 8px;
-}
-.wa-btn-approve, .wa-btn-reject {
-  padding: 5px 14px;
-  border-radius: 6px;
-  border: none;
-  font-size: 12px;
-  cursor: pointer;
-  font-weight: 500;
-}
-.wa-btn-approve {
-  background: var(--accent, #007AFF);
-  color: #fff;
-}
-.wa-btn-approve:hover { opacity: 0.85; }
-.wa-btn-reject {
-  background: rgba(255,255,255,0.08);
-  color: var(--text-secondary, #888);
-  border: 1px solid var(--border, rgba(0,0,0,0.1));
-}
-.wa-btn-reject:hover { background: rgba(255,255,255,0.15); }
 
 /* ── Undo Agent button ──────────────────────────────────────── */
-.wa-btn-undo-agent {
-  display: inline-block;
-  margin-left: 8px;
-  padding: 3px 10px;
-  font-size: 11px;
-  border-radius: 5px;
-  border: 1px solid rgba(255,140,0,0.3);
-  background: rgba(255,140,0,0.08);
-  color: #ffa500;
-  cursor: pointer;
-  transition: all 0.15s;
-}
-.wa-btn-undo-agent:hover {
-  background: rgba(255,140,0,0.18);
-  border-color: rgba(255,140,0,0.5);
-}
-.wa-btn-undo-agent:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
 
 /* Task flow cleanup */
 #wa-ai-messages .wa-task-run.is-compact {
@@ -10977,7 +10421,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 .wa-local-folder-picker {
   position: fixed;
   inset: 0;
-  z-index: 9999;
+  z-index: var(--z-toast);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -11361,21 +10805,12 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 
         /* ── Bindings & Triggers UI ─────────────────────────────── */
         .bindings-toolbar { display: flex; gap: 6px; margin: 0 0 8px; align-items: center; flex-wrap: wrap; }
-        .bindings-list, .triggers-list {
+.triggers-list {
             display: flex; flex-direction: column; gap: 6px;
             max-height: 300px; overflow-y: auto; padding-right: 2px;
         }
-        .binding-row, .trigger-row {
-            border: 1px solid var(--border-color); border-radius: var(--radius-md);
-            padding: 8px 10px; background: var(--bg-tertiary);
-            display: flex; align-items: center; gap: 8px; transition: border-color 0.15s;
-        }
         .binding-row.enabled, .trigger-row.enabled { border-color: rgba(16,185,129,0.3); }
         .binding-row-info, .trigger-row-info { flex: 1; min-width: 0; }
-        .binding-skill-name, .trigger-name {
-            font-size: 12px; font-weight: 600; color: var(--text-primary);
-            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-        }
         .binding-patterns { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 4px; }
         .pattern-tag {
             font-size: 10px; padding: 1px 6px; border-radius: 10px;
@@ -11429,7 +10864,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             padding: 10px 12px;
             min-width: 210px; max-width: 280px;
             box-shadow: 0 10px 28px rgba(0,0,0,.55);
-            z-index: 99999;
+            z-index: var(--z-max);
             text-align: left;
             pointer-events: none;
             display: none;
@@ -11502,7 +10937,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
             box-shadow: 0 6px 24px rgba(0,0,0,0.28);
-            z-index: 9999;
+            z-index: var(--z-toast);
             pointer-events: none;
             white-space: normal;
         }
@@ -11531,7 +10966,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             top: calc(100% - 1px); left: 50%; transform: translateX(-50%);
             border: 5px solid transparent;
             border-top-color: var(--bg-secondary);
-            z-index: 1;
+            z-index: var(--z-base);
         }
         .csb-pill:hover .csb-pill-tip { display: block; }
         .csb-manage-link {
@@ -11719,7 +11154,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             position: absolute; right: 0; top: calc(100% + 5px);
             background: var(--bg-elevated, var(--bg-secondary));
             border: 1px solid var(--border-color); border-radius: 10px;
-            padding: 4px; z-index: 300; min-width: 130px;
+            padding: 4px; z-index: var(--z-panel); min-width: 130px;
             box-shadow: 0 6px 20px rgba(0,0,0,.3);
             display: none;
         }
@@ -12086,7 +11521,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             gap: 12px;
             background: #f5f7fb;
             color: #0c1526;
-            z-index: 9999;
+            z-index: var(--z-toast);
             font-family: 'Noto Sans SC', 'Segoe UI', sans-serif;
         }
         #startupSplash .spinner {
@@ -12649,4 +12084,12 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 .wa-task-workbench-completion {
   display: grid;
   gap: 10px;
+}
+
+/* ?? Virtual scrolling optimization ?? */
+#wa-files-list,
+#wa-recent-list,
+#wa-tmpws-list,
+#wa-myws-list {
+  contain: layout style;
 }

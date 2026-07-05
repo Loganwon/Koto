@@ -915,7 +915,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       routeDecision = fileTaskRouteDecision('frontend_file_context_guard', routeDecision);
     }
     if (isDirectWorkspaceResponse(routeDecision)) {
-      return streamWorkspaceChatRoute(context, routeDecision);
+      return streamWorkspaceChatRoute(context, routeDecision!);
     }
     return runTaskFlowRoute(context, routeDecision || undefined);
   }
@@ -1168,12 +1168,12 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     }
 
     if (explicitTaskPayload) {
-      return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision);
+      return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision)!;
     }
 
     const resumedTaskPayload = implicitResumeTaskPayload(text);
     if (resumedTaskPayload) {
-      return finalizeExplicitTaskPayload(resumedTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision);
+      return finalizeExplicitTaskPayload(resumedTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision)!;
     }
 
     const rawFiles: TaskFileInfo[] = Array.isArray(state._aiFileContext)

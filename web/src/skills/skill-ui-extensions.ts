@@ -77,7 +77,7 @@ function renderActionButtons(buttons: ActionButton[]): void {
   bar.setAttribute('role', 'toolbar');
   bar.setAttribute('aria-label', '技能快捷操作');
 
-  buttons.forEach(function (btn) {
+  buttons.forEach((btn) => {
     const el = document.createElement('button');
     el.type = 'button';
     el.className = 'skill-ext-action-btn skill-ext-action-btn--' + esc(btn.variant || 'default');
@@ -85,7 +85,7 @@ function renderActionButtons(buttons: ActionButton[]): void {
     if (btn.tooltip) el.setAttribute('title', esc(btn.tooltip));
     el.setAttribute('data-action-id', esc(btn.id || ''));
 
-    el.addEventListener('click', function () {
+    el.addEventListener('click', () => {
       if (btn.message) {
         sendMessage(btn.message);
       } else if (btn.action) {
@@ -125,12 +125,12 @@ function attachQuickRepliesToMessage(msgEl: Element, replies: string[]): void {
   row.setAttribute('role', 'group');
   row.setAttribute('aria-label', '快速回复');
 
-  replies.forEach(function (text) {
+  replies.forEach((text) => {
     const chip = document.createElement('button');
     chip.type = 'button';
     chip.className = 'skill-ext-qr-chip';
     chip.textContent = text;
-    chip.addEventListener('click', function () {
+    chip.addEventListener('click', () => {
       sendMessage(text);
       row.remove();
     });
@@ -163,9 +163,9 @@ function startQuickReplyObserver(replies: string[]): void {
   );
   if (!container) return;
 
-  _qrObserver = new MutationObserver(function (mutations) {
-    mutations.forEach(function (m) {
-      m.addedNodes.forEach(function (node) {
+  _qrObserver = new MutationObserver((mutations) => {
+    mutations.forEach((m) => {
+      m.addedNodes.forEach((node) => {
         if (node.nodeType !== 1) return;
         const el = node as Element;
         const isAI = el.classList.contains('assistant') ||
@@ -191,7 +191,7 @@ function stopQuickReplyObserver(): void {
     _qrObserver.disconnect();
     _qrObserver = null;
   }
-  document.querySelectorAll('.' + QUICK_REPLY_CLS).forEach(function (el) { el.remove(); });
+  document.querySelectorAll('.' + QUICK_REPLY_CLS).forEach((el) => { el.remove(); });
 }
 
 // ─── 3. Floating Widget ───────────────────────────────────
@@ -255,7 +255,7 @@ function applyWidgetPosition(el: HTMLElement, pos: string): void {
 function makeDraggable(panel: HTMLElement, handle: HTMLElement): void {
   let startX: number, startY: number, startLeft: number, startTop: number;
   handle.style.cursor = 'move';
-  handle.addEventListener('mousedown', function (e) {
+  handle.addEventListener('mousedown', (e) => {
     if ((e.target as HTMLElement).classList.contains('skill-ext-float-close')) return;
     e.preventDefault();
     const rect = panel.getBoundingClientRect();
@@ -301,8 +301,8 @@ function renderDiceRoller(container: HTMLElement): void {
     '    <button type="button" data-sides="100">D100</button>' +
     '  </div>' +
     '</div>';
-  container.querySelectorAll('button[data-sides]').forEach(function (btn) {
-    btn.addEventListener('click', function () {
+  container.querySelectorAll('button[data-sides]').forEach((btn) => {
+    btn.addEventListener('click', () => {
       const sides = parseInt(btn.getAttribute('data-sides')!, 10);
       const result = Math.floor(Math.random() * sides) + 1;
       container.querySelector('#skill-ext-dice-result')!.textContent = result + ' / D' + sides;
@@ -330,16 +330,16 @@ function renderTimer(container: HTMLElement): void {
   const startBtn = container.querySelector('#skill-ext-timer-start')!;
   const resetBtn = container.querySelector('#skill-ext-timer-reset')!;
 
-  startBtn.addEventListener('click', function () {
+  startBtn.addEventListener('click', () => {
     if (interval) {
       clearInterval(interval); interval = null;
       startBtn.textContent = '继续';
     } else {
-      interval = setInterval(function () { seconds++; updateDisplay(); }, 1000);
+      interval = setInterval(() => { seconds++; updateDisplay(); }, 1000);
       startBtn.textContent = '暂停';
     }
   });
-  resetBtn.addEventListener('click', function () {
+  resetBtn.addEventListener('click', () => {
     clearInterval(interval!); interval = null;
     seconds = 0; updateDisplay();
     startBtn.textContent = '开始';
@@ -354,7 +354,7 @@ function renderNotes(container: HTMLElement): void {
     'maxlength="4096"></textarea>';
   const ta = container.querySelector('textarea')!;
   ta.value = sessionStorage.getItem(storageKey) || '';
-  ta.addEventListener('input', function () {
+  ta.addEventListener('input', () => {
     sessionStorage.setItem(storageKey, ta.value);
   });
 }
@@ -370,8 +370,8 @@ function renderCalculator(container: HTMLElement): void {
   ];
   const displayId = 'skill-ext-calc-display';
   let html = '<div class="skill-ext-calc"><div class="skill-ext-calc-display" id="' + displayId + '">0</div><div class="skill-ext-calc-btns">';
-  btnLayout.forEach(function (row) {
-    row.forEach(function (lbl) {
+  btnLayout.forEach((row) => {
+    row.forEach((lbl) => {
       const wide = lbl === '0' ? ' skill-ext-calc-btn--wide' : '';
       html += '<button type="button" class="skill-ext-calc-btn' + wide + '" data-lbl="' + esc(lbl) + '">' + esc(lbl) + '</button>';
     });
@@ -383,8 +383,8 @@ function renderCalculator(container: HTMLElement): void {
 
   function setDisplay(val: string) { display.textContent = val || '0'; }
 
-  container.querySelectorAll('.skill-ext-calc-btn').forEach(function (btn) {
-    btn.addEventListener('click', function () {
+  container.querySelectorAll('.skill-ext-calc-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
       const lbl = btn.getAttribute('data-lbl');
       if (lbl === 'C') { expr = ''; setDisplay('0'); return; }
       if (lbl === '±') {
@@ -440,7 +440,7 @@ function renderWordCounter(container: HTMLElement): void {
   const ta = container.querySelector('textarea')!;
   const charsEl = container.querySelector('#skill-ext-wc-chars')!;
   const wordsEl = container.querySelector('#skill-ext-wc-words')!;
-  ta.addEventListener('input', function () {
+  ta.addEventListener('input', () => {
     const text = ta.value;
     charsEl.textContent = String(text.length);
     const cjkMatches = (text.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) || []).length;
@@ -463,15 +463,15 @@ function renderColorPicker(container: HTMLElement): void {
   const hexEl = container.querySelector('#skill-ext-color-hex')!;
   const copyBtn = container.querySelector('#skill-ext-color-copy')!;
 
-  input.addEventListener('input', function () {
+  input.addEventListener('input', () => {
     hexEl.textContent = input.value;
   });
-  copyBtn.addEventListener('click', function () {
+  copyBtn.addEventListener('click', () => {
     if (navigator.clipboard) {
-      navigator.clipboard.writeText(input.value).catch(function () { });
+      navigator.clipboard.writeText(input.value).catch(() => { });
     }
     copyBtn.textContent = '已复制!';
-    setTimeout(function () { copyBtn.textContent = '复制'; }, 1500);
+    setTimeout(() => { copyBtn.textContent = '复制'; }, 1500);
   });
 }
 
@@ -486,7 +486,7 @@ function showPermissionDialog(skillId: string, skillName: string, missingPerms: 
   overlay.setAttribute('aria-modal', 'true');
   overlay.setAttribute('aria-label', '权限申请');
 
-  const permListHtml = missingPerms.map(function (p) {
+  const permListHtml = missingPerms.map((p) => {
     return '<li><strong>' + esc(p.label || p.id) + '</strong>: ' + esc(p.description || '') +
       ' <span class="skill-ext-risk skill-ext-risk--' + esc(p.risk || 'unknown') + '">' +
       esc(p.risk || '') + '</span></li>';
@@ -503,24 +503,24 @@ function showPermissionDialog(skillId: string, skillName: string, missingPerms: 
     '  </div>' +
     '</div>';
 
-  overlay.querySelector('#skill-ext-perm-grant')!.addEventListener('click', function () {
-    const perms = missingPerms.map(function (p) { return p.id; });
+  overlay.querySelector('#skill-ext-perm-grant')!.addEventListener('click', () => {
+    const perms = missingPerms.map((p) => { return p.id; });
     fetch('/api/skills/' + encodeURIComponent(skillId) + '/permissions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ permissions: perms }),
     })
-      .then(function (r) { return r.json(); })
-      .then(function (data: any) {
+      .then((r) => { return r.json(); })
+      .then((data: any) => {
         removePermissionDialog();
         if (data.success && onGranted) onGranted();
       })
-      .catch(function () { removePermissionDialog(); });
+      .catch(() => { removePermissionDialog(); });
   });
 
   overlay.querySelector('#skill-ext-perm-deny')!.addEventListener('click', removePermissionDialog);
 
-  overlay.addEventListener('click', function (e) {
+  overlay.addEventListener('click', (e) => {
     if (e.target === overlay) removePermissionDialog();
   });
 

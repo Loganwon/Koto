@@ -198,7 +198,7 @@ class AppContext:
 
     @property
     def settings_manager(self):
-        """web.settings.SettingsManager"""
+        """app.core.config.user_settings.SettingsManager"""
         return self.get("settings_manager")
 
     @property
@@ -248,7 +248,7 @@ class AppContext:
 
     @property
     def token_tracker(self):
-        """web.token_tracker module-level functions proxy"""
+        """app.core.analytics.token_tracker module-level functions proxy"""
         return self.get("token_tracker")
 
 
@@ -268,7 +268,7 @@ def _make_settings_manager():
     try:
         from settings import SettingsManager
     except ImportError:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
     logger.debug("[AppContext] 创建 SettingsManager")
     return SettingsManager()
 
@@ -388,7 +388,7 @@ def _make_agent():
 
 def _make_token_tracker():
     try:
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         logger.debug("[AppContext] 加载 TokenTracker 模块")
         return tt

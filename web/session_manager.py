@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 import time
 from datetime import datetime
 
@@ -22,12 +23,24 @@ def _chat_dir() -> str:
     return str(getattr(get_app_module(), "CHAT_DIR", "") or "")
 
 
+# Per-session file lock to prevent concurrent read-modify-write cycles
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_lock = threading.Lock()
+
+
+def _get_session_lock(filename: str) -> threading.Lock:
+    """Get or create a per-file lock for thread-safe session I/O."""
+    with _session_locks_lock:
+        if filename not in _session_locks:
+            _session_locks[filename] = threading.Lock()
+        return _session_locks[filename]
+
 
 class SessionManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.sessions = {}
 
-    def list_sessions(self):
+    def list_sessions(self) -> list[str]:
         """列出所有会话，按修改时间排序（最新在前）"""
         files = [f for f in os.listdir(_chat_dir()) if f.endswith(".json")]
         # 按修改时间排序，最新的在前
@@ -39,7 +52,7 @@ class SessionManager:
         files_with_time.sort(key=lambda x: x[1], reverse=True)
         return [f[0] for f in files_with_time]
 
-    def load(self, filename):
+    def load(self, filename: str) -> list[dict]:
         """加载会话历史 - 返回用于模型上下文的截断版本"""
         path = os.path.join(_chat_dir(), filename)
         if os.path.exists(path):
@@ -53,7 +66,7 @@ class SessionManager:
                 return []
         return []
 
-    def load_full(self, filename):
+    def load_full(self, filename: str) -> list[dict]:
         """加载完整会话历史 - 用于追加保存，不做截断"""
         path = os.path.join(_chat_dir(), filename)
         if os.path.exists(path):
@@ -65,7 +78,7 @@ class SessionManager:
                 return []
         return []
 
-    def _trim_history(self, history, max_turns=20):
+    def _trim_history(self, history: list[dict], max_turns: int = 20) -> list[dict]:
         """保留最多 20 轮对话（约 12000+ tokens），确保上下文足够但不过长"""
         model_history = [
             turn
@@ -89,7 +102,7 @@ class SessionManager:
         )
         return trimmed
 
-    def create(self, name):
+    def create(self, name: str) -> str:
         safe = "".join([c if c.isalnum() else "_" for c in name])
         filename = f"{safe}.json"
         path = os.path.join(_chat_dir(), filename)
@@ -101,7 +114,7 @@ class SessionManager:
             json.dump([], f)
         return filename
 
-    def save(self, filename, history):
+    def save(self, filename: str, history: list[dict]) -> None:
         path = os.path.join(_chat_dir(), filename)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         tmp_path = ""
@@ -125,7 +138,7 @@ class SessionManager:
                 except OSError:
                     pass
 
-    def append_and_save(self, filename, user_msg, model_msg, **extra_fields):
+    def append_and_save(self, filename: str, user_msg: str, model_msg: str, **extra_fields: object) -> list[dict]:
         """追加消息并保存 - 基于磁盘完整历史，避免截断导致数据丢失"""
         full_history = self.load_full(filename)
         user_timestamp = extra_fields.pop("user_timestamp", datetime.now().isoformat())
@@ -144,7 +157,7 @@ class SessionManager:
         self.save(filename, full_history)
         return full_history
 
-    def append_user_early(self, filename, user_msg):
+    def append_user_early(self, filename: str, user_msg: str) -> int:
         """在请求到达时立即保存用户消息，防止断连导致丢失
         返回history长度，后续用update_last_model_response更新模型回复"""
         full_history = self.load_full(filename)
@@ -156,7 +169,7 @@ class SessionManager:
         self.save(filename, full_history)
         return len(full_history)
 
-    def update_last_model_response(self, filename, model_msg, **extra_fields):
+    def update_last_model_response(self, filename: str, model_msg: str, **extra_fields: object) -> None:
         """更新最后一条模型回复（配合append_user_early使用）"""
         full_history = self.load_full(filename)
         if full_history and full_history[-1].get("role") == "model":
@@ -192,7 +205,7 @@ class SessionManager:
         self.save(filename, full_history)
         return entry
 
-    def delete(self, filename):
+    def delete(self, filename: str) -> bool:
         path = os.path.join(_chat_dir(), filename)
         if os.path.exists(path):
             try:
@@ -203,7 +216,7 @@ class SessionManager:
                 return False
         return False
 
-    def rename(self, filename, new_name):
+    def rename(self, filename: str, new_name: str) -> dict[str, object]:
         """将会话文件重命名。new_name 为用户输入的显示名称（非文件名）。"""
         old_path = os.path.join(_chat_dir(), filename)
         if not os.path.exists(old_path):

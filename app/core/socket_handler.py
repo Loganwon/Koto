@@ -121,7 +121,7 @@ def register_socket_events(socketio):
         _use_agent_loop = data.get("_use_agent_loop", True)
         if not _use_agent_loop:
             try:
-                from web.settings import SettingsManager as _SM
+                from app.core.config.user_settings import SettingsManager as _SM
                 _use_agent_loop = bool(_SM().get("ai", "use_agent_loop"))
             except Exception:
                 pass
@@ -130,7 +130,7 @@ def register_socket_events(socketio):
         _use_doc_agent = data.get("_use_doc_agent", False)
         if not _use_doc_agent:
             try:
-                from web.settings import SettingsManager as _SM
+                from app.core.config.user_settings import SettingsManager as _SM
                 _use_doc_agent = bool(_SM().get("ai", "use_doc_agent"))
             except Exception:
                 pass
@@ -332,9 +332,9 @@ _ONLINE_DOC_MODELS = [
 def _pick_online_model() -> str:
     """Use the current CHAT model when available; otherwise use the preferred fallback."""
     try:
-        from web.runtime_context import get_model_id
+        from app.core.llm.model_selection import get_configured_cloud_model
 
-        m = get_model_id("CHAT")
+        m = get_configured_cloud_model(task_type="CHAT", fallback_model=_ONLINE_DOC_MODELS[0])
         if m:
             return m
     except Exception:
@@ -512,14 +512,38 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
 
 def _run_agent_loop(socketio, sid, data: dict) -> None:
     """
-    Run a doc_ai_request through the legacy AgentLoop facade.
+    Run a doc_ai_request through the DocWebSocketLoopExecutor.
     Maps AgentEvent objects to existing WebSocket events for
     backward-compatible frontend consumption.
     """
-    from app.core.agent.legacy_loop_facade import iter_doc_agent_events
+    from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor
 
-    for event in iter_doc_agent_events(sid, data, _get_session_queue()):
+    request = _build_doc_agent_request(sid, data)
+    for event in DocWebSocketLoopExecutor().iter_events(request, _get_session_queue()):
         _emit_agent_event(socketio, sid, event)
+
+
+def _build_doc_agent_request(sid: str, data: dict) -> "AgentRequest":
+    """Build an AgentRequest from raw WebSocket data."""
+    from app.core.agent.lifecycle import AgentRequest
+    return AgentRequest(
+        prompt=str(data.get("prompt") or ""),
+        session_id=sid or "",
+        file_type=str(data.get("file_type") or "unknown"),
+        file_name=str(data.get("file_name") or ""),
+        context=str(data.get("context") or ""),
+        selection=str(data.get("selection") or ""),
+        has_selection=bool(data.get("has_selection", False)),
+        history=data.get("history") if isinstance(data.get("history"), list) else [],
+        output_mode=str(data.get("output_mode") or "inline"),
+        model_mode=normalize_model_mode(data.get("model_mode"), default="auto"),
+        language=str(data.get("language") or ""),
+        csv_data=str(data.get("csv_data") or ""),
+        action_type=str(data.get("_action_type") or ""),
+        action_system_prompt=str(data.get("_action_system_prompt") or ""),
+        live_doc=bool(data.get("live_doc", False)),
+        live_mode=str(data.get("live_mode") or "replace"),
+    )
 
 
 def _emit_agent_event(socketio, sid, event) -> None:

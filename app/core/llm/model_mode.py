@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from typing import Optional
 
+# Only providers with configured API keys are listed as valid modes.
+# openai / anthropic can be re-added when corresponding keys are available.
 _EXPLICIT_MODEL_MODES = {
     "local",
     "cloud",
     "gemini",
     "deepseek",
-    "openai",
-    "anthropic",
     "ollama",
 }
 

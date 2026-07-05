@@ -6,14 +6,14 @@
 
 // ── External dependencies (provided by workspace-assistant IIFE scope) ──
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
-declare var lastSelectionText: string;
-declare var _docxMouseIsDown: boolean;
-declare var _docxMouseUpY: number;
-declare var _docxHbEl: HTMLElement | null;
-declare var _docxCpEl: HTMLElement | null;
-declare var _docxSelTimer: any;
+declare let state: any;
+declare let WA: any;
+declare let lastSelectionText: string;
+declare let _docxMouseIsDown: boolean;
+declare let _docxMouseUpY: number;
+declare let _docxHbEl: HTMLElement | null;
+declare let _docxCpEl: HTMLElement | null;
+declare let _docxSelTimer: any;
 declare function _cloneSerializable(val: any, fallback: any): any;
 declare function _escHtml(s: any): string;
 declare function _getPinnedSelectionSourceMeta(): { sourcePath: string; sourceName: string; sourceType: string };
@@ -831,7 +831,7 @@ export function closeSelectionToolbar(): void {
   state._selectionDismissed = true;
   const tt = $('wa-pdf-tooltip');
   if (tt) tt.style.display = 'none';
-  try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+  try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
 }
 
 export function clearSelection(): void {
@@ -839,7 +839,7 @@ export function clearSelection(): void {
   state.lastPinnedSel = null;
   state._selectionDismissed = true;
   lastSelectionText = '';
-  try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+  try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
   try {
     if (state.activeEditor) {
       state.activeEditor._savedSel = null;
@@ -848,7 +848,7 @@ export function clearSelection(): void {
       state.activeEditor._lastTableRows = 0;
       state.activeEditor._lastTableCols = 0;
     }
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
   const tt = $('wa-pdf-tooltip');
   if (tt) tt.style.display = 'none';
   _updateContextBar();

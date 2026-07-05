@@ -5,6 +5,7 @@
 
 import { fileTaskStatusLabel, isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
 import { taskReportStageTitle } from './task-report-layout';
+import { _escHtml as escHtml } from './infrastructure';
 
 interface WATurn {
   id: string;
@@ -113,14 +114,6 @@ interface ConversationApi {
 
 const WA_HISTORY_SCHEMA_VERSION = 2;
 
-function escapeHtml(text: unknown): string {
-  return String(text || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
 function normalizeRole(role: unknown): string {
   const value = String(role || '').trim().toLowerCase();
@@ -341,7 +334,7 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       };
   const renderMarkdown = typeof options.renderMarkdown === 'function'
     ? options.renderMarkdown
-    : (text: string) => escapeHtml(text).replace(/\n/g, '<br>');
+    : (text: string) => escHtml(text).replace(/\n/g, '<br>');
   const loadSessionHistory = typeof options.loadSessionHistory === 'function'
     ? options.loadSessionHistory
     : null;

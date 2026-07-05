@@ -131,13 +131,13 @@ def _is_transient_error(exc: Exception) -> bool:
 # DeepSeek 是当前默认云端主通路；Gemini 只在显式选择或 Gemini-only 任务中使用。
 # 可通过环境变量 KOTO_FALLBACK_CHAIN_DEFAULT 覆盖（逗号分隔）。
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
+    "deepseek-chat",
+    "deepseek-chat",
 ]
 
 _DEEPSEEK_FALLBACK_CHAIN: List[str] = [
-    "deepseek-v4-pro",
-    "deepseek-v4-flash",
+    "deepseek-chat",
+    "deepseek-chat",
 ]
 
 _GEMINI_DEFAULT_FALLBACK_CHAIN: List[str] = [

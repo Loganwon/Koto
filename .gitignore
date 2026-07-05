@@ -167,3 +167,9 @@ config/work_file_library.db
 
 # Cython build cache
 /build/cython_cache/
+
+# Coverage reports
+coverage_html/
+coverage.xml
+.coverage
+

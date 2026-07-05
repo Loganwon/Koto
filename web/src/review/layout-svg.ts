@@ -393,9 +393,7 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
 
   function _collectReviewVisualPageBounds(layoutState: LayoutState, root: HTMLElement | null): PageBounds[] {
     if (!layoutState || !layoutState.viewportRect) return [];
-    const pageRoot: HTMLElement | null = root && root.querySelectorAll
-      ? root
-      : (layoutState.pageEl || $( 'wa-docx-editor' )?.querySelector('.ProseMirror') as HTMLElement || null);
+    const pageRoot: HTMLElement | null = root || (layoutState.pageEl || $( 'wa-docx-editor' )?.querySelector('.ProseMirror') as HTMLElement || null);
     if (!pageRoot || typeof pageRoot.getBoundingClientRect !== 'function') return [];
     if (layoutState._reviewVisualPageRoot === pageRoot && Array.isArray(layoutState._reviewVisualPageBounds)) {
       return layoutState._reviewVisualPageBounds;
@@ -460,7 +458,7 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
       if (nearest) return nearest;
     }
     const host = $('wa-docx-editor');
-    const scopedRoot = root && root.querySelectorAll ? root : host;
+    const scopedRoot: HTMLElement | null = root || host;
     const pageCandidates: HTMLElement[] = [];
     if (scopedRoot && scopedRoot.matches && scopedRoot.matches('.koto-doc-page, .ProseMirror')) {
       pageCandidates.push(scopedRoot);
@@ -473,10 +471,10 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
     }
     let bestPage: { rect: DOMRect; pageEl: HTMLElement } | null = null;
     let bestDistance = Infinity;
-    pageCandidates.forEach((pageEl) => {
-      if (!pageEl || typeof pageEl.getBoundingClientRect !== 'function') return;
+    for (const pageEl of pageCandidates) {
+      if (!pageEl || typeof pageEl.getBoundingClientRect !== 'function') continue;
       const rect = pageEl.getBoundingClientRect();
-      if (!rect || rect.height <= 0) return;
+      if (!rect || rect.height <= 0) continue;
       const distance = screenY < rect.top
         ? rect.top - screenY
         : (screenY > rect.bottom ? screenY - rect.bottom : 0);
@@ -484,8 +482,8 @@ export function createDocxReviewLayoutSvg(deps: ReviewLayoutDeps): ReviewSvgApi 
         bestDistance = distance;
         bestPage = { rect, pageEl };
       }
-    });
-    if (!bestPage || !bestPage.rect) return null;
+    }
+    if (!bestPage) return null;
     const top = _screenYToReviewContentY(bestPage.rect.top, layoutState);
     const bottom = _screenYToReviewContentY(bestPage.rect.bottom, layoutState);
     if (!Number.isFinite(top) || !Number.isFinite(bottom) || bottom <= top) return null;

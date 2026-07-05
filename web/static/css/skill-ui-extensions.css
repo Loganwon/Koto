@@ -34,20 +34,8 @@
     color: #fff;
 }
 
-.skill-ext-action-btn--primary {
-    background: var(--accent-color, #6366f1);
-    color: #fff;
-}
 
-.skill-ext-action-btn--danger {
-    border-color: #ef4444;
-    color: #ef4444;
-}
 
-.skill-ext-action-btn--danger:hover {
-    background: #ef4444;
-    color: #fff;
-}
 
 /* ── Quick Reply Chips ─────────────────────────────────────────────────────── */
 

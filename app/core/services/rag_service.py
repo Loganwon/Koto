@@ -226,7 +226,7 @@ class RAGService:
     def __init__(
         self,
         index_dir: Optional[str] = None,
-        prefer_local_embeddings: bool = False,
+        prefer_local_embeddings: bool | None = None,
         auto_load: bool = True,
     ):
         self.index_dir = Path(index_dir or _DEFAULT_INDEX_DIR)
@@ -235,7 +235,11 @@ class RAGService:
         self._embeddings = None  # 懒加载
         self._vectorstore = None
         self._doc_count = 0
-        self._prefer_local = prefer_local_embeddings
+        self._prefer_local = (
+        prefer_local_embeddings
+        if prefer_local_embeddings is not None
+        else os.environ.get("KOTO_PREFER_LOCAL_EMBEDDINGS", "").lower() in ("1", "true", "yes")
+    )
         self._metadata_path = self.index_dir / "metadata.json"
         self._index_path = str(self.index_dir / "faiss_index")
         self._bm25_cache: Optional[Tuple] = (

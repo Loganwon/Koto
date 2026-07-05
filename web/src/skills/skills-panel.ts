@@ -1,5 +1,8 @@
 /** skills-panel.ts — Koto Skills Panel UI */
 
+import { installErrorBoundary } from '../shared/error-boundary';
+installErrorBoundary();
+
 import { csrfFetch } from '../shared/csrf';
 import { markSidePanelClosed, markSidePanelOpen } from '../shared/side-panels';
 
@@ -120,7 +123,7 @@ function spRecordUsage(skillId: string): void {
     const uc = spGetUseCounts();
     uc[skillId] = (uc[skillId] || 0) + 1;
     localStorage.setItem(LS_USE_COUNT, JSON.stringify(uc));
-  } catch (_) { }
+  } catch (e) { console.warn("[Koto]", e) }
 }
 
 function _syncCsbToggleBtn(isOpen: boolean): void {
@@ -181,7 +184,7 @@ function _isUnifiedWorkspace(): boolean {
   let _taskId: string | null = null;
   let _sse: EventSource | null = null;
   let _pollTimer: ReturnType<typeof setInterval> | null = null;
-  let _sessionId = 'default';
+  const _sessionId = 'default';
 
   function _el(id: string): HTMLElement | null { return document.getElementById(id); }
 
@@ -267,7 +270,7 @@ function _isUnifiedWorkspace(): boolean {
       const json = await resp.json();
       if (!resp.ok || !json.ok) throw new Error(json.error || '提交失败');
       _taskId = json.data.task_id;
-      _startMonitor(_taskId);
+      _startMonitor(_taskId!);
       switchTab('status');
       (_el('cwTabStatus') as HTMLElement)!.style.display = '';
       (_el('cwCurrentGoal') as HTMLElement)!.textContent = '目标: ' + goal;
@@ -504,7 +507,7 @@ async function spLoadSkills(): Promise<void> {
         _spConflictWinner = {};
         (cdata.conflicts || []).forEach((c: ConflictData) => { _spConflictWinner[c.loser_id] = c.winner_name; });
       }
-    } catch (_) { }
+    } catch (e) { console.warn("[Koto]", e) }
     spRenderCards();
   } catch (e: any) {
     content.innerHTML = `<div class="sp-loading" style="color:var(--error-color,#e06c75)">⚠️ ${e.message}</div>`;
@@ -954,7 +957,7 @@ window.spToggleSortMenu = function (e: MouseEvent) {
   btn!.classList.toggle('open', isOpen);
 };
 
-document.addEventListener('click', function () {
+document.addEventListener('click', () => {
   const dd = document.getElementById('spSortDropdown');
   const btn = document.getElementById('spSortBtn');
   if (dd) dd.classList.remove('open');
@@ -1125,7 +1128,7 @@ function spGetUserPresets(): PresetItem[] {
   try { return JSON.parse(localStorage.getItem(LS_PRESETS) || '[]'); } catch (_) { return []; }
 }
 function spSaveUserPresets(arr: PresetItem[]): void {
-  try { localStorage.setItem(LS_PRESETS, JSON.stringify(arr)); } catch (_) { }
+  try { localStorage.setItem(LS_PRESETS, JSON.stringify(arr)); } catch (_) { /* allowed to fail */ }
 }
 
 function spGetActivePresetId(): string | null {
@@ -1261,14 +1264,14 @@ function spRenderPresets(): void {
     });
     localStorage.setItem(LS_LAST_USED, JSON.stringify(lu));
     localStorage.setItem(LS_USE_COUNT, JSON.stringify(uc));
-  } catch (_) { }
+  } catch (e) { console.warn("[Koto]", e) }
   try {
     _spCsrfFetch('/api/skills/usage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skill_ids: enabledIds }),
     }).catch(() => { });
-  } catch (_) { }
+  } catch (e) { console.warn("[Koto]", e) }
 };
 
 async function spLoadRecStrip(): Promise<void> {
@@ -1287,7 +1290,7 @@ async function spLoadRecStrip(): Promise<void> {
       </button>`;
     }).join('');
     strip.style.display = 'block';
-  } catch (_) { }
+  } catch (e) { console.warn("[Koto]", e) }
 }
 
 window.spAskKoto = async function () {
@@ -1402,7 +1405,7 @@ window.spAskKoto = async function () {
     if (data.success && !_spSkills.length) {
       _spSkills = (data.skills || []).filter((s: SkillManifest) => s.skill_nature !== 'system');
     }
-  } catch (_) { }
+  } catch (e) { console.warn("[Koto]", e) }
 })();
 
 export { spLoadSkills, spRenderCards, spGetLastUsed, spGetUseCounts };

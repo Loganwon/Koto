@@ -1409,7 +1409,7 @@ def cost_stats():
     try:
         # 导入 token_tracker
         try:
-            import web.token_tracker as token_tracker
+            import app.core.analytics.token_tracker as token_tracker
 
             token_stats = token_tracker.get_stats()
         except Exception as _te:
