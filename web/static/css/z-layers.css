@@ -1,0 +1,59 @@
+/* ═════════════════════════════════════════════════════════════════════
+   Koto Z-Index Layer System
+   ═════════════════════════════════════════════════════════════════════
+   Use these CSS custom properties instead of raw z-index numbers.
+   Each layer reserves a range for internal stacking within that layer.
+
+   Layer     Range      Usage
+   ─────     ─────      ─────
+   base      0-9        Default content, cards, subtle elevation
+   raised    10-99      Dropdowns, tooltips, popovers, context menus
+   sticky    100-199    Sticky headers, fixed nav bars
+   overlay   200-299    Drawers, slide-out panels, backdrops
+   modal     300-399    Modal dialogs, lightboxes
+   toast     1000-1099  Toast/snackbar notifications
+   app       2000-2999  App windows, taskbar, floating panels
+   topmost   9998+      Loading screens, critical error overlays
+   ═════════════════════════════════════════════════════════════════════ */
+:root {
+  /* ── Base layer (0-9) ── */
+  --z-base:        0;
+  --z-base-raised: 3;
+  --z-card:        4;
+  --z-card-hover:  5;
+  --z-card-active: 6;
+
+  /* ── Raised layer (10-99): dropdowns, tooltips, popovers ── */
+  --z-dropdown:    10;
+  --z-tooltip:     20;
+  --z-popover:     30;
+  --z-context-menu: 40;
+  --z-autocomplete: 50;
+
+  /* ── Sticky layer (100-199): headers, nav ── */
+  --z-sticky:      100;
+  --z-nav:         120;
+  --z-nav-overlay: 190;
+
+  /* ── Overlay layer (200-299): drawers, slide-outs ── */
+  --z-overlay-backdrop: 200;
+  --z-overlay-panel:    201;
+  --z-drawer:           210;
+
+  /* ── Modal layer (300-399): dialogs, lightboxes ── */
+  --z-modal-backdrop: 300;
+  --z-modal-panel:    301;
+
+  /* ── Toast layer (1000-1099): notifications ── */
+  --z-toast: 1000;
+
+  /* ── App layer (2000-2999): floating windows, taskbar ── */
+  --z-app-taskbar:   2000;
+  --z-app-window:    2100;
+  --z-app-window-top: 2190;
+
+  /* ── Topmost layer (9998+): critical overlays ── */
+  --z-topmost-loading:  9998;
+  --z-topmost-critical: 9999;
+  --z-debug-overlay:   10100;
+}

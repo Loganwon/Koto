@@ -140,70 +140,78 @@ class SessionManager:
 
     def append_and_save(self, filename: str, user_msg: str, model_msg: str, **extra_fields: object) -> list[dict]:
         """追加消息并保存 - 基于磁盘完整历史，避免截断导致数据丢失"""
-        full_history = self.load_full(filename)
-        user_timestamp = extra_fields.pop("user_timestamp", datetime.now().isoformat())
-        model_timestamp = extra_fields.pop(
-            "model_timestamp", datetime.now().isoformat()
-        )
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            user_timestamp = extra_fields.pop("user_timestamp", datetime.now().isoformat())
+            model_timestamp = extra_fields.pop(
+                "model_timestamp", datetime.now().isoformat()
+            )
 
-        full_history.append(
-            {"role": "user", "parts": [user_msg], "timestamp": user_timestamp}
-        )
-        model_entry = {"role": "model", "parts": [model_msg]}
-        if "timestamp" not in extra_fields:
-            model_entry["timestamp"] = model_timestamp
-        model_entry.update(extra_fields)
-        full_history.append(model_entry)
-        self.save(filename, full_history)
-        return full_history
+            full_history.append(
+                {"role": "user", "parts": [user_msg], "timestamp": user_timestamp}
+            )
+            model_entry = {"role": "model", "parts": [model_msg]}
+            if "timestamp" not in extra_fields:
+                model_entry["timestamp"] = model_timestamp
+            model_entry.update(extra_fields)
+            full_history.append(model_entry)
+            self.save(filename, full_history)
+            return full_history
 
     def append_user_early(self, filename: str, user_msg: str) -> int:
         """在请求到达时立即保存用户消息，防止断连导致丢失
         返回history长度，后续用update_last_model_response更新模型回复"""
-        full_history = self.load_full(filename)
-        now_iso = datetime.now().isoformat()
-        full_history.append({"role": "user", "parts": [user_msg], "timestamp": now_iso})
-        full_history.append(
-            {"role": "model", "parts": ["⏳ 处理中..."], "timestamp": now_iso}
-        )
-        self.save(filename, full_history)
-        return len(full_history)
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            now_iso = datetime.now().isoformat()
+            full_history.append({"role": "user", "parts": [user_msg], "timestamp": now_iso})
+            full_history.append(
+                {"role": "model", "parts": ["⏳ 处理中..."], "timestamp": now_iso}
+            )
+            self.save(filename, full_history)
+            return len(full_history)
 
     def update_last_model_response(self, filename: str, model_msg: str, **extra_fields: object) -> None:
         """更新最后一条模型回复（配合append_user_early使用）"""
-        full_history = self.load_full(filename)
-        if full_history and full_history[-1].get("role") == "model":
-            model_entry = {"role": "model", "parts": [model_msg]}
-            if "timestamp" not in extra_fields:
-                model_entry["timestamp"] = datetime.now().isoformat()
-            model_entry.update(extra_fields)
-            full_history[-1] = model_entry
-            self.save(filename, full_history)
-        else:
-            # fallback: 直接追加
-            model_entry = {"role": "model", "parts": [model_msg]}
-            if "timestamp" not in extra_fields:
-                model_entry["timestamp"] = datetime.now().isoformat()
-            model_entry.update(extra_fields)
-            full_history.append(model_entry)
-            self.save(filename, full_history)
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            if full_history and full_history[-1].get("role") == "model":
+                model_entry = {"role": "model", "parts": [model_msg]}
+                if "timestamp" not in extra_fields:
+                    model_entry["timestamp"] = datetime.now().isoformat()
+                model_entry.update(extra_fields)
+                full_history[-1] = model_entry
+                self.save(filename, full_history)
+            else:
+                # fallback: 直接追加
+                model_entry = {"role": "model", "parts": [model_msg]}
+                if "timestamp" not in extra_fields:
+                    model_entry["timestamp"] = datetime.now().isoformat()
+                model_entry.update(extra_fields)
+                full_history.append(model_entry)
+                self.save(filename, full_history)
 
     def add_message(
         self, filename, role, content, task="CHAT", model_name="Auto", **extra_fields
     ):
         """追加单条消息（兼容旧调用），默认附带时间戳"""
-        full_history = self.load_full(filename)
-        entry = {
-            "role": role,
-            "parts": [content],
-            "task": task,
-            "model_name": model_name,
-            "timestamp": extra_fields.pop("timestamp", datetime.now().isoformat()),
-        }
-        entry.update(extra_fields)
-        full_history.append(entry)
-        self.save(filename, full_history)
-        return entry
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            entry = {
+                "role": role,
+                "parts": [content],
+                "task": task,
+                "model_name": model_name,
+                "timestamp": extra_fields.pop("timestamp", datetime.now().isoformat()),
+            }
+            entry.update(extra_fields)
+            full_history.append(entry)
+            self.save(filename, full_history)
+            return entry
 
     def delete(self, filename: str) -> bool:
         path = os.path.join(_chat_dir(), filename)

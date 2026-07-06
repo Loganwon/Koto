@@ -790,7 +790,7 @@
     .wa-close-warn-overlay {
       position: fixed;
       inset: 0;
-      z-index: 10080;
+      z-index: var(--z-debug-overlay);
       display: none;
       align-items: center;
       justify-content: center;
@@ -1349,7 +1349,7 @@
     /* ── Right-click context menu ── */
     #wa-ctx-menu {
       position: fixed;
-      z-index: 10100; /* above pptx handles (10000) and DOCX hover controls (10000) */
+      z-index: var(--z-debug-overlay); /* above pptx handles (10000) and DOCX hover controls (10000) */
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 6px;
@@ -1365,7 +1365,7 @@
     /* ── DOCX right-click context menu ── */
     #wa-docx-ctx {
       position: fixed;
-      z-index: 10100;
+      z-index: var(--z-debug-overlay);
       background: var(--surface2);
       border: 1px solid var(--border);
       border-radius: 10px;
@@ -3021,7 +3021,7 @@
       pointer-events: auto;
     }
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav.is-open {
-      z-index: 10120;
+      z-index: var(--z-debug-overlay);
     }
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav .wa-docx-review-summary {
       padding-right: 10px;
@@ -3055,7 +3055,7 @@
       background: #ffffff;
       box-shadow: 0 12px 28px rgba(15, 23, 42, 0.14);
       pointer-events: auto;
-      z-index: 10121;
+      z-index: var(--z-debug-overlay);
     }
     #wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav.is-open .wa-docx-review-nav-menu {
       display: flex;
@@ -3412,7 +3412,7 @@
       border: 1px solid rgba(111, 126, 167, 0.35);
       border-radius: 12px;
       padding: 10px;
-      z-index: 10001;
+      z-index: var(--z-topmost-critical);
       box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
       user-select: none;
     }
@@ -3826,7 +3826,7 @@
       border: 1.5px solid var(--accent);
       border-radius: 1px;
       box-sizing: border-box;
-      z-index: 10000;
+      z-index: var(--z-topmost-critical);
     }
     .wa-pptx-handle[data-h="nw"] { top: -4px; left: -4px;              cursor: nw-resize; }
     .wa-pptx-handle[data-h="n"]  { top: -4px; left: calc(50% - 4px);   cursor: n-resize;  }
@@ -4899,7 +4899,7 @@
     #wa-docx-hoverbar {
       display: none;
       position: fixed;
-      z-index: 9998;
+      z-index: var(--z-topmost-loading);
       user-select: none;
       background: var(--surface);
       backdrop-filter: blur(18px) saturate(1.4);
@@ -5019,7 +5019,7 @@
     #wa-docx-cp {
       display: none;
       position: fixed;
-      z-index: 10000;
+      z-index: var(--z-topmost-critical);
       background: var(--surface);
       border: 1px solid var(--border);
       border-radius: 8px;
@@ -5079,6 +5079,44 @@
       min-width: 250px;
       flex-shrink: 0;
     }
+
+
+/* ── AI Panel Close Button (in session list head) ── */
+.wa-ai-panel-close-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 5px;
+  border-radius: 5px;
+  color: var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.wa-ai-panel-close-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+}
+
+/* ── AI Panel Collapsed State ── */
+#wa-ai.wa-ai-collapsed {
+  border: none;
+  box-shadow: none;
+  overflow: hidden;
+}
+#wa-ai.wa-ai-collapsed > * {
+  display: none !important;
+}
+
+/* ── Sidebar AI Toggle active state ── */
+#navAiBtn.active {
+  background: var(--hover);
+  color: var(--text);
+}
+#navAiBtn[aria-expanded="false"] svg {
+  opacity: 0.5;
+}
 
     /* ── AI Header — utility icons only ── */
     #wa-ai-header {
@@ -6529,7 +6567,7 @@
       position: absolute;
       left: 0;
       top: 0;
-      z-index: 10130;
+      z-index: var(--z-debug-overlay);
       display: none;
       pointer-events: none;
     }
@@ -8258,7 +8296,7 @@
     #wa-chart-dialog {
       position: fixed;
       inset: 0;
-      z-index: 9998;
+      z-index: var(--z-topmost-loading);
       display: none;
       align-items: center;
       justify-content: center;
@@ -8643,7 +8681,7 @@
       background: var(--surface);
       border-left: 1px solid var(--border);
       box-shadow: -4px 0 20px rgba(0,0,0,0.1);
-      z-index: 4000;
+      z-index: var(--z-app-window-top);
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -8836,7 +8874,7 @@
   padding: 4px 10px;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0,0,0,0.12);
-  z-index: 9998;
+  z-index: var(--z-topmost-loading);
   display: none;
   align-items: center;
   gap: 5px;
@@ -9288,7 +9326,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   border-radius: 12px;
   background: var(--bg-elevated);
   box-shadow: 0 14px 36px rgba(15, 23, 42, 0.18);
-  z-index: 1200;
+  z-index: var(--z-toast);
 }
 
 .koto-activity-bar .latency-detail-inner {
@@ -10629,7 +10667,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
         .skill-editor-modal {
             position: fixed; inset: 0; background: rgba(0,0,0,.6);
             display: flex; align-items: center; justify-content: center;
-            z-index: 3000; backdrop-filter: blur(3px);
+            z-index: var(--z-app-window); backdrop-filter: blur(3px);
         }
         .ske-panel {
             background: #111827; border-radius: 14px; width: min(640px,95vw);
@@ -11540,7 +11578,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 /* == Token Monitor == */
         #tokenMonitor {
             position: relative;
-            z-index: 2500;
+            z-index: var(--z-app-window);
             font-family: inherit;
             font-size: 12px;
             display: inline-flex;
@@ -11665,7 +11703,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             border-radius: 14px;
             padding: 14px 20px;
             box-shadow: 0 8px 32px rgba(0,0,0,.55), 0 0 0 1px rgba(99,102,241,.15);
-            z-index: 9900;
+            z-index: var(--z-topmost-critical);
             max-width: 460px;
             width: calc(100vw - 48px);
             opacity: 0;
@@ -11730,7 +11768,7 @@ body.koto-unified-workspace.skills-panel-open .main-content {
             inset: 0;
             background: rgba(0,0,0,.65);
             backdrop-filter: blur(4px);
-            z-index: 10000;
+            z-index: var(--z-topmost-critical);
             align-items: center;
             justify-content: center;
         }
