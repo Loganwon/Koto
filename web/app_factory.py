@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import logging
 import os
+import uuid
 from pathlib import Path
 
-from flask import Flask, request
+from flask import Flask, jsonify, request
 from flask_cors import CORS
 try:
     from flask_wtf.csrf import CSRFProtect
@@ -73,6 +74,9 @@ def create_flask_app(import_name: str):
     app.extensions["csrf"] = _csrf
 
     # Add cache-control headers for static assets
+
+    # ── Gzip compression for text assets ─────────────────────────────
+    @app.after_request
     @app.after_request
     def _set_security_headers(response):
         # CSP: allow inline scripts/styles (desktop app, nonce too heavy)
@@ -112,5 +116,125 @@ def create_flask_app(import_name: str):
         atexit.register(service_registry.shutdown)
     except Exception:
         pass
+
+
+
+    # ── Structured error handlers ────────────────────────────────────
+    from web.errors import APIError
+
+    @app.errorhandler(APIError)
+    def _handle_api_error(exc: APIError):
+        """Return structured JSON for known API errors."""
+        _logger = logging.getLogger("koto.app")
+        if exc.status_code >= 500:
+            _logger.exception(
+                "[APIError] %s status=%d path=%s",
+                exc.error_code, exc.status_code, request.path,
+            )
+        else:
+            _logger.warning(
+                "[APIError] %s status=%d path=%s detail=%s",
+                exc.error_code, exc.status_code, request.path,
+                exc.detail or exc.user_message,
+            )
+        return jsonify(exc.to_dict()), exc.status_code
+
+    @app.errorhandler(Exception)
+    def _handle_unhandled_exception(exc):
+        request_id = str(uuid.uuid4())[:8]
+        logger = logging.getLogger("koto.app")
+        # Let HTTP/werkzeug exceptions pass through with their own status
+        from werkzeug.exceptions import HTTPException
+        if isinstance(exc, HTTPException):
+            return jsonify({
+                "error": exc.description or "Request failed",
+                "status": exc.code or 500,
+            }), exc.code or 500
+        logger.exception(
+            "[Unhandled] request_id=%s path=%s", request_id, request.path
+        )
+        return (
+            jsonify({
+                "error": "Internal server error",
+                "message": "服务器内部错误，请重试",
+                "request_id": request_id,
+                "status": 500,
+            }),
+            500,
+        )
+
+    @app.errorhandler(404)
+    def _handle_not_found(exc):
+        return jsonify({"error": "Not found", "message": "资源不存在", "status": 404}), 404
+
+    @app.errorhandler(413)
+    def _handle_too_large(exc):
+        return jsonify({"error": "Payload too large", "message": "文件过大，上限 50 MB", "status": 413}), 413
+
+    @app.errorhandler(429)
+    def _handle_rate_limit(exc):
+        return jsonify({"error": "Too many requests", "message": "请求过于频繁，请稍后重试", "status": 429}), 429
+
+
+    # ── Gzip compression WSGI middleware ──────────────────────────────
+    import gzip as _gzip, io as _io
+    _gzip_app = app
+
+    class _GzipMiddleware:
+        """WSGI middleware that gzip-compresses text responses."""
+        COMPRESSIBLE_CT = (
+            "text/", "application/json", "application/javascript",
+            "image/svg", "application/xml"
+        )
+
+        def __init__(self, app):
+            self.app = app
+
+        def __call__(self, environ, start_response):
+            accept = environ.get("HTTP_ACCEPT_ENCODING", "")
+            if "gzip" not in accept.lower():
+                return self.app(environ, start_response)
+
+            def _gzip_start_response(status, headers, exc_info=None):
+                self._status = status
+                self._headers = headers
+                self._compress = False
+                ct = ""
+                for name, value in headers:
+                    if name.lower() == "content-type":
+                        ct = value.lower()
+                        break
+                if any(t in ct for t in self.COMPRESSIBLE_CT):
+                    self._compress = True
+
+            body = list(self.app(environ, _gzip_start_response))
+            if not getattr(self, "_compress", False) or not body:
+                return body
+
+            data = b"".join(body)
+            if len(data) < 500:
+                return body
+
+            buf = _io.BytesIO()
+            with _gzip.GzipFile(fileobj=buf, mode="wb", compresslevel=6) as gz:
+                gz.write(data)
+            compressed = buf.getvalue()
+
+            new_headers = []
+            for name, value in self._headers:
+                low = name.lower()
+                if low == "content-length":
+                    new_headers.append((name, str(len(compressed))))
+                elif low == "content-encoding":
+                    continue
+                else:
+                    new_headers.append((name, value))
+            new_headers.append(("Content-Encoding", "gzip"))
+            new_headers.append(("Vary", "Accept-Encoding"))
+
+            start_response(self._status, new_headers)
+            return [compressed]
+
+    app.wsgi_app = _GzipMiddleware(app.wsgi_app)
 
     return app, _read_app_version(), cors_origins
