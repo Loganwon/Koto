@@ -177,13 +177,18 @@ def get_memory_manager() -> Any:
 
 # ?? Domain-specific helpers (kept for convenience) ??????????
 
-def get_model_id(task: str, default: str = "") -> str:
-    fallback = str(service_registry.model_map.get(task, default) or default)
+def get_model_id(task_type: str = "CHAT", default: str = "") -> str:
+    """Return the best model id for a task type.
+
+    Uses the configured cloud model when available, falling back to
+    the MODEL_MAP entry or the explicit ``default``.
+    """
+    fallback = str(service_registry.model_map.get(task_type, default) or default)
     try:
         from app.core.llm.model_selection import get_configured_cloud_model
-        return get_configured_cloud_model(task_type=task, fallback_model=fallback) or fallback
+        return get_configured_cloud_model(task_type=task_type, fallback_model=fallback) or fallback
     except Exception:
-        return fallback
+        return fallback or "deepseek-chat"
 
 def get_smart_dispatcher() -> Any:
     return service_registry._get("SmartDispatcher")
@@ -261,15 +266,6 @@ def normalize_model_mode(raw: str) -> str:
     mode = str(raw or "").strip().lower()
     valid = {"local", "cloud", "deepseek", "gemini"}
     return mode if mode in valid else "cloud"
-
-def get_model_id(task_type: str = "CHAT") -> str:
-    """Return model id for a task type."""
-    try:
-        module = get_app_module()
-        model_map = getattr(module, "MODEL_MAP", {})
-        return str(model_map.get(task_type, model_map.get("CHAT", "deepseek-chat"))).strip()
-    except Exception:
-        return "deepseek-chat"
 
 def stream_file_task_request(*args, **kwargs):
     """Delegate to web.file_task_stream.stream_file_task_request (the real implementation)."""
