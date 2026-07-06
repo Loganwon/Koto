@@ -20,7 +20,7 @@ import pytest
 
 def _get_auth_module():
     """Import (or re-import) the auth module."""
-    import web.auth as auth_mod
+    import web.blueprints.auth as auth as auth_mod
 
     return auth_mod
 

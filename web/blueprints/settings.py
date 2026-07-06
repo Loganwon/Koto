@@ -14,7 +14,7 @@ import time
 
 from flask import Blueprint, Response, current_app, jsonify, request
 
-from web.auth import require_auth
+from web.blueprints.auth import require_auth
 from web.config import invalidate_settings_cache
 from web.runtime_context import (
     get_app_module,

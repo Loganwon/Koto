@@ -9,7 +9,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, List, Optional, Sequence
 
-from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
+from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import (
     FileTaskEvent,
     FileTaskFile,

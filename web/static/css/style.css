@@ -1,4 +1,4 @@
-/* ===== Palette & Tokens ===== */
+﻿/* ===== Palette & Tokens ===== */
 :root {
     /* --- Surfaces (dark default — charcoal-navy) --- */
     --bg-primary:   #0e1117;
@@ -4544,6 +4544,14 @@ body.desktop-mode .pill-btn {
 .main-content.chatgpt-main::before {
     backdrop-filter: blur(20px) saturate(1.4);
     -webkit-backdrop-filter: blur(20px) saturate(1.4);
+}
+
+/* ── Chat view container: flex stack topbar → main-grid → input ── */
+#chatView {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
 }
 
 /* ── Topbar: minimal, clean, borderless feel ── */

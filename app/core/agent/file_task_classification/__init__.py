@@ -13,7 +13,7 @@ from app.core.agent.file_task_classification_contract import (
     normalize_mainline_contract,
     refresh_classification_recipe,
 )
-from app.core.agent.file_task_classification_contract_context import (
+from app.core.agent.file_task_classification_contract import (
     build_intent_adjudication_contract_context,
     build_mainline_contract_context,
 )

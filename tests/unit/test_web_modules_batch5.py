@@ -667,23 +667,23 @@ class TestProcessedFileNetwork:
 
 @pytest.mark.unit
 class TestPptSynthesizer:
-    """Tests for web.ppt_synthesizer.PPTSynthesizer (non-async helpers and theme logic)."""
+    """Tests for app.core.services.ppt_synthesizer.PPTSynthesizer (non-async helpers and theme logic)."""
 
     def test_init_default_theme(self):
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         assert synth.theme == "business"
         assert synth.slide_count == 0
 
     def test_init_custom_theme(self):
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer(theme="tech")
         assert synth.theme == "tech"
 
     def test_get_theme_colors_business(self):
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("business")
@@ -694,21 +694,21 @@ class TestPptSynthesizer:
         assert len(colors["primary"]) == 3
 
     def test_get_theme_colors_tech(self):
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("tech")
         assert colors["primary"] == (0, 120, 215)
 
     def test_get_theme_colors_creative(self):
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("creative")
         assert colors["primary"] == (156, 39, 176)
 
     def test_get_theme_colors_unknown_defaults_to_business(self):
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         colors = synth._get_theme_colors("nonexistent")
@@ -717,7 +717,7 @@ class TestPptSynthesizer:
 
     def test_select_slide_layout_returns_blank(self):
         """_select_slide_layout always returns the blank layout (index 6)."""
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         mock_prs = MagicMock()
@@ -730,7 +730,7 @@ class TestPptSynthesizer:
 
     def test_apply_beauty_rules_no_crash(self):
         """_apply_beauty_rules should not crash with minimal mocks."""
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         slide = MagicMock()
@@ -742,7 +742,7 @@ class TestPptSynthesizer:
 
     def test_beauty_optimizer_static_methods(self):
         """PPTBeautyOptimizer static methods should not crash with mock data."""
-        from web.ppt_synthesizer import PPTBeautyOptimizer
+        from app.core.services.ppt_synthesizer import PPTBeautyOptimizer
 
         PPTBeautyOptimizer.add_visual_hierarchy(MagicMock(), {})
         PPTBeautyOptimizer.optimize_image_placement(MagicMock(), [], "balanced")
@@ -751,7 +751,7 @@ class TestPptSynthesizer:
         """When synthesize_from_blueprint encounters an error, it returns error dict."""
         import asyncio
 
-        from web.ppt_synthesizer import PPTSynthesizer
+        from app.core.services.ppt_synthesizer import PPTSynthesizer
 
         synth = PPTSynthesizer()
         blueprint = MagicMock()
@@ -776,7 +776,7 @@ class TestPptSynthesizer:
 
     def test_optimize_image_placement_no_images(self):
         """optimize_image_placement with empty images list should not crash."""
-        from web.ppt_synthesizer import PPTBeautyOptimizer
+        from app.core.services.ppt_synthesizer import PPTBeautyOptimizer
 
         slide = MagicMock()
         PPTBeautyOptimizer.optimize_image_placement(slide, [], "balanced")
@@ -1024,7 +1024,7 @@ class TestFileQualityChecker:
 
 @pytest.mark.unit
 class TestSearchEngine:
-    """Tests for web.search_engine.SearchEngine."""
+    """Tests for app.core.services.search_engine.SearchEngine."""
 
     @pytest.fixture(autouse=True)
     def _setup(self, tmp_path):
@@ -1035,7 +1035,7 @@ class TestSearchEngine:
         os.makedirs(self.chats, exist_ok=True)
 
     def _make_engine(self):
-        from web.search_engine import SearchEngine
+        from app.core.services.search_engine import SearchEngine
 
         engine = SearchEngine()
         engine.workspace_root = self.workspace
@@ -1044,7 +1044,7 @@ class TestSearchEngine:
         return engine
 
     def test_init_sets_paths(self):
-        from web.search_engine import SearchEngine
+        from app.core.services.search_engine import SearchEngine
 
         engine = SearchEngine()
         assert engine.workspace_root is not None
@@ -1191,7 +1191,7 @@ class TestSearchEngine:
         assert len(filtered) == 1
 
     def test_get_search_engine_singleton(self):
-        import web.search_engine as mod
+        import app.core.services.search_engine as mod
 
         old = mod._search_engine
         mod._search_engine = None

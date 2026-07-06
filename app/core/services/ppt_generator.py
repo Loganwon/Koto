@@ -102,7 +102,7 @@ class PPTGenerator:
 
         # Try to load from new Theme System
         try:
-            from web.ppt_themes import get_theme
+            from app.core.services.ppt_themes import get_theme
 
             ppt_theme = get_theme(self.theme)
             if ppt_theme:

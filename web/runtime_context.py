@@ -272,8 +272,11 @@ def get_model_id(task_type: str = "CHAT") -> str:
         return "deepseek-chat"
 
 def stream_file_task_request(*args, **kwargs):
-    """Stub for file task streaming - delegates to chat stream handler."""
-    handler = get_chat_stream_handler()
-    if handler:
-        return handler(*args, **kwargs)
-    raise RuntimeError("ChatStreamHandler not available")
+    """Delegate to web.file_task_stream.stream_file_task_request (the real implementation)."""
+    import sys as _s_mod
+    _fts_mod = _s_mod.modules.get("web.file_task_stream")
+    if _fts_mod is None:
+        import web.file_task_stream as _fts_mod
+    if _fts_mod and hasattr(_fts_mod, "stream_file_task_request") and callable(_fts_mod.stream_file_task_request):
+        return _fts_mod.stream_file_task_request(*args, **kwargs)
+    raise RuntimeError("stream_file_task_request not available in web.file_task_stream")

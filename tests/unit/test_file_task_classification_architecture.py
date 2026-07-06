@@ -78,7 +78,7 @@ def test_file_task_intent_adjudicator_orchestration_is_extracted_from_runtime() 
 
 def test_file_task_intent_adjudication_contract_context_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
-    helper = _read("app/core/agent/file_task_classification_contract_context.py")
+    helper = _read("app/core/agent/file_task_classification_contract.py")
     facade = _classification_facade()
     body = _body_between(
         runtime,
@@ -87,7 +87,7 @@ def test_file_task_intent_adjudication_contract_context_is_extracted_from_runtim
     )
 
     assert (
-        "from app.core.agent.file_task_classification_contract_context import"
+        "from app.core.agent.file_task_classification_contract import"
         in facade
     )
     assert "from app.core.agent.file_task_classification import" in runtime
@@ -104,7 +104,7 @@ def test_file_task_intent_adjudication_contract_context_is_extracted_from_runtim
 
 def test_file_task_mainline_contract_context_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
-    helper = _read("app/core/agent/file_task_classification_contract_context.py")
+    helper = _read("app/core/agent/file_task_classification_contract.py")
     body = _body_between(
         runtime,
         "    def _normalize_mainline_contract(",

@@ -28,10 +28,9 @@ def _clean(value: Any, limit: int = 180) -> str:
 
 
 def _file_type(file_info: FileTaskFile) -> str:
-    explicit = str(getattr(file_info, "type", "") or "").strip().lower().lstrip(".")
-    if explicit:
-        return explicit
-    return Path(str(file_info.path or file_info.name or "")).suffix.lower().lstrip(".")
+    from app.core.agent.file_task_recipes import file_type_from_file_info
+
+    return file_type_from_file_info(file_info)
 
 
 def _target_candidates(

@@ -31,7 +31,7 @@ def _get_types():
 def voice_stt_status():
     """Return status for the supported upload-based STT engines."""
     try:
-        from web.local_stt import get_status
+        from app.core.services.local_stt import get_status
 
         local = get_status()
     except Exception as exc:
@@ -75,7 +75,7 @@ def voice_gemini_stt():
         _logger.debug("[STT] uploaded audio %.1fKB MIME=%s", len(audio_bytes) / 1024, mime_type)
 
         try:
-            from web.local_stt import is_available, transcribe
+            from app.core.services.local_stt import is_available, transcribe
 
             if is_available():
                 ok, text, engine = transcribe(audio_bytes, mime_type)

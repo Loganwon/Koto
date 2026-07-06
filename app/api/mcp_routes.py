@@ -894,7 +894,7 @@ def mcp_status():
     """REST status entry for Koto MCP integration."""
     origin = request.headers.get("Origin", "")
     try:
-        from web.mcp_ws import get_mcp_ws_status
+        from app.core.mcp.session_store import get_mcp_ws_status
 
         websocket = get_mcp_ws_status()
     except Exception as exc:

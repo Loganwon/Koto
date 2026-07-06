@@ -131,76 +131,12 @@ def chat() -> Response:
 
 @chat_bp.route("/api/chat/stream", methods=["POST"])
 def chat_stream() -> Response:
-    handler = get_chat_stream_handler()
-    if not callable(handler):
-        return jsonify({"error": "Chat stream service is unavailable"}), 503
-    return handler()
-
-
-@chat_bp.route("/api/chat/file", methods=["POST"])
-def chat_with_file() -> Response:
-    """Handle file upload and chat requests."""
-    session_name = request.form.get("session")
-    user_input = request.form.get("message", "")
-    files = request.files.getlist("file")
-
-    _logger.info("[FILE UPLOAD DEBUG] ========== 接收到文件上传请求 ==========")
-    _logger.info("[FILE UPLOAD DEBUG] request.files keys: %s", list(request.files.keys()))
-    _logger.info("[FILE UPLOAD DEBUG] request.files.getlist('file'): %s 个文件", len(files))
-    for index, file_obj in enumerate(files):
-        _logger.info(
-            "[FILE UPLOAD DEBUG]   %s. %s",
-            index + 1,
-            file_obj.filename if file_obj else "None",
-        )
-
-    if not files:
-        single_file = request.files.get("file")
-        if single_file:
-            files = [single_file]
-            _logger.info(
-                "[FILE UPLOAD DEBUG] 使用单文件模式，文件: %s",
-                single_file.filename,
-            )
-
-    locked_task = request.form.get("locked_task")
-    locked_model = request.form.get("locked_model", "cloud")
-    if str(locked_model or "").strip().lower() in {"", "auto"}:
-        locked_model = "cloud"
-    stream_mode = request.form.get("stream", "").lower() in ("1", "true", "yes")
-
-    _logger.info("[FILE UPLOAD DEBUG] 最终 files 列表: %s 个文件", len(files))
-    _logger.info("[FILE UPLOAD DEBUG] 判断: len(files) > 1 = %s", len(files) > 1)
-
-    if not session_name or not files:
-        return jsonify({"error": "Missing session or file"}), 400
-    if len(files) > 10:
-        return jsonify({"error": "最多一次上传 10 个文件"}), 400
-
-    from web.chat_file_handlers import (
-        handle_multi_file_chat_request,
-        handle_single_file_chat_request,
-    )
-
-    if len(files) > 1:
-        return handle_multi_file_chat_request(
-            app_module=None,
-            session_name=session_name,
-            user_input=user_input,
-            files=files,
-            locked_task=locked_task,
-            locked_model=locked_model,
-            stream_mode=stream_mode,
-        )
-    return handle_single_file_chat_request(
-        app_module=None,
-        session_name=session_name,
-        user_input=user_input,
-        file=files[0],
-        locked_task=locked_task,
-        locked_model=locked_model,
-    )
-
+    """Stream chat response via SSE, delegated to web.app.chat_stream."""
+    import sys as _sys
+    _app_mod = _sys.modules.get("web.app") or _sys.modules.get("__main__")
+    if _app_mod and hasattr(_app_mod, "chat_stream") and callable(_app_mod.chat_stream):
+        return _app_mod.chat_stream()
+    return jsonify({"error": "Chat stream service is unavailable"}), 503
 
 @chat_bp.route("/api/chat/interrupt", methods=["POST"])
 def interrupt_chat() -> Response:
@@ -390,3 +326,4 @@ def mini_chat() -> Response:
             "error": response_text if is_error else "",
         }
     )
+

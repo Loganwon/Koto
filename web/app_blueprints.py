@@ -43,7 +43,6 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.token_stats", "token_stats_bp", None, "TokenStats"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
-    ("web.blueprints.editor_compat", "editor_compat_bp", None, "EditorCompat"),
     (
         "web.blueprints.workspace_assistant",
         "workspace_assistant_bp",
@@ -107,7 +106,7 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         logger.error(f"[HTTP] ❌ HTTP 基础中间件注册失败: {exc}")
 
     try:
-        from web.auth import register_auth_routes
+        from web.blueprints.auth import register_auth_routes
 
         register_auth_routes(app)
         logger.info("[Auth] ✅ 认证 API 已注册")
@@ -316,7 +315,7 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         logger.error(f"[WorkflowAPI] ❌ 工作流 API 注册失败: {exc}")
 
     try:
-        from web.memory_api_routes import register_memory_routes
+        from web.blueprints.memory_api import register_memory_routes
         from web.runtime_context import get_memory_manager
 
         register_memory_routes(app, get_memory_manager)
@@ -336,6 +335,12 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
                 app.register_blueprint(blueprint)
             if tag == "Chat":
                 _exempt_csrf_endpoint(app, "chat.chat")
+                _exempt_csrf_endpoint(app, "chat.chat_stream")
+                _exempt_csrf_endpoint(app, "chat.mini_chat")
+            elif tag == "EditorAI":
+                _exempt_csrf_endpoint(app, "editor_ai.editor_ai_task_stream")
+                _exempt_csrf_endpoint(app, "editor_ai.editor_ai_task_stream_cancel")
+                _exempt_csrf_endpoint(app, "editor_ai.editor_ai_chart")
             logger.info(f"[{tag}] ✅ 蓝图已注册")
         except ImportError as exc:
             logger.warning(f"[{tag}] ⚠️ 蓝图导入失败: {exc}")

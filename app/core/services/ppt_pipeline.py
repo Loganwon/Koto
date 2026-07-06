@@ -12,8 +12,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from web.ppt_master import PPTBlueprint, PPTMasterOrchestrator
-from web.ppt_synthesizer import PPTQualityEnsurance, PPTSynthesizer
+from app.core.services.ppt_master import PPTBlueprint, PPTMasterOrchestrator
+from app.core.services.ppt_synthesizer import PPTQualityEnsurance, PPTSynthesizer
 
 logger = logging.getLogger(__name__)
 

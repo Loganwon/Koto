@@ -30,11 +30,11 @@ def tmp_dir():
 
 @pytest.mark.unit
 class TestPptGenerator:
-    """Tests for web.ppt_generator.PPTGenerator"""
+    """Tests for app.core.services.ppt_generator.PPTGenerator"""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import PPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import PPTGenerator
 
             return PPTGenerator(theme=theme)
 
@@ -57,57 +57,57 @@ class TestPptGenerator:
     # -- _clean_markdown -----------------------------------------------
 
     def test_clean_markdown_removes_heading_marks(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("### Title text") == "Title text"
 
     def test_clean_markdown_strips_bold_when_requested(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("**bold text**", strip_bold=True)
         assert "**" not in result
         assert "bold text" in result
 
     def test_clean_markdown_preserves_bold_when_not_requested(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("**bold text**", strip_bold=False)
         assert "**bold text**" in result
 
     def test_clean_markdown_removes_bullet_markers(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("- list item").strip() == "list item"
 
     def test_clean_markdown_removes_inline_code(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("`code`") == "code"
 
     def test_clean_markdown_strips_links(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("[click](http://example.com)")
         assert "click" in result
         assert "http" not in result
 
     def test_clean_markdown_removes_strikethrough(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("~~old~~") == "old"
 
     def test_clean_markdown_handles_empty_string(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("") == ""
 
     def test_clean_markdown_handles_none(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown(None) is None
 
     def test_clean_markdown_removes_ai_patterns(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("Sure! Here is something: real content")
         assert "real content" in result

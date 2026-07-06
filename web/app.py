@@ -103,7 +103,7 @@ try:
         )
         from task_dispatcher import get_scheduler, start_dispatcher, stop_dispatcher
     except ImportError:
-        from web.parallel_api import register_parallel_api
+        from web.blueprints.parallel_api import register_parallel_api
         from web.parallel_executor import (
             Priority,
             Task,

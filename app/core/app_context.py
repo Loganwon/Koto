@@ -274,7 +274,7 @@ def _make_settings_manager():
 
 
 def _make_memory_manager():
-    from web.enhanced_memory_manager import EnhancedMemoryManager
+    from app.core.services.memory_manager import EnhancedMemoryManager
 
     logger.debug("[AppContext] 创建 EnhancedMemoryManager")
     return EnhancedMemoryManager()
@@ -282,7 +282,7 @@ def _make_memory_manager():
 
 def _make_knowledge_base():
     try:
-        from web.knowledge_base import get_knowledge_base
+        from app.core.services.knowledge_base import get_knowledge_base
 
         logger.debug("[AppContext] 创建 KnowledgeBase")
         return get_knowledge_base()
@@ -334,7 +334,7 @@ def _make_notification_manager():
         )
     db_path = os.path.join(root, "config", "notifications.sqlite")
     try:
-        from web.notification_manager import NotificationManager
+        from app.core.services.notification_manager import NotificationManager
 
         logger.debug("[AppContext] 创建 NotificationManager")
         return NotificationManager(db_path)
@@ -366,7 +366,7 @@ def _make_checkpointer():
 
 def _make_model_manager():
     try:
-        from web.model_manager import ModelManager
+        from app.core.services.model_manager import ModelManager
 
         logger.debug("[AppContext] 创建 ModelManager")
         return ModelManager()

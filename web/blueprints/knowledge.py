@@ -15,7 +15,7 @@ knowledge_bp = Blueprint("knowledge", __name__)
 
 
 def _get_kb():
-    from web.knowledge_base import KnowledgeBase
+    from app.core.services.knowledge_base import KnowledgeBase
 
     return KnowledgeBase()
 

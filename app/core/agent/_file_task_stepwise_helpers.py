@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.core.agent.file_task_runtime_utils import _compact_line
-from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
+from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_recipes import request_file_types
 
@@ -24,13 +24,9 @@ def _workflow_resume_control(request: FileTaskRequest) -> Dict[str, Any]:
 
 
 def file_task_suffix(file_info: FileTaskFile) -> str:
-    explicit = str(getattr(file_info, "type", "") or "").strip().lower().lstrip(".")
-    if explicit:
-        return explicit
-    candidate = str(
-        getattr(file_info, "path", "") or getattr(file_info, "name", "") or ""
-    )
-    return Path(candidate).suffix.lower().lstrip(".")
+    from app.core.agent.file_task_recipes import file_type_from_file_info
+
+    return file_type_from_file_info(file_info)
 
 
 def looks_like_windowed_pdf_task(

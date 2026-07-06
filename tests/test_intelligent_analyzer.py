@@ -15,7 +15,7 @@ web_dir = Path(__file__).parent / "web"
 sys.path.insert(0, str(web_dir))
 
 from web.document_reader import DocumentReader
-from web.intelligent_document_analyzer import IntelligentDocumentAnalyzer
+from app.core.services.intelligent_document_analyzer import IntelligentDocumentAnalyzer
 
 
 class MockLLMClient:

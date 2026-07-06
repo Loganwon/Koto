@@ -16,7 +16,7 @@ from typing import Any, Dict
 
 from flask import Blueprint, jsonify, request
 
-from .parallel_executor import (
+from web.parallel_executor import (
     Priority,
     TaskType,
     cancel_task,

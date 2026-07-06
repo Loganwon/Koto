@@ -175,7 +175,7 @@ def _make_memory_app():
     """Create a minimal Flask app with memory routes registered."""
     from flask import Flask
 
-    from web.memory_api_routes import register_memory_routes
+    from web.blueprints.memory_api import register_memory_routes
 
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -223,7 +223,7 @@ class TestMemoryApiRoutes:
 
     def setup_method(self):
         self._sw_patcher = patch(
-            "web.memory_api_routes._get_shadow_watcher", return_value=None
+            "web.blueprints.memory_api._get_shadow_watcher", return_value=None
         )
         self._sw_patcher.start()
         self.client, self.mgr = _make_memory_app()
@@ -257,7 +257,7 @@ class TestMemoryApiRoutes:
         assert r.status_code == 400
 
     def test_delete_memory_returns_200(self):
-        with patch("web.memory_api_routes._get_shadow_watcher", return_value=None):
+        with patch("web.blueprints.memory_api._get_shadow_watcher", return_value=None):
             r = self.client.delete("/api/memories/1")
         assert r.status_code == 200
         data = r.get_json()
@@ -282,7 +282,7 @@ class TestMemoryApiRoutes:
 
     def test_manager_exception_returns_500(self):
         self.mgr.get_all_memories.side_effect = RuntimeError("db error")
-        with patch("web.memory_api_routes._get_shadow_watcher", return_value=None):
+        with patch("web.blueprints.memory_api._get_shadow_watcher", return_value=None):
             r = self.client.get("/api/memories")
         assert r.status_code == 500
 

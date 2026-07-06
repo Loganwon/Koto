@@ -34,18 +34,9 @@ def classification_target_file_type(
     request: FileTaskRequest,
     files: Sequence[FileTaskFile],
 ) -> str:
-    target_file_type = Path(str(request.target_path or "")).suffix.lstrip(".").lower()
-    if target_file_type:
-        return target_file_type
-    for file_info in files:
-        if not file_info.target:
-            continue
-        target_file_type = (
-            file_info.type or Path(file_info.path or file_info.name).suffix.lstrip(".")
-        ).lower()
-        if target_file_type:
-            return target_file_type
-    return ""
+    from app.core.agent.file_task_recipes import request_target_file_type
+
+    return request_target_file_type(request, files)
 
 
 def classification_confidence(

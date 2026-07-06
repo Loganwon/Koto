@@ -548,7 +548,7 @@ def test_frontend_button_sources_keep_matching_backend_clusters():
     assert '@job_bp.post("/triggers/bootstrap")' in job_routes
     assert '# @job_bp.get("/triggers")' not in job_routes
     assert "register_memory_routes" in app_blueprints
-    assert "from web.auth import register_auth_routes" in app_blueprints
+    assert "from web.blueprints.auth import register_auth_routes" in app_blueprints
     assert "from web.app_http import configure_http_wiring" in app_blueprints
     assert "from app.api.response_routes import response_bp" in app_blueprints
     assert "register_blueprints_deferred" in blueprint_loader

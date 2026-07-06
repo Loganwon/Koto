@@ -9,7 +9,7 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260625">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-ai-panel.css') }}?v=20260628-ai-panel-layout">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-ai-panel.css') }}?v=20260706-ai-panel-fix-v2">
     <link rel="stylesheet" href="{{ url_for('static', filename='css/utilities.css') }}?v=20260705">
     <!-- Restore UI zoom before first paint to avoid flash -->
     <script>(function(){
@@ -218,8 +218,6 @@
                             </div>
                         </div>
                     </div>
-                </section>
-            </div>
 
             <div id="miniGamePanel" class="mini-game-panel hidden">
                 <div class="mini-game-header">
@@ -289,6 +287,8 @@
                     <div class="input-meta-bar"></div>
                     <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
                 </div>
+            </div>
+                </section>
             </div>
                         </div><!-- /chatView -->
 

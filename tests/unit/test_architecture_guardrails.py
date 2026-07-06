@@ -42,8 +42,8 @@ CHAT_GENERATION_POLICY = ROOT / "app" / "core" / "llm" / "chat_generation_policy
 SESSIONS_BP = ROOT / "web" / "blueprints" / "sessions.py"
 SETTINGS_BP = ROOT / "web" / "blueprints" / "settings.py"
 PAGES_BP = ROOT / "web" / "blueprints" / "pages.py"
-AUTH_ROUTES = ROOT / "web" / "auth.py"
-MEMORY_API_ROUTES = ROOT / "web" / "memory_api_routes.py"
+AUTH_ROUTES = ROOT / "web" / "blueprints" / "auth.py"
+MEMORY_API_ROUTES = ROOT / "web" / "blueprints" / "memory_api.py"
 ANALYTICS_BP = ROOT / "web" / "blueprints" / "analytics.py"
 PROACTIVE_BP = ROOT / "web" / "blueprints" / "proactive.py"
 EXECUTION_BP = ROOT / "web" / "blueprints" / "execution.py"
@@ -318,7 +318,7 @@ def test_ppt_api_handlers_stay_outside_web_app():
     assert '@ppt_api_bp.route("/download/<session_id>", methods=["GET"])' in ppt_source
     assert "from app.core.services.ppt_generation_service import PPTGenerationService" in ppt_source
     assert "PPTGenerationService().render_editor_pptx(" in ppt_source
-    assert "from web.ppt_generator import" not in ppt_source
+    assert "from app.core.services.ppt_generator import" not in ppt_source
     assert '"/api/ppt/download", methods=["POST"]' not in app_source
 
 
@@ -478,7 +478,7 @@ def test_task_orchestrator_filegen_lives_outside_orchestrator_class():
     assert "parse_ppt_outline_markdown(text_out)" in filegen_source
     assert "choose_ppt_theme(user_input)" in filegen_source
     assert "PPTGenerationService().generate_from_outline(" in filegen_source
-    assert "from web.ppt_generator import" not in filegen_source
+    assert "from app.core.services.ppt_generator import" not in filegen_source
     assert "def _clean_filegen_text(" not in orchestrator_source
     assert "def _extract_markdown_table(" not in orchestrator_source
     assert "def _parse_ppt_outline(" not in orchestrator_source
@@ -512,8 +512,8 @@ def test_task_orchestrator_ppt_multi_step_lives_outside_orchestrator_class():
     assert "async def execute_ppt_multi_step(" in ppt_source
     assert "from app.core.services.ppt_generation_service import PPTGenerationService" in ppt_source
     assert "PPTGenerationService(" in ppt_source
-    assert "from web.ppt_master import" not in ppt_source
-    assert "from web.ppt_generator import" not in ppt_source
+    assert "from app.core.services.ppt_master import" not in ppt_source
+    assert "from app.core.services.ppt_generator import" not in ppt_source
     assert "PPTContentPlanner" not in orchestrator_source
     assert "PPTGenerator" not in orchestrator_source
     assert "FileQualityGate.check_and_fix_ppt_outline" not in orchestrator_source
@@ -631,8 +631,8 @@ def test_ppt_plugin_uses_core_generation_service_facade():
     assert "from app.core.services.ppt_generation_service import" in plugin_source
     assert "PPTGenerationService().plan_outline(" in plugin_source
     assert "PPTGenerationService().generate_from_outline(" in plugin_source
-    assert "from web.ppt_master import" not in plugin_source
-    assert "from web.ppt_generator import" not in plugin_source
+    assert "from app.core.services.ppt_master import" not in plugin_source
+    assert "from app.core.services.ppt_generator import" not in plugin_source
     assert "from app.core.services.ppt_generation_contract import" in service_source
     assert "from app.core.services.ppt_generation_legacy_adapter import" in service_source
     assert "load_planner_cls()" in service_source
@@ -640,15 +640,15 @@ def test_ppt_plugin_uses_core_generation_service_facade():
     assert "normalize_generation_result(result, output_path)" in service_source
     assert "def parse_ppt_outline_markdown(" not in service_source
     assert "def choose_ppt_theme(" not in service_source
-    assert "from web.ppt_master import" not in service_source
-    assert "from web.ppt_generator import" not in service_source
+    assert "from app.core.services.ppt_master import" not in service_source
+    assert "from app.core.services.ppt_generator import" not in service_source
     assert "def parse_ppt_outline_markdown(" in contract_source
     assert "def choose_ppt_theme(" in contract_source
     assert "def normalize_generation_result(" in contract_source
-    assert "from web.ppt_master import" not in contract_source
-    assert "from web.ppt_generator import" not in contract_source
-    assert "from web.ppt_master import PPTContentPlanner" in legacy_adapter_source
-    assert "from web.ppt_generator import PPTGenerator" in legacy_adapter_source
+    assert "from app.core.services.ppt_master import" not in contract_source
+    assert "from app.core.services.ppt_generator import" not in contract_source
+    assert "from app.core.services.ppt_master import PPTContentPlanner" in legacy_adapter_source
+    assert "from app.core.services.ppt_generator import PPTGenerator" in legacy_adapter_source
 
 
 def test_template_library_ppt_generation_uses_service_facade():
@@ -656,7 +656,7 @@ def test_template_library_ppt_generation_uses_service_facade():
 
     assert "from app.core.services.ppt_generation_service import PPTGenerationService" in template_source
     assert "PPTGenerationService().generate_outline_result(" in template_source
-    assert "from web.ppt_generator import" not in template_source
+    assert "from app.core.services.ppt_generator import" not in template_source
     assert "PPTGenerator(" not in template_source
 
 
@@ -670,7 +670,7 @@ def test_ppt_generator_direct_imports_are_limited_to_legacy_adapter():
             if path == PPT_GENERATOR:
                 continue
             source = _read(path)
-            if "from web.ppt_generator import" in source:
+            if "from app.core.services.ppt_generator import" in source:
                 rel_path = path.relative_to(ROOT).as_posix()
                 if rel_path not in allowed:
                     offenders.append(rel_path)
@@ -685,7 +685,7 @@ def test_legacy_ppt_pipeline_stays_unwired_from_production_paths():
             if path == ROOT / "web" / "ppt_pipeline.py":
                 continue
             source = _read(path)
-            if "web.ppt_pipeline" in source or "from web.ppt_pipeline import" in source:
+            if "app.core.services.ppt_pipeline" in source or "from app.core.services.ppt_pipeline import" in source:
                 offenders.append(path.relative_to(ROOT).as_posix())
 
     assert offenders == []

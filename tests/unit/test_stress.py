@@ -220,7 +220,7 @@ class TestRateLimiterStress:
     """Verify the sliding-window rate limiter is accurate under load."""
 
     def setup_method(self):
-        import web.auth as _auth
+        import web.blueprints.auth as auth as _auth
 
         self._auth = _auth
         self._orig_buckets = _auth._rate_buckets.copy()
@@ -232,7 +232,7 @@ class TestRateLimiterStress:
 
     def test_rate_limit_enforced_at_boundary(self):
         """With strict tier (10/60s), exactly 10 succeed, rest are rejected."""
-        import web.auth as _auth
+        import web.blueprints.auth as auth as _auth
 
         user = f"stress_user_{uuid.uuid4().hex[:8]}"
         tier = "strict"  # 10 requests / 60s
@@ -246,7 +246,7 @@ class TestRateLimiterStress:
 
     def test_concurrent_rate_limit_no_over_admission(self):
         """100 threads hit the rate limiter simultaneously — must admit ≤ max."""
-        import web.auth as _auth
+        import web.blueprints.auth as auth as _auth
 
         user = f"concurrent_user_{uuid.uuid4().hex[:8]}"
         tier = "strict"  # 10 requests / 60s
@@ -284,7 +284,7 @@ class TestRateLimiterStress:
 
     def test_rate_limit_resets_after_window(self):
         """After the window passes, the same user can make requests again."""
-        import web.auth as _auth
+        import web.blueprints.auth as auth as _auth
 
         user = f"window_user_{uuid.uuid4().hex[:8]}"
         tier = "strict"  # 10/60s window
@@ -303,7 +303,7 @@ class TestRateLimiterStress:
 
     def test_different_users_do_not_share_bucket(self):
         """Each user's rate limit is independent."""
-        import web.auth as _auth
+        import web.blueprints.auth as auth as _auth
 
         users = [f"user_{i}_{uuid.uuid4().hex[:4]}" for i in range(10)]
         tier = "strict"
@@ -319,7 +319,7 @@ class TestRateLimiterStress:
 
     def test_standard_tier_higher_limit(self):
         """Standard tier allows 30/60s, strict allows 10/60s."""
-        import web.auth as _auth
+        import web.blueprints.auth as auth as _auth
 
         user_std = f"std_{uuid.uuid4().hex[:8]}"
         user_strict = f"strict_{uuid.uuid4().hex[:8]}"

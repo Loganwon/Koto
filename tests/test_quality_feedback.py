@@ -513,7 +513,7 @@ print("=" * 60)
 try:
     import tempfile
 
-    from web.ppt_generator import PPTGenerator
+    from app.core.services.ppt_generator import PPTGenerator
 
     # 生成一个测试 PPT
     test_outline = [

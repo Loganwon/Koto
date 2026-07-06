@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 
 def _preview(value: Any, limit: int = 700) -> str:
@@ -95,3 +95,12 @@ def _followup_has_prior_excel_docx_insert(followup_context: Dict[str, Any]) -> b
         if str(change.get("operation") or "").strip() == "insert_excel_as_docx_table":
             return True
     return False
+
+
+
+def workflow_checkpoint_from_options(options: Mapping[str, Any]) -> Dict[str, Any]:
+    checkpoint = options.get("workflow_checkpoint")
+    if isinstance(checkpoint, Mapping):
+        return dict(checkpoint)
+
+    return {}

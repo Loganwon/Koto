@@ -582,17 +582,17 @@ class TestDocumentEditor:
 
 @pytest.mark.unit
 class TestQualityEvaluator:
-    """Tests for web.quality_evaluator module."""
+    """Tests for app.core.services.quality_evaluator module."""
 
     def test_ppt_evaluator_init(self):
-        from web.quality_evaluator import PPTEvaluator
+        from app.core.services.quality_evaluator import PPTEvaluator
 
         ev = PPTEvaluator()
         assert ev.issues == []
         assert ev.suggestions == []
 
     def test_ppt_evaluator_missing_pptx_module(self):
-        from web.quality_evaluator import PPTEvaluator
+        from app.core.services.quality_evaluator import PPTEvaluator
 
         ev = PPTEvaluator()
         with patch.dict("sys.modules", {"pptx": None}):
@@ -601,26 +601,26 @@ class TestQualityEvaluator:
         assert any("不可用" in i for i in result.issues)
 
     def test_score_slide_count_optimal(self):
-        from web.quality_evaluator import PPTEvaluator
+        from app.core.services.quality_evaluator import PPTEvaluator
 
         ev = PPTEvaluator()
         assert ev._score_slide_count(10) == 100.0
 
     def test_score_slide_count_too_few(self):
-        from web.quality_evaluator import PPTEvaluator
+        from app.core.services.quality_evaluator import PPTEvaluator
 
         ev = PPTEvaluator()
         assert ev._score_slide_count(2) == 20.0
 
     def test_score_slide_count_too_many(self):
-        from web.quality_evaluator import PPTEvaluator
+        from app.core.services.quality_evaluator import PPTEvaluator
 
         ev = PPTEvaluator()
         score = ev._score_slide_count(35)
         assert score == 60.0
 
     def test_prioritize_improvements(self):
-        from web.quality_evaluator import PPTEvaluator
+        from app.core.services.quality_evaluator import PPTEvaluator
 
         ev = PPTEvaluator()
         scores = {
@@ -633,13 +633,13 @@ class TestQualityEvaluator:
         assert any("内容" in p for p in priorities)
 
     def test_document_evaluator_init(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         assert ev.issues == []
 
     def test_document_evaluator_good_document(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         doc = (
@@ -653,7 +653,7 @@ class TestQualityEvaluator:
         assert isinstance(result.category_scores, dict)
 
     def test_document_evaluator_short_document(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         result = ev.evaluate_document("short")
@@ -661,14 +661,14 @@ class TestQualityEvaluator:
         assert any("过短" in i for i in result.issues)
 
     def test_evaluate_structure_no_headings(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         score = ev._evaluate_structure("no headings here at all")
         assert score == 40.0
 
     def test_evaluate_length_ranges(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         assert ev._evaluate_length("A" * 2000) == 100.0
@@ -676,7 +676,7 @@ class TestQualityEvaluator:
         assert ev._evaluate_length("A" * 100) == 50.0
 
     def test_evaluate_quality_function_docx(self):
-        from web.quality_evaluator import evaluate_quality
+        from app.core.services.quality_evaluator import evaluate_quality
 
         result = evaluate_quality(
             "docx", "# Title\n\n## Section\n\n" + "Content " * 200
@@ -685,14 +685,14 @@ class TestQualityEvaluator:
         assert isinstance(result["overall_score"], float)
 
     def test_evaluate_quality_function_ppt(self):
-        from web.quality_evaluator import evaluate_quality
+        from app.core.services.quality_evaluator import evaluate_quality
 
         with patch.dict("sys.modules", {"pptx": None}):
             result = evaluate_quality("pptx", "fake_path.pptx")
         assert result["overall_score"] == 0
 
     def test_evaluate_format_consistent(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         content = "# Title\n\n- item1\n- item2\n\n```python\nprint('hi')\n```"
@@ -700,7 +700,7 @@ class TestQualityEvaluator:
         assert score >= 80
 
     def test_evaluate_completeness(self):
-        from web.quality_evaluator import DocumentEvaluator
+        from app.core.services.quality_evaluator import DocumentEvaluator
 
         ev = DocumentEvaluator()
         content = "# Intro\n\n## Section\n\n详细内容\n\n## 结论\n\n总结"

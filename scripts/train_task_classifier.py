@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 训练任务分类器：已缓存的 BERT 模型均值池化 + LogisticRegression 分类头。
 

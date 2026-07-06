@@ -21,7 +21,7 @@ env/
 # Secrets & API keys
 **/gemini_config.env
 config/deepseek_config.env
-config/user_settings.json
+app/core/config/user_settings.json
 config/user_profile.json
 config/memory.json
 config/macro_suggestions.json
@@ -31,7 +31,7 @@ config/skill_bindings.json
 config/model_setup_done.json
 config/koto_checkpoints.sqlite*
 config/local_model_prompted.json
-config/jwt_secret.txt
+web/config/jwt_secret.txt
 
 # Runtime / personal data (generated at runtime, not for repo)
 config/proactive_queue.json
@@ -173,3 +173,7 @@ coverage_html/
 coverage.xml
 .coverage
 
+
+# Server logs
+server_*.log
+srv_*.log

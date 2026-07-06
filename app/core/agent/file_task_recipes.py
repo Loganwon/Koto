@@ -164,10 +164,18 @@ def _semantic_task_text(task: str) -> str:
     return text
 
 
+
+def file_type_from_file_info(file_info: FileTaskFile) -> str:
+    explicit = str(getattr(file_info, "type", "") or "").strip().lower().lstrip(".")
+    if explicit:
+        return explicit
+    candidate = str(getattr(file_info, "path", "") or getattr(file_info, "name", "") or "")
+    return Path(candidate).suffix.lower().lstrip(".")
+
 def request_file_types(files: Sequence[FileTaskFile]) -> set[str]:
     file_types: set[str] = set()
     for file_info in files:
-        file_type = str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")).lower().strip()
+        file_type = file_type_from_file_info(file_info)
         if file_type:
             file_types.add(file_type)
             if file_type == "xlsm":
@@ -184,7 +192,7 @@ def request_target_file_type(request: FileTaskRequest, files: Sequence[FileTaskF
     for file_info in files:
         if not file_info.target:
             continue
-        candidate = str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")).lower().strip()
+        candidate = file_type_from_file_info(file_info)
         if candidate:
             return candidate
     return ""

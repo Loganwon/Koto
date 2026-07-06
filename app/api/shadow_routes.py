@@ -272,23 +272,25 @@ def shadow_tick():
         # 尝试获取 LLM 函数（可选）
         llm_fn = None
         try:
-            from google.genai import types as _types
+            from google.genai import types as _types, Client as _GeminiClient
 
-            from web.runtime_context import get_client_proxy
+            from app.core.llm.gemini_config import get_gemini_api_key
 
-            client = get_client_proxy()
+            _api_key = get_gemini_api_key()
+            if _api_key:
+                client = _GeminiClient(api_key=_api_key)
 
-            def _llm(prompt: str) -> str:
-                resp = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=prompt,
-                    config=_types.GenerateContentConfig(
-                        temperature=0.7, max_output_tokens=80
-                    ),
-                )
-                return resp.text or ""
+                def _llm(prompt: str) -> str:
+                    resp = client.models.generate_content(
+                        model="gemini-2.5-flash-lite",
+                        contents=prompt,
+                        config=_types.GenerateContentConfig(
+                            temperature=0.7, max_output_tokens=80
+                        ),
+                    )
+                    return resp.text or ""
 
-            llm_fn = _llm
+                llm_fn = _llm
         except Exception:
             import logging
 

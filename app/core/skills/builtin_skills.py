@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 
 """Koto built-in skill definitions (migrated from skill_manager.py)."""

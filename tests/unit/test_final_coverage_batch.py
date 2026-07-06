@@ -297,8 +297,8 @@ class TestPptGeneratorDeep:
     generate_from_text, and EnhancedPPTGenerator."""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import PPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import PPTGenerator
 
             return PPTGenerator(theme=theme)
 
@@ -329,42 +329,42 @@ class TestPptGeneratorDeep:
 
     # -- _clean_markdown static method --------------------------------------
     def test_clean_markdown_removes_code_blocks(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "Before\n```python\ncode here\n```\nAfter"
         result = PPTGenerator._clean_markdown(text)
         assert "```" not in result
 
     def test_clean_markdown_removes_strikethrough(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "~~deleted~~ kept"
         result = PPTGenerator._clean_markdown(text)
         assert "~~" not in result
 
     def test_clean_markdown_removes_link_markup(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "[Click here](https://example.com)"
         result = PPTGenerator._clean_markdown(text)
         assert "](http" not in result
 
     def test_clean_markdown_strips_h1_headers(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "# H1 Title"
         result = PPTGenerator._clean_markdown(text)
         assert result.strip() == "H1 Title"
 
     def test_clean_markdown_ai_dialogue_patterns(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "当然可以！这里是内容。好的，以下是数据。"
         result = PPTGenerator._clean_markdown(text)
         assert isinstance(result, str)
 
     def test_clean_markdown_strip_bold_mode(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "This is **bold** text"
         result = PPTGenerator._clean_markdown(text, strip_bold=True)
@@ -374,7 +374,7 @@ class TestPptGeneratorDeep:
     def test_generate_from_text_creates_pptx(self):
         gen = self._make_gen()
         mock_prs = MagicMock()
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_text(
@@ -390,7 +390,7 @@ class TestPptGeneratorDeep:
         outline = [
             {"title": "Intro", "points": ["Point 1"], "slide_type": "detail"},
         ]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 gen.generate_from_outline("Title", outline, out, progress_callback=cb)
@@ -401,7 +401,7 @@ class TestPptGeneratorDeep:
         mock_prs = MagicMock()
         mock_prs.save.side_effect = PermissionError("locked")
         outline = [{"title": "T", "points": ["P"], "slide_type": "detail"}]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
             with pytest.raises(PermissionError):
                 gen.generate_from_outline("T", outline, "/locked/out.pptx")
 
@@ -416,7 +416,7 @@ class TestPptGeneratorDeep:
                 "slide_type": "image_full",
             }
         ]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_outline(
@@ -434,7 +434,7 @@ class TestPptGeneratorDeep:
                 "slide_type": "content_image",
             }
         ]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_outline(
@@ -467,16 +467,16 @@ class TestPptGeneratorDeep:
 
     # -- EnhancedPPTGenerator -----------------------------------------------
     def test_enhanced_extract_subtitle_with_year(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator(theme="tech")
             subtitle = epg._extract_subtitle("2024年度市场分析报告")
         assert "2024" in subtitle or subtitle == ""
 
     def test_enhanced_generate_fallback_outline(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             outline = epg._generate_fallback_outline("Market Report", "Analyze trends")
@@ -484,8 +484,8 @@ class TestPptGeneratorDeep:
         assert len(outline) > 0
 
     def test_enhanced_parse_enhanced_outline(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             md = "## Section 1\n- Point A\n- Point B\n\n## Section 2\n- Point C"
@@ -494,16 +494,16 @@ class TestPptGeneratorDeep:
         assert len(parsed) >= 2
 
     def test_enhanced_parse_enhanced_outline_empty(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             parsed = epg._parse_enhanced_outline("")
         assert isinstance(parsed, list)
 
     def test_enhanced_match_images_to_slides(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             outline = [{"title": "A", "points": []}, {"title": "B", "points": []}]
@@ -511,8 +511,8 @@ class TestPptGeneratorDeep:
         assert isinstance(result, list)
 
     def test_enhanced_build_outline_prompt(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             prompt = epg._build_outline_prompt("Title", "Request", None, None)

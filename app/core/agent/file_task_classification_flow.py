@@ -19,6 +19,12 @@ class FileTaskClassificationFlow:
     force_long_pdf_docx_write: bool = False
 
 
+def _followup_field(followup_context: Mapping[str, Any] | None, key: str) -> str:
+    if not isinstance(followup_context, Mapping):
+        return ""
+    return str(followup_context.get(key) or "").strip().lower()
+
+
 def build_classification_flow(
     *,
     followup_context: Mapping[str, Any],
@@ -27,39 +33,11 @@ def build_classification_flow(
     file_types: Sequence[str],
     target_file_type: str,
 ) -> FileTaskClassificationFlow:
-    followup_action = (
-        str(followup_context.get("followup_action") or "").strip().lower()
-        if isinstance(followup_context, Mapping)
-        else ""
-    )
-    previous_task_family = (
-        str(followup_context.get("previous_task_family") or "").strip().lower()
-        if isinstance(followup_context, Mapping)
-        else ""
-    )
-    previous_task_execution_mode = (
-        str(
-            followup_context.get("previous_task_execution_mode")
-            or followup_context.get("previous_task_mode")
-            or ""
-        )
-        .strip()
-        .lower()
-        if isinstance(followup_context, Mapping)
-        else ""
-    )
-    previous_task_output_mode = (
-        str(followup_context.get("previous_task_output_mode") or "").strip().lower()
-        if isinstance(followup_context, Mapping)
-        else ""
-    )
-    previous_task_intent_can_apply = (
-        str(followup_context.get("previous_task_intent_can_apply") or "")
-        .strip()
-        .lower()
-        if isinstance(followup_context, Mapping)
-        else ""
-    )
+    followup_action = _followup_field(followup_context, "followup_action")
+    previous_task_family = _followup_field(followup_context, "previous_task_family")
+    previous_task_execution_mode = _followup_field(followup_context, "previous_task_execution_mode")
+    previous_task_output_mode = _followup_field(followup_context, "previous_task_output_mode")
+    previous_task_intent_can_apply = _followup_field(followup_context, "previous_task_intent_can_apply")
     resume_adapter = (
         str(resume_control.get("adapter") or "").strip().lower()
         if isinstance(resume_control, Mapping)
