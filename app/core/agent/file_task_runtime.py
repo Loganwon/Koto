@@ -1,3 +1,25 @@
+# =============================================================================
+# Koto File Task Runtime — Public API Index
+# =============================================================================
+# Lines: 5857  |  1 class (FileTaskRuntime)  |  ~140 private methods
+#
+# PUBLIC API:
+#   request_cancel(run_id) .... Register cancellation for a running task
+#   is_cancel_requested(run_id). Check if cancellation was requested
+#   FileTaskRuntime .......... Main orchestrator for file-based AI tasks
+#     .run(request) .......... Execute a file task end-to-end
+#
+# INTERNAL STRUCTURE (FileTaskRuntime private methods):
+#   Classification ... _classify_request, _infer_output_mode, _quick_action_mode
+#   Intent ............ _adjudicate_intent_if_needed, _apply_intent_adjudication
+#   Planning .......... _build_plan, _resolve_intent_plan, _fallback_intent_plan
+#   Execution ......... _run_builtin_tool, _consume_streaming_tool_result
+#   Quality ........... _evaluate_task_quality_gate, _verify_task
+#   Stepwise .......... _stepwise_docx_*, _write_stepwise_pdf_docx_native
+#   Readonly .......... _readonly_answer_required_message, _readonly_tool_*
+#   Heuristics ........ _looks_like_chart_request, _looks_like_ppt_request, ...
+#   Sandbox ........... (delegated to task_tools.py helpers)
+# =============================================================================
 from __future__ import annotations
 
 import datetime as _dt

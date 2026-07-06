@@ -1,6 +1,24 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 
+# =============================================================================
+# Koto Web Application — Module Index
+# =============================================================================
+# Lines: 3191
+#
+# STRUCTURE:
+#   L1-170    Imports & module setup (proxy, paths, Gemini config, blueprints)
+#   L170-350  Proxy helpers (_extract_system_proxy_candidates, setup_proxy)
+#   L350-500  Client creation (create_client, get_client, _TrackedModels)
+#   L500-750  _ClientProxy class (Gemini API wrapper with retry logic)
+#   L750-1250 Interactions API (polling, text extraction, sync helpers)
+#   L1250-1400 Model manager init & refresh loop
+#   L1400-1680 System instructions, style helpers, filegen brief
+#   L1681-2515 KotoBrain class (chat orchestration: routing → generation → fallback)
+#   L2516-2554 chat() — non-streaming chat endpoint
+#   L2554-3118 chat_stream() — SSE streaming endpoint
+#   L3118+      chat_with_file() — file upload chat endpoint
+# =============================================================================
 # Bypass system/VPN proxy for all localhost services (Ollama, etc.)
 # Must be set before any requests/urllib imports.
 import os as _os
@@ -103,7 +121,6 @@ try:
         )
         from task_dispatcher import get_scheduler, start_dispatcher, stop_dispatcher
     except ImportError:
-        from web.blueprints.parallel_api import register_parallel_api
         from web.parallel_executor import (
             Priority,
             Task,
@@ -1109,7 +1126,6 @@ configure_observability(
 if PARALLEL_SYSTEM_ENABLED:
     _app_logger.debug("[PARALLEL] 🚀 Initializing parallel execution system...")
     try:
-        register_parallel_api(app)
         start_dispatcher()
         _app_logger.info(
             "[PARALLEL] ✅ Parallel execution system initialized successfully"
@@ -3115,81 +3131,6 @@ def chat_stream():
     return response
 
 
-def chat_with_file():
-    """处理文件上传和聊天请求"""
-    session_name = request.form.get("session")
-    user_input = request.form.get("message", "")
-    files = request.files.getlist("file")
-
-    # 🔍 调试日志
-    _app_logger.info(f"[FILE UPLOAD DEBUG] ========== 接收到文件上传请求 ==========")
-    _app_logger.info(
-        f"[FILE UPLOAD DEBUG] request.files keys: {list(request.files.keys())}"
-    )
-    _app_logger.info(
-        f"[FILE UPLOAD DEBUG] request.files.getlist('file'): {len(files)} 个文件"
-    )
-    for i, f in enumerate(files):
-        _app_logger.info(f"[FILE UPLOAD DEBUG]   {i+1}. {f.filename if f else 'None'}")
-
-    if not files:
-        single_file = request.files.get("file")
-        if single_file:
-            files = [single_file]
-            _app_logger.info(
-                f"[FILE UPLOAD DEBUG] 使用单文件模式，文件: {single_file.filename}"
-            )
-
-    locked_task = request.form.get("locked_task")
-    locked_model = request.form.get("locked_model", "cloud")
-    if str(locked_model or "").strip().lower() in {"", "auto"}:
-        locked_model = "cloud"
-    stream_mode = request.form.get("stream", "").lower() in ("1", "true", "yes")
-
-    _app_logger.info(f"[FILE UPLOAD DEBUG] 最终 files 列表: {len(files)} 个文件")
-    _app_logger.info(f"[FILE UPLOAD DEBUG] 判断: len(files) > 1 = {len(files) > 1}")
-
-    if not session_name or not files:
-        return jsonify({"error": "Missing session or file"}), 400
-    if len(files) > 10:
-        return jsonify({"error": "最多一次上传 10 个文件"}), 400
-
-    if len(files) > 1:
-        return handle_multi_file_chat_request(
-            app_module=sys.modules[__name__],
-            session_name=session_name,
-            user_input=user_input,
-            files=files,
-            locked_task=locked_task,
-            locked_model=locked_model,
-            stream_mode=stream_mode,
-        )
-    return handle_single_file_chat_request(
-        app_module=sys.modules[__name__],
-        session_name=session_name,
-        user_input=user_input,
-        file=files[0],
-        locked_task=locked_task,
-        locked_model=locked_model,
-    )
-
-
-# ==================== 智能文档处理路由 ====================
-
-
-from web.services.intent import should_use_annotation_system as _should_use_annotation_system
-from web.services.intent import is_analysis_request as _is_analysis_request
-from web.services.intent import is_explicit_file_gen_request as _is_explicit_file_gen_request
-
-# 临时 file_id → 实际路径映射（进程内缓存，重启后失效属正常）
-_compare_file_registry: dict = {}
-
-
-# ================= 主程序入口 =================
-
-# ================= NotebookLM 功能复刻 API =================
-
-
 if __name__ == "__main__":
     import sys
     # Allow emoji/unicode in startup prints on Windows (cp1252 terminal)
@@ -3266,75 +3207,3 @@ if __name__ == "__main__":
             stop_dispatcher()
             print("[PARALLEL] ✅ Parallel execution system shut down")
 
-
-# ═══ 文件组织系统 API ═══
-
-from web.lazy_loaders import (
-    _lazy_cache,
-    _lazy_load,
-    get_auto_execution,
-    get_batch_ops_manager,
-    get_behavior_monitor,
-    get_concept_extractor,
-    get_context_awareness,
-    get_file_analyzer,
-    get_file_editor,
-    get_file_indexer,
-    get_file_organizer,
-    get_insight_reporter,
-    get_knowledge_graph,
-    get_notification_manager,
-    get_proactive_dialogue,
-    get_suggestion_engine,
-    get_trigger_system,
-)
-
-
-# ═══════════════════════════════════════════════════
-# 文件编辑与搜索 API
-# ═══════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════
-# 全盘文件扫描 API  (FileScanner)
-# ═══════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════
-# 概念提取 API
-# ═══════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════
-# 知识图谱 API
-# ═══════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════
-# 行为监控 API
-# ═══════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════
-# 智能建议 API
-# ═══════════════════════════════════════════════════
-
-
-# ═══════════════════════════════════════════════════
-# 洞察报告 API
-# ═══════════════════════════════════════════════════
-
-
-# ==================== 通知管理 API ====================
-
-
-# ==================== 主动对话 API ====================
-
-
-# ==================== 情境感知 API ====================
-
-
-# ==================== 自动执行 API ====================
-
-
-# ==================== 主动交互触发系统 API ====================

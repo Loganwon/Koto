@@ -1,3 +1,29 @@
+# =============================================================================
+# Koto Task Tools — Public API Index
+# =============================================================================
+# Lines: 6716  |  Public: 33  |  Private helpers: 100+
+#
+# QUICK NAVIGATION:
+#   XLSX Tools ........... read_sheet_data → write_sheet_data    (~L1113-1407)
+#   DOCX Read ............ read_docx_content                      (~L1408)
+#   File Parse ........... parse_file_to_text                     (~L1566)
+#   Workspace Files ...... list_workspace_files, open_file_in_editor (~L2478-2543)
+#   LLM Tools ............ llm_extract, llm_transform             (~L2854-2907)
+#   File Compare ......... compare_files                          (~L2907)
+#   DOCX Annotate ........ compare_docx_and_annotate → write_docx_comments (~L3418-3532)
+#   File Create .......... create_file, extract_to_file           (~L2820, 3532)
+#   DOCX Edit ............ write_docx_content, fill_docx_template (~L4846, 5330)
+#   PDF Convert .......... convert_docx_to_pdf, convert_file      (~L5124, 5187)
+#   PPTX Tools ........... write_pptx_slides → add_pptx_slides    (~L5444-5814)
+#   TaskToolsPlugin ...... Agent plugin class                     (~L5815-6083)
+#
+# PRIVATE HELPERS (internal, called by public functions):
+#   General I/O .... _resolve_path, _result_path, _success_result, _blocked_write_result
+#   XLSX helpers ... _select_workbook_sheet, _build_workbook_structure_payload, ...
+#   DOCX helpers ... _docx_nonempty_paragraph_texts, _build_docx_compare_annotations, ...
+#   Sandbox ........ _stage_task_files_for_sandbox, _sync_staged_files_to_source, ...
+#   PDF helpers .... _read_pdf_excerpt, _read_pdf_letter_window, ...
+# =============================================================================
 # ══════════════════════════════════════════════════════════════
 # task_tools.py — Composable file-operation tools for FileTaskRuntime
 #

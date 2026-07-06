@@ -1,70 +1,118 @@
-# Koto AI — Agent Instructions
+﻿# Koto AI - Agent Guidelines
 
 ## Project Overview
-Koto is an AI-powered desktop workspace with chat, file editing, document generation, and agent orchestration. Built with Flask (Python) backend and vanilla JS frontend.
+
+Koto is an AI-powered workspace assistant with chat, file editing, document generation,
+code execution, and web search capabilities. It runs as a Flask web application with a
+rich browser-based UI.
 
 ## Architecture
 
 ```
-Koto/
-├── web/                        # Flask web layer
-│   ├── app.py                  # Main app (3340 lines — KotoBrain, chat_stream, routing)
-│   ├── app_blueprints.py       # Blueprint registration + CSRF exemptions
-│   ├── runtime_context.py      # ServiceRegistry singleton + backward-compat getters
-│   ├── session_manager.py      # Thread-safe JSON file session store
-│   ├── blueprints/             # 24 Flask blueprints (chat, editor_ai, workspace, etc.)
-│   ├── services/chat_stream/   # Extracted chat stream handlers
-│   ├── static/css/             # style.css (5250L) + workspace.css (11506L)
-│   │   └── z-layers.css        # Z-index layer system (CSS custom properties)
-│   └── static/js/build/        # Bundled JS (app-bundle, workspace-bundle, etc.)
-├── app/                        # Domain logic
-│   └── core/
-│       ├── agent/              # Agents: task_tools (6083L), file_task_runtime (5573L)
-│       ├── services/           # Migrated services (doc_gen, ppt, rag, memory, etc.)
-│       ├── llm/                # LLM providers (Gemini, Ollama, DeepSeek)
-│       ├── routing/            # SmartDispatcher, local model router
-│       ├── skills/             # Skill system (auto-builder, matcher, manager)
-│       ├── file/               # File parsers, exporters, registry
-│       ├── security/           # Output validator, auth
-│       └── workspace/          # Workspace management
-├── src/                        # Desktop app entry (koto_app.py)
-├── launcher/                   # Bootstrap/health
-└── tests/                      # Tests (unit, integration, e2e)
+entry: launcher/entry.py  →  web/app.py (Flask app factory)
+                                │
+         ┌──────────────────────┼──────────────────────┐
+         ▼                      ▼                      ▼
+   web/blueprints/        web/services/           app/core/
+   (HTTP routes)          (chat_stream, etc.)     (domain logic)
 ```
 
-## Key Patterns
+### Key Layers
 
-### Service Registry
+| Layer | Location | Role |
+|---|---|---|
+| Entry | `launcher/` | Bootstrap, health checks, frozen-app support |
+| Web | `web/` | Flask app, blueprints, SSE streaming, static assets |
+| Blueprints | `web/blueprints/` | 24 route modules (chat, editor_ai, workspace, etc.) |
+| Services | `web/services/chat_stream/` | Chat streaming pipeline (orchestrator → handlers) |
+| Core | `app/core/` | Domain logic: agent, llm, skills, routing, security |
+| Agents | `app/core/agent/` | File tasks, task tools, classification, plugins |
+| LLM | `app/core/llm/` | Provider wrappers (DeepSeek, Gemini, Ollama, OpenAI) |
+| Desktop | `src/` | PyInstaller packaging, local model installer |
+
+### Request Flow (Chat)
+
+```
+Browser → POST /api/chat
+  → web/blueprints/chat.py : chat()
+    → web/runtime_context.py : get_brain()
+      → web/app.py : KotoBrain.chat()
+        → app/core/llm/ : provider call
+        → web/session_manager : save history
+```
+
+### Request Flow (Streaming)
+
+```
+Browser → POST /api/chat/stream
+  → web/blueprints/chat.py : chat_stream()
+    → web/app.py : chat_stream()
+      → web/services/chat_stream/orchestrator.py : setup_chat_stream_context()
+      → web/services/chat_stream/agent_handler.py : handle_agent_task()
+      → web/services/chat_stream/generate/regular_handler.py : handle_regular()
+      → SSE events → Browser
+```
+
+### Request Flow (File Tasks)
+
+```
+Browser → POST /api/editor/ai/task-stream
+  → web/blueprints/editor_ai.py : editor_ai_task_stream()
+    → web/runtime_context.py : stream_file_task_request()
+      → web/file_task_stream.py : stream_file_task_request()
+        → app/core/agent/file_task_runtime.py : orchestrator
+        → app/core/agent/task_tools.py : tool implementations
+```
+
+## Service Locator
+
+`web/runtime_context.py` provides a `ServiceRegistry` singleton. Prefer:
+
 ```python
 from web.runtime_context import service_registry
-brain = service_registry.brain
 session_mgr = service_registry.session_manager
 ```
-Prefer `service_registry.<prop>` over `get_*()` helpers in new code.
 
-### Blueprint Pattern
-All routes in `web/blueprints/`. Register in `web/app_blueprints.py`.
-CSRF-exempt API endpoints with `_exempt_csrf_endpoint()`.
+Legacy `get_*()` functions (e.g., `get_brain()`, `get_session_manager()`) are wrappers
+around the registry. New code should use `service_registry.<property>` directly.
 
-### Session Storage
-Thread-safe JSON files in `app/core/chats/`. All read-modify-write ops use per-file `threading.Lock`.
+## God Files (Refactor Targets)
 
-### CSS Z-Index
-Use variables from `z-layers.css`: `--z-dropdown`, `--z-modal-panel`, `--z-toast`, `--z-app-window`, `--z-topmost-critical`. No raw values above 2000.
+These files exceed 1000 lines and should be split when touched:
 
-## Known Debt
-- `task_tools.py` (6083L) and `file_task_runtime.py` (5573L) need splitting
-- 30+ `get_*()` backward-compat wrappers in runtime_context.py
-- `web/` root has 107 .py files in gradual migration to `app/core/`
-- No frontend test coverage
-- CSS ~16,700 total lines, no automated dead-code detection
+| File | Lines | Suggested split |
+|---|---|---|
+| `app/core/agent/task_tools.py` | 6083 | xlsx/pdf/pptx/docx sub-modules |
+| `app/core/agent/file_task_runtime.py` | 5573 | stepwise/whitebox/supervisor sub-modules |
+| `web/app.py` | 3340 | KotoBrain → app/core/brain.py |
+| `app/core/file/parsers/docx_parser.py` | 4125 | paragraph/table/style sub-parsers |
+
+## Naming Conventions
+
+- Blueprints: `web/blueprints/<name>.py`, variable `{name}_bp`
+- Services: `app/core/services/<name>.py`
+- LLM providers: `app/core/llm/<name>_provider.py`
+- Test batches: `tests/unit/test_web_modules_batch<N>.py` (temporary during migration)
 
 ## Running
+
 ```bash
-python -m web.app          # Start server on :5000
-python src/koto_app.py     # Desktop app
+# Development
+python -m web.app
+
+# Environment
+config/deepseek_config.env   # API keys (gitignored)
+config/requirements.txt      # Python dependencies
 ```
 
-## API Key Config
-- `config/deepseek_config.env` (gitignored)
-- `web/config/jwt_secret.txt` (gitignored)
+## Migration Status
+
+Services are being moved from `web/` root to `app/core/services/`.
+The `web/` copies are backward-compatible re-export shims:
+
+```python
+# web/knowledge_base.py (shim)
+from app.core.services.knowledge_base import *  # noqa
+```
+
+When importing, prefer `app.core.services.xxx` for new code.
