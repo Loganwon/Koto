@@ -94,6 +94,8 @@ def create_flask_app(import_name: str):
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         # Prevent clickjacking
         response.headers.setdefault("X-Frame-Options", "DENY")
+        response.headers.setdefault("X-API-Version", "1.0")
+        response.headers.setdefault("X-Koto-Version", _read_app_version())
 
         return response
     @app.after_request
@@ -198,7 +200,10 @@ def create_flask_app(import_name: str):
     _gzip_app = app
 
     class _GzipMiddleware:
-        """WSGI middleware that gzip-compresses text responses."""
+        """WSGI middleware that gzip-compresses text responses.
+
+        Always calls start_response (required by WSGI spec).
+        """
         COMPRESSIBLE_CT = (
             "text/", "application/json", "application/javascript",
             "image/svg", "application/xml"
@@ -212,24 +217,33 @@ def create_flask_app(import_name: str):
             if "gzip" not in accept.lower():
                 return self.app(environ, start_response)
 
-            def _gzip_start_response(status, headers, exc_info=None):
-                self._status = status
-                self._headers = headers
-                self._compress = False
-                ct = ""
-                for name, value in headers:
-                    if name.lower() == "content-type":
-                        ct = value.lower()
-                        break
-                if any(t in ct for t in self.COMPRESSIBLE_CT):
-                    self._compress = True
+            captured = {}
 
-            body = list(self.app(environ, _gzip_start_response))
-            if not getattr(self, "_compress", False) or not body:
+            def _capture(status, headers, exc_info=None):
+                captured["status"] = status
+                captured["headers"] = headers
+
+            body = list(self.app(environ, _capture))
+            status = captured.get("status", "200 OK")
+            headers = captured.get("headers", [])
+
+            if not body:
+                start_response(status, headers)
+                return body
+
+            ct = ""
+            for name, value in headers:
+                if name.lower() == "content-type":
+                    ct = value.lower()
+                    break
+
+            if not any(t in ct for t in self.COMPRESSIBLE_CT):
+                start_response(status, headers)
                 return body
 
             data = b"".join(body)
             if len(data) < 500:
+                start_response(status, headers)
                 return body
 
             buf = _io.BytesIO()
@@ -238,7 +252,7 @@ def create_flask_app(import_name: str):
             compressed = buf.getvalue()
 
             new_headers = []
-            for name, value in self._headers:
+            for name, value in headers:
                 low = name.lower()
                 if low == "content-length":
                     new_headers.append((name, str(len(compressed))))
@@ -249,9 +263,10 @@ def create_flask_app(import_name: str):
             new_headers.append(("Content-Encoding", "gzip"))
             new_headers.append(("Vary", "Accept-Encoding"))
 
-            start_response(self._status, new_headers)
+            start_response(status, new_headers)
             return [compressed]
 
     app.wsgi_app = _GzipMiddleware(app.wsgi_app)
 
-    return app, _read_app_version(), cors_origins
+    APP_VERSION = _read_app_version()
+    return app, APP_VERSION, cors_origins

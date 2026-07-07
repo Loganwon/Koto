@@ -50,6 +50,7 @@ class ServiceRegistry:
         self._module: Any = None
         self._cache: dict[str, Any] = {}
         self._shutdown_hooks: list[Callable[[], None]] = []
+        self._factories: dict[str, Callable[[], Any]] = {}
 
     # -- module access --
 

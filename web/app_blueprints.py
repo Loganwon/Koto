@@ -43,6 +43,7 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.token_stats", "token_stats_bp", None, "TokenStats"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
+    ("web.blueprints.tasks", "tasks_bp", None, "Tasks"),
     (
         "web.blueprints.workspace_assistant",
         "workspace_assistant_bp",
@@ -319,6 +320,20 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         from web.runtime_context import get_memory_manager
 
         register_memory_routes(app, get_memory_manager)
+        logger.info("[Memory] ?? API ???")
+    except ImportError as exc:
+        logger.warning(f"[Memory] ?????? API: {exc}")
+    except Exception as exc:
+        logger.warning(f"[Memory] ?? API ????: {exc}")
+
+    try:
+        from web.blueprints.parallel_api import register_parallel_api
+        register_parallel_api(app)
+        logger.info("[Parallel] ?? API ???")
+    except ImportError as exc:
+        logger.warning(f"[Parallel] ????: {exc}")
+    except Exception as exc:
+        logger.warning(f"[Parallel] ????: {exc}")
         logger.info("[MemoryAPI] ✅ 增强记忆系统 API 已注册")
     except ImportError as exc:
         logger.warning(f"[MemoryAPI] ⚠️ 增强记忆系统 API 未找到: {exc}")

@@ -3179,6 +3179,11 @@ if __name__ == "__main__":
             task_scheduler.start()
             print("⏰ 任务调度器已启动")
 
+            # 启动后台任务队列
+            from web.task_queue import task_queue
+            task_queue.start()
+            print("📋 后台任务队列已启动")
+
             # 初始化自动归纳调度器（如果已启用）
             auto_catalog = get_auto_catalog_scheduler()
             if auto_catalog.is_auto_catalog_enabled():
