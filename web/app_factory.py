@@ -5,7 +5,7 @@ import os
 import uuid
 from pathlib import Path
 
-from flask import Flask, jsonify, request
+from flask import Flask, g, jsonify, request
 from flask_cors import CORS
 try:
     from flask_wtf.csrf import CSRFProtect
@@ -75,8 +75,7 @@ def create_flask_app(import_name: str):
 
     # Add cache-control headers for static assets
 
-    # ── Gzip compression for text assets ─────────────────────────────
-    @app.after_request
+    # ── Request tracing: inject request_id ────────────────────────────
     @app.after_request
     def _set_security_headers(response):
         # CSP: allow inline scripts/styles (desktop app, nonce too heavy)
@@ -109,11 +108,29 @@ def create_flask_app(import_name: str):
                 response.headers["Cache-Control"] = "public, max-age=3600"
         return response
 
+
     # Register service registry shutdown on app teardown
     try:
         from web.runtime_context import service_registry
         import atexit
         atexit.register(service_registry.shutdown)
+    except Exception:
+        pass
+
+    # ── Request deduplication ─────────────────────────────────────────
+    try:
+        from web.request_dedup import deduplicator
+        app.before_request(deduplicator.check_or_register)
+        app.after_request(deduplicator.release_current)
+    except Exception:
+        pass
+
+
+
+    # ── Structured JSON logging ───────────────────────────────────────
+    try:
+        from web.structured_logging import install_json_formatter
+        install_json_formatter()
     except Exception:
         pass
 
