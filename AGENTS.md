@@ -1,4 +1,4 @@
-﻿# Koto AI - Agent Guidelines
+# Koto AI - Agent Guidelines
 
 ## Project Overview
 
@@ -96,6 +96,13 @@ These files exceed 1000 lines and should be split when touched:
 
 ## Running
 
+```bash
+# Always use the venv Python (NOT the system Python):
+.venv\\Scripts\\python.exe -m web.app
+
+# Or use the launcher script:
+start_koto.bat
+```
 ```bash
 # Development
 python -m web.app

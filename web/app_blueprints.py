@@ -43,7 +43,6 @@ _WEB_BLUEPRINT_CONFIGS = [
     ("web.blueprints.token_stats", "token_stats_bp", None, "TokenStats"),
     ("web.blueprints.chat", "chat_bp", None, "Chat"),
     ("web.blueprints.editor_ai", "editor_ai_bp", None, "EditorAI"),
-    ("web.blueprints.tasks", "tasks_bp", None, "Tasks"),
     (
         "web.blueprints.workspace_assistant",
         "workspace_assistant_bp",
@@ -120,6 +119,7 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
         from app.api.task_routes import task_bp as _task_bp
 
         app.register_blueprint(_task_bp, url_prefix="/api/tasks")
+        _exempt_csrf_endpoint(app, "tasks.submit_background_task")
         logger.info("[TaskAPI] ✅ 任务管理 API 已注册: /api/tasks")
     except ImportError as exc:
         logger.warning(f"[TaskAPI] ⚠️ 未能导入任务管理 API 蓝图: {exc}")

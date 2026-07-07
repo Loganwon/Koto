@@ -76,6 +76,13 @@ def create_flask_app(import_name: str):
     # Add cache-control headers for static assets
 
     # ── Request tracing: inject request_id ────────────────────────────
+    # ── Request tracing ────────────────────────────────────────────
+    @app.before_request
+    def _inject_request_id():
+        """Inject a unique request_id into every request context."""
+        g.request_id = str(uuid.uuid4())[:12]
+        g._request_start_ms = int(__import__("time").monotonic() * 1000)
+
     @app.after_request
     def _set_security_headers(response):
         # CSP: allow inline scripts/styles (desktop app, nonce too heavy)
@@ -110,6 +117,23 @@ def create_flask_app(import_name: str):
                 response.headers["Cache-Control"] = "public, max-age=3600"
         return response
 
+
+
+    # ── Request logging ───────────────────────────────────────────
+    @app.after_request
+    def _log_request(response):
+        """Log every request with method, path, status, duration."""
+        rid = getattr(g, "request_id", "-")
+        start_ms = getattr(g, "_request_start_ms", 0)
+        elapsed = int(__import__("time").monotonic() * 1000) - start_ms
+        logger = logging.getLogger("koto.app")
+        logger.info(
+            "[%s] %s %s → %d (%dms)",
+            rid, request.method, request.path,
+            response.status_code, elapsed,
+        )
+        response.headers["X-Request-ID"] = rid
+        return response
 
     # Register service registry shutdown on app teardown
     try:
