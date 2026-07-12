@@ -44,7 +44,7 @@ def test_pdf_open_path_surfaces_errors_in_the_viewer():
     assert "function _showPdfOpenError" in src
     assert "PDF 加载失败" in src
     assert "await _ensurePdfJS()" in src
-    assert "await state.activeEditor.render(data && data.raw_url, data)" in src
+    assert "await state.activeEditor!.render(data && data.raw_url, data)" in src
     assert "_showPdfOpenError(error)" in src
 
 

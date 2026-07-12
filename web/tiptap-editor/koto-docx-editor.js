@@ -801,15 +801,7 @@ export class KotoTipTapEditor {
     }
 
     // ── Pass header/footer HTML to DocxPageBreak extension storage ───────
-    // The NodeView reads from storage so each break renders the same
-    // header/footer. Must be set before the NodeViews are created (they
-    // read storage on first render, triggered by requestAnimationFrame).
-    if (this.editor.storage?.docxPageBreak) {
-      this.editor.storage.docxPageBreak.headerHtml = this._headerHtml || '';
-      this.editor.storage.docxPageBreak.footerHtml = this._footerHtml || '';
-    }
-
-    // ── Pass page dimensions + header/footer to AutoPageBreakPlugin ──────
+    // ── Pass page dimensions + header/footer to the single pagination runtime ──
     // These values are used by the plugin to measure content heights and
     // insert soft-break widget decorations at page boundaries.
     if (this.editor.storage?.autoPageBreak) {
@@ -2953,7 +2945,6 @@ export class KotoTipTapEditor {
 
     this._headerHtml = html;
     if (this.editor?.storage?.autoPageBreak) this.editor.storage.autoPageBreak.headerHtml = html;
-    if (this.editor?.storage?.docxPageBreak) this.editor.storage.docxPageBreak.headerHtml = html;
     this._updateSectionField('header_html', html, true);
 
     this._refreshPageChromeShells(this._totalPages || 1);
@@ -2972,7 +2963,6 @@ export class KotoTipTapEditor {
 
     this._footerHtml = html;
     if (this.editor?.storage?.autoPageBreak) this.editor.storage.autoPageBreak.footerHtml = html;
-    if (this.editor?.storage?.docxPageBreak) this.editor.storage.docxPageBreak.footerHtml = html;
     this._updateSectionField('footer_html', html, true);
 
     this._refreshPageChromeShells(this._totalPages || 1);

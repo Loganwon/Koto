@@ -168,8 +168,8 @@ def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
     assert "setWorkspaceAiComposerValue('chat', text" in conversation_list
     assert "setWorkspaceAiComposerValue('chat', text" in ai_review
     assert "wa-session-list-input" not in conversation_list
-    assert "function resizeWorkspaceAiComposer" in bundle
-    assert "function mountWorkspaceAiComposer" in bundle
+    assert "wa-chat-composer-host" in bundle
+    assert "wa-session-list-composer-host" in bundle
     assert "submitUnifiedAiComposer" in bundle
 
 
@@ -186,4 +186,4 @@ def test_workspace_ai_session_api_is_split_from_list_rendering() -> None:
     assert "createAiSessionRecord()" in conversation_list
     assert "deleteAiSessionRecord(normalized)" in conversation_list
     assert "fetch('/api/sessions?preview=1'" not in conversation_list
-    assert "function fetchAiSessionPreviews" in bundle
+    assert "/api/sessions?preview=1" in bundle

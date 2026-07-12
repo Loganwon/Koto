@@ -34,3 +34,22 @@ def test_settings_open_does_not_override_server_zoom_with_stale_local_storage() 
     assert "setUIZoom(String(savedZoom), true)" in apply_body
     assert "localStorage.setItem('koto.uiZoom', normalizedZoom);" in theme
     assert "Math.max(0.7, Math.min(1.5" in theme
+
+
+def test_settings_controls_have_one_persisted_runtime_path() -> None:
+    panel = _read("web/templates/_settings_panel.html")
+    settings = _read("web/src/app/settings.ts")
+    theme = _read("web/src/app/theme.ts")
+    chat_ui = _read("web/src/app/chat-ui.ts")
+
+    assert "oninput=\"previewUIZoom(this.value / 100)\"" in panel
+    assert "onchange=\"setUIZoom(this.value / 100)\"" in panel
+    assert "onBooleanSettingChange(this, 'ai', 'enable_mini_game')" in panel
+    assert "export async function onBooleanSettingChange" in settings
+    assert "return false;" in settings[settings.index("export async function updateSetting") :]
+    assert "if (localOnly)" in settings[settings.index("export async function onLocalModelChange") :]
+    assert "export function previewUIZoom" in theme
+    assert "currentSettings?.appearance?.ui_zoom" in theme
+    assert "_systemThemeQuery.addEventListener('change'" in theme
+    assert "const enableMiniGame" not in chat_ui
+    assert "(window as any).enableMiniGame === false" in chat_ui

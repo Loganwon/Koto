@@ -225,11 +225,19 @@ function _isReviewCommentModeEnabled(): boolean {
 
 function _getReviewCommentSelectionState(): any {
   const snapshot = state._reviewSelectionSnapshot || null;
-  if (snapshot && _clean(snapshot.rawText || snapshot.text)) return snapshot;
   const selection = window.getSelection();
+  if (snapshot && _clean(snapshot.rawText || snapshot.text)) {
+    return { ...snapshot, supported: true, selection };
+  }
   const rawText = selection ? _clean(selection.toString()) : '';
-  if (!rawText) return { valid: false, message: '请先选中文档正文' };
-  return { valid: true, rawText, previewText: _previewReviewText(rawText, 80) };
+  if (!rawText) return { valid: false, supported: false, selection: null, message: '请先选中文档正文' };
+  return {
+    valid: true,
+    supported: true,
+    selection,
+    rawText,
+    previewText: _previewReviewText(rawText, 80),
+  };
 }
 
 function _getReviewLayout(): any {
@@ -870,6 +878,7 @@ document.addEventListener('selectionchange', () => {
 (window as any)._syncReviewSelectionSnapshot = _captureReviewSelection;
 (window as any)._renderReviewSelectionLauncher = () => _getReviewLayout()?.renderReviewSelectionLauncher?.();
 (window as any)._hideReviewSelectionLauncher = () => _getReviewLayout()?.hideReviewSelectionLauncher?.();
+(window as any)._isReviewCommentModeEnabled = _isReviewCommentModeEnabled;
 (window as any)._isReviewEditorFocused = _isReviewEditorFocused;
 (window as any)._isReviewShellFocused = () => !!document.activeElement?.closest?.('#wa-review-shell');
 
@@ -878,8 +887,6 @@ document.addEventListener('selectionchange', () => {
 (window as any).WA.createReviewComment = _createReviewComment;
 (window as any).WA.createReviewRevision = _createReviewRevision;
 (window as any).WA.openReviewCenter = () => { _setReviewCenterOpen(true); _renderReviewShell(); };
-(window as any).WA.closeReviewCenter = () => { _setReviewCenterOpen(false); _renderReviewShell(); };
-(window as any).WA.setReviewMode = (mode: string) => { _setStoredReviewMode(mode); _setReviewCenterOpen(true); _renderReviewShell(); };
 (window as any).WA.toggleReviewCommentMode = (forceOpen?: boolean) => {
   if (state.fileType !== 'docx') {
     showToast('当前仅 DOCX 文档支持批注模式', 'info');

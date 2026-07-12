@@ -9,6 +9,14 @@ def _read(rel_path: str) -> str:
     return (_repo_root() / rel_path).read_text(encoding="utf-8")
 
 
+def test_review_state_reads_preserve_live_entry_identity():
+    source = _read("web/src/review/state.ts")
+
+    assert "Object.assign(comment, normalizeReviewComment(comment, index))" in source
+    assert "Object.assign(proposal, normalizeReviewProposal(proposal, index))" in source
+    assert "existing.comments = rawComments.map(normalizeReviewComment)" not in source
+
+
 def test_review_shell_entry_is_present_without_ai_comment_entrypoints():
     embedded_html = _read("web/templates/index.html")
     asset_partial = _read("web/templates/_workspace_asset_scripts.html")
@@ -67,6 +75,10 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     assert "(window as any).WA.focusReviewThread" in js
     assert "function _coerceReviewModeForVisibleContent" in js
     assert "function _getReviewCommentSelectionState(): any" in js
+    assert "supported: true" in js
+    assert "supported: false, selection: null" in js
+    assert "selectionState.supported" in layout_js
+    assert "selectionState && selectionState.selection" in layout_js
     assert "const includeAnchorMeta = !!opts.includeAnchorMeta;" in js
     assert "function _getDocxSelectionPayload(options?:" in js
     assert "function _renderReviewNavMenu(): void" in js
@@ -116,16 +128,13 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
         "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot as HTMLElement);"
         in layout_js
     )
-    assert (
-        "if (!textIndex) textIndex = svg._buildReviewTextIndex(contentRoot);"
-        in review_bundle
-    )
+    assert "_buildReviewTextIndex" in review_bundle
     assert "function _ensureReviewAnchorHighlightLayer" in layout_js
     assert "function _drawReviewAnchorHighlight" in layout_js
     assert "wa-review-anchor-highlight-layer" in review_bundle
     assert "wa-review-anchor-highlight-rect" in review_bundle
     assert (
-        "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);"
+        "const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl!).paddingRight) || 0);"
         in layout_js
     )
     assert (

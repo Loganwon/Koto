@@ -10,6 +10,7 @@ import {
   isFileTaskConfirmationStatus,
   normalizeFileTaskTerminalStatus,
 } from './file-task-status';
+import { _renderTabs } from './state';
 
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
@@ -23,7 +24,6 @@ declare let _waTaskDispatcher: any;
 declare function _escHtml(s: any): string;
 declare function showToast(message: string, kind?: string, duration?: number): void;
 declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-declare function _renderTabs(): void;
 declare function _renderMyWorkspace(): void;
 declare function _notifyPyModified(tab: any, modified: boolean): void;
 declare function _initWorkspaceAiRuntimes(): void;

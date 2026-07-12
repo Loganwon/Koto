@@ -393,12 +393,44 @@ export function _runTextDecoration(run: any): string {
   return parts.join(' ');
 }
 
+/**
+ * Returns true when the keydown target is an input, textarea, or contenteditable
+ * element whose native editing behaviour should not be intercepted by the PPTX
+ * global keyboard handler.
+ */
+export function _shouldIgnorePptxGlobalKeydown(target: EventTarget | null): boolean {
+  if (!target) return false;
+  const el = target as HTMLElement;
+  if (!el || !el.tagName) return false;
+  const tag = el.tagName.toUpperCase();
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if ((el as any).isContentEditable) return true;
+  // Check for contenteditable attribute on ancestors
+  let parent = el.parentElement;
+  while (parent) {
+    if ((parent as any).isContentEditable) return true;
+    parent = parent.parentElement;
+  }
+  return false;
+}
+
 // Backward compatibility
 (window as any).$ = $;
 (window as any)._csrfFetch = _csrfFetch;
 (window as any)._escHtml = _escHtml;
 (window as any)._hexLuma = _hexLuma;
 (window as any)._safeTextColor = _safeTextColor;
+(window as any)._shouldIgnorePptxGlobalKeydown = _shouldIgnorePptxGlobalKeydown;
+// _saveEditorRange — preserve editor selection before focus leaves
+// Called by the quick-action / selection-toolbar path so the editor can
+// restore the selection later when applying AI replacements.
+(window as any).WA = (window as any).WA || {};
+(window as any).WA._saveEditorRange = () => {
+  const editor = (window as any).state?.activeEditor;
+  if (editor && typeof editor.saveSelection === 'function') {
+    try { editor.saveSelection(); } catch (_) { /* noop */ }
+  }
+};
 (window as any)._runTextDecoration = _runTextDecoration;
 (window as any)._fileIcon = _fileIcon;
 (window as any)._DEFAULT_FILE_SVG = _DEFAULT_FILE_SVG;

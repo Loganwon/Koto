@@ -617,11 +617,28 @@ async function _openFilePicker(options?: { multiple?: boolean; fallbackInputId?:
       }
       await _loadPickedFiles(files);
     } catch (error: any) {
-      if (error && error.name !== 'AbortError') showToast('无法打开文件: ' + error.message, 'error');
+      if (error && error.name === 'AbortError') {
+        showToast('已取消选择文件', 'info');
+      } else if (error) {
+        showToast('无法打开文件: ' + error.message, 'error');
+      }
     }
     return;
   }
-  if (fallbackInput) fallbackInput.click();
+  if (!fallbackInput) {
+    showToast('文件选择器不可用，请刷新页面后重试', 'error');
+    return;
+  }
+  let selectionChanged = false;
+  const markSelection = () => { selectionChanged = true; };
+  const reportCancelledSelection = () => {
+    window.setTimeout(() => {
+      if (!selectionChanged) showToast('未选择文件', 'info');
+    }, 180);
+  };
+  fallbackInput.addEventListener('change', markSelection, { once: true });
+  window.addEventListener('focus', reportCancelledSelection, { once: true });
+  fallbackInput.click();
 }
 
 function _supportedFolderFiles(files: FileList | File[]): File[] {

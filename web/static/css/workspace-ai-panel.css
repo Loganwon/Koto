@@ -472,6 +472,9 @@
   line-height: 1;
   white-space: nowrap;
   overflow: hidden;
+  font: inherit;
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .wa-model-mode-toggle-btn:hover:not(:disabled) {
@@ -497,6 +500,31 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.wa-model-mode-sub {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  color: inherit;
+  font-size: 10.5px;
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.wa-model-mode-sub::before {
+  content: '·';
+  flex: 0 0 auto;
+  margin: 0 4px;
+  color: currentColor;
+  opacity: 0.55;
+}
+
+.wa-model-mode-sub[hidden] {
+  display: none !important;
 }
 
 

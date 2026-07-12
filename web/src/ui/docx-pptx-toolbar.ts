@@ -2,38 +2,21 @@
  * DOCX/PPTX toolbar bridges - hoverbar formatting, slide operations, shape operations.
  */
 
+import { _getDocxSelectionPayload, _showTableTooltipNear } from './selection-toolbar';
+
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
 declare let WA: any;
 declare let lastSelectionText: string;
-declare let _docxCpEl: HTMLElement | null;
-declare let _docxHbEl: HTMLElement | null;
-declare let _docxNativeSelBottom: number;
-declare let _docxMouseUpY: number;
+let _docxCpEl: HTMLElement | null = null;
+let _docxHbEl: HTMLElement | null = null;
 
 declare function _escHtml(s: any): string;
 declare function showToast(message: string, kind?: string, duration?: number): void;
 declare function _evtEl(target: EventTarget | null): Element | null;
-declare function _getDocxRibbonToolbar(): HTMLElement | null;
-declare function _ensureDocxHoverBar(): HTMLElement | null;
-declare function _hideDocxHoverBar(): void;
-declare function _resetDocxSelection(): void;
-declare function _syncDocxHoverBar(): void;
-declare function _getDocxSelectionPayload(opts?: any): any;
-declare function _getDocxHdrFtrSelectionInfo(): any;
 declare function _updateContextBar(opts?: any): void;
-declare function _showTableTooltipNear(el: HTMLElement): void;
 declare function _updateDocxZoomUI(zoom: number): void;
-declare function _isReviewCommentModeEnabled(): boolean;
-declare function _hideReviewSelectionLauncher(): void;
-declare function _updateSubjectBar(fileName: string, fileType: string): void;
 declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-declare function _downloadBlob(blob: Blob, filename: string): void;
-declare function _resolveDocxFontFamily(name: string): string;
-declare function _getDocxFontFamilyOptionValue(fontName: string, options: any): string;
-declare function _getDocxFontDisplayName(fontName: string): string;
-declare function _getDocxBlockTextStyleValue(ed: any, prop: string): string;
-declare function _extractDocxStyleValue(style: string, property: string): string;
 
 const _CP_COLORS = [
   '#000000','#1f1f1f','#595959','#808080','#a6a6a6','#d9d9d9','#f2f2f2','#ffffff',
@@ -42,6 +25,73 @@ const _CP_COLORS = [
   '#1f3864','#2e75b6','#4472c4','#9dc3e6','#7030a0','#984ea3','#c9a0dc','#d9e1f2',
   '#c55a11','#843c0c','#7f1d1d','#002060','#00bcd4','#009688','#4caf50','#607d8b',
 ];
+
+function _getDocxRibbonToolbar(): HTMLElement | null {
+  return document.getElementById('koto-tt-toolbar')
+    || document.getElementById('wa-editor-toolbar');
+}
+
+function _ensureDocxHoverBar(): HTMLElement | null {
+  if (!_docxHbEl || !_docxHbEl.isConnected) {
+    _docxHbEl = document.getElementById('wa-docx-hoverbar');
+  }
+  if (!_docxCpEl || !_docxCpEl.isConnected) {
+    _docxCpEl = document.getElementById('wa-docx-cp');
+  }
+  (window as any)._docxHbEl = _docxHbEl;
+  (window as any)._docxCpEl = _docxCpEl;
+  return _docxHbEl;
+}
+
+function _hideDocxHoverBar(): void {
+  _ensureDocxHoverBar();
+  if (_docxHbEl) _docxHbEl.style.display = 'none';
+  if (_docxCpEl) _docxCpEl.style.display = 'none';
+}
+
+function _syncDocxHoverBar(): void {
+  _syncDocxHoverBarFromRibbon();
+}
+
+function _resetDocxSelection(): void {
+  const reset = (window as any)._resetDocxSelection;
+  if (typeof reset === 'function') reset();
+}
+
+function _isReviewCommentModeEnabled(): boolean {
+  const check = (window as any)._isReviewCommentModeEnabled;
+  if (typeof check === 'function') return !!check();
+  return state?.fileType === 'docx'
+    && state?._reviewCenterOpen !== false
+    && state?._reviewMode === 'comments';
+}
+
+function _hideReviewSelectionLauncher(): void {
+  const hide = (window as any)._hideReviewSelectionLauncher;
+  if (typeof hide === 'function') hide();
+}
+
+function _updateSubjectBar(fileName: string, fileType: string): void {
+  const update = (window as any).WA?._updateSubjectBar
+    || (window as any)._updateSubjectBar;
+  if (typeof update === 'function') update(fileName, fileType);
+}
+
+function _resolveDocxFontFamily(name: string): string {
+  return String(name || '').trim();
+}
+
+function _getDocxFontFamilyOptionValue(fontName: string, options: any): string {
+  const resolved = _resolveDocxFontFamily(fontName);
+  const normalized = resolved.toLowerCase();
+  const matches = Array.from(options || []) as HTMLOptionElement[];
+  const exact = matches.find((option) => String(option.value || '').toLowerCase() === normalized);
+  return exact ? exact.value : '';
+}
+
+function _getDocxFontDisplayName(fontName: string): string {
+  return _resolveDocxFontFamily(fontName).split(',')[0].replace(/^['"]|['"]$/g, '');
+}
 
 function _safeGetDocxHdrFtrSelectionInfo(): any {
   const getter = (window as any)._getDocxHdrFtrSelectionInfo;
@@ -225,6 +275,15 @@ export function _showDocxHoverBar(): void {
 
   const ed = state.activeEditor && state.activeEditor.editor;
   if (!ed) return;
+  // Review mode owns the native selection and uses it to position the comment
+  // launcher. Exit before the formatting path attempts to normalize or clear
+  // a selection that ProseMirror has not mirrored yet.
+  if (_isReviewCommentModeEnabled()) {
+    _hideDocxHoverBar();
+    const tt = $('wa-pdf-tooltip');
+    if (tt) tt.style.display = 'none';
+    return;
+  }
   const overlaySelection = _safeGetDocxHdrFtrSelectionInfo();
   const docxSelection = overlaySelection ? null : _getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false });
   let bounds: any = null;
@@ -256,13 +315,6 @@ export function _showDocxHoverBar(): void {
   }
   if (!selText) { _resetDocxSelection(); return; }
 
-  if (_isReviewCommentModeEnabled()) {
-    _hideDocxHoverBar();
-    const tt = $('wa-pdf-tooltip');
-    if (tt) tt.style.display = 'none';
-    return;
-  }
-
   if ((window as any)._docxHoverForceHiddenText === selText) {
     _hideDocxHoverBar();
     return;
@@ -285,9 +337,11 @@ export function _showDocxHoverBar(): void {
   const vh = window.innerHeight;
   const vw = window.innerWidth;
 
+  const nativeSelectionBottom = Number((window as any)._docxNativeSelBottom) || 0;
+  const mouseUpY = Number((window as any)._docxMouseUpY) || 0;
   const anchorY = bounds.bottom > 0
     ? bounds.bottom
-    : (_docxNativeSelBottom > 0 ? _docxNativeSelBottom : _docxMouseUpY);
+    : (nativeSelectionBottom > 0 ? nativeSelectionBottom : mouseUpY);
 
   const STACK_GAP = 8;
   const SELECTION_GAP = 2;
@@ -359,8 +413,14 @@ export function _kotoDocxSelectionChanged(): void {
     const overlaySelection = _safeGetDocxHdrFtrSelectionInfo();
     const docxSelection = _getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false });
     if (!overlaySelection && !docxSelection) {
+      // Clear stale toolbar selection to prevent phantom reappearances
+      if (state.activeEditor && state.activeEditor._toolbarSelection) {
+        state.activeEditor._toolbarSelection = null;
+      }
       _resetDocxSelection();
     } else if (!(state as any)._docxMouseIsDown) {
+      // _showDocxHoverBar handles both the formatting hoverbar and the
+      // quick-assistant selection toolbar (快捷助手) as a stacked layout.
       _showDocxHoverBar();
     }
   }, 50);
@@ -523,11 +583,36 @@ export function closeDocxHoverBar(): void {
   _resetDocxSelection();
 }
 
-export function closeSelectionToolbar(): void {
-  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
-  const tt = $('wa-pdf-tooltip');
-  if (tt) tt.style.display = 'none';
-  if (state.fileType === 'docx') _resetDocxSelection();
+
+// ── Header / Footer overlay selection helper ──────────────────────
+// Provides the selection text + viewport bounds for the currently active
+// header/footer overlay so the hoverbar and selection toolbar can show
+// quick actions (润色/翻译/解释 etc.) on header/footer content.
+function _buildHdrFtrSelectionInfo(): { text: string; bounds: any } | null {
+  const overlay = document.querySelector('#wa-docx-editor .koto-hdrftr-overlay.is-active');
+  if (!overlay) return null;
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if (!overlay.contains(range.commonAncestorContainer)) return null;
+  const text = sel.toString().trim();
+  if (!text) return null;
+  const rects = range.getClientRects();
+  let top = Infinity, bottom = -Infinity, left = Infinity, right = -Infinity;
+  for (let i = 0; i < rects.length; i++) {
+    const r = rects[i];
+    if (r.height <= 0 || r.width <= 0) continue;
+    if (r.top < top) top = r.top;
+    if (r.bottom > bottom) bottom = r.bottom;
+    if (r.left < left) left = r.left;
+    if (r.right > right) right = r.right;
+  }
+  if (top === Infinity) {
+    const br = range.getBoundingClientRect();
+    if (!br || br.height <= 0) return null;
+    return { text, bounds: { top: br.top, bottom: br.bottom, left: br.left, right: br.right, centerX: br.left + br.width / 2 } };
+  }
+  return { text, bounds: { top, bottom, left, right, centerX: (left + right) / 2 } };
 }
 
 // ── PPTX shape/slide operations ───────────────────────────────────
@@ -1108,7 +1193,6 @@ if (typeof window !== 'undefined') {
   (window as any).WA.docxColorPicker = docxColorPicker;
   (window as any).WA._docxPickColor = _docxPickColor;
   (window as any).WA.closeDocxHoverBar = closeDocxHoverBar;
-  (window as any).WA.closeSelectionToolbar = closeSelectionToolbar;
   (window as any).WA.pptxShapeFill = pptxShapeFill;
   (window as any).WA.pptxShapeBorder = pptxShapeBorder;
   (window as any).WA.pptxBorderWidth = pptxBorderWidth;
@@ -1159,5 +1243,6 @@ if (typeof window !== 'undefined') {
   (window as any).WA._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
   (window as any)._getDocxSelBounds = _getDocxSelBounds;
   (window as any)._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
+(window as any)._getDocxHdrFtrSelectionInfo = _buildHdrFtrSelectionInfo;
   (window as any)._kotoDocxSelectionChanged = _kotoDocxSelectionChanged;
 }

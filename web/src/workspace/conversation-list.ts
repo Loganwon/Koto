@@ -73,7 +73,7 @@ function _setChatHeader(sessionId?: string): void {
   const meta = _sessions.find((session) => session.id === id) || (id ? { id, title: sessionTitle(null, id) } : null);
   const title = $('wa-ai-chat-title');
   const subtitle = $('wa-ai-chat-subtitle');
-  if (title) title.textContent = sessionTitle(meta, _activeAiSessionId);
+  if (title) title.textContent = sessionTitle(meta, _activeAiSessionId) || 'Koto AI';
   if (subtitle) {
     const count = Number(meta && meta.message_count || 0);
     const taskCount = Number(meta && meta.task_count || 0);
@@ -81,7 +81,7 @@ function _setChatHeader(sessionId?: string): void {
       count ? `${count} 条消息` : '',
       taskCount ? `${taskCount} 个任务` : '',
     ].filter(Boolean);
-    subtitle.textContent = parts.length ? parts.join(' · ') : '新对话 · 直接输入问题或附加文件';
+    subtitle.textContent = parts.length ? parts.join(' · ') : '新对话 · 输入问题或拖入文件开始';
   }
 }
 
@@ -92,7 +92,7 @@ function _renderLoading(): void {
   _syncSessionActionState();
 }
 
-function _renderEmpty(message = '暂无对话与任务'): void {
+function _renderEmpty(message = '发送第一条消息开始对话'): void {
   const list = $('wa-ai-session-list');
   if (!list) return;
   list.innerHTML = `
@@ -136,7 +136,7 @@ function _renderSessions(): void {
     const active = session.id === _activeAiSessionId ? ' is-active' : '';
     const taskTitle = String(session.latest_task_title || '').trim();
     const title = taskTitle || sessionTitle(session, _activeAiSessionId);
-    const preview = session.preview || '暂无消息';
+    const preview = session.preview || '（空消息）';
     const time = formatSessionTime(session);
     const count = Number(session.message_count || 0);
     const countText = count ? `${count} 条消息` : '空会话';
@@ -218,6 +218,15 @@ function _showChatView(): void {
   if (chatView) chatView.hidden = false;
   mountWorkspaceAiComposer('chat');
   _setChatHeader();
+}
+
+/**
+ * The activity-bar AI entry is a conversation entry point, not a history
+ * browser.  Keep the history list behind the back button in the chat header.
+ */
+export function showAiChat(): void {
+  _showChatView();
+  _focusComposer();
 }
 
 export function showAiSessionList(): void {
@@ -361,7 +370,7 @@ export async function newAiSession(options: NewSessionOptions = {}): Promise<any
     const sessionId = await createAiSessionRecord();
     await refreshAiSessions({ silent: true });
     const opened = await openAiSession(sessionId, { force: true });
-    if (options.toast !== false) showToast('新对话已创建，直接输入问题或附加文件即可开始。', 'success');
+    if (options.toast !== false) showToast('新对话已创建，在下方输入框开始吧。', 'success');
     if (options.focus !== false) _focusComposer();
     return opened;
   } catch (error: any) {
@@ -492,7 +501,7 @@ export function syncAiSessionSelection(sessionId: string, options: { showChat?: 
 function _initAiSessionBrowser(): void {
   if (!$('wa-ai-session-list-view')) return;
   _bindAiSessionBrowser();
-  mountWorkspaceAiComposer(workspaceAiComposerMode());
+  _showChatView();
   _setChatHeader(_activeAiSessionId);
   refreshAiSessions({ silent: true }).catch(() => {});
 }
@@ -500,6 +509,7 @@ function _initAiSessionBrowser(): void {
 if (typeof window !== 'undefined') {
   (window as any).WA = (window as any).WA || {};
   (window as any).WA.showAiSessionList = showAiSessionList;
+  (window as any).WA.showAiChat = showAiChat;
   (window as any).WA.refreshAiSessions = refreshAiSessions;
   (window as any).WA.openAiSession = openAiSession;
   (window as any).WA.deleteAiSession = deleteAiSession;

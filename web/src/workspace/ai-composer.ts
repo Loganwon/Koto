@@ -154,5 +154,5 @@ export function syncWorkspaceAiComposerSendState(kind: WorkspaceAiComposerKind):
   const input = getWorkspaceAiComposerInput();
   const button = getWorkspaceAiComposerSendButton();
   if (!button) return;
-  button.disabled = !input || input.disabled || (kind === 'sessionList' && !input.value.trim());
+  button.disabled = !input || input.disabled || !input.value.trim();
 }

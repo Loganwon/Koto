@@ -9,19 +9,20 @@ def _read(rel_path: str) -> str:
     return (_repo_root() / rel_path).read_text(encoding="utf-8")
 
 
-def test_main_chat_onboarding_uses_prompt_first_welcome():
+def test_main_chat_onboarding_uses_actionable_examples():
     html = _read("web/templates/index.html")
 
-    assert "直接开始" in html
-    assert "先说目标，再补充文件或上下文" in html
-    assert "直接告诉 Koto 你想完成什么" in html
-    assert "不必先选固定任务" in html
-    assert "welcome-capability-row" in html
-    assert "先帮我判断怎么做" in html
-    assert "先给我一个结果" in html
+    assert "你好，我是 Koto" in html
+    assert "直接告诉我你想做什么，我来帮你搞定" in html
+    assert "welcome-quick-cards" in html
+    assert "写文档" in html
+    assert "分析数据" in html
+    assert "做PPT" in html
+    assert "只需 3 步，开始使用 Koto" in html
     assert "快速开始 — 点击任意卡片填入示例" not in html
-    assert "写作与润色" not in html
     assert "insertSuggestionWithSkill(" not in html
+    assert "window.insertSuggestion = function(text)" in html
+    assert "document.getElementById('wa-user-input')" in html
 
 
 def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_flow():
@@ -36,9 +37,22 @@ def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_
     assert "早上好，有什么需要帮忙？☀️" in router_ts
 
 
+def test_hidden_legacy_composer_delegates_to_workspace_sender():
+    main_ts = _read("web/src/app/main.ts")
+    html = _read("web/templates/index.html")
+
+    assert "function delegateHiddenLegacySendToWorkspace(event?: Event)" in main_ts
+    assert "const workspaceSender = (window as any).WA?.sendMessage" in main_ts
+    assert "if (legacyMessage || workspaceInput.value.trim()) workspaceSender();" in main_ts
+    assert "Double-click / rapid-submit prevention" not in html
+    assert "_kotoResetSending" not in html
+    assert 'target: "#wa-chat-panel, #wa-user-input"' in html
+
+
 def test_setup_wizard_uses_deepseek_api_key_only():
     html = _read("web/templates/index.html")
     app_js = _read("web/static/js/build/app-bundle.js")
+    settings_ts = _read("web/src/app/settings.ts")
 
     assert "设置云端模型 API Key" in html
     assert 'id="setupProviderDeepSeek"' in html
@@ -46,6 +60,7 @@ def test_setup_wizard_uses_deepseek_api_key_only():
     assert "Gemini" not in html
     assert "Google AI Studio" not in html
     assert "platform.deepseek.com/api_keys" in app_js
-    assert "function selectSetupProvider(provider)" in app_js
+    assert "export function selectSetupProvider(provider: string)" in settings_ts
+    assert "window as any).selectSetupProvider = selectSetupProvider" in settings_ts
     assert "DeepSeek API Key" in app_js
     assert "Gemini" not in app_js

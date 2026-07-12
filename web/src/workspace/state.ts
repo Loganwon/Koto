@@ -1157,8 +1157,14 @@ wa.clearSearch = () => {
   if (typeof (window as any).WA !== 'undefined' && (window as any).WA.filterFiles) (window as any).WA.filterFiles('');
 };
 
+function _syncSectionToggleState(id: string, open: boolean): void {
+  const control = document.querySelector(`[data-wa-section-toggle="${CSS.escape(id)}"]`);
+  if (control) control.setAttribute('aria-expanded', String(open));
+}
+
 wa.toggleSection = (id: string) => {
   state.sectionOpen[id] = !state.sectionOpen[id];
+  _syncSectionToggleState(id, state.sectionOpen[id] !== false);
   localStorage.setItem('wa_sections', JSON.stringify(state.sectionOpen));
   if (id === 'myworkspace') {
     _toggleMyWorkspaceSection();
@@ -1180,6 +1186,7 @@ wa.refreshRecent = () => loadRecentFiles();
 
 wa.toggleRecentSection = () => {
   state._recentOpen = !state._recentOpen;
+  _syncSectionToggleState('recent', state._recentOpen);
   const list = document.getElementById('wa-recent-list');
   const arrow = document.getElementById('wa-recent-arrow');
   if (list) list.style.display = state._recentOpen ? '' : 'none';

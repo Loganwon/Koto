@@ -123,7 +123,9 @@ def test_workspace_close_warning_requires_real_unsaved_snapshot_and_clear_ui():
     assert "const actualUnsavedTabs = getUnsavedTabs();" in file_utils_ts
     assert "resolve('cancel');" in file_utils_ts
     assert "function _trapCloseWarnFocus" in file_utils_ts
-    assert "window.WA.isTabActuallyUnsaved = isTabActuallyUnsaved" in workspace_bundle
+    # The production bundle is minified, so the local function identifier is
+    # unstable; the public WA property is the observable contract.
+    assert "window.WA.isTabActuallyUnsaved=" in workspace_bundle
 
     close_warn_css = workspace_css[
         workspace_css.index(".wa-close-warn-overlay"):

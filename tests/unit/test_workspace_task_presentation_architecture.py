@@ -66,7 +66,7 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "(window as any)._waRenderMarkdown" in task_final_report
     assert "wa-task-final-report" in task_runner
     assert "const auditHtml = supervisorAuditHtml(data);" in task_runner
-    assert 'class="wa-task-final-report-title">总结与回答</div>' in task_runner
+    assert 'class="wa-task-final-report-title">任务结果</div>' in task_runner
     assert "renderTaskFinalReport(visibleSummary)" in task_runner
     assert "fileTaskOutcomeCopy" in task_runner
     assert "任务已完成，结果已显示在步骤下方" in file_task_status
@@ -83,6 +83,9 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "function terminalTaskAnswer(" in dispatcher
     assert "dataset.taskFinalAnswer || dataset.taskSummary" in dispatcher
     assert "wa-task-final-answer-title" in conversation
+    assert "function taskPlanSummaryFromElement(" in conversation
+    assert "task_plan_summary: taskPlanSummary" in conversation
+    assert "turn.task_plan_summary" in conversation
 
 
 def test_compact_task_card_keeps_process_steps_visible_before_summary() -> None:

@@ -200,7 +200,7 @@ def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fa
     shell_js = _workspace_runtime_sources()
 
     assert "async function _mountDocx(tab: TabInfo, data: any): Promise<void>" in shell_js
-    assert "new (window as any).KotoDocxEditorLib.KotoTipTapEditor();" in shell_js
+    assert "new (window as any).KotoDocxEditorLib.KotoTipTapEditor()" in shell_js
     assert "await _mountDocx(tab, data);" in shell_js
     assert "state.activeEditor.editor.selection" not in shell_js
     assert "Legacy Slate fallback (unused — kept for safety)" not in shell_js
@@ -279,7 +279,10 @@ def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
     assert "function _getDocxBlockTextStyleValue(ed, attrName)" in editor_js
     assert "_getDocxFontFamilyOptionValue(ff, fontFamilySel.options)" in editor_js
     assert "const nextValue = cmd === 'setFontFamily' ? _resolveDocxFontFamily(value)" in shell_js
-    assert "declare function _getDocxBlockTextStyleValue(ed: any, prop: string): string;" in shell_js
+    assert "function _ensureDocxHoverBar(): HTMLElement | null" in shell_js
+    assert "function _isReviewCommentModeEnabled(): boolean" in shell_js
+    assert "declare function _ensureDocxHoverBar" not in shell_js
+    assert "declare function _isReviewCommentModeEnabled" not in shell_js
     assert "_getDocxFontDisplayName(fontNameValue)" in shell_js
     assert '<option value="SimSun">' in index_html
     assert '<option value="STKaiti">' in index_html
@@ -288,6 +291,17 @@ def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
 def test_docx_hoverbar_reuses_ribbon_for_header_footer_overlay():
     js = _workspace_runtime_sources()
     assert "_safeGetDocxHdrFtrSelectionInfo" in js
+
+
+def test_docx_review_mode_keeps_native_selection_for_comment_launcher():
+    js = _workspace_runtime_sources()
+    show_start = js.index("export function _showDocxHoverBar(): void")
+    show_end = js.index("export function _kotoDocxSelectionChanged", show_start)
+    show_fn = js[show_start:show_end]
+
+    assert show_fn.index("if (_isReviewCommentModeEnabled())") < show_fn.index(
+        "_getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false })"
+    )
     assert "_syncDocxHoverBarFromRibbon" in js
     assert "_dispatchDocxRibbonClick" in js
     assert "(window as any)._ttPickColor" in js

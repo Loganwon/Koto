@@ -21,11 +21,29 @@ export function updateThemeSelector(theme: string): void {
 }
 
 export function selectTheme(theme: string): void {
+  const previousTheme = String((window as any).currentSettings?.appearance?.theme || localStorage.getItem('koto.theme') || 'light');
   updateThemeSelector(theme);
   applyTheme(theme);
   localStorage.setItem('koto.theme', theme);
   if (typeof (window as any).updateSetting === 'function') {
-    (window as any).updateSetting('appearance', 'theme', theme);
+    void (window as any).updateSetting('appearance', 'theme', theme).then((saved: boolean) => {
+      if (saved === false) {
+        updateThemeSelector(previousTheme);
+        applyTheme(previousTheme);
+        localStorage.setItem('koto.theme', previousTheme);
+      }
+    });
+  }
+}
+
+function _syncZoomViewportHeight(zoom: number): void {
+  document.documentElement.style.setProperty('--viewport-h', `${window.innerHeight / zoom}px`);
+}
+
+function _reflowWorkspaceAfterZoom(): void {
+  const WA = (window as any).WA || {};
+  if (typeof WA.refreshWorkspaceLayout === 'function') {
+    WA.refreshWorkspaceLayout();
   }
 }
 
@@ -36,7 +54,18 @@ export function setUIZoom(zoomStr: string, suppressSave: boolean = false): void 
   const normalizedZoom = zoom.toFixed(2).replace(/\.?0+$/, '');
   const pct = Math.round(zoom * 100);
   const root = document.documentElement;
-  root.style.fontSize = `${16 * zoom}px`;
+  // Slider previews can already have changed the DOM.  The last acknowledged
+  // backend value is the only safe rollback target when the final save fails.
+  const previousZoom = String((window as any).currentSettings?.appearance?.ui_zoom || root.dataset.kotoUiZoom || '1');
+  // `html.style.zoom` used to be set by an inline bootstrap script while this
+  // function only changed the root font size.  That left px-based workspace
+  // panels at a stale scale.  Body zoom is the single owner for all UI sizing.
+  root.style.zoom = '';
+  root.style.fontSize = '16px';
+  root.dataset.kotoUiZoom = normalizedZoom;
+  if (document.body) document.body.style.zoom = normalizedZoom;
+  delete (window as any)._waZoomMinSize;
+  _syncZoomViewportHeight(zoom);
   // Update number-only display beside "Koto" logo
   const display = document.getElementById('uiZoomDisplay');
   if (display) display.textContent = pct + '%';
@@ -49,9 +78,19 @@ export function setUIZoom(zoomStr: string, suppressSave: boolean = false): void 
   // Persist to server (unless loading)
   if (!suppressSave) {
     if (typeof (window as any).updateSetting === 'function') {
-      (window as any).updateSetting('appearance', 'ui_zoom', normalizedZoom);
+      void (window as any).updateSetting('appearance', 'ui_zoom', normalizedZoom).then((saved: boolean) => {
+        if (saved === false && root.dataset.kotoUiZoom === normalizedZoom) {
+          setUIZoom(previousZoom, true);
+        }
+      });
     }
   }
+  requestAnimationFrame(_reflowWorkspaceAfterZoom);
+}
+
+/** Apply a slider value immediately without producing overlapping save requests. */
+export function previewUIZoom(zoomStr: string): void {
+  setUIZoom(zoomStr, true);
 }
 
 export function changeUIScale(delta: number): void {
@@ -60,9 +99,20 @@ export function changeUIScale(delta: number): void {
   setUIZoom(newZoom.toFixed(2));
 }
 
+window.addEventListener('resize', () => {
+  const zoom = parseFloat(document.documentElement.dataset.kotoUiZoom || '1');
+  _syncZoomViewportHeight(Number.isFinite(zoom) && zoom > 0 ? zoom : 1);
+});
+
+const _systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');
+_systemThemeQuery.addEventListener('change', () => {
+  if (localStorage.getItem('koto.theme') === 'auto') applyTheme('auto');
+});
+
 // Backward compat
 (window as any).applyTheme = applyTheme;
 (window as any).updateThemeSelector = updateThemeSelector;
 (window as any).selectTheme = selectTheme;
 (window as any).setUIZoom = setUIZoom;
+(window as any).previewUIZoom = previewUIZoom;
 (window as any).changeUIScale = changeUIScale;

@@ -1199,9 +1199,32 @@ export async function saveCreateSkill(): Promise<void> {
   }
 }
 
-// ── Send Message (main entry for form submit) ──
-export async function sendMessage(event: Event): Promise<void> {
-  event.preventDefault();
+// ── Send Message (legacy-form compatibility entry) ──
+// The workspace owns the visible composer.  A few compatibility hooks still
+// call window.sendMessage(), so forward them instead of opening the retired
+// chat stream alongside the workspace task stream.
+function delegateHiddenLegacySendToWorkspace(event?: Event): boolean {
+  const legacyInput = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+  const workspaceInput = document.getElementById('wa-user-input') as HTMLTextAreaElement | null;
+  const legacyRect = legacyInput?.getBoundingClientRect();
+  const legacyIsVisible = Boolean(legacyRect && legacyRect.width > 0 && legacyRect.height > 0);
+  const workspaceSender = (window as any).WA?.sendMessage;
+
+  if (legacyIsVisible || !workspaceInput || typeof workspaceSender !== 'function') return false;
+
+  event?.preventDefault();
+  const legacyMessage = legacyInput?.value.trim() || '';
+  if (legacyMessage && !workspaceInput.value.trim()) {
+    workspaceInput.value = legacyMessage;
+    workspaceInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (legacyMessage || workspaceInput.value.trim()) workspaceSender();
+  return true;
+}
+
+export async function sendMessage(event?: Event): Promise<void> {
+  if (delegateHiddenLegacySendToWorkspace(event)) return;
+  event?.preventDefault();
 
   const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
   const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement | null;

@@ -8,7 +8,7 @@ import { markSidePanelClosed, markSidePanelOpen } from '../shared/side-panels';
 interface KotoSettings {
   storage?: { workspace_dir?: string; documents_dir?: string; images_dir?: string; chats_dir?: string };
   appearance?: { theme?: string; ui_zoom?: string };
-  ai?: { cloud_provider?: string; show_thinking?: boolean; show_task_type?: boolean; auto_save_files?: boolean; enable_mini_game?: boolean; use_local_only?: boolean; default_model?: string; local_model?: string };
+  ai?: { cloud_provider?: string; show_thinking?: boolean; show_task_type?: boolean; auto_save_files?: boolean; enable_mini_game?: boolean; use_local_only?: boolean; local_model?: string };
   local_model?: string;
   proxy?: { enabled?: boolean; manual_proxy?: string };
 }
@@ -188,7 +188,7 @@ function rememberSetting(category: string, key: string, value: any): void {
   (window as any).currentSettings = currentSettings;
 }
 
-export async function updateSetting(category: string, key: string, value: any): Promise<void> {
+export async function updateSetting(category: string, key: string, value: any): Promise<boolean> {
   try {
     const response = await csrfFetch('/api/settings', {
       method: 'POST',
@@ -200,18 +200,50 @@ export async function updateSetting(category: string, key: string, value: any): 
       throw new Error(data.error || '设置保存失败');
     }
     rememberSetting(category, key, value);
+    return true;
   } catch (e: any) {
     if (typeof (window as any).showNotification === 'function') {
       (window as any).showNotification(e?.message || '设置保存失败', 'error', 2200);
     }
     console.warn('Failed to update setting', category, key, e);
+    return false;
+  }
+}
+
+export async function onBooleanSettingChange(input: HTMLInputElement, category: string, key: string): Promise<void> {
+  const nextValue = input.checked;
+  const previousValue = typeof (currentSettings as any)?.[category]?.[key] === 'boolean'
+    ? (currentSettings as any)[category][key]
+    : !nextValue;
+  const saved = await updateSetting(category, key, nextValue);
+  if (!saved) {
+    input.checked = previousValue;
+    return;
+  }
+  if (category === 'ai' && key === 'enable_mini_game') {
+    (window as any).enableMiniGame = nextValue;
+    if (!nextValue) (window as any).hideMiniGame?.();
   }
 }
 
 export function applyLocalOnlyMode(enabled: boolean): void {
+  // Sync window.selectedModel for chat API payloads
   (window as any).selectedModel = enabled ? 'local' : 'auto';
-  const modelSelector = document.getElementById('modelSelect');
-  if (modelSelector) (modelSelector as HTMLSelectElement).value = enabled ? 'local' : 'auto';
+  // If switching to local, show the saved model name immediately
+  if (enabled) {
+    const savedModel = (currentSettings?.ai?.local_model || currentSettings?.local_model || '').trim();
+    if (savedModel) {
+      const localModelLabel = document.getElementById('wa-model-mode-local-model');
+      if (localModelLabel) localModelLabel.textContent = savedModel;
+    }
+  }
+  // Sync the workspace chat toggle (WA bridge). Guard against
+  // re-entrant calls that could cause double-switch loops during init.
+  const waCurrentModel = String((window as any)._waLockedModelCache || '').trim();
+  const targetMode = enabled ? 'local' : 'deepseek';
+  if (waCurrentModel === targetMode) return; // already synced, skip
+  const waSetLocked = (window as any).WA?.setLockedModel as ((v: string) => void) | undefined;
+  if (typeof waSetLocked === 'function') waSetLocked(targetMode);
 }
 
 export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
@@ -259,14 +291,39 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
     }
   }
 
-  applyLocalOnlyMode(enabled);
-  await updateSetting('ai', 'use_local_only', enabled);
   const modelTag = selectEl?.value || currentSettings?.local_model || currentSettings?.ai?.local_model || '';
-  csrfFetch('/api/local-model/switch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(enabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
-  }).catch(() => {});
+  const previousEnabled = currentSettings?.ai?.use_local_only === true;
+  let runtimeSwitched = false;
+  try {
+    const response = await csrfFetch('/api/local-model/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(enabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
+    runtimeSwitched = true;
+    if (!await updateSetting('ai', 'use_local_only', enabled)) throw new Error('设置保存失败');
+    applyLocalOnlyMode(enabled);
+    // Directly update chat label with selected model name
+    if (enabled && modelTag) {
+      const localModelLabel = document.getElementById('wa-model-mode-local-model');
+      if (localModelLabel) localModelLabel.textContent = modelTag;
+    }
+  } catch (error: any) {
+    if (localOnlyEl) localOnlyEl.checked = previousEnabled;
+    applyLocalOnlyMode(previousEnabled);
+    if (runtimeSwitched) {
+      void csrfFetch('/api/local-model/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previousEnabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
+      });
+    }
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 4000);
+    }
+  }
 }
 
 export function filterLocalModels(query: string): void {
@@ -319,7 +376,7 @@ function renderLocalModelOptions(query: string): void {
   if (!selectEl) return;
   const q = String(query || '').trim().toLowerCase();
   const filtered = q ? allLocalModels.filter((model) => model.toLowerCase().includes(q)) : allLocalModels;
-  const saved = currentSettings?.local_model || currentSettings?.ai?.local_model || '';
+  const saved = currentSettings?.ai?.local_model || currentSettings?.local_model || '';
   if (!filtered.length) {
     selectEl.innerHTML = `<option value="">${allLocalModels.length ? '— 无匹配模型 —' : '— 检测后选择 —'}</option>`;
     if (hintEl && allLocalModels.length) hintEl.textContent = `无匹配结果（共 ${allLocalModels.length} 个模型）`;
@@ -336,21 +393,29 @@ function renderLocalModelOptions(query: string): void {
 export async function onLocalModelChange(modelTag: string): Promise<void> {
   const nextModel = String(modelTag || '').trim();
   if (!nextModel) return;
-  await updateSetting('ai', 'local_model', nextModel);
   try {
-    const resp = await csrfFetch('/api/local-model/switch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'local', model_tag: nextModel }),
-    });
-    const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
+    const localOnly = (document.getElementById('settingLocalOnly') as HTMLInputElement | null)?.checked === true;
+    if (localOnly) {
+      const resp = await csrfFetch('/api/local-model/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'local', model_tag: nextModel }),
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
+    }
+    if (!await updateSetting('ai', 'local_model', nextModel)) throw new Error('设置保存失败');
     if (currentSettings) {
       currentSettings.local_model = nextModel;
       currentSettings.ai = { ...(currentSettings.ai || {}), local_model: nextModel };
       (window as any).currentSettings = currentSettings;
     }
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`已切换本地模型：${nextModel}`, 'success', 1800);
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(localOnly ? `已切换本地模型：${nextModel}` : `已保存本地模型：${nextModel}`, 'success', 1800);
+    }
+    // Directly update the chat entry local model label
+    const localModelLabel = document.getElementById('wa-model-mode-local-model');
+    if (localModelLabel) localModelLabel.textContent = nextModel;
   } catch (error: any) {
     if (typeof (window as any).showNotification === 'function') (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 3000);
   }
@@ -810,6 +875,7 @@ function escHtml(str: string): string {
 (window as any).onCloudProviderChange = onCloudProviderChange;
 (window as any).saveSettingsApiKey = saveSettingsApiKey;
 (window as any).updateSetting = updateSetting;
+(window as any).onBooleanSettingChange = onBooleanSettingChange;
 (window as any).applyLocalOnlyMode = applyLocalOnlyMode;
 (window as any).onLocalOnlyChange = onLocalOnlyChange;
 (window as any).filterLocalModels = filterLocalModels;

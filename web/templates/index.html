@@ -2846,102 +2846,30 @@
     </div>
     <script>
     // Welcome screen suggestion cards — fill input with a prompt template and focus
-    function insertSuggestion(text) {
-        var el = document.getElementById('messageInput');
+    window.insertSuggestion = function(text) {
+        // The workspace composer is the only visible primary input.  The
+        // former chat composer remains temporarily for compatibility but is
+        // collapsed in the unified workspace, so never target it first.
+        var el = document.getElementById('wa-user-input');
+        if (!el || el.getBoundingClientRect().width === 0 || el.getBoundingClientRect().height === 0) {
+            el = document.getElementById('messageInput');
+        }
         if (!el) return;
         el.value = text;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
         el.focus();
         el.setSelectionRange(text.length, text.length);
         el.dispatchEvent(new Event('input'));
         el.classList.add('input-flash');
         setTimeout(function(){ el.classList.remove('input-flash'); }, 800);
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    }
-    // Rotating input placeholder
-    (function(){
-        var input = document.getElementById("messageInput");
-        if (!input) return;
-        var placeholders = [
-            "直接告诉我你想做什么…",
-            "✍️ 帮我写一份周报",
-            "📄 拖入文档，让 Koto 帮你总结",
-            "📊 分析数据并生成图表",
-            "🔍 搜索并整理最新资料",
-            "🎨 把这些要点做成 PPT",
-            "💻 帮我写一个 Python 脚本",
-            "📝 润色这段文字",
-            "📚 用通俗方式解释这个概念",
-            "🗂️ 帮我整理这些文件",
-        ];
-        var idx = 0;
-        var _phPaused = false;
-        var _phInterval = setInterval(function(){
-            if (_phPaused || document.activeElement === input) return;
-            idx = (idx + 1) % placeholders.length;
-            input.placeholder = placeholders[idx];
-        }, 3000);
-        input.addEventListener("focus", function(){
-            _phPaused = true;
-            input.placeholder = "直接告诉我想做什么…";
-        });
-        input.addEventListener("blur", function(){
-            _phPaused = false;
-            input.placeholder = placeholders[idx];
-        });
-    })();
-
+    };
     </script>
 
     <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
     {% include '_workspace_asset_scripts.html' %}
 
 </div><!-- /app-shell -->
-
-<!-- Koto main app logic (real sendMessage + chat + settings) -->
-    <!-- Double-click / rapid-submit prevention -->
-    <script>
-    (function(){
-        var _sending = false;
-        var _resetDelay = 2000; // auto-reset after 2s safety timeout
-        var _originalSendMessage = window.sendMessage;
-        window.sendMessage = function(e){
-            var inputEl = document.getElementById("messageInput");
-            if (inputEl && !inputEl.value.trim()) {
-                if (e) e.preventDefault();
-                inputEl.focus();
-                return false;
-            }
-            if(_sending){
-                console.warn("[Koto] 请求进行中，忽略重复提交");
-                if(e) e.preventDefault();
-                return false;
-            }
-            _sending = true;
-            var btn = document.getElementById("sendBtn");
-            if(btn){ btn.disabled = true; btn.classList.add("sending"); }
-            // Auto-reset safety net
-            setTimeout(function(){
-                if(_sending){
-                    _sending = false;
-                    if(btn){ btn.disabled = false; btn.classList.remove("sending"); }
-                }
-            }, _resetDelay);
-            try {
-                return _originalSendMessage ? _originalSendMessage.call(this, e) : true;
-            } catch(ex){
-                _sending = false;
-                if(btn){ btn.disabled = false; btn.classList.remove("sending"); }
-                throw ex;
-            }
-        };
-        // Public API to reset sending state (call after response completes)
-        window._kotoResetSending = function(){
-            _sending = false;
-            var btn = document.getElementById("sendBtn");
-            if(btn){ btn.disabled = false; btn.classList.remove("sending"); }
-        };
-    })();
-    </script>
 
     <!-- Koto Guided Tour Overlay -->
     <div id="kotoTourOverlay" style="display:none">
@@ -2965,7 +2893,7 @@
 
         var steps = [
             { target: ".welcome-quick-cards", title: "👋 欢迎使用 Koto", desc: "Koto 是你的 AI 工作伙伴，可以处理对话、文档、数据、演示文稿和研究任务。" },
-            { target: "#chatMessages, #messageInput", title: "💬 开始对话", desc: "在输入框说出目标，也可以先拖入文件；Koto 会根据任务选择聊天或执行流程。" },
+            { target: "#wa-chat-panel, #wa-user-input", title: "💬 开始对话", desc: "在输入框说出目标，也可以先拖入文件；Koto 会根据任务选择聊天或执行流程。" },
             { target: "#navSkillsBtn", title: "🧩 Skills 技能", desc: "在 Skills 中启用需要的能力，为特定任务增加专业提示和工具。" },
             { target: "#navAiBtn", title: "🤖 AI 工作区", desc: "文件任务的计划、执行过程、产物和最终汇报都会显示在这里。" },
             { target: "#sideNav", title: "📁 文件工作区", desc: "打开或拖入 Word、Excel、PPT、PDF 等文件后，可以直接让 Koto 处理。" }
@@ -3077,7 +3005,7 @@
 
         function tryStart() {
             _retryCount++;
-            var inputEl = document.getElementById("messageInput");
+            var inputEl = document.getElementById("wa-user-input");
             var welcomeEl = document.getElementById("welcomeScreen");
             var inputReady = inputEl && inputEl.offsetParent !== null;
             var welcomeVisible = welcomeEl && welcomeEl.style.display !== "none" && welcomeEl.offsetParent !== null;

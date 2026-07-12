@@ -16,6 +16,7 @@ interface WATurn {
   schema_version?: number;
   legacy_schema?: boolean;
   task_card_snapshot?: TaskCardSnapshot;
+  task_plan_summary?: string;
   skip_model_context?: boolean;
   status?: string;
   task_terminal_status?: string;
@@ -218,7 +219,7 @@ function testStructureStepTitle(value: unknown, fallback?: unknown): string {
 function testStructureCheckText(value: unknown): string {
   let text = String(value || '').replace(/\s+/g, ' ').trim();
   if (!text) return '';
-  if (/详细内容见总结与回答|较长内容.*总结与回答/u.test(text)) return '';
+  if (/详细内容见任务结果|较长内容.*任务结果/u.test(text)) return '';
   text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
   if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
   if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
@@ -402,6 +403,11 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
     };
   }
 
+  function taskPlanSummaryFromElement(element: HTMLElement | null): string {
+    if (!element || !element.querySelector) return '';
+    return String(element.querySelector('[data-role="plan"]')?.textContent || '').trim();
+  }
+
   function syncAssistantTaskTurn(turnId: string, metadata?: Record<string, any>): WATurn | null {
     const payload = metadata || {};
     const resolvedId = String(turnId || payload.id || '').trim();
@@ -411,6 +417,12 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
     const index = turns.findIndex((item) => String(item && (item.id || item.turn_id || item.run_id) || '') === resolvedId);
     const existing = index >= 0 ? (normalizeTurn(turns[index]) || turns[index]) : null;
     const snapshot = taskCardSnapshotFromElement(payload.loadingEl);
+    const taskPlanSummary = String(
+      payload.task_plan_summary
+      || (existing && existing.task_plan_summary)
+      || taskPlanSummaryFromElement(payload.loadingEl)
+      || '',
+    ).trim();
     const content = String(payload.content || (existing && existing.content) || '任务处理中…').trim() || '任务处理中…';
     const turn = normalizeTurn(Object.assign({}, existing || {}, payload, snapshot ? { task_card_snapshot: snapshot } : {}, {
       id: resolvedId,
@@ -422,6 +434,7 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       skip_model_context: payload.skip_model_context !== undefined
         ? payload.skip_model_context
         : (existing && existing.skip_model_context !== undefined ? existing.skip_model_context : true),
+      task_plan_summary: taskPlanSummary,
     }), { session_id: sessionId });
     if (!turn) return null;
     if (index >= 0) turns[index] = turn;
@@ -496,6 +509,11 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       if (restored) {
         restored.dataset.turnId = turn.id;
         restored.dataset.rawText = turn.content;
+        const plan = restored.querySelector('[data-role="plan"]') as HTMLElement | null;
+        if (plan && !String(plan.textContent || '').trim() && turn.task_plan_summary) {
+          plan.textContent = turn.task_plan_summary;
+          plan.hidden = false;
+        }
         applyTaskHistoryMetadata(restored, turn);
         const structure = renderTestStructure(turn.test_structure);
         if (structure) restored.appendChild(structure);
@@ -513,7 +531,7 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       el.appendChild(structure);
       const answer = document.createElement('div');
       answer.className = 'wa-task-final-answer';
-      answer.innerHTML = '<div class="wa-task-final-answer-title">总结与回答</div>'
+      answer.innerHTML = '<div class="wa-task-final-answer-title">任务结果</div>'
         + '<div class="wa-task-final-answer-content">' + renderMarkdown(turn.content) + '</div>';
       el.appendChild(answer);
     } else {

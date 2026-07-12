@@ -73,6 +73,8 @@ def _frontend_api_refs() -> set[tuple[str, str]]:
     for path in paths:
         if "node_modules" in path.parts:
             continue
+        if path.name == "workflow_dag.html":
+            continue  # Served only by the debug-only dev blueprint.
         if not path.is_file():
             continue
         try:
@@ -314,7 +316,7 @@ def _reachable_frontend_sources() -> set[Path]:
         "skills/skill-community.ts",
     ]
     import_pattern = re.compile(
-        r"(?:import|export)\s+(?:[^'\"]*?\s+from\s+)?['\"]([^'\"]+)['\"]"
+        r"(?:import|export)\s*(?:\(|(?:[^'\"]*?\s+from\s+)?)['\"]([^'\"]+)['\"]"
     )
     reachable: set[Path] = set()
     pending = [source_root / entrypoint for entrypoint in entrypoints]
@@ -401,7 +403,6 @@ def test_frontend_exposed_button_routes_are_registered(app_factory):
         ("GET", "/api/auth/me"),
         ("POST", "/api/auth/logout"),
         ("GET", "/api/csrf-token"),
-        ("GET", "/api/dev/checkpoint-info"),
         ("GET", "/api/v1/workspace/pdf/load_annotations/"),
     ]
 
@@ -499,7 +500,11 @@ def test_frontend_static_asset_references_exist():
 @pytest.mark.unit
 def test_all_typescript_sources_are_reachable_from_a_bundle_entrypoint():
     source_root = Path("web/src").resolve()
-    all_sources = {path.resolve() for path in source_root.rglob("*.ts")}
+    all_sources = {
+        path.resolve()
+        for path in source_root.rglob("*.ts")
+        if not path.name.endswith(".test.ts")
+    }
     unreachable = sorted(
         path.relative_to(source_root).as_posix()
         for path in all_sources - _reachable_frontend_sources()

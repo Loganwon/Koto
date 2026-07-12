@@ -829,6 +829,13 @@ export function sendSelectionToAI(): void {
 
 export function closeSelectionToolbar(): void {
   state._selectionDismissed = true;
+  if (state.fileType === 'docx') {
+    // This is the sole WA.closeSelectionToolbar implementation.  Preserve the
+    // DOCX hover-bar dismissal contract here instead of relying on the DOCX
+    // toolbar module to overwrite the global entry point later in the bundle.
+    (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
+    _resetDocxSelection();
+  }
   const tt = $('wa-pdf-tooltip');
   if (tt) tt.style.display = 'none';
   try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }

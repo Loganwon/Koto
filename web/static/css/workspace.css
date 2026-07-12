@@ -54,7 +54,7 @@
       color: var(--text);
       flex: 1;
       white-space: nowrap;
-      overflow: hidden;
+      overflow: visible;
       text-overflow: ellipsis;
       font-weight: 600;
       letter-spacing: -0.01em;
@@ -588,6 +588,18 @@
     }
     /* collapsed = no rotation (› points right), open = 90° (points down) */
     .wa-section-arrow.open { transform: rotate(90deg); }
+
+    .wa-section-toggle {
+      min-width: 0;
+      cursor: pointer;
+    }
+    .wa-section-toggle:focus-visible,
+    #tokenChip:focus-visible,
+    #statusIndicator:focus-visible {
+      outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
+      outline-offset: 2px;
+      border-radius: 4px;
+    }
 
     .wa-section-badge {
       font-size: 10px;
@@ -1543,6 +1555,7 @@
          Split.js inline width take priority once set. */
       flex: 1 1 auto;
       overflow: clip; /* clip without creating a scroll-container BFC that traps position:fixed popups */
+      transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       background: var(--bg);
       display: flex;
       flex-direction: column;
@@ -2475,9 +2488,17 @@
     }
 
     #wa-docx-editor.has-review-shell .koto-zoom-wrapper {
-      margin-left: auto;
-      margin-right: auto;
+      width: var(--wa-review-canvas-width) !important;
+      min-width: var(--wa-review-canvas-width) !important;
+      max-width: var(--wa-review-canvas-width) !important;
+      margin-left: 0;
+      margin-right: 0;
       left: 0;
+    }
+
+    #wa-docx-editor.has-review-shell .koto-zoom-wrapper > .ProseMirror {
+      margin-left: 0 !important;
+      margin-right: 0 !important;
     }
 
     /* ── Zoom wrapper — contains .ProseMirror and widget decorations ──────────
@@ -5071,12 +5092,14 @@
       border-radius: 10px;
       display: flex;
       flex-direction: column;
+      transition: opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       overflow: hidden;
       position: relative;
       box-shadow: 0 2px 10px rgba(0,0,0,0.05);
       /* Fallback width before Split.js sets inline style */
       width: 30%;
-      min-width: 250px;
+      /* Must match the embedded Split.js floor: 300px clips the composer. */
+      min-width: 420px;
       flex-shrink: 0;
     }
 
@@ -5104,15 +5127,21 @@
   border: none;
   box-shadow: none;
   overflow: hidden;
+  opacity: 0;
+  pointer-events: none;
 }
 #wa-ai.wa-ai-collapsed > * {
   display: none !important;
 }
+  /* ── Hide gutter when AI panel collapsed ── */
+  .gutter-hidden {
+    display: none !important;
+  }
 
 /* ── Sidebar AI Toggle active state ── */
 #navAiBtn.active {
-  background: var(--hover);
-  color: var(--text);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
 }
 #navAiBtn[aria-expanded="false"] svg {
   opacity: 0.5;
@@ -6726,7 +6755,9 @@
     }
     #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .koto-docx-comment-layer {
       position: absolute;
-      inset: 0;
+      inset: 0 auto 0 0;
+      display: block;
+      flex: none;
       overflow: visible;
       padding: 0;
       pointer-events: none;
@@ -7642,6 +7673,89 @@
     .wa-task-chip.ok { color: var(--accent); }
     .wa-task-chip.warn { color: #9a6a09; }
     .wa-task-chip.error { color: #b3261e; }
+    .wa-task-chip.artifact { color: #5a7a3a; }
+    .wa-task-chip.success { color: #2e7d32; }
+    .wa-task-artifact-label {
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .wa-task-artifact-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 0 3px 12px;
+      border-left: 2px solid color-mix(in srgb, var(--accent) 35%, transparent);
+      margin: 2px 0 2px 8px;
+      animation: wa-task-artifact-in 180ms ease-out;
+    }
+    @keyframes wa-task-artifact-in {
+      from { opacity: 0; transform: translateX(-6px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+.wa-task-result-summary-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  margin: 8px 0 2px;
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg));
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--ai-border));
+  border-radius: 8px;
+  font-size: 12px;
+  flex-wrap: wrap;
+}
+.wa-task-summary-label {
+  font-weight: 700;
+  color: var(--accent);
+  margin-right: 4px;
+  white-space: nowrap;
+}
+.wa-task-summary-chip {
+.wa-task-summary-chip.has-thumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px 1px 2px;
+  max-width: 200px;
+}
+.wa-task-summary-chip.has-thumb img {
+  width: 24px;
+  height: 24px;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--ai-border) 60%, transparent);
+  flex-shrink: 0;
+}
+.wa-task-summary-chip.has-thumb span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+  display: inline-block;
+  padding: 2px 8px;
+  background: color-mix(in srgb, var(--accent) 14%, white 86%);
+  border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--ai-border));
+  border-radius: 12px;
+  font-size: 11px;
+  color: var(--text);
+  white-space: nowrap;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wa-task-process-to-result {
+      text-align: center;
+      padding: 4px 0 0;
+      font-size: 18px;
+      color: var(--text-muted);
+      opacity: 0.45;
+      letter-spacing: 2px;
+      user-select: none;
+    }
     .wa-task-evidence {
       margin-top: 4px;
       display: flex;

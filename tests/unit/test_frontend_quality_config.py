@@ -14,12 +14,14 @@ EXPECTED_BUNDLES = {
 }
 
 
-def test_typescript_quality_gate_is_incremental():
+def test_typescript_quality_gate_enforces_strict_mode():
     tsconfig = json.loads(Path("web/tsconfig.json").read_text(encoding="utf-8"))
     compiler_options = tsconfig["compilerOptions"]
 
-    assert compiler_options["strict"] is False
-    assert compiler_options["noImplicitAny"] is False
+    assert compiler_options["strict"] is True
+    assert compiler_options["noImplicitAny"] is True
+    assert compiler_options["strictNullChecks"] is True
+    assert compiler_options["useUnknownInCatchVariables"] is True
     assert compiler_options["noFallthroughCasesInSwitch"] is True
     assert "static" in tsconfig["exclude"]
     assert "node_modules" in tsconfig["exclude"]
@@ -29,11 +31,12 @@ def test_eslint_quality_gate_scopes_to_source_not_generated_assets():
     eslint_config = Path("web/eslint.config.js").read_text(encoding="utf-8")
     package_json = json.loads(Path("web/package.json").read_text(encoding="utf-8"))
 
-    assert "ignores: ['node_modules/**', 'static/**']" in eslint_config
+    assert "ignores: ['node_modules/**', 'static/**', '**/*.test.ts']" in eslint_config
     assert "files: ['src/**/*.ts', 'src/**/*.tsx']" in eslint_config
-    assert "'no-fallthrough': 'warn'" in eslint_config
+    assert "'no-fallthrough': 'error'" in eslint_config
     assert "'no-duplicate-imports': 'warn'" in eslint_config
-    assert "'no-constant-binary-expression': 'warn'" in eslint_config
+    assert "'no-constant-binary-expression': 'error'" in eslint_config
+    assert "'no-debugger': 'error'" in eslint_config
     assert package_json["scripts"]["lint"].startswith("eslint src/")
 
 

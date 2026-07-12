@@ -310,15 +310,6 @@ export function openInMainView(): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       _initSplit();
-      if ((window as any)._waSplit) {
-        let sizes = [68, 32];
-        try {
-          const raw = localStorage.getItem('wa_split_sizes_embedded');
-          const parsed = raw ? JSON.parse(raw) : null;
-          if (Array.isArray(parsed) && parsed.length === 2) sizes = parsed;
-        } catch {}
-        try { (window as any)._waSplit.setSizes(sizes); } catch {}
-      }
     });
   });
   if ((window as any).WA && typeof (window as any).WA.loadFileBrowser === 'function' && !(window as any)._WA_fileBrowserLoaded) {
@@ -366,16 +357,13 @@ export function showFileWorkspace(): void {
 
 export function showAiWorkspace(): void {
   openInMainView();
-  if (typeof (window as any).WA?.showAiSessionList === 'function') {
-    (window as any).WA.showAiSessionList();
+  if (typeof (window as any).WA?.showAiChat === 'function') {
+    (window as any).WA.showAiChat();
   }
-  _setActivityActive('navAiSessionsBtn');
+  _setActivityActive('navAiBtn');
   requestAnimationFrame(() => {
-    const sessionList = document.getElementById('wa-ai-session-list') as HTMLElement | null;
     const userInput = document.getElementById('wa-user-input') as HTMLTextAreaElement | null;
-    if (sessionList && !document.getElementById('wa-ai-chat-view')?.hasAttribute('hidden')) return;
-    if (sessionList) sessionList.scrollIntoView({ block: 'nearest' });
-    else if (userInput) {
+    if (userInput) {
       try { userInput.focus({ preventScroll: true }); } catch { userInput.focus(); }
     }
   });

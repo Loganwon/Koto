@@ -160,10 +160,16 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     const serverComments = Array.isArray(serverData.comments) ? serverData.comments : [];
     const existingProposals = Array.isArray(existing.proposals) ? existing.proposals : [];
     const serverProposals = Array.isArray(serverData.proposals) ? serverData.proposals : [];
-    const rawComments: ReviewComment[] = existingComments.length ? existingComments : serverComments;
-    const rawProposals: ReviewProposal[] = existingProposals.length ? existingProposals : serverProposals;
-    existing.comments = rawComments.map(normalizeReviewComment);
-    existing.proposals = mergeReviewProposals([], rawProposals);
+    // Preserve object identity once review state is live. Callers commonly
+    // resolve an entry and then call ensureTabReviewState() again before
+    // mutating it; replacing the arrays with cloned normalized objects here
+    // made saves, edits and deletes silently target stale entries.
+    existing.comments = existingComments.length
+      ? existingComments.map((comment: ReviewComment, index: number) => Object.assign(comment, normalizeReviewComment(comment, index)))
+      : serverComments.map(normalizeReviewComment);
+    existing.proposals = existingProposals.length
+      ? existingProposals.map((proposal: ReviewProposal, index: number) => Object.assign(proposal, normalizeReviewProposal(proposal, index)))
+      : mergeReviewProposals([], serverProposals);
     existing.focusedId = cleanString(existing.focusedId);
     existing.expandedId = cleanString(existing.expandedId);
     tab.reviewState = existing;

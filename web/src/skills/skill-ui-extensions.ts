@@ -47,17 +47,34 @@ function esc(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function sendMessage(text: string): void {
+function _setChatInputValue(input: HTMLInputElement | HTMLTextAreaElement, text: string): void {
+  const prototype = input instanceof HTMLTextAreaElement
+    ? window.HTMLTextAreaElement.prototype
+    : window.HTMLInputElement.prototype;
+  const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value');
+  if (nativeSetter?.set) nativeSetter.set.call(input, text);
+  else input.value = text;
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+function _submitSkillMessage(text: string): void {
+  const workspaceInput = document.getElementById('wa-user-input') as HTMLTextAreaElement | null;
+  if (workspaceInput && workspaceInput.offsetParent !== null) {
+    _setChatInputValue(workspaceInput, text);
+    const WA = (window as any).WA || {};
+    if (typeof WA.submitUnifiedAiComposer === 'function') {
+      WA.submitUnifiedAiComposer();
+      return;
+    }
+    if (typeof WA.sendMessage === 'function') {
+      WA.sendMessage();
+      return;
+    }
+  }
+
   const input = document.querySelector('#messageInput, #userInput, [data-role="chat-input"]') as HTMLInputElement | HTMLTextAreaElement | null;
   if (!input) return;
-  const nativeSetter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value') ||
-    Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value');
-  if (nativeSetter && nativeSetter.set) {
-    nativeSetter.set.call(input, text);
-  } else {
-    input.value = text;
-  }
-  input.dispatchEvent(new Event('input', { bubbles: true }));
+  _setChatInputValue(input, text);
   const sendBtn = document.querySelector('#sendBtn, [data-role="send-button"], button[type="submit"]') as HTMLElement | null;
   if (sendBtn) {
     sendBtn.click();
@@ -87,7 +104,7 @@ function renderActionButtons(buttons: ActionButton[]): void {
 
     el.addEventListener('click', () => {
       if (btn.message) {
-        sendMessage(btn.message);
+        _submitSkillMessage(btn.message);
       } else if (btn.action) {
         handleBuiltinAction(btn.action, btn);
       }
@@ -96,7 +113,7 @@ function renderActionButtons(buttons: ActionButton[]): void {
   });
 
   const inputArea = document.querySelector(
-    '#inputArea, #input-area, .input-area, .chat-input-area, #chatForm'
+    '#wa-ai-input-area, #inputArea, #input-area, .input-area, .chat-input-area, #chatForm'
   );
   if (inputArea) {
     inputArea.parentNode!.insertBefore(bar, inputArea);
@@ -131,7 +148,7 @@ function attachQuickRepliesToMessage(msgEl: Element, replies: string[]): void {
     chip.className = 'skill-ext-qr-chip';
     chip.textContent = text;
     chip.addEventListener('click', () => {
-      sendMessage(text);
+      _submitSkillMessage(text);
       row.remove();
     });
     row.appendChild(chip);
@@ -142,7 +159,7 @@ function attachQuickRepliesToMessage(msgEl: Element, replies: string[]): void {
 
 function getAIMessageElements(): Element[] {
   return Array.from(document.querySelectorAll(
-    '.message.assistant, .message--assistant, [data-role="assistant-message"], .ai-message'
+    '.message.assistant, .message--assistant, [data-role="assistant-message"], .ai-message, #wa-ai-messages .wa-msg.ai'
   ));
 }
 
