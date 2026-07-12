@@ -93,3 +93,47 @@ def test_file_task_stream_emits_frontend_progress_events_for_known_stages():
     assert progress["payload"]["progress"] == 20
     assert progress["payload"]["label"] == "规划检查"
     assert progress["payload"]["source_event"] == "plan.checked"
+
+
+def test_file_task_terminal_progress_uses_needs_attention_ui_state():
+    from web.file_task_stream import _iter_file_task_stream_events
+
+    request = SimpleNamespace(
+        task="读取不存在的文件",
+        run_id="terminal-progress-run",
+        task_id="terminal-progress-task",
+        session_id="session-1",
+        target_path="",
+        files=[],
+        current_file=None,
+        selection_source="",
+    )
+    event = _event(
+        "run.finished",
+        {
+            "completed_task": False,
+            "runtime": {"terminal_status": "needs_attention"},
+        },
+    )
+
+    chunks = list(
+        _iter_file_task_stream_events(
+            request,
+            [event],
+            save_task_summary_fn=lambda **_: None,
+            normalize_event_fn=lambda _: None,
+            persist_progress_fn=lambda *_: None,
+        )
+    )
+    parsed = [json.loads(chunk.strip()[6:]) for chunk in chunks if chunk.strip().startswith("data: ")]
+
+    assert parsed[0]["type"] == "progress"
+    assert parsed[0]["payload"] == {
+        "progress": 100,
+        "label": "任务需要处理",
+        "phase": "done",
+        "status": "failed",
+        "source_event": "run.finished",
+    }
+    assert parsed[1]["type"] == "run.finished"
+    assert parsed[1]["ui_state"]["status"] == "failed"

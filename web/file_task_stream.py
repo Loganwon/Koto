@@ -338,7 +338,12 @@ def _compact_file_task_stream_payload(payload: dict) -> dict:
     return compact
 
 
-def _file_task_frontend_progress(event_type: str, payload: dict) -> dict | None:
+def _file_task_frontend_progress(
+    event_type: str,
+    payload: dict,
+    *,
+    ui_state: dict | None = None,
+) -> dict | None:
     """Return the browser progress projection for milestone events.
 
     Keep this mapping aligned with ``file_task_ui_stream.normalize_ui_state``.
@@ -370,6 +375,15 @@ def _file_task_frontend_progress(event_type: str, payload: dict) -> dict | None:
     if event_type in {"tool.finished", "step.finished", "step.result"}:
         if payload.get("success") is False or str(payload.get("status") or "").lower() in {"failed", "error"}:
             status = "failed"
+
+    # ``_safe_file_task_event_dict`` has already projected the authoritative
+    # terminal UI state.  Reuse it here so the separate progress event cannot
+    # claim success while the final run event says the task needs attention.
+    if event_type == "run.finished" and isinstance(ui_state, dict):
+        progress = ui_state.get("progress") if isinstance(ui_state.get("progress"), int) else progress
+        fallback_label = _trim_file_task_text(ui_state.get("title"), 120) or fallback_label
+        phase = _trim_file_task_text(ui_state.get("phase"), 80) or phase
+        status = _trim_file_task_text(ui_state.get("status"), 80) or status
     label = _trim_file_task_text(
         payload.get("title") or payload.get("tool_name"),
         120,
@@ -896,6 +910,7 @@ def _iter_file_task_stream_events(
         progress_payload = _file_task_frontend_progress(
             str(safe_event.get("type") or "").strip(),
             safe_event.get("payload") if isinstance(safe_event.get("payload"), dict) else {},
+            ui_state=safe_event.get("ui_state") if isinstance(safe_event.get("ui_state"), dict) else None,
         )
         progress_sse = None
         if progress_payload is not None and terminal_event:
