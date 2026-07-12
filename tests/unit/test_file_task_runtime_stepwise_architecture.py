@@ -118,6 +118,31 @@ def test_file_task_readonly_answer_only_loop_guard_is_extracted_from_runtime() -
     assert '"tool_name": "duplicate_guard"' in helper
 
 
+def test_file_task_runtime_unused_compatibility_wrappers_are_removed() -> None:
+    runtime = _read("app/core/agent/file_task_runtime.py")
+
+    for name in (
+        "_intent_adjudicator_messages",
+        "_refresh_classification_recipe",
+        "_has_explicit_planner_override",
+        "_single_context_file",
+    ):
+        assert f"def {name}(" not in runtime
+
+
+def test_file_task_runtime_drops_unused_external_planner_fallback_state() -> None:
+    runtime = _read("app/core/agent/file_task_runtime.py")
+    execution_loop = _read("app/core/agent/file_task_execution_loop.py")
+    finalization = _read("app/core/agent/file_task_finalization.py")
+    step_payload = _read("app/core/agent/file_task_step_payload.py")
+
+    for source in (runtime, execution_loop, finalization, step_payload):
+        assert "planner_fallback_runtime_payload" not in source
+        assert "planner_fallback_payload" not in source
+    assert "external_planner_request" not in execution_loop
+    assert "planner_runtime_fallback_attempted" not in execution_loop
+
+
 def test_file_task_native_stepwise_pdf_guard_payload_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/_file_task_stepwise_helpers.py")

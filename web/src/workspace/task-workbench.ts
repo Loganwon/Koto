@@ -1071,6 +1071,7 @@ function renderDetail(state: WorkbenchState, task: WorkbenchTask | null): void {
   const processButton = !state.focusedOnly && canResume
     ? '<button type="button" data-task-detail-action="process">定位对话</button>'
     : '';
+  const inlineTaskCardOwnsResult = taskHasProjectedInlineCard(task);
   const metaLine = taskMetaLine(task);
   detail.innerHTML = [
     '<div class="wa-task-workbench-detail-head">',
@@ -1085,8 +1086,15 @@ function renderDetail(state: WorkbenchState, task: WorkbenchTask | null): void {
     '<div class="wa-task-workbench-detail-actions">',
     processButton,
     '</div>',
-    renderCompletionReport(task, summary, artifactButton),
+    inlineTaskCardOwnsResult ? '' : renderCompletionReport(task, summary, artifactButton),
   ].join('');
+}
+
+function taskHasProjectedInlineCard(task: WorkbenchTask): boolean {
+  const taskId = String(task && task.task_id || '').trim();
+  if (!taskId) return false;
+  return Array.from(document.querySelectorAll('#wa-ai-messages .wa-task-run.is-workbench-projected'))
+    .some((node) => (node as HTMLElement).dataset.taskId === taskId);
 }
 
 async function fetchJson(url: string): Promise<any> {
@@ -1270,7 +1278,20 @@ export function refreshCurrentTaskFlow(): Promise<any> {
 export function notifyTaskFlowChanged(taskId?: any): void {
   const state = initTaskWorkbench();
   if (!state) return;
+  projectWorkbenchBeforeInlineTaskCard(state, taskId);
   scheduleWorkbenchRefresh(state, taskId);
+}
+
+function projectWorkbenchBeforeInlineTaskCard(state: WorkbenchState, taskId?: any): void {
+  const id = String(taskId || state.activeTaskId || '').trim();
+  if (!id || !state.host) return;
+  const card = Array.from(document.querySelectorAll('#wa-ai-messages .wa-task-run'))
+    .find((node) => (node as HTMLElement).dataset.taskId === id) as HTMLElement | undefined;
+  if (!card || card.classList.contains('is-history-snapshot')) return;
+  card.classList.add('is-workbench-projected');
+  if (state.host.parentElement === card.parentElement && state.host.nextElementSibling !== card) {
+    card.parentElement?.insertBefore(state.host, card);
+  }
 }
 
 function ready(): void {

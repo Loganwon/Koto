@@ -218,7 +218,6 @@ class FileTaskPlanningPhase:
                 or "file_task_native_only",
                 "round": 1,
             },
-            planner_fallback_payload={},
         )
         plan_runtime["performance"] = performance_snapshot()
 

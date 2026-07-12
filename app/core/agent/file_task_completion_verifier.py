@@ -162,6 +162,7 @@ def _verification_summary_from_changes(
     ]
     aggregate_images = len(image_changes) > 1
     image_summary_added = False
+    reported_docx_paragraphs = 0
 
     def image_display_name(change: Dict[str, Any]) -> str:
         name = str(change.get("image_name") or "").strip()
@@ -228,9 +229,7 @@ def _verification_summary_from_changes(
             if replacements:
                 details.append(f"已替换 {replacements} 处选区")
         elif operation == "write_docx_content":
-            paragraphs = int(change.get("paragraphs_written") or 0)
-            if paragraphs:
-                details.append(f"已写入 {paragraphs} 个段落")
+            reported_docx_paragraphs += int(change.get("paragraphs_written") or 0)
         elif operation == "insert_image_into_docx":
             if aggregate_images:
                 if not image_summary_added:
@@ -265,6 +264,12 @@ def _verification_summary_from_changes(
             if revisions_accepted:
                 details.append(f"已接受 {revisions_accepted} 处修订")
 
+    if reported_docx_paragraphs:
+        details.append(f"本次工具调用写入 {reported_docx_paragraphs} 个段落")
+    verified_docx_paragraphs = _verified_docx_nonempty_paragraph_count(primary_path)
+    if verified_docx_paragraphs is not None:
+        details.append(f"核验：文档现有 {verified_docx_paragraphs} 个非空段落")
+
     warning = str(primary.get("warning") or "").strip()
     if warning:
         details.append(f"提示：{warning}")
@@ -277,6 +282,23 @@ def _verification_summary_from_changes(
     if details:
         summary += "；" + "，".join(details)
     return summary
+
+
+def _verified_docx_nonempty_paragraph_count(path: str) -> int | None:
+    """Read the delivered DOCX so completion copy never presents a guess as fact."""
+    raw_path = str(path or "").strip()
+    if not raw_path or Path(raw_path).suffix.lower() != ".docx":
+        return None
+    resolved = _safe_resolve_for_compare(raw_path)
+    if not resolved or not os.path.isfile(resolved):
+        return None
+    try:
+        from docx import Document
+
+        document = Document(resolved)
+        return sum(1 for paragraph in document.paragraphs if paragraph.text.strip())
+    except Exception:
+        return None
 
 
 def _task_requires_docx_summary_with_excel_table(

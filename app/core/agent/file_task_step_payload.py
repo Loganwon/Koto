@@ -11,25 +11,17 @@ def build_runtime_metadata(
     readonly_fallback_used: bool,
     model_failed: bool,
     planner_payload: dict[str, Any] | None = None,
-    planner_fallback_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     planner_payload = planner_payload if isinstance(planner_payload, dict) else {}
-    planner_fallback_payload = (
-        planner_fallback_payload if isinstance(planner_fallback_payload, dict) else {}
-    )
 
     backend = str(planner_payload.get("backend") or "")
     source = str(planner_payload.get("source") or "")
     policy = str(planner_payload.get("policy") or "")
     transport = str(planner_payload.get("transport") or "")
     reason = str(planner_payload.get("reason") or "")
-    fallback_from = str(planner_fallback_payload.get("from") or "")
-
     execution_path = "native"
     if readonly_fallback_used:
         execution_path = "readonly_fallback"
-    elif fallback_from:
-        execution_path = "planner_fallback"
     elif backend and backend != "native":
         execution_path = "planner"
     elif source and source != "native":
@@ -45,9 +37,6 @@ def build_runtime_metadata(
     round_index = planner_payload.get("round")
     if round_index:
         planner_runtime["round"] = round_index
-    if fallback_from:
-        planner_runtime["fallback_from"] = fallback_from
-
     return {
         "execution_path": execution_path,
         "terminal_status": str(terminal_status or ""),

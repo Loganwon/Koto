@@ -47,7 +47,6 @@ class FileTaskFinalizationPhase:
         model_failed: bool,
         readonly_fallback_used: bool,
         planner_runtime_payload: Dict[str, Any],
-        planner_fallback_runtime_payload: Dict[str, Any],
         last_check_payload: Optional[Dict[str, Any]],
         tool_gap: Optional[Dict[str, Any]],
         next_action_artifact: Optional[Dict[str, Any]],
@@ -150,7 +149,6 @@ class FileTaskFinalizationPhase:
             readonly_fallback_used=readonly_fallback_used,
             model_failed=model_failed,
             planner_payload=planner_runtime_payload,
-            planner_fallback_payload=planner_fallback_runtime_payload,
         )
         terminal_runtime["performance"] = performance_snapshot(total=True)
         check_payload["runtime"] = terminal_runtime

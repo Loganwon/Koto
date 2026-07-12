@@ -83,3 +83,22 @@ def test_explicit_output_paths_join_split_directory_and_filename() -> None:
     )
 
     assert paths == ["codex_real_task_20260701/sales_profit_report.xlsx"]
+
+
+def test_explicit_output_name_does_not_include_the_instruction_prefix() -> None:
+    from app.core.agent.file_task_targeting import (
+        explicit_output_path_from_task,
+        explicit_output_paths_from_task,
+    )
+
+    task = (
+        "请阅读当前文档，生成一份名为《艺术全球规则_目录摘要.docx》的中文摘要文档，"
+        "不要修改原文件。"
+    )
+
+    assert explicit_output_path_from_task(
+        task, has_artifact_creation_intent=lambda _task: True
+    ) == "艺术全球规则_目录摘要.docx"
+    assert explicit_output_paths_from_task(
+        task, has_artifact_creation_intent=lambda _task: True
+    ) == ["艺术全球规则_目录摘要.docx"]

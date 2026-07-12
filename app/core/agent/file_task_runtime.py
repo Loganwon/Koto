@@ -84,10 +84,8 @@ from app.core.agent.file_task_classification import (
     classification_task_text as _intent_adjudication_classification_task_text,
     demote_classification_to_read as _classification_contract_demote_to_read,
     infer_task_family_operation as _classification_semantics_infer_task_family_operation,
-    intent_adjudicator_messages as _intent_adjudication_messages,
     intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
     normalize_mainline_contract as _classification_contract_normalize_mainline,
-    refresh_classification_recipe as _classification_contract_refresh_recipe,
     request_with_task as _intent_adjudication_request_with_task,
     routing_decision_payload as _decision_context_routing_decision_payload,
     should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
@@ -513,7 +511,6 @@ class FileTaskRuntime:
         model_failed = execution_result.model_failed
         readonly_fallback_used = execution_result.readonly_fallback_used
         planner_runtime_payload = execution_result.planner_runtime_payload
-        planner_fallback_runtime_payload = execution_result.planner_fallback_runtime_payload
         last_check_payload = execution_result.last_check_payload
         tool_gap = execution_result.tool_gap
         next_action_artifact = execution_result.next_action_artifact
@@ -540,7 +537,6 @@ class FileTaskRuntime:
             model_failed=model_failed,
             readonly_fallback_used=readonly_fallback_used,
             planner_runtime_payload=planner_runtime_payload,
-            planner_fallback_runtime_payload=planner_fallback_runtime_payload,
             last_check_payload=last_check_payload,
             tool_gap=tool_gap,
             next_action_artifact=next_action_artifact,
@@ -579,14 +575,12 @@ class FileTaskRuntime:
         readonly_fallback_used: bool,
         model_failed: bool,
         planner_payload: Optional[Dict[str, Any]] = None,
-        planner_fallback_payload: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return _step_payload_build_runtime_metadata(
             terminal_status=terminal_status,
             readonly_fallback_used=readonly_fallback_used,
             model_failed=model_failed,
             planner_payload=planner_payload,
-            planner_fallback_payload=planner_fallback_payload,
         )
 
     def _with_runtime_context(
@@ -1332,14 +1326,6 @@ class FileTaskRuntime:
     def _intent_adjudicator_system_prompt(self) -> str:
         return _intent_adjudication_system_prompt()
 
-    def _intent_adjudicator_messages(
-        self,
-        request: FileTaskRequest,
-        files: List[FileTaskFile],
-        classification: FileTaskClassification,
-    ) -> List[Dict[str, Any]]:
-        return _intent_adjudication_messages(request, files, classification)
-
     def _adjudicate_intent_if_needed(
         self,
         request: FileTaskRequest,
@@ -1416,14 +1402,6 @@ class FileTaskRuntime:
             classification,
             reason=reason,
         )
-
-    def _refresh_classification_recipe(
-        self,
-        request: FileTaskRequest,
-        files: List[FileTaskFile],
-        classification: FileTaskClassification,
-    ) -> FileTaskClassification:
-        return _classification_contract_refresh_recipe(request, files, classification)
 
     def _build_execution_context(
         self,
@@ -1551,9 +1529,6 @@ class FileTaskRuntime:
 
     def _planner_classification(self, request: FileTaskRequest) -> tuple[str, str, str]:
         return "native_only", "file_task_native_only", "native"
-
-    def _has_explicit_planner_override(self, request: FileTaskRequest) -> bool:
-        return False
 
     def _sanitize_planner_options(self, options: Dict[str, Any]) -> Dict[str, Any]:
         return {
@@ -2209,20 +2184,6 @@ class FileTaskRuntime:
                 continue
             return file_info
         return None
-
-    def _single_context_file(
-        self, files: List[FileTaskFile], types: set[str]
-    ) -> Optional[FileTaskFile]:
-        matches: List[FileTaskFile] = []
-        for file_info in files:
-            file_type = (
-                file_info.type
-                or Path(file_info.path or file_info.name).suffix.lstrip(".")
-            ).lower()
-            if types and file_type not in types:
-                continue
-            matches.append(file_info)
-        return matches[0] if len(matches) == 1 else None
 
     def _context_files_by_type(
         self, files: List[FileTaskFile], types: set[str]

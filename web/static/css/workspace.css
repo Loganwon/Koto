@@ -10169,6 +10169,9 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   display: grid;
   gap: 5px;
 }
+#wa-ai-messages .wa-task-run.is-workbench-projected [data-role="process"] {
+  display: none !important;
+}
 #wa-ai-messages .wa-task-run.is-compact .wa-task-outcome {
   margin: 0;
   color: var(--text);

@@ -39,6 +39,12 @@ _TASK_TEXT_OUTPUT_DIRECTORY_VERB = (
 _TASK_TEXT_FILENAME_LABEL = (
     r"(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)"
 )
+_TASK_TEXT_NAMED_OUTPUT_PATTERN = re.compile(
+    rf"{_TASK_TEXT_FILENAME_LABEL}\s*(?:[《「“\"'])?"
+    r"(?P<path>[^\s\"'<>|:：,，。；;、!?！？()（）\[\]【】《》「」“”]+?"
+    r"\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))",
+    re.IGNORECASE,
+)
 
 
 def request_with_target_path(
@@ -132,6 +138,9 @@ def explicit_output_path_from_task(
     task_text = str(task or "").strip()
     if not task_text or not has_artifact_creation_intent(task_text):
         return ""
+    named_outputs = _explicitly_named_output_paths(task_text)
+    if named_outputs:
+        return named_outputs[-1][1]
     candidates: List[tuple[int, int, str]] = []
     for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
@@ -178,6 +187,9 @@ def explicit_output_paths_from_task(
     task_text = str(task or "").strip()
     if not task_text or not has_artifact_creation_intent(task_text):
         return []
+    named_outputs = _explicitly_named_output_paths(task_text)
+    if named_outputs:
+        return _unique_output_paths(named_outputs)
     candidates: List[tuple[int, int, str]] = []
     for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
@@ -209,11 +221,38 @@ def explicit_output_paths_from_task(
         if score > 0:
             candidates.append((score, start, candidate_path))
 
+    return _unique_output_paths(candidates)
+
+
+def _explicitly_named_output_paths(task_text: str) -> List[tuple[int, str]]:
+    """Return output names following an explicit naming label.
+
+    The general file-reference matcher deliberately accepts broad text so it
+    can recognize paths in natural-language tasks.  That also made
+    ``生成一份名为《报告.docx》`` look like one long filename.  A named-output
+    reference is unambiguous, so resolve it before considering the broad
+    matcher.
+    """
+    candidates: List[tuple[int, str]] = []
+    for match in _TASK_TEXT_NAMED_OUTPUT_PATTERN.finditer(task_text):
+        raw_path = match.group("path").strip()
+        suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
+        if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
+            continue
+        start, end = match.span("path")
+        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
+        if candidate_path:
+            candidates.append((start, candidate_path))
+    return candidates
+
+
+def _unique_output_paths(candidates: List[tuple[Any, ...]]) -> List[str]:
     seen: set[str] = set()
     outputs: List[str] = []
-    for _score, _start, candidate_path in sorted(candidates, key=lambda item: item[1]):
+    for candidate in sorted(candidates, key=lambda item: item[0]):
+        candidate_path = str(candidate[-1] or "").strip()
         normalized = candidate_path.replace("\\", "/").casefold()
-        if normalized in seen:
+        if not normalized or normalized in seen:
             continue
         seen.add(normalized)
         outputs.append(candidate_path)

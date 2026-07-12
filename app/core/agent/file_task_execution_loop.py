@@ -62,7 +62,6 @@ class FileTaskExecutionResult:
     model_failed: bool
     readonly_fallback_used: bool
     planner_runtime_payload: Dict[str, Any]
-    planner_fallback_runtime_payload: Dict[str, Any]
     last_check_payload: Optional[Dict[str, Any]]
     tool_gap: Optional[Dict[str, Any]]
     next_action_artifact: Optional[Dict[str, Any]]
@@ -148,7 +147,6 @@ class FileTaskExecutionLoop:
         readonly_fallback_used = False
         last_tool_batch_signature = ""
         planner_runtime_payload: Dict[str, Any] = {}
-        planner_fallback_runtime_payload: Dict[str, Any] = {}
         last_tool_gap_signature = ""
         plan_confirmed_emitted = False
         last_execution_brief_signature = ""
@@ -178,7 +176,6 @@ class FileTaskExecutionLoop:
                 model_failed=model_failed,
                 readonly_fallback_used=readonly_fallback_used,
                 planner_runtime_payload=planner_runtime_payload,
-                planner_fallback_runtime_payload=planner_fallback_runtime_payload,
                 last_check_payload=last_check_payload,
                 tool_gap=tool_gap,
                 next_action_artifact=next_action_artifact,
@@ -194,7 +191,6 @@ class FileTaskExecutionLoop:
                 return _result(cancelled=True)
             if round_index > runtime._max_rounds and not pending_repair_check_payload:
                 break
-            planner_fallback_runtime_payload = {}
             answer_only_plan = _readonly_answer_only_round(
                 write_intent=write_intent,
                 readonly_answer_guard_injected=readonly_answer_guard_injected,
@@ -434,17 +430,10 @@ class FileTaskExecutionLoop:
                             step_id=execute_step_id,
                         )
                         break
-            external_planner_request = False
             if (
                 not tool_gap
                 and known_tool_gap
                 and not tool_calls
-                and not external_planner_request
-                and not bool(
-                    (model_request.options or {}).get(
-                        "planner_runtime_fallback_attempted"
-                    )
-                )
             ):
                 tool_gap = known_tool_gap
 
@@ -465,7 +454,6 @@ class FileTaskExecutionLoop:
                     readonly_fallback_used=readonly_fallback_used,
                     model_failed=model_failed,
                     planner_payload=planner_runtime_payload,
-                    planner_fallback_payload=planner_fallback_runtime_payload,
                 )
                 next_action_artifact = runtime._with_runtime_context(
                     build_next_action_artifact(request, tool_gap),
@@ -774,7 +762,6 @@ class FileTaskExecutionLoop:
                             readonly_fallback_used=readonly_fallback_used,
                             model_failed=model_failed,
                             planner_payload=planner_runtime_payload,
-                            planner_fallback_payload=planner_fallback_runtime_payload,
                         )
                         repair_check_payload = dict(last_check_payload)
                         repair_check_payload["runtime"] = repair_runtime
@@ -1676,7 +1663,6 @@ class FileTaskExecutionLoop:
                         readonly_fallback_used=readonly_fallback_used,
                         model_failed=model_failed,
                         planner_payload=planner_runtime_payload,
-                        planner_fallback_payload=planner_fallback_runtime_payload,
                     )
                     repair_check_payload = dict(last_check_payload)
                     repair_check_payload["runtime"] = repair_runtime
