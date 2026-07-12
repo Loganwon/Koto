@@ -79,6 +79,22 @@ class TestGetSettings:
 
 @pytest.mark.integration
 class TestUpdateSettings:
+    def test_rejects_invalid_json_body(self, client):
+        response = _post(client, "/api/settings", data="not json", content_type="application/json")
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data["success"] is False
+
+    def test_rejects_out_of_range_ui_zoom(self, client):
+        response = _post(
+            client,
+            "/api/settings",
+            json={"category": "appearance", "key": "ui_zoom", "value": 2},
+        )
+        data = response.get_json()
+        assert response.status_code == 400
+        assert data["success"] is False
+
     def test_update_valid_setting(self, client):
         resp = _post(
             client,

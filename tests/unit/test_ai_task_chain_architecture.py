@@ -110,7 +110,7 @@ def test_workspace_route_intent_has_deterministic_fast_path_before_model() -> No
     route_endpoint = _body_between(
         editor_ai,
         'def workspace_ai_route_intent():',
-        '\n\n@editor_ai_bp.route("/api/editor/ai/agent", methods=["POST"])',
+        '\n\n@editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])',
     )
 
     assert "/api/workspace/ai/direct-response" not in editor_ai
@@ -203,10 +203,38 @@ def test_file_task_tool_gateway_is_only_a_tool_boundary() -> None:
 
 
 def test_runtime_records_decision_and_supervisor_verification_per_tool_step() -> None:
-    source = _read("app/core/agent/file_task_runtime.py")
+    runtime_source = _read("app/core/agent/file_task_runtime.py")
+    execution_source = _read("app/core/agent/file_task_execution_loop.py")
+    finalization_source = _read("app/core/agent/file_task_finalization.py")
 
-    assert '"decision.made"' in source
-    assert '"supervisor.step_verified"' in source
-    assert '"check.finished"' in source
-    assert '"supervisor.verified"' in source
-    assert source.index('"decision.made"') < source.index('"supervisor.step_verified"')
+    assert "FileTaskExecutionLoop(self).stream(" in runtime_source
+    assert "FileTaskFinalizationPhase(self).stream(" in runtime_source
+    assert '"decision.made"' in execution_source
+    assert '"supervisor.step_verified"' in execution_source
+    assert execution_source.index('"decision.made"') < execution_source.index('"supervisor.step_verified"')
+    assert '"check.finished"' in finalization_source
+    assert '"supervisor.verified"' in finalization_source
+
+
+def test_runtime_path_resolution_logs_unexpected_resolver_failures() -> None:
+    source = _read("app/core/agent/file_task_runtime.py")
+    start = source.index("    def _resolve_task_file_path(")
+    end = source.index("    def _plan_summary(", start)
+    resolver = source[start:end]
+
+    assert "except Exception as exc:" in resolver
+    assert "[FileTaskRuntime] workspace path resolution skipped" in resolver
+    assert "except Exception:\n            pass" not in resolver
+
+
+def test_file_conversion_implementation_stays_outside_task_tools_registry() -> None:
+    task_tools = _read("app/core/agent/task_tools.py")
+    conversion = _read("app/core/agent/task_tools_conversion.py")
+
+    assert "from app.core.agent.task_tools_conversion import (" in task_tools
+    assert "def convert_docx_to_pdf_with_libreoffice(" in conversion
+    assert "def convert_file(" in conversion
+    assert "def list_conversions(" in conversion
+    assert "return _conversion_convert_docx_to_pdf(" in task_tools
+    assert "return _conversion_convert_file(" in task_tools
+    assert "return _conversion_list_conversions(file_ext)" in task_tools

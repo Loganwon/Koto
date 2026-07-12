@@ -8,7 +8,7 @@ import pytest
 
 
 class TestSettingsManager:
-    """Tests for web.settings.SettingsManager."""
+    """Tests for app.core.config.user_settings.SettingsManager."""
 
     @pytest.fixture
     def settings_file(self, tmp_path):
@@ -19,16 +19,16 @@ class TestSettingsManager:
     @pytest.fixture
     def settings_mgr(self, monkeypatch, settings_file):
         import importlib
-        import web.settings
-        importlib.reload(web.settings)
-        monkeypatch.setattr('web.settings.SETTINGS_FILE', str(settings_file))
-        web.settings.SettingsManager._instance = None
-        mgr = web.settings.SettingsManager()
+        import app.core.config.user_settings as _settings_mod
+        importlib.reload(_settings_mod)
+        monkeypatch.setattr('app.core.config.user_settings.SETTINGS_FILE', str(settings_file))
+        _settings_mod.SettingsManager._instance = None
+        mgr = _settings_mod.SettingsManager()
         yield mgr
         mgr._flush_timer = None
 
     def test_singleton(self, settings_mgr):
-        from web.settings import SettingsManager as SM
+        from app.core.config.user_settings import SettingsManager as SM
         mgr2 = SM()
         assert settings_mgr is mgr2
 
@@ -64,11 +64,11 @@ class TestSettingsValidation:
         sf = tmp_path / "user_settings.json"
         sf.write_text('{}')
         import importlib
-        import web.settings
-        importlib.reload(web.settings)
-        monkeypatch.setattr('web.settings.SETTINGS_FILE', str(sf))
-        web.settings.SettingsManager._instance = None
-        mgr = web.settings.SettingsManager()
+        import app.core.config.user_settings as _settings_mod
+        importlib.reload(_settings_mod)
+        monkeypatch.setattr('app.core.config.user_settings.SETTINGS_FILE', str(sf))
+        _settings_mod.SettingsManager._instance = None
+        mgr = _settings_mod.SettingsManager()
         yield mgr
         mgr._flush_timer = None
 
@@ -95,10 +95,10 @@ class TestSettingsValidation:
     def test_persistence(self, settings_mgr_val, monkeypatch, tmp_path):
         settings_mgr_val.set('appearance', 'theme', 'ocean')
         settings_mgr_val.flush()
-        import web.settings
-        web.settings.SettingsManager._instance = None
-        import importlib
-        importlib.reload(web.settings)
-        monkeypatch.setattr('web.settings.SETTINGS_FILE', str(tmp_path / 'user_settings.json'))
-        mgr2 = web.settings.SettingsManager()
+        import app.core.config.user_settings as _settings_mod
+        monkeypatch.setattr('app.core.config.user_settings.SETTINGS_FILE', str(tmp_path / 'user_settings.json'))
+        _settings_mod.SettingsManager._instance = None
+        mgr2 = _settings_mod.SettingsManager()
+        assert mgr2.get('appearance', 'theme') == 'ocean'
+        mgr2 = _settings_mod.SettingsManager()
         assert mgr2.get('appearance', 'theme') == 'ocean'

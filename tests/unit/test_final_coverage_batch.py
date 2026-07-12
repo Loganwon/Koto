@@ -952,34 +952,34 @@ class TestKotoSetupDeep:
     """Cover config writing edge cases, API validation errors,
     _run_setup_if_needed branches, _prompt_local_model_if_needed."""
 
-    # -- _write_gemini_config -----------------------------------------------
+    # -- _write_deepseek_config ---------------------------------------------
     def test_write_config_creates_file(self):
-        from src.koto_setup import _write_gemini_config
+        from src.koto_setup import _write_deepseek_config
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             with patch("src.koto_setup.APP_ROOT", td_path):
-                _write_gemini_config(
-                    "AIzaTestKey123456789012345678", "https://custom.api.com"
+                _write_deepseek_config(
+                    "sk-test-key-123456789", "https://custom.api.com"
                 )
-            config_file = td_path / "config" / "gemini_config.env"
+            config_file = td_path / "config" / "deepseek_config.env"
             assert config_file.exists()
             content = config_file.read_text(encoding="utf-8")
-            assert "AIzaTestKey123456789012345678" in content
+            assert "sk-test-key-123456789" in content
             assert "https://custom.api.com" in content
 
     def test_write_config_default_base(self):
-        from src.koto_setup import _write_gemini_config
+        from src.koto_setup import _write_deepseek_config
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             with patch("src.koto_setup.APP_ROOT", td_path):
-                _write_gemini_config("AIzaKey999", "")
-            content = (td_path / "config" / "gemini_config.env").read_text(
+                _write_deepseek_config("sk-test-key-999", "")
+            content = (td_path / "config" / "deepseek_config.env").read_text(
                 encoding="utf-8"
             )
-            assert "AIzaKey999" in content
-            assert "GEMINI_API_BASE=" in content
+            assert "sk-test-key-999" in content
+            assert "DEEPSEEK_BASE_URL=https://api.deepseek.com" in content
 
     # -- _api_key_configured ------------------------------------------------
     def test_api_key_configured_false_for_your_api_key_here(self):
@@ -987,9 +987,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=your_api_key_here\n")
+            cfg.write_text("DEEPSEEK_API_KEY=your_api_key_here\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is False
@@ -999,9 +999,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=\n")
+            cfg.write_text("DEEPSEEK_API_KEY=\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is False
@@ -1011,9 +1011,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=None\n")
+            cfg.write_text("DEEPSEEK_API_KEY=None\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is False
@@ -1023,9 +1023,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=AIzaRealKeyValue12345678901234\n")
+            cfg.write_text("DEEPSEEK_API_KEY=sk-real-key-value-123456789\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is True
@@ -1044,14 +1044,14 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
             cfg.write_text(
-                "GEMINI_API_KEY=AIzaKey123\nGEMINI_API_BASE=https://api.example.com\n"
+                "DEEPSEEK_API_KEY=sk-key-123\nDEEPSEEK_BASE_URL=https://api.example.com\n"
             )
             with patch("src.koto_setup.APP_ROOT", td_path):
                 key, base = _read_config_values()
-        assert key == "AIzaKey123"
+        assert key == "sk-key-123"
         assert base == "https://api.example.com"
 
     def test_read_config_values_missing_file(self):
@@ -1072,7 +1072,7 @@ class TestKotoSetupDeep:
         mock_response.__enter__ = lambda s: mock_response
         mock_response.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_response):
-            ok, msg = _validate_api_key("AIzaTestKey123456789012345678")
+            ok, msg = _validate_api_key("sk-test-key-123456789")
         assert ok is True
 
     def test_validate_api_key_http_400(self):
@@ -1086,7 +1086,7 @@ class TestKotoSetupDeep:
                 "http://example.com", 400, "Bad Request", {}, None
             ),
         ):
-            ok, msg = _validate_api_key("AIzaBadKey")
+            ok, msg = _validate_api_key("sk-bad-key")
         assert ok is False
         assert "❌" in msg
 
@@ -1101,7 +1101,7 @@ class TestKotoSetupDeep:
                 "http://example.com", 403, "Forbidden", {}, None
             ),
         ):
-            ok, msg = _validate_api_key("AIzaForbidden")
+            ok, msg = _validate_api_key("sk-forbidden")
         assert ok is False
         assert "403" in msg or "❌" in msg
 
@@ -1116,7 +1116,7 @@ class TestKotoSetupDeep:
                 "http://example.com", 500, "Server Error", {}, None
             ),
         ):
-            ok, msg = _validate_api_key("AIzaTestKey123456789012345678")
+            ok, msg = _validate_api_key("sk-test-key-123456789")
         assert ok is False
         assert "500" in msg
 
@@ -1124,7 +1124,7 @@ class TestKotoSetupDeep:
         from src.koto_setup import _validate_api_key
 
         with patch("urllib.request.urlopen", side_effect=ConnectionError("no network")):
-            ok, msg = _validate_api_key("AIzaTestKey123456789012345678")
+            ok, msg = _validate_api_key("sk-test-key-123456789")
         assert ok is False
         assert "⚠" in msg
 
@@ -1138,7 +1138,7 @@ class TestKotoSetupDeep:
         with patch(
             "urllib.request.urlopen", return_value=mock_response
         ) as mock_urlopen:
-            ok, msg = _validate_api_key("AIzaKey", base="https://custom.api.com")
+            ok, msg = _validate_api_key("sk-key", base="https://custom.api.com")
         assert ok is True
         # Verify the custom base was used in the URL
         call_args = mock_urlopen.call_args
@@ -1151,8 +1151,8 @@ class TestKotoSetupDeep:
 
         with patch("sys.argv", ["koto_setup.py", "--setup"]), patch(
             "src.koto_setup._show_api_setup_wizard",
-            return_value={"key": "AIzaKey12345678901234567890", "base": ""},
-        ) as mock_wizard, patch("src.koto_setup._write_gemini_config"), patch(
+            return_value={"key": "sk-key-12345678901234567890", "base": ""},
+        ) as mock_wizard, patch("src.koto_setup._write_cloud_config"), patch(
             "src.koto_setup.APP_ROOT", Path(tempfile.mkdtemp())
         ):
             try:
@@ -1176,7 +1176,7 @@ class TestKotoSetupDeep:
         with patch("sys.argv", ["koto_setup.py"]), patch(
             "src.koto_setup._api_key_configured", return_value=True
         ), patch(
-            "src.koto_setup._read_config_values", return_value=("AIzaKey", "")
+            "src.koto_setup._read_config_values", return_value=("sk-key", "")
         ), patch(
             "src.koto_setup._validate_api_key", return_value=(True, "")
         ), patch(
@@ -1191,7 +1191,7 @@ class TestKotoSetupDeep:
         with patch("sys.argv", ["koto_setup.py"]), patch(
             "src.koto_setup._api_key_configured", return_value=True
         ), patch(
-            "src.koto_setup._read_config_values", return_value=("AIzaKey", "")
+            "src.koto_setup._read_config_values", return_value=("sk-key", "")
         ), patch(
             "src.koto_setup._validate_api_key", return_value=(False, "⚠️ 网络异常")
         ), patch(

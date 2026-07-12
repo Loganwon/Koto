@@ -8,6 +8,14 @@ from datetime import datetime
 _app_logger = logging.getLogger("koto.app")
 
 
+def file_capability_guidance() -> str:
+    """Return one truthful capability boundary for general-chat replies."""
+    return """## 📁 文件能力说明
+- 已打开或附加的 Word、Excel、PPT、文本和 CSV 文件可按用户指令读取、分析或编辑；Excel 不是只读能力。
+- PDF、图片等格式的编辑范围取决于当前工作区工具与用户请求；不确定时说明限制，不要把所有文件笼统说成“仅读取”。
+- 只有用户明确要求分析、总结、检查时才保持只读；用户明确要求编辑、写入或生成新版本时，应说明会进入相应文件任务流程。"""
+
+
 def get_chat_system_instruction(question: str = None):
     """
     生成包含当前日期时间和系统状态的系统指令
@@ -72,6 +80,8 @@ def get_chat_system_instruction(question: str = None):
 5. **环境感知** - 了解当前 CPU、内存、磁盘状态，做出合适的建议
 6. **时间准确性** - 使用系统时间准确计算相对日期
 7. **禁止生成文件** - 仅在明确要求PDF/Word/Excel/PPT时才生成
+
+{file_capability_guidance()}
 
 ## ✅ 能做的事
 - 帮助用户分析本地文件、文档、图片

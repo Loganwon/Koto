@@ -562,6 +562,12 @@ class ContextInjector:
             f"对话历史中出现的任何日期（如之前的回复里写过'3月28日'等）均为**历史消息生成时的时间**，\n"
             f"与现在无关。计算'今天/明天/下周/上月'等相对时间时，**严格以此处时间为准**，忽略历史记录中的日期。"
         )
+        try:
+            from web.chat_system_instruction import file_capability_guidance
+
+            _file_capability_guidance = file_capability_guidance()
+        except Exception:
+            _file_capability_guidance = ""
 
         return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。{_personality_part}{context_part}
 
@@ -578,6 +584,8 @@ class ContextInjector:
 4. **按需引用系统信息** - 仅当用户明确询问系统状态、性能诊断或相关操作任务时，才引用 CPU/内存/磁盘数据；普通问答、学习解释、写作等场景**不主动提及**系统信息
 5. **时间准确性** - 使用系统时间准确计算相对日期
 6. **严格限制文件生成** - 绝对禁止主动生成任何文件（PPT/PDF/Word/Excel/Code）或使用了BEGIN_FILE标记，除非用户明确使用了"生成"、"创建"、"制作"等动词要求文件。对于"分析"、"解释"、"怎么做"等咨询类问题，仅提供纯文本回答。
+
+{_file_capability_guidance}
 
 ## ✅ 能做的事
 - 帮助用户分析本地文件、文档、图片

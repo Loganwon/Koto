@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import importlib.util
+import os
 import subprocess
 import sys
 from collections import OrderedDict
@@ -164,6 +165,18 @@ def _suite_requires_browser(name: str) -> bool:
     return "browser-mock" in _resolve_suite_names(name)
 
 
+def _pytest_environment(base_environment: dict[str, str] | None = None) -> dict[str, str]:
+    """Return an isolated environment for deterministic assistant-flow tests.
+
+    The task-stream assertions exercise request handling, not production
+    schedulers.  Starting background jobs, model warmups, and file watchers in
+    the same interpreter makes SSE timing depend on machine state.
+    """
+    environment = dict(os.environ if base_environment is None else base_environment)
+    environment["KOTO_SKIP_BACKGROUND_RUNTIME"] = "1"
+    return environment
+
+
 def _missing_browser_prerequisites() -> list[str]:
     missing = []
     for module_name, package_name in BROWSER_PREREQUISITES.items():
@@ -241,7 +254,7 @@ def main(argv: list[str] | None = None) -> int:
             _print_browser_prerequisite_error(missing)
             return 2
 
-    return subprocess.call(command)
+    return subprocess.call(command, env=_pytest_environment())
 
 
 if __name__ == "__main__":

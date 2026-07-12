@@ -20,3 +20,12 @@ def test_ai_assistant_runner_has_mcp_and_test_ready_preflight_lanes():
         "browser-mock",
     ]
     assert runner.COMPOSITE_SUITES["release"][-1] == "browser-mock"
+
+
+def test_ai_assistant_runner_disables_background_runtime_for_pytest():
+    environment = runner._pytest_environment(
+        {"KOTO_SKIP_BACKGROUND_RUNTIME": "0", "KEEP_ME": "yes"}
+    )
+
+    assert environment["KOTO_SKIP_BACKGROUND_RUNTIME"] == "1"
+    assert environment["KEEP_ME"] == "yes"

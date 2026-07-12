@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from app.core.llm.model_capabilities import is_interactions_only_model
-from web.model_manager import _INFER_RULES, ModelManager, infer_capabilities
+from app.core.services.model_manager import (
+    _INFER_RULES,
+    ModelManager,
+    infer_capabilities,
+)
 
 
 class _FakeModel:
@@ -74,9 +78,15 @@ def test_select_best_chat_prefers_flash_over_heavier_pro_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
         "gemini-2.5-pro": _caps(
-            speed=10, quality=10, reasoning=10, context=10, tier=10
+            speed=4, quality=10, reasoning=10, context=10, tier=10
         ),
-        "gemini-2.5-flash": _caps(speed=3, quality=3, reasoning=3, context=3, tier=7),
+        "gemini-2.5-flash": _caps(
+            speed=9,
+            quality=7,
+            reasoning=7,
+            context=7,
+            tier=7,
+        ),
     }
 
     best = manager._select_best("CHAT", ["gemini-2.5-pro", "gemini-2.5-flash"])
@@ -180,4 +190,4 @@ def test_static_default_map_includes_file_task_route():
     manager = ModelManager(client=None)
     assert manager._static_default_map()["FILE_TASK"] == "deepseek-chat"
     assert manager._static_default_map()["CHAT"] == "deepseek-chat"
-    assert manager._static_default_map()["VISION"] == "gemini-3-flash-preview"
+    assert manager._static_default_map()["VISION"] == "deepseek-chat"

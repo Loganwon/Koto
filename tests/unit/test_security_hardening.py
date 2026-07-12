@@ -24,7 +24,7 @@ if _ROOT not in sys.path:
 
 def _get_auth_module():
     """Import the auth module."""
-    import web.blueprints.auth as auth as auth_mod
+    import web.blueprints.auth as auth_mod
 
     return auth_mod
 

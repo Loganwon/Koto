@@ -207,7 +207,7 @@ def delete_calendar_event(event_id: str) -> Response:
 @misc_api_bp.route("/api/clipboard/history", methods=["GET"])
 def get_clipboard_history() -> Response:
     """获取剪贴板历史"""
-    from clipboard_manager import get_clipboard_manager
+    from app.core.services.clipboard_manager import get_clipboard_manager
 
     limit = int(request.args.get("limit", 50))
     type_filter = request.args.get("type")
@@ -222,7 +222,7 @@ def get_clipboard_history() -> Response:
 @misc_api_bp.route("/api/clipboard/search", methods=["GET"])
 def search_clipboard() -> Response:
     """搜索剪贴板历史"""
-    from clipboard_manager import get_clipboard_manager
+    from app.core.services.clipboard_manager import get_clipboard_manager
 
     query = request.args.get("query", "")
     type_filter = request.args.get("type")
@@ -237,7 +237,7 @@ def search_clipboard() -> Response:
 @misc_api_bp.route("/api/clipboard/copy", methods=["POST"])
 def copy_from_history() -> Response:
     """从历史中复制"""
-    from clipboard_manager import get_clipboard_manager
+    from app.core.services.clipboard_manager import get_clipboard_manager
 
     content = request.json.get("content")
     index = request.json.get("index")

@@ -37,15 +37,15 @@ logger = logging.getLogger("koto.data_gen")
 
 # ── 加载 Gemini API Key ───────────────────────────────────────────────────────
 def _load_api_key() -> str:
-    env_file = _ROOT / "config" / "gemini_config.env"
+    env_file = _ROOT / "config" / "deepseek_config.env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
             line = line.strip()
-            if line.startswith("GEMINI_API_KEY="):
+            if line.startswith("DEEPSEEK_API_KEY="):
                 return line.split("=", 1)[1].strip()
-    key = os.environ.get("GEMINI_API_KEY", "")
+    key = os.environ.get("DEEPSEEK_API_KEY", "")
     if not key:
-        raise RuntimeError("找不到 GEMINI_API_KEY，请检查 config/gemini_config.env")
+        raise RuntimeError("找不到 DEEPSEEK_API_KEY，请检查 config/deepseek_config.env")
     return key
 
 
@@ -107,33 +107,17 @@ def load_all_skills() -> List[Dict]:
 
 
 # ── Gemini 调用 ───────────────────────────────────────────────────────────────
-def call_gemini(api_key: str, messages: List[Dict], model: str = "gemini-2.5-flash") -> str:
-    """简单的 Gemini HTTP 调用，返回文本响应"""
+def call_deepseek(api_key: str, messages: List[Dict], model: str = "deepseek-chat") -> str:
+    """通过 Koto DeepSeek provider 返回文本响应。"""
     try:
-        from google import genai
-        client = genai.Client(api_key=api_key)
-        # 转为 Gemini SDK 格式
-        contents = []
-        sys_instruction = None
-        for m in messages:
-            if m["role"] == "system":
-                sys_instruction = m["content"]
-            elif m["role"] == "user":
-                contents.append(m["content"])
-
-        config_kwargs: Dict[str, Any] = {"max_output_tokens": 8192}
-        if sys_instruction:
-            config_kwargs["system_instruction"] = sys_instruction
-
-        from google.genai import types
-        response = client.models.generate_content(
-            model=model,
-            contents=contents,
-            config=types.GenerateContentConfig(**config_kwargs),
+        from app.core.llm.deepseek_provider import DeepSeekProvider
+        response = DeepSeekProvider(api_key=api_key).generate_content(
+            prompt=messages, model=model, max_tokens=8192,
+            response_format={"type": "json_object"},
         )
-        return response.text or ""
+        return str(response.get("content") or "")
     except Exception as e:
-        logger.error(f"Gemini 调用失败: {e}")
+        logger.error(f"DeepSeek 调用失败: {e}")
         raise
 
 
@@ -222,7 +206,7 @@ Skill 名称: {skill['name']} {skill['icon']}
             {"role": "system", "content": _GENERATOR_SYSTEM},
             {"role": "user", "content": user_msg},
         ]
-        raw = call_gemini(api_key, messages)
+        raw = call_deepseek(api_key, messages)
         raw = raw.strip()
         if raw.startswith("```"):
             lines = raw.split("\n")
@@ -280,7 +264,7 @@ def build_sample(
         "skill_id": skill["id"],
         "skill_name": skill["name"],
         "negative": negative,
-        "source": "gemini_generated",
+        "source": "deepseek_generated",
         "quality": 0.85,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }

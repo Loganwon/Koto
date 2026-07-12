@@ -21,7 +21,7 @@ from datetime import datetime
 from web.auto_execution import AutoExecutionEngine
 from web.behavior_monitor import BehaviorMonitor
 from web.context_awareness import ContextAwarenessSystem
-from web.notification_manager import NotificationManager
+from app.core.services.notification_manager import NotificationManager
 from web.proactive_dialogue import ProactiveDialogueEngine
 from web.proactive_trigger import ProactiveTriggerSystem
 from web.suggestion_engine import SuggestionEngine

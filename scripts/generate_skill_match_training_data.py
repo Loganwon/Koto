@@ -86,13 +86,13 @@ def _load_skill_catalog() -> list[dict]:
 
 
 # ── Gemini API 调用 ────────────────────────────────────────────────────────────
-def _load_gemini_key() -> str:
-    env_file = ROOT / "config" / "gemini_config.env"
+def _load_deepseek_key() -> str:
+    env_file = ROOT / "config" / "deepseek_config.env"
     if env_file.exists():
         for line in env_file.read_text(encoding="utf-8").splitlines():
-            if line.strip().startswith("GEMINI_API_KEY"):
+            if line.strip().startswith("DEEPSEEK_API_KEY"):
                 return line.split("=", 1)[-1].strip().strip('"').strip("'")
-    return os.environ.get("GEMINI_API_KEY", "")
+    return os.environ.get("DEEPSEEK_API_KEY", "")
 
 
 def _fix_json_newlines(s: str) -> str:
@@ -119,21 +119,13 @@ def _fix_json_newlines(s: str) -> str:
     return "".join(result)
 
 
-def _call_gemini(api_key: str, prompt: str, model: str = "gemini-2.5-flash") -> str:
-    import urllib.request, urllib.error
-    url = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/"
-        f"{model}:generateContent?key={api_key}"
+def _call_deepseek(api_key: str, prompt: str, model: str = "deepseek-chat") -> str:
+    from app.core.llm.deepseek_provider import DeepSeekProvider
+    response = DeepSeekProvider(api_key=api_key).generate_content(
+        prompt=prompt, model=model, temperature=0.9, max_tokens=8192,
+        response_format={"type": "json_object"},
     )
-    body = json.dumps({
-        "contents": [{"role": "user", "parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.9, "maxOutputTokens": 8192},
-    }).encode("utf-8")
-    req = urllib.request.Request(url, data=body,
-                                  headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-    return data["candidates"][0]["content"]["parts"][0]["text"]
+    return str(response.get("content") or "")
 
 
 # ── 提示词构建 ─────────────────────────────────────────────────────────────────
@@ -211,7 +203,7 @@ def _generate_match_samples(
 
 总计输出 {total} 条，直接输出 JSON 数组，不要任何前缀或后缀文字:"""
 
-    raw = _call_gemini(api_key, prompt)
+    raw = _call_deepseek(api_key, prompt)
     # 移除 markdown fence
     raw = re.sub(r"^```[a-z]*\n?", "", raw.strip())
     raw = re.sub(r"\n?```$", "", raw.strip())
@@ -274,9 +266,9 @@ def main():
     parser.add_argument("--resume", action="store_true", help="跳过已生成的 Skill")
     args = parser.parse_args()
 
-    api_key = _load_gemini_key()
+    api_key = _load_deepseek_key()
     if not api_key:
-        print("❌ 未找到 GEMINI_API_KEY，请检查 config/gemini_config.env")
+        print("❌ 未找到 DEEPSEEK_API_KEY，请检查 config/deepseek_config.env")
         sys.exit(1)
 
     output_path = ROOT / args.output

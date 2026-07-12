@@ -17,15 +17,8 @@ from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
-try:
-    from web.behavior_monitor import BehaviorMonitor
-except ImportError:
-    from behavior_monitor import BehaviorMonitor
-
-try:
-    from web.knowledge_graph import KnowledgeGraph
-except ImportError:
-    from knowledge_graph import KnowledgeGraph
+from web.behavior_monitor import BehaviorMonitor
+from web.knowledge_graph import KnowledgeGraph
 
 
 class SuggestionEngine:

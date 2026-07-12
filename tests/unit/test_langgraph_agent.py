@@ -472,6 +472,25 @@ class TestLangGraphAgent:
         )
         assert "graph" in agent.get_graph_mermaid().lower()
 
+    @patch(f"{_MOD}.build_graph")
+    @patch(_TOOL_REG, autospec=False)
+    def test_run_accepts_record_task_compatibility_flag(self, mock_tr_cls, mock_bg):
+        self._skip_if_unavailable()
+        fake_graph = Mock()
+        mock_bg.return_value = fake_graph
+
+        from app.core.agent.langgraph_agent import LangGraphAgent
+
+        agent = LangGraphAgent(
+            registry=Mock(),
+            enable_pii_filter=False,
+            enable_output_validation=False,
+        )
+        with patch.object(agent, "stream", return_value=iter([{"type": "answer", "content": "ok"}])):
+            steps = list(agent.run("health check", record_task=False))
+
+        assert steps[-1].content == "ok"
+
 
 # ===================================================================
 # 5. Test _assert_langgraph

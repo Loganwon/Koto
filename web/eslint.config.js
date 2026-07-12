@@ -36,7 +36,7 @@ export default [
         varsIgnorePattern: '^_',
       }],
 
-      // Production safety ? allow console.warn/error, warn on log/debug
+      // Production safety: allow console.warn/error/debug, warn on other console calls.
       'no-console': ['warn', { allow: ['warn', 'error', 'debug'] }],
       'no-debugger': 'error',
 

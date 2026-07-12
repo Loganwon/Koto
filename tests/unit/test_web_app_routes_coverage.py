@@ -165,6 +165,15 @@ class TestSetupRoutes:
         resp = _json_post(client, "/api/setup/apikey", {})
         assert resp.status_code in (200, 400)
 
+    def test_setup_apikey_rejects_archived_gemini(self, client):
+        resp = _json_post(
+            client,
+            "/api/setup/apikey",
+            {"provider": "gemini", "api_key": "legacy-key-that-must-not-be-saved"},
+        )
+        assert resp.status_code == 410
+        assert resp.get_json()["code"] == "provider_archived"
+
     def test_setup_workspace(self, client):
         resp = _json_post(client, "/api/setup/workspace", {"path": ""})
         assert resp.status_code in (200, 500)
@@ -495,6 +504,11 @@ class TestLocalModelRoutes:
     def test_local_model_switch(self, client):
         resp = _json_post(client, "/api/local-model/switch", {"mode": "cloud"})
         assert resp.status_code in (200, 500)
+
+    def test_local_model_switch_rejects_archived_gemini(self, client):
+        resp = _json_post(client, "/api/local-model/switch", {"mode": "gemini"})
+        assert resp.status_code == 410
+        assert resp.get_json()["code"] == "provider_archived"
 
     def test_local_model_setup(self, client):
         resp = _json_post(client, "/api/local-model/setup")

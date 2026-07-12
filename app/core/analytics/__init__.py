@@ -1,1 +1,1 @@
-﻿# Package: analytics
+# Package: analytics

@@ -914,46 +914,21 @@ class TestGetMemoryManager:
     def test_returns_instance(self):
         app = _import_app()
         memory_runtime = _import_memory_runtime()
-        old = memory_runtime._memory_manager
-        try:
-            memory_runtime._memory_manager = None
-            mock_mgr = MagicMock()
-            ctx_mod = types.ModuleType("app.core.app_context")
-            ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
+        mock_mgr = MagicMock()
+        ctx_mod = types.ModuleType("app.core.app_context")
+        ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
 
-            with patch.dict(
-                sys.modules, {"app.core.app_context": ctx_mod}
-            ), patch.object(memory_runtime, "_inject_memory_adapters"):
-                mgr = app.get_memory_manager()
-                assert mgr is mock_mgr
-                # Second call returns same instance
-                assert app.get_memory_manager() is mgr
-        finally:
-            memory_runtime._memory_manager = old
+        with patch.dict(
+            sys.modules, {"app.core.app_context": ctx_mod}
+        ), patch.object(memory_runtime, "_inject_memory_adapters"):
+            assert app.get_memory_manager() is mock_mgr
 
-    def test_fallback_to_service_manager(self):
-        app = _import_app()
+    def test_has_no_legacy_manager_fallback(self):
         memory_runtime = _import_memory_runtime()
-        old = memory_runtime._memory_manager
-        try:
-            memory_runtime._memory_manager = None
-            mock_service = MagicMock()
+        source = Path(memory_runtime.__file__).read_text(encoding="utf-8")
 
-            with patch.dict(
-                sys.modules,
-                {
-                    "app.core.app_context": None,
-                    "enhanced_memory_manager": None,
-                    "web.enhanced_memory_manager": None,
-                },
-            ), patch(
-                "app.core.services.memory_manager.EnhancedMemoryManager",
-                return_value=mock_service,
-            ), patch.object(memory_runtime, "_inject_memory_adapters"):
-                mgr = app.get_memory_manager()
-                assert mgr is mock_service
-        finally:
-            memory_runtime._memory_manager = old
+        assert "from web.memory_manager import MemoryManager" not in source
+        assert "from enhanced_memory_manager import EnhancedMemoryManager" not in source
 
 
 # =====================================================================
@@ -963,20 +938,12 @@ class TestGetMemoryManager:
 class TestGetKnowledgeBase:
     def test_returns_instance(self):
         app = _import_app()
-        memory_runtime = _import_memory_runtime()
-        old = memory_runtime._kb
-        try:
-            memory_runtime._kb = None
-            mock_kb = MagicMock()
-            kb_mod = types.ModuleType("knowledge_base")
-            kb_mod.KnowledgeBase = MagicMock(return_value=mock_kb)
+        mock_kb = MagicMock()
+        ctx_mod = types.ModuleType("app.core.app_context")
+        ctx_mod.ctx = MagicMock(knowledge_base=mock_kb)
 
-            with patch.dict(sys.modules, {"knowledge_base": kb_mod}):
-                kb = app.get_knowledge_base()
-                assert kb is mock_kb
-                assert app.get_knowledge_base() is kb
-        finally:
-            memory_runtime._kb = old
+        with patch.dict(sys.modules, {"app.core.app_context": ctx_mod}):
+            assert app.get_knowledge_base() is mock_kb
 
 
 # =====================================================================

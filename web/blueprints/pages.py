@@ -53,6 +53,13 @@ def index() -> Response:
     resp.headers["Pragma"] = "no-cache"
     return resp
 
+@pages_bp.route("/favicon.ico")
+def favicon() -> Response:
+    """Serve the Koto icon as favicon."""
+    import os as _os
+    static_dir = _os.path.join(_os.path.dirname(__file__), "..", "static", "assets")
+    return send_from_directory(static_dir, "koto_icon.png", mimetype="image/png")
+
 
 @pages_bp.route("/app")
 def app_main() -> Response:
@@ -145,4 +152,3 @@ def workspace_assistant_page() -> Response:
 def doc_compare_ui() -> str:
     """多文档对比界面"""
     return render_template("doc_compare.html")
-

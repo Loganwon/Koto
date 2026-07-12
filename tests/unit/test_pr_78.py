@@ -125,7 +125,8 @@ class TestIsExplicitModelMode(unittest.TestCase):
         self.assertTrue(self.is_explicit("CLOUD"))
 
     def test_provider_name_is_explicit(self):
-        self.assertTrue(self.is_explicit("gemini"))
+        self.assertTrue(self.is_explicit("deepseek"))
+        self.assertFalse(self.is_explicit("gemini"))
 
     def test_unknown_not_explicit(self):
         self.assertFalse(self.is_explicit("bogus"))

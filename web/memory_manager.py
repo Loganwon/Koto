@@ -1,5 +1,12 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
+"""Basic JSON-file memory manager (legacy fallback).
+
+.. deprecated::
+    Prefer ``app.core.services.memory_manager.EnhancedMemoryManager`` for
+    all new code.  This module exists only as a last-resort fallback when
+    the enhanced manager cannot be loaded.
+"""
 import json
 import logging
 import os
