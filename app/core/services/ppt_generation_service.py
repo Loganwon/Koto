@@ -19,10 +19,8 @@ from app.core.services.ppt_generation_contract import (
     normalize_slide,
     parse_ppt_outline_markdown,
 )
-from app.core.services.ppt_generation_legacy_adapter import (
-    load_generator_cls,
-    load_planner_cls,
-)
+from app.core.services.ppt_generator import PPTGenerator as _PPTGenerator
+from app.core.services.ppt_master import PPTContentPlanner as _PPTContentPlanner
 
 
 class PPTGenerationService:
@@ -48,7 +46,7 @@ class PPTGenerationService:
         audience: str = "通用受众",
         extra_context: str = "",
     ) -> list[dict[str, Any]]:
-        planner_cls = self._planner_cls or load_planner_cls()
+        planner_cls = self._planner_cls or _PPTContentPlanner
         planner = planner_cls()
         outline_dict = planner._generate_default_plan(
             user_request=(
@@ -115,7 +113,7 @@ class PPTGenerationService:
         enable_ai_images: bool = False,
         progress_callback=None,
     ) -> dict[str, Any]:
-        generator_cls = self._generator_cls or load_generator_cls()
+        generator_cls = self._generator_cls or _PPTGenerator
         generator = generator_cls(theme=theme)
         result = generator.generate_from_outline(
             title=title,
@@ -147,7 +145,7 @@ class PPTGenerationService:
 
     def _get_planner(self):
         if self._planner is None:
-            planner_cls = self._planner_cls or load_planner_cls()
+            planner_cls = self._planner_cls or _PPTContentPlanner
             kwargs = {}
             if self._ai_client is not None:
                 kwargs["ai_client"] = self._ai_client

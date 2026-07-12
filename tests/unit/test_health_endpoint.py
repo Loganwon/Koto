@@ -39,7 +39,11 @@ class TestPing:
 
     def test_ping_body(self, client):
         data = client.get("/api/ping").get_json()
-        assert data == {"status": "ok"}
+        assert data["status"] == "ok"
+        assert isinstance(data["providers"], list)
+        assert isinstance(data["cloud_providers"], list)
+        assert isinstance(data["ollama"], bool)
+        assert data["has_any_provider"] is bool(data["providers"])
 
 
 # ---------------------------------------------------------------------------

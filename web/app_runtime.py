@@ -120,7 +120,7 @@ def initialize_background_runtime(
             logger.warning(f"[Flywheel] ⚠️ 飞轮监听器注册失败（非致命）: {exc}")
 
         try:
-            from web.telegram_bot import get_telegram_bot
+            from app.core.services.telegram_bot import get_telegram_bot
 
             tg_bot = get_telegram_bot()
             if tg_bot:
@@ -161,6 +161,24 @@ def start_background_runtime(logger: Logger, get_workspace_root) -> threading.Th
         if _runtime_started and _runtime_thread is not None:
             logger.debug("[Runtime] 后台运行时已请求启动，跳过重复启动")
             return _runtime_thread
+
+        if os.environ.get("KOTO_SKIP_BACKGROUND_RUNTIME", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }:
+            # Import and diagnostic probes must not start watchers, schedulers,
+            # or external integrations merely to verify that the app imports.
+            thread = threading.Thread(
+                target=lambda: None,
+                name="RuntimeBootstrapSkipped",
+                daemon=True,
+            )
+            _runtime_started = True
+            _runtime_thread = thread
+            logger.info("[Runtime] 后台运行时已按 KOTO_SKIP_BACKGROUND_RUNTIME 跳过")
+            return thread
 
         thread = threading.Thread(
             target=initialize_background_runtime,

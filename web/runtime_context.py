@@ -179,7 +179,11 @@ def get_interrupt_manager() -> Any:
     return service_registry.interrupt_manager
 
 def get_memory_manager() -> Any:
-    return service_registry._get("memory_manager", required=False)
+    # Memory is owned by AppContext.  Do not resolve it from web.app, which
+    # can otherwise create a second lifecycle/cache path for the same store.
+    from web.memory_runtime import get_memory_manager as _get_memory_manager
+
+    return _get_memory_manager()
 
 
 # ?? Domain-specific helpers (kept for convenience) ??????????

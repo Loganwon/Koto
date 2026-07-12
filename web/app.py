@@ -398,7 +398,7 @@ def _get_local_model_config() -> tuple:
         return "cloud", None
 # ?? Token ???????????????? Google??????????????????????????
 try:
-    from web.token_tracker import record_usage as _record_token_usage
+    from app.core.analytics.token_tracker import record_usage as _record_token_usage
 
     _TOKEN_TRACKER_ENABLED = True
 except ImportError:
@@ -1006,10 +1006,10 @@ UPLOAD_DIR = _storage_paths.upload_dir
 # ???????????TTL ??? 6 ???????
 
 try:
-    from web.model_manager import KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
-    from web.model_manager import ModelManager
-    from web.model_manager import TASK_REQUIREMENTS as _MODEL_TASK_REQUIREMENTS
-    from web.model_manager import score_model_for_task as _score_model_for_task
+    from app.core.services.model_manager import KNOWN_MODEL_REGISTRY as _MODEL_REGISTRY
+    from app.core.services.model_manager import ModelManager
+    from app.core.services.model_manager import TASK_REQUIREMENTS as _MODEL_TASK_REQUIREMENTS
+    from app.core.services.model_manager import score_model_for_task as _score_model_for_task
 
     _model_manager_available = True
 except ImportError:
@@ -2190,4 +2190,3 @@ if __name__ == "__main__":
         chat_dir=CHAT_DIR,
         workspace_dir=WORKSPACE_DIR,
     )
-

@@ -203,7 +203,7 @@ class AppContext:
 
     @property
     def memory_manager(self):
-        """web.enhanced_memory_manager.EnhancedMemoryManager"""
+        """app.core.services.memory_manager.EnhancedMemoryManager"""
         return self.get("memory_manager")
 
     @property
@@ -228,7 +228,7 @@ class AppContext:
 
     @property
     def notification_manager(self):
-        """web.notification_manager.NotificationManager"""
+        """app.core.services.notification_manager.NotificationManager"""
         return self.get("notification_manager")
 
     @property

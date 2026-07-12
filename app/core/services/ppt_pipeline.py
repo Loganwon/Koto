@@ -58,7 +58,8 @@ class PPTGenerationPipeline:
             if progress_callback:
                 try:
                     progress_callback(msg, p)
-                except:
+                except Exception:
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                     pass
             self._log(f"[{p}%] {msg}" if p is not None else msg)
 
@@ -66,7 +67,8 @@ class PPTGenerationPipeline:
             if thought_callback:
                 try:
                     thought_callback(text)
-                except:
+                except Exception:
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                     pass
             self._log(f"[THOUGHT] {text}")
 
@@ -314,16 +316,8 @@ class PPTGenerationPipeline:
 
                     client = get_client()
                     logger.info("[PPT_Pipeline] 已懒加载 AI Client")
-                except Exception:
-                    try:
-                        import google.genai as genai
-
-                        if os.environ.get("GEMINI_API_KEY"):
-                            client = genai.Client(
-                                api_key=os.environ.get("GEMINI_API_KEY")
-                            )
-                    except Exception as e:
-                        logger.debug("Failed to initialize genai client: %s", e)
+                except Exception as e:
+                    logger.debug("Failed to initialize active image client: %s", e)
 
             if not client:
                 self._log("⚠️ 无法初始化 ImageManager (无 AI Client)，跳过自动配图")

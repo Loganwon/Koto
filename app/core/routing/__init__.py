@@ -3,7 +3,7 @@
 from .smart_dispatcher import SmartDispatcher
 
 
-# 延迟导入 - 这些类仅在运行时首次使用时加载，避免启动时加载 google.genai (~4.7s) 和 requests (~0.5s)
+# 延迟导入 - 这些类仅在运行时首次使用时加载，减少启动耗时。
 def __getattr__(name):
     if name == "LocalModelRouter":
         from .local_model_router import LocalModelRouter

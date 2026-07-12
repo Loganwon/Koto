@@ -1,1 +1,1 @@
-﻿# Package: config
+# Package: config

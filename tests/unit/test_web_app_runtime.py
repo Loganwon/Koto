@@ -32,6 +32,24 @@ def test_start_background_runtime_is_idempotent(monkeypatch):
 
 
 @pytest.mark.unit
+def test_start_background_runtime_can_be_skipped_for_safe_import_probes(monkeypatch):
+    import web.app_runtime as mod
+
+    thread_factory = MagicMock()
+    thread = MagicMock()
+    thread_factory.return_value = thread
+    monkeypatch.setattr(mod, "_runtime_started", False)
+    monkeypatch.setattr(mod, "_runtime_thread", None)
+    monkeypatch.setattr(mod.threading, "Thread", thread_factory)
+    monkeypatch.setenv("KOTO_SKIP_BACKGROUND_RUNTIME", "1")
+
+    result = mod.start_background_runtime(MagicMock(), MagicMock())
+
+    assert result is thread
+    thread.start.assert_not_called()
+
+
+@pytest.mark.unit
 def test_initialize_background_runtime_skips_disabled_workspace_watcher(
     monkeypatch, tmp_path
 ):
@@ -92,7 +110,7 @@ def test_initialize_background_runtime_skips_disabled_workspace_watcher(
     shadow_tracer_mod.TraceEvent = types.SimpleNamespace(
         TRAINING_READY="training_ready"
     )
-    telegram_bot_mod = types.ModuleType("web.telegram_bot")
+    telegram_bot_mod = types.ModuleType("app.core.services.telegram_bot")
     telegram_bot_mod.get_telegram_bot = lambda: None
     morning_brief_mod = types.ModuleType("app.core.services.morning_brief")
     morning_brief_mod.get_morning_brief_service = lambda: fake_morning_brief
@@ -121,7 +139,7 @@ def test_initialize_background_runtime_skips_disabled_workspace_watcher(
     monkeypatch.setitem(
         sys.modules, "app.core.learning.shadow_tracer", shadow_tracer_mod
     )
-    monkeypatch.setitem(sys.modules, "web.telegram_bot", telegram_bot_mod)
+    monkeypatch.setitem(sys.modules, "app.core.services.telegram_bot", telegram_bot_mod)
     monkeypatch.setitem(
         sys.modules, "app.core.services.morning_brief", morning_brief_mod
     )

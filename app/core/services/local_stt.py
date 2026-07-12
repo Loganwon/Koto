@@ -108,7 +108,7 @@ def _try_load_model():
             _load_error = e
             logger.warning(f"[LocalSTT] openai-whisper 加载失败: {e}")
 
-        logger.info("[LocalSTT] 未找到本地 STT 库，将使用 Gemini STT 作为后备")
+        logger.info("[LocalSTT] 未找到本地 STT 库，语音识别将不可用")
         _engine_name = "unavailable"
 
 
