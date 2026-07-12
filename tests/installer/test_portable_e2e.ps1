@@ -100,7 +100,7 @@ $requiredPaths = @(
     (Join-Path $internalDir "app"),
     (Join-Path $internalDir "web"),
     (Join-Path $configRoot ".builtin_key"),
-    (Join-Path $configRoot "gemini_config.env.example"),
+    (Join-Path $configRoot "deepseek_config.env.example"),
     (Join-Path $configRoot "macro_suggestions.json"),
     (Join-Path $configRoot "personality_matrix.json"),
     (Join-Path $configRoot "skill_affinity.json"),

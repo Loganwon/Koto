@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from launcher import bootstrap, health
+from src.startup_diagnostics import run_startup_diagnostics
 
 logger = logging.getLogger("koto.launcher.entry")
 
@@ -31,7 +32,9 @@ def launch_desktop(root: Path, port: int) -> int:
         logger.error("No desktop entry script found. Run 'python -m launcher --server' for Flask mode.")
         return 1
 
-    os.environ.setdefault("KOTO_PORT", str(port))
+    # ``port`` may have been changed after resolving a conflict.  Keeping an
+    # inherited value here makes the launcher report one port and start another.
+    os.environ["KOTO_PORT"] = str(port)
     os.chdir(str(root))
 
     logger.info("Starting desktop mode: %s (port %d)", entry, port)
@@ -45,7 +48,7 @@ def launch_server(root: Path, port: int) -> int:
         logger.error("No server entry script found.")
         return 1
 
-    os.environ.setdefault("KOTO_PORT", str(port))
+    os.environ["KOTO_PORT"] = str(port)
     os.chdir(str(root))
 
     logger.info("Starting server mode: %s (port %d)", entry, port)
@@ -86,6 +89,7 @@ def main() -> int:
 
     args = parser.parse_args()
     setup_logging(args.log_level)
+    root = Path(__file__).resolve().parent.parent
 
     # Health check mode
     if args.health:
@@ -93,10 +97,14 @@ def main() -> int:
         ready = health.check_runtime_readiness()
         for name, status in ready.items():
             logger.info("  %-20s %s", name, "OK" if status else "MISSING")
-        return 0 if ok else 1
+        report = run_startup_diagnostics(root, include_import_check=True)
+        logger.info("Startup self-check: %s", report["summary"])
+        for check in report["checks"]:
+            if check["level"] != "ok":
+                logger.warning("  %-24s %s", check["name"], check["message"])
+        return 0 if ok and report["status"] != "blocked" else 1
 
     mode = "server" if args.server else args.mode
-    root = Path(__file__).resolve().parent.parent
 
     # Port resolution
     port = args.port or int(os.environ.get("KOTO_PORT", health.DEFAULT_PORT))

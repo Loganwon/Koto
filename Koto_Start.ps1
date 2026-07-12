@@ -135,6 +135,58 @@ function Test-PortFree {
     }
 }
 
+function Test-KotoHealth {
+    param([int]$Port)
+
+    try {
+        $response = Invoke-RestMethod `
+            -Uri "http://127.0.0.1:$Port/api/health" `
+            -TimeoutSec 2 `
+            -ErrorAction Stop
+        # A recovery page can also return HTTP 200.  Treat startup as healthy
+        # only when the endpoint responds with Koto's expected JSON contract.
+        if ($response -is [string] -or $null -eq $response) {
+            return $false
+        }
+        $status = [string]$response.status
+        return $status -in @("healthy", "degraded")
+    } catch {
+        return $false
+    }
+}
+
+function Stop-KotoProcessTree {
+    param([int]$ProcessId)
+
+    # Windows venv launchers can spawn the base interpreter as a child process.
+    # On a failed startup, terminating only the launcher can leave that child
+    # holding Koto's port and make the retry attach to stale state.
+    $killOrder = New-Object System.Collections.Generic.List[int]
+    $pending = New-Object System.Collections.Generic.Queue[int]
+    $seen = New-Object 'System.Collections.Generic.HashSet[int]'
+    $pending.Enqueue($ProcessId)
+
+    try {
+        $processes = @(Get-CimInstance Win32_Process -ErrorAction Stop)
+        while ($pending.Count -gt 0) {
+            $current = $pending.Dequeue()
+            if (-not $seen.Add($current)) { continue }
+            $killOrder.Add($current)
+            foreach ($child in $processes) {
+                if ($child.ParentProcessId -eq $current) {
+                    $pending.Enqueue([int]$child.ProcessId)
+                }
+            }
+        }
+    } catch {
+        $killOrder.Add($ProcessId)
+    }
+
+    for ($index = $killOrder.Count - 1; $index -ge 0; $index--) {
+        Stop-Process -Id $killOrder[$index] -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Get-KotoProcesses {
     return Get-Process -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -and ($_.CommandLine -match "koto_app\.py" -or $_.CommandLine -match "web[/\\\\]app\.py") }
@@ -461,17 +513,38 @@ function Start-KotoApp {
                 }
 
                 if (-not $proc.HasExited) {
-                    # 桌面模式：进程健康，启动器立即退出（Koto 继续运行）
-                    Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
-                    Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
-                    Write-Log "OK" "Koto 正在后台运行 (PID=$($proc.Id))。关闭本窗口不会停止 Koto。"
-                    # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
-                    $entryForCheck = Resolve-EntryScript -RunMode $Mode
-                    if ($entryForCheck -match "web[/\\]app\.py") {
-                        Write-Log "INFO" "正在打开统一入口: $(Get-UnifiedAppUrl -Port $Port)"
-                        Start-Process (Get-UnifiedAppUrl -Port $Port)
+                    # Do not report success just because the pythonw launcher
+                    # survived.  A desktop window without a healthy backend is
+                    # unusable and used to be reported as a successful startup.
+                    $healthDeadline = (Get-Date).AddSeconds(15)
+                    $backendHealthy = $false
+                    while ((Get-Date) -lt $healthDeadline -and -not $proc.HasExited) {
+                        if (Test-KotoHealth -Port $Port) {
+                            $backendHealthy = $true
+                            break
+                        }
+                        Start-Sleep -Milliseconds 500
                     }
-                    exit 0
+
+                    if (-not $backendHealthy) {
+                        Write-Log "WARN" "桌面进程仍在运行，但 /api/health 在 15 秒内未就绪；按启动失败处理。"
+                        Stop-KotoProcessTree -ProcessId $proc.Id
+                        $proc.WaitForExit(2000) | Out-Null
+                    }
+
+                    if ($backendHealthy) {
+                        # 桌面模式：窗口进程与后端健康，启动器立即退出（Koto 继续运行）
+                        Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
+                        Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
+                        Write-Log "OK" "Koto 正在后台运行且后端健康 (PID=$($proc.Id))。关闭本窗口不会停止 Koto。"
+                        # 仅在纯 Flask 模式（web\app.py）时打开浏览器；pywebview 模式自带窗口
+                        $entryForCheck = Resolve-EntryScript -RunMode $Mode
+                        if ($entryForCheck -match "web[/\\]app\.py") {
+                            Write-Log "INFO" "正在打开统一入口: $(Get-UnifiedAppUrl -Port $Port)"
+                            Start-Process (Get-UnifiedAppUrl -Port $Port)
+                        }
+                        exit 0
+                    }
                 }
                 $exitCode = $proc.ExitCode
             }
@@ -538,6 +611,19 @@ Clear-RetiredExternalProcesses
 
 # Step 3: 清孤进程
 Clear-OrphanProcesses
+
+# Step 3b: 清理7天前日志
+Write-Log "INFO" "正在清理7天前日志..."
+$cutoff = (Get-Date).AddDays(-7)
+if (Test-Path $LOG_DIR) {
+    Get-ChildItem -Path $LOG_DIR -File | Where-Object {
+        $_.LastWriteTime -lt $cutoff -and $_.Name -match '\.(log|txt)$'
+    } | ForEach-Object {
+        Write-Log "INFO" "  删除日志: $($_.Name)"
+        Remove-Item $_.FullName -Force -ErrorAction SilentlyContinue
+    }
+}
+Write-Log "OK" "日志清理完成"
 
 # Step 4: 文件检查
 Assert-RequiredFiles -RunMode $Mode

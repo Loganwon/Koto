@@ -33,11 +33,11 @@ _REQUIRED_MODULES = {
 
 _COMPATIBILITY_MODULES = (
     "app.core.routing.local_dispatcher",
-    "web.model_manager",
-    "web.token_tracker",
-    "web.notification_manager",
+    "app.core.services.model_manager",
+    "app.core.analytics.token_tracker",
+    "app.core.services.notification_manager",
     "web.settings",
-    "web.knowledge_base",
+    "app.core.services.knowledge_base",
 )
 
 _OPTIONAL_MODULES = {

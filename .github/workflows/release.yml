@@ -15,12 +15,63 @@ on:
         default: ''
 
 jobs:
+  quality-gate:
+    name: Release Quality Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install Python test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r config/requirements.lock
+          pip install pytest pytest-mock pytest-timeout pytest-playwright playwright pip-audit
+
+      - name: Audit locked runtime dependencies
+        run: pip-audit --requirement config/requirements.lock --desc
+
+      - name: Install Chromium for browser regression
+        run: python -m playwright install --with-deps chromium
+
+      - name: Build and validate main frontend
+        run: |
+          npm ci --prefix web
+          npm audit --prefix web --audit-level=high
+          npm ci --prefix web/univer-editor
+          npm audit --prefix web/univer-editor --audit-level=high
+          npm run lint --prefix web
+          npm run typecheck --prefix web
+          npm run build --prefix web
+          npm run build --prefix web/univer-editor
+
+      - name: Run release source regressions
+        env:
+          PYTHONPATH: .
+        run: |
+          python -m pytest tests/unit/test_release_packaging_guards.py tests/unit/test_architecture_guardrails.py tests/unit/test_frontend_quality_config.py -q --tb=short
+          python scripts/run_ai_assistant_flow_tests.py release -q --tb=short
+
   # ══════════════════════════════════════════════════════════════════════════
   # Job 1: Windows 桌面版构建（PyInstaller + Inno Setup）
   # ══════════════════════════════════════════════════════════════════════════
   build-windows:
     name: Build Windows Package
     runs-on: windows-latest
+    needs: quality-gate
     permissions:
       contents: write
 
@@ -40,7 +91,9 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: web/univer-editor/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            web/univer-editor/package-lock.json
 
       - name: Determine version
         shell: pwsh
@@ -99,14 +152,18 @@ jobs:
       - name: Install frontend dependencies
         shell: pwsh
         run: |
+          npm ci --prefix web
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend npm ci failed"; exit 1 }
           npm ci --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::npm ci failed"; exit 1 }
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
 
-      - name: Build file assistant frontend assets
+      - name: Build frontend assets
         shell: pwsh
         run: |
+          npm run build --prefix web
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
           npm run build --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Frontend build failed"; exit 1 }
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend build failed"; exit 1 }
 
       - name: Build with PyInstaller
         shell: pwsh
@@ -148,11 +205,10 @@ jobs:
             "$staticRoot\js\workspace-assistant.js",
             "$staticRoot\jszip.min.js",
             "$staticRoot\docx-preview.min.js",
-            "$staticRoot\univer-dist\index.html",
             "$staticRoot\univer-dist\assets\sheets-main.js",
             "$staticRoot\univer-dist\assets\sheets-main.css",
             "$configRoot\.builtin_key",
-            "$configRoot\gemini_config.env.example",
+            "$configRoot\deepseek_config.env.example",
             "$configRoot\macro_suggestions.json",
             "$configRoot\personality_matrix.json",
             "$configRoot\skill_affinity.json",
@@ -176,24 +232,10 @@ jobs:
           if ($pyd) { Write-Host "  OK: psutil C extension: $($pyd.Name)" }
           else       { $failed += "psutil/_psutil_windows.pyd"; Write-Host "::error::MISSING: psutil C extension .pyd" }
 
-          $indexHtml = Join-Path $staticRoot "univer-dist\index.html"
-          if (Test-Path $indexHtml) {
-            $html = Get-Content $indexHtml -Raw -Encoding UTF8
-            $refs = [regex]::Matches($html, '(assets/index-[^"''>]+\.(?:js|css))') |
-              ForEach-Object { $_.Groups[1].Value } |
-              Select-Object -Unique
-            if (-not $refs) {
-              $failed += "univer-dist/index.html asset refs"
-              Write-Host "::error::MISSING: no hashed index asset refs found in $indexHtml"
-            }
-            foreach ($rel in $refs) {
-              $assetPath = Join-Path (Split-Path $indexHtml -Parent) $rel
-              if (Test-Path $assetPath) { Write-Host "  OK: $assetPath" }
-              else {
-                $failed += $assetPath
-                Write-Host "::error::MISSING: $assetPath"
-              }
-            }
+          $legacyIndex = Join-Path $staticRoot "univer-dist\index.html"
+          if (Test-Path $legacyIndex) {
+            $failed += $legacyIndex
+            Write-Host "::error::UNEXPECTED legacy Univer index: $legacyIndex"
           }
 
           if ($failed.Count -gt 0) {
@@ -272,6 +314,17 @@ jobs:
           $sizeMB = [math]::Round((Get-Item "dist\$zipName").Length / 1MB, 1)
           Write-Host "Zip: $zipName ($sizeMB MB)"
 
+      - name: Generate release manifest and SHA-256 checksums
+        shell: pwsh
+        run: |
+          .\.venv\Scripts\python.exe scripts\write_release_manifest.py `
+            --version $env:VERSION `
+            --output "dist\Koto_v$($env:VERSION)_release-manifest.json" `
+            --hash-output "dist\Koto_v$($env:VERSION)_SHA256SUMS.txt" `
+            "dist\Koto_v$($env:VERSION)_Setup.exe" `
+            "dist\Koto_v$($env:VERSION)_Windows.zip"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release manifest generation failed"; exit 1 }
+
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
@@ -279,6 +332,8 @@ jobs:
           path: |
             dist/Koto_v*_Setup.exe
             dist/Koto_v*_Windows.zip
+            dist/Koto_v*_release-manifest.json
+            dist/Koto_v*_SHA256SUMS.txt
           retention-days: 7
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -313,8 +368,7 @@ jobs:
             -SetupExe $setup.FullName `
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_E2E" `
             -Port 5099 `
-            -HealthTimeoutSec 60 `
-            -RequireHealth:$false
+            -HealthTimeoutSec 60
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run portable E2E test
@@ -323,13 +377,12 @@ jobs:
           KOTO_SERVER_ONLY: "1"
         run: |
           $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
-          if (-not $zip) { Write-Host "::warning::ZIP not found, skipping portable test"; exit 0 }
+          if (-not $zip) { Write-Host "::error::ZIP not found; portable E2E is required for release"; exit 1 }
           Write-Host "Testing portable: $($zip.FullName)"
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
             -Port 5098 `
-            -HealthTimeoutSec 60 `
-            -RequireHealth:$false
+            -HealthTimeoutSec 60
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -401,6 +454,8 @@ jobs:
           files: |
             Koto_v*_Setup.exe
             Koto_v*_Windows.zip
+            Koto_v*_release-manifest.json
+            Koto_v*_SHA256SUMS.txt
 
   # ══════════════════════════════════════════════════════════════════════════
   # Job 5: Sync VERSION file to match released tag

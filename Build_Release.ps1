@@ -24,6 +24,9 @@ param(
     [switch]$SkipBuild,
     [switch]$SkipCython,
     [switch]$Incremental,   # 增量构建：不加 --clean，保留上次缓存（只改了 .py 时快很多）
+    [switch]$AllowPrebuiltFrontend, # 仅用于无法安装 Node.js 的受限环境；不应作为正式发布路径
+    [switch]$AllowNoInstaller,      # 仅生成便携包；不应作为完整 Windows 发布路径
+    [switch]$AllowDirtyWorktree,    # 仅用于诊断构建；不得将产物作为正式发布版本
     [string]$Version = ""
 )
 
@@ -38,6 +41,8 @@ $DIST_DIR   = Join-Path $REPO_ROOT "dist"
 $LOG_DIR    = Join-Path $REPO_ROOT "logs"
 $SPEC_FILE  = Join-Path $REPO_ROOT "koto.spec"
 $LOCAL_INSTALLER_SPEC = Join-Path $REPO_ROOT "local_model_installer.spec"
+$MANIFEST_WRITER = Join-Path $REPO_ROOT "scripts\write_release_manifest.py"
+$CYTHON_CLEANUP = Join-Path $REPO_ROOT "scripts\clean_inplace_cython_artifacts.py"
 
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
@@ -97,22 +102,6 @@ function Format-CmdArg {
     return '"{0}"' -f $Value.Replace('"', '""')
 }
 
-function Get-UniverIndexAssetRefs {
-    param([Parameter(Mandatory = $true)][string]$IndexHtmlPath)
-
-    $content = Get-Content $IndexHtmlPath -Raw -Encoding UTF8
-    $jsMatch = [regex]::Match($content, "(assets/index-[^`"'>]+\.js)")
-    $cssMatch = [regex]::Match($content, "(assets/index-[^`"'>]+\.css)")
-    if (-not $jsMatch.Success) {
-        throw "未在 $IndexHtmlPath 中找到 index-*.js 引用"
-    }
-    if (-not $cssMatch.Success) {
-        throw "未在 $IndexHtmlPath 中找到 index-*.css 引用"
-    }
-
-    return @($jsMatch.Groups[1].Value, $cssMatch.Groups[1].Value)
-}
-
 function Test-WorkspaceStaticAssets {
     param(
         [Parameter(Mandatory = $true)][string]$StaticRoot,
@@ -123,7 +112,6 @@ function Test-WorkspaceStaticAssets {
         (Join-Path $StaticRoot "js\build\workspace-bundle.js"),
         (Join-Path $StaticRoot "jszip.min.js"),
         (Join-Path $StaticRoot "docx-preview.min.js"),
-        (Join-Path $StaticRoot "univer-dist\index.html"),
         (Join-Path $StaticRoot "univer-dist\assets\sheets-main.js"),
         (Join-Path $StaticRoot "univer-dist\assets\sheets-main.css")
     )
@@ -134,13 +122,9 @@ function Test-WorkspaceStaticAssets {
         }
     }
 
-    $indexHtml = Join-Path $StaticRoot "univer-dist\index.html"
-    $indexDir = Split-Path $indexHtml -Parent
-    foreach ($asset in Get-UniverIndexAssetRefs -IndexHtmlPath $indexHtml) {
-        $assetPath = Join-Path $indexDir $asset
-        if (-not (Test-Path $assetPath)) {
-            throw "$Label 缺少 index.html 引用的资源: $assetPath"
-        }
+    $legacyIndex = Join-Path $StaticRoot "univer-dist\index.html"
+    if (Test-Path $legacyIndex) {
+        throw "$Label 包含已废弃的 Univer index.html: $legacyIndex"
     }
 
     Write-OK "$Label 关键静态资源齐全"
@@ -154,7 +138,6 @@ function Test-PackagedConfigDefaults {
 
     $required = @(
         (Join-Path $ConfigRoot ".builtin_key"),
-        (Join-Path $ConfigRoot "gemini_config.env.example"),
         (Join-Path $ConfigRoot "macro_suggestions.json"),
         (Join-Path $ConfigRoot "personality_matrix.json"),
         (Join-Path $ConfigRoot "skill_affinity.json"),
@@ -215,6 +198,21 @@ if (-not (Test-Path $PYTHON)) {
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
 Write-OK "虚拟环境 OK"
 
+# 正式发布必须对应一个可追溯的 Git 提交。否则 manifest 只能记录 HEAD，
+# 却无法表达实际打包了哪些未提交内容，极易误发本地试验产物。
+$gitStatus = @(& git -C $REPO_ROOT status --porcelain --untracked-files=all)
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "无法读取 Git 工作区状态；正式发布需要可追溯的 Git 仓库。"
+    exit 1
+}
+if ($gitStatus.Count -gt 0) {
+    if (-not $AllowDirtyWorktree) {
+        Write-Fail "工作区存在未提交改动；请先审阅并提交，或仅为诊断构建显式传入 -AllowDirtyWorktree。"
+        exit 1
+    }
+    Write-Host "  [--] 工作区存在 $($gitStatus.Count) 条未提交改动；本次仅为诊断构建，不得作为正式发布版本。" -ForegroundColor Yellow
+}
+
 # ─── 版本号（单一来源：根目录 VERSION 文件）──────────
 if ([string]::IsNullOrWhiteSpace($Version)) {
     $versionFile = Join-Path $REPO_ROOT "VERSION"
@@ -223,12 +221,25 @@ if ([string]::IsNullOrWhiteSpace($Version)) {
     }
 }
 if ([string]::IsNullOrWhiteSpace($Version)) { $Version = Get-Date -Format "yyyy.MM.dd" }
+if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+\-]*$') {
+    Write-Fail "版本号仅可包含字母、数字、点、下划线、加号和连字符，且必须以字母或数字开头。"
+    exit 1
+}
 Write-OK "版本号: $Version"
 
 # ─── 步骤 0：Cython 编译（保护核心模块 + _license key）────
 if ($SkipCython) {
     Write-Step "步骤 0/5  跳过 Cython 编译（-SkipCython）"
 } else {
+    Write-Step "Cython 编译前清理源码覆盖产物"
+    $cythonCleanupLog = Join-Path $LOG_DIR "cython_cleanup_preflight.log"
+    $cythonCleanupExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonCleanupLog
+    if ($cythonCleanupExitCode -ne 0) {
+        Write-Fail "无法清理旧 .pyd 覆盖产物；请先关闭源码模式的 Koto 进程。日志：$cythonCleanupLog"
+        Get-Content $cythonCleanupLog -Tail 20
+        exit 1
+    }
+
     Write-Step "步骤 0/5  Cython 编译核心模块 → .pyd（保护源码 + 内嵌 Key）"
     $cythonLog = Join-Path $LOG_DIR "cython_build.log"
     $cythonExitCode = Invoke-CmdLogged -CommandLine ('{0} {1} build_ext --inplace' -f (Format-CmdArg $PYTHON), (Format-CmdArg (Join-Path $REPO_ROOT "build_cython.py"))) -LogPath $cythonLog
@@ -241,11 +252,14 @@ if ($SkipCython) {
 }
 
 # ─── 步骤 0.5：前端资产构建（Vite + esbuild） ──────────
-Write-Step "步骤 0.5  前端资产构建（文件助手 + Univer Sheets）"
+Write-Step "步骤 0.5  前端资产构建（主界面 + 文件助手 + Univer Sheets）"
+$webDir = Join-Path $REPO_ROOT "web"
 $univDir = Join-Path $REPO_ROOT "web\univer-editor"
 $staticRoot = Join-Path $REPO_ROOT "web\static"
-$frontendInstallLog = Join-Path $LOG_DIR "frontend_npm_ci.log"
-$frontendBuildLog = Join-Path $LOG_DIR "frontend_build.log"
+$webFrontendInstallLog = Join-Path $LOG_DIR "web_frontend_npm_ci.log"
+$webFrontendBuildLog = Join-Path $LOG_DIR "web_frontend_build.log"
+$univerFrontendInstallLog = Join-Path $LOG_DIR "univer_frontend_npm_ci.log"
+$univerFrontendBuildLog = Join-Path $LOG_DIR "univer_frontend_build.log"
 
 # 检测 Node.js / npm 是否可用
 $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
@@ -259,36 +273,34 @@ if ($nodeCmd -and $npmCmd) {
         $npmCmd.Source
     }
 
-    Push-Location $univDir
-    try {
-        if (-not (Test-Path (Join-Path $univDir "node_modules"))) {
-            Write-Step "  [npm] 安装文件助手前端依赖..."
-            $npmExitCode = Invoke-ProcessLogged -FilePath $npmExecutable -ArgumentList @('ci') -WorkingDirectory $univDir -LogPath $frontendInstallLog
-            if ($npmExitCode -ne 0) {
-                Write-Fail "npm ci 失败，查看日志：$frontendInstallLog"
-                Get-Content $frontendInstallLog -Tail 40
-                exit 1
-            }
-            Write-OK "前端依赖安装完成"
-        }
-
-        Write-Step "  [npm] 构建文件助手前端资源..."
-        $npmExitCode = Invoke-ProcessLogged -FilePath $npmExecutable -ArgumentList @('run', 'build') -WorkingDirectory $univDir -LogPath $frontendBuildLog
+    $frontendBuilds = @(
+        [pscustomobject]@{ Label = "主 Web 前端"; Directory = $webDir; InstallLog = $webFrontendInstallLog; BuildLog = $webFrontendBuildLog },
+        [pscustomobject]@{ Label = "Univer 文件助手前端"; Directory = $univDir; InstallLog = $univerFrontendInstallLog; BuildLog = $univerFrontendBuildLog }
+    )
+    foreach ($frontend in $frontendBuilds) {
+        Write-Step "  [npm] 按锁文件安装 $($frontend.Label) 依赖..."
+        $npmExitCode = Invoke-ProcessLogged -FilePath $npmExecutable -ArgumentList @('ci') -WorkingDirectory $frontend.Directory -LogPath $frontend.InstallLog
         if ($npmExitCode -ne 0) {
-            Write-Fail "npm run build 失败，查看日志：$frontendBuildLog"
-            Get-Content $frontendBuildLog -Tail 60
+            Write-Fail "npm ci 失败，查看日志：$($frontend.InstallLog)"
+            Get-Content $frontend.InstallLog -Tail 40
             exit 1
         }
-        Write-OK "前端构建完成"
-    } finally { Pop-Location }
+
+        Write-Step "  [npm] 构建 $($frontend.Label) 资源..."
+        $npmExitCode = Invoke-ProcessLogged -FilePath $npmExecutable -ArgumentList @('run', 'build') -WorkingDirectory $frontend.Directory -LogPath $frontend.BuildLog
+        if ($npmExitCode -ne 0) {
+            Write-Fail "npm run build 失败，查看日志：$($frontend.BuildLog)"
+            Get-Content $frontend.BuildLog -Tail 60
+            exit 1
+        }
+        Write-OK "$($frontend.Label) 构建完成"
+    }
 } else {
-    # Node.js 不可用 — 检查预构建产物是否存在
-    Write-Host "  [--] 未检测到 Node.js/npm，检查预构建资产..." -ForegroundColor Yellow
-    if (-not (Test-Path (Join-Path $staticRoot "univer-dist\index.html"))) {
-        Write-Fail "前端预构建资产缺失且无 Node.js 可用！请安装 Node.js 或手动构建前端。"
+    if (-not $AllowPrebuiltFrontend) {
+        Write-Fail "正式发布需要 Node.js/npm 从锁文件重建前端；如仅重打已有产物，请显式传入 -AllowPrebuiltFrontend。"
         exit 1
     }
-    Write-Host "  [OK] 预构建资产已存在，跳过前端构建" -ForegroundColor Green
+    Write-Host "  [--] 已显式允许使用预构建前端资产；这不是完整发布路径。" -ForegroundColor Yellow
 }
 
 Test-WorkspaceStaticAssets -StaticRoot $staticRoot -Label "源代码前端产物"
@@ -343,10 +355,12 @@ Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto_Portable\_inte
 Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 
-# ─── 步骤 4：构建 Inno Setup 安装包（可选） ──────────────
-Write-Step "步骤 4/5  构建安装包（Inno Setup，未安装则跳过）"
+# ─── 步骤 4：构建 Inno Setup 安装包 ─────────────────────
+Write-Step "步骤 4/5  构建安装包（Inno Setup）"
 $resolveInno = Join-Path $REPO_ROOT "scripts\resolve_inno_setup.ps1"
 $iscc = (& $resolveInno -Quiet) | Select-Object -First 1
+$setupName = "Koto_v${Version}_Setup.exe"
+$setupPath = Join-Path $DIST_DIR $setupName
 if ($iscc) {
     $issFile = Join-Path $REPO_ROOT "koto_installer.iss"
     $isccLog = Join-Path $LOG_DIR "inno_setup_build.log"
@@ -356,10 +370,13 @@ if ($iscc) {
         Get-Content $isccLog -Tail 30
         exit 1
     }
-    $setupName = "Koto_v${Version}_Setup.exe"
     Write-OK "安装包已生成 → dist\$setupName"
 } else {
-    Write-Host "  [--] 未检测到 Inno Setup 6，跳过安装包构建（可从 https://jrsoftware.org/isinfo.php 安装）" -ForegroundColor Yellow
+    if (-not $AllowNoInstaller) {
+        Write-Fail "未检测到 Inno Setup 6；完整 Windows 发布必须生成安装包。仅生成便携包时请显式传入 -AllowNoInstaller。"
+        exit 1
+    }
+    Write-Host "  [--] 已显式允许缺少安装包；只生成便携包。" -ForegroundColor Yellow
 }
 
 # ─── 步骤 5：压缩为 zip ───────────────────────
@@ -372,9 +389,36 @@ if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path "$portableDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
 Write-OK "zip 已生成 → dist\$zipName"
 
+# ─── 步骤 6：生成发布清单与校验和 ──────────────────────
+Write-Step "步骤 6/6  生成发布清单与 SHA-256 校验和"
+$manifestPath = Join-Path $DIST_DIR "Koto_v${Version}_release-manifest.json"
+$checksumPath = Join-Path $DIST_DIR "Koto_v${Version}_SHA256SUMS.txt"
+$artifacts = @($zipPath)
+if (Test-Path $setupPath) { $artifacts += $setupPath }
+$manifestExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($MANIFEST_WRITER, '--version', $Version, '--output', $manifestPath, '--hash-output', $checksumPath, $artifacts) -WorkingDirectory $REPO_ROOT -LogPath (Join-Path $LOG_DIR 'release_manifest.log')
+if ($manifestExitCode -ne 0) {
+    Write-Fail "生成发布清单失败，查看日志：logs\release_manifest.log"
+    exit 1
+}
+Write-OK "发布清单 → dist\$(Split-Path $manifestPath -Leaf)"
+Write-OK "SHA-256 → dist\$(Split-Path $checksumPath -Leaf)"
+
+if (-not $SkipCython) {
+    Write-Step "发布收尾：清理源码覆盖产物"
+    $cythonCleanupLog = Join-Path $LOG_DIR "cython_cleanup_postbuild.log"
+    $cythonCleanupExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonCleanupLog
+    if ($cythonCleanupExitCode -ne 0) {
+        Write-Host "  [--] 发布包已完成，但源码目录仍有被锁定的 .pyd；关闭源码实例后运行清理工具。日志：$cythonCleanupLog" -ForegroundColor Yellow
+    } else {
+        Write-OK "源码覆盖产物已清理，开发启动将使用当前 Python 源码"
+    }
+}
+
 # ─── 完成 ─────────────────────────────────────
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
 Write-Host "  打包完成！发布文件：dist\$zipName" -ForegroundColor Green
+if (Test-Path $setupPath) { Write-Host "  安装包：dist\$setupName" -ForegroundColor Green }
+Write-Host "  校验文件：dist\$(Split-Path $checksumPath -Leaf)" -ForegroundColor Green
 Write-Host "  用户使用方法：解压 → 填写 API Key → 双击 Start_Koto.bat" -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Green

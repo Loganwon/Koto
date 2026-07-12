@@ -14,3 +14,11 @@ def test_desktop_launcher_stops_server_lock_instead_of_opening_browser():
     assert "Stop-Process -Id ([int]$lockedPid)" in src
     assert "desktop 启动将先停止它" in src
     assert "Invoke-LockCheck -RunMode $Mode" in src
+
+
+def test_desktop_launcher_requires_json_health_contract():
+    src = (_repo_root() / "Koto_Start.ps1").read_text(encoding="utf-8-sig")
+
+    assert "Invoke-RestMethod" in src
+    assert '$status -in @(\"healthy\", \"degraded\")' in src
+    assert "$response -is [string]" in src

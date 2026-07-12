@@ -25,7 +25,11 @@ ROOT = Path(__file__).parent
 # 修改 build_config.PROTECTED_DIRS 来控制哪些模块被编译
 
 # 不编译 __init__.py（保留为源码，方便 Python 发现包）
-EXCLUDE_FILES = {"__init__.py"}
+# Keep package discovery files and lightweight import-time fallback routers as
+# source.  The latter are imported from scheduler threads during startup, where
+# a compiled extension adds no protection value and has caused unstable module
+# initialization on Windows.
+EXCLUDE_FILES = {"__init__.py", "local_dispatcher.py"}
 
 
 def collect_extensions() -> list[Extension]:
@@ -62,7 +66,10 @@ def main():
             compiler_directives={
                 "language_level": "3",
                 "boundscheck": False,
-                "wraparound": False,
+                # Core modules deliberately use normal Python negative-index
+                # semantics in several task paths.  Disabling wraparound turns
+                # those valid expressions into undefined native memory access.
+                "wraparound": True,
                 "cdivision": True,
             },
             build_dir="build/cython_cache",  # 中间 .c 文件放在 build/ 避免污染源码

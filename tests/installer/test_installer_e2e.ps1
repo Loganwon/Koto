@@ -123,7 +123,7 @@ $requiredPaths = @(
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
     (Join-Path $configRoot ".builtin_key"),
-    (Join-Path $configRoot "gemini_config.env.example"),
+    (Join-Path $configRoot "deepseek_config.env.example"),
     (Join-Path $configRoot "macro_suggestions.json"),
     (Join-Path $configRoot "personality_matrix.json"),
     (Join-Path $configRoot "skill_affinity.json"),
@@ -166,7 +166,7 @@ Test-WorkspaceAssetBundle -StaticRoot $staticRoot
 # Start Menu shortcut check
 $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Koto"
 if (Test-Path "$startMenu\Koto.lnk") { Pass "Start Menu shortcut exists" }
-else { Write-Host "  WARN: Start Menu shortcut not found (may be optional)" }
+else { Fail "Start Menu shortcut missing: $startMenu\Koto.lnk" }
 
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 3 — Verify registry key (Inno Setup writes under HKCU)

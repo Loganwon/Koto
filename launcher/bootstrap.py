@@ -16,7 +16,6 @@ MIN_PYTHON = (3, 10)
 # (import_name, display_name)
 REQUIRED_PACKAGES = [
     ("flask", "flask"),
-    ("google.genai", "google-genai"),
     ("docx", "python-docx"),
     ("openpyxl", "openpyxl"),
     ("PIL", "Pillow"),

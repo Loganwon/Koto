@@ -584,7 +584,7 @@ class VoiceAPI:
     def get_available_engines(self):
         """Return the supported upload-based STT engines."""
         try:
-            from web.local_stt import get_status
+            from app.core.services.local_stt import get_status
 
             local = get_status()
         except Exception as e:
