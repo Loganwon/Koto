@@ -14,10 +14,6 @@ except Exception:  # pragma: no cover - depends on optional SDK install
 
 logger = logging.getLogger("koto.app")
 
-_memory_manager: Any = None
-_kb: Any = None
-
-
 def _get_client() -> Any:
     from web.runtime_context import get_client_proxy
 
@@ -25,43 +21,18 @@ def _get_client() -> Any:
 
 
 def get_memory_manager() -> Any:
-    global _memory_manager
-    if _memory_manager is not None:
-        return _memory_manager
+    """Return the application-owned memory service.
 
-    try:
-        from app.core.app_context import ctx
+    The web layer supplies LLM adapters, but it never creates a second memory
+    store or silently falls back to the deprecated JSON implementation.  A
+    single manager instance is essential: otherwise chat, agent tools and the
+    memory API can read and write different histories in the same process.
+    """
+    from app.core.app_context import ctx
 
-        mgr = ctx.memory_manager
-        if mgr is not None:
-            _memory_manager = mgr
-            _inject_memory_adapters(_memory_manager)
-            return _memory_manager
-    except Exception:
-        logger.warning("[MemoryRuntime] AppContext memory manager unavailable", exc_info=True)
-
-    try:
-        from enhanced_memory_manager import EnhancedMemoryManager
-
-        _memory_manager = EnhancedMemoryManager()
-        logger.info("[MemoryRuntime] Enhanced memory manager initialized")
-    except ImportError:
-        try:
-            from app.core.services.memory_manager import EnhancedMemoryManager
-
-            _memory_manager = EnhancedMemoryManager()
-            logger.info("[MemoryRuntime] Enhanced memory manager initialized")
-        except ImportError:
-            try:
-                from memory_manager import MemoryManager
-            except ImportError:
-                from web.memory_manager import MemoryManager
-
-            _memory_manager = MemoryManager()
-            logger.warning("[MemoryRuntime] Basic memory manager initialized")
-
-    _inject_memory_adapters(_memory_manager)
-    return _memory_manager
+    manager = ctx.memory_manager
+    _inject_memory_adapters(manager)
+    return manager
 
 
 def _generate_config(*, temperature: float, max_output_tokens: int) -> Any:
@@ -142,12 +113,9 @@ def _start_memory_extraction(
     session_name: str = "default",
 ) -> None:
     try:
-        from memory_integration import MemoryIntegration
+        from web.memory_integration import MemoryIntegration
     except ImportError:
-        try:
-            from web.memory_integration import MemoryIntegration
-        except ImportError:
-            MemoryIntegration = None
+        MemoryIntegration = None
 
     def _reflection_llm(prompt: str) -> str:
         return _llm_sync(
@@ -261,12 +229,7 @@ def _start_memory_extraction(
 
 
 def get_knowledge_base() -> Any:
-    global _kb
-    if _kb is None:
-        try:
-            from knowledge_base import KnowledgeBase
-        except ImportError:
-            from app.core.services.knowledge_base import KnowledgeBase
-        _kb = KnowledgeBase()
-        logger.info("[MemoryRuntime] Knowledge base initialized")
-    return _kb
+    """Return the AppContext-owned knowledge base used by memory features."""
+    from app.core.app_context import ctx
+
+    return ctx.knowledge_base

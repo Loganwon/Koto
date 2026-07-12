@@ -370,7 +370,8 @@ def submit_background_task():
 def _execute_background_file_task(task_text: str, data: dict) -> dict:
     """Execute a file task in background (called from worker thread)."""
     try:
-        from web.runtime_context import stream_file_task_request
+        from web.file_task_stream import stream_file_task_request
+
         payload = {"task": task_text}
         payload.update({k: v for k, v in data.items() if k not in ("task", "instruction")})
         for frame in stream_file_task_request(payload):

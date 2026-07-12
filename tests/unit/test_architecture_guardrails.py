@@ -30,7 +30,6 @@ PPT_WORKFLOW_SKILL_MATRIX = ROOT / "docs" / "PPT_WORKFLOW_SKILL_ROUTE_MATRIX.md"
 PPT_PLUGIN = ROOT / "app" / "core" / "agent" / "plugins" / "ppt_plugin.py"
 PPT_GENERATION_SERVICE = ROOT / "app" / "core" / "services" / "ppt_generation_service.py"
 PPT_GENERATION_CONTRACT = ROOT / "app" / "core" / "services" / "ppt_generation_contract.py"
-PPT_GENERATION_LEGACY_ADAPTER = ROOT / "app" / "core" / "services" / "ppt_generation_legacy_adapter.py"
 TEMPLATE_LIBRARY = ROOT / "web" / "template_library.py"
 PPT_API_ROUTES = ROOT / "web" / "ppt_api_routes.py"
 PPT_GENERATOR = ROOT / "web" / "ppt_generator.py"
@@ -51,13 +50,14 @@ KNOWLEDGE_BP = ROOT / "web" / "blueprints" / "knowledge.py"
 FILE_EDITOR_BP = ROOT / "web" / "blueprints" / "file_editor.py"
 FILE_ORGANIZE_BP = ROOT / "web" / "blueprints" / "file_organize.py"
 FILE_HUB_ROUTES = ROOT / "app" / "api" / "file_hub_routes.py"
+TASK_ROUTES = ROOT / "app" / "api" / "task_routes.py"
 TRAINING_DATA_BUILDER = ROOT / "app" / "core" / "learning" / "training_data_builder.py"
 TRAINING_ROUTES = ROOT / "app" / "api" / "training_routes.py"
 TEST_WEB_APP_COVERAGE = ROOT / "tests" / "unit" / "test_web_app_coverage.py"
 TEST_WEB_APP_UTILS = ROOT / "tests" / "unit" / "test_web_app.py"
 
 EXPECTED_WEB_APP_ROUTES: set[str] = set()
-WEB_APP_LINE_BUDGET = 3501
+WEB_APP_LINE_BUDGET = 2213
 TASK_ORCHESTRATOR_LINE_BUDGET = 199
 ALLOWED_DIRECT_WEB_APP_IMPORTS: set[str] = set()
 
@@ -109,6 +109,55 @@ def test_training_api_routes_live_outside_training_data_builder():
 def test_web_app_line_budget_does_not_regress():
     """The app module is still large; keep new work out while migration continues."""
     assert len(_read(WEB_APP).splitlines()) <= WEB_APP_LINE_BUDGET
+
+
+def test_web_app_uses_core_koto_brain_compatibility_alias():
+    """Chat orchestration belongs to the core; web.app keeps the legacy name."""
+    source = _read(WEB_APP)
+
+    assert "from app.core.brain import KotoBrain" in source
+    assert "class KotoBrain:" not in source
+
+
+def test_koto_brain_uses_explicit_runtime_services_not_web_runtime_context():
+    brain_source = _read(ROOT / "app" / "core" / "brain.py")
+    app_source = _read(WEB_APP)
+
+    assert "class BrainRuntimeServices" in brain_source
+    assert "web.runtime_context" not in brain_source
+    assert "configure_default_brain_runtime(" in app_source
+    assert "BrainRuntimeServices(" in app_source
+
+
+def test_background_file_tasks_call_the_file_task_stream_owner_directly():
+    """The task API must not route file work through the web.app compatibility bridge."""
+    source = _read(TASK_ROUTES)
+
+    assert "from web.file_task_stream import stream_file_task_request" in source
+    assert "from web.runtime_context import stream_file_task_request" not in source
+
+
+def test_core_llm_provider_helpers_do_not_reflect_through_web_runtime_context():
+    source = _read(ROOT / "app" / "core" / "agent" / "llm_provider_helpers.py")
+
+    assert "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    assert "web.runtime_context" not in source
+
+
+def test_memory_tools_plugin_uses_the_memory_runtime_owner_directly():
+    source = _read(ROOT / "app" / "core" / "agent" / "plugins" / "memory_tools_plugin.py")
+
+    assert "from web.memory_runtime import get_memory_manager" in source
+    assert "web.runtime_context" not in source
+    assert "EnhancedMemoryManager()" not in source
+
+
+def test_web_app_keeps_executable_lifecycle_outside_application_factory():
+    """Importing the Flask module must not also own process lifecycle code."""
+    source = _read(WEB_APP)
+
+    assert "from web.app_entrypoint import run_web_server" in source
+    assert "def start_background_services" not in source
 
 
 def test_direct_web_app_imports_do_not_expand():
@@ -376,13 +425,12 @@ def test_session_manager_implementation_stays_outside_web_app():
     assert "class SessionManager" in session_manager_source
 
 
-def test_local_dispatcher_implementation_stays_outside_web_app():
-    app_source = _read(WEB_APP)
-    local_dispatcher_source = _read(ROOT / "web" / "local_dispatcher.py")
-
-    assert "class LocalDispatcher" not in app_source
-    assert "from web.local_dispatcher import" in app_source
-    assert "class LocalDispatcher" in local_dispatcher_source
+def test_local_dispatcher_removed_from_web():
+    """LocalDispatcher was unused dead code and has been removed."""
+    local_dispatcher_path = ROOT / "web" / "local_dispatcher.py"
+    assert not local_dispatcher_path.exists(), (
+        "web/local_dispatcher.py should not exist (dead code, removed)"
+    )
 
 
 def test_memory_api_registration_stays_outside_web_app():
@@ -391,6 +439,9 @@ def test_memory_api_registration_stays_outside_web_app():
 
     assert "memory_api_routes" not in app_source
     assert "register_memory_routes(app, get_memory_manager)" in registry_source
+    assert 'logger.info("[Memory] ✅ 记忆 API 已注册")' in registry_source
+    assert 'logger.info("[Parallel] ✅ 并行任务 API 已注册")' in registry_source
+    assert "[MemoryAPI]" not in registry_source
 
 
 def test_memory_runtime_implementation_stays_outside_web_app():
@@ -404,6 +455,25 @@ def test_memory_runtime_implementation_stays_outside_web_app():
     assert "def get_memory_manager(" in memory_source
     assert "def _start_memory_extraction(" in memory_source
     assert "def get_knowledge_base(" in memory_source
+    assert "from web.memory_manager import MemoryManager" not in memory_source
+    assert "from enhanced_memory_manager import EnhancedMemoryManager" not in memory_source
+
+
+def test_regular_chat_uses_the_canonical_memory_runtime():
+    source = _read(ROOT / "web" / "services" / "chat_stream" / "generate" / "regular_handler.py")
+
+    assert "from web.memory_runtime import _start_memory_extraction, get_memory_manager" in source
+    assert "def _start_memory_extraction(*args, **kwargs):" not in source
+    assert "class _CompatMemoryManager" not in source
+
+
+def test_editor_ai_removes_unconsumed_legacy_routes():
+    source = _read(ROOT / "web" / "blueprints" / "editor_ai.py")
+
+    assert 'route("/api/editor/ai/task-stream", methods=["POST"])' in source
+    assert 'route("/api/editor/ai/agent", methods=["POST"])' not in source
+    assert 'route("/api/editor/ai/chart-rerun", methods=["POST"])' not in source
+    assert "def _agent_step_events(" not in source
 
 
 def test_task_orchestrator_implementation_stays_outside_web_app():
@@ -626,7 +696,6 @@ def test_ppt_plugin_uses_core_generation_service_facade():
     plugin_source = _read(PPT_PLUGIN)
     service_source = _read(PPT_GENERATION_SERVICE)
     contract_source = _read(PPT_GENERATION_CONTRACT)
-    legacy_adapter_source = _read(PPT_GENERATION_LEGACY_ADAPTER)
 
     assert "from app.core.services.ppt_generation_service import" in plugin_source
     assert "PPTGenerationService().plan_outline(" in plugin_source
@@ -634,21 +703,19 @@ def test_ppt_plugin_uses_core_generation_service_facade():
     assert "from app.core.services.ppt_master import" not in plugin_source
     assert "from app.core.services.ppt_generator import" not in plugin_source
     assert "from app.core.services.ppt_generation_contract import" in service_source
-    assert "from app.core.services.ppt_generation_legacy_adapter import" in service_source
-    assert "load_planner_cls()" in service_source
-    assert "load_generator_cls()" in service_source
+    # Service facade now imports PPTContentPlanner/PPTGenerator directly (legacy adapter removed)
+    assert "from app.core.services.ppt_master import PPTContentPlanner" in service_source
+    assert "from app.core.services.ppt_generator import PPTGenerator" in service_source
+    assert "_PPTContentPlanner" in service_source
+    assert "_PPTGenerator" in service_source
     assert "normalize_generation_result(result, output_path)" in service_source
     assert "def parse_ppt_outline_markdown(" not in service_source
     assert "def choose_ppt_theme(" not in service_source
-    assert "from app.core.services.ppt_master import" not in service_source
-    assert "from app.core.services.ppt_generator import" not in service_source
     assert "def parse_ppt_outline_markdown(" in contract_source
     assert "def choose_ppt_theme(" in contract_source
     assert "def normalize_generation_result(" in contract_source
     assert "from app.core.services.ppt_master import" not in contract_source
     assert "from app.core.services.ppt_generator import" not in contract_source
-    assert "from app.core.services.ppt_master import PPTContentPlanner" in legacy_adapter_source
-    assert "from app.core.services.ppt_generator import PPTGenerator" in legacy_adapter_source
 
 
 def test_template_library_ppt_generation_uses_service_facade():
@@ -660,9 +727,9 @@ def test_template_library_ppt_generation_uses_service_facade():
     assert "PPTGenerator(" not in template_source
 
 
-def test_ppt_generator_direct_imports_are_limited_to_legacy_adapter():
+def test_ppt_generator_direct_imports_are_limited_to_service_facade():
     allowed = {
-        PPT_GENERATION_LEGACY_ADAPTER.relative_to(ROOT).as_posix(),
+        PPT_GENERATION_SERVICE.relative_to(ROOT).as_posix(),
     }
     offenders = []
     for root in [ROOT / "app", ROOT / "web"]:
@@ -714,18 +781,43 @@ def test_retired_api_aliases_stay_removed():
     assert "def process_stream():" in agent_source
 
 
-def test_chat_session_and_settings_blueprints_use_runtime_context():
-    for path in [CHAT_BP, SESSIONS_BP, SETTINGS_BP]:
+def test_chat_and_session_blueprints_use_explicit_chat_runtime_services():
+    for path in [CHAT_BP, SESSIONS_BP]:
         source = _read(path)
-        assert "from web.runtime_context import" in source
+        assert "from web.chat_runtime_services import" in source
+        assert "from web.runtime_context import" not in source
         assert "import web.app" not in source
         assert "from web.app import" not in source
+
+    settings_source = _read(SETTINGS_BP)
+    assert "from web.settings_runtime_services import" in settings_source
+    assert "from web.runtime_context import" not in settings_source
 
 
 def test_session_and_settings_runtime_access_uses_named_helpers():
     for path in [SESSIONS_BP, SETTINGS_BP]:
         source = _read(path)
         assert "get_app_attr(" not in source
+
+
+def test_chat_runtime_services_do_not_reflect_through_web_app():
+    source = _read(ROOT / "web" / "chat_runtime_services.py")
+
+    assert "class ChatRuntimeServices" in source
+    assert "web.runtime_context" not in source
+    assert "web.app" not in source
+
+
+def test_settings_runtime_services_keep_app_globals_out_of_routes():
+    route_source = _read(SETTINGS_BP)
+    service_source = _read(ROOT / "web" / "settings_runtime_services.py")
+    bootstrap_source = _read(ROOT / "web" / "settings_runtime_bootstrap.py")
+
+    assert "from web.settings_runtime_services import" in route_source
+    assert "from web.runtime_context import" not in route_source
+    assert "class SettingsRuntimeServices" in service_source
+    assert "web.app" not in service_source
+    assert "web.app" not in bootstrap_source
 
 
 def test_service_blueprints_use_named_runtime_services():

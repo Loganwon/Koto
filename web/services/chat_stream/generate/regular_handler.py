@@ -40,7 +40,7 @@ def handle_regular(
 ):
     from app.core.llm.provider_compat import types
     from web.chat_runtime_services import get_utils
-    from web.memory_runtime import get_memory_manager
+    from web.memory_runtime import _start_memory_extraction, get_memory_manager
     from web.utils.threading_utils import stream_with_keepalive
 
     Utils = get_utils()
@@ -674,39 +674,6 @@ def handle_regular(
         yield _safe_sse({'type': 'token', 'content': error_response})
         total_time = time.time() - start_time
         yield _safe_sse({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})
-
-
-def _start_memory_extraction(*args, **kwargs):
-    pass
-
-
-def get_memory_manager():
-    try:
-        from web.memory_runtime import get_memory_manager as _get_memory_manager
-
-        manager = _get_memory_manager()
-        if manager is not None:
-            return manager
-    except Exception:
-        pass
-    try:
-        from web.enhanced_memory_manager import EnhancedMemoryManager
-
-        return EnhancedMemoryManager()
-    except Exception:
-        from web.memory_manager import MemoryManager
-
-        class _CompatMemoryManager:
-            def __init__(self):
-                self._base = MemoryManager()
-
-            def get_or_update_summary(self, *args, **kwargs):
-                return ""
-
-            def get_context_string(self, user_input, *args, **kwargs):
-                return self._base.get_context_string(user_input)
-
-        return _CompatMemoryManager()
 
 
 def run_with_timeout(func, timeout):
