@@ -1,1 +1,1 @@
-﻿# Package: fixtures
+# Package: fixtures

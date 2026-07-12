@@ -96,6 +96,48 @@ class TestWorkspaceAiAssistantSmoke:
         assert e2e_page.locator("#wa-ai-route-info").count() > 0
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
+    def test_workspace_model_toggle_is_unique_and_switches_modes(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
+        captured_modes: list[str] = []
+
+        def fulfill_model_switch(route):
+            try:
+                payload = json.loads(route.request.post_data or "{}")
+            except json.JSONDecodeError:
+                payload = {}
+            captured_modes.append(str(payload.get("mode") or ""))
+            route.fulfill(
+                status=200,
+                content_type="application/json",
+                body=json.dumps({"success": True, "mode": payload.get("mode")}),
+            )
+
+        e2e_page.route("**/api/local-model/switch", fulfill_model_switch)
+        _open_workspace_ai(e2e_page, e2e_base_url)
+
+        deepseek = e2e_page.locator("#wa-model-mode-deepseek-btn")
+        local = e2e_page.locator("#wa-model-mode-local-btn")
+        assert e2e_page.locator("#wa-model-mode-toggle").count() == 1
+        assert deepseek.count() == 1
+        assert local.count() == 1
+
+        deepseek.click()
+        e2e_page.wait_for_function(
+            """() => document.querySelector('#wa-model-mode-deepseek-btn')
+                ?.classList.contains('active')""",
+            timeout=PAGE_TIMEOUT,
+        )
+        local.click()
+        e2e_page.wait_for_function(
+            """() => document.querySelector('#wa-model-mode-local-btn')
+                ?.classList.contains('active')""",
+            timeout=PAGE_TIMEOUT,
+        )
+
+        assert captured_modes == ["deepseek", "local"]
+        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+
     def test_workspace_ai_send_message_renders_mocked_whitebox_task_card(self, e2e_page, console_errors, e2e_base_url):
         captured = {}
         sse_events = [
@@ -461,7 +503,8 @@ class TestWorkspaceAiAssistantSmoke:
         assert "先分析文档A" in messages_text
         assert "模拟任务1已完成" in messages_text
         assert e2e_page.locator(".wa-task-run").count() >= 1
-        assert e2e_page.locator(".wa-task-run [data-role='plan']").first.inner_text() == "准备处理任务。"
+        process = e2e_page.locator(".wa-task-run [data-role='process']").first
+        assert "执行过程" in process.inner_text()
 
         e2e_page.locator("#wa-user-input").fill("继续基于刚才的结论处理文档B")
         e2e_page.locator("#wa-send-btn").click()

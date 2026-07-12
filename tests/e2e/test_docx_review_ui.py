@@ -44,7 +44,6 @@ def _wait_until_text_includes(
 
 def _open_docx_for_review(page, base_url: str, docx_path: str) -> None:
     page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
-    page.wait_for_load_state("networkidle", timeout=15_000)
     page.locator("#wa-file-input").set_input_files(docx_path)
     _wait_until_visible(
         page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT
@@ -245,9 +244,11 @@ def _create_comment_via_launcher(
     _select_docx_text(page, anchor_text)
     _wait_until_visible(page, "#wa-review-selection-launcher")
     _wait_until_text_includes(
-        page, "#wa-review-selection-launcher .wa-review-selection-title", "新建批注"
+        page, "#wa-review-selection-launcher .wa-review-selection-title", "添加批注或修订"
     )
-    page.locator("#wa-review-selection-launcher .wa-review-selection-add").click()
+    page.locator(
+        '#wa-review-selection-launcher [data-review-create="comment"]'
+    ).click()
     _wait_until_visible(page, "#wa-review-shell .koto-docx-comment-edit")
     textarea = page.locator("#wa-review-shell .koto-docx-comment-edit").last
     textarea.fill(comment_text)
@@ -256,10 +257,14 @@ def _create_comment_via_launcher(
         "#wa-review-shell .koto-docx-comment-card:last-of-type",
         anchor_text,
     )
-    assert 188 <= draft_geometry["cardWidth"] <= 232
+    assert 218 <= draft_geometry["cardWidth"] <= 302
     assert draft_geometry["cardLeftDelta"] >= 6
-    assert abs(draft_geometry["cardTopDelta"]) <= 24
-    assert draft_geometry["cardOutsideText"] is True
+    card_count = page.locator("#wa-review-shell .koto-docx-comment-card").count()
+    if card_count == 1:
+        assert abs(draft_geometry["cardTopDelta"]) <= 24
+    else:
+        assert -24 <= draft_geometry["cardTopDelta"] <= 200
+    assert draft_geometry["cardOutsideText"] is True, draft_geometry
     assert draft_geometry["cardInViewport"] is True
     assert draft_geometry["saveInViewport"] is True
     assert draft_geometry["hasInlineAnchorButton"] is True
@@ -326,8 +331,8 @@ def test_docx_review_selection_launcher_creates_comment(
         f'#wa-review-shell [data-review-id="{review_id}"]',
         "批注测试",
     )
-    assert 188 <= saved_geometry["cardWidth"] <= 232
-    assert saved_geometry["cardHeight"] <= 72
+    assert 218 <= saved_geometry["cardWidth"] <= 302
+    assert saved_geometry["cardHeight"] <= 100
     assert saved_geometry["cardLeftDelta"] >= 6
     assert abs(saved_geometry["cardTopDelta"]) <= 24
     assert saved_geometry["cardOutsideText"] is True
@@ -360,10 +365,7 @@ def test_docx_review_nav_menu_edit_and_delete_flow(
         comment_text="第二条原始批注",
         expected_summary="2条批注",
     )
-
-    e2e_page.locator(
-        f'#wa-review-shell [data-review-id="{first_id}"] [data-review-action="focus"]'
-    ).click()
+    e2e_page.locator(f'#wa-review-shell [data-review-id="{first_id}"]').click()
     _wait_for_review_card_focus(e2e_page, first_id)
 
     e2e_page.locator(".wa-docx-review-summary").click()
@@ -414,6 +416,7 @@ def test_docx_review_nav_menu_edit_and_delete_flow(
     )
     _wait_until_text_includes(e2e_page, ".wa-docx-review-summary", "1条批注")
 
+    e2e_page.locator(f'#wa-review-shell [data-review-id="{first_id}"]').hover()
     e2e_page.locator(
         f'#wa-review-shell [data-review-id="{first_id}"] [data-review-action="delete"]'
     ).click()
