@@ -122,6 +122,13 @@ class TestWorkspaceAiAssistantSmoke:
         assert deepseek.count() == 1
         assert local.count() == 1
 
+        # The selected mode is persisted between sessions.  Re-selecting the
+        # already active option is deliberately a no-op, so the request
+        # contract must depend on the actual initial state rather than test
+        # process history.
+        initially_deepseek = deepseek.evaluate(
+            "(element) => element.classList.contains('active')"
+        )
         deepseek.click()
         e2e_page.wait_for_function(
             """() => document.querySelector('#wa-model-mode-deepseek-btn')
@@ -135,7 +142,8 @@ class TestWorkspaceAiAssistantSmoke:
             timeout=PAGE_TIMEOUT,
         )
 
-        assert captured_modes == ["deepseek", "local"]
+        expected_modes = (["deepseek"] if not initially_deepseek else []) + ["local"]
+        assert captured_modes == expected_modes
         assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
 
     def test_workspace_ai_send_message_renders_mocked_whitebox_task_card(self, e2e_page, console_errors, e2e_base_url):
