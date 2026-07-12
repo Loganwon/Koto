@@ -100,7 +100,13 @@ class ServiceRegistry:
 
     @property
     def brain(self) -> Any:
-        return self._get("brain")
+        # ``brain`` can be replaced during an in-process restart, model reload,
+        # or an integration test.  Caching it leaves request handlers pointing
+        # at an obsolete instance after the replacement is undone.
+        value = getattr(self.module, "brain", None)
+        if value is None:
+            raise RuntimeError("Runtime service unavailable: brain")
+        return value
 
     @property
     def client(self) -> Any:
@@ -246,27 +252,35 @@ def resolve_requested_model_id(
         except Exception:
             pass
         return fallback_model or "deepseek-chat"
-    return str(requested_model or "").strip() or fallback_model or "deepseek-chat"
+    from app.core.llm.provider_boundary import normalize_public_model
+
+    return normalize_public_model(
+        str(requested_model or "").strip() or fallback_model or "deepseek-chat"
+    )
 # ── Editor AI / Compat stubs (delegated to app module) ────────────────────
 
 def get_configured_local_model_id(default: str = "") -> str:
     """Return configured local model id from settings."""
     try:
-        from web.config import _load_user_settings
-        settings = _load_user_settings()
-        return str(settings.get("local_model", "") or default).strip() or default
+        from app.core.config.user_settings import SettingsManager
+        sm = SettingsManager()
+        all_s = sm.get_all()
+        tag = all_s.get("local_model") or (all_s.get("ai") or {}).get("local_model") or ""
+        return str(tag).strip() or default
     except Exception:
         return default
 
-def safe_editor_sse(data: str, event: str = "message") -> str:
-    """Format data as SSE event string."""
-    return f"event: {event}\ndata: {data}\n\n"
+def safe_editor_sse(data: dict, event: str = "message") -> str:
+    """Format editor events with the shared compact JSON SSE protocol."""
+    from web.file_task_stream import safe_editor_sse as _safe_editor_sse
 
-def normalize_model_mode(raw: str) -> str:
-    """Normalize model mode string."""
-    mode = str(raw or "").strip().lower()
-    valid = {"local", "cloud", "deepseek", "gemini"}
-    return mode if mode in valid else "cloud"
+    return _safe_editor_sse(data)
+
+def normalize_model_mode(raw: str, default: str = "cloud") -> str:
+    """Delegate model-mode normalization to the canonical core contract."""
+    from app.core.llm.model_mode import normalize_model_mode as _normalize_model_mode
+
+    return _normalize_model_mode(raw, default=default)
 
 def stream_file_task_request(*args, **kwargs):
     """Delegate to web.file_task_stream.stream_file_task_request (the real implementation)."""

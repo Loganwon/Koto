@@ -21,7 +21,7 @@ from typing import Any
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.runtime_context import get_brain, get_model_map, get_session_manager
+from web.chat_runtime_services import get_brain, get_model_map, get_session_manager
 
 _logger = logging.getLogger("koto.routes.sessions")
 
@@ -228,7 +228,7 @@ def _generate_workspace_task_title(user_text: str, assistant_text: str, metadata
         f"执行结果：{_compact_text(assistant_text, 300)}"
     )
     try:
-        title_model = _get_model_map().get("CHAT", "gemini-2.5-flash")
+        title_model = _get_model_map().get("CHAT", "deepseek-chat")
         result = _get_brain().chat([], prompt, model=title_model, auto_model=False)
         generated = _clean_generated_title(_raw_title_from_model_result(result), 24)
         if generated:
@@ -764,7 +764,7 @@ def auto_title_session(session_name: str) -> Response:
         f"直接输出标题文字）：\n\n{context}"
     )
     try:
-        title_model = _get_model_map().get("CHAT", "gemini-2.5-flash")
+        title_model = _get_model_map().get("CHAT", "deepseek-chat")
         result = _get_brain().chat([], prompt, model=title_model, auto_model=False)
         raw_title = (result.get("response") or "").strip()
         raw_title = raw_title.strip("\"'「」《》【】\n").split("\n")[0].strip()

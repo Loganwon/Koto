@@ -131,7 +131,7 @@ def _resolve_review_model_id(
             )
 
             provider_name = get_provider_for_model_mode(normalized_mode)
-            fallback_model = "gemini-3.1-pro-preview"
+            fallback_model = "deepseek-chat"
             if provider_name == "deepseek":
                 from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL
 

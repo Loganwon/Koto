@@ -4,31 +4,25 @@ import hashlib
 import threading
 
 from app.core.llm.model_capabilities import is_interactions_only_model
+from app.core.llm.model_selection import is_archived_cloud_model
 
-# google.genai.types 延迟到 classify() 内部加载，避免启动时加载 (~4.7s)
+# Provider compatibility types are loaded lazily by classify().
 
 
 class AIRouter:
     """
     基于轻量级 AI 模型的智能任务路由器
-    默认使用 gemini-3-flash-preview，如不可用则优先降级到快速的 2.5 系列
+    使用 DeepSeek 作为唯一云端路由模型。
     """
 
     # 路由器当前使用的模型（由 ModelManager 初始化后可更新；不可用时自动降级）
-    _router_model: str = "gemini-3-flash-preview"
+    _router_model: str = "deepseek-chat"
 
-    # Gemini 3 Flash Preview 在极小 token 预算下可能返回空成功响应，
     # 路由器至少保留一个安全的短文本输出空间。
     _ROUTER_MAX_OUTPUT_TOKENS: int = 64
 
     # 路由模型降级链（所有模型必须支持 generate_content，不能是 interactions_only）
-    _ROUTER_MODEL_CHAIN: list = [
-        "gemini-3-flash-preview",  # 首选：当前主力快速模型
-        "gemini-2.5-flash",  # 稳定快速回退
-        "gemini-2.5-flash-lite",  # 轻量回退
-        "gemini-2.5-pro",  # 质量兜底
-        "gemini-3-pro-preview",  # 最后再尝试慢速 preview pro
-    ]
+    _ROUTER_MODEL_CHAIN: list = ["deepseek-chat"]
 
     # 判定模型不可用的错误信号词
     _MODEL_UNAVAILABLE_KEYWORDS: tuple = (
@@ -50,6 +44,9 @@ class AIRouter:
         会拒绝 Interactions-only 模型（不兼容 generate_content）。"""
         if not model_id:
             return
+        if is_archived_cloud_model(model_id):
+            print(f"[AIRouter] ⚠️ 拒绝设置已封存云端模型: {model_id}")
+            return
         if is_interactions_only_model(model_id):
             print(f"[AIRouter] ⚠️ 拒绝设置 Interactions-only 模型为路由器: {model_id}")
             return
@@ -67,8 +64,7 @@ class AIRouter:
     def _extract_response_text(cls, response) -> str:
         """Best-effort text extraction for short routing calls.
 
-        Some Gemini preview models may leave candidates/parts empty while still
-        exposing the final text on response.text.
+        Providers may expose final text either directly or through candidates.
         """
         if response is None:
             return ""
@@ -211,7 +207,7 @@ class AIRouter:
             ]
 
             def call_model():
-                from google.genai import types
+                from app.core.llm.provider_compat import types
 
                 # 构建尝试顺序：当前模型优先，再按降级链补全
                 models_to_try = [cls._router_model]
@@ -329,7 +325,7 @@ hint 规则（所有任务均可填写，无特殊要求则填 null）:
             def call_model():
                 import json as _json
 
-                from google.genai import types
+                from app.core.llm.provider_compat import types
 
                 valid_tasks = [
                     "PAINTER",

@@ -64,7 +64,7 @@ def _iter_embed_models(api_key: str) -> Iterable[str]:
         return ()
 
     try:
-        import google.genai as genai
+        from app.core.llm import provider_compat as genai
 
         client = genai.Client(api_key=api_key)
         available = []

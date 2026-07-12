@@ -1,4 +1,5 @@
-# Copyright (C) 2024-2026 Koto AI. All rights reserved.
+# GEMINI ARCHIVED - 2026-07-10 - Entire module deprecated. Use DeepSeek provider instead.
+# # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import logging
 import os

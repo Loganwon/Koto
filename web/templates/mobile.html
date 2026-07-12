@@ -1209,7 +1209,7 @@ function toast(msg, ms=2500) {
 /* ────────────────── Model badge ── */
 function setBadge(m) {
   if (!m) return;
-  const short = m.replace('gemini-','G').replace('-preview','').replace('flash','F').replace('pro','Pro').replace('--','-');
+  const short = m.replace('deepseek-','DS-').replace('-preview','').replace('--','-');
   document.getElementById('hdrBadge').textContent = short;
 }
 

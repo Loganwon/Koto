@@ -5,11 +5,11 @@ import json
 import time
 
 from web.sse.sanitizer import safe_sse as _safe_sse
-from google.genai import types
+from app.core.llm.provider_compat import types
 
 
 def handle_web_search(yield_thinking, context_info, client, session_manager, user_input, session_name, start_time, _app_logger, MODEL_MAP):
-    from web.runtime_context import get_create_client, get_utils, get_web_searcher
+    from web.chat_runtime_services import get_create_client, get_utils, get_web_searcher
 
     Utils = get_utils()
     try:
@@ -21,9 +21,9 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
             search_with_grounding = staticmethod(_web_searcher.search_with_grounding)
 
     def generate_with_cloud_fallback(model, contents, config):
-        model = str(model or "").strip() or "gemini-2.5-flash"
-        if not model.startswith("gemini-"):
-            model = "gemini-2.5-flash"
+        from app.core.llm.provider_boundary import normalize_public_model
+
+        model = normalize_public_model(model)
         try:
             return client.models.generate_content(
                 model=model,
@@ -43,9 +43,9 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
                 config=config,
             )
 
-    used_model = "gemini-2.5-flash (Google Search)"
+    used_model = "deepseek-chat (web search)"
     yield _safe_sse({"type": "progress", "message": "正在连接互联网搜索...", "detail": ""})
-    yield _safe_sse({"type": "progress", "message": "正在搜索实时信息...", "detail": "Google Search"})
+    yield _safe_sse({"type": "progress", "message": "正在搜索实时信息...", "detail": "Web Search"})
     yield _safe_sse({"type": "progress", "message": "正在整理搜索结果...", "detail": ""})
 
     _skill_prompt = (context_info or {}).get("skill_prompt")
@@ -60,7 +60,7 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
         or "搜索失败" in response_text
     ):
         t = yield_thinking(
-            "初次搜索结果不佳，使用 gemini-2.5-flash-lite 改写查询词后重试",
+            "初次搜索结果不佳，正在改写查询词后重试",
             "searching",
         )
         if t:
@@ -71,7 +71,7 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
             f"用户需求: {user_input}"
         )
         fix_query_resp = generate_with_cloud_fallback(
-            model="gemini-2.5-flash-lite",
+            model="deepseek-chat",
             contents=fix_query_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.2,
@@ -88,7 +88,7 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
             "WEB_SEARCH", user_input, response_text
         )
         fix_resp = generate_with_cloud_fallback(
-            model=MODEL_MAP.get("WEB_SEARCH", "gemini-3-flash-preview"),
+            model=MODEL_MAP.get("WEB_SEARCH", "deepseek-chat"),
             contents=fix_prompt,
             config=types.GenerateContentConfig(
                 temperature=0.4,

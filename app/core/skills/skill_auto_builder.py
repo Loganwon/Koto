@@ -715,12 +715,12 @@ class SkillAutoBuilder:
         author: str = "user",
         tags: Optional[List[str]] = None,
         enabled: bool = False,
-        model: str = "gemini-2.5-flash",
+        model: str = "deepseek-chat",
         personalize: bool = False,
         personalization_context: Optional[Dict[str, Any]] = None,
     ):
         """
-        使用 Gemini AI 生成高质量 SkillDefinition。
+        使用当前云端 AI 生成高质量 SkillDefinition。
         相比规则引擎，能理解复杂的语义意图，生成更精准的 system_prompt_template。
         若 API 不可用或调用失败，自动降级到 from_style_description() 规则引擎。
 
@@ -732,7 +732,7 @@ class SkillAutoBuilder:
             author:      作者
             tags:        搜索标签
             enabled:     是否默认启用
-            model:       Gemini 模型名称
+            model:       当前云端模型名称
 
         Returns:
             SkillDefinition（AI 生成或规则降级）
@@ -812,13 +812,13 @@ class SkillAutoBuilder:
         cls, name: str, description: str, model: str
     ) -> Optional[str]:
         """
-        调用 Gemini API 生成 system_prompt_template。
+        调用当前云端 provider 生成 system_prompt_template。
         成功返回 prompt 字符串，失败返回 None。
         """
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            client = GeminiProvider()
+            client = get_llm_provider(provider="deepseek", allow_local_fallback=False)
 
             meta_prompt = f"""你是一个专业的 AI Skill 设计师。
 用户想创建一个名为「{name}」的 AI 技能，使用场景描述如下：
@@ -849,7 +849,7 @@ class SkillAutoBuilder:
             return None
 
         except Exception as e:
-            logger.debug(f"[SkillAutoBuilder] Gemini 生成失败: {e}")
+            logger.debug(f"[SkillAutoBuilder] 云端生成失败: {e}")
             return None
 
     @classmethod

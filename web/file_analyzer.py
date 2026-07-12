@@ -297,18 +297,18 @@ class FileAnalyzer:
         raw = None
 
         if is_cloud:
-            # ═══ 云端模式：使用 Gemini API ═══
+            # ═══ 云端模式：使用 DeepSeek provider ═══
             try:
-                from google import genai as _genai
-                from google.genai import types as _types
+                from app.core.llm import provider_compat as _genai
+                from app.core.llm.provider_compat import types as _types
 
-                api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("API_KEY")
+                api_key = os.environ.get("DEEPSEEK_API_KEY")
                 if not api_key:
                     return None
 
                 _client = _genai.Client(api_key=api_key)
                 resp = _client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
+                    model="deepseek-chat",
                     contents=f"{self.AI_CLASSIFY_PROMPT}\n\n{user_msg}",
                     config=_types.GenerateContentConfig(
                         temperature=0.0,
@@ -317,7 +317,7 @@ class FileAnalyzer:
                 )
                 raw = (resp.text or "").strip()
             except Exception as e:
-                logger.error(f"[FileAnalyzer AI/Cloud] ❌ Gemini 分类失败: {e}")
+                logger.error(f"[FileAnalyzer AI/Cloud] ❌ DeepSeek 分类失败: {e}")
                 return None
         else:
             # ═══ 本地模式：使用 Ollama ═══
@@ -436,10 +436,10 @@ class FileAnalyzer:
         # PDF提取文本
         if file_type == ".pdf":
             try:
-                import PyPDF2
+                import pypdf
 
                 with open(file_path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
+                    reader = pypdf.PdfReader(f)
                     text = ""
                     for page in reader.pages[:3]:  # 读前3页
                         text += page.extract_text()

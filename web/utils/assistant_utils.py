@@ -40,7 +40,7 @@ def _types() -> Any:
     types_module = get_types()
     if types_module is not None:
         return types_module
-    from google.genai import types as genai_types
+    from app.core.llm.provider_compat import types as genai_types
 
     return genai_types
 
@@ -168,7 +168,7 @@ class Utils:
                 f"模型输出:\n{output_text}\n"
             )
             response = _client().models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="deepseek-chat",
                 contents=check_prompt,
                 config=_types().GenerateContentConfig(
                     max_output_tokens=300,

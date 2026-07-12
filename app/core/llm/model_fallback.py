@@ -16,9 +16,9 @@
 
     # 带自动降级的生成调用
     result = executor.generate_with_fallback(
-        provider=gemini_provider,
+        provider=deepseek_provider,
         prompt="你好",
-        preferred_model="gemini-2.5-flash",
+        preferred_model="deepseek-chat",
         task_type="CHAT",
     )
 
@@ -26,7 +26,7 @@
     model_id = executor.get_best_available(task_type="CODER")
 
     # 手动标记某模型短暂不可用
-    executor.mark_unavailable("gemini-2.5-pro")
+    executor.mark_unavailable("deepseek-chat")
 """
 
 from __future__ import annotations
@@ -36,6 +36,8 @@ import re
 import threading
 import time
 from typing import Dict, List, Optional
+
+from .model_selection import is_archived_cloud_model
 
 logger = logging.getLogger(__name__)
 
@@ -81,12 +83,6 @@ _TRANSIENT_MODEL_ERROR_PATTERNS = [
     r"ssl.*error",
     r"connection.*aborted",
     r"broken.*pipe",
-    # google-genai SDK 内部兼容性错误（特定预览模型可能触发，换模型可解决）
-    r"has no attribute.*headers",
-    r"HttpResponse.*headers",
-    r"response_stream.*httpx",
-    r"Expected.*response_stream.*httpx",
-    r"has no attribute.*body_segments",
 ]
 
 # 超时导致的模型不可用缓存 TTL（比模型本身 404 的 5 分钟更短）
@@ -109,7 +105,7 @@ def _is_retryable_generation_error(exc: Exception) -> bool:
 
 
 def _is_location_blocked_error(exc: Exception) -> bool:
-    """判断是否为地区/帐号限制错误（切换 Gemini 模型无用，需直接走本地兜底）。"""
+    """判断是否为地区/帐号限制错误（切换云端模型无用，需直接走本地兜底）。"""
     msg = str(exc)
     return any(re.search(p, msg, re.IGNORECASE) for p in _LOCATION_BLOCKED_PATTERNS)
 
@@ -128,98 +124,23 @@ def _is_transient_error(exc: Exception) -> bool:
 
 
 # ── 通用降级链（无任务信息时使用）──────────────────────────────────────────────
-# DeepSeek 是当前默认云端主通路；Gemini 只在显式选择或 Gemini-only 任务中使用。
+# DeepSeek 是唯一活动云端主通路。
 # 可通过环境变量 KOTO_FALLBACK_CHAIN_DEFAULT 覆盖（逗号分隔）。
 _DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "deepseek-chat",
     "deepseek-chat",
 ]
 
 _DEEPSEEK_FALLBACK_CHAIN: List[str] = [
     "deepseek-chat",
-    "deepseek-chat",
-]
-
-_GEMINI_DEFAULT_FALLBACK_CHAIN: List[str] = [
-    "gemini-3-flash-preview",
-    "gemini-3.1-pro-preview",
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
 ]
 
 # ── 按任务类型的专属降级链 ──────────────────────────────────────────────────────
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
-    "CHAT": [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-    ],
-    "CODER": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-    ],
-    "RESEARCH": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-    ],
-    "PAINTER": [
-        "gemini-3.1-flash-image-preview",
-        "gemini-2.5-flash-image",
-    ],
-    "WEB_SEARCH": [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-    ],
-    "FILE_GEN": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-    ],
-    "FILE_TASK": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-    ],
-    "AGENT": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-    ],
-    "DOC_ANNOTATE": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-    ],
-    "FILE_SEARCH": [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-    ],
-    "VISION": [
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-    ],
-    "MULTI_STEP": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-    ],
-    "COMPLEX": [
-        "gemini-3.1-pro-preview",
-        "gemini-3-pro-preview",
-        "gemini-3-flash-preview",
-        "gemini-2.5-flash",
-    ],
+    task: ["deepseek-chat"]
+    for task in (
+        "CHAT", "CODER", "RESEARCH", "WEB_SEARCH", "FILE_GEN", "FILE_TASK",
+        "AGENT", "DOC_ANNOTATE", "FILE_SEARCH", "MULTI_STEP", "COMPLEX",
+    )
 }
 
 
@@ -359,7 +280,7 @@ class ModelFallbackExecutor:
         尝试 preferred_model 生成，遇到"模型不可用"错误自动切换到备选模型。
 
         Args:
-            provider:         LLMProvider 实例（GeminiProvider 等）。
+            provider:         LLMProvider 实例。
             prompt:           用户 prompt（str 或 list）。
             preferred_model:  首选模型 ID。
             task_type:        任务类型，用于选择降级链（默认 "CHAT"）。
@@ -539,7 +460,7 @@ class ModelFallbackExecutor:
         result: List[str] = []
 
         def _add(m: str) -> None:
-            if m and m not in seen:
+            if m and not is_archived_cloud_model(m) and m not in seen:
                 seen.add(m)
                 result.append(m)
 
@@ -555,7 +476,7 @@ class ModelFallbackExecutor:
             return result
         for m in _TASK_FALLBACK_CHAINS.get(task_type, []):
             _add(m)
-        for m in _GEMINI_DEFAULT_FALLBACK_CHAIN:
+        for m in _DEFAULT_FALLBACK_CHAIN:
             _add(m)
         return result
 

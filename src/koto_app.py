@@ -533,15 +533,15 @@ def ensure_directories():
 
 def check_config():
     """检查配置文件"""
-    config_file = APP_ROOT / "config" / "gemini_config.env"
+    config_file = APP_ROOT / "config" / "deepseek_config.env"
     if not config_file.exists():
         config_file.parent.mkdir(exist_ok=True, parents=True)
         config_file.write_text(
             "# Koto Configuration\n"
-            "API_KEY=your_api_key_here\n"
-            "GEMINI_API_KEY=your_api_key_here\n"
+            "DEEPSEEK_API_KEY=your_api_key_here\n"
+            "DEEPSEEK_BASE_URL=https://api.deepseek.com\n"
         )
-        _write_log("⚠️ 未检测到 gemini_config.env，已生成占位文件")
+        _write_log("⚠️ 未检测到 deepseek_config.env，已生成占位文件")
     else:
         _write_log("✔ 配置文件存在")
 
@@ -591,7 +591,7 @@ class VoiceAPI:
             logger.debug("Failed to get local STT status: %s", e)
             local = {"available": False, "engine": "unavailable"}
 
-        engines = [{"id": "gemini", "name": "Gemini upload STT", "available": True}]
+        engines = []
         if local.get("available"):
             engines.insert(
                 0,
@@ -972,34 +972,34 @@ def start_flask_server():
                 syntax_ok, syntax_err = _pre_check_syntax(app_file)
                 if not syntax_ok:
                     _write_log(f"❌ app.py 语法检查失败: {syntax_err}")
-                    # 尝试自动修复
-                    fixed = _auto_fix_syntax(app_file, syntax_err)
-                    if fixed:
-                        _write_log("✅ 已自动修复语法错误，重新检查...")
-                        syntax_ok2, syntax_err2 = _pre_check_syntax(app_file)
-                        if not syntax_ok2:
-                            _write_log(f"❌ 自动修复后仍有语法错误: {syntax_err2}")
-                            _server_error[0] = syntax_err2
-                            _start_fallback_server(syntax_err2, port=KOTO_PORT)
-                            return
-                        _write_log("✅ 语法修复成功！")
-                    else:
-                        _server_error[0] = syntax_err
-                        _start_fallback_server(syntax_err, port=KOTO_PORT)
-                        return
+                    # Do not rewrite source during startup.  Heuristic repairs
+                    # can turn a recoverable syntax error into data loss.
+                    _server_error[0] = syntax_err
+                    _start_fallback_server(syntax_err, port=KOTO_PORT)
+                    return
             else:
                 _write_log("⚡ 快速启动：跳过语法预检查")
 
             # ──────── 正式启动 Flask ────────
-            from web.app import app
+            from web.app import app, socketio
 
-            app.run(
-                host=KOTO_HOST,
-                port=KOTO_PORT,
-                debug=False,
-                use_reloader=False,
-                threaded=True,
-            )
+            if socketio is not None:
+                socketio.run(
+                    app,
+                    host=KOTO_HOST,
+                    port=KOTO_PORT,
+                    debug=False,
+                    use_reloader=False,
+                    allow_unsafe_werkzeug=True,
+                )
+            else:
+                app.run(
+                    host=KOTO_HOST,
+                    port=KOTO_PORT,
+                    debug=False,
+                    use_reloader=False,
+                    threaded=True,
+                )
         except SyntaxError as e:
             error_msg = f"语法错误 ({e.filename}, 第{e.lineno}行): {e.msg}"
             _server_error[0] = error_msg
@@ -1061,21 +1061,14 @@ def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
                 self.end_headers()
 
             def _handle_diagnose(self):
-                """诊断当前系统状态"""
-                app_file = os.path.join(str(APP_ROOT), "web", "app.py")
-                info = {
-                    "python_version": sys.version,
-                    "app_file_exists": os.path.exists(app_file),
-                    "app_file_size": (
-                        os.path.getsize(app_file) if os.path.exists(app_file) else 0
-                    ),
-                    "error": error_msg,
-                }
-                # 语法检查
-                if os.path.exists(app_file):
-                    ok, err = _pre_check_syntax(app_file)
-                    info["syntax_ok"] = ok
-                    info["syntax_error"] = err
+                """Run a safe, structured startup diagnosis."""
+                try:
+                    from src.startup_diagnostics import run_startup_diagnostics
+                except ImportError:
+                    from startup_diagnostics import run_startup_diagnostics
+
+                info = run_startup_diagnostics(APP_ROOT, port=port)
+                info["error"] = error_msg
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1085,29 +1078,21 @@ def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
                 )
 
             def _handle_retry(self):
-                """尝试重新启动主应用"""
+                """Restart only after a non-mutating self-check passes."""
                 result = {"success": False, "message": ""}
-                app_file = os.path.join(str(APP_ROOT), "web", "app.py")
+                try:
+                    from src.startup_diagnostics import run_startup_diagnostics
+                except ImportError:
+                    from startup_diagnostics import run_startup_diagnostics
 
-                # 1. 先检查语法
-                ok, err = _pre_check_syntax(app_file)
-                if not ok:
-                    # 尝试自动修复
-                    fixed = _auto_fix_syntax(app_file, err)
-                    if fixed:
-                        ok2, err2 = _pre_check_syntax(app_file)
-                        if ok2:
-                            result["message"] = "语法已自动修复！正在重启程序..."
-                            result["success"] = True
-                            result["action"] = "restart"
-                        else:
-                            result["message"] = f"自动修复失败，仍有错误: {err2}"
-                    else:
-                        result["message"] = f"无法自动修复: {err}"
-                else:
-                    result["message"] = "语法检查通过！正在重启程序..."
+                report = run_startup_diagnostics(APP_ROOT, port=port)
+                result["diagnostics"] = report
+                if report["can_restart"]:
+                    result["message"] = "自检通过，正在安全重启程序..."
                     result["success"] = True
                     result["action"] = "restart"
+                else:
+                    result["message"] = "自检发现阻断问题；请根据诊断结果修复后再重试。"
 
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -1118,7 +1103,7 @@ def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
 
                 # 如果修复成功，重启整个进程
                 if result.get("success"):
-                    _write_log("🔄 语法修复成功，准备重启进程...")
+                    _write_log("🔄 自检通过，准备重启进程...")
 
                     def _do_restart():
                         time.sleep(1)
@@ -1170,19 +1155,19 @@ def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
                     "</style></head><body>"
                     '<div class="card">'
                     "<h1>⚠️ Koto 启动遇到问题</h1>"
-                    '<p class="subtitle">应用加载过程中出现错误，可尝试自动修复</p>'
+                    '<p class="subtitle">应用加载过程中出现错误；先执行安全自检，再决定是否重启</p>'
                     f'<div class="error-box">{safe_err}</div>'
                     '<div id="status" class="status"></div>'
                     '<div class="actions">'
                     '<button class="btn btn-primary" id="retryBtn" onclick="handleRetry()">'
-                    "🔧 自动修复并重启</button>"
+                    "🛡️ 安全检查并重启</button>"
                     '<button class="btn btn-secondary" id="diagnoseBtn" onclick="handleDiagnose()">'
                     "🔍 诊断检查</button>"
                     "</div>"
                     '<div class="tips">'
                     "<h3>💡 手动排查提示</h3>"
                     "<ul>"
-                    "<li>🔑 检查 <code>config/gemini_config.env</code> 中的 API 密钥</li>"
+                    "<li>🔑 检查 <code>config/deepseek_config.env</code> 中的 API 密钥</li>"
                     "<li>📦 运行 <code>pip install -r requirements.txt</code></li>"
                     "<li>🔄 关闭后重新运行 <code>RunSource.bat</code></li>"
                     "<li>📋 查看 <code>logs/startup.log</code> 获取详细日志</li>"
@@ -1197,8 +1182,8 @@ def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
                     'statusEl.className="status show "+type;statusEl.innerHTML=msg}'
                     "async function handleRetry(){"
                     "retryBtn.disabled=true;"
-                    "retryBtn.innerHTML='<span class=\"spinner\"></span>正在修复...';"
-                    'showStatus("⏳ 正在检查语法并尝试自动修复...","info");'
+                    "retryBtn.innerHTML='<span class=\"spinner\"></span>正在自检...';"
+                    'showStatus("⏳ 正在执行安全自检...","info");'
                     'try{const r=await fetch("/api/retry",{method:"POST"});'
                     "const d=await r.json();"
                     "if(d.success){"
@@ -1206,19 +1191,17 @@ def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
                     "setTimeout(()=>location.reload(),3000)"
                     "}else{"
                     'showStatus("❌ "+d.message,"error");'
-                    'retryBtn.disabled=false;retryBtn.innerHTML="🔧 重试修复"}'
+                    'retryBtn.disabled=false;retryBtn.innerHTML="🛡️ 安全检查并重启"}'
                     "}catch(e){"
                     'showStatus("❌ 请求失败: "+e.message,"error");'
-                    'retryBtn.disabled=false;retryBtn.innerHTML="🔧 重试修复"}}'
+                    'retryBtn.disabled=false;retryBtn.innerHTML="🛡️ 安全检查并重启"}}'
                     "async function handleDiagnose(){"
                     'diagnoseBtn.disabled=true;diagnoseBtn.innerHTML="🔍 检查中...";'
                     'try{const r=await fetch("/api/diagnose");const d=await r.json();'
-                    'let info="<b>📋 诊断结果</b><br>";'
-                    'info+="Python: "+d.python_version+"<br>";'
-                    'info+="app.py 存在: "+(d.app_file_exists?"✅":"❌")+"<br>";'
-                    'info+="文件大小: "+(d.app_file_size/1024).toFixed(1)+" KB<br>";'
-                    'info+="语法检查: "+(d.syntax_ok?"✅ 通过":"❌ "+d.syntax_error)+"<br>";'
-                    'showStatus(info,d.syntax_ok?"success":"error")'
+                    'const esc=v=>String(v||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));'
+                    'let info="<b>📋 启动自检："+esc(d.summary)+"</b><br>";'
+                    'for(const c of (d.checks||[])){const icon=c.level==="ok"?"✅":c.level==="warning"?"⚠️":"❌";info+=icon+" "+esc(c.name)+"："+esc(c.message)+(c.action?"（"+esc(c.action)+"）":"")+"<br>";}'
+                    'showStatus(info,d.status==="blocked"?"error":d.status==="attention"?"info":"success")'
                     '}catch(e){showStatus("❌ 诊断失败: "+e.message,"error")}'
                     'diagnoseBtn.disabled=false;diagnoseBtn.innerHTML="🔍 诊断检查"}'
                     "</script></body></html>"

@@ -180,10 +180,10 @@ def _translate_batch_llm(texts: list, target_language: str, llm_client) -> list:
     )
 
     try:
-        from google.genai import types as gtypes
+        from app.core.llm.provider_compat import types as gtypes
 
         resp = llm_client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="deepseek-chat",
             contents=prompt,
             config=gtypes.GenerateContentConfig(
                 temperature=0.1,
@@ -218,7 +218,7 @@ def _translate_one_by_one(texts: list, target_language: str, llm_client) -> list
     results = []
     for text in texts:
         try:
-            from google.genai import types as gtypes
+            from app.core.llm.provider_compat import types as gtypes
 
             prompt = (
                 f"Translate the following text to {target_language}.\n"
@@ -226,7 +226,7 @@ def _translate_one_by_one(texts: list, target_language: str, llm_client) -> list
                 f"{text}"
             )
             resp = llm_client.models.generate_content(
-                model="gemini-2.5-flash",
+                model="deepseek-chat",
                 contents=prompt,
                 config=gtypes.GenerateContentConfig(
                     temperature=0.1, max_output_tokens=512

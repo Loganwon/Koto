@@ -28,7 +28,7 @@ Koto OpsEventBus — 运维事件总线
 用法:
     from app.core.ops.ops_event_bus import get_ops_bus
     get_ops_bus().emit("model_fallback", {
-        "from": "gemini-2.5-flash",
+        "from": "deepseek-chat",
         "to":   "ollama/qwen2.5",
         "reason": "API timeout",
     })

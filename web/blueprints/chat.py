@@ -18,10 +18,9 @@ import logging
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.runtime_context import (
+from web.chat_runtime_services import (
     get_brain,
     get_chat_stream_handler,
-    get_client_proxy,
     get_default_chat_system_instruction,
     get_interrupt_flags,
     get_interrupt_manager,
@@ -29,7 +28,6 @@ from web.runtime_context import (
     get_model_map,
     get_session_manager,
     get_smart_dispatcher,
-    get_types,
     get_utils,
     get_web_searcher,
     resolve_requested_model_id,
@@ -77,6 +75,35 @@ def chat() -> Response:
 
     if not session_name or not str(user_input or "").strip():
         return jsonify({"error": "Missing session or message"}), 400
+
+    # ?? Provider availability check ????????????????????????????????????
+    try:
+        from app.core.llm.provider_factory import list_available_providers
+        available = list_available_providers()
+        if not available:
+            _logger.warning("[chat] No LLM provider available; returning 503")
+            return jsonify({
+                "error": "??????? AI ?????",
+                "error_code": "NO_PROVIDER",
+                "guide": {
+                    "title": "Koto 尚未配置可用的 AI 服务",
+                    "options": [
+                        {
+                            "name": "配置 DeepSeek API Key",
+                            "url": "https://platform.deepseek.com/api_keys",
+                            "desc": "启用云端对话、代码和文件任务"
+                        },
+                        {
+                            "name": "安装本地模型（Ollama）",
+                            "url": "https://ollama.com/download",
+                            "desc": "在本机运行受支持的本地模型"
+                        }
+                    ],
+                    "setup": "在设置中保存密钥，或切换到已经安装的本地模型。"
+                },
+            }), 503
+    except ImportError:
+        _logger.debug("[chat] provider_factory not importable, skipping pre-check")
 
     utils = get_utils()
     session_manager = get_session_manager()
@@ -131,12 +158,51 @@ def chat() -> Response:
 
 @chat_bp.route("/api/chat/stream", methods=["POST"])
 def chat_stream() -> Response:
-    """Stream chat response via SSE, delegated to web.app.chat_stream."""
-    import sys as _sys
-    _app_mod = _sys.modules.get("web.app") or _sys.modules.get("__main__")
-    if _app_mod and hasattr(_app_mod, "chat_stream") and callable(_app_mod.chat_stream):
-        return _app_mod.chat_stream()
-    return jsonify({"error": "Chat stream service is unavailable"}), 503
+    """Stream chat response via the configured SSE handler."""
+    return get_chat_stream_handler()()
+
+
+@chat_bp.route("/api/chat/file", methods=["POST"])
+def chat_with_file() -> Response:
+    """Handle file upload and chat requests (multipart form data).
+
+    Form fields: session, message, locked_task, locked_model, file (one or more).
+    """
+    session_name = request.form.get("session")
+    user_input = request.form.get("message", "")
+    files = request.files.getlist("file")
+    locked_task = request.form.get("locked_task")
+    locked_model = request.form.get("locked_model", "auto")
+
+    if not session_name or not files:
+        return jsonify({"error": "Missing session or file"}), 400
+    if len(files) > 10:
+        return jsonify({"error": "?????? 10 ???"}), 400
+
+    from web.chat_file_handlers import (
+        handle_multi_file_chat_request,
+        handle_single_file_chat_request,
+    )
+
+    _app_mod = None
+
+    if len(files) > 1:
+        return handle_multi_file_chat_request(
+            app_module=_app_mod,
+            session_name=session_name,
+            user_input=user_input,
+            files=files,
+            locked_task=locked_task,
+            locked_model=locked_model,
+        )
+    return handle_single_file_chat_request(
+        app_module=_app_mod,
+        session_name=session_name,
+        user_input=user_input,
+        file=files[0],
+        locked_task=locked_task,
+        locked_model=locked_model,
+    )
 
 @chat_bp.route("/api/chat/interrupt", methods=["POST"])
 def interrupt_chat() -> Response:
@@ -152,7 +218,7 @@ def interrupt_chat() -> Response:
 
     if task_id:
         try:
-            from task_scheduler import get_task_scheduler
+            from web.task_scheduler import get_task_scheduler
 
             get_task_scheduler().cancel_task(task_id)
             _logger.debug("[INTERRUPT] Cancel task_id=%s", task_id)
@@ -186,8 +252,14 @@ def mini_chat() -> Response:
     session_manager = get_session_manager()
     brain = get_brain()
     model_map = get_model_map()
-    client = get_client_proxy()
-    types = get_types()
+    from app.core.llm.provider_factory import get_llm_provider
+
+    provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
+
+    def _provider_text(response):
+        if isinstance(response, dict):
+            return str(response.get("content") or response.get("text") or "")
+        return str(getattr(response, "text", response) or "")
 
     user_input = utils.sanitize_string(user_input)
     session_name = "MiniKoto_Quick"
@@ -213,7 +285,7 @@ def mini_chat() -> Response:
                 user_input, skill_prompt=_mini_skill_prompt
             )
             response_text = search_result.get("response", "")
-            used_model = "gemini-2.5-flash (Google Search)"
+            used_model = "DeepSeek Chat (Web Search)"
             if (
                 not search_result.get("success")
                 or utils.is_failure_output(response_text)
@@ -224,14 +296,13 @@ def mini_chat() -> Response:
                     f"用户需求: {user_input}"
                 )
                 try:
-                    fix_resp = client.models.generate_content(
-                        model="gemini-2.5-flash-lite",
-                        contents=fix_query_prompt,
-                        config=types.GenerateContentConfig(
-                            temperature=0.2, max_output_tokens=64
-                        ),
+                    fix_resp = provider.generate_content(
+                        prompt=fix_query_prompt,
+                        model="deepseek-chat",
+                        temperature=0.2,
+                        max_tokens=64,
                     )
-                    fixed_query = (fix_resp.text or user_input).strip()
+                    fixed_query = (_provider_text(fix_resp) or user_input).strip()
                     search_result = get_web_searcher().search_with_grounding(fixed_query)
                     response_text = search_result.get("response", "")
                 except Exception as e:
@@ -253,17 +324,15 @@ def mini_chat() -> Response:
                         "SYSTEM", user_input, response_text
                     )
                     try:
-                        fix_resp = client.models.generate_content(
-                            model="gemini-2.5-flash",
-                            contents=fix_prompt,
-                            config=types.GenerateContentConfig(
-                                system_instruction=get_default_chat_system_instruction(),
-                                temperature=0.4,
-                                max_output_tokens=1000,
-                            ),
+                        fix_resp = provider.generate_content(
+                            prompt=fix_prompt,
+                            model="deepseek-chat",
+                            system_instruction=get_default_chat_system_instruction(),
+                            temperature=0.4,
+                            max_tokens=1000,
                         )
-                        response_text = fix_resp.text or response_text
-                        used_model = "gemini-2.5-flash (fallback)"
+                        response_text = _provider_text(fix_resp) or response_text
+                        used_model = "deepseek-chat (fallback)"
                         is_error = False
                     except Exception as e:
                         _logger.debug("[MINI_CHAT] AI 修正失败: %s", e)
@@ -286,7 +355,7 @@ def mini_chat() -> Response:
                 code in response_text for code in ("404", "503", "UNAVAILABLE", "INVALID")
             )
             if _needs_fallback:
-                for fallback_model in ["gemini-2.5-flash", "gemini-2.5-flash-lite"]:
+                for fallback_model in ["deepseek-chat"]:
                     try:
                         result = brain.chat(
                             history, user_input, model=fallback_model, auto_model=False
@@ -327,3 +396,40 @@ def mini_chat() -> Response:
         }
     )
 
+@chat_bp.route("/api/response/rate", methods=["POST"])
+def rate_response() -> Response:
+    """Save user rating for an AI response.
+
+    JSON body: {msg_id, stars, comment, session_name, user_input, ai_response, task_type}
+    """
+    data = request.get_json(silent=True) or {}
+    msg_id = str(data.get("msg_id") or "").strip()
+    stars = int(data.get("stars", 0))
+    comment = str(data.get("comment") or "").strip()
+    session_name = str(data.get("session_name") or data.get("session") or "").strip()
+    user_input = str(data.get("user_input") or data.get("user_msg") or "").strip()
+    ai_response = str(data.get("ai_response") or data.get("assistant_msg") or "").strip()
+    task_type = str(data.get("task_type") or "CHAT").strip().upper() or "CHAT"
+
+    if not msg_id or stars < 1 or stars > 5:
+        return jsonify({"error": "msg_id and stars (1-5) are required"}), 400
+
+    try:
+        from app.core.learning.rating_store import RatingStore
+
+        rs = RatingStore()
+        if not msg_id:
+            msg_id = RatingStore.make_msg_id(session_name, user_input)
+        rs.save_user_rating(
+            msg_id=msg_id,
+            stars=stars,
+            comment=comment,
+            session_name=session_name,
+            user_input=user_input,
+            ai_response=ai_response,
+        )
+        _logger.info("Rating saved: msg_id=%s stars=%d task=%s", msg_id, stars, task_type)
+        return jsonify({"ok": True})
+    except Exception as exc:
+        _logger.warning("Failed to save rating: %s", exc)
+        return jsonify({"error": str(exc)}), 500

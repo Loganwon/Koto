@@ -256,7 +256,8 @@ class PPTGenerator:
                         s_title,
                         _type_name_map.get(s_type, s_type),
                     )
-                except:
+                except Exception:
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                     pass
 
             # --- AI Image Generation Logic ---
@@ -468,7 +469,8 @@ class PPTGenerator:
                 slide.shapes.add_picture(
                     bg_image, 0, 0, width=prs.slide_width, height=prs.slide_height
                 )
-            except:
+            except Exception:
+                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 pass
         else:
             # Use solid color background
@@ -1475,7 +1477,7 @@ class EnhancedPPTGenerator:
             images: 生成的图片路径列表
             ai_client: AI客户端（用于内容生成）
         """
-        from google.genai import types
+        from app.core.llm.provider_compat import types
 
         # 1. 生成智能大纲
         outline_prompt = self._build_outline_prompt(
@@ -1485,7 +1487,7 @@ class EnhancedPPTGenerator:
         if ai_client:
             try:
                 response = ai_client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="deepseek-chat",
                     contents=outline_prompt,
                     config=types.GenerateContentConfig(
                         system_instruction="你是专业的PPT内容策划师，擅长结构化内容组织。",

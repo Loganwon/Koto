@@ -75,7 +75,7 @@ def _resolve_provider_arg(model_mode: str) -> dict:
         from app.core.llm.model_selection import get_configured_cloud_provider
 
         return {"provider": get_configured_cloud_provider()}
-    if normalized_mode in ("gemini", "deepseek", "openai", "anthropic", "ollama"):
+    if normalized_mode in ("deepseek", "ollama"):
         return {"provider": normalized_mode}
     # "auto" 或其他 → 不指定，由 provider_factory 自动检测
     return {}
@@ -86,7 +86,7 @@ def _extract_text(result: Any) -> str:
     if isinstance(result, str):
         return result
     if isinstance(result, dict):
-        # Gemini / OpenAI 返回 dict 时，文本通常在 "text" 或 "content" 键
+        # Provider wrappers return text in either the "text" or "content" key.
         return result.get("text") or result.get("content") or str(result)
     return str(result)
 

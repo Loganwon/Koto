@@ -1150,12 +1150,12 @@ def batch_ai():
         yield f"data: {_json.dumps({'type': 'start', 'total': len(paths)}, ensure_ascii=False)}\n\n"
         try:
             from app.core.file.file_registry import _extract_text_preview
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
         except Exception as e:
             yield f"data: {_json.dumps({'type': 'error', 'message': f'模块加载失败: {e}'}, ensure_ascii=False)}\n\n"
             return
 
-        llm = GeminiProvider()
+        llm = get_llm_provider(provider="deepseek", allow_local_fallback=False)
         for i, path in enumerate(paths):
             name = Path(path).name
             yield f"data: {_json.dumps({'type': 'file', 'index': i, 'name': name}, ensure_ascii=False)}\n\n"
@@ -1185,7 +1185,6 @@ def batch_ai():
                 )
                 resp = llm.generate_content(
                     prompt=prompt,
-                    model="gemini-2.5-flash",
                     system_instruction="你是一个专业的文件分析助手，用中文输出简洁精准的分析结果。",
                 )
                 text = ""

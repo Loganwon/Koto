@@ -1,3 +1,4 @@
+# GEMINI ARCHIVED - 2026-07-10 - Config deprecated. Use deepseek_config.py instead.
 from __future__ import annotations
 
 import os
@@ -134,6 +135,41 @@ def set_runtime_gemini_api_key(api_key: str) -> str:
     for env_name in GEMINI_KEY_ENV_NAMES:
         os.environ[env_name] = normalized
     return normalized
+
+
+def validate_gemini_config() -> list[str]:
+    """Validate Gemini configuration and return a list of warnings.
+
+    Call this at startup to catch misconfiguration early.
+    Returns empty list when everything looks correct.
+    """
+    warnings: list[str] = []
+
+    api_key = get_gemini_api_key(ensure_loaded=False)
+    if not api_key:
+        warnings.append(
+            "Gemini API key is not configured. "
+            "Set GEMINI_API_KEY in config/gemini_config.env or environment."
+        )
+
+    api_base = os.getenv("GEMINI_API_BASE", "").strip()
+    if api_base:
+        # Validate URL format for custom endpoints
+        if not (api_base.startswith("http://") or api_base.startswith("https://")):
+            warnings.append(
+                f"GEMINI_API_BASE ({api_base!r}) does not look like a valid URL. "
+                "It should start with http:// or https://. "
+                "Leave it empty to use the official Google API endpoint."
+            )
+
+    proxy = os.getenv("FORCE_PROXY", "auto").strip().lower()
+    if proxy not in ("auto", "none", "system", ""):
+        if not (proxy.startswith("http://") or proxy.startswith("https://") or proxy.startswith("socks5://")):
+            warnings.append(
+                f"FORCE_PROXY ({proxy!r}) does not look like a valid proxy URL."
+            )
+
+    return warnings
 
 
 def write_gemini_config_file(

@@ -46,8 +46,30 @@ export interface SettingsState {
 }
 
 export function toggleSettings(): void {
-  const active = document.querySelector('.wa-model-mode-toggle-btn.active') as HTMLElement;
+  const active = _modelControlsRoot()?.querySelector('.wa-model-mode-toggle-btn.active') as HTMLElement | null;
   if (active) active.focus();
+}
+
+function _modelControlsRoot(): HTMLElement | null {
+  return document.getElementById('wa-ai-input-area');
+}
+
+function _bindModelModeControls(): void {
+  const root = _modelControlsRoot();
+  if (!root || root.dataset.modelControlsBound === 'true') return;
+
+  root.dataset.modelControlsBound = 'true';
+  root.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest<HTMLButtonElement>('.wa-model-mode-toggle-btn[data-model-mode]');
+    if (!button || !root.contains(button) || button.disabled) return;
+
+    const mode = String(button.dataset.modelMode || '').trim();
+    if (!mode) return;
+    event.preventDefault();
+    setLockedModel(mode);
+  });
 }
 
 // ── Skill Library compatibility ──────────────────────────────────
@@ -138,7 +160,6 @@ export function _formatLocalRuntimeModelLabel(label: any, options?: { running?: 
 
 export function _modelDisplayName(modelId: string, fallback?: string): string {
   if (!modelId) return fallback || '\u4e91\u7aef';
-  if (modelId === 'gemini') return 'DeepSeek';  // legacy compat
   if (modelId === 'deepseek') return 'DeepSeek';
   if (modelId === 'local') return '\u672c\u5730';
   const meta = _lookupModelMeta(modelId);
@@ -166,9 +187,10 @@ export function _currentCloudModelHint(): string {
 }
 
 export function _syncModelStatusUi(): void {
+  const controlsRoot = _modelControlsRoot();
   const badge = $('wa-ai-model-badge');
-  const deepseekModelEl = $('wa-model-mode-deepseek-model');
-  const localModelEl = $('wa-model-mode-local-model');
+  const deepseekModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-deepseek-model') || null;
+  const localModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-local-model') || null;
   const routeInfo = $('wa-ai-route-info');
   const explicitCloudModel = _selectedCloudModelId();
   const activeRoute = state._activeRoute || null;
@@ -201,7 +223,7 @@ export function _syncModelStatusUi(): void {
     localModelEl.title = `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}`;
     localModelEl.hidden = false;
   }
-  document.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]').forEach((button) => {
+  controlsRoot?.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]').forEach((button) => {
     const btn = button as HTMLElement;
     const isActive = btn.dataset.modelMode === activeMode;
     btn.classList.toggle('active', isActive);
@@ -298,7 +320,7 @@ export function _checkOllamaStatus(): void {
   fetch('/api/v1/workspace/ollama-status')
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
-      const localButton = document.getElementById('wa-model-mode-local-btn') as HTMLButtonElement | null;
+      const localButton = _modelControlsRoot()?.querySelector<HTMLButtonElement>('#wa-model-mode-local-btn') || null;
       if (!localButton) return;
       const configuredModel = _normalizeLocalRuntimeModelLabel(
         (data && (data.configured_model || data.model)) || state._localRuntimeModel
@@ -359,6 +381,7 @@ export function _syncLockedModelFromServer(): Promise<any> {
 }
 
 export function initSocket(): void {
+  _bindModelModeControls();
   const storedLockedModel = localStorage.getItem('wa_locked_model');
   if (storedLockedModel !== state.lockedModel) {
     localStorage.setItem('wa_locked_model', state.lockedModel);
@@ -383,6 +406,10 @@ export function setLockedModel(val: string): void {
 function _setWorkspaceModelMode(mode: string): void {
   const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');
   const newModel = normalized === 'cloud' ? 'deepseek' : normalized;
+
+  // Prevent redundant switches (loop guard during cross-bundle sync)
+  if (state.lockedModel === newModel) return;
+
   state.lockedModel = newModel;
   if (newModel === 'deepseek') state._cloudProvider = newModel;
   state._hasExplicitModelChoice = true;
@@ -390,9 +417,35 @@ function _setWorkspaceModelMode(mode: string): void {
   state._modelChoiceUpdatedAt = Date.now();
   localStorage.setItem('wa_locked_model', newModel);
   localStorage.setItem('wa_model_choice_explicit', '1');
+
+  // Cache for cross-bundle loop prevention
+  (window as any)._waLockedModelCache = newModel;
+
+  // Sync the legacy window.selectedModel for chat API payloads
+  (window as any).selectedModel = newModel === 'local' ? 'local' : 'auto';
+
   _clearActiveRoute();
   _syncModelStatusUi();
   _checkOllamaStatus();
+
+  // Sync settings panel checkbox when chat toggle changes
+  const settingLocalOnly = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
+  if (settingLocalOnly) {
+    const shouldBeLocal = newModel === 'local';
+    if (settingLocalOnly.checked !== shouldBeLocal) {
+      settingLocalOnly.checked = shouldBeLocal;
+    }
+  }
+
+  // If switching to local mode, ensure model picker is visible
+  if (newModel === 'local') {
+    const settingModelSelect = document.getElementById('settingLocalModel') as HTMLSelectElement | null;
+    if (settingModelSelect && !settingModelSelect.value) {
+      const pickerRow = document.getElementById('localModelPickerRow');
+      if (pickerRow) pickerRow.style.display = '';
+    }
+  }
+
   _csrfFetch('/api/local-model/switch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -413,6 +466,7 @@ if (typeof window !== 'undefined') {
   (window as any).WA.setLockedModel = setLockedModel;
   (window as any).WA.refreshModelCatalog = (force: boolean = true) => _refreshModelCatalog(force);
   (window as any).WA.checkOllamaStatus = _checkOllamaStatus;
+  (window as any).WA.syncModelStatusUi = _syncModelStatusUi;
   (window as any).WA.syncLockedModelFromServer = _syncLockedModelFromServer;
   (window as any).WA.initSocket = initSocket;
   (window as any).initSocket = initSocket;

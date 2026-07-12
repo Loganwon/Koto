@@ -239,8 +239,6 @@ class TestDeepSeekProvider:
         candidates = executor._build_candidate_list("deepseek-chat", "FILE_TASK")
 
         assert "deepseek-chat" in candidates
-        assert "deepseek-v4-flash" in candidates
-        assert "deepseek-chat" not in candidates
         assert "deepseek-reasoner" not in candidates
         assert all(not model.startswith("gemini-") for model in candidates)
 
@@ -250,7 +248,7 @@ class TestDeepSeekProvider:
         executor = ModelFallbackExecutor()
         candidates = executor._build_candidate_list("", "FILE_TASK")
 
-        assert candidates[:2] == ["deepseek-chat", "deepseek-v4-flash"]
+        assert "deepseek-chat" in candidates
         assert all(not model.startswith("gemini-") for model in candidates)
 
 

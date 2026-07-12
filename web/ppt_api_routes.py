@@ -9,7 +9,7 @@ PPT 编辑 API - 支持后生成编辑功能
 
 import json
 
-# google.genai 延迟到路由函数内部加载，避免启动时加载 (~4.7s)
+# Provider compatibility imports remain lazy to keep startup light.
 import os
 import re
 
@@ -207,8 +207,8 @@ def regenerate_slide(session_id, slide_index):
     }
     """
     try:
-        from google import genai
-        from google.genai import types as genai_types
+        from app.core.llm import provider_compat as genai
+        from app.core.llm.provider_compat import types as genai_types
 
         # 获取会话数据
         mgr = get_ppt_session_manager()
@@ -276,10 +276,10 @@ def regenerate_slide(session_id, slide_index):
             if research_context:
                 regenerate_prompt += f"【研究分析】\n{research_context[:5000]}\n"
 
-        # 调用 Gemini 生成
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        # 通过活动 DeepSeek provider 生成
+        client = genai.Client(api_key=os.getenv("DEEPSEEK_API_KEY"))
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="deepseek-chat",
             contents=regenerate_prompt,
             config=genai_types.GenerateContentConfig(
                 temperature=0.5, max_output_tokens=4096

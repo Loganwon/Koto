@@ -8,7 +8,7 @@
 
 职责
 ────
-云端 LLM（Gemini 等）返回结果后，本模块在本地对输出进行质量验收：
+云端 LLM 返回结果后，本模块在本地对输出进行质量验收：
 
 1. 格式验收  — 对照 Skill.OutputSpec 检查格式是否符合约定
 2. 完整性验收 — 检测截断、空输出、重复、模型拒绝等异常
@@ -295,8 +295,8 @@ class OutputValidator:
     """
 
     # ── LLM 判断配置 ──────────────────────────────────────────────
-    _judge_client: Optional[Any] = None  # GeminiProvider 或兼容实例
-    _judge_model: str = "gemini-2.5-flash"  # 默认使用快速但有能力的模型
+    _judge_client: Optional[Any] = None  # LLM provider 或兼容实例
+    _judge_model: str = "deepseek-chat"
     _judge_timeout: float = 15.0  # 最长等待秒数，超时则跳过
     _judge_min_len: int = 80  # 响应短于此字符数则不启动 LLM 判断
 
@@ -304,14 +304,14 @@ class OutputValidator:
     def configure_llm_judge(
         cls,
         client: Any,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         timeout: float = 15.0,
     ) -> None:
         """
         配置 LLM 质量判断器。在应用启动时调用一次即可。
 
         Args:
-            client  : GeminiProvider 实例（或任何实现 generate_content() 的对象）
+            client  : LLM provider 实例（或任何实现 generate_content() 的对象）
             model_id: 用于质量判断的模型 ID（轻量快速模型即可，不需要最强模型）
             timeout : 单次判断最长等待秒数，超时自动跳过（默认 15s）
         """
@@ -328,23 +328,16 @@ class OutputValidator:
     def _get_judge_client(cls) -> Optional[Any]:
         """
         返回已配置的 judge client。若未通过 configure_llm_judge() 配置，
-        尝试用环境变量懒加载一个 GeminiProvider。
+        尝试懒加载当前 DeepSeek provider。
         """
         if cls._judge_client is not None:
             return cls._judge_client
         try:
-            import os
+            from app.core.llm.provider_factory import get_llm_provider
 
-            api_key = (
-                os.environ.get("GEMINI_API_KEY")
-                or os.environ.get("API_KEY")
-                or os.environ.get("GOOGLE_API_KEY")
+            cls._judge_client = get_llm_provider(
+                provider="deepseek", allow_local_fallback=False
             )
-            if not api_key:
-                return None
-            from app.core.llm.gemini import GeminiProvider
-
-            cls._judge_client = GeminiProvider(api_key=api_key)
             logger.info(
                 "[OutputValidator] LLM judge 懒加载成功: model=%s", cls._judge_model
             )

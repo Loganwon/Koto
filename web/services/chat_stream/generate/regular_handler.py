@@ -12,6 +12,8 @@ from app.core.llm.chat_generation_policy import (
     should_try_local_chat_fast_path,
 )
 from web.sse.sanitizer import safe_sse as _safe_sse
+from ..error_messages import format_chat_error
+from ._provider_helpers import _convert_history_to_messages, _stream_from_provider
 
 
 def handle_regular(
@@ -36,8 +38,9 @@ def handle_regular(
     SmartDispatcher,
     _LMRv2,
 ):
-    from google.genai import types
-    from web.runtime_context import get_utils
+    from app.core.llm.provider_compat import types
+    from web.chat_runtime_services import get_utils
+    from web.memory_runtime import get_memory_manager
     from web.utils.threading_utils import stream_with_keepalive
 
     Utils = get_utils()
@@ -320,20 +323,22 @@ def handle_regular(
 
         stream_error = None
         response = None
-        for candidate_model in candidates:
+        from app.core.llm.provider_boundary import normalize_public_model
+
+        attempted_models = set()
+        for raw_candidate_model in candidates:
+            candidate_model = normalize_public_model(raw_candidate_model)
+            if candidate_model in attempted_models:
+                continue
+            attempted_models.add(candidate_model)
             if not executor.is_available(candidate_model):
                 continue
             try:
-                response = client.models.generate_content_stream(
-                    model=candidate_model,
-                    contents=formatted_history
-                    + [
-                        types.Content(
-                            role="user",
-                            parts=[types.Part.from_text(text=_rag_augmented_input)],
-                        )
-                    ],
-                    config=types.GenerateContentConfig(system_instruction=use_instruction),
+                from app.core.llm.provider_factory import get_llm_provider
+                provider = get_llm_provider(model=candidate_model)
+                messages = _convert_history_to_messages(formatted_history, _rag_augmented_input)
+                response = _stream_from_provider(
+                    provider, candidate_model, messages, use_instruction,
                 )
                 used_model = candidate_model
                 if candidate_model != model_id:
@@ -420,7 +425,7 @@ def handle_regular(
                         yield _safe_sse({'type': 'progress', 'message': '⚠️ 首包超时, 切换到快速模型...', 'detail': ''})
                         try:
                             fallback_resp = client.models.generate_content(
-                                model="gemini-2.5-flash",
+                                model="deepseek-chat",
                                 contents=formatted_history
                                 + [
                                     types.Content(
@@ -656,83 +661,7 @@ def handle_regular(
                 yield _safe_sse({'type': 'done', 'images': [], 'saved_files': [], 'total_time': total_time})
                 return
 
-        if (
-            "location is not supported" in error_str.lower()
-            or "failed_precondition" in error_str.lower()
-        ):
-            error_response = "❌ 地区限制\n\n您所在的地区不支持 Gemini API.\n\n💡 解决方案:\n1. 在 `config/gemini_config.env` 配置中转服务 `GEMINI_API_BASE`\n2. 或使用支持的代理服务\n3. 或启动本地 Ollama 模型作为备用"
-        elif "API key not valid" in error_str or (
-            "INVALID_ARGUMENT" in error_str and "api key" in error_str.lower()
-        ):
-            error_response = (
-                "❌ **API 密钥无效**\n\n"
-                "请检查您的 Gemini API 密钥:\n"
-                "1. 前往 [aistudio.google.com/apikey](https://aistudio.google.com/apikey) 获取有效密钥\n"
-                "2. 在 Koto 设置页面更新 API 密钥（设置 → API 配置）\n"
-                "3. 确保密钥所在 Google 项目已启用 Generative Language API\n\n"
-                f"原始错误: `{error_str[:150]}`"
-            )
-        elif (
-            "server disconnected" in error_str.lower()
-            or "disconnected without" in error_str.lower()
-            or "connection reset" in error_str.lower()
-            or "connection aborted" in error_str.lower()
-        ):
-            try:
-                from app.core.llm.model_fallback import get_fallback_executor
-                get_fallback_executor().mark_unavailable(model_id, ttl=120)
-                _app_logger.warning(
-                    f"[CHAT] 连接中断, 已将 {model_id} 标记不可用 120s, 下次自动降级"
-                )
-            except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-            error_response = (
-                "❌ **服务器连接中断**\n\n"
-                "与 Gemini API 的连接被意外断开, 这通常是临时性问题.\n\n"
-                "💡 建议:\n"
-                "1. 稍等片刻后重新发送消息\n"
-                "2. 检查您的网络连接稳定性\n"
-                "3. 如果使用代理, 请确认代理连接正常\n"
-                "4. 如问题持续, 可尝试切换到其他模型"
-            )
-        elif (
-            "resource_exhausted" in error_str.lower()
-            or "quota" in error_str.lower()
-            or "rate limit" in error_str.lower()
-            or "429" in error_str
-        ):
-            error_response = (
-                "❌ **API 配额超限**\n\n"
-                "当前 API 密钥的请求频率或配额已达上限.\n\n"
-                "💡 建议:\n"
-                "1. 稍等 1-2 分钟后重试\n"
-                "2. 在设置中切换到其他 API 密钥\n"
-                "3. 或升级您的 Google AI Studio 计划"
-            )
-        elif (
-            "unavailable" in error_str.lower()
-            or "503" in error_str
-            or "service unavailable" in error_str.lower()
-        ):
-            error_response = (
-                "❌ **Gemini 服务暂时不可用**\n\n"
-                "Gemini API 服务器当前无法响应, 可能正在维护中.\n\n"
-                "💡 建议: 稍等片刻后重试, 或访问 [status.google.com](https://status.google.com) 查看服务状态"
-            )
-        elif (
-            "deadline_exceeded" in error_str.lower()
-            or "timed out" in error_str.lower()
-        ):
-            error_response = (
-                "❌ **请求超时**\n\n"
-                "模型响应时间过长, 请求已超时.\n\n"
-                "💡 建议:\n"
-                "1. 尝试缩短您的问题或分步骤提问\n"
-                "2. 切换到响应更快的模型（如 gemini-2.5-flash）\n"
-                "3. 检查网络连接质量"
-            )
-        else:
-            error_response = f"❌ 发生错误: {error_str[:200]}"
+        error_response = format_chat_error(error_str)
 
         session_manager.append_and_save(
             f"{session_name}.json",
@@ -753,9 +682,9 @@ def _start_memory_extraction(*args, **kwargs):
 
 def get_memory_manager():
     try:
-        from web.runtime_context import get_memory_manager as _get_runtime_memory_manager
+        from web.memory_runtime import get_memory_manager as _get_memory_manager
 
-        manager = _get_runtime_memory_manager()
+        manager = _get_memory_manager()
         if manager is not None:
             return manager
     except Exception:

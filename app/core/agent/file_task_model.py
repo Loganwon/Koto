@@ -104,12 +104,7 @@ class FileTaskModelClient:
         model_id = self._cloud_model_id(request)
         provider_name = get_provider_for_model_mode(request.model_mode)
         provider_kwargs = {"provider": provider_name, "model": model_id}
-        if provider_name == "gemini" and self._api_key:
-            from app.core.llm.gemini import GeminiProvider
-
-            provider = GeminiProvider(api_key=self._api_key)
-        else:
-            provider = get_llm_provider(**provider_kwargs)
+        provider = get_llm_provider(**provider_kwargs)
         try:
             from app.core.llm.model_fallback import get_fallback_executor
 
@@ -171,7 +166,7 @@ class FileTaskModelClient:
         requested = str(request.model_id or "").strip()
         mode = normalize_model_mode(request.model_mode, default="deepseek")
         provider = get_provider_for_model_mode(mode)
-        ignored = {"auto", "cloud", "local", "gemini", "deepseek", "openai", "anthropic", "ollama"}
+        ignored = {"auto", "cloud", "local", "deepseek", "ollama"}
         if requested and requested.lower() not in ignored:
             return requested
         model_map = _runtime_model_map()
@@ -179,17 +174,15 @@ class FileTaskModelClient:
             model_from_app = str(model_map.get(task_key) or "").strip()
             if model_from_app:
                 return model_from_app
-        if provider != "gemini":
-            return get_configured_cloud_model(
-                task_type="FILE_TASK",
-                fallback_model=self._default_model,
-                provider=provider,
-            )
-        return self._default_model
+        return get_configured_cloud_model(
+            task_type="FILE_TASK",
+            fallback_model=self._default_model,
+            provider=provider,
+        )
 
     def _local_model_id(self, request: FileTaskRequest) -> str:
         configured = str(request.options.get("local_model") or request.model_id or "").strip()
-        if configured.lower().startswith("gemini") or configured.lower() in {"auto", "cloud", "local", "deepseek", "openai", "anthropic", "ollama"}:
+        if configured.lower() in {"auto", "cloud", "local", "deepseek", "ollama"}:
             return ""
         return configured
 

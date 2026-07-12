@@ -65,7 +65,7 @@ AI 回复：
 
 
 _MIN_RESPONSE_LEN = 10  # 过短的回复不值得评分
-_EVAL_MODEL = "gemini-2.5-flash-lite"  # 快速、便宜
+_EVAL_MODEL = "deepseek-chat"
 _MAX_INPUT_CHARS = 1200  # 截断避免长度超限
 
 

@@ -4786,7 +4786,7 @@ body.desktop-mode .pill-btn {
    ══════════════════════════════════════════════════════════════ */
 
 /* ══════════════════════════════════════════════════════════════
-   GEMINI-STYLE SIDEBAR v2
+   COMPACT SIDEBAR v2
    ══════════════════════════════════════════════════════════════ */
 
 /* ── Collapsed state ── */
@@ -5169,7 +5169,7 @@ body.desktop-mode .pill-btn {
     font-weight: 400;
 }
 
-   END GEMINI-STYLE SIDEBAR v2
+   END COMPACT SIDEBAR v2
    ══════════════════════════════════════════════════════════════ */
 
 /* ══════════════════════════════════════════════════════════════
@@ -5218,7 +5218,6 @@ body.desktop-mode .pill-btn {
     transition: background 0.15s;
 }
 .model-chip-dot.dot-auto    { background: #5b9df5; }
-.model-chip-dot.dot-gemini  { background: #4a90d9; }
 .model-chip-dot.dot-gpt     { background: #10a97a; }
 .model-chip-dot.dot-claude  { background: #d4844a; }
 .model-chip-dot.dot-local   { background: #a78bfa; }
@@ -5625,3 +5624,495 @@ svg {
 /* Extra fix for common un-aligned icons */
 button > svg { display: block; margin: auto 0; }
 
+
+
+/* ===== Enhanced Welcome Quick Cards ===== */
+.welcome-quick-cards {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 4px;
+}
+@media (max-width: 640px) {
+    .welcome-quick-cards { grid-template-columns: repeat(2, 1fr); }
+}
+.welcome-quick-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 14px 16px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.18s ease;
+    position: relative;
+    overflow: hidden;
+}
+.welcome-quick-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, rgba(91,157,245,0.04) 0%, transparent 60%);
+    opacity: 0;
+    transition: opacity 0.18s;
+}
+.welcome-quick-card:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(91,157,245,0.14);
+}
+.welcome-quick-card:hover::before { opacity: 1; }
+.wqc-icon {
+    font-size: 24px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+.wqc-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1.1;
+}
+.wqc-sub {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+.welcome-tip {
+    text-align: center;
+    font-size: 13px;
+    color: var(--text-muted);
+    margin: 0;
+    padding-top: 4px;
+}
+
+
+/* ===== Onboarding Section (????) ===== */
+.welcome-onboarding {
+    margin-top: 6px;
+}
+.welcome-onboarding-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 0 0 8px 0;
+    text-align: center;
+}
+.welcome-onboarding-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-width: 520px;
+    margin: 0 auto;
+}
+.welcome-ob-card {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    text-align: left;
+    cursor: pointer;
+    font-family: inherit;
+    font-size: 13px;
+    transition: all 0.18s ease;
+}
+.welcome-ob-card:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+    transform: translateX(4px);
+}
+.wob-step {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    flex-shrink: 0;
+    width: 24px;
+    text-align: center;
+}
+.wob-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+.wob-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+.wob-flow {
+    font-size: 11.5px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.wob-arrow {
+    font-size: 14px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: transform 0.18s;
+}
+.welcome-ob-card:hover .wob-arrow {
+    transform: translateX(3px);
+    color: var(--accent-primary);
+}
+
+/* ===== Welcome Card Staggered Entrance ===== */
+.welcome-quick-card {
+    opacity: 0;
+    animation: wqcSlideUp 0.4s ease-out forwards;
+}
+.welcome-quick-card:nth-child(1) { animation-delay: 0.10s; }
+.welcome-quick-card:nth-child(2) { animation-delay: 0.17s; }
+.welcome-quick-card:nth-child(3) { animation-delay: 0.24s; }
+.welcome-quick-card:nth-child(4) { animation-delay: 0.31s; }
+.welcome-quick-card:nth-child(5) { animation-delay: 0.38s; }
+.welcome-quick-card:nth-child(6) { animation-delay: 0.45s; }
+
+@keyframes wqcSlideUp {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.welcome-ob-card {
+    opacity: 0;
+    animation: wobSlideIn 0.35s ease-out forwards;
+}
+.welcome-ob-card:nth-child(1) { animation-delay: 0.52s; }
+.welcome-ob-card:nth-child(2) { animation-delay: 0.59s; }
+.welcome-ob-card:nth-child(3) { animation-delay: 0.66s; }
+
+@keyframes wobSlideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+/* ===== Guided Tour Overlay ===== */
+#kotoTourOverlay {
+    position: fixed;
+    inset: 0;
+    z-index: 300;
+}
+.koto-tour-backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0,0,0,0.55);
+}
+[data-theme="light"] .koto-tour-backdrop {
+    background: rgba(0,0,0,0.35);
+}
+.koto-tour-spotlight {
+    position: fixed;
+    border-radius: 10px;
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.55), 0 0 0 3px rgba(91,157,245,0.6);
+    transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+    z-index: 301;
+}
+[data-theme="light"] .koto-tour-spotlight {
+    box-shadow: 0 0 0 9999px rgba(0,0,0,0.35), 0 0 0 3px rgba(91,157,245,0.6);
+}
+.koto-tour-popover {
+    position: fixed;
+    background: var(--bg-card, #1a1d2e);
+    border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+    border-radius: 16px;
+    padding: 24px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+    z-index: 302;
+    transition: all 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.koto-tour-steps {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 16px;
+}
+.koto-tour-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.2);
+    transition: all 0.25s;
+}
+.koto-tour-dot.active {
+    background: var(--accent-primary, #5b9df5);
+    box-shadow: 0 0 8px rgba(91,157,245,0.5);
+    width: 20px;
+    border-radius: 4px;
+}
+.koto-tour-dot.done {
+    background: var(--accent-primary, #5b9df5);
+    opacity: 0.5;
+}
+.koto-tour-content h3 {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin: 0 0 8px;
+}
+.koto-tour-content p {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.55;
+    margin: 0;
+}
+.koto-tour-actions {
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+}
+.koto-tour-btn {
+    padding: 8px 18px;
+    border-radius: 8px;
+    font-size: 13.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    font-family: inherit;
+    transition: all 0.15s;
+}
+.koto-tour-skip {
+    background: transparent;
+    color: var(--text-muted);
+    margin-right: auto;
+}
+.koto-tour-skip:hover { color: var(--text-secondary); }
+.koto-tour-prev {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+.koto-tour-prev:hover { background: var(--bg-hover); color: var(--text-primary); }
+.koto-tour-next, .koto-tour-done {
+    background: var(--accent-primary, #5b9df5);
+    color: #fff;
+}
+.koto-tour-next:hover, .koto-tour-done:hover {
+    filter: brightness(1.1);
+    transform: translateY(-1px);
+}
+
+/* ===== Input Placeholder Animation ===== */
+#messageInput::placeholder {
+    transition: opacity 0.4s ease;
+}
+
+.input-hint kbd, .wa-input-hint kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 11px;
+    font-family: inherit;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    line-height: 1.3;
+}
+
+/* ═══════════════════════════════════════════
+   Welcome Card Click Animation
+   ═══════════════════════════════════════════ */
+.welcome-quick-card:active {
+    transform: scale(0.97);
+    transition: transform 0.1s ease;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+}
+
+.welcome-quick-card {
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.welcome-quick-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0,0,0,0.1);
+}
+
+.welcome-quick-card::after {
+    content: '点击开始 →';
+    position: absolute;
+    bottom: 10px;
+    right: 14px;
+    font-size: 11px;
+    color: var(--text-tertiary, #999);
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+.welcome-quick-card:hover::after {
+    opacity: 1;
+}
+
+/* ═══════════════════════════════════════════
+   Tour Polish - Smooth Spotlight Transition
+   ═══════════════════════════════════════════ */
+.koto-tour-spotlight {
+    transition: top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2),
+                left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2),
+                width 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2),
+                height 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+}
+
+.koto-tour-popover {
+    transition: top 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2),
+                left 0.35s cubic-bezier(0.25, 0.8, 0.25, 1.2);
+}
+
+/* ═══════════════════════════════════════════
+   Input Area Improvements
+   ═══════════════════════════════════════════ */
+#messageInput {
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#messageInput:focus {
+    border-color: var(--accent-color, #4F8BFF);
+    box-shadow: 0 0 0 3px rgba(79,139,255,0.15);
+}
+
+/* ═══════════════════════════════════════════
+   Responsive Welcome Cards (Mobile)
+   ═══════════════════════════════════════════ */
+@media (max-width: 768px) {
+    .welcome-quick-cards {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 8px;
+    }
+    .welcome-quick-card {
+        padding: 12px 10px;
+    }
+    .welcome-quick-card .wqc-title {
+        font-size: 14px;
+    }
+    .welcome-quick-card .wqc-sub {
+        font-size: 11px;
+    }
+}
+@media (max-width: 480px) {
+    .welcome-quick-cards {
+        grid-template-columns: 1fr;
+        gap: 8px;
+    }
+    .welcome-quick-card {
+        padding: 14px 12px;
+    }
+}
+
+/* ═══════════════════════════════════════════
+   kbd keycap style
+   ═══════════════════════════════════════════ */
+kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    font-size: 0.8em;
+    font-family: inherit;
+    line-height: 1.4;
+    color: var(--text-secondary, #666);
+    background: var(--bg-secondary, #f0f0f0);
+    border: 1px solid var(--border-color, #ddd);
+    border-radius: 4px;
+    box-shadow: 0 1px 1px rgba(0,0,0,0.08);
+    margin: 0 2px;
+}
+
+
+/* ═══════════════════════════════════════════
+   Input flash feedback (quick card click)
+   ═══════════════════════════════════════════ */
+@keyframes inputFlash {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(79,139,255,0); }
+    50% { box-shadow: 0 0 0 4px rgba(79,139,255,0.35); }
+}
+#messageInput.input-flash {
+    animation: inputFlash 0.8s ease;
+    border-color: var(--accent-color, #4F8BFF);
+}
+
+/* ═══════════════════════════════════════════
+   Drag-and-drop visual indicator
+   ═══════════════════════════════════════════ */
+.chat-messages.drag-over::after {
+    content: "📂 释放文件开始处理";
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.3rem;
+    color: var(--accent-color, #4F8BFF);
+    background: rgba(79,139,255,0.06);
+    border: 3px dashed var(--accent-color, #4F8BFF);
+    border-radius: 12px;
+    z-index: 10;
+    pointer-events: none;
+    backdrop-filter: blur(4px);
+}
+
+/* ═══════════════════════════════════════════
+   Skills bar empty state enhancement
+   ═══════════════════════════════════════════ */
+.csb-hint {
+    opacity: 0.7;
+    transition: opacity 0.3s ease;
+}
+.csb-hint:hover {
+    opacity: 1;
+}
+.csb-pills:not(:has(.csb-pill)) .csb-hint {
+    animation: csbPulse 2.5s ease-in-out infinite;
+}
+@keyframes csbPulse {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 0.85; }
+}
+
+/* ═══════════════════════════════════════════
+   Send button state transition
+   ═══════════════════════════════════════════ */
+.send-btn .send-icon,
+.send-btn .stop-icon {
+    transition: transform 0.2s ease, opacity 0.2s ease;
+}
+.send-btn.sending .send-icon {
+    transform: scale(0);
+    opacity: 0;
+}
+.send-btn.sending .stop-icon {
+    display: block !important;
+    animation: stopPulse 2s ease-in-out infinite;
+}
+@keyframes stopPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* ═══════════════════════════════════════════
+   Welcome greeting fade-in
+   ═══════════════════════════════════════════ */
+.welcome-card {
+    animation: welcomeFadeIn 0.5s ease-out;
+}
+@keyframes welcomeFadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+}

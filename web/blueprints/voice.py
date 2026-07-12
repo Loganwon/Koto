@@ -15,18 +15,6 @@ _logger = logging.getLogger("koto.routes.voice")
 voice_bp = Blueprint("voice_routes", __name__)
 
 
-def _get_client():
-    from web.runtime_context import get_client_proxy
-
-    return get_client_proxy()
-
-
-def _get_types():
-    from web.runtime_context import get_types
-
-    return get_types()
-
-
 @voice_bp.route("/api/voice/stt_status", methods=["GET"])
 def voice_stt_status():
     """Return status for the supported upload-based STT engines."""
@@ -46,16 +34,19 @@ def voice_stt_status():
         {
             "local": local,
             "fast": local,
-            "gemini": {"available": True, "engine": "gemini-2.5-flash-lite"},
-            "active": local.get("engine") if local.get("available") else "gemini",
+            "cloud": {
+                "available": False,
+                "engine": "unavailable",
+                "reason": "当前 DeepSeek 云模型不支持音频转写",
+            },
+            "active": local.get("engine") if local.get("available") else "unavailable",
         }
     )
 
 
-@voice_bp.route("/api/voice/gemini_stt", methods=["POST"])
 @voice_bp.route("/api/voice/stt", methods=["POST"])
-def voice_gemini_stt():
-    """Transcribe uploaded audio bytes using local Whisper first, then Gemini."""
+def voice_stt():
+    """Transcribe uploaded audio bytes with the local Whisper runtime."""
     try:
         data = request.get_json(silent=True) or {}
         audio_b64 = data.get("audio", "")
@@ -88,51 +79,20 @@ def voice_gemini_stt():
                     }
                 )
         except Exception as exc:
-            _logger.debug("[STT] local STT unavailable, falling back to Gemini: %s", exc)
+            _logger.debug("[STT] local STT unavailable: %s", exc)
 
-        client = _get_client()
-        types = _get_types()
-        if client is None:
-            return (
-                jsonify(
-                    {
-                        "success": False,
-                        "text": "",
-                        "message": "Gemini 客户端未初始化，请检查 API Key；或安装 faster-whisper 使用本地识别",
-                    }
-                ),
-                503,
-            )
-
-        stt_model = "gemini-2.5-flash-lite"
-        prompt_parts = [
-            types.Part.from_bytes(data=audio_bytes, mime_type=mime_type),
-            types.Part.from_text(
-                text=(
-                    "请将上面音频中的语音内容完整转写为文字。"
-                    "只输出转写结果，不要加解释、前缀或额外说明。"
-                    "如果听不清或没有语音，只输出空字符串。"
-                )
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "text": "",
+                    "engine": "unavailable",
+                    "message": (
+                        "当前云模型不支持音频转写。请安装 faster-whisper 启用本地语音识别。"
+                    ),
+                }
             ),
-        ]
-        resp = client.models.generate_content(
-            model=stt_model,
-            contents=[types.Content(role="user", parts=prompt_parts)],
-            config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=512),
-        )
-
-        text = (resp.text or "").strip()
-        for prefix in ("转写：", "转写:", "识别：", "识别:", "文字：", "文字:"):
-            if text.startswith(prefix):
-                text = text[len(prefix) :].strip()
-
-        return jsonify(
-            {
-                "success": bool(text),
-                "text": text,
-                "engine": f"Gemini/{stt_model}",
-                "message": "识别成功" if text else "未检测到语音内容",
-            }
+            503,
         )
     except Exception as exc:
         return jsonify({"success": False, "text": "", "message": f"STT 失败: {str(exc)[:200]}"}), 500
@@ -173,14 +133,26 @@ def speech_extract_actions():
 会议文本：
 {transcript[:25000]}
 """
-        client = _get_client()
-        types = _get_types()
-        resp = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(temperature=0.2, max_output_tokens=1800),
+        from app.core.llm.model_selection import (
+            get_configured_cloud_model,
+            get_configured_cloud_provider,
         )
-        raw = (resp.text or "").strip()
+        from app.core.llm.provider_factory import get_llm_provider
+
+        provider_name = get_configured_cloud_provider()
+        model_id = get_configured_cloud_model(provider=provider_name)
+        provider = get_llm_provider(provider=provider_name, model=model_id)
+        resp = provider.generate_content(
+            prompt=prompt,
+            model=model_id,
+            temperature=0.2,
+            max_tokens=1800,
+            response_format={"type": "json_object"},
+        )
+        if isinstance(resp, dict):
+            raw = str(resp.get("content") or resp.get("text") or "").strip()
+        else:
+            raw = str(getattr(resp, "text", resp) or "").strip()
         if raw.startswith("```json"):
             raw = raw[7:].rstrip("`").strip()
         elif raw.startswith("```"):

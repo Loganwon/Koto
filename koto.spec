@@ -27,6 +27,10 @@ datas = []
 # 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
 # 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
 _PROTECTED_DIRS = protected_dir_paths(ROOT)
+_ARCHIVED_RUNTIME_FILES = {
+    os.path.normcase(os.path.abspath(os.path.join(ROOT, 'app', 'core', 'llm', name)))
+    for name in ('gemini.py', 'gemini_config.py')
+}
 
 def _protected_pyd_exists(py_path):
     """检查对应的 .pyd / .so 是否已编译"""
@@ -61,6 +65,8 @@ def _add_dir_filtered(src_dir, dst_dir):
             # 递归子目录
             _add_dir_filtered(fpath, os.path.join(dst_dir, fname))
         else:
+            if os.path.normcase(os.path.abspath(fpath)) in _ARCHIVED_RUNTIME_FILES:
+                continue
             if is_protected and fname.endswith('.py') and fname != '__init__.py':
                 if _protected_pyd_exists(fpath):
                     continue  # 有 .pyd，跳过 .py
@@ -99,7 +105,7 @@ _CONFIG_EXCLUDED_FILES = {
     'DS_KEY.txt',
     'deepseek_config.env',
     'email_accounts.json',
-    'gemini_config.env',
+    'gemini_config.env.example',
     'jwt_secret.txt',
     'memory.json',
     'memory_summaries.json',
@@ -199,7 +205,6 @@ hiddenimports = [
     'socketio',
 
     # ── Google GenAI / API core ──
-    'google', 'google.genai', 'google.genai.types',
     'google.api_core', 'google.api_core.gapic_v1',
     'google.auth', 'google.auth.transport', 'google.auth.transport.requests',
     'google.protobuf',
@@ -215,7 +220,7 @@ hiddenimports = [
     'lxml', 'lxml.etree', 'lxml._elementpath', 'lxml.html',
     'openpyxl', 'openpyxl.styles', 'openpyxl.utils',
     'pptx', 'pptx.util', 'pptx.enum', 'pptx.dml', 'pptx.chart',
-    'PyPDF2', 'pdfplumber', 'pypdf',
+    'pdfplumber', 'pypdf', 'pymupdf',
     'bs4', 'bs4.builder', 'bs4.builder._lxml',
     'jieba', 'jieba.posseg', 'jieba.analyse',
     'docx2txt', 'striprtf',
@@ -246,7 +251,7 @@ hiddenimports = [
     'win32api', 'win32con', 'win32gui', 'win32process', 'win32event',
     'pywintypes', 'pythoncom',
 
-    # ── 上传音频 STT（Whisper / Gemini）──
+    # ── 上传音频 STT（Whisper）──
     'edge_tts',
     'wave', 'audioop',
     'win32com', 'win32com.client',
@@ -293,7 +298,6 @@ hiddenimports = [
     'app.core.agent.plugins.system_info_plugin',
     'app.core.agent.plugins.annotation_plugin',
     'app.core.agent.plugins.chart_vision_plugin',
-    'app.core.agent.plugins.doc_gen_plugin',
     'app.core.agent.plugins.file_converter_plugin',
     'app.core.agent.plugins.memory_tools_plugin',
     'app.core.agent.plugins.ppt_plugin',
@@ -307,7 +311,7 @@ hiddenimports = [
     'app.core.learning.shadow_tracer',
     'app.core.learning.training_data_builder',
     'app.core.llm', 'app.core.llm.base',
-    'app.core.llm.gemini', 'app.core.llm.langchain_adapter',
+    'app.core.llm.langchain_adapter',
     'app.core.llm.openai_provider',
     'app.core.llm.deepseek_config',
     'app.core.llm.deepseek_provider',
@@ -331,7 +335,6 @@ hiddenimports = [
     'app.core.skills.skill_recorder',
     'app.core.skills.skill_schema',
     'app.core.workflow',
-    'app.core.workflow.interactive_planner',
     'app.core.workflow.langgraph_workflow',
     'app.core.workflows',
     'app.core.workflows.action_item_extractor',
@@ -373,6 +376,8 @@ hiddenimports = [
     'web.blueprints.dev',
     'web.blueprints.editor_ai',
     'web.blueprints.pptx_editor',
+    'web.blueprints.parallel_api',
+    'web.blueprints.memory_api',
     'web.blueprints.workflow_api',
     'web.blueprints.workspace_assistant',
 
@@ -385,13 +390,13 @@ hiddenimports = [
 
         # ── web/ 全部模块 ──
     'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
-    'web.auth', 'web.auth_manager', 'web.auto_catalog_scheduler',
+    'web.auth_manager', 'web.auto_catalog_scheduler',
     'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
     'web.behavior_monitor', 'web.calendar_manager',
     'web.clipboard_ocr_assistant', 'web.code_generator',
     'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
     'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator',
+    'web.doc_annotation', 'web.doc_planner', 'web.document_batch_annotator',
     'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
     'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator',
@@ -403,10 +408,10 @@ hiddenimports = [
     'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
     'web.image_manager', 'web.insight_reporter', 
     'web.knowledge_base', 'web.knowledge_graph', 'web.local_executor',
-    'web.local_stt', 'web.memory_api_routes', 'web.memory_integration',
+    'web.local_stt', 'web.memory_integration',
     'web.memory_manager', 'web.model_manager', 'web.note_manager',
     'web.notification_manager', 'web.operation_history', 'web.organize_cleanup',
-    'web.parallel_api', 'web.parallel_executor', 'web.ppt_api_routes',
+    'web.parallel_executor', 'web.ppt_api_routes',
     
     'web.ppt_session_manager', 
     'web.proactive_dialogue', 'web.proactive_trigger',
@@ -435,9 +440,8 @@ def _safe_collect(pkg):
 
 _collect_pkgs = [
     'flask', 'flask_cors', 'jinja2', 'werkzeug',
-    'google.genai', 'google.api_core', 'google.auth',
     'httpx', 'httpcore', 'anyio', 'certifi',
-    'PIL', 'lxml', 'bs4',
+    'PIL', 'lxml', 'bs4', 'pymupdf',
     'pandas', 'numpy', 'matplotlib',
     'webview',
     'pystray',

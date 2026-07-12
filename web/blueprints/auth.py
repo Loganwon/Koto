@@ -91,11 +91,11 @@ ADMIN_TOKEN = os.environ.get("KOTO_ADMIN_TOKEN", "")
 ACTIVATION_CODES_FILE = os.environ.get(
     "KOTO_ACTIVATION_CODES_FILE", "config/activation_codes.json"
 )
-# 系统 API key（后台 Gemini key，供持有激活码的用户使用）
-def _get_system_gemini_key() -> str:
-    from app.core.llm.gemini_config import get_gemini_api_key
+# 系统 API key（当前 DeepSeek key，供持有激活码的用户使用）
+def _get_system_cloud_key() -> str:
+    from app.core.llm.deepseek_config import get_deepseek_api_key
 
-    return get_gemini_api_key() or ""
+    return get_deepseek_api_key() or ""
 
 
 def _hash_password(password: str, salt: str = None) -> tuple:
@@ -144,11 +144,11 @@ def get_user_api_key(user_record: dict) -> str | None:
     返回该用户发起 AI 请求时应使用的 API key。
     优先级：用户自己绑定的 key > 激活码（使用系统 key） > None（拒绝请求）
     """
-    own_key = (user_record.get("gemini_api_key") or "").strip()
+    own_key = (user_record.get("deepseek_api_key") or "").strip()
     if own_key:
         return own_key
     if user_record.get("activation_code"):
-        return _get_system_gemini_key() or None
+        return _get_system_cloud_key() or None
     return None
 
 
@@ -279,7 +279,7 @@ def require_auth(f):
         if not AUTH_ENABLED:
             g.user_id = "local"
             g.user_email = "local@koto.ai"
-            g.api_key = _get_system_gemini_key()
+            g.api_key = _get_system_cloud_key()
             return f(*args, **kwargs)
 
         # 从 header 或 cookie 获取 token
@@ -320,7 +320,7 @@ def require_auth(f):
             return (
                 jsonify(
                     {
-                        "error": "请先绑定自己的 Gemini API Key，或向管理员申请激活码",
+                        "error": "请先绑定自己的 DeepSeek API Key，或向管理员申请激活码",
                         "code": "NO_API_KEY",
                     }
                 ),
@@ -421,7 +421,7 @@ def register_auth_routes(app):
             "created_at": datetime.now().isoformat(),
             "plan": "free",
             "daily_limit": MAX_DAILY_REQUESTS,
-            "gemini_api_key": "",  # 用户可绑定自己的 key
+            "deepseek_api_key": "",  # 用户可绑定自己的 key
             "activation_code": "",  # 激活码（兑换后写入）
         }
         _save_users(users)
@@ -554,7 +554,7 @@ def register_auth_routes(app):
                         "has_api_access": bool(effective_key),
                         "api_key_type": (
                             "own"
-                            if (user.get("gemini_api_key") or "").strip()
+                            if (user.get("deepseek_api_key") or "").strip()
                             else (
                                 "activation" if user.get("activation_code") else "none"
                             )
@@ -566,19 +566,19 @@ def register_auth_routes(app):
     @auth_bp.route("/api/auth/bind/apikey", methods=["POST"])
     @require_auth
     def auth_bind_apikey():
-        """绑定/更新用户自己的 Gemini API Key"""
+        """绑定/更新用户自己的 DeepSeek API Key"""
         data = request.get_json(force=True) or {}
         api_key = (data.get("api_key") or "").strip()
         if not api_key:
             return jsonify({"error": "api_key 不能为空"}), 400
         # 简单格式校验
-        if not api_key.startswith("AIza") or len(api_key) < 30:
-            return jsonify({"error": "API Key 格式不正确（应以 AIza 开头）"}), 400
+        if not api_key.startswith("sk-") or len(api_key) < 20:
+            return jsonify({"error": "API Key 格式不正确（应以 sk- 开头）"}), 400
 
         users = _load_users()
         for key, rec in users.items():
             if rec.get("user_id") == g.user_id:
-                rec["gemini_api_key"] = api_key
+                rec["deepseek_api_key"] = api_key
                 _save_users(users)
                 return jsonify({"success": True, "message": "API Key 绑定成功"})
         return jsonify({"error": "用户不存在"}), 404
@@ -674,7 +674,7 @@ def register_auth_routes(app):
                     "phone": rec.get("phone", ""),
                     "plan": rec.get("plan", "free"),
                     "created_at": rec.get("created_at"),
-                    "has_own_key": bool((rec.get("gemini_api_key") or "").strip()),
+                    "has_own_key": bool((rec.get("deepseek_api_key") or "").strip()),
                     "has_activation": bool(rec.get("activation_code")),
                 }
             )

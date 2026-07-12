@@ -7,7 +7,7 @@ from typing import Optional
 _EXPLICIT_MODEL_MODES = {
     "local",
     "cloud",
-    "gemini",
+    # "gemini",  # ARCHIVED
     "deepseek",
     "ollama",
 }

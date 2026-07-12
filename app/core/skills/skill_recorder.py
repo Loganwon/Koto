@@ -335,9 +335,9 @@ class SkillRecorder:
             try:
                 import importlib
 
-                _types = importlib.import_module("google.genai.types")
+                _types = importlib.import_module("app.core.llm.provider_compat").types
                 resp = _client.models.generate_content(
-                    model="gemini-2.5-flash",
+                    model="deepseek-chat",
                     contents="请分析对话并输出 Skill 定义 JSON。",
                     config=_types.GenerateContentConfig(
                         system_instruction=prompt_text,
@@ -497,9 +497,6 @@ class SkillRecorder:
             logger.warning(
                 f"[skill_recorder] SkillManager 注册失败（已保存到磁盘）: {e}"
             )
-
-        # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
-        _auto_register_intent_binding(skill_def)
 
         # 自动注册意图绑定：从 intent_description + tags 提取触发关键词
         _auto_register_intent_binding(skill_def)

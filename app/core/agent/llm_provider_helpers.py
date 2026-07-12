@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from app.core.llm.model_selection import get_configured_cloud_model
 from app.core.shared.llm_helpers import (
     get_local_provider,
     is_ollama_alive,
@@ -18,14 +19,14 @@ def pick_online_model(request: Optional[Any] = None) -> str:
     if preferred_model:
         return preferred_model
     try:
-        from web.runtime_context import get_model_id
-
-        model = get_model_id("CHAT")
+        model = get_configured_cloud_model(
+            task_type="CHAT", fallback_model="deepseek-chat"
+        )
         if model:
             return model
     except Exception:
         pass
-    return "gemini-2.5-flash"
+    return "deepseek-chat"
 
 
 def get_provider(model: str = "", model_mode: str = ""):

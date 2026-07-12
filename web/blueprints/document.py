@@ -134,7 +134,7 @@ def _call_document_annotate(file_path: str, requirement: str):
             file_path=file_path,
             user_requirement=requirement,
             gemini_client=_get_client(),
-            model_id="gemini-2.5-pro",
+            model_id="deepseek-chat",
         )
 
         # 添加处理模式标记
@@ -419,7 +419,7 @@ def document_annotate() -> Response:
         data = request.json
         file_path = data.get("file_path")
         user_requirement = data.get("requirement", "")
-        model_id = data.get("model_id", "gemini-2.5-pro")
+        model_id = data.get("model_id", "deepseek-chat")
 
         if not file_path:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
@@ -483,7 +483,7 @@ def document_batch_annotate_stream() -> Response:
                 file_path=file_path,
                 user_requirement=user_requirement,
                 gemini_client=_get_client(),
-                model_id="gemini-2.5-pro",
+                model_id="deepseek-chat",
             ),
             mimetype="text/event-stream",
             headers={

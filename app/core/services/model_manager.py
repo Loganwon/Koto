@@ -4,7 +4,7 @@
 动态模型管理器 (Dynamic Model Manager)
 ========================================
 自动发现 API 可用模型，根据任务类型智能匹配最佳模型。
-支持 Gemini 及未来其他 Provider 扩展。
+支持 DeepSeek 与本地模型扩展。
 
 核心能力：
 - 调用 client.models.list() 自动发现 API 可用模型列表
@@ -161,7 +161,7 @@ LOCAL_EXECUTOR_TASKS = {"SYSTEM", "FILE_OP"}
 
 # ─── 已知模型能力注册表 ───────────────────────────────────────────────────────
 # 预填已知模型的能力；未知模型通过名称规则自动推断。
-# provider: "gemini" | "openai" | "anthropic" | ...（预留扩展）
+# provider: "deepseek" | "local" | ...（预留扩展）
 # tier: 综合能力等级（1-10），同任务需求下优先选高 tier
 # interactions_only: True 表示必须走 Interactions API（而非 generate_content）
 KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
@@ -180,21 +180,6 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "interactions_only": False,
         "display": "DeepSeek Chat",
         "strengths": ["推理", "代码", "工具调用", "复杂文件任务"],
-    },
-    "deepseek-chat": {
-        "provider": "deepseek",
-        "tier": 8,
-        "speed": 9,
-        "quality": 8,
-        "reasoning": 8,
-        "context": 8,
-        "multimodal": False,
-        "function_calling": True,
-        "grounding": True,
-        "image_gen": False,
-        "interactions_only": False,
-        "display": "DeepSeek Chat (Fast)",
-        "strengths": ["快速", "对话", "代码", "工具调用"],
     },
     # ── Gemini 3.x preview (preferred text stack) ──────────────────
     "gemini-3.1-pro-preview": {
@@ -335,6 +320,14 @@ KNOWN_MODEL_REGISTRY: Dict[str, Dict[str, Any]] = {
         "display": "Deep Research Pro 🔬",
         "strengths": ["深度研究", "学术分析", "综合报告"],
     },
+}
+
+# The historical registry is retained only as migration data.  It must never
+# participate in discovery, scoring, UI model lists, or runtime routing.
+KNOWN_MODEL_REGISTRY = {
+    model_id: capabilities
+    for model_id, capabilities in KNOWN_MODEL_REGISTRY.items()
+    if capabilities.get("provider") != "gemini"
 }
 
 # ─── 名称推断规则 (越靠前优先级越高) ──────────────────────────────────────────
@@ -622,27 +615,11 @@ class ModelManager:
 
     def _rebuild(self):
         """从 API 获取可用模型列表，重新构建 model_map 和 capabilities 缓存。"""
-        # 只有 Gemini 才需要通过 API 发现模型列表
-        try:
-            from app.core.llm.model_selection import get_configured_cloud_provider
-            _cloud_provider = get_configured_cloud_provider()
-        except Exception:
-            _cloud_provider = "gemini"
-
-        if _cloud_provider == "gemini":
-            try:
-                discovered = self._fetch_available_model_ids()
-            except Exception as exc:
-                logger.warning(f"[ModelManager] 模型列表获取失败: {exc}")
-                self._last_fail_ts = time.time()
-                if self._cached_map is None:
-                    self._cached_map = self._static_default_map()
-                    self._preload_static_caps()
-                return
-        else:
-            # 非 Gemini 提供者使用静态默认列表
-            discovered = list(self._static_default_map().values())
-            self._last_fail_ts = 0.0
+        # Active cloud providers use the configured/static model list.  Dynamic
+        # SDK discovery belonged to the archived provider and is intentionally
+        # outside the runtime path.
+        discovered = list(self._static_default_map().values())
+        self._last_fail_ts = 0.0
 
         try:
             from app.core.llm.model_selection import (
@@ -651,12 +628,10 @@ class ModelManager:
             )
 
             cloud_provider = get_configured_cloud_provider()
-            if cloud_provider != "gemini":
-                for task in ("CHAT", "CODER", "FILE_TASK", "AGENT"):
-                    configured_model = get_configured_cloud_model(task_type=task, provider=cloud_provider)
-                    if configured_model:
-                        discovered.append(configured_model)
-                # DeepSeek models already covered by static defaults + configured model above
+            for task in ("CHAT", "CODER", "FILE_TASK", "AGENT"):
+                configured_model = get_configured_cloud_model(task_type=task, provider=cloud_provider)
+                if configured_model:
+                    discovered.append(configured_model)
         except Exception as exc:
             logger.debug("[ModelManager] configured cloud model injection skipped: %s", exc)
 

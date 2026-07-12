@@ -39,7 +39,7 @@ async def execute_ppt_multi_step(
     try:
         ppt_service = PPTGenerationService(
             ai_client=client,
-            model_name="gemini-2.5-flash",
+            model_name="deepseek-chat",
         )
 
         _report("正在规划内容结构...", "调用 AI 规划大纲")
@@ -149,7 +149,7 @@ async def execute_ppt_multi_step(
             )
             verify_resp = await asyncio.to_thread(
                 lambda: client.models.generate_content(
-                    model="gemini-2.5-flash", contents=verify_prompt
+                    model="deepseek-chat", contents=verify_prompt
                 )
             )
             if verify_resp and verify_resp.text:
@@ -189,7 +189,7 @@ async def execute_ppt_multi_step(
             "output": md_outline,
             "content": md_outline,
             "saved_files": [rel_path],
-            "model_id": "gemini-2.5-flash (Planner)",
+            "model_id": "deepseek-chat (Planner)",
         }
 
     except Exception as e:

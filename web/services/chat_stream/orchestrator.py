@@ -249,9 +249,9 @@ def setup_chat_stream_context(
             def no_key_gen():
                 msg = (
                     "⚠️ **API 密钥未配置**\n\n"
-                    "请在 `config/gemini_config.env` 文件中设置：\n"
-                    "```\nGEMINI_API_KEY=你的密钥\n```\n\n"
-                    "💡 获取密钥：[Google AI Studio](https://aistudio.google.com/apikey)\n\n"
+                    "请在 `config/deepseek_config.env` 文件中设置：\n"
+                    "```\nDEEPSEEK_API_KEY=你的密钥\n```\n\n"
+                    "💡 获取密钥：[DeepSeek 开放平台](https://platform.deepseek.com/api_keys)\n\n"
                     "设置完成后重启 Koto 即可使用。"
                 )
                 yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"

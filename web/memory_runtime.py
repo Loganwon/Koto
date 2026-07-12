@@ -8,7 +8,7 @@ import threading
 from typing import Any
 
 try:
-    from google.genai import types
+    from app.core.llm.provider_compat import types
 except Exception:  # pragma: no cover - depends on optional SDK install
     types = None
 
@@ -47,7 +47,7 @@ def get_memory_manager() -> Any:
         logger.info("[MemoryRuntime] Enhanced memory manager initialized")
     except ImportError:
         try:
-            from web.enhanced_memory_manager import EnhancedMemoryManager
+            from app.core.services.memory_manager import EnhancedMemoryManager
 
             _memory_manager = EnhancedMemoryManager()
             logger.info("[MemoryRuntime] Enhanced memory manager initialized")
@@ -75,17 +75,13 @@ def _generate_config(*, temperature: float, max_output_tokens: int) -> Any:
 
 def _inject_memory_adapters(mgr: Any) -> None:
     try:
-        from app.core.llm.embedding_model_selector import (
-            resolve_gemini_embedding_model,
-        )
-
-        memory_embedding_model = resolve_gemini_embedding_model()
+        import hashlib
 
         def _memory_generate(
             prompt: str, temperature: float = 0.2, max_tokens: int = 300
         ) -> str:
             kwargs = {
-                "model": "gemini-2.5-flash-lite",
+                "model": "deepseek-chat",
                 "contents": prompt,
             }
             config = _generate_config(
@@ -98,30 +94,18 @@ def _inject_memory_adapters(mgr: Any) -> None:
             return resp.text or ""
 
         def _memory_embed(texts: list) -> list:
-            safe_texts = [(t or "")[:1000] for t in texts]
-            resp = _get_client().models.embed_content(
-                model=memory_embedding_model,
-                contents=safe_texts,
-            )
-            embeddings = []
-            if hasattr(resp, "embeddings"):
-                for item in resp.embeddings:
-                    if hasattr(item, "values"):
-                        embeddings.append(list(item.values))
-                    elif hasattr(item, "embedding"):
-                        embeddings.append(list(item.embedding))
-                    elif isinstance(item, dict):
-                        embeddings.append(
-                            list(item.get("values") or item.get("embedding") or [])
-                        )
-            elif hasattr(resp, "embedding"):
-                embeddings.append(list(resp.embedding))
-            elif isinstance(resp, dict) and "embeddings" in resp:
-                for item in resp.get("embeddings", []):
-                    embeddings.append(
-                        list(item.get("values") or item.get("embedding") or [])
-                    )
-            return embeddings
+            # Deterministic local feature hashing keeps memory retrieval usable
+            # without crossing the archived cloud-embedding boundary.
+            vectors = []
+            for text in texts:
+                vector = [0.0] * 256
+                for token in str(text or "")[:4000].lower().split():
+                    digest = hashlib.blake2b(token.encode("utf-8"), digest_size=4).digest()
+                    slot = int.from_bytes(digest, "big") % len(vector)
+                    vector[slot] += 1.0
+                magnitude = sum(value * value for value in vector) ** 0.5 or 1.0
+                vectors.append([value / magnitude for value in vector])
+            return vectors
 
         if hasattr(mgr, "set_llm_adapters"):
             mgr.set_llm_adapters(
@@ -168,13 +152,13 @@ def _start_memory_extraction(
     def _reflection_llm(prompt: str) -> str:
         return _llm_sync(
             prompt,
-            model="gemini-2.5-flash-lite",
+            model="deepseek-chat",
             temperature=0.1,
             max_tokens=600,
         )
 
     def _quality_llm(prompt: str) -> str:
-        quality_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+        quality_models = ["deepseek-chat"]
         model = quality_models[0]
         try:
             from app.core.llm.model_fallback import get_fallback_executor
@@ -282,7 +266,7 @@ def get_knowledge_base() -> Any:
         try:
             from knowledge_base import KnowledgeBase
         except ImportError:
-            from web.knowledge_base import KnowledgeBase
+            from app.core.services.knowledge_base import KnowledgeBase
         _kb = KnowledgeBase()
         logger.info("[MemoryRuntime] Knowledge base initialized")
     return _kb

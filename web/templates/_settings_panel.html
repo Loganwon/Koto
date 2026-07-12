@@ -146,7 +146,8 @@
                         </label>
                         <div class="font-scale-row">
                             <input type="range" id="uiZoomSlider" min="70" max="150" step="5" value="100"
-                                   oninput="setUIZoom(this.value / 100)">
+                                   oninput="previewUIZoom(this.value / 100)"
+                                   onchange="setUIZoom(this.value / 100)">
                         </div>
                         <div class="fs-presets">
                             <button class="fs-preset-btn" onclick="setUIZoom(0.8)">80%</button>
@@ -194,14 +195,21 @@
                             </select>
                             <button class="btn-secondary btn-sm" onclick="detectLocalModels()" title="扫描 Ollama 可用模型">🔍 检测</button>
                         </div>
-                        <p class="setting-hint" id="localModelHint">点击「检测」扫描本地 Ollama 已安装的模型</p>
+                        <p class="setting-hint" id="localModelHint">点击“检测”扫描本地 Ollama 已安装的模型</p>
+                    <div style="margin-top:10px;padding:10px;background:var(--bg-tertiary, rgba(59,130,246,0.08));border-radius:8px;font-size:12px;color:var(--text-secondary);line-height:1.6;" id="ollamaGuideBox">
+                        <strong>如何启用本地模型？</strong><br>
+                        <span>1. 安装 Ollama：<a href="https://ollama.com/download" target="_blank" style="color:var(--accent-primary);">ollama.com/download</a></span><br>
+                        <span>2. 在终端安装模型：<code style="background:var(--bg-secondary);padding:1px 5px;border-radius:3px;">ollama pull qwen2.5:7b</code></span><br>
+                        <span>3. 返回此处点击“检测”，然后选择模型。</span><br>
+                        <span style="color:var(--text-tertiary);">推荐：qwen2.5:7b（均衡）、llama3.2:3b（轻量）或 gemma3:4b（多语言）。</span>
+                    </div>
                     </div>
 
                     <div class="setting-item">
                         <div class="toggle-row">
                             <span class="toggle-label">自动保存回复文件</span>
                             <label class="toggle">
-                                <input type="checkbox" id="settingAutoSaveFiles" onchange="updateSetting('ai', 'auto_save_files', this.checked)">
+                                <input type="checkbox" id="settingAutoSaveFiles" onchange="onBooleanSettingChange(this, 'ai', 'auto_save_files')">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -211,7 +219,7 @@
                         <div class="toggle-row">
                             <span class="toggle-label">显示思考过程</span>
                             <label class="toggle">
-                                <input type="checkbox" id="settingShowThinking" onchange="updateSetting('ai', 'show_thinking', this.checked)">
+                                <input type="checkbox" id="settingShowThinking" onchange="onBooleanSettingChange(this, 'ai', 'show_thinking')">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -221,7 +229,7 @@
                         <div class="toggle-row">
                             <span class="toggle-label">显示任务分类标签</span>
                             <label class="toggle">
-                                <input type="checkbox" id="settingShowTaskType" onchange="updateSetting('ai', 'show_task_type', this.checked)">
+                                <input type="checkbox" id="settingShowTaskType" onchange="onBooleanSettingChange(this, 'ai', 'show_task_type')">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -231,7 +239,7 @@
                         <div class="toggle-row">
                             <span class="toggle-label">等待时启用小游戏</span>
                             <label class="toggle">
-                                <input type="checkbox" id="settingEnableMiniGame" checked onchange="updateSetting('ai', 'enable_mini_game', this.checked)">
+                                <input type="checkbox" id="settingEnableMiniGame" checked onchange="onBooleanSettingChange(this, 'ai', 'enable_mini_game')">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
@@ -252,7 +260,7 @@
                         <div class="toggle-row">
                             <span class="toggle-label">启用代理</span>
                             <label class="toggle">
-                                <input type="checkbox" id="settingProxyEnabled" onchange="updateSetting('proxy', 'enabled', this.checked)">
+                                <input type="checkbox" id="settingProxyEnabled" onchange="onBooleanSettingChange(this, 'proxy', 'enabled')">
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>

@@ -412,7 +412,6 @@ function metadataModelLabel(task: any, metadata?: Record<string, any>): string {
   const modelId = String(data.model_id || payload && payload.model_id || '').trim();
   const modeLabels: Record<string, string> = {
     auto: '自动',
-    // gemini legacy key removed
     cloud: 'DeepSeek',
     deepseek: 'DeepSeek',
     local: '本地模型',
@@ -704,7 +703,7 @@ function emptyTaskFlowHtml(): string {
   return [
     '<div class="wa-task-workbench-empty wa-task-workbench-empty-flow">',
     '  <strong>等待文件任务</strong>',
-    '  <span>当请求需要读取、修改或生成文件时，这里会直接展开任务识别、执行方案、进度和核验结果。</span>',
+    '  <span>当请求需要读取、修改或生成文件时，这里会直接展开需求分析、执行计划、进度和结果检查。</span>',
     '  <div class="wa-task-workbench-empty-steps">',
     stageLabels,
     '  </div>',
@@ -1010,7 +1009,7 @@ function renderCompletionReport(task: WorkbenchTask, summary: string, artifactBu
   const stats = renderArtifactStats(task.artifact_result);
   const body = summary
     ? `<div class="wa-task-workbench-summary">${esc(summary)}</div>`
-    : '<div class="wa-task-workbench-summary is-empty">暂无总结与回答。</div>';
+    : '<div class="wa-task-workbench-summary is-empty">暂无任务结果。</div>';
   const actions = artifactButton
     ? `<div class="wa-task-workbench-detail-actions">${artifactButton}</div>`
     : '';

@@ -7,11 +7,11 @@ import os
 
 from web.sse.sanitizer import safe_sse as _safe_sse
 from web.local_executor import LocalExecutor
-from google.genai import types
+from app.core.llm.provider_compat import types
 
 
 def handle_system(yield_thinking, user_input, session_name, start_time, client, model_id, system_instruction, session_manager, _app_logger):
-    from web.runtime_context import get_utils
+    from web.chat_runtime_services import get_utils
 
     Utils = get_utils()
 

@@ -96,32 +96,30 @@ class TestAllModelsFail:
                 )
 
 
-def test_file_task_candidate_list_prefers_file_task_route_first():
+def test_file_task_candidate_list_ignores_archived_cloud_route():
     exe = _fresh_executor()
     exe.update_model_map({"FILE_TASK": "gemini-3-flash-preview"})
 
     candidates = exe._build_candidate_list("", "FILE_TASK")
 
-    assert candidates[0] == "gemini-3-flash-preview"
-    assert candidates[1] == "gemini-3.1-pro-preview"
-    assert "gemini-2.5-flash" in candidates
-    assert "gemini-2.5-flash-lite" in candidates
+    assert candidates == ["deepseek-chat"]
 
-    def test_raises_runtime_if_no_candidate_tried(self):
-        """All models pre-marked unavailable → RuntimeError (no last_exc)."""
-        exe = _fresh_executor()
-        for m in SHORT_CHAIN:
-            exe.mark_unavailable(m, ttl=600)
 
-        provider = _make_provider()
-        with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
-            with pytest.raises(RuntimeError, match="所有候选模型均不可用"):
-                exe.generate_with_fallback(
-                    provider=provider,
-                    prompt="hi",
-                    preferred_model="model-a",
-                    task_type="CHAT",
-                )
+def test_raises_runtime_if_no_candidate_tried():
+    """All models pre-marked unavailable → RuntimeError (no last_exc)."""
+    exe = _fresh_executor()
+    for m in SHORT_CHAIN:
+        exe.mark_unavailable(m, ttl=600)
+
+    provider = _make_provider()
+    with patch.object(exe, "_build_candidate_list", return_value=SHORT_CHAIN):
+        with pytest.raises(RuntimeError, match="所有候选模型均不可用"):
+            exe.generate_with_fallback(
+                provider=provider,
+                prompt="hi",
+                preferred_model="model-a",
+                task_type="CHAT",
+            )
 
 
 @pytest.mark.unit

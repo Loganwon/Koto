@@ -747,7 +747,7 @@ def chat():
     message = data.get("message")
     session_id = data.get("session_id") or data.get("session", "")
     history = data.get("history") or _load_history(session_id)
-    model_id = data.get("model", "gemini-2.5-flash")
+    model_id = data.get("model", "deepseek-chat")
     locked_model = data.get("locked_model") or ("local" if model_id == "local" else "auto")
     user_chose_local = locked_model == "local"
     skill_id = data.get("skill_id")

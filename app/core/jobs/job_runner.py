@@ -509,17 +509,17 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         # 尝试获取 LLM 函数（非必须）
         llm_fn = None
         try:
-            from google.genai import types as _types
+            from app.core.llm.provider_compat import types as _types
 
             from web.runtime_context import get_client_proxy
 
             client = get_client_proxy()
             if client is None:
-                raise RuntimeError("Gemini client unavailable")
+                raise RuntimeError("Active LLM client unavailable")
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
+                    model="deepseek-chat",
                     contents=prompt,
                     config=_types.GenerateContentConfig(
                         temperature=0.7, max_output_tokens=80

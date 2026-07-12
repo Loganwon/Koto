@@ -160,11 +160,11 @@ class PPTResourceManager:
 class PPTContentPlanner:
     """PPT内容规划器 - 生成详细的内容结构"""
 
-    def __init__(self, ai_client=None, model_name: str = "gemini-2.5-flash"):
+    def __init__(self, ai_client=None, model_name: str = "deepseek-chat"):
         self.ai_client = ai_client
-        # 使用 gemini-2.5-flash 为默认，但优先使用能用的模型
+        # 使用 DeepSeek 作为唯一云端内容规划模型。
         self.model_name = model_name
-        self._fallback_models = ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+        self._fallback_models = ["deepseek-chat"]
 
     async def plan_content_structure(
         self, user_request: str, search_results: Optional[List[Dict]] = None
@@ -302,7 +302,8 @@ class PPTContentPlanner:
                                         s["key_points"] = [
                                             "(Content missing, please expand)"
                                         ]
-                            except:
+                            except Exception:
+                                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                                 pass
 
                             logger.info(
@@ -392,7 +393,7 @@ class PPTContentPlanner:
             """
 
             # 使用最强模型进行 critique
-            model = "gemini-2.0-pro-exp-02-05"
+            model = "deepseek-chat"
 
             # Fallback to current model if specialized one fails
             try:
@@ -403,7 +404,7 @@ class PPTContentPlanner:
                 )
             except Exception:
                 response = self.ai_client.models.generate_content(
-                    model="gemini-2.5-flash",  # Faster fallback
+                    model="deepseek-chat",
                     contents=prompt,
                     config={"response_mime_type": "application/json"},
                 )
@@ -442,7 +443,7 @@ class PPTContentPlanner:
             )
 
             # 使用快速模型
-            model = "gemini-2.5-flash"
+            model = "deepseek-chat"
 
             call_state = {"response": None, "error": None}
             done_event = threading.Event()
@@ -735,7 +736,8 @@ class PPTMasterOrchestrator:
             if progress_callback:
                 try:
                     progress_callback(msg)
-                except:
+                except Exception:
+                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                     pass
             self._log(msg)
 

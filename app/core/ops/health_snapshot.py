@@ -173,21 +173,21 @@ class HealthSnapshot:
         try:
             import os
 
-            api_key = os.environ.get("GEMINI_API_KEY", "")
+            api_key = os.environ.get("DEEPSEEK_API_KEY", "")
             if not api_key:
                 # 尝试从配置文件读取
                 from pathlib import Path
 
-                env_path = Path("config/gemini_config.env")
+                env_path = Path("config/deepseek_config.env")
                 if env_path.exists():
                     for line in env_path.read_text(encoding="utf-8").splitlines():
-                        if line.startswith("GEMINI_API_KEY="):
+                        if line.startswith(("DEEPSEEK_API_KEY=", "DEEPSEEK_KEY=")):
                             api_key = line.split("=", 1)[1].strip()
                             break
             if not api_key:
                 return {
                     "status": _DEGRADED,
-                    "message": "GEMINI_API_KEY 未配置",
+                    "message": "DEEPSEEK_API_KEY 未配置",
                     "value": {},
                 }
             return {"status": _HEALTHY, "message": "API Key 已配置", "value": {}}

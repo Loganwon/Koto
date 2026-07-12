@@ -179,7 +179,7 @@ class DocAgent:
     def __init__(
         self,
         emitter: Optional["DocEventEmitter"] = None,
-        model_id: str = "gemini-3.1-pro-preview",
+        model_id: str = "deepseek-chat",
         api_key: Optional[str] = None,
     ):
         self._emitter = emitter
@@ -948,7 +948,7 @@ class DocAgent:
 
 def create_doc_agent(
     emitter: Optional["DocEventEmitter"] = None,
-    model_id: str = "gemini-3.1-pro-preview",
+    model_id: str = "deepseek-chat",
     api_key: Optional[str] = None,
 ) -> DocAgent:
     """Factory function to create a DocAgent instance."""

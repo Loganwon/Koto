@@ -81,7 +81,7 @@ class _OllamaUsageMetadata:
 
 class OllamaResponse:
     """
-    模拟 google.genai GenerateContentResponse。
+    提供兼容旧调用方的 GenerateContentResponse 形状。
     web/app.py 通常访问:
       response.text
       response.candidates[0].content.parts[0].text
@@ -515,7 +515,7 @@ class OllamaModelsProxy:
 
 class OllamaClientProxy:
     """
-    顶层代理对象，完全模拟 google.genai.Client。
+    顶层代理对象，提供兼容旧调用方的 Client 形状。
     web/app.py 访问: client.models.generate_content(...)
     """
 

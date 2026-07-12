@@ -383,5 +383,5 @@ class DocWebSocketAgentExecutor:
             )
         return (
             "在线 AI 不可用，本地 Ollama 也未运行。\n"
-            "请执行: ollama serve，或在 config/gemini_config.env 配置 API 密钥。"
+            "请执行: ollama serve，或在 config/deepseek_config.env 配置 API 密钥。"
         )

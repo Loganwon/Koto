@@ -7,7 +7,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 
 
-DEFAULT_CHAT_MODEL = "gemini-2.5-flash"
+DEFAULT_CHAT_MODEL = "deepseek-chat"
 CODER_FIRST_TOKEN_TIMEOUT_SECONDS = 60
 DEFAULT_FIRST_TOKEN_TIMEOUT_SECONDS = 120
 

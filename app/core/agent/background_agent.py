@@ -228,7 +228,7 @@ class BackgroundAgent:
     def __init__(
         self,
         session_id: str = "",
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         max_steps: int = 10,
         step_timeout_seconds: float = 120.0,
     ):
@@ -758,12 +758,11 @@ class BackgroundAgent:
         if self._llm_provider is not None:
             return
         try:
-            import os
+            from app.core.llm.provider_factory import get_llm_provider
 
-            from app.core.llm.gemini import GeminiProvider
-
-            api_key = os.environ.get("GEMINI_API_KEY", "")
-            self._llm_provider = GeminiProvider(api_key=api_key)
+            self._llm_provider = get_llm_provider(
+                provider="deepseek", allow_local_fallback=False
+            )
         except Exception as e:
             logger.error(f"[BackgroundAgent] LLMProvider 加载失败: {e}")
             self._llm_provider = None

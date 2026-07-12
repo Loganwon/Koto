@@ -261,7 +261,7 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": "❌ LLM 代码生成失败，请检查 GEMINI_API_KEY 配置。",
+                    "text": "❌ LLM 代码生成失败，请检查 DEEPSEEK_API_KEY 配置。",
                     "is_error": True,
                 },
                 namespace="/doc",
@@ -322,11 +322,7 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
 # ── LLM helpers — 使用 Koto 统一 LLM Provider 体系 ────────────
 
 
-_ONLINE_DOC_MODELS = [
-    "gemini-3-flash-preview",  # 首选：当前主聊天模型
-    "gemini-2.5-flash",        # 稳定快速回退
-    "gemini-2.5-flash-lite",   # 轻量兜底
-]
+_ONLINE_DOC_MODELS = ["deepseek-chat"]
 
 
 def _pick_online_model() -> str:

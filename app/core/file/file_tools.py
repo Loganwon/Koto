@@ -1593,12 +1593,11 @@ class FileToolsPlugin(AgentPlugin):
             f"内容：\n{safe_content}"
         )
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            llm = GeminiProvider()
+            llm = get_llm_provider(provider="deepseek", allow_local_fallback=False)
             resp = llm.generate_content(
                 prompt=prompt,
-                model="gemini-2.5-flash",
                 system_instruction="你是一个专业的文件摘要助手，输出简洁精准的中文摘要。",
             )
             text = ""
@@ -1786,9 +1785,9 @@ class FileToolsPlugin(AgentPlugin):
         )
 
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            provider = GeminiProvider()
+            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
             resp = provider.generate_content(prompt)
             answer = resp.get("content") or resp.get("text") or str(resp)
         except Exception as exc:

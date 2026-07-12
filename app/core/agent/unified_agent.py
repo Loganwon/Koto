@@ -89,16 +89,14 @@ class UnifiedAgent(Agent):
 
     # 升级链：按强度升序排列，优先尝试同系列快速模型，再升到 Pro
     _ESCALATION_CHAIN = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
+        "deepseek-chat",
     ]
 
     def __init__(
         self,
         llm_provider: LLMProvider,
         tool_registry: Optional[ToolRegistry] = None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         system_instruction: Optional[str] = None,
         # ── v2 参数 ──────────────────────────────────────────────
         skill_id: Optional[str] = None,

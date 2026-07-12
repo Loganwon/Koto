@@ -46,7 +46,7 @@ function $appEl(id: string | HTMLElement): HTMLElement | null {
 (window as any).setupComplete = false;
 (window as any).lockedTaskType = null;
 (window as any).selectedModel = 'auto';
-(window as any).enableMiniGame = true;
+if (typeof (window as any).enableMiniGame !== 'boolean') (window as any).enableMiniGame = true;
 (window as any).isScrollLocked = false;
 
 // ── Window controls ──
@@ -1370,7 +1370,7 @@ export async function sendMessage(event: Event): Promise<void> {
       const streamEndpoint = useUnifiedAgentStream ? '/api/agent/process-stream' : '/api/chat/stream';
       const contextFiles = Array.isArray((window as any)._kotoContextFiles) ? (window as any)._kotoContextFiles.map((f: any) => f.path) : [];
       const payload = useUnifiedAgentStream
-        ? { request: message, context: { history: [] as any[] }, session_id: thisSession, model: modelToUse || 'gemini-3-flash-preview', ...(contextFiles.length ? { context_files: contextFiles } : {}) }
+        ? { request: message, context: { history: [] as any[] }, session_id: thisSession, model: modelToUse || 'deepseek-chat', ...(contextFiles.length ? { context_files: contextFiles } : {}) }
         : { session: thisSession, message, locked_task: taskType, locked_model: modelToUse, ...(contextFiles.length ? { context_files: contextFiles } : {}) };
       response = await fetch(streamEndpoint, {
         method: 'POST',
@@ -1455,7 +1455,6 @@ document.addEventListener('DOMContentLoaded', async () => {
     () => { if (typeof (window as any).checkStatus === 'function') (window as any).checkStatus(); },
     () => { if (typeof (window as any).initCapabilityButtons === 'function') (window as any).initCapabilityButtons(); },
   ]);
-  if ((window as any).currentSettings?.ai) { (window as any).selectedModel = (window as any).currentSettings.ai.default_model || 'auto'; }
   const newSessionInput = document.getElementById('newSessionName');
   if (newSessionInput) newSessionInput.addEventListener('keydown', (e: Event) => { if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); if (typeof (window as any).confirmNewSession === 'function') (window as any).confirmNewSession(); } });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e: MediaQueryListEvent) => {

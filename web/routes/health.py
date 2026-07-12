@@ -16,7 +16,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from flask import Blueprint, jsonify
+from flask import Blueprint, current_app, jsonify
 
 logger = logging.getLogger(__name__)
 
@@ -64,16 +64,42 @@ def _check_disk() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
+def _check_blueprint_registration() -> dict:
+    """Surface capabilities skipped during application startup.
+
+    Registration is owned by ``web.app_blueprints``.  It writes a compact
+    ledger into the Flask application's extensions so a development process
+    can still start for diagnosis without falsely reporting a healthy product.
+    """
+    state = current_app.extensions.get("koto_blueprint_registration", {})
+    missing_required = list(state.get("missing_required", ()))
+    missing_optional = list(state.get("missing_optional", ()))
+
+    if missing_required:
+        return {
+            "status": "error",
+            "missing_required": missing_required,
+            "missing_optional": missing_optional,
+        }
+    if missing_optional:
+        return {
+            "status": "warning",
+            "missing_required": [],
+            "missing_optional": missing_optional,
+        }
+    return {"status": "ok", "missing_required": [], "missing_optional": []}
+
+
 def _overall_status(checks: dict) -> str:
     """Derive overall status from individual checks.
 
     - "healthy"  : all checks pass
-    - "degraded" : non-critical checks (ollama) fail
-    - "unhealthy": critical checks (disk) fail
+    - "degraded" : non-critical checks (ollama or optional blueprint) fail
+    - "unhealthy": critical checks (disk or required blueprint) fail
     """
-    critical = ["disk"]
+    critical = ["disk", "blueprints"]
     any_fail = any(v.get("status") != "ok" for v in checks.values())
-    critical_fail = any(checks.get(k, {}).get("status") != "ok" for k in critical)
+    critical_fail = any(checks.get(k, {}).get("status") == "error" for k in critical)
     if critical_fail:
         return "unhealthy"
     if any_fail:
@@ -111,6 +137,7 @@ def health():
         checks = {
             "ollama": _check_ollama(),
             "disk": _check_disk(),
+            "blueprints": _check_blueprint_registration(),
         }
         status = _overall_status(checks)
         payload = {
@@ -129,48 +156,37 @@ def health():
 
 @health_bp.route("/api/ping", methods=["GET"])
 def ping():
-    """Lightweight liveness probe.
+    """Lightweight liveness probe with provider availability.
     ---
     tags:
       - Health
     responses:
       200:
-        description: Service is alive
-        schema:
-          type: object
-          properties:
-            status:
-              type: string
-              example: ok
+        description: Service is alive with provider info
     """
-    return jsonify({"status": "ok"}), 200
+    providers = []
+    try:
+        from app.core.llm.provider_factory import list_available_providers
+        providers = list_available_providers()
+    except Exception:
+        pass
+
+    ollama_available = "ollama" in providers
+    cloud_providers = [p for p in providers if p != "ollama"]
+    return jsonify({
+        "status": "ok",
+        "ollama": ollama_available,
+        "providers": providers,
+        "cloud_providers": cloud_providers,
+        "has_any_provider": len(providers) > 0,
+    }), 200
 
 
 @health_bp.route("/api/ping/cloud", methods=["GET"])
 def ping_cloud():
-    """Measure round-trip latency to the configured cloud AI API endpoint.
-    Supports Gemini and DeepSeek based on the configured cloud provider.
-    """
-    from urllib.parse import urlparse
-
-    # Determine the cloud provider and target URL
-    try:
-        from app.core.llm.model_selection import get_configured_cloud_provider
-        provider = get_configured_cloud_provider()
-    except Exception:
-        provider = "gemini"
-
-    if provider == "deepseek":
-        target_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip()
-    else:
-        base = os.getenv("GEMINI_API_BASE", "").strip()
-        if base:
-            parsed = urlparse(base)
-            netloc = parsed.netloc or parsed.path.split("/")[0]
-            scheme = parsed.scheme or "https"
-            target_url = f"{scheme}://{netloc}"
-        else:
-            target_url = "https://generativelanguage.googleapis.com"
+    """Measure round-trip latency to the active DeepSeek endpoint."""
+    provider = "deepseek"
+    target_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip()
 
     try:
         t0 = time.monotonic()
@@ -212,15 +228,12 @@ def ping_cloud():
 
 @health_bp.route("/api/ping/cloud/all", methods=["GET"])
 def ping_cloud_all():
-    """Measure round-trip latency to both Gemini and DeepSeek API endpoints.
-    Returns latency for each provider independently.
-    """
+    """Return latency for cloud providers exposed by the current product."""
     from urllib.parse import urlparse
 
     results = {}
 
     providers = {
-        "gemini": os.getenv("GEMINI_API_BASE", "https://generativelanguage.googleapis.com").strip(),
         "deepseek": os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip(),
     }
 

@@ -15,7 +15,7 @@ from app.core.services.ppt_generation_service import (
 )
 
 try:
-    from google.genai import types
+    from app.core.llm.provider_compat import types
 except Exception:  # pragma: no cover - optional SDK in some test envs
     types = None
 
@@ -79,7 +79,7 @@ async def execute_file_gen(
                 from web.doc_planner import DocumentPlanner
 
                 _planner = DocumentPlanner(
-                    ai_client=client, model_name="gemini-2.5-flash"
+                    ai_client=client, model_name="deepseek-chat"
                 )
                 _report("📋 规划文档结构...", "分析需求/分配章节")
                 _doc_plan = await _planner.plan(

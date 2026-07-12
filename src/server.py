@@ -14,7 +14,7 @@ Koto Server Mode - 纯 Web 服务（无桌面窗口）
   KOTO_AUTH_ENABLED=true       启用认证（SaaS 模式）
   KOTO_JWT_SECRET=xxx          JWT 签名密钥
   KOTO_MAX_DAILY_REQUESTS=100  每用户每日请求上限
-  GEMINI_API_KEY=xxx           Gemini API 密钥
+  DEEPSEEK_API_KEY
 
   # LangSmith 可观测性追踪（可选）
   LANGCHAIN_TRACING_V2=true
@@ -33,7 +33,6 @@ try:
     from src.runtime_bootstrap import (
         configure_process_environment,
         init_optional_langsmith,
-        load_optional_gemini_env,
         resolve_runtime_roots,
         validate_startup_config_or_raise,
     )
@@ -41,7 +40,6 @@ except ImportError:
     from runtime_bootstrap import (
         configure_process_environment,
         init_optional_langsmith,
-        load_optional_gemini_env,
         resolve_runtime_roots,
         validate_startup_config_or_raise,
     )
@@ -60,9 +58,6 @@ configure_process_environment(
 from app.core.logging_setup import setup_logging  # noqa: E402
 
 setup_logging(log_dir=str(APP_ROOT / "logs"))
-
-# 加载 .env 配置
-load_optional_gemini_env()
 
 # 启动时配置验证
 try:

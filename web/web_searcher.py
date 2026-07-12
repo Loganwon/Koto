@@ -49,7 +49,7 @@ def _types() -> Any:
     types_module = get_types()
     if types_module is not None:
         return types_module
-    from google.genai import types as genai_types
+    from app.core.llm.provider_compat import types as genai_types
 
     return genai_types
 
@@ -317,7 +317,7 @@ class WebSearcher:
 
     @classmethod
     def search_with_grounding(cls, query, skill_prompt=None):
-        """使用 Gemini Google Search Grounding 进行实时搜索（意图感知版本）
+        """Retrieve live web results and synthesize them with the active provider.
 
         skill_prompt: 来自本地/AI路由器生成的执行指令。
           - 若提供，直接用作 system_instruction（正确理解用户意图）
@@ -336,48 +336,60 @@ class WebSearcher:
             query_type = cls._detect_query_type(query)
             _, system_instruction = cls._build_search_context(query, query_type)
             logger.debug(f"[WebSearcher] 关键词检测备用: {query_type}")
-        try:
-            # 使用 Google Search 作为工具
-            search_client = _client()
-            try:
-                if "ollama" in type(search_client).__name__.lower():
-                    search_client = _create_client()
-            except Exception:
-                search_client = _client()
-            search_config = _types().GenerateContentConfig(
-                tools=[_types().Tool(google_search=_types().GoogleSearch())],
-                system_instruction=system_instruction,
-            )
-            try:
-                response = search_client.models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=query,
-                    config=search_config,
-                )
-            except Exception as exc:
-                exc_text = str(exc)
-                if "model is required" not in exc_text and "Ollama" not in exc_text:
-                    raise
-                response = _create_client().models.generate_content(
-                    model="gemini-2.5-flash",
-                    contents=query,
-                    config=search_config,
-                )
+        from web.search_backend import search_web
 
-            if response.text:
-                return {"success": True, "response": response.text, "grounded": True}
-            else:
-                return {
-                    "success": False,
-                    "response": "搜索未返回结果",
-                    "grounded": False,
-                }
-        except Exception as e:
+        sources = search_web(query)
+        if not sources:
             return {
                 "success": False,
-                "response": f"搜索失败: {str(e)}",
+                "response": "搜索失败：未能从互联网检索到结果",
                 "grounded": False,
+                "sources": [],
             }
+
+        evidence = "\n\n".join(
+            f"[{item['id']}] {item['title']}\nURL: {item['url']}\n摘要: {item['snippet']}"
+            for item in sources
+        )
+        prompt = (
+            f"用户问题：{query}\n\n以下是刚刚检索到的网页结果：\n{evidence}\n\n"
+            "请仅依据这些结果回答；涉及事实时使用 [1]、[2] 这样的来源编号。"
+            "如果结果不足以支持结论，请明确说明。"
+        )
+        try:
+            from app.core.llm.model_selection import (
+                get_configured_cloud_model,
+                get_configured_cloud_provider,
+            )
+            from app.core.llm.provider_factory import get_llm_provider
+
+            provider_name = get_configured_cloud_provider()
+            model_id = get_configured_cloud_model(provider=provider_name)
+            provider = get_llm_provider(provider=provider_name, model=model_id)
+            response = provider.generate_content(
+                prompt=prompt,
+                model=model_id,
+                system_instruction=system_instruction,
+                max_tokens=2400,
+                stream=False,
+            )
+            if isinstance(response, dict):
+                answer = str(response.get("content") or response.get("text") or "").strip()
+            else:
+                answer = str(getattr(response, "text", response) or "").strip()
+        except Exception as exc:
+            logger.warning("[WebSearcher] provider synthesis unavailable: %s", exc)
+            answer = "检索已完成，但当前 AI 模型不可用。搜索结果如下：\n\n" + "\n".join(
+                f"[{item['id']}] {item['title']} — {item['snippet']}"
+                for item in sources
+            )
+
+        return {
+            "success": True,
+            "response": answer,
+            "grounded": True,
+            "sources": sources,
+        }
 
     @classmethod
     def generate_ppt_images(
@@ -405,7 +417,7 @@ class WebSearcher:
 
         try:
             resp = _client().models.generate_content(
-                model="gemini-2.5-flash",
+                model="deepseek-chat",
                 contents=pick_prompt,
                 config=_types().GenerateContentConfig(
                     temperature=0.3, max_output_tokens=1024
@@ -449,10 +461,13 @@ class WebSearcher:
             result_q = _queue.Queue()
 
             def _gen_image(p, q):
-                # ① 首选: Gemini 3.1 Flash Image
+                q.put(("error", "cloud image generation is not configured"))
+                return
+                # Historical image response parsing remains unreachable until an
+                # active multimodal provider implements this contract.
                 try:
                     res = _client().models.generate_content(
-                        model="gemini-3.1-flash-image-preview",
+                        model="deepseek-chat",
                         contents=p,
                         config=_types().GenerateContentConfig(
                             response_modalities=["TEXT", "IMAGE"]
@@ -558,63 +573,8 @@ class WebSearcher:
         if search_context:
             research_prompt += f"\n已有的搜索参考资料：\n{search_context[:8000]}\n"
 
-        def _extract_text_from_obj(obj) -> list[str]:
-            walker = getattr(_app_attr("_extract_interaction_text_global"), "_walk", None)
-            return walker(obj) if callable(walker) else []
-
-        def _extract_interaction_text(interaction_obj) -> str:
-            return _app_call("_extract_interaction_text_global", interaction_obj)
-
-        # 深度研究专用：Interactions API（deep-research-pro-preview-*）
-        preferred_model = get_model_map().get("RESEARCH", "deep-research-pro-preview-12-2025")
-        if preferred_model.startswith("deep-research-pro-preview"):
-            try:
-                research_client = _app_call("create_research_client")
-                _log_ppt = logging.getLogger(__name__)
-                _log_ppt.info(
-                    "[PPT-RESEARCH] 🚀 提交 deep-research job (model=%s)",
-                    preferred_model,
-                )
-                _ppt_create_kwargs: dict = {
-                    "input": research_prompt,
-                    "background": True,
-                    "stream": False,
-                }
-                if _app_call("_is_interactions_agent", preferred_model):
-                    _ppt_create_kwargs["agent"] = preferred_model
-                else:
-                    _ppt_create_kwargs["model"] = preferred_model
-                interaction = research_client.interactions.create(**_ppt_create_kwargs)
-                interaction_id = getattr(interaction, "id", None)
-                init_status = str(getattr(interaction, "status", "") or "").lower()
-                if init_status in _app_attr("_INTERACTION_FAIL_STATES", frozenset()):
-                    raise RuntimeError(f"deep-research job 立即失败: {init_status}")
-
-                final_interaction = _app_call("_poll_interaction",
-                    research_client,
-                    interaction_id,
-                    timeout=600.0,  # PPT 研究最多 10 分钟
-                    initial_sleep=3.0,
-                    backoff_multiplier=1.5,
-                    max_sleep=30.0,
-                    label="PPT-RESEARCH",
-                )
-                text = _extract_interaction_text(final_interaction)
-                if text and len(text) > 200:
-                    logger.info(
-                        f"[PPT-RESEARCH] ✅ 深度研究完成 ({preferred_model}), {len(text)} 字符"
-                    )
-                    return text
-                logger.warning(f"[PPT-RESEARCH] ⚠️ Interactions 返回空结果或过短")
-            except Exception as inter_err:
-                logger.debug(f"[PPT-RESEARCH] Interactions 失败: {inter_err}")
-
-        logger.debug(f"[PPT-RESEARCH] 🔄 切换到备用模型进行研究...")
-        research_models = [
-            get_model_map().get("RESEARCH", "deep-research-pro-preview-12-2025"),
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-        ]
+        logger.debug("[PPT-RESEARCH] 使用当前模型研究路径")
+        research_models = [get_model_map().get("RESEARCH", "deepseek-chat")]
         # 去重并去空，保持顺序
         research_models = [
             m

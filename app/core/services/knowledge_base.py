@@ -5,7 +5,7 @@
 """
 本地知识库系统 - 向量化语义搜索 + 全文检索
 支持：PDF、Word、Markdown、TXT 等格式
-使用 Gemini embedding 模型实现语义搜索
+使用本地索引实现检索
 """
 
 import hashlib
@@ -20,17 +20,11 @@ import numpy as np
 
 logger = logging.getLogger(__name__)
 
-try:
-    import google.genai as genai  # New SDK
-except ImportError:
-    try:
-        import google.generativeai as genai  # Fallback to deprecated SDK
-    except ImportError:
-        genai = None
-
+# Backward-compatible test/extension hook. Cloud embedding initialization is disabled.
+genai = None
 
 class KnowledgeBase:
-    """向量化知识库管理器 - 使用 Gemini 嵌入和余弦相似度搜索"""
+    """知识库管理器 - 本地索引和余弦相似度搜索。"""
 
     CHUNK_SIZE = 500  # 文本块大小
     CHUNK_OVERLAP = 50  # 块重叠
@@ -48,66 +42,9 @@ class KnowledgeBase:
         self.chunks_file = os.path.join(self.kb_dir, "chunks.json")
         os.makedirs(self.kb_dir, exist_ok=True)
 
-        # Initialize Gemini API
-        api_key = api_key or os.getenv("GEMINI_API_KEY")
+        # Cloud embeddings are intentionally disabled; keyword/local RAG paths remain available.
         self.client = None
-        self.embedding_model = "models/gemini-embedding-2"
-
-        if api_key and genai:
-            try:
-                from app.core.llm.embedding_model_selector import (
-                    resolve_gemini_embedding_model,
-                )
-
-                self.embedding_model = resolve_gemini_embedding_model(api_key)
-                if hasattr(genai, "Client"):
-                    # New SDK
-                    self.client = genai.Client(api_key=api_key)
-                else:
-                    # Old SDK - wrap it to mimic new client structure?
-                    # Or just set it and handle differences in methods
-                    genai.configure(api_key=api_key)
-
-                    # Create a shim for old SDK to look like new SDK client.models.embed_content
-                    class OldSDKShim:
-                        def __init__(self, old_genai):
-                            self._genai = old_genai
-                            self.models = self
-
-                        def embed_content(self, model, content):
-                            # Adapt new SDK call to old SDK
-                            # old: result = genai.embed_content(model=..., content=...)
-                            # result['embedding'] is the vector
-                            res = self._genai.embed_content(
-                                model=model, content=content
-                            )
-
-                            class ShimResponse:
-                                pass
-
-                            r = ShimResponse()
-                            r.embedding = res["embedding"]
-                            return r
-
-                        def batch_embed_contents(self, model, requests):
-                            # Adapt batch
-                            texts = [r["content"] for r in requests]
-                            res = self._genai.embed_content(model=model, content=texts)
-
-                            # res['embedding'] is list of vectors if content is list
-                            class ShimBatchResponse:
-                                pass
-
-                            r = ShimBatchResponse()
-                            r.embeddings = [
-                                type("obj", (), {"values": v}) for v in res["embedding"]
-                            ]
-                            return r
-
-                    self.client = OldSDKShim(genai)
-
-            except Exception as e:
-                logger.info(f"[KnowledgeBase] API initialization error: {e}")
+        self.embedding_model = "local"
 
         # Load data
         self.index = self._load_index()
@@ -329,10 +266,10 @@ class KnowledgeBase:
 
             elif ext == ".pdf":
                 try:
-                    import PyPDF2
+                    import pypdf
 
                     with open(file_path, "rb") as f:
-                        reader = PyPDF2.PdfReader(f)
+                        reader = pypdf.PdfReader(f)
                         text = []
                         for page in reader.pages:
                             text.append(page.extract_text())

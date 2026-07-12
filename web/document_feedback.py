@@ -19,6 +19,7 @@ from app.core.llm.model_capabilities import (
     is_interactions_only_model,
     normalize_model_id,
 )
+from app.core.llm.model_selection import is_archived_cloud_model
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +28,11 @@ class DocumentFeedbackSystem:
     """文档智能反馈系统"""
 
     def __init__(
-        self, gemini_client=None, default_model_id: str = "gemini-2.5-pro"
+        self, gemini_client=None, default_model_id: str = "deepseek-chat"
     ):
         """
         Args:
-            gemini_client: Gemini API客户端实例
+            gemini_client: 兼容参数名；传入当前活动模型客户端
             default_model_id: 默认优先模型（必须是支持 generate_content 的模型，不能是 Interactions-only 模型）
         """
         self.client = gemini_client
@@ -73,17 +74,15 @@ class DocumentFeedbackSystem:
         if not self._is_local_client():
             return preferred
 
-        lowered = preferred.lower()
-        if lowered and lowered not in {"auto", "cloud", "local"} and not lowered.startswith("gemini"):
-            return preferred
-
+        # A local proxy has already selected the concrete Ollama model. Cloud
+        # defaults or stale UI model ids must not override that runtime identity.
         return self._local_client_model_id() or preferred or "local"
 
     def analyze_and_suggest(
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
     ) -> Dict[str, Any]:
         """
         分析文档并给出AI修改建议
@@ -125,7 +124,7 @@ class DocumentFeedbackSystem:
         logger.info(f"[DocumentFeedback] 🤖 AI分析中...")
 
         try:
-            from google.genai import types
+            from app.core.llm.provider_compat import types
 
             response = self.client.models.generate_content(
                 model=selected_model,
@@ -477,7 +476,7 @@ class DocumentFeedbackSystem:
                         # 跳过 Interactions-only 模型（仅支持 Interactions API，不能用于 generate_content）
                         if not is_interactions_only_model(
                             base_name, self._INTERACTIONS_ONLY_MODELS
-                        ):
+                        ) and not is_archived_cloud_model(base_name):
                             models.append(
                                 {
                                     "name": base_name,
@@ -512,26 +511,14 @@ class DocumentFeedbackSystem:
         safe_preferred = (
             preferred
             if not is_interactions_only_model(preferred, self._INTERACTIONS_ONLY_MODELS)
-            else "gemini-2.5-flash"
+            and not is_archived_cloud_model(preferred)
+            else "deepseek-chat"
         )
 
         if not models:
             return safe_preferred, models
 
-        priority = [
-            safe_preferred,
-            # gemini-2.5-flash / gemini-2.5-pro 是 generate_content 模型，可正常使用
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            # gemini-2.5-pro 是目前最强的可用模型
-            "gemini-2.5-pro",
-            "gemini-2.5-pro-customtools",
-            "gemini-3-flash",
-            "gemini-3-pro",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.0-pro",
-        ]
+        priority = [safe_preferred, "deepseek-chat"]
 
         for name in priority:
             if name in available:
@@ -568,19 +555,9 @@ class DocumentFeedbackSystem:
             return resolved_preferred
         if self._is_local_client():
             return resolved_preferred
-        from google.genai import types as _gt
+        from app.core.llm.provider_compat import types as _gt
 
-        probe_order = list(
-            dict.fromkeys(
-                [
-                    resolved_preferred,
-                    "gemini-2.5-pro",
-                    "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "gemini-2.5-flash",
-                ]
-            )
-        )
+        probe_order = list(dict.fromkeys([resolved_preferred, "deepseek-chat"]))
         probe_order = [
             m
             for m in probe_order
@@ -669,13 +646,9 @@ class DocumentFeedbackSystem:
                 logger.debug("[DocumentFeedback] status_callback 调用失败: %s", exc)
 
         def _call_model(contents: str):
-            from google.genai import types
+            from app.core.llm.provider_compat import types
 
-            # gemini-2.5-pro 是思维链模型：thinking tokens 计入 max_output_tokens 预算
-            # 设置 thinking_budget=4096 防止思考链耗尽 token 预算；max_output_tokens 提升至 16000
-            _is_thinking_model = (not is_local_client) and (
-                "2.5" in runtime_model_id or "gemini-3" in runtime_model_id
-            )
+            _is_thinking_model = False
             _thinking_cfg = (
                 types.ThinkingConfig(thinking_budget=4096)
                 if _is_thinking_model
@@ -2077,7 +2050,7 @@ class DocumentFeedbackSystem:
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-2.5-pro",
+        model_id: str = "deepseek-chat",
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议
@@ -2149,7 +2122,7 @@ class DocumentFeedbackSystem:
             )
 
             try:
-                from google.genai import types
+                from app.core.llm.provider_compat import types
 
                 response = self.client.models.generate_content(
                     model=selected_model,
@@ -3248,7 +3221,7 @@ def collect_annotation_result(
     file_path: str,
     user_requirement: str,
     gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
+    model_id: str = "deepseek-chat",
     task_id: Optional[str] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     skill_prompt: str = "",
@@ -3296,7 +3269,7 @@ def iter_annotation_progress_events(
     file_path: str,
     user_requirement: str,
     gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
+    model_id: str = "deepseek-chat",
     task_id: Optional[str] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     skill_prompt: str = "",
@@ -3319,7 +3292,7 @@ def stream_annotation_events(
     file_path: str,
     user_requirement: str,
     gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
+    model_id: str = "deepseek-chat",
     task_id: Optional[str] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
     skill_prompt: str = "",

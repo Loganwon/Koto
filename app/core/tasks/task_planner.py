@@ -393,7 +393,7 @@ class TaskPlanner:
         task_id: str,
         user_input: str,
         llm_provider: Any,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         available_tools: Optional[List[str]] = None,
         session_context: str = "",
     ) -> Plan:
@@ -508,7 +508,7 @@ class TaskPlanner:
         task_id: str,
         user_input: str,
         llm_provider: Any,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         tool_registry: Any = None,
         history: Optional[List[Dict[str, Any]]] = None,
     ) -> "Plan":
@@ -608,7 +608,7 @@ class TaskPlanner:
         approval_fn: Optional[Callable[[PlanStep], bool]] = None,
         cancel_check: Optional[Callable[[], bool]] = None,
         llm_provider: Any = None,
-        replan_model_id: str = "gemini-2.5-flash",
+        replan_model_id: str = "deepseek-chat",
     ) -> Generator[Dict[str, Any], None, None]:
         """
         顺序执行计划中所有就绪步骤。
@@ -833,7 +833,7 @@ class TaskPlanner:
         self,
         plan: Plan,
         llm_provider: Any,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         replan_hint: str = "",
         completed_summary: str = "",
     ) -> bool:

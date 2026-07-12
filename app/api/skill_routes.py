@@ -1147,12 +1147,11 @@ def ask_koto_recommend():
   "reasoning": "简短说明为什么选这几个（≤60字）"
 }}"""
 
-        from app.core.llm.gemini import GeminiProvider
+        from app.core.llm.provider_factory import get_llm_provider
 
-        client = GeminiProvider()
+        client = get_llm_provider(provider="deepseek", allow_local_fallback=False)
         raw = client.generate_content(
             prompt=prompt,
-            model="gemini-2.5-flash",
             temperature=0.2,
             max_tokens=400,
         )

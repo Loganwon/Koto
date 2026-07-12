@@ -385,15 +385,15 @@ class OrganizeCleanup:
     # 7. AI 重命名（可选）
     # ──────────────────────────────────────────────
     def _ai_rename_folders(self) -> int:
-        """使用 Gemini AI 模型分析文件内容并重命名文件夹。"""
+        """使用当前 DeepSeek 模型分析文件名并重命名文件夹。"""
         renames = 0
         try:
-            import google.genai as genai
+            from app.core.llm import provider_compat as genai
 
             from app.core.config import get_settings
 
             settings = get_settings()
-            api_key = settings.get("gemini_api_key") or os.environ.get("GEMINI_API_KEY")
+            api_key = settings.get("deepseek_api_key") or os.environ.get("DEEPSEEK_API_KEY")
             if not api_key:
                 self._log("AI 重命名: 未找到 API key，跳过")
                 return 0
@@ -431,7 +431,7 @@ class OrganizeCleanup:
 
             try:
                 response = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
+                    model="deepseek-chat",
                     contents=prompt,
                 )
                 suggested_name = response.text.strip().strip('"').strip("'")
