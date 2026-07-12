@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Current ownership is documented in [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # Legacy Code Path Audit
 
 Date: 2026-06-28
@@ -16,6 +18,9 @@ assistant overlap.
 | Memory runtime helpers | `get_memory_manager`, `_start_memory_extraction`, and `get_knowledge_base` now live in `web.memory_runtime`; `web.app` only re-exports the old names. | `tests/unit/test_architecture_guardrails.py::test_memory_runtime_implementation_stays_outside_web_app` |
 | Task orchestrator | `TaskOrchestrator` now lives in `web.task_orchestrator`; the old `web.app.TaskOrchestrator` compatibility export has been removed. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_implementation_stays_outside_web_app` |
 | Task orchestrator runtime | Runtime proxies for client/model/settings/workspace now live in `web.task_orchestrator_runtime`, keeping `web.task_orchestrator` focused on orchestration behavior. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_implementation_stays_outside_web_app` |
+| Background file-task API | `app.api.task_routes` now calls `web.file_task_stream` directly instead of relaying through `web.runtime_context`. | `tests/unit/test_architecture_guardrails.py::test_background_file_tasks_call_the_file_task_stream_owner_directly` |
+| Agent model selection | `app.core.agent.llm_provider_helpers` now uses Core model selection directly rather than reflecting through `web.runtime_context`. | `tests/unit/test_architecture_guardrails.py::test_core_llm_provider_helpers_do_not_reflect_through_web_runtime_context` |
+| Agent memory tools | `MemoryToolsPlugin` now resolves the established `web.memory_runtime` owner directly instead of reflecting through `web.runtime_context`. | `tests/unit/test_architecture_guardrails.py::test_memory_tools_plugin_uses_the_memory_runtime_owner_directly` |
 | Task file generation | `_execute_file_gen` now delegates to `web.task_orchestrator_filegen.execute_file_gen`, isolating document/PPT/Excel export logic from the orchestrator class. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_filegen_lives_outside_orchestrator_class` |
 | Task step executors | Painter, research, coder, and system execution now delegate to `web.task_orchestrator_steps`, leaving the orchestrator class focused on sequencing. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_step_executors_live_outside_orchestrator_class` |
 | Task PPT multi-step execution | PPT planning, quality gate, and rendering now delegate to `web.task_orchestrator_ppt.execute_ppt_multi_step`, keeping heavy PPT execution details out of the orchestrator class. | `tests/unit/test_architecture_guardrails.py::test_task_orchestrator_ppt_multi_step_lives_outside_orchestrator_class` |
@@ -46,7 +51,7 @@ files as compatibility shims:
 
 | Removed path | Current owner |
 | --- | --- |
-| `web/static/js/workspace-assistant.js` | `web/src/` modules bundled into `web/static/js/build/workspace-bundle.js` |
+| `web/src/workspace/ (已迁移至模块化工作区)` | `web/src/` modules bundled into `web/static/js/build/workspace-bundle.js` |
 | `web/static/js/workspace-ai-*.js` | `web/src/workspace/*` TypeScript modules |
 | `web/static/js/workspace-task-*.js` | `web/src/workspace/*` TypeScript modules |
 | `web/templates/workspace_assistant.html` | `web/templates/index.html` |

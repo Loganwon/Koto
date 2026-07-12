@@ -36,7 +36,7 @@ If those prerequisites are missing:
 - direct `pytest tests/e2e/...` runs will skip browser tests instead of failing with a missing `page` fixture error
 - `python scripts/run_ai_assistant_flow_tests.py browser-mock`, `browser`, `test-ready`, and `release` will stop early with an explicit prerequisite message
 
-Two composite lanes are defined in [scripts/run_ai_assistant_flow_tests.py](scripts/run_ai_assistant_flow_tests.py):
+Two composite lanes are defined in [scripts/run_ai_assistant_flow_tests.py](../scripts/run_ai_assistant_flow_tests.py):
 
 - `full`: `smoke + contracts + backend + runtime + matrix`
 - `release`: `full + browser-mock`
@@ -109,22 +109,26 @@ python scripts/run_ai_assistant_flow_tests.py release -vv
 
 The runner passes extra arguments through to `pytest`, so `-k`, `-x`, `-vv`, or `--headed` can be appended as needed.
 
+All lanes run with `KOTO_SKIP_BACKGROUND_RUNTIME=1`. This keeps task-stream and
+browser-mock assertions isolated from production schedulers, model warmups, and
+file watchers; it does not replace a real desktop startup or live-frontend test.
+
 ## Coverage Map
 
-- Workspace send-message entry and payload wiring: [tests/test_ai_stream.py](tests/test_ai_stream.py) and [tests/unit/test_ai_task_chain_architecture.py](tests/unit/test_ai_task_chain_architecture.py)
-- Whitebox task-stream SSE contract and persistence: [tests/test_ai_stream.py](tests/test_ai_stream.py)
-- File-task runtime and native routing: [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py)
-- Task-family routing and completion-contract coverage: [tests/unit/test_ai_task_family_matrix.py](tests/unit/test_ai_task_family_matrix.py), [tests/unit/test_file_task_recipes.py](tests/unit/test_file_task_recipes.py), and [tests/unit/test_file_task_classification_recipes.py](tests/unit/test_file_task_classification_recipes.py)
-- Provider timeout and local routing behavior: [tests/unit/test_llm_providers.py](tests/unit/test_llm_providers.py) and [tests/unit/test_file_task_runtime.py](tests/unit/test_file_task_runtime.py)
-- Browser-level assistant shell and mocked task-card rendering: [tests/e2e/test_workspace_ai_assistant.py](tests/e2e/test_workspace_ai_assistant.py)
-- MCP route, frontend-action, WebSocket, and stdio bridge contracts: [tests/unit/test_mcp_integration.py](tests/unit/test_mcp_integration.py)
+- Workspace send-message entry and payload wiring: [tests/test_ai_stream.py](../tests/test_ai_stream.py) and [tests/unit/test_ai_task_chain_architecture.py](../tests/unit/test_ai_task_chain_architecture.py)
+- Whitebox task-stream SSE contract and persistence: [tests/test_ai_stream.py](../tests/test_ai_stream.py)
+- File-task runtime and native routing: [tests/unit/test_file_task_runtime.py](../tests/unit/test_file_task_runtime.py)
+- Task-family routing and completion-contract coverage: [tests/unit/test_ai_task_family_matrix.py](../tests/unit/test_ai_task_family_matrix.py), [tests/unit/test_file_task_recipes.py](../tests/unit/test_file_task_recipes.py), and [tests/unit/test_file_task_classification_recipes.py](../tests/unit/test_file_task_classification_recipes.py)
+- Provider timeout and local routing behavior: [tests/unit/test_llm_providers.py](../tests/unit/test_llm_providers.py) and [tests/unit/test_file_task_runtime.py](../tests/unit/test_file_task_runtime.py)
+- Browser-level assistant shell and mocked task-card rendering: [tests/e2e/test_workspace_ai_assistant.py](../tests/e2e/test_workspace_ai_assistant.py)
+- MCP route, frontend-action, WebSocket, and stdio bridge contracts: [tests/unit/test_mcp_integration.py](../tests/unit/test_mcp_integration.py)
 
 ## Update Rule
 
 Whenever the AI assistant flow changes, update both:
 
 - the relevant behavior tests
-- the lane definition in [scripts/run_ai_assistant_flow_tests.py](scripts/run_ai_assistant_flow_tests.py) if the critical path moved or a new lane is needed
+- the lane definition in [scripts/run_ai_assistant_flow_tests.py](../scripts/run_ai_assistant_flow_tests.py) if the critical path moved or a new lane is needed
 
 If a flow change is large enough to alter the routing boundary, the minimum expectation is:
 

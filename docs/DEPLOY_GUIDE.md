@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current deployment or release procedure.** Use [RELEASE_GATE.md](RELEASE_GATE.md) for the supported release path.
+
 # Koto SaaS 部署指南
 
 ## 架构概览

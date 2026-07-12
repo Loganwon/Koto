@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current documentation index.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) instead.
+
 # 📑 P0 项目文件索引和导航
 
 ## 快速查找目录
@@ -131,7 +133,7 @@ docs/
 
 ### 👨‍💻 前端开发
 1. [P0_QUICK_REFERENCE.md](P0_QUICK_REFERENCE.md#️-前端-ppt-按钮) - 前端按钮部分
-2. [app.js](../web/static/js/app.js#L668) - downloadPPT 函数
+2. [app.js](../web/src/app/ (已迁移至模块化主应用)#L668) - downloadPPT 函数
 3. [style.css](../web/static/css/style.css#L2830) - CSS 样式
 
 ### 🔧 后端开发
@@ -328,7 +330,7 @@ Get-Content "docs/P0_CHANGELOG.md" | Measure-Object -Line
 
 ```
 代码文件:
-☐ [web/static/js/app.js](../web/static/js/app.js) 已修改
+☐ [web/src/app/ (已迁移至模块化主应用)](../web/src/app/ (已迁移至模块化主应用)) 已修改
 ☐ [web/static/css/style.css](../web/static/css/style.css) 已修改
 ☐ [web/app.py](../web/app.py) 已修改
 ☐ [tests/test_p0_comprehensive.py](../tests/test_p0_comprehensive.py) 已创建

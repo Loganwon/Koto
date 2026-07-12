@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for current entrypoints.
+
 # P0 功能实现变更日志
 
 **生成日期**: 2025-02-19
@@ -10,7 +12,7 @@
 
 | 文件 | 修改类型 | 行数 | 描述 |
 |------|---------|------|------|
-| web/static/js/app.js | 修改 + 新增 | 50+ | 添加 PPT 按钮和下载函数 |
+| web/src/app/ (已迁移至模块化主应用) | 修改 + 新增 | 50+ | 添加 PPT 按钮和下载函数 |
 | web/static/css/style.css | 新增 | 60+ | 添加 6 个 CSS 样式类 |
 | web/app.py | 修改 + 新增 | 100+ | 添加 API 端点和导入 |
 | tests/test_p0_comprehensive.py | 新建 | 450+ | 完整的测试套件 |
@@ -21,7 +23,7 @@
 
 ## 🔧 详细变更
 
-### 1. web/static/js/app.js
+### 1. web/src/app/ (已迁移至模块化主应用)
 
 #### 变更 1.1: 添加 downloadPPT 函数 (L668-698)
 

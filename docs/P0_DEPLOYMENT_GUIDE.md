@@ -1,3 +1,5 @@
+> **Historical snapshot — not a release procedure.** Use [RELEASE_GATE.md](RELEASE_GATE.md) for the current release gate.
+
 # P0 部署和验证指南
 
 ## 🚀 部署前检查清单
@@ -27,7 +29,7 @@ Test-Path "tests\test_p0_comprehensive.py"    # 应显示 True
 grep "from flask import send_file" web/app.py
 
 # 检查 app.js 是否包含 downloadPPT 函数
-grep "function downloadPPT" web/static/js/app.js
+grep "function downloadPPT" web/src/app/ (已迁移至模块化主应用)
 ```
 
 **验证 API 端点**:

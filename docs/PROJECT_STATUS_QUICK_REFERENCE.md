@@ -1,3 +1,5 @@
+> **Historical snapshot — not current project status.** Use [KOTO_CODE_DEBT_REPORT.md](KOTO_CODE_DEBT_REPORT.md) and [RELEASE_GATE.md](RELEASE_GATE.md).
+
 # ⚡ Koto 触发器功能 - 项目状态速查表
 
 **最后更新**: 2025-02-14 | **状态**: ✅ 完成 | **版本**: 1.0
@@ -27,7 +29,7 @@
 |------|--------|------|
 | `web/proactive_trigger.py` | +150 行 | ✅ 完成 |
 | `web/app.py` | +70 行 | ✅ 完成 |
-| `web/static/js/app.js` | +100 行 | ✅ 完成 |
+| `web/src/app/ (已迁移至模块化主应用)` | +100 行 | ✅ 完成 |
 | `web/static/css/style.css` | +50 行 | ✅ 完成 |
 
 ### ✅ 已交付的文档

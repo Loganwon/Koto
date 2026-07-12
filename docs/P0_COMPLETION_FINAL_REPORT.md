@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for active documentation.
+
 # P0 功能集成完成报告
 
 ## 📊 执行摘要
@@ -24,7 +26,7 @@
 
 ### 1. 前端 PPT 编辑和下载按钮 ✅
 
-**文件**: [web/static/js/app.js](web/static/js/app.js), [web/static/css/style.css](web/static/css/style.css)
+**文件**: [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用)), [web/static/css/style.css](web/static/css/style.css)
 
 **实现内容**:
 - 在 `renderMessage()` 中添加 PPT 操作按钮 HTML
@@ -239,7 +241,7 @@ except Exception as e:
 
 ### 前端改动
 
-**文件**: [web/static/js/app.js](web/static/js/app.js)
+**文件**: [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用))
 
 ```javascript
 // 修改 1: renderMessage() 添加 PPT 按钮 (L800+)
@@ -501,7 +503,7 @@ def get_ppt_session(session_id):
 ## 📝 核心文件清单
 
 **已修改**:
-- [web/static/js/app.js](web/static/js/app.js) - 前端 JS
+- [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用)) - 前端 JS
 - [web/static/css/style.css](web/static/css/style.css) - CSS 样式
 - [web/app.py](web/app.py) - 后端 API 端点
 

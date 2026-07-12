@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** The referenced frontend paths may be removed; see [ARCHITECTURE.md](ARCHITECTURE.md).
+
 # 文档标注进度卡顿修复说明
 
 ## 问题描述
@@ -125,7 +127,7 @@ from typing import Dict, Any, Optional, List, Callable
 ## 相关文件
 - [web/document_feedback.py](web/document_feedback.py) - 核心修复
 - [web/app.py](web/app.py#L10877) - SSE流式API
-- [web/static/js/app.js](web/static/js/app.js) - 前端进度显示
+- [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用)) - 前端进度显示
 
 ## 下次改进
 - [ ] 添加取消功能（当前已有check_task_cancelled但未完全接入）
