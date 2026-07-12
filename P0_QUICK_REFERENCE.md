@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current quick start.** Use [QUICKSTART.md](QUICKSTART.md) instead.
+
 # P0 实施快速参考指南
 
 ## 🎯 核心功能速查表
@@ -15,9 +17,9 @@ if (meta.ppt_session_id && role === 'assistant' && meta.task === 'FILE_GEN')
 - 下载按钮: `.ppt-download-btn` - 绿色，按钮式
 
 **关键代码位置**:
-- HTML: [web/static/js/app.js](web/static/js/app.js#L800)
+- HTML: [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用)#L800)
 - CSS: [web/static/css/style.css](web/static/css/style.css#L2830)
-- JS 函数: [downloadPPT()](web/static/js/app.js#L668)
+- JS 函数: [downloadPPT()](web/src/app/ (已迁移至模块化主应用)#L668)
 
 ---
 
@@ -192,7 +194,7 @@ python tests/test_p0_comprehensive.py
 ## 🚀 部署清单
 
 - [ ] 更新 [web/app.py](web/app.py) - 添加新 API 端点
-- [ ] 更新 [web/static/js/app.js](web/static/js/app.js) - 前端逻辑
+- [ ] 更新 [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用)) - 前端逻辑
 - [ ] 更新 [web/static/css/style.css](web/static/css/style.css) - 样式
 - [ ] 创建会话目录: `workspace/ppt_sessions/`
 - [ ] 运行测试: `python tests/test_p0_comprehensive.py`

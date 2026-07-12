@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current file map.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) instead.
+
 # 📊 项目最终交付 - 所有文件总结
 
 **更新日期**: 2025年2月14日  
@@ -38,7 +40,7 @@
   - 增强 POST /api/triggers/update
 - **状态**: ✅ 完成并通过测试
 
-### 3. `web/static/js/app.js` (+100 行)
+### 3. `web/src/app/ (已迁移至模块化主应用)` (+100 行)
 - **位置**: `/web/static/js/`
 - **修改**: +100 行代码
 - **内容**: 前端 JavaScript 交互逻辑

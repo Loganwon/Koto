@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for current owners and commands.
+
 # P0 集成完成报告
 
 ## 执行摘要
@@ -41,7 +43,7 @@
   - ✅ 文件移除功能
   - ✅ 支持多文件选择 (MAX 10 files)
 
-- **JavaScript 文件处理** (`web/static/js/app.js`)
+- **JavaScript 文件处理** (`web/src/app/ (已迁移至模块化主应用)`)
   - ✅ `handleFileSelect()` - 文件选择处理
   - ✅ `handleDragOver()` - 拖拽覆盖
   - ✅ `handleDrop()` - 拖拽放入
@@ -224,7 +226,7 @@ PPTGenerator
 
 ### 4.3 未修改
 - `web/templates/index.html` - 前端基础已完整，保持不动
-- `web/static/js/app.js` - 文件处理函数已完整，保持不动
+- `web/src/app/ (已迁移至模块化主应用)` - 文件处理函数已完整，保持不动
 
 ---
 

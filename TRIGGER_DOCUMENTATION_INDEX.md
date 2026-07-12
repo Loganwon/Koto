@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current documentation index.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) instead.
+
 # 📑 Koto 触发器参数编辑功能 - 文档索引
 
 **完成日期**: 2025年2月14日  
@@ -83,7 +85,7 @@
 |------|------|------|
 | `web/proactive_trigger.py` | +150 行 | 参数管理系统 |
 | `web/app.py` | +70 行 | API 端点 |
-| `web/static/js/app.js` | +100 行 | UI 交互 |
+| `web/src/app/ (已迁移至模块化主应用)` | +100 行 | UI 交互 |
 | `web/static/css/style.css` | +50 行 | 样式美化 |
 
 ---
@@ -176,7 +178,7 @@
 
 - 后端: `web/proactive_trigger.py` (ProactiveTriggerSystem 类)
 - API: `web/app.py` (触发器路由)
-- 前端: `web/static/js/app.js` (renderTriggerList, saveTrigger 函数)
+- 前端: `web/src/app/ (已迁移至模块化主应用)` (renderTriggerList, saveTrigger 函数)
 - 样式: `web/static/css/style.css` (.trigger-params-section 等)
 
 ---

@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Refer to [ARCHITECTURE.md](ARCHITECTURE.md) for current frontend ownership.
+
 # 设置面板 UI 优化说明
 
 ## 🎯 修复内容
@@ -131,7 +133,7 @@
    - 新增 `.toggle-label` 样式
    - 优化 `.setting-hint` 边距和字体
 
-3. **web/static/js/app.js**
+3. **web/src/app/ (已迁移至模块化主应用)**
    - 移除对 `settingAutoExecute` 的引用
    - 移除对 `settingVoiceAutoSend` 的引用
    - 移除对 `settingProxyAuto` 的引用

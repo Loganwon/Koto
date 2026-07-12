@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current release checklist.** Use [RELEASE_GATE.md](RELEASE_GATE.md) instead.
+
 # 📦 Koto v2.0 触发器参数编辑功能 - 最终交付清单
 
 **项目**: Koto v2.0 触发器参数编辑功能  
@@ -35,7 +37,7 @@
   - [x] 错误处理
 - **状态**: ✅ 完成并通过测试
 
-#### ✅ web/static/js/app.js
+#### ✅ web/src/app/ (已迁移至模块化主应用)
 - **修改量**: +100 行
 - **内容**:
   - [x] 参数渲染函数优化
@@ -299,7 +301,7 @@
 总计: 4 个文件
 ├─ web/proactive_trigger.py     +150 行
 ├─ web/app.py                   +70 行
-├─ web/static/js/app.js         +100 行
+├─ web/src/app/ (已迁移至模块化主应用)         +100 行
 └─ web/static/css/style.css     +50 行
    总计: +370 行
 ```
@@ -474,7 +476,7 @@
 - [x] **代码文件** (4 个)
   - [x] web/proactive_trigger.py
   - [x] web/app.py
-  - [x] web/static/js/app.js
+  - [x] web/src/app/ (已迁移至模块化主应用)
   - [x] web/static/css/style.css
 
 - [x] **文档文件** (11 个)

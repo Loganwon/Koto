@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for active documentation.
+
 # 触发器阈值可编辑功能 - 完成总结
 
 **日期**: 2025年2月14日  
@@ -49,7 +51,7 @@
 - ✅ `_check_unorganized_files()` - 使用配置的建议阈值
 - ✅ `_check_pending_suggestions()` - 添加 trigger_id
 
-### 2. 前端界面增强 (`web/static/js/app.js`)
+### 2. 前端界面增强 (`web/src/app/ (已迁移至模块化主应用)`)
 
 #### 参数编辑 UI
 - ✅ 新增"⚙️ 参数"按钮（点击展开/收起参数区域）
@@ -200,7 +202,7 @@ POST /api/triggers/params/<trigger_id>
 ## 📈 影响范围
 
 ### 直接影响
-- ✅ Koto 主应用 (`web/app.py`, `web/static/js/app.js`)
+- ✅ Koto 主应用 (`web/app.py`, `web/src/app/ (已迁移至模块化主应用)`)
 - ✅ 触发器系统 (`web/proactive_trigger.py`)
 - ✅ 所有触发条件检查函数
 
@@ -226,7 +228,7 @@ POST /api/triggers/params/<trigger_id>
 修改:
   web/proactive_trigger.py          (+150 行, 参数管理系统)
   web/app.py                        (+70 行, API 端点)
-  web/static/js/app.js              (+100 行, UI 交互)
+  web/src/app/ (已迁移至模块化主应用)              (+100 行, UI 交互)
   web/static/css/style.css          (+50 行, 样式)
 
 新增:

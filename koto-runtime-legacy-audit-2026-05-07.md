@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [ARCHITECTURE.md](ARCHITECTURE.md) and [KOTO_CODE_DEBT_REPORT.md](KOTO_CODE_DEBT_REPORT.md) for the live architecture.
+
 # Koto Runtime And Legacy Audit
 
 Date: 2026-05-07
@@ -41,7 +43,7 @@ Current source-of-truth layers:
 
 - Backend app and routes: `web/app.py`, `web/blueprints/`, `app/api/`
 - Frontend page shell: `web/templates/`
-- Frontend workspace runtime: `web/static/js/workspace-assistant.js`, `web/static/js/workspace-ai-task.js`
+- Frontend workspace runtime: `web/src/workspace/ (已迁移至模块化工作区)`, `web/static/js/workspace-ai-task.js`
 - File task runtime: `app/core/agent/file_task_runtime.py`
 
 Generated or non-source layers:
@@ -81,23 +83,23 @@ Browser inspection of the live page confirms:
 | User-facing capability | Frontend owner | Backend owner | Current status |
 | --- | --- | --- | --- |
 | Open workspace page | `web/blueprints/pages.py:132` + `web/templates/workspace_assistant.html` | `web/app.py` blueprint registration | Primary |
-| Workspace file tree and current workspace metadata | `web/static/js/workspace-assistant.js` fetches `/api/v1/workspace/current_dir` | `web/blueprints/workspace_assistant.py` | Primary |
-| Recent files and search | `web/static/js/workspace-assistant.js` fetches `/api/files/recent` and `/api/files/search` | `app/api/file_hub_routes.py:237`, `app/api/file_hub_routes.py:323` | Primary |
-| Open file from workspace | `window.WA.openWorkspaceFile` at `web/static/js/workspace-assistant.js:3102` | `web/blueprints/workspace_assistant.py:266` and `:368` | Primary |
-| Editor dispatch by file type | `_mountOpenTabEditor` at `web/static/js/workspace-assistant.js:451` | Parsed file payload from `workspace_assistant.py` | Primary |
+| Workspace file tree and current workspace metadata | `web/src/workspace/ (已迁移至模块化工作区)` fetches `/api/v1/workspace/current_dir` | `web/blueprints/workspace_assistant.py` | Primary |
+| Recent files and search | `web/src/workspace/ (已迁移至模块化工作区)` fetches `/api/files/recent` and `/api/files/search` | `app/api/file_hub_routes.py:237`, `app/api/file_hub_routes.py:323` | Primary |
+| Open file from workspace | `window.WA.openWorkspaceFile` at `web/src/workspace/ (已迁移至模块化工作区):3102` | `web/blueprints/workspace_assistant.py:266` and `:368` | Primary |
+| Editor dispatch by file type | `_mountOpenTabEditor` at `web/src/workspace/ (已迁移至模块化工作区):451` | Parsed file payload from `workspace_assistant.py` | Primary |
 | DOCX editing | `_mountDocxEditor` and `_ensureTipTap` in `workspace-assistant.js` | `workspace_assistant.py` open + `docx_full` progressive fetch | Primary |
 | XLSX editing | `_ensureUniverSheets` and `KotoXlsxEditor` in `workspace-assistant.js` | `workspace_assistant.py` open/save/export | Primary |
 | PPTX editing | `KotoPptxEditor` in `workspace-assistant.js` | `workspace_assistant.py` parsing path plus PPTX helpers | Primary |
 | PDF viewing and PDF ops | `KotoPdfViewer` in `workspace-assistant.js` | `workspace_assistant.py` PDF routes | Primary |
 | Text/code editing | `KotoTextEditor` in `workspace-assistant.js` | `workspace_assistant.py` | Primary |
-| Quick AI actions on selection or current content | `WA.quickAction` and `WA.sendQuickAction` in `workspace-assistant.js` | `/api/editor/ai/stream` in `web/app.py:18326` | Current secondary AI path |
-| Whitebox file task stream | `WA.sendMessage` in `workspace-assistant.js` -> `WA.streamWhiteboxTask` in `workspace-ai-task.js:619` | `/api/editor/ai/task-stream` in `web/app.py:18312` -> `FileTaskRuntime` | Current primary file-task AI path |
+| Quick AI actions on selection or current content | `WA.quickAction` and `WA.sendQuickAction` in `workspace-assistant.js` | `/api/editor/ai/stream` in `web/blueprints/editor_ai.py` | Current secondary AI path |
+| Whitebox file task stream | `WA.sendMessage` in `workspace-assistant.js` -> `WA.streamWhiteboxTask` in `workspace-ai-task.js:619` | `/api/editor/ai/task-stream` in `web/blueprints/editor_ai.py` -> `FileTaskRuntime` | Current primary file-task AI path |
 | Save / export / auto-save / versions | `workspace-assistant.js` buttons and timers | `workspace_assistant.py` save, auto_save, versions, restore-version | Primary |
 | Audio overview and notebook guide | `workspace-assistant.js` modal/drawer actions | `workspace_assistant.py` `/audio_overview` and `/notebook_guide` | Primary but auxiliary |
 
 ### 2.3 File-Type Ownership
 
-Current editor/viewer ownership is not split across multiple page systems. It is centralized in `web/static/js/workspace-assistant.js`.
+Current editor/viewer ownership is not split across multiple page systems. It is centralized in `web/src/workspace/ (已迁移至模块化工作区)`.
 
 - DOCX: `_mountDocxEditor` creates `new KotoDocxEditorLib.KotoTipTapEditor()` and `_ensureTipTap` loads `/static/js/tiptap-docx-bundle.js`.
 - XLSX: `_ensureUniverSheets` loads `/static/univer-dist/assets/sheets-main.css` and `/static/univer-dist/assets/sheets-main.js`, then `KotoXlsxEditor` talks to `window.KotoSheetsAPI`.
@@ -117,9 +119,9 @@ Conclusion:
 
 `web/app.py` is the real control center for live backend routing.
 
-- `_register_blueprints_deferred()` is defined at `web/app.py:1843`.
-- `workspace_assistant_bp` is registered through that path at `web/app.py:2112`.
-- `_register_blueprints_deferred()` is called at `web/app.py:2276`.
+- `_register_blueprints_deferred()` is defined at `web/app_blueprints.py`.
+- `workspace_assistant_bp` is registered through that path at `web/app_blueprints.py`.
+- `_register_blueprints_deferred()` is called at `web/app_blueprints.py`.
 
 That makes `web/app.py` the place where backend user-visible behavior is actually wired into the live app.
 
@@ -129,8 +131,8 @@ That makes `web/app.py` the place where backend user-visible behavior is actuall
 | --- | --- | --- |
 | File workstation BFF | `web/blueprints/workspace_assistant.py` | Owns open, save, temp raw files, versions, PDF ops, workspace FS operations |
 | File search/recent/archive | `app/api/file_hub_routes.py` | Feeds the workstation sidebar and archive flows |
-| Whitebox file task AI | `web/app.py:18312` + `_stream_whitebox_file_task_request` at `web/app.py:2520` + `app/core/agent/file_task_runtime.py` | This is the current primary file-task AI runtime |
-| Quick editor AI actions | `web/app.py:18326` | Handles selection-based translate/polish/check/summarize and other editor actions |
+| Whitebox file task AI | `web/blueprints/editor_ai.py` + `_stream_whitebox_file_task_request` at `web/file_task_stream.py` + `app/core/agent/file_task_runtime.py` | This is the current primary file-task AI runtime |
+| Quick editor AI actions | `web/blueprints/editor_ai.py` | Handles selection-based translate/polish/check/summarize and other editor actions |
 | Generic task ledger/progress system | `app/api/task_routes.py` | Still live infrastructure, but not the primary workstation user feel path |
 | Legacy/compat agent callbacks | `app/api/agent_routes.py` | Still registered, but mostly compatibility or retirement surfaces |
 
@@ -141,8 +143,8 @@ The live path is:
 - `WA.sendMessage` at `workspace-assistant.js:11836`
 - `WA.streamWhiteboxTask` at `workspace-ai-task.js:619`
 - POST `/api/editor/ai/task-stream` at `workspace-ai-task.js:626`
-- `web/app.py:18312` route
-- `_stream_whitebox_file_task_request()` at `web/app.py:2520`
+- `web/blueprints/editor_ai.py` route
+- `_stream_whitebox_file_task_request()` at `web/file_task_stream.py`
 - `FileTaskRuntime.run()` in `app/core/agent/file_task_runtime.py`
 
 This is the current primary AI path for file tasks because it is the only path that is both:
@@ -158,7 +160,7 @@ Quick actions still use `/api/editor/ai/stream`.
 Evidence:
 
 - `WA.sendQuickAction` sends to `/api/editor/ai/stream` from `workspace-assistant.js:4050`.
-- `_EDITOR_AI_STREAM_ACTIONS` in `web/app.py:17946` includes `translate`, `polish`, `summarize`, `check`, `chart`, `find_replace`, `custom_instruction`, and more.
+- `_EDITOR_AI_STREAM_ACTIONS` in `web/blueprints/editor_ai.py` includes `translate`, `polish`, `summarize`, `check`, `chart`, `find_replace`, `custom_instruction`, and more.
 
 So this route is not dead. It is just no longer the primary multi-file/file-task path.
 
@@ -187,7 +189,7 @@ These are live but not the current central path users feel when using the workst
 These are current and should not be treated as dead code:
 
 - `web/templates/workspace_assistant.html`
-- `web/static/js/workspace-assistant.js`
+- `web/src/workspace/ (已迁移至模块化工作区)`
 - `web/static/js/workspace-ai-task.js`
 - `web/blueprints/workspace_assistant.py`
 - `web/app.py` routes `/api/editor/ai/task-stream` and `/api/editor/ai/stream`
@@ -221,10 +223,10 @@ These are still in source, but their behavior is mostly retirement or compatibil
 
 | Item | Evidence | Judgment |
 | --- | --- | --- |
-| `WA.extractTopics` | `web/static/js/workspace-assistant.js:11447` only shows a retirement warning | Retired stub |
-| `WA.sendInlineMessage` | `web/static/js/workspace-assistant.js:12182` only returns a disabled message | Retired stub |
-| `WA.setOutputMode` | `web/static/js/workspace-assistant.js:11980` hard-locks inline mode | Compat shim |
-| `WA.applyAIResponse` | `web/static/js/workspace-assistant.js:11755` survives as a wrapper into the action bar apply path | Compat shim |
+| `WA.extractTopics` | `web/src/workspace/ (已迁移至模块化工作区):11447` only shows a retirement warning | Retired stub |
+| `WA.sendInlineMessage` | `web/src/workspace/ (已迁移至模块化工作区):12182` only returns a disabled message | Retired stub |
+| `WA.setOutputMode` | `web/src/workspace/ (已迁移至模块化工作区):11980` hard-locks inline mode | Compat shim |
+| `WA.applyAIResponse` | `web/src/workspace/ (已迁移至模块化工作区):11755` survives as a wrapper into the action bar apply path | Compat shim |
 | `/api/agent/confirm` | `app/api/agent_routes.py:1382` returns HTTP 410 | Explicit retirement stub |
 | `/api/agent/choice` | `app/api/agent_routes.py:1396` returns HTTP 410 | Explicit retirement stub |
 
@@ -278,7 +280,7 @@ This duplication is not the main runtime path, but it is repository clutter that
 
 ### 6.1 Frontend Ownership
 
-- The workstation shell, left file panel, tab model, editor dispatch, AI input, save/autosave buttons, model switches, and many per-format UI behaviors are all centralized in `web/static/js/workspace-assistant.js`.
+- The workstation shell, left file panel, tab model, editor dispatch, AI input, save/autosave buttons, model switches, and many per-format UI behaviors are all centralized in `web/src/workspace/ (已迁移至模块化工作区)`.
 - The structured whitebox task rendering and follow-up action UI are centralized in `web/static/js/workspace-ai-task.js`.
 - The template `web/templates/workspace_assistant.html` decides what the live page actually loads.
 
@@ -298,7 +300,7 @@ This duplication is not the main runtime path, but it is repository clutter that
 
 This repo does not have one single dead layer. It has several different kinds of old mess.
 
-### 7.1 `web/static/js/workspace-assistant.js` Is The Main Frontend Shit Mountain
+### 7.1 `web/src/workspace/ (已迁移至模块化工作区)` Is The Main Frontend Shit Mountain
 
 Why:
 
@@ -383,7 +385,7 @@ If the question is "what currently controls what users can touch and feel," the 
 - Backend control hub: `web/app.py`
 - Workstation BFF: `web/blueprints/workspace_assistant.py`
 - Live workstation UI: `web/templates/workspace_assistant.html`
-- Frontend control monolith: `web/static/js/workspace-assistant.js`
+- Frontend control monolith: `web/src/workspace/ (已迁移至模块化工作区)`
 - Current file-task AI runtime: `web/static/js/workspace-ai-task.js` + `app/core/agent/file_task_runtime.py`
 
 If the question is "what is old shit mountain," the answer is:

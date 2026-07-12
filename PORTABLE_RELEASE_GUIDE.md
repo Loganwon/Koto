@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current release procedure.** Use [RELEASE_GATE.md](RELEASE_GATE.md) and `Build_Release.ps1`.
+
 # Koto 便携版发布指南
 
 目标：生成一个可直接发给其他 Windows 用户的目录版 Koto。对方解压后，先安装本地模型，再启动 Koto 即可使用。

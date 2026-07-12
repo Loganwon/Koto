@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current quick start.** Use [QUICKSTART.md](QUICKSTART.md) instead.
+
 # 🚀 Koto v2.0 触发器功能 - 开始使用指南
 
 **最后更新**: 2025年2月14日 | **项目状态**: ✅ 完成 | **当前版本**: 1.0
@@ -100,7 +102,7 @@ POST /api/triggers/params/<trigger_id>      # 更新参数
 POST /api/triggers/update                   # 增强版更新
 ```
 
-**前端交互** (`web/static/js/app.js`)
+**前端交互** (`web/src/app/ (已迁移至模块化主应用)`)
 ```javascript
 // 显示参数编辑区
 toggleTriggerParams(triggerId)
@@ -152,7 +154,7 @@ cp config/proactive_triggers.db config/proactive_triggers.db.backup
 #    需要更新这 4 个文件：
 #    - web/proactive_trigger.py
 #    - web/app.py  
-#    - web/static/js/app.js
+#    - web/src/app/ (已迁移至模块化主应用)
 #    - web/static/css/style.css
 
 # 3. 重启应用

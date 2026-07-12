@@ -1,146 +1,55 @@
-# Koto Architecture & Developer Guide
+# Koto architecture
 
-## Overview
+Last verified: 2026-07-12. For current run, test, and release instructions use
+the [documentation index](DOCUMENTATION_INDEX.md).
 
-Koto (?) is a desktop AI assistant built with a Python backend and TypeScript
-frontend, rendered via WebView2. It combines AI chat with a file workstation
-(DOCX/XLSX/PPTX/PDF editing, review, and generation).
+## Runtime shape
 
-```
-????????????????????????????????????????????????????????
-?                    WebView2 Shell                     ?
-?  ??????????????????????????????????????????????????  ?
-?  ?              index.html (Flask/Jinja2)          ?  ?
-?  ?  ????????????  ?????????????  ??????????????  ?  ?
-?  ?  ? Chat View?  ? Workspace ?  ?Skills Panel?  ?  ?
-?  ?  ? (legacy) ?  ? (TS/Vite) ?  ?  (TS/Vite) ?  ?  ?
-?  ?  ????????????  ?????????????  ??????????????  ?  ?
-?  ??????????????????????????????????????????????????  ?
-?                       ? HTTP + SSE                    ?
-?  ??????????????????????????????????????????????????  ?
-?  ?              Flask Application                  ?  ?
-?  ?  ????????????  ?????????????  ??????????????  ?  ?
-?  ?  ?Blueprints?  ?   app/    ?  ?   web/      ?  ?  ?
-?  ?  ?(routes)  ?  ?  core/    ?  ?  services   ?  ?  ?
-?  ?  ????????????  ?????????????  ??????????????  ?  ?
-?  ??????????????????????????????????????????????????  ?
-?                       ?                               ?
-?  ??????????????????????????????????????????????????  ?
-?  ?         Python Backend Services                 ?  ?
-?  ?  LLM ? File I/O ? Skills ? Agents ? Memory     ?  ?
-?  ??????????????????????????????????????????????????  ?
-????????????????????????????????????????????????????????
+```text
+launcher/entry.py
+  -> web/app.py (Flask app assembly)
+       -> web/app_blueprints.py and web/blueprints/* (HTTP boundaries)
+       -> web/services/* (web-facing orchestration)
+       -> app/core/* (agents, files, LLMs, skills, domain services)
+
+Browser / desktop shell
+  -> web/templates/index.html
+  -> web/src/* TypeScript source
+  -> web/static/js/build/workspace-bundle.js generated runtime asset
 ```
 
-## Directory Map
+## Ownership boundaries
 
-```
-Koto/
-??? app/                    # Core backend (Python)
-?   ??? api/               # Agent, MCP, goals, tasks, skills APIs
-?   ??? core/              # LLM, file I/O, config, hooks, planning
-??? web/                    # Web layer (Flask + TypeScript)
-?   ??? blueprints/        # Flask route blueprints
-?   ??? src/               # TypeScript source (Vite bundles)
-?   ?   ??? app/           # Chat UI, router, settings, theme
-?   ?   ??? bundles/       # Bundle entry points
-?   ?   ??? workspace/     # File workspace (tabs, AI, save, review)
-?   ?   ??? skills/        # Skills panel & marketplace
-?   ?   ??? editors/       # DOCX, PDF, PPTX, XLSX, image viewers
-?   ?   ??? shared/        # CSRF, auth, side-panels
-?   ?   ??? ui/            # Shared UI components
-?   ??? static/            # Built JS, CSS, vendor libs
-?   ??? templates/         # Jinja2 HTML templates
-?   ??? services/          # Python service layer
-??? config/                # Application configuration
-??? workspace/             # Default workspace directory
-??? tests/                 # Python tests (pytest)
-??? docs/                  # Documentation
+| Boundary | Current owner | Rule |
+| --- | --- | --- |
+| Flask assembly and compatibility wiring | `web/app.py` | Do not add new route business logic here. |
+| HTTP request/response mapping | `web/blueprints/*` | Blueprints parse requests and map domain results to HTTP/SSE. |
+| Web flow orchestration | `web/services/*`, `web/file_task_stream.py` | Keep route-independent orchestration out of blueprint files. |
+| File-task execution | `app/core/agent/file_task_runtime.py` plus phase helpers | Keep request, planning, execution, and finalization contracts explicit. |
+| File/document operations | `app/core/file/*`, `app/core/agent/task_tools*.py` | Format-specific behavior belongs behind core boundaries. |
+| Skills | `app/core/skills/*` | Read runtime skills through public `SkillManager` methods. |
+| Unified frontend | `web/src/*` | TypeScript source is authoritative; the generated bundle is not a second owner. |
+| Desktop/release assembly | `src/*`, `koto.spec`, `Build_Release.ps1` | Packaging changes require release-gate verification. |
+
+## Request flows
+
+### Chat
+
+```text
+Browser -> POST /api/chat/stream -> web/blueprints/chat.py
+  -> web/app.py / web/services/chat_stream/* -> app/core/llm/*
+  -> SSE -> browser
 ```
 
-## Frontend Entry Points
+### File task
 
-| Bundle | Entry | Size | Purpose |
-|--------|-------|------|---------|
-| `workspace-bundle.js` | `src/bundles/workspace.ts` | ~1.1MB | File workstation + AI panel |
-| `app-bundle.js` | `src/bundles/app.ts` | ~259KB | Chat view, routing, settings |
-| `skills-panel-bundle.js` | `src/skills/skills-panel.ts` | ~64KB | Skills library panel |
-| `review-bundle.js` | `src/bundles/review.ts` | ~68KB | DOCX review annotations |
-
-**Build**: `node scripts/build-bundles.mjs` (uses Vite + esbuild)
-
-## Backend Blueprints
-
-| Blueprint | Prefix | Purpose |
-|-----------|--------|---------|
-| `chat_bp` | `/api/chat` | Chat, file-chat, interrupt |
-| `workspace_assistant_bp` | `/api/v1/workspace` | File open/save/download |
-| `editor_ai_bp` | `/api/editor-ai` | AI-powered document editing |
-| `sessions_bp` | `/api/sessions` | Session CRUD |
-| `settings_bp` | `/api/settings` | User preferences |
-| `document_bp` | `/api/document` | DOCX batch annotate, convert |
-| `pptx_editor_bp` | `/api/pptx` | PPTX generation & editing |
-| `knowledge_bp` | `/api/knowledge` | Knowledge base operations |
-
-## Key Patterns
-
-### Service Access
-```python
-# New code: use the service registry
-from web.runtime_context import service_registry
-session_mgr = service_registry.session_manager
-
-# Legacy code (still supported):
-from web.runtime_context import get_session_manager
-session_mgr = get_session_manager()
+```text
+Browser -> POST /api/editor/ai/task-stream -> web/blueprints/editor_ai.py
+  -> web/runtime_context.py -> web/file_task_stream.py
+  -> app/core/agent/file_task_runtime.py -> task tools
+  -> SSE progress and artifacts -> browser
 ```
 
-### Frontend Module Organization
-```typescript
-// Each workspace module exports via the WA namespace
-import { state } from './state';
-// Modules attach public APIs to (window as any).WA
-// Bundles import modules for side effects only
-```
-
-### CSS Variables
-```css
-/* z-index layers ? use these instead of raw numbers */
---z-base: 1;       /* default content */
---z-above: 2;      /* slightly elevated */
---z-dropdown: 100; /* context menus, tooltips */
---z-sticky: 200;   /* sticky headers */
---z-panel: 300;    /* side panels */
---z-overlay: 1000; /* modal backdrops */
---z-modal: 5000;   /* modal dialogs */
---z-toast: 9999;   /* toast notifications */
---z-max: 99999;    /* critical system */
-```
-
-## Development
-
-```bash
-# Install Python deps
-pip install -r requirements.txt
-
-# Install Node deps
-cd web && npm install
-
-# Run dev server
-python run.py
-
-# Build frontend
-cd web && npm run build
-
-# Run Python tests
-pytest tests/
-
-# Run frontend tests
-cd web && npm test
-```
-
-## Testing
-
-- **Python**: pytest in `tests/` (run with `pytest`)
-- **Frontend**: Vitest + jsdom (run with `cd web && npm test`)
-- Write tests alongside source: `web/src/**/*.test.ts`
+See [ARCHITECTURE_CLEANUP_ROADMAP.md](ARCHITECTURE_CLEANUP_ROADMAP.md) for
+open structural work and [KOTO_CODE_DEBT_REPORT.md](KOTO_CODE_DEBT_REPORT.md)
+for its current baseline.
