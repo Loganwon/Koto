@@ -22,7 +22,11 @@ if getattr(sys, "frozen", False):
     PROJECT_ROOT = os.path.dirname(sys.executable)
 else:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-    PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+    # user_settings.py lives in app/core/config.  The prior one-level lookup
+    # resolved to app/core, creating a second settings file that the launcher,
+    # setup tools and packaged runtime never use.  Development must use the
+    # same project-root config directory as every other entry point.
+    PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir))
 SETTINGS_FILE = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
 
 # ????

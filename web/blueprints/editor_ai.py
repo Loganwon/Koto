@@ -17,9 +17,9 @@ from web.runtime_context import (
     get_types,
     normalize_model_mode,
     resolve_requested_model_id,
-    safe_editor_sse,
-    stream_file_task_request,
 )
+from web.editor_ai_text import clean_selection_text
+from web.file_task_stream import safe_editor_sse, stream_file_task_request
 
 
 editor_ai_bp = Blueprint("editor_ai", __name__)
@@ -38,29 +38,6 @@ _EDITOR_AI_STREAM_ACTIONS = {
     "chart",
 }
 
-
-_SYSTEM_LOG_MARKERS = ['执行过程未完成', '准备处理', '分析需求', '耗时', '正在处理', '异常', '制定计划', '读取文件', '检查结果', '任务未完成', '任务理解', '我理解的任务', '查看产物', '追问原因', '重新发起', '已写入任务记忆', '记忆摘要', '任务结果']
-
-_SYSTEM_LOG_MARKER_PATTERN = re.compile(
-    r"\*\*\*?(" + "|".join(re.escape(m) for m in _SYSTEM_LOG_MARKERS) + r")\*\*\*?",
-    re.IGNORECASE,
-)
-
-def _clean_selection_text(selection: str) -> str:
-    if not selection:
-        return ""
-    match = _SYSTEM_LOG_MARKER_PATTERN.search(selection)
-    if match:
-        selection = selection[:match.start()].rstrip()
-    lines = selection.split("\\n")
-    cleaned_lines = []
-    for line in lines:
-        stripped = line.strip()
-        if stripped and not _SYSTEM_LOG_MARKER_PATTERN.search(stripped):
-            cleaned_lines.append(line)
-    result = "\\n".join(cleaned_lines).strip()
-    result = re.sub(r"\\n{3,}", "\\n\\n", result)
-    return result
 
 _WORKSPACE_ROUTE_NAMES = {
     "light_chat",
@@ -721,16 +698,15 @@ def workspace_ai_route_intent():
     return _timed_route_response(_fallback_workspace_route(data), "fallback")
 
 
-@editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])
-def editor_ai_stream():
-    """Stream editor quick-action output through the unified AgentLoop."""
-    data = request.get_json(silent=True) or {}
+def _stream_editor_quick_action(data: dict):
+    """Stream a validated editor quick action without re-reading the request."""
+    data = dict(data or {})
     action = str(data.get("action") or "").strip().lower()
     if action not in _EDITOR_AI_STREAM_ACTIONS:
         return jsonify({"error": f"Unsupported editor AI action: {action}"}), 400
 
     raw_selection = str(data.get("selection") or "")
-    selection = _clean_selection_text(raw_selection).strip()
+    selection = clean_selection_text(raw_selection).strip()
     data["selection"] = selection
     full_text = str(data.get("full_text") or data.get("context") or "").strip()
     instruction = str(data.get("instruction") or "").strip()
@@ -754,6 +730,12 @@ def editor_ai_stream():
     return _sse_response(generate())
 
 
+@editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])
+def editor_ai_stream():
+    """Stream editor quick-action output through the unified AgentLoop."""
+    return _stream_editor_quick_action(request.get_json(silent=True) or {})
+
+
 @editor_ai_bp.route("/api/editor/ai/task-stream", methods=["POST"])
 def editor_ai_task_stream():
     """Koto-native file task stream."""
@@ -775,8 +757,8 @@ def editor_ai_task_stream():
         data["action"] = action
         raw_sel = str(data.get("selection") or "")
         if raw_sel:
-            data["selection"] = _clean_selection_text(raw_sel)
-        return editor_ai_stream()
+            data["selection"] = clean_selection_text(raw_sel)
+        return _stream_editor_quick_action(data)
 
     return _sse_response(stream_file_task_request(data))
 

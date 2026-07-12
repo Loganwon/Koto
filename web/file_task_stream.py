@@ -19,7 +19,7 @@ from typing import Any, Iterable
 
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
-from web.blueprints.editor_ai import _clean_selection_text
+from web.editor_ai_text import clean_selection_text
 from web.sse.protocol import sse
 
 logger = logging.getLogger("koto.app")
@@ -95,10 +95,10 @@ def _normalize_file_task_payload(data: dict) -> dict:
 
     raw_task = str(payload.get("task") or payload.get("instruction") or "")
     if raw_task:
-        payload["task"] = _clean_selection_text(raw_task)
+        payload["task"] = clean_selection_text(raw_task)
     raw_selection = str(payload.get("selection") or "")
     if raw_selection:
-        payload["selection"] = _clean_selection_text(raw_selection)
+        payload["selection"] = clean_selection_text(raw_selection)
 
     model_mode = normalize_model_mode(payload.get("model_mode"), default="deepseek")
     payload["model_mode"] = model_mode
@@ -108,12 +108,17 @@ def _normalize_file_task_payload(data: dict) -> dict:
         options["allow_local_fallback"] = False
     payload["options"] = options
     if model_mode == "local":
-        raw_model_id = str(payload.get("model_id") or "").strip()
-        if raw_model_id.lower() in {"auto", "cloud", "local"} or raw_model_id.lower().startswith("gemini"):
-            payload["model_id"] = ""
+        # A local task always follows the model selected in Settings.  In
+        # particular, resume payloads from older runs can contain a now-stale
+        # options.local_model and must not override the current selection.
+        # model_id belongs to the cloud-model picker, so it is not meaningful
+        # on the Ollama path either.
+        payload["model_id"] = ""
         configured_local_model = get_configured_local_model_id()
         if configured_local_model:
-            options.setdefault("local_model", configured_local_model)
+            options["local_model"] = configured_local_model
+        else:
+            options.pop("local_model", None)
     history = payload.get("history")
     if not isinstance(history, list):
         history = []

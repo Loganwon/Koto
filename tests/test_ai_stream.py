@@ -2000,6 +2000,7 @@ class TestEditorAIStream:
                     "task": "总结当前文件",
                     "model_mode": "local",
                     "model_id": "gemini-3-flash-preview",
+                    "options": {"local_model": "stale-model:old"},
                 },
             )
 

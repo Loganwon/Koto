@@ -337,6 +337,13 @@ def test_editor_ai_blueprint_uses_runtime_context_not_web_app_imports():
     assert "from web.app import" not in source
     assert "get_app_attr(" not in source
     assert "_stream_file_task_request" not in source
+    assert "from web.file_task_stream import safe_editor_sse, stream_file_task_request" in source
+    assert "from web.editor_ai_text import clean_selection_text" in source
+    runtime_source = _read(ROOT / "web" / "runtime_context.py")
+    assert "def stream_file_task_request(" not in runtime_source
+    assert "def safe_editor_sse(" not in runtime_source
+    stream_source = _read(FILE_TASK_STREAM)
+    assert "from web.blueprints.editor_ai import _clean_selection_text" not in stream_source
 
 
 def test_file_task_stream_lives_outside_web_app():

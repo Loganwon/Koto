@@ -261,7 +261,7 @@ def resolve_requested_model_id(
     return normalize_public_model(
         str(requested_model or "").strip() or fallback_model or "deepseek-chat"
     )
-# ── Editor AI / Compat stubs (delegated to app module) ────────────────────
+# ── Editor AI runtime helpers ─────────────────────────────────────────────
 
 def get_configured_local_model_id(default: str = "") -> str:
     """Return configured local model id from settings."""
@@ -274,24 +274,8 @@ def get_configured_local_model_id(default: str = "") -> str:
     except Exception:
         return default
 
-def safe_editor_sse(data: dict, event: str = "message") -> str:
-    """Format editor events with the shared compact JSON SSE protocol."""
-    from web.file_task_stream import safe_editor_sse as _safe_editor_sse
-
-    return _safe_editor_sse(data)
-
 def normalize_model_mode(raw: str, default: str = "cloud") -> str:
     """Delegate model-mode normalization to the canonical core contract."""
     from app.core.llm.model_mode import normalize_model_mode as _normalize_model_mode
 
     return _normalize_model_mode(raw, default=default)
-
-def stream_file_task_request(*args, **kwargs):
-    """Delegate to web.file_task_stream.stream_file_task_request (the real implementation)."""
-    import sys as _s_mod
-    _fts_mod = _s_mod.modules.get("web.file_task_stream")
-    if _fts_mod is None:
-        import web.file_task_stream as _fts_mod
-    if _fts_mod and hasattr(_fts_mod, "stream_file_task_request") and callable(_fts_mod.stream_file_task_request):
-        return _fts_mod.stream_file_task_request(*args, **kwargs)
-    raise RuntimeError("stream_file_task_request not available in web.file_task_stream")

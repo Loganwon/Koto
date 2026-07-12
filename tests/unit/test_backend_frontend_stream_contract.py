@@ -100,6 +100,35 @@ def test_editor_stream_validation_errors_use_same_sse_headers():
 
 
 @pytest.mark.unit
+def test_task_stream_quick_action_reuses_internal_stream_handler(monkeypatch):
+    import web.blueprints.editor_ai as editor_ai
+
+    received = {}
+
+    def fake_quick_action_stream(data: dict):
+        received.update(data)
+        return editor_ai._sse_response(iter(['data: {"type":"done"}\n\n']))
+
+    monkeypatch.setattr(editor_ai, "_stream_editor_quick_action", fake_quick_action_stream)
+    app = Flask(__name__)
+    app.register_blueprint(editor_ai.editor_ai_bp)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/api/editor/ai/task-stream",
+            json={
+                "task": "润色所选文字",
+                "selection": "  保留这段文字  ",
+                "options": {"quick_action_mode": "simple"},
+            },
+        )
+
+    assert response.status_code == 200
+    assert received["action"] == "polish"
+    assert received["selection"] == "保留这段文字"
+
+
+@pytest.mark.unit
 def test_chart_validation_errors_use_same_sse_headers():
     import web.blueprints.editor_ai as editor_ai
 

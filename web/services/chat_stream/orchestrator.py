@@ -618,6 +618,22 @@ def setup_chat_stream_context(
     else:
         model_id = routed_model_id
 
+    # Settings own the local runtime choice.  The browser still sends a
+    # generic `locked_model: local`, while the legacy router may have already
+    # selected a cloud model for display.  Resolve the concrete configured
+    # Ollama tag here so the chat stream, status events and actual client all
+    # agree on the same model.
+    try:
+        from app.core.llm.provider_factory import get_local_model_tag, is_local_mode
+
+        if is_local_mode():
+            model_id = get_local_model_tag() or model_id
+    except Exception as _local_model_config_error:
+        _app_logger.debug(
+            "[STREAM] configured local model lookup skipped: %s",
+            _local_model_config_error,
+        )
+
     _app_logger.debug(
         f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n"
     )

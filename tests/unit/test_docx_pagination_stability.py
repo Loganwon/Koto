@@ -148,6 +148,18 @@ def test_explicit_docx_page_break_uses_rendered_sheet_bounds():
     assert "dom.style.marginRight = `-${mRight}px`;" not in node_view
 
 
+def test_page_edge_chrome_uses_the_same_left_page_origin_as_break_widgets():
+    editor_src = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(
+        encoding="utf-8"
+    )
+
+    assert "position:absolute; top:0; left:0; transform:none;" in editor_src
+    assert "position:absolute; bottom:0; left:0; transform:none;" in editor_src
+    assert "left:50%; transform:translateX(-50%);" not in editor_src
+    assert "const renderedPageWidthPx = this.editor.view.dom.offsetWidth" in editor_src
+    assert editor_src.count("const _pw = renderedPageWidthPx;") == 2
+
+
 def test_all_page_break_types_share_one_surface_builder_and_storage():
     src = _read_ext_js()
     editor_src = (_repo_root() / "web" / "tiptap-editor" / "koto-docx-editor.js").read_text(

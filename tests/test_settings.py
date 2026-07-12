@@ -10,6 +10,14 @@ import pytest
 class TestSettingsManager:
     """Tests for app.core.config.user_settings.SettingsManager."""
 
+    def test_development_settings_file_uses_project_config_directory(self):
+        """Settings must share config/user_settings.json with launcher and UI."""
+        from pathlib import Path
+        import app.core.config.user_settings as settings_module
+
+        expected = Path(__file__).resolve().parents[1] / "config" / "user_settings.json"
+        assert Path(settings_module.SETTINGS_FILE).resolve() == expected.resolve()
+
     @pytest.fixture
     def settings_file(self, tmp_path):
         sf = tmp_path / "user_settings.json"

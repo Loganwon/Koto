@@ -326,7 +326,13 @@ def local_model_switch() -> Response:
                 elif mode == "cloud":
                     ai_settings.setdefault("cloud_provider", "deepseek")
             if model_tag:
-                sm._settings["local_model"] = model_tag
+                # Keep the legacy nested value in sync with the runtime
+                # source of truth.  Older UI code still reads ai.local_model,
+                # while all model providers read the top-level value.
+                normalized_model_tag = str(model_tag).strip()
+                sm._settings["local_model"] = normalized_model_tag
+                if isinstance(ai_settings, dict):
+                    ai_settings["local_model"] = normalized_model_tag
             save_ok = sm._save_settings()
         if not save_ok:
             return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
@@ -445,7 +451,23 @@ def update_settings() -> Response:
         value, validation_error = _normalize_setting_value(category, key, value)
         if validation_error:
             return jsonify({"success": False, "error": validation_error}), 400
-        success = sm.set(category, key, value)
+        if category == "ai" and key == "local_model":
+            # The settings picker used to write only ai.local_model.  That
+            # left the top-level runtime value stale, so chat and file tasks
+            # could silently use different local models.  Mirror the setting
+            # atomically to keep one configured model for every entry point.
+            normalized_model_tag = str(value or "").strip()
+            with sm._lock:
+                ai_settings = sm._settings.setdefault("ai", {})
+                if not isinstance(ai_settings, dict):
+                    ai_settings = {}
+                    sm._settings["ai"] = ai_settings
+                ai_settings["local_model"] = normalized_model_tag
+                sm._settings["local_model"] = normalized_model_tag
+                sm._dirty = True
+                success = sm._save_settings()
+        else:
+            success = sm.set(category, key, value)
         if not success:
             return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
         # Storage settings must create the newly selected paths, not only the
@@ -453,6 +475,8 @@ def update_settings() -> Response:
         sm.ensure_directories()
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
         invalidate_settings_cache()
+        if category == "ai" and key == "local_model":
+            reset_client_cache()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
         if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):
             if key == "workspace_dir":

@@ -124,6 +124,14 @@ def chat() -> Response:
         task_type=task_type,
     )
     auto_model = not bool(requested_model) or requested_model.lower() in {"auto", "cloud"}
+    try:
+        from app.core.llm.provider_factory import get_local_model_tag, is_local_mode
+
+        if is_local_mode():
+            model = get_local_model_tag() or model
+            auto_model = False
+    except Exception as exc:
+        _logger.debug("[chat] configured local model lookup skipped: %s", exc)
 
     result = get_brain().chat(
         history,

@@ -825,9 +825,16 @@ export class KotoTipTapEditor {
       };
     }
 
+    // The editor surface is the single authority for page width.  Section
+    // metadata can vary between pages, but it must not make header/footer
+    // chrome narrower than the rendered page or wider than the break widgets.
+    const renderedPageWidthPx = this.editor.view.dom.offsetWidth || this._pageWidthPx || 816;
+
     // ── Inject page-1 header inside ProseMirror's top margin area ───────
     // Absolutely positioned within the zoom-wrapper so it overlays
-    // ProseMirror's top padding (the margin area).  IMPORTANT: NO
+    // ProseMirror's top padding (the margin area).  The review rail can widen
+    // that wrapper, so page chrome must use its left page origin rather than
+    // centering itself in the wider review canvas.  IMPORTANT: NO
     // contenteditable="true" on the container — that would trigger the
     // generic [contenteditable="true"] CSS rule which adds min-height:1056px,
     // background:#fff, and padding, covering all page content.
@@ -840,12 +847,12 @@ export class KotoTipTapEditor {
       hdrFirst.className = 'koto-page-header-first';
       hdrFirst.dataset.variant = this._topHeaderVariant;
       // NO contenteditable on the wrapper — avoid polluting CSS selector
-      const _pw = firstPageChrome.pageWidthPx || 816;
+      const _pw = renderedPageWidthPx;
       const _ml = firstPageChrome.marginLeftPx || 96;
       const _mr = firstPageChrome.marginRightPx || 96;
       const _mt = firstPageChrome.marginTopPx || 96;
       hdrFirst.style.cssText = `
-        position:absolute; top:0; left:50%; transform:translateX(-50%);
+        position:absolute; top:0; left:0; transform:none;
         z-index:5; pointer-events:auto; cursor:text;
         width:${_pw}px; max-width:${_pw}px; box-sizing:border-box;
         --koto-docx-marker-left:${Math.max(24, _ml - 12)}px;
@@ -909,12 +916,12 @@ export class KotoTipTapEditor {
       const ftrLast = document.createElement('div');
       ftrLast.className = 'koto-page-footer-last';
       ftrLast.dataset.variant = this._bottomFooterVariant;
-      const _pw = lastPageChrome.pageWidthPx || 816;
+      const _pw = renderedPageWidthPx;
       const _ml = lastPageChrome.marginLeftPx || 96;
       const _mr = lastPageChrome.marginRightPx || 96;
       const _mb = lastPageChrome.marginBottomPx || 80;
       ftrLast.style.cssText = `
-        position:absolute; bottom:0; left:50%; transform:translateX(-50%);
+        position:absolute; bottom:0; left:0; transform:none;
         z-index:5; pointer-events:auto; cursor:text;
         width:${_pw}px; max-width:${_pw}px; box-sizing:border-box;
         padding:4px ${_mr}px 12px ${_ml}px;
