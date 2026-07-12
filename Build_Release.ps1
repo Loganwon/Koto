@@ -185,6 +185,59 @@ function Set-PackagedConfigDirectories {
     }
 }
 
+function Set-PackagedRuntimeConfigDefaults {
+    param(
+        [Parameter(Mandatory = $true)][string]$ConfigRoot,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    # These files deliberately remain gitignored because they accumulate
+    # personal runtime data.  A release must nevertheless start from a known
+    # empty shape instead of relying on files that happen to exist on the
+    # builder machine.
+    $defaults = @(
+        [pscustomobject]@{
+            Name = "macro_suggestions.json"
+            Content = @'
+{
+  "suggestions": [],
+  "seen_fingerprints": []
+}
+'@
+        },
+        [pscustomobject]@{
+            Name = "personality_matrix.json"
+            Content = @'
+{
+  "cognitive": {
+    "exploratory": 0.5,
+    "executor": 0.5,
+    "analytical": 0.5,
+    "creative": 0.5
+  },
+  "expertise": {},
+  "goals": [],
+  "recent_themes": [],
+  "values": {
+    "efficiency": 0.5,
+    "depth": 0.5,
+    "formality": 0.5
+  },
+  "last_updated": null
+}
+'@
+        }
+    )
+
+    foreach ($default in $defaults) {
+        $path = Join-Path $ConfigRoot $default.Name
+        if (-not (Test-Path $path)) {
+            Set-Content -Path $path -Value $default.Content -Encoding UTF8
+            Write-Host "  [--] 已补齐 $Label 运行时默认配置: $($default.Name)" -ForegroundColor Yellow
+        }
+    }
+}
+
 # ─── 前置检查 ────────────────────────────────
 Write-Step "前置检查"
 if (-not (Test-Path $VENV_PIP)) {
@@ -324,6 +377,7 @@ if (-not $SkipBuild) {
     Write-OK "构建完成 → dist\Koto\Koto.exe"
     Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto\_internal\web\static") -Label "PyInstaller 包内前端产物"
     Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
+    Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
     Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
 } else {
     Write-Step "跳过 PyInstaller（-SkipBuild）"
@@ -353,6 +407,7 @@ if ($portableExitCode -ne 0) {
 Write-OK "便携包已组装 → dist\Koto_Portable\"
 Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\web\static") -Label "便携包内前端产物"
 Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
+Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 
 # ─── 步骤 4：构建 Inno Setup 安装包 ─────────────────────

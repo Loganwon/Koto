@@ -172,6 +172,20 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "版本号仅可包含字母、数字、点、下划线、加号和连字符" in local_release
 
 
+def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
+    release_build = Path("Build_Release.ps1").read_text(encoding="utf-8")
+
+    assert "function Set-PackagedRuntimeConfigDefaults" in release_build
+    assert 'Name = "macro_suggestions.json"' in release_build
+    assert '"seen_fingerprints": []' in release_build
+    assert 'Name = "personality_matrix.json"' in release_build
+    assert '"exploratory": 0.5' in release_build
+    assert release_build.count("Set-PackagedRuntimeConfigDefaults -ConfigRoot") == 2
+    assert release_build.index("Set-PackagedRuntimeConfigDefaults -ConfigRoot") < release_build.index(
+        "Test-PackagedConfigDefaults -ConfigRoot"
+    )
+
+
 def test_release_pipelines_publish_manifest_and_sha256_checksums():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     build = Path(".github/workflows/build.yml").read_text(encoding="utf-8")
