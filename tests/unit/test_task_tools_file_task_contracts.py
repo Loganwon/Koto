@@ -741,7 +741,7 @@ def test_verify_task_completion_summarizes_multiple_docx_changes_on_target():
 
     assert result["completed"] is True
     assert "文件已成功修改：report.docx" in result["summary"]
-    assert "已写入 2 个段落" in result["summary"]
+    assert "本次工具调用写入 2 个段落" in result["summary"]
     assert "工作表“Budget”" in result["summary"]
     assert "4 行 × 5 列" in result["summary"]
     assert "相关文件变更" not in result["summary"]

@@ -44,7 +44,6 @@ import filecmp
 import hashlib
 import re
 import shutil
-import subprocess
 import sys
 import tempfile
 import stat
@@ -55,10 +54,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
-from app.core.agent.file_task_contract import (
-    FileTaskToolStreamChunk,
-    FileTaskToolStreamResult,
-)
+from app.core.agent.file_task_contract import FileTaskToolStreamResult
 from app.core.agent.file_task_completion_verifier import verify_task_completion
 from app.core.agent.file_task_result_markers import (
     KOTO_CREATED_FALLBACK_KEY,
@@ -115,6 +111,7 @@ from app.core.agent.task_tools_conversion import (
 from app.core.agent.task_tools_docx_template import (
     replace_docx_placeholders_in_paragraph as _replace_docx_placeholders_in_paragraph,
 )
+from app.core.agent.task_tool_operation_bindings import build_task_tool_operations
 from app.core.agent.task_tools_registry import build_task_tool_definitions
 from app.core.services.file_service import FileService
 
@@ -5369,7 +5366,7 @@ class TaskToolsPlugin(AgentPlugin):
         return "Composable file-operation tools for dynamic task execution."
 
     def get_tools(self) -> List[Dict[str, Any]]:
-        return build_task_tool_definitions(self, sys.modules[__name__])
+        return build_task_tool_definitions(self, build_task_tool_operations())
 
     def _editor_live_update(self, type: str, **kwargs) -> str:
         """Push a change to the live editor via WebSocket."""

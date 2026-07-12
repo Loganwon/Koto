@@ -1,6 +1,7 @@
 """Regression guards for the high-risk module extraction seams."""
 from __future__ import annotations
 
+import ast
 import subprocess
 import sys
 from pathlib import Path
@@ -9,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TASK_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools.py"
 TASK_TOOL_REGISTRY = ROOT / "app" / "core" / "agent" / "task_tools_registry.py"
+TASK_TOOL_OPERATION_BINDINGS = ROOT / "app" / "core" / "agent" / "task_tool_operation_bindings.py"
 TASK_RUNTIME = ROOT / "app" / "core" / "agent" / "file_task_runtime.py"
 EXECUTION_LOOP = ROOT / "app" / "core" / "agent" / "file_task_execution_loop.py"
 FINALIZATION = ROOT / "app" / "core" / "agent" / "file_task_finalization.py"
@@ -38,6 +40,7 @@ def test_god_file_line_budgets_only_ratchet_down() -> None:
 def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     task_tools = _source(TASK_TOOLS)
     task_tool_registry = _source(TASK_TOOL_REGISTRY)
+    operation_bindings = _source(TASK_TOOL_OPERATION_BINDINGS)
     task_runtime = _source(TASK_RUNTIME)
     execution_loop = _source(EXECUTION_LOOP)
     finalization = _source(FINALIZATION)
@@ -56,6 +59,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "from app.core.agent.task_tools_conversion import (" in task_tools
     assert "from app.core.agent.task_tools_docx_template import (" in task_tools
     assert "from app.core.agent.task_tools_registry import build_task_tool_definitions" in task_tools
+    assert "from app.core.agent.task_tool_operation_bindings import build_task_tool_operations" in task_tools
     assert "from app.core.agent.file_task_plan_presentation import" in task_runtime
     assert "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop" in task_runtime
     assert "from app.core.agent.file_task_finalization import FileTaskFinalizationPhase" in task_runtime
@@ -70,6 +74,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "def _task_tools_helper(" in xlsx_tools
     assert "file_task_runtime import" not in task_tool_registry
     assert "from app.core.agent.task_tools import" not in task_tool_registry
+    assert "from app.core.agent.task_tools import (" in operation_bindings
     assert "file_task_runtime import" not in plan_presentation
     assert "file_task_runtime import" not in execution_loop
     assert "file_task_runtime import" not in finalization
@@ -77,6 +82,38 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "file_task_runtime import" not in planning
     assert "docx_parser import" not in docx_review
     assert "from app.core.file.parsers.docx_parser import" not in docx_rich_renderer
+
+
+def test_task_tools_drops_unused_runtime_imports() -> None:
+    task_tools = _source(TASK_TOOLS)
+
+    assert "import subprocess" not in task_tools
+    assert "FileTaskToolStreamChunk" not in task_tools
+    assert "FileTaskToolStreamResult" in task_tools
+
+
+def test_task_tools_registry_receives_only_explicit_operation_bindings() -> None:
+    task_tools = _source(TASK_TOOLS)
+    operation_bindings = _source(TASK_TOOL_OPERATION_BINDINGS)
+
+    assert "sys.modules[__name__]" not in task_tools
+    assert "build_task_tool_definitions(self, build_task_tool_operations())" in task_tools
+    assert "def build_task_tool_operations()" in operation_bindings
+
+
+def test_task_tool_operation_bindings_match_registry_references() -> None:
+    from app.core.agent.task_tool_operation_bindings import build_task_tool_operations
+
+    registry_tree = ast.parse(_source(TASK_TOOL_REGISTRY))
+    registry_operation_names = {
+        node.attr
+        for node in ast.walk(registry_tree)
+        if isinstance(node, ast.Attribute)
+        and isinstance(node.value, ast.Name)
+        and node.value.id == "operations"
+    }
+
+    assert registry_operation_names == set(vars(build_task_tool_operations()))
 
 
 def test_xlsx_tool_module_imports_without_task_tools_circularity() -> None:
