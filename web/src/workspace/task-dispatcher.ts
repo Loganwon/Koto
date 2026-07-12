@@ -1035,7 +1035,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   function taskCardCheckLine(value: unknown): string {
     let text = String(value || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
-    if (/详细内容见总结与回答|较长内容.*总结与回答/u.test(text)) return '';
+    if (/详细内容见任务结果|较长内容.*任务结果/u.test(text)) return '';
     text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
     if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
     if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
@@ -1137,8 +1137,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const turnMetadata = Object.assign({
       content: assistantText, loadingEl, task_kind: 'file_task',
       status: String(payload.status || fallbackStatus || 'done').trim() || 'done',
+    }, taskTurnMetadataFromLoadingEl(loadingEl), {
+      // Streaming snapshots stay out of model context, but a terminal task
+      // result must be available to an immediate follow-up after a file switch.
       skip_model_context: !!skipModelContext,
-    }, taskTurnMetadataFromLoadingEl(loadingEl));
+    });
     if (taskTurnId && typeof options.syncAssistantTaskTurn === 'function') {
       options.syncAssistantTaskTurn(taskTurnId, turnMetadata);
     } else {

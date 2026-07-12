@@ -15,7 +15,7 @@ export function looksLikeFullAnswerText(value: string): boolean {
   return /(^|\n)\s*#{1,6}\s|\*\*|```|(^|\n)\s*[-*]\s+\S/u.test(text);
 }
 
-export function compactFlowSummary(value: string, fallback = '详细内容见总结与回答。'): string {
+export function compactFlowSummary(value: string, fallback = '详细内容见任务结果。'): string {
   const text = String(value || '').trim();
   if (!text) return fallback;
   if (looksLikeFullAnswerText(text)) return fallback;
@@ -84,10 +84,43 @@ export function renderTaskFinalReport(value: string): string {
 }
 
 export function normalizeTaskFinalReportMarkdown(value: string): string {
-  return String(value || '')
-    .trim()
-    .replace(/^(?:---|\*\*\*)\s*\n+(?=#{1,6}\s+)/, '')
-    .trim();
+  let text = String(value || '').trim();
+  text = text.replace(/^(?:---|\*\*\*)\s*\n+(?=#{1,6}\s+)/, '');
+  text = enforceTaskReportStructure(text);
+  return text.trim();
+}
+
+export function enforceTaskReportStructure(text: string): string {
+  if (!text) return '';
+  const hasMainSections = /[①-③]/.test(text);
+  if (hasMainSections) {
+    return cleanEmptyReportSections(text);
+  }
+  return '① 核心结果：' + text.replace(/^#+\s*/gm, '').trim();
+}
+
+export function cleanEmptyReportSections(text: string): string {
+  const lines = text.split(/\n/);
+  const result: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const isHeader = /^[①-③]\s/.test(line.trim());
+    if (isHeader) {
+      let j = i + 1;
+      while (j < lines.length && !/^[①-③]\s/.test(lines[j].trim())) j++;
+      const hasContent = lines.slice(i + 1, j).some((l: string) => l.trim().length > 0);
+      if (hasContent) {
+        result.push(line);
+        for (let k = i + 1; k < j; k++) result.push(lines[k]);
+      }
+      i = j;
+    } else {
+      result.push(line);
+      i++;
+    }
+  }
+  return result.join('\n').trim();
 }
 
 export function renderReadableMarkdownFallback(value: string): string {

@@ -180,10 +180,24 @@ def execute_step_summary(
     if isinstance(tool_gap, dict) and tool_gap:
         return str(tool_gap.get("summary") or "当前任务缺少对应的 Koto 原生工具。")
     if file_changes:
-        return f"已完成第 {round_index} 轮工具执行，累计记录 {len(file_changes)} 次文件变更。"
+        parts = []
+        for fc in file_changes[:6]:
+            fpath = str(fc.get("path") or fc.get("file_path") or "").strip()
+            path_parts = fpath.replace(chr(92), "/").split("/") if fpath else []
+            fname = path_parts[len(path_parts) - 1] if path_parts else ""
+            preview = str(fc.get("preview") or fc.get("summary") or "").strip()
+            if fname:
+                parts.append(fname + (": " + preview if preview else ""))
+            elif preview:
+                parts.append(preview)
+        if parts:
+            detail = "；".join(parts[:4])
+            more = f" 等{len(file_changes)}项" if len(file_changes) > 4 else ""
+            return f"第{round_index}轮完成{len(file_changes)}项变更：{detail}{more}"
+        return f"已完成第{round_index}轮工具执行，累计记录{len(file_changes)}次文件变更。"
     if round_index > 0:
-        return f"已完成第 {round_index} 轮工具执行。"
-    return "模型未再请求工具调用。"
+        return f"第{round_index}轮处理完毕，继续执行。"
+    return "本轮无新增文件变更，继续执行。"
 
 
 def execute_step_result_status(

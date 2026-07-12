@@ -73,16 +73,31 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
     if not raw_type:
         return None
 
+    quick_action_mode = str(
+        payload.get("quick_action_mode") or ""
+    ).strip().lower()
+    is_text_qa = quick_action_mode in {
+        "simple", "polish", "translate", "summary", "rewrite", "continue", "check",
+    }
+
     if raw_type == "run.started":
+        if is_text_qa:
+            return FileTaskUiState("run", "处理中…", "running", 8)
         return FileTaskUiState("run", "执行任务", "running", 4)
     if raw_type == "task.classified":
+        if is_text_qa:
+            return None
         return FileTaskUiState("plan", "任务识别", "running", 12)
     if raw_type == "plan.checked":
         status = "running" if payload.get("passed") is not False else "warning"
         return FileTaskUiState("plan", "规划检查", status, 20)
     if raw_type == "plan.created":
+        if is_text_qa:
+            return None
         return FileTaskUiState("plan", "准备计划", "running", 28)
     if raw_type == "step.started":
+        if is_text_qa:
+            return None
         return FileTaskUiState(
             str(
                 event.get("step_id")
@@ -95,10 +110,14 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
             36,
         )
     if raw_type == "tool.started":
+        if is_text_qa:
+            return None
         return FileTaskUiState(
             "tool", _text(payload.get("tool_name") or "执行工具", 80), "running", 52
         )
     if raw_type in {"tool.finished", "step.finished", "step.result"}:
+        if is_text_qa:
+            return None
         success = payload.get("success")
         failed = success is False or str(
             payload.get("status") or ""
@@ -110,6 +129,8 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
             68,
         )
     if raw_type in {"check.started", "check.finished"}:
+        if is_text_qa:
+            return None
         status = "running"
         progress = 84 if raw_type == "check.started" else 92
         if raw_type == "check.finished" and payload.get("passed") is False:
@@ -125,6 +146,8 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
         completed = bool(payload.get("completed_task"))
         if terminal_status == "awaiting_confirmation":
             return FileTaskUiState("waiting", "等待确认", "waiting", 100, True, True)
+        if is_text_qa and completed:
+            return FileTaskUiState("done", "完成", "succeeded", 100, True, True)
         failed = (
             terminal_status in {"failed", "blocked", "write_blocked", "tool_gap"}
             or not completed

@@ -38,6 +38,18 @@ _PATH_SCOPED_PROTECTION_PATTERN = re.compile(
     r".{0,18}(?:修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)",
     re.IGNORECASE,
 )
+_OTHER_FILES_PROTECTION_PATTERN = re.compile(
+    r"(?:不要|不用|无需|不需要|不必|别|不|do not|don't|dont|no need to|without)"
+    r".{0,64}(?:任何|所有|全部|其他|other|any\s+other|all\s+other)"
+    r".{0,12}(?:文件|文档|file|document|files|documents)",
+    re.IGNORECASE,
+)
+_TARGETED_ARTIFACT_CREATION_PATTERN = re.compile(
+    r"(?:create|generate|export|save as).{0,28}"
+    r"(?:specified|target|output|new).{0,24}"
+    r"(?:text\s+)?(?:file|document|report|spreadsheet|slides?)",
+    re.IGNORECASE,
+)
 _PAST_ARTIFACT_REFERENCE_PATTERN = re.compile(
     r"(?:刚才|之前|上次|上一轮|前面|已|已经|already|previously).{0,18}"
     r"(?:生成|创建|导出|保存|created|generated|exported|saved)(?:的|好)?",
@@ -82,6 +94,13 @@ _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN = re.compile(
     r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入)",
     re.IGNORECASE,
 )
+_PPT_WRITE_REQUEST_PATTERN = re.compile(
+    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入|补充|扩写|更新)"
+    r".{0,32}(?:pptx?|演示文稿|幻灯片|slides?)"
+    r"|(?:pptx?|演示文稿|幻灯片|slides?).{0,32}"
+    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入|补充|扩写|更新)",
+    re.IGNORECASE,
+)
 
 
 def has_write_intent(task: str) -> bool:
@@ -109,7 +128,12 @@ def has_strong_write_intent(task: str) -> bool:
         return True
     if any(pattern.search(task_text) for pattern in _IMPERATIVE_WRITE_PATTERNS):
         return True
-    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text):
+    if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
+        return True
+    if (
+        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
+        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
+    ):
         return True
     markers = semantic_markers(task_text)
     if (
@@ -128,6 +152,7 @@ def has_strong_write_intent(task: str) -> bool:
         return True
     return bool(
         _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
+        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
         or re.search(
             r"(?:加入|添加|插入|放入|写入).{0,18}(?:docx|word|文档|pptx?|幻灯片|slides?)",
             task_text,
@@ -149,7 +174,10 @@ def has_explicit_write_intent(task: str) -> bool:
         return True
     if any(pattern.search(task_text) for pattern in _IMPERATIVE_WRITE_PATTERNS):
         return True
-    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text):
+    if (
+        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
+        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
+    ):
         return True
     has_soft_action = any(word in lowered for word in _SOFT_WRITE_ACTION_WORDS)
     has_target_hint = any(word in lowered for word in _WRITE_TARGET_HINT_WORDS)
@@ -189,6 +217,13 @@ def has_readonly_write_negation(task: str) -> bool:
     ):
         return False
     if _has_disjoint_target_write_and_path_protection(task_text):
+        return False
+    # "Do not modify any other file" protects the rest of the workspace; it
+    # does not cancel a clear request to create the specified target artifact.
+    if _OTHER_FILES_PROTECTION_PATTERN.search(task_text) and (
+        has_artifact_creation_intent(task_text)
+        or has_target_scoped_write_intent(task_text)
+    ):
         return False
     if has_global_readonly_write_negation(task_text):
         return True
@@ -302,7 +337,12 @@ def has_artifact_creation_intent(task: str) -> bool:
         return False
     if any(pattern.search(task_text) for pattern in _ARTIFACT_CREATION_INTENT_PATTERNS):
         return True
-    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text):
+    if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
+        return True
+    if (
+        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
+        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
+    ):
         return True
     markers = semantic_markers(task_text)
     return bool(

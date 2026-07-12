@@ -264,9 +264,10 @@ def test_readonly_missing_file_reference_does_not_complete(tmp_path):
     )
 
     events = list(runtime.run(request))
-
     run_started = next(event for event in events if event.type == "run.started")
-    check_finished = next(event for event in events if event.type == "check.finished")
+    check_finished = next(
+        event for event in reversed(events) if event.type == "check.finished"
+    )
     run_finished = next(event for event in events if event.type == "run.finished")
     assert check_finished.payload["passed"] is False
     assert check_finished.payload["status"] == "needs_attention"
@@ -321,7 +322,9 @@ def test_readonly_directory_listing_does_not_satisfy_missing_file_reference(tmp_
 
     events = list(runtime.run(request))
 
-    check_finished = next(event for event in events if event.type == "check.finished")
+    check_finished = next(
+        event for event in reversed(events) if event.type == "check.finished"
+    )
     run_finished = next(event for event in events if event.type == "run.finished")
     assert check_finished.payload["passed"] is False
     assert check_finished.payload["status"] == "needs_attention"
@@ -3417,7 +3420,7 @@ def test_file_task_runtime_quality_gate_accepts_verified_docx_narrative_after_py
 
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     request = FileTaskRequest(
-        task="请修复目标 Word 报告，补全预算分析、风险矩阵和谈判建议。",
+        task="请修复目标 Word 报告，补全预算分析、关键风险和谈判建议。",
         target_path=target_path.name,
         files=[
             FileTaskFile(
@@ -6077,6 +6080,51 @@ def test_file_task_runtime_treats_file_copy_as_write_intent():
     assert runtime._has_write_intent(task) is True
     assert classification.write_intent is True
     assert classification.selected_recipe == "workspace_file_copy"
+
+
+def test_file_task_runtime_treats_create_specified_target_text_file_as_write_intent():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
+    task = "Create the specified target text file containing exactly: Koto live file task passed."
+    request = FileTaskRequest(
+        task=task,
+        run_id="create_target_text_file_intent",
+        target_path="tmp/koto_live_e2e.txt",
+    )
+
+    classification = runtime._normalize_mainline_contract(
+        request,
+        request.files,
+        runtime._classify_request(request, request.files),
+    )
+
+    assert runtime._has_write_intent(task) is True
+    assert classification.write_intent is True
+    assert classification.output_mode == "write"
+    assert "mainline_contract:keyword_write_demoted" not in classification.reason_codes
+
+
+def test_file_task_runtime_allows_target_creation_while_protecting_other_files():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
+    task = (
+        "Create the specified target text file containing exactly: Koto live file task passed. "
+        "Do not read, modify, or delete any other file."
+    )
+    request = FileTaskRequest(
+        task=task,
+        run_id="create_target_text_file_with_other_files_protected",
+        target_path="tmp/koto_live_e2e.txt",
+    )
+
+    classification = runtime._normalize_mainline_contract(
+        request,
+        request.files,
+        runtime._classify_request(request, request.files),
+    )
+
+    assert runtime._has_readonly_write_negation(task) is False
+    assert classification.write_intent is True
+    assert classification.output_mode == "write"
+    assert "mainline_contract:readonly_guard" not in classification.reason_codes
 
 
 def test_file_task_runtime_treats_put_summary_into_new_slides_as_write_intent():

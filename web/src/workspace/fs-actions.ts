@@ -60,72 +60,6 @@ function _toggleBrowserCheck(cb: HTMLInputElement): void {
   _updateSelectBar();
 }
 
-function _browserFileRowMouseDown(event: MouseEvent, el: HTMLElement): void {
-  if (!state.selectMode || !el) return;
-  if (event && event.button !== 0) return;
-  if (
-    event &&
-    event.target &&
-    (event.target as HTMLElement).closest &&
-    (event.target as HTMLElement).closest('.wa-file-check')
-  )
-    return;
-  el.dataset.selectMouseHandled = '1';
-  _browserFileRowClick(event, el);
-}
-
-function _browserFileRowClick(event: MouseEvent, el: HTMLElement): void {
-  if (event) {
-    if ((event as any).__waFileRowHandled) return;
-    (event as any).__waFileRowHandled = true;
-  }
-  if (!el) return;
-  if (
-    event &&
-    event.target &&
-    (event.target as HTMLElement).closest &&
-    (event.target as HTMLElement).closest('.wa-file-check')
-  )
-    return;
-  if (el.dataset.selectMouseHandled === '1' && event && event.type === 'click') {
-    delete el.dataset.selectMouseHandled;
-    if (event && typeof event.preventDefault === 'function') event.preventDefault();
-    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-    return;
-  }
-  if (state.selectMode) {
-    if (event && typeof event.preventDefault === 'function') event.preventDefault();
-    if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-    const cb = el.querySelector('.wa-file-check') as HTMLInputElement | null;
-    if (!cb) return;
-    cb.checked = !cb.checked;
-    _toggleBrowserCheck(cb);
-    return;
-  }
-  if (el.dataset.supported !== 'false') {
-    (window as any).WA.openBrowserFile(el.dataset.path, true);
-  } else {
-    showToast('此格式暂不支持在线编辑：' + (el.dataset.path || '').split(/[\\/]/).pop(), 'info');
-  }
-}
-
-function _installBrowserFileRowDelegation(): void {
-  const doc = document as any;
-  if (doc.__waBrowserFileDelegationInstalled) return;
-  doc.__waBrowserFileDelegationInstalled = true;
-  document.addEventListener('click', (event: MouseEvent) => {
-    if ((event as any).__waFileRowHandled) return;
-    const list = document.getElementById('wa-files-list') as HTMLElement | null;
-    if (!list) return;
-    const target = event.target as HTMLElement | null;
-    if (!target || typeof target.closest !== 'function') return;
-    if (target.closest('.wa-file-check, .wa-file-actions, button, input, textarea, select, a')) return;
-    const row = target.closest('.wa-file-item.file') as HTMLElement | null;
-    if (!row || !list.contains(row)) return;
-    _browserFileRowClick(event, row);
-  });
-}
-
 function _updateSelectBar(): void {
   const n = state.selectedFiles.size;
   const countEl = document.getElementById('wa-select-count');
@@ -610,8 +544,6 @@ const wa = (window as any).WA || {};
 wa._fileRowClick = _fileRowClick;
 wa._toggleFileCheck = _toggleFileCheck;
 wa._toggleBrowserCheck = _toggleBrowserCheck;
-if (typeof wa._browserFileRowMouseDown !== 'function') wa._browserFileRowMouseDown = _browserFileRowMouseDown;
-if (typeof wa._browserFileRowClick !== 'function') wa._browserFileRowClick = _browserFileRowClick;
 wa._updateSelectBar = _updateSelectBar;
 wa.toggleSelectMode = toggleSelectMode;
 wa.selectAll = selectAll;
@@ -624,9 +556,3 @@ wa.closeFolderOverlay = closeFolderOverlay;
 wa.confirmOpenFolder = confirmOpenFolder;
 wa.browseForFolder = browseForFolder;
 wa.toggleFolder = toggleFolder;
-
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', _installBrowserFileRowDelegation, { once: true });
-} else {
-  _installBrowserFileRowDelegation();
-}

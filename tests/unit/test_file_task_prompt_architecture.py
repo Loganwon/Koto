@@ -19,6 +19,7 @@ def _body_between(source: str, start_marker: str, end_marker: str) -> str:
 def test_file_task_doc_annotate_request_detection_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/file_task_doc_annotate_request.py")
+    planning = _read("app/core/agent/file_task_planning.py")
     classify_body = _body_between(
         runtime,
         "    def _classify_request(",
@@ -35,7 +36,11 @@ def test_file_task_doc_annotate_request_detection_is_extracted_from_runtime() ->
     assert "is_docx_annotation_request=_doc_annotate_is_annotation_request" in classify_body
     assert "is_docx_clear_review_request=_doc_annotate_is_clear_review_request" in classify_body
     assert "docx_annotation_has_contract=_doc_annotate_contract_for_request" in runtime
-    assert "docx_annotation_has_contract=_doc_annotate_has_request_contract" in runtime
+    assert "apply_doc_annotate_bridge_fallback" not in runtime
+    assert "from app.core.agent.file_task_doc_annotate_request import" in planning
+    assert "docx_annotation_has_request_contract as _doc_annotate_has_request_contract" in planning
+    assert "apply_doc_annotate_bridge_fallback(" in planning
+    assert "docx_annotation_has_contract=_doc_annotate_has_request_contract" in planning
     assert "def is_docx_annotation_request(" in helper
     assert "def is_docx_clear_review_request(" in helper
     assert "def docx_annotation_has_request_contract(" in helper

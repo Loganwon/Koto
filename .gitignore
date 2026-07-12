@@ -84,8 +84,36 @@ build_log.txt
 /workspace/
 /chats/
 
+# Application-owned runtime state.  Keep the source directories visible; only
+# ignore the locations populated by an interactive Koto run.
+/app/core/chats/
+/app/core/workspace/images/
+/app/core/workspace/uploads/
+/app/core/workspace/clipboard/history.json
+config/auto_execution.db
+config/user_settings.json
+
+# One-off local diagnostics captured during the 2026-07 worktree inventory.
+# These are deliberately exact names, rather than broad patterns, so fixtures
+# and release assets remain reviewable by default.
+/collapse_state.png
+/expand_state.png
+/screenshot_before.png
+/debug_error.txt
+/frontend_test_err.txt
+/safe_test_files.txt
+/temp_test_output.txt
+/temp_test_result.txt
+/test_stderr.txt
+/test_stdout.txt
+/unit_test_results.txt
+/create_test.py
+/temp_fix4.py
+
 # Models (large binary files)
 models/
+!web/models/
+!web/models/*.py
 
 # Build artifacts
 _archive/

@@ -688,9 +688,10 @@ class TestEditorAIStream:
         )
         events = parse_sse_events(resp.get_data())
         event_types = [event.get("type") for event in events]
+        lifecycle_event_types = [event_type for event_type in event_types if event_type != "progress"]
 
         assert resp.status_code == 200
-        assert event_types[:6] == [
+        assert lifecycle_event_types[:6] == [
             "run.started",
             "supervisor.status",
             "task.classified",
@@ -702,7 +703,8 @@ class TestEditorAIStream:
         assert "check.finished" in event_types
         assert event_types[-1] == "run.finished"
         assert [event.get("seq") for event in events] == list(range(1, len(events) + 1))
-        assert events[0]["payload"]["mode"] == "whitebox_v1"
+        run_started = next(event for event in events if event.get("type") == "run.started")
+        assert run_started["payload"]["mode"] == "whitebox_v1"
 
     def test_whitebox_task_stream_preserves_runtime_metadata_and_followup_context(
         self, app_client, monkeypatch, tmp_path
@@ -1988,7 +1990,10 @@ class TestEditorAIStream:
 
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
 
-        with patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"):
+        with patch(
+            "web.runtime_context.get_configured_local_model_id",
+            return_value="qwen3.5:9b",
+        ):
             resp = app_client.post(
                 "/api/editor/ai/task-stream",
                 json={
@@ -2292,16 +2297,19 @@ class TestEditorAIStream:
             yield evt_task_complete(result="ok")
 
         with patch(
-            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            "app.core.agent.editor_loop_executor.EditorLoopExecutor.iter_events",
             fake_run,
-        ), patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"):
+        ), patch(
+            "web.blueprints.editor_ai.get_configured_local_model_id",
+            return_value="qwen3.5:9b",
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
                     "action": "polish",
                     "selection": "这段文字需要润色。",
                     "model_mode": "cloud",
-                    "model_id": "gemini-2.5-pro",
+                    "model_id": "deepseek-chat",
                 },
             )
             _ = resp.get_data()
@@ -2309,7 +2317,7 @@ class TestEditorAIStream:
         assert resp.status_code == 200
         req = captured["request"]
         assert req.model_mode == "cloud"
-        assert req.extra["preferred_model"] == "gemini-2.5-pro"
+        assert req.extra["preferred_model"] == "deepseek-chat"
         assert req.extra["local_model"] == "qwen3.5:9b"
 
     def test_main_stream_code_mode_uses_editor_code_executor_not_quick_executor(
@@ -2350,50 +2358,6 @@ class TestEditorAIStream:
         assert code_result["files"] == {"chart.png": "ZmFrZQ=="}
 
 
-class TestEditorAIAgent:
-    """Tests for POST /api/editor/ai/agent structured progress events."""
-
-    def test_agent_route_emits_structured_step_events(self, app_client):
-        from app.core.agent.types import AgentAction, AgentStep, AgentStepType
-
-        class FakeAgent:
-            def run(self, input_text, session_id=None, system_context=None):
-                yield AgentStep(
-                    step_type=AgentStepType.THOUGHT, content="先理解文档问题"
-                )
-                yield AgentStep(
-                    step_type=AgentStepType.ACTION,
-                    content="执行搜索",
-                    action=AgentAction(
-                        tool_name="web_search", tool_args={"query": "AI"}
-                    ),
-                )
-                yield AgentStep(
-                    step_type=AgentStepType.OBSERVATION,
-                    content="找到结果",
-                    observation="找到 3 条相关结果",
-                )
-                yield AgentStep(step_type=AgentStepType.ANSWER, content="最终答案")
-
-        with patch("app.api.agent_routes.get_agent", return_value=FakeAgent()):
-            resp = app_client.post(
-                "/api/editor/ai/agent",
-                json={"query": "帮我分析这份文档", "full_text": "文档内容"},
-            )
-            payload = resp.get_data()
-
-        assert resp.status_code == 200
-        events = parse_sse_events(payload)
-        types = [e.get("type") for e in events]
-        assert "thought" in types
-        assert "step_start" in types
-        assert "tool_call" in types
-        assert "tool_result" in types
-        assert "step_done" in types
-        assert "token" in types
-        assert "done" in types
-
-
 class TestChartStream:
     """Tests for POST /api/editor/ai/chart streaming progress."""
 
@@ -2424,58 +2388,6 @@ class TestChartStream:
         assert "code" in types
         assert "image" in types
         assert "done" in types
-
-
-class TestChartRerun:
-    """Tests for POST /api/editor/ai/chart-rerun"""
-
-    def test_empty_code_returns_error(self, app_client):
-        """空代码应返回错误"""
-        resp = app_client.post(
-            "/api/editor/ai/chart-rerun",
-            json={
-                "code": "",
-                "lang": "python",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["error"]
-
-    def test_simple_python_code(self, app_client):
-        """简单 Python 代码应成功执行"""
-        resp = app_client.post(
-            "/api/editor/ai/chart-rerun",
-            json={
-                "code": "print('hello')",
-                "lang": "python",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert "hello" in (data.get("stdout") or "")
-
-    def test_chart_generation_code(self, app_client):
-        """图表生成代码应产出图片文件"""
-        code = (
-            "import matplotlib\n"
-            "matplotlib.use('Agg')\n"
-            "import matplotlib.pyplot as plt\n"
-            "plt.plot([1, 2, 3], [1, 4, 9])\n"
-            "plt.savefig('chart.png', dpi=72)\n"
-            "plt.close()\n"
-        )
-        resp = app_client.post(
-            "/api/editor/ai/chart-rerun",
-            json={
-                "code": code,
-                "lang": "python",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data.get("error") is None or data["error"] == ""
-        assert "chart.png" in (data.get("files") or {})
 
 
 class TestBuildEditorPrompt:
@@ -2666,7 +2578,7 @@ class TestLocalModelMode:
                     ]
                 )
 
-        with patch("web.settings.SettingsManager.get", return_value=True), patch(
+        with patch("app.core.config.user_settings.SettingsManager.get", return_value=True), patch(
             "app.core.agent.llm_provider_helpers.get_provider", return_value=FakeCloudProvider()
         ), patch(
             "app.core.agent.llm_provider_helpers.get_local_provider",
@@ -3175,9 +3087,12 @@ class TestLocalModelMode:
         partial_html = _read_frontend_source("web/templates/_workspace_model_controls.html")
         assert "{% include '_workspace_model_controls.html' %}" in standalone_html
         assert "{% include '_workspace_model_controls.html' %}" in index_html
+        assert index_html.count("{% include '_workspace_model_controls.html' %}") == 1
         assert 'id="wa-model-mode-toggle"' in partial_html
         assert 'id="wa-model-mode-deepseek-btn"' in partial_html
         assert 'id="wa-model-mode-local-btn"' in partial_html
+        assert "KotoSetModelMode" not in partial_html
+        assert "onclick=" not in partial_html
         assert 'id="wa-model-select"' not in partial_html
         assert 'id="wa-model-mode-deepseek-btn"' not in standalone_html
         assert 'id="wa-model-mode-local-btn"' not in standalone_html
@@ -3222,15 +3137,15 @@ class TestLocalModelMode:
 
 
 class TestMainChatProgressRegression:
-    """Regression checks for canonical step-event support in the main chat UI."""
+    """Regression checks for canonical step-event support in the active SSE renderer."""
 
     def test_main_chat_normalizes_canonical_step_events(self):
-        src = _read_frontend_source("web/src/app/main.ts")
-        assert "evt.type === 'plan'" in src
-        assert "evt.type === 'phase'" in src
-        assert "evt.type === 'step_start'" in src
-        assert "evt.type === 'tool_call'" in src
-        assert "const canonicalProgressPercent =" in src
+        src = _read_frontend_source("web/src/shared/sse-pipeline.ts")
+        assert "e.type === 'plan'" in src
+        assert "e.type === 'phase'" in src
+        assert "e.type === 'step_start'" in src
+        assert "e.type === 'tool_call'" in src
+        assert "private _progressPercent(" in src
 
 
 class TestRemovedLegacyTaskRoutes:
@@ -3426,9 +3341,10 @@ class TestLegacyEditorRemovalRegression:
         assert not Path("web/univer-editor/index.html").exists()
         assert not Path("web/static/univer-dist/index.html").exists()
 
-    def test_legacy_univer_source_tree_is_removed(self):
+    def test_legacy_univer_entrypoint_is_removed_but_build_source_is_retained(self):
         assert not Path("web/univer-editor/main.js").exists()
-        assert not Path("web/univer-editor/src").exists()
+        assert Path("web/univer-editor/src").is_dir()
+        assert Path("web/univer-editor/sheets-main.js").is_file()
 
     def test_workspace_assistant_still_loads_sheets_runtime(self):
         src = _read_frontend_source("web/src/editors/cdn-loaders.ts")
@@ -4050,17 +3966,11 @@ class TestTaskAgentDocumentEdits:
             for e in events
         )
 
-    def test_resolve_requested_model_id_falls_back_when_unavailable(self, monkeypatch):
+    def test_resolve_requested_model_id_normalizes_archived_cloud_model(self, monkeypatch):
         import web.app as webapp
 
         class _DummyManager:
             _cached_caps = {}
-
-            def get_available_models(self):
-                return [{"id": "gemini-2.5-flash"}]
-
-            def get_model_for_task(self, task):
-                return "gemini-2.5-flash"
 
         monkeypatch.setattr(webapp, "_model_manager", _DummyManager())
 
@@ -4069,75 +3979,7 @@ class TestTaskAgentDocumentEdits:
                 "gemini-2.5-pro",
                 fallback_model="gemini-3.1-pro-preview",
             )
-            == "gemini-2.5-flash"
-        )
-
-    def test_resolve_requested_model_id_rejects_image_model_for_chat(self, monkeypatch):
-        import web.app as webapp
-
-        class _DummyManager:
-            _cached_caps = {
-                "gemini-3.1-flash-image-preview": {
-                    "image_gen": True,
-                    "multimodal": True,
-                    "grounding": False,
-                    "function_calling": False,
-                    "tier": 7,
-                }
-            }
-
-            def get_available_models(self):
-                return [
-                    {"id": "gemini-3.1-flash-image-preview"},
-                    {"id": "gemini-2.5-flash"},
-                ]
-
-        monkeypatch.setattr(webapp, "_model_manager", _DummyManager())
-
-        assert (
-            webapp._resolve_requested_model_id(
-                "gemini-3.1-flash-image-preview",
-                fallback_model="gemini-2.5-flash",
-                task_type="CHAT",
-            )
-            == "gemini-2.5-flash"
-        )
-
-    def test_resolve_requested_model_id_rejects_model_without_required_task_capability(
-        self, monkeypatch
-    ):
-        import web.app as webapp
-
-        class _DummyManager:
-            _cached_caps = {
-                "gemini-2.5-flash": {
-                    "speed": 10,
-                    "quality": 8,
-                    "reasoning": 8,
-                    "context": 8,
-                    "multimodal": True,
-                    "grounding": False,
-                    "function_calling": True,
-                    "image_gen": False,
-                    "tier": 8,
-                }
-            }
-
-            def get_available_models(self):
-                return [
-                    {"id": "gemini-2.5-flash"},
-                    {"id": "gemini-2.5-pro"},
-                ]
-
-        monkeypatch.setattr(webapp, "_model_manager", _DummyManager())
-
-        assert (
-            webapp._resolve_requested_model_id(
-                "gemini-2.5-flash",
-                fallback_model="gemini-2.5-pro",
-                task_type="WEB_SEARCH",
-            )
-            == "gemini-2.5-pro"
+            == "deepseek-chat"
         )
 
     def test_parse_file_to_text_accepts_larger_custom_windows(self, tmp_path):

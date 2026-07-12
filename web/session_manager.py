@@ -12,15 +12,26 @@ import os
 import tempfile
 import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
-
-from web.runtime_context import get_app_module
 
 logger = logging.getLogger(__name__)
 
 
+_chat_dir_provider: Callable[[], str] | None = None
+_default_session_manager: "SessionManager | None" = None
+
+
+def configure_session_storage(chat_dir_provider: Callable[[], str]) -> None:
+    """Bind session storage to the application-owned chat directory."""
+    global _chat_dir_provider
+    _chat_dir_provider = chat_dir_provider
+
+
 def _chat_dir() -> str:
-    return str(getattr(get_app_module(), "CHAT_DIR", "") or "")
+    if _chat_dir_provider is None:
+        raise RuntimeError("Session storage is not configured")
+    return str(_chat_dir_provider() or "")
 
 
 # Per-session file lock to prevent concurrent read-modify-write cycles
@@ -249,3 +260,11 @@ class SessionManager:
                 "Failed to rename session %s -> %s: %s", filename, new_filename, e
             )
             return {"success": False, "error": str(e)}
+
+
+def get_session_manager() -> SessionManager:
+    """Return the single application session manager."""
+    global _default_session_manager
+    if _default_session_manager is None:
+        _default_session_manager = SessionManager()
+    return _default_session_manager

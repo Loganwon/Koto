@@ -18,16 +18,42 @@ def _body_between(source: str, start_marker: str, end_marker: str) -> str:
     return source[start:end]
 
 
+def test_file_task_runtime_phase_modules_do_not_import_runtime_facade() -> None:
+    """Keep the extracted phases acyclic and independently importable."""
+    runtime = _read("app/core/agent/file_task_runtime.py")
+    phase_modules = (
+        "file_task_context_read.py",
+        "file_task_execution_loop.py",
+        "file_task_finalization.py",
+        "file_task_planning.py",
+        "file_task_plan_presentation.py",
+    )
+
+    assert "from app.core.agent.file_task_context_read import FileTaskContextReadPhase" in runtime
+    assert "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop" in runtime
+    assert "from app.core.agent.file_task_finalization import FileTaskFinalizationPhase" in runtime
+    assert "from app.core.agent.file_task_planning import FileTaskPlanningPhase" in runtime
+    assert "from app.core.agent.file_task_plan_presentation import" in runtime
+
+    for module_name in phase_modules:
+        source = _read(f"app/core/agent/{module_name}")
+        assert "from app.core.agent.file_task_runtime import" not in source
+        assert "import app.core.agent.file_task_runtime" not in source
+
+
 def test_file_task_doc_annotate_bridge_fallback_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
+    planning = _read("app/core/agent/file_task_planning.py")
     helper = _read("app/core/agent/file_task_doc_annotate_fallback.py")
     body = _body_between(
-        runtime,
+        planning,
         "        write_intent = execution_context.write_intent",
         "        bridge_execution_mode = classification.execution_mode == \"doc_annotate_bridge\"",
     )
 
-    assert "from app.core.agent.file_task_doc_annotate_fallback import" in runtime
+    assert "from app.core.agent.file_task_doc_annotate_fallback import" not in runtime
+    assert "from app.core.agent.file_task_planning import FileTaskPlanningPhase" in runtime
+    assert "from app.core.agent.file_task_doc_annotate_fallback import" in planning
     assert "apply_doc_annotate_bridge_fallback(" in body
     assert "file_task_doc_annotate_boundary.should_use_bridge_execution" not in body
     assert "doc_annotate_bridge_execution_fallback" not in body
@@ -38,19 +64,21 @@ def test_file_task_doc_annotate_bridge_fallback_is_extracted_from_runtime() -> N
 
 def test_file_task_readonly_answer_only_loop_guard_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
+    execution_loop = _read("app/core/agent/file_task_execution_loop.py")
     helper = _read("app/core/agent/file_task_readonly_loop_guard.py")
     loop_body = _body_between(
-        runtime,
+        execution_loop,
         "        for round_index in range(1, repair_round_limit + 1):",
-        "            batch_signature = self._tool_batch_signature(tool_calls)",
+        "            batch_signature = runtime._tool_batch_signature(tool_calls)",
     )
     duplicate_body = _body_between(
-        runtime,
+        execution_loop,
         "            if batch_signature and batch_signature == last_tool_batch_signature:",
         "                if (",
     )
 
     assert "from app.core.agent.file_task_readonly_loop_guard import" in runtime
+    assert "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop" in runtime
     assert "_readonly_answer_only_round(" in loop_body
     assert "_readonly_discard_answer_only_tool_calls(" in loop_body
     assert "_readonly_should_retry_answer_guard(" in loop_body

@@ -66,25 +66,11 @@ class EditorQuickActionExecutor:
             meta.finish(RunState.FAILED, "empty prompt")
             return
 
-        phases = self._resolve_phases(request)
-        phase_steps = [
-            {
-                "id": phase.get("id") or f"step_{idx + 1}",
-                "description": phase.get("label") or phase.get("id") or f"步骤 {idx + 1}",
-            }
-            for idx, phase in enumerate(phases)
-        ]
-        if phase_steps:
-            yield evt_plan(phase_steps)
-
-        analyze_phase = phases[0] if phases else {"id": "understand", "label": "理解需求"}
-        analyze_step_id = analyze_phase.get("id", "understand")
-        analyze_label = analyze_phase.get("label", "理解需求")
-
-        yield evt_step_start(analyze_step_id, analyze_label)
-        yield evt_phase(phases, analyze_step_id, "running")
-        yield evt_step_progress(analyze_step_id, "正在分析上下文…")
-        yield evt_status_message("正在分析上下文…")
+        is_text_quick_action = request.action_type in {
+            "polish", "translate", "summary", "check", "rewrite", "continue",
+        }
+        if not is_text_quick_action:
+            yield evt_status_message("正在分析上下文…")
 
         prompt = self._apply_rag_chunking(request, request.prompt)
         system_instruction = RequestValidator.build_system_instruction(request)
@@ -92,18 +78,8 @@ class EditorQuickActionExecutor:
         use_local = self._should_use_local(request)
         meta.model = self._pick_model(use_local, request)
 
-        yield evt_step_done(analyze_step_id, f"{analyze_label}完成")
-        yield evt_phase(phases, analyze_step_id, "done")
-
-        gen_phase = phases[-1]["id"] if len(phases) <= 2 else phases[1]["id"]
-        gen_label = next(
-            (phase.get("label", gen_phase) for phase in phases if phase.get("id") == gen_phase),
-            gen_phase,
-        )
-        yield evt_step_start(gen_phase, gen_label)
-        yield evt_phase(phases, gen_phase, "running")
-        yield evt_step_progress(gen_phase, "正在生成回复…")
-        yield evt_status_message("正在生成回复…")
+        if not is_text_quick_action:
+            yield evt_status_message("正在生成回复…")
 
         result_text = yield from self._stream_llm(
             full_prompt,
@@ -113,17 +89,15 @@ class EditorQuickActionExecutor:
         )
         if result_text is None:
             meta.finish(RunState.FAILED, "LLM returned empty")
-            yield evt_step_error(gen_phase, "未能生成有效回复")
             yield evt_error(self._build_model_unavailable_error(request, use_local))
             return
 
-        yield evt_step_done(gen_phase, f"{gen_label}完成")
-
         clean_text, _tool_calls = parse_tool_calls(result_text)
-        for phase in phases:
-            yield evt_phase(phases, phase["id"], "done")
-        yield evt_status_message("")
-        yield evt_task_complete(result=clean_text)
+        yield evt_task_complete(
+            result=clean_text,
+            action_type=request.action_type,
+            can_insert=bool(is_text_quick_action and clean_text),
+        )
         meta.finish(RunState.SUCCEEDED)
 
     def _stream_llm(

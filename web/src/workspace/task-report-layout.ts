@@ -1,34 +1,34 @@
 export const TASK_REPORT_LABELS = {
   processTitle: '执行过程',
-  finalTitle: '总结与回答',
+  finalTitle: '任务结果',
 };
 
 export const TASK_REPORT_STAGE_DEFS = [
-  { id: 'route', title: '任务识别', hint: '判断用户意图、目标文件和处理类型' },
-  { id: 'plan', title: '执行方案', hint: '确定处理路线、工具选择和质量要求' },
-  { id: 'execute', title: '执行进度', hint: '读取、分析、生成、写入或调用模型' },
-  { id: 'check', title: '完成核验', hint: '检查结果、变更和可继续处理项' },
+  { id: 'route', title: '分析需求', hint: '判断用户意图、目标文件和处理类型' },
+  { id: 'plan', title: '制定计划', hint: '确定处理路线、工具选择和质量要求' },
+  { id: 'execute', title: '正在处理', hint: '读取、分析、生成、写入或调用模型' },
+  { id: 'check', title: '检查结果', hint: '检查结果、变更和可继续处理项' },
 ];
 
 export const TASK_REPORT_STAGE_DONE_TEXT: Record<string, string> = {
-  route: '已确认任务目标、处理类型和文件上下文。',
-  plan: '已确定执行方式和输出要求。',
-  execute: '本轮处理已结束，输出已同步到总结与回答。',
-  check: '核验已结束，结论已同步到总结与回答。',
+  route: '已完成',
+  plan: '已完成',
+  execute: '已完成',
+  check: '核验已结束，结论已同步到任务结果。',
 };
 
 export const TASK_REPORT_STAGE_RUNNING_TEXT: Record<string, string> = {
-  route: '正在确认任务目标和文件上下文。',
-  plan: '正在整理执行方案和输出要求。',
-  execute: '正在读取文件并整理结果。',
-  check: '正在检查结果文件和任务完成状态。',
+  route: '识别中',
+  plan: '规划中',
+  execute: '处理中',
+  check: '核验中',
 };
 
 export const TASK_REPORT_STAGE_PENDING_TEXT: Record<string, string> = {
-  route: '等待开始识别任务。',
-  plan: '等待生成执行方案。',
-  execute: '等待开始处理文件。',
-  check: '等待完成后核验。',
+  route: '等待中',
+  plan: '等待中',
+  execute: '等待中',
+  check: '等待中',
 };
 
 export const TASK_REPORT_STAGE_BY_STEP_ID: Record<string, string> = {

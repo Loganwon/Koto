@@ -17,7 +17,7 @@ class AnswerOnlyToolCalls:
 
 
 READONLY_DUPLICATE_GUARD_SUMMARY = (
-    "检测到重复读取/重复工具调用，已要求模型停止读取并直接生成总结与回答。"
+    "检测到重复读取/重复工具调用，已要求模型停止读取并直接输出分析结果。"
 )
 READONLY_DUPLICATE_FALLBACK_SUMMARY = "已读取上下文，但模型未生成可见分析结果。"
 READONLY_ANSWER_GUARD_PENDING_SUMMARY = "已读取内容，正在生成可见分析结果。"
@@ -87,7 +87,7 @@ def readonly_duplicate_guard_reminder(
     source_lines: list[str],
 ) -> str:
     reminder_lines = [
-        "你正在重复调用只读工具。不要再次调用任何工具；请直接基于已读取内容输出总结与回答。",
+        "你正在重复调用只读工具。不要再次调用任何工具；请直接基于已读取内容输出分析结果。",
         f"用户任务：{task}",
     ]
     if source_lines:

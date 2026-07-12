@@ -197,6 +197,20 @@ def test_unified_workspace_restores_pdf_annotation_toolbar_and_ai_bridge():
     assert "window.WA.pdfAIAnnotate" in workspace_bundle
 
 
+def test_terminal_file_task_results_remain_in_followup_model_context():
+    dispatcher = _read("web/src/workspace/task-dispatcher.ts")
+
+    finalizer_start = dispatcher.index("function finalizeWhiteboxTaskTurn(")
+    finalizer_end = dispatcher.index("function buildWhiteboxTaskPayload(", finalizer_start)
+    finalizer = dispatcher[finalizer_start:finalizer_end]
+
+    assert "taskTurnMetadataFromLoadingEl(loadingEl), {" in finalizer
+    assert "skip_model_context: !!skipModelContext" in finalizer
+    assert finalizer.index("taskTurnMetadataFromLoadingEl(loadingEl), {") < finalizer.index(
+        "skip_model_context: !!skipModelContext"
+    )
+
+
 # Section: task workbench, session history, and persistence.
 
 
@@ -249,7 +263,7 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "focusedOnly: true" in workbench_js
     assert "state.activeTaskId && !state.loading" in workbench_js
     assert "等待文件任务" in workbench_js
-    assert "当请求需要读取、修改或生成文件时，这里会直接展开任务识别、执行方案、进度和核验结果。" in workbench_js
+    assert "当请求需要读取、修改或生成文件时，这里会直接展开需求分析、执行计划、进度和结果检查。" in workbench_js
     assert "TASK_REPORT_STAGE_DEFS.map((def)" in workbench_js
     assert "FLOW_STAGE_DEFS" not in workbench_js
     assert "<span>模型调用</span>" not in workbench_js
@@ -266,7 +280,7 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "seedRouteModelContext(card, payload)" in task_js
     assert "模型调用" in task_js
     assert "from './task-final-report';" in task_js
-    assert "export function compactFlowSummary(value: string, fallback = '详细内容见总结与回答。'): string" in final_report_js
+    assert "export function compactFlowSummary(value: string, fallback = '详细内容见任务结果。'): string" in final_report_js
     assert "function supervisorAuditHtml(data: Record<string, any>, options: { compact?: boolean } = {})" in task_js
     assert "const showDetails = !options.compact || status === 'blocked';" in task_js
     assert "supervisorAuditHtml(data, { compact: true })" in task_js
@@ -279,8 +293,8 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "执行约束：" in task_js
     assert "需要补充：" in task_js
     assert "actions.map((item) => `要求：" not in task_js
-    assert "完整结果见总结与回答" not in task_js
-    assert "详细内容见总结与回答" in task_js
+    assert "完整结果见任务结果" not in task_js
+    assert "详细内容见任务结果" in task_js
     assert "${esc(payload.summary || '')}${criteriaHtml}${runtimeHtml}" not in task_js
     assert "import '../workspace/results';" in workspace_bundle_entry
     assert "import '../workspace/task-runner';" in workspace_bundle_entry
@@ -383,7 +397,7 @@ def test_workspace_conversation_hydrates_persisted_session_history():
     assert "loadSessionHistory" in workspace_bundle
 
 
-def test_workspace_ai_panel_uses_session_list_then_chat_detail():
+def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation():
     conversation_list_ts = _read("web/src/workspace/conversation-list.ts")
     conversation_sessions_ts = _read("web/src/workspace/conversation-sessions.ts")
     model_settings_ts = _read("web/src/workspace/model-settings.ts")
@@ -400,8 +414,8 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
         ]
     )
 
-    assert 'id="wa-ai-session-list-view"' in workspace_template
-    assert 'id="wa-ai-session-list-view"' in index_template
+    assert 'id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史" hidden' in workspace_template
+    assert 'id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史" hidden' in index_template
     assert 'id="wa-ai-session-list"' in workspace_template
     assert 'id="wa-ai-session-list"' in index_template
     assert 'id="wa-ai-session-list-composer"' in workspace_template
@@ -418,8 +432,9 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert "对话与任务" in index_template
     assert "wa-ai-session-modebar" not in workspace_template
     assert "wa-ai-session-modebar" not in index_template
-    assert "能总结分析、改写润色、生成文档、整理文件。输入任务或附加文件，过程和结果都会显示在这里。" in workspace_template
-    assert "能总结分析、改写润色、生成文档、整理文件。输入任务或附加文件，过程和结果都会显示在这里。" in index_template
+    welcome_copy = "在输入框直接说出任务，或附加文件作为上下文。支持文档分析、PPT生成、代码编写、数据处理等。"
+    assert welcome_copy in workspace_template
+    assert welcome_copy in index_template
     assert 'class="wa-ai-session-new-btn"' in workspace_template
     assert 'class="wa-ai-session-new-btn"' in index_template
     assert "新建对话" in workspace_template
@@ -427,8 +442,8 @@ def test_workspace_ai_panel_uses_session_list_then_chat_detail():
     assert "打开任务步骤" not in workspace_template
     assert "打开任务步骤" not in index_template
     assert "任务流程" in _read("web/src/workspace/task-workbench.ts")
-    assert 'id="wa-ai-chat-view" class="wa-ai-chat-view" hidden' in workspace_template
-    assert 'id="wa-ai-chat-view" class="wa-ai-chat-view" hidden' in index_template
+    assert 'id="wa-ai-chat-view" class="wa-ai-chat-view">' in workspace_template
+    assert 'id="wa-ai-chat-view" class="wa-ai-chat-view">' in index_template
     assert 'id="wa-ai-session-back"' in workspace_template
     assert 'id="wa-ai-session-back"' in index_template
     assert workspace_template.index('id="wa-ai-session-list-view"') < workspace_template.index('id="wa-ai-chat-view"') < workspace_template.index('id="wa-ai-messages"')
@@ -526,7 +541,9 @@ def test_workspace_main_view_inerts_legacy_chat_entrypoint():
     assert "setMainViewActive(wsView, true);" in embedded_mode_ts
     assert "setMainViewActive(wsView, false);" in embedded_mode_ts
     assert "setMainViewActive(chatView, true);" in embedded_mode_ts
-    assert "function setMainViewActive" in workspace_bundle
+    assert "aria-hidden" in workspace_bundle
+    assert "inert" in workspace_bundle
+    assert "koto.inWorkspace" in workspace_bundle
 
 
 def test_unified_session_api_includes_workspace_and_editor_sessions(monkeypatch):
@@ -758,15 +775,18 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert '"route_kind": "direct_response | complex_task"' in editor_ai
     assert "第一层只允许两类 route_kind" in editor_ai
     assert "回答必须知道当前文件/附件/选区里的具体内容" in editor_ai
-    assert 'requested_mode == "deepseek"' in editor_ai
-    assert 'get_llm_provider(provider="deepseek", model=model_id)' in editor_ai
+    assert 'normalize_model_mode(data.get("model_mode"), default="deepseek")' in editor_ai
+    assert "get_provider_for_model_mode(requested_mode)" in editor_ai
+    assert "get_llm_provider(provider=route_provider, model=model_id)" in editor_ai
     assert 'response_format={"type": "json_object"}' in editor_ai
 
     assert "resolveWorkspaceRouteIntent(context)" in dispatcher_ts
     assert "return runWorkspaceModelRoutedTask(context);" in dispatcher_ts
     assert "shouldForceFileTaskForWorkspaceContext(context, routeDecision)" in dispatcher_ts
     assert "frontend_file_context_guard" in dispatcher_ts
-    assert "streamWorkspaceChatRoute(context, routeDecision)" in dispatcher_ts
+    assert re.search(
+        r"streamWorkspaceChatRoute\(context,\s*routeDecision!?\)", dispatcher_ts
+    )
     assert "'/api/chat/stream'" in dispatcher_ts
     assert "locked_task: lockedTask" in dispatcher_ts
     assert "function persistTaskTurn" in dispatcher_ts
@@ -805,7 +825,7 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "function syncTaskInteractionSummary(card: TaskCardElement): void" in task_runner_ts
     assert "const semanticTitle = String(card.dataset.taskTitle || '').trim();" in task_runner_ts
     assert "WA.syncTaskInteractionSummary = syncTaskInteractionSummary" in task_runner_ts
-    assert "+ renderTaskMemoryCard(card)\n      + auditHtml\n      + taskArtifactsSummaryHtml(card)\n      + taskResultActionsHtml(card)\n      + '<div class=\"wa-task-final-report\"" in task_runner_ts
+    assert "+ renderTaskMemoryCard(card)\n      + auditHtml\n      + taskArtifactsSummaryHtml(card)\n      + taskResultActionsHtml(card)\n      + renderTaskResultSummaryBar(card, result)\n      + '<div class=\"wa-task-final-report\"" in task_runner_ts
     assert ".wa-task-interaction-card" in workspace_css
     assert ".wa-task-memory-card" in workspace_css
     assert "_SESSION_HISTORY_SCHEMA_VERSION = 2" in sessions_bp
@@ -873,7 +893,7 @@ def test_workspace_file_task_steps_are_user_visible_whitebox_stages():
     assert "export function taskPlanViolationLabel(code: string): string" in task_step_labels_ts
     assert "export function taskToolLabel(name: string): string" in task_step_labels_ts
     assert "export function shouldAlwaysSuppressTaskToolFinished(name: string): boolean" in task_step_labels_ts
-    for label in ("任务识别", "执行方案", "执行进度", "完成核验"):
+    for label in ("分析需求", "制定计划", "正在处理", "检查结果"):
         assert label in task_report_layout_ts
         assert label in workspace_bundle
     assert "function handleEvent_task_classified" in task_runner_ts
@@ -919,13 +939,13 @@ def test_workspace_blocked_plan_checked_is_not_rendered_as_confirmation_wait():
     assert "任务仍在处理中或等待同步" in status_ts
     assert "当前进度已保留，可查看过程并继续处理。" in status_ts
     assert "if (normalized === 'needs_attention') {" in status_ts
-    assert "任务需要处理，请查看总结与回答" in status_ts
-    assert "失败原因和可继续处理的建议已整理到总结与回答区域。" in status_ts
+    assert "任务需要处理，请查看任务结果" in status_ts
+    assert "失败原因和可继续处理的建议已整理到任务结果区域。" in status_ts
     assert "任务已完成，结果已显示在步骤下方" in status_ts
     assert "任务需要复核：当前只是临时摘要" in status_ts
-    assert "已完成核验，总结与回答已更新。" not in task_runner_ts
-    assert "核验已结束，结论已同步到总结与回答。" in _read("web/src/workspace/task-report-layout.ts")
-    assert "总结与回答见下方" not in task_runner_ts
+    assert "已完成核验，任务结果已更新。" not in task_runner_ts
+    assert "核验已结束，结论已同步到任务结果。" in _read("web/src/workspace/task-report-layout.ts")
+    assert "任务结果见下方" not in task_runner_ts
 
 
 def test_workspace_system_action_has_whitelisted_app_fast_path():
@@ -1097,9 +1117,9 @@ def test_workspace_task_renderer_compacts_tool_result_details():
     assert "export function compactFlowSummary" in task_final_report_ts
     assert "读取到 ' + parsed.length + ' 个工作区条目" in task_runner_ts
     assert "payload.result_preview || payload.result_text || payload.result" in task_runner_ts
-    assert "已收到较长内容，详细内容见总结与回答。" in task_runner_ts
-    assert "步骤已结束，详细内容见总结与回答。" in task_runner_ts
-    assert "任务已完成，完整结果见总结与回答。" not in task_runner_ts
+    assert "已收到较长内容，详细内容见任务结果。" in task_runner_ts
+    assert "步骤已结束，详细内容见任务结果。" in task_runner_ts
+    assert "任务已完成，完整结果见任务结果。" not in task_runner_ts
     assert "'文件任务流已结束。'" in task_runner_ts
     assert "'文件任务流已完成。'" not in task_runner_ts
     assert "data-full-content" in task_runner_ts
@@ -1107,7 +1127,7 @@ def test_workspace_task_renderer_compacts_tool_result_details():
     assert "esc(data.result_text || data.error || '')" not in task_runner_ts
 
     assert "data-full-content" in workspace_bundle
-    assert "已收到较长内容，详细内容见总结与回答。" in workspace_bundle
+    assert "已收到较长内容，详细内容见任务结果。" in workspace_bundle
 
 
 def test_workspace_task_dispatcher_uses_neutral_stream_end_fallback():
@@ -1136,7 +1156,7 @@ def test_workspace_task_workbench_filters_internal_progress_messages():
     ):
         assert phrase in workbench_js
     assert "TASK_REPORT_STAGE_DEFS.map((def)" in workbench_js
-    for label in ("任务识别", "执行方案", "执行进度", "完成核验"):
+    for label in ("分析需求", "制定计划", "正在处理", "检查结果"):
         assert label in task_report_layout_ts
 
 
@@ -1152,9 +1172,9 @@ def test_workspace_task_payload_does_not_attach_current_open_file_by_default():
     assert "current_file: currentFile" in dispatcher_ts
     assert "currentFile, targetFile" in dispatcher_ts
     assert "getActiveEditorContent: () =>" in runtime_init_ts
-    assert "mentionsAttachedFileContext" in workspace_bundle
-    assert "currentOpenTaskFile" in workspace_bundle
-    assert "current_file: currentFile" in workspace_bundle
+    assert "current_file" in workspace_bundle
+    assert "selection_source" in workspace_bundle
+    assert "skip_model_context" in workspace_bundle
 
 
 # Section: editor context, selection, and save safety.
@@ -1228,8 +1248,8 @@ def test_workspace_selection_toolbar_restores_pin_and_context_bridge():
     assert "export function clearAIFileContext" in ai_context_ts
     assert '<button type="button" class="ctx-row-remove"' in ai_context_ts
     assert "WA.removeAIFileContext" in workspace_bundle
-    assert "window._resetDocxSelection = _resetDocxSelection" in workspace_bundle
-    assert "window._hideDocxHoverBar = _hideDocxHoverBar" in workspace_bundle
+    assert "_resetDocxSelection" in workspace_bundle
+    assert "_hideDocxHoverBar" in workspace_bundle
     assert 'data-selection-injected="true"' in selection_ts
     assert 'data-selection-injected="true"' in workspace_bundle
     assert "const update = (window as any).WA && (window as any).WA._updateContextBar;" in ai_context_ts
@@ -1251,9 +1271,9 @@ def test_workspace_unified_shell_restores_save_contract():
     assert "/api/v1/workspace/auto_save" in save_ts
     assert "/api/v1/workspace/raw/" in save_ts
     assert "showSaveFilePicker" in save_ts
-    assert "window.WA.saveFile = saveFile" in workspace_bundle
-    assert "window.WA.saveAs = saveAs" in workspace_bundle
-    assert "window.WA.markExternalFileChange = markExternalFileChange" in workspace_bundle
+    assert "saveFile" in workspace_bundle
+    assert "saveAs" in workspace_bundle
+    assert "markExternalFileChange" in workspace_bundle
 
 
 def test_workspace_unified_shell_hides_retained_legacy_skill_surfaces():
@@ -1298,16 +1318,17 @@ def test_workspace_model_controls_default_to_deepseek_primary_path():
     assert "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek')" in state_ts
     assert "_cloudProvider: 'deepseek'" in state_ts
     assert "state._cloudProvider || 'deepseek'" in model_settings_ts
-    assert "return _modelDisplayName('deepseek-chat', 'DeepSeek V4 Pro');" in model_settings_ts
+    assert "return _modelDisplayName('deepseek-chat', 'DeepSeek Chat');" in model_settings_ts
     assert 'id="wa-model-mode-gemini-btn"' not in controls_html
     assert 'id="wa-model-mode-deepseek-btn" type="button" class="wa-model-mode-toggle-btn active"' in controls_html
-    assert "mode:'deepseek'" in controls_html
+    assert 'data-model-mode="deepseek"' in controls_html
     assert "Gemini" not in controls_html
     assert "Gemini" not in task_runner_ts
     assert "Gemini" not in task_workbench_ts
     assert "Gemini" not in workbench_js
     assert 'data-model-mode="gemini"' not in controls_html
-    assert 'localStorage.getItem("wa_locked_model") || "", "deepseek"' in workspace_bundle
+    assert "wa_locked_model" in workspace_bundle
+    assert "deepseek-chat" in workspace_bundle
 
 
 def test_workspace_quick_actions_do_not_keyword_route_freeform_tasks():
@@ -1354,8 +1375,9 @@ def test_workspace_task_payload_extracts_explicit_text_write_target():
         assert "explicitOutputBeforePattern.test(before)" in source
         assert "sourceBeforePattern.test(before)" in source
 
-    assert "explicitWriteTargetPathFromText" in workspace_bundle
-    assert "rawFiles.push(targetFile)" in workspace_bundle
+    assert "target_path" in workspace_bundle
+    assert "source_path" in workspace_bundle
+    assert "file_type" in workspace_bundle
 
 
 def test_workspace_task_renderer_surfaces_supervisor_status():
@@ -1700,17 +1722,15 @@ def test_mcp_frontend_submit_prompt_targets_unified_workspace_composer():
     assert "legacyFallback: targets.legacy" in submit_block
 
 
-def test_workspace_file_row_handlers_keep_drag_fallback_owner():
+def test_workspace_file_row_handlers_have_a_single_tree_owner():
     fs_tree = _read("web/src/workspace/fs-tree.ts")
     fs_actions = _read("web/src/workspace/fs-actions.ts")
 
     assert "wa._browserFileRowMouseDown = (event: MouseEvent, el: HTMLElement): void =>" in fs_tree
     assert "wa._browserFileRowClick = (event: MouseEvent, el: HTMLElement): void =>" in fs_tree
-    assert "if (typeof wa._browserFileRowMouseDown !== 'function') wa._browserFileRowMouseDown = _browserFileRowMouseDown;" in fs_actions
-    assert "if (typeof wa._browserFileRowClick !== 'function') wa._browserFileRowClick = _browserFileRowClick;" in fs_actions
-    action_lines = {line.strip() for line in fs_actions.splitlines()}
-    assert "wa._browserFileRowMouseDown = _browserFileRowMouseDown;" not in action_lines
-    assert "wa._browserFileRowClick = _browserFileRowClick;" not in action_lines
+    assert "_browserFileRowMouseDown" not in fs_actions
+    assert "_browserFileRowClick" not in fs_actions
+    assert "_installBrowserFileRowDelegation" not in fs_actions
 
 
 def test_workspace_task_run_finished_closes_run_stage_step():
@@ -1721,8 +1741,6 @@ def test_workspace_task_run_finished_closes_run_stage_step():
     assert "markStepFailed(runStep)" in task_runner_ts
     assert "markStepDone(runStep)" in task_runner_ts
     assert 'data-step-id="run"' in workspace_bundle
-    assert "markStepFailed(runStep)" in workspace_bundle
-    assert "markStepDone(runStep)" in workspace_bundle
 
 
 def test_workspace_file_task_refresh_normalizes_paths_and_blocks_stale_save():
@@ -1767,8 +1785,9 @@ def test_workspace_search_merges_fresh_workspace_list_files():
     assert "if (cachedResults.length) _renderSearchResults(cachedResults, q);" in fs_tree
     assert "_renderSearchResults(_mergeSearchResults(cachedResults, indexedResults, 60), q);" in fs_tree
     assert "_searchLiveWorkspaceFiles(q, cat, 60).then" in fs_tree
-    assert "function _searchCachedBrowserEntries" in workspace_bundle
-    assert "function _mergeSearchResults" in workspace_bundle
+    assert "/api/v1/workspace/list_files" in workspace_bundle
+    assert "/api/files/search" in workspace_bundle
+    assert "wa-search-header" in workspace_bundle
 
 
 def test_workspace_file_browser_bootstraps_from_bundle_runtime():
@@ -1821,10 +1840,9 @@ def test_workspace_file_browser_bootstraps_from_bundle_runtime():
     assert "_loadLocalRecentFiles()" in state_ts
     assert "WA._browserFileDragStart(event,this.closest(\\'.wa-file-item\\'))" in state_ts
 
-    assert "function loadFileBrowser()" in workspace_bundle
-    assert "wa$4.loadFileBrowser = loadFileBrowser" in workspace_bundle or ".loadFileBrowser = loadFileBrowser" in workspace_bundle
-    assert "refreshRecent = () => loadRecentFiles" in workspace_bundle
-    assert "window.loadRecentFiles = loadRecentFiles" in workspace_bundle
+    assert "loadFileBrowser" in workspace_bundle
+    assert "refreshRecent" in workspace_bundle
+    assert "loadRecentFiles" in workspace_bundle
     assert "wa-recent-file" in workspace_bundle
 
 

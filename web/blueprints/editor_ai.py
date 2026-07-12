@@ -38,6 +38,30 @@ _EDITOR_AI_STREAM_ACTIONS = {
     "chart",
 }
 
+
+_SYSTEM_LOG_MARKERS = ['执行过程未完成', '准备处理', '分析需求', '耗时', '正在处理', '异常', '制定计划', '读取文件', '检查结果', '任务未完成', '任务理解', '我理解的任务', '查看产物', '追问原因', '重新发起', '已写入任务记忆', '记忆摘要', '任务结果']
+
+_SYSTEM_LOG_MARKER_PATTERN = re.compile(
+    r"\*\*\*?(" + "|".join(re.escape(m) for m in _SYSTEM_LOG_MARKERS) + r")\*\*\*?",
+    re.IGNORECASE,
+)
+
+def _clean_selection_text(selection: str) -> str:
+    if not selection:
+        return ""
+    match = _SYSTEM_LOG_MARKER_PATTERN.search(selection)
+    if match:
+        selection = selection[:match.start()].rstrip()
+    lines = selection.split("\\n")
+    cleaned_lines = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped and not _SYSTEM_LOG_MARKER_PATTERN.search(stripped):
+            cleaned_lines.append(line)
+    result = "\\n".join(cleaned_lines).strip()
+    result = re.sub(r"\\n{3,}", "\\n\\n", result)
+    return result
+
 _WORKSPACE_ROUTE_NAMES = {
     "light_chat",
     "web_search",
@@ -447,8 +471,9 @@ def _model_workspace_route(data: dict) -> dict | None:
         from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL
         from app.core.llm.provider_factory import get_llm_provider
 
+        route_provider = "deepseek"
         model_id = requested_model or DEEPSEEK_DEFAULT_MODEL
-        provider = get_llm_provider(provider="deepseek", model=model_id)
+        provider = get_llm_provider(provider=route_provider, model=model_id)
         response = provider.generate_content(
             prompt=prompt,
             model=model_id,
@@ -526,6 +551,20 @@ def _build_editor_prompt(
     action = str(action or "").strip().lower()
     selection = str(selection or "")
     instruction = str(instruction or "")
+
+    action_labels = {
+        "polish": "润色",
+        "translate": "翻译",
+        "summary": "总结",
+        "check": "检查",
+        "rewrite": "改写",
+        "continue": "续写",
+    }
+    label = action_labels.get(action, "")
+    if label and selection.startswith(label + "："):
+        selection = selection[len(label) + 1:].lstrip()
+    elif label and selection.startswith(label + ":"):
+        selection = selection[len(label) + 1:].lstrip()
     context = _truncate_context(full_text)
 
     parts = []
@@ -600,6 +639,7 @@ def _editor_agent_request_from_payload(data: dict):
         extra={
             "preferred_model": preferred_model,
             "local_model": local_model,
+            "action_type": action,
         },
     )
 
@@ -618,6 +658,10 @@ def _agent_event_payload(event) -> dict:
         payload = {"type": "done", **data}
         if "result" not in payload and "text" in payload:
             payload["result"] = payload["text"]
+        result_text = str(payload.get("result") or payload.get("text") or "").strip()
+        if result_text:
+            payload["can_insert"] = True
+            payload["action_type"] = data.get("action_type") or ""
         return payload
     if event_type == "error":
         return {"type": "error", "text": data.get("text", "AI 处理失败，请稍后重试。")}
@@ -626,43 +670,6 @@ def _agent_event_payload(event) -> dict:
     if event_type == "code_result":
         return {"type": "code_result", **data}
     return {"type": event_type, **data}
-
-
-def _agent_step_events(step) -> list[dict]:
-    step_type = getattr(getattr(step, "step_type", None), "value", None) or str(
-        getattr(step, "step_type", "")
-    )
-    content = str(getattr(step, "content", "") or "")
-    if "THOUGHT" in step_type or step_type == "thought":
-        return [
-            {"type": "thought", "content": content, "text": content},
-            {"type": "step_start", "step_id": "thought", "text": content or "开始分析"},
-        ]
-    if "ACTION" in step_type or step_type == "action":
-        action = getattr(step, "action", None)
-        tool_name = str(getattr(action, "tool_name", "") or "")
-        tool_args = getattr(action, "tool_args", {}) or {}
-        return [
-            {
-                "type": "tool_call",
-                "tool_name": tool_name,
-                "tool_args": tool_args,
-                "content": content,
-                "text": content,
-            }
-        ]
-    if "OBSERVATION" in step_type or step_type == "observation":
-        observation = str(getattr(step, "observation", "") or content)
-        return [
-            {"type": "tool_result", "content": observation, "text": observation},
-            {"type": "step_done", "step_id": "action", "text": observation or "工具执行完成"},
-        ]
-    if "ANSWER" in step_type or step_type == "answer":
-        return [
-            {"type": "token", "content": content, "text": content},
-            {"type": "done", "result": content},
-        ]
-    return [{"type": "info", "text": content}]
 
 
 @editor_ai_bp.route("/api/editor/ai/history", methods=["GET"])
@@ -714,30 +721,6 @@ def workspace_ai_route_intent():
     return _timed_route_response(_fallback_workspace_route(data), "fallback")
 
 
-@editor_ai_bp.route("/api/editor/ai/agent", methods=["POST"])
-def editor_ai_agent():
-    """SSE wrapper for the structured editor agent route."""
-    data = request.get_json(silent=True) or {}
-    query = str(data.get("query") or data.get("task") or data.get("prompt") or "").strip()
-    full_text = str(data.get("full_text") or data.get("context") or "").strip()
-    session_id = str(data.get("session_id") or "").strip()
-
-    def generate():
-      try:
-          from app.api.agent_routes import get_agent
-
-          agent = get_agent()
-          system_context = full_text if full_text else None
-          for step in agent.run(query, session_id=session_id or None, system_context=system_context):
-              for payload in _agent_step_events(step):
-                  yield _safe_sse(payload)
-      except Exception as exc:
-          _logger.exception("[editor-ai] structured agent failed")
-          yield _safe_sse({"type": "error", "text": f"Agent 处理失败：{exc}"})
-
-    return _sse_response(generate())
-
-
 @editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])
 def editor_ai_stream():
     """Stream editor quick-action output through the unified AgentLoop."""
@@ -746,7 +729,9 @@ def editor_ai_stream():
     if action not in _EDITOR_AI_STREAM_ACTIONS:
         return jsonify({"error": f"Unsupported editor AI action: {action}"}), 400
 
-    selection = str(data.get("selection") or "").strip()
+    raw_selection = str(data.get("selection") or "")
+    selection = _clean_selection_text(raw_selection).strip()
+    data["selection"] = selection
     full_text = str(data.get("full_text") or data.get("context") or "").strip()
     instruction = str(data.get("instruction") or "").strip()
     if action in {"polish", "translate", "summary", "check", "rewrite", "continue"}:
@@ -777,6 +762,22 @@ def editor_ai_task_stream():
     if not task:
         return jsonify({"error": "Missing 'task' parameter"}), 400
     data["task"] = task
+
+    quick_action_mode = str(data.get("options", {}).get("quick_action_mode") or "").strip().lower()
+    if not quick_action_mode:
+        quick_action_mode = str(data.get("quick_action_mode") or "").strip().lower()
+    has_files = bool(data.get("files") or data.get("target_path"))
+    is_text_quick_action = quick_action_mode in {
+        "simple", "polish", "translate", "summary", "rewrite", "continue", "check",
+    }
+    if is_text_quick_action and not has_files:
+        action = quick_action_mode if quick_action_mode != "simple" else "polish"
+        data["action"] = action
+        raw_sel = str(data.get("selection") or "")
+        if raw_sel:
+            data["selection"] = _clean_selection_text(raw_sel)
+        return editor_ai_stream()
+
     return _sse_response(stream_file_task_request(data))
 
 
@@ -858,42 +859,21 @@ def editor_ai_chart():
     return _sse_response(generate())
 
 
-@editor_ai_bp.route("/api/editor/ai/chart-rerun", methods=["POST"])
-def editor_ai_chart_rerun():
-    """Compatibility JSON endpoint for rerunning already-generated chart code."""
-    data = request.get_json(silent=True) or {}
-    code = str(data.get("code") or "").strip()
-    lang = str(data.get("lang") or data.get("language") or "python").strip().lower()
-    if not code:
-        return jsonify({"stdout": "", "stderr": "", "files": {}, "error": "缺少代码内容"})
-    if lang not in {"python", "r"}:
-        lang = "python"
-    try:
-        if lang == "r":
-            from app.core.sandbox import run_r
-
-            result = run_r(code)
-        else:
-            from app.core.sandbox import run_python
-
-            result = run_python(code)
-        return jsonify(result)
-    except Exception as exc:
-        _logger.exception("[editor-ai] chart rerun failed")
-        return jsonify({"stdout": "", "stderr": "", "files": {}, "error": f"图表代码执行失败：{exc}"})
-
-
 @editor_ai_bp.route("/api/editor/ai/skill-list", methods=["GET"])
 def editor_skill_list():
     """Return editor toolbar skills backed by the native runtime."""
     try:
-        from app.core.skills.registry import SkillRegistry
+        from app.core.skills.skill_manager import SkillManager
+
         file_type = request.args.get("file_type", "").strip().lower()
-        all_skills = SkillRegistry.list_all()
+        all_skills = SkillManager.list_runtime_entries().values()
         enabled = [s for s in all_skills if s.get("enabled", True)]
         if file_type:
             enabled = [s for s in enabled if file_type in (s.get("file_types") or s.get("tags") or [])]
         return jsonify({"skills": enabled})
-    except Exception:
+    except Exception as exc:
         _logger.exception("[editor-ai] skill-list failed")
-        return jsonify({"skills": []})
+        return jsonify({
+            "error": "skill_list_unavailable",
+            "message": f"技能列表加载失败：{type(exc).__name__}: {exc}",
+        }), 500

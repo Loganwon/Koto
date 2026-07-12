@@ -337,7 +337,12 @@ def has_create_or_export_contract(task: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?:创建|新建|生成|产出|导出|保存为|整理成|做成|create|generate|export|save as).{0,28}(?:\.docx|\.xlsx|\.pptx|\.pdf|word|excel|ppt|文档|表格|幻灯片|报告)",
+            r"(?:创建|新建|生成|产出|导出|保存为|整理成|做成|create|generate|export|save as).{0,28}(?:\.docx|\.xlsx|\.pptx|\.pdf|\.md|\.txt|\.csv|word|excel|ppt|文档|表格|幻灯片|报告)",
+            task_text,
+            re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:create|generate|export|save as).{0,28}(?:specified|target|output|new).{0,24}(?:text\s+)?(?:file|document|report|spreadsheet|slides?)",
             task_text,
             re.IGNORECASE,
         )

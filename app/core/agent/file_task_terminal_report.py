@@ -19,15 +19,13 @@ def apply_terminal_check_overrides(
     missing_read_refs: List[str],
 ) -> Dict[str, Any]:
     payload = dict(check_payload)
-    check_passed = bool(payload.get("passed"))
     no_read_context = not snippets and not readonly_tool_outputs
 
     if (
-        not write_intent
-        and not file_changes
-        and check_passed
+        not file_changes
         and no_read_context
         and requires_file_context
+        and not tool_gap
     ):
         payload["passed"] = False
         payload["status"] = "needs_attention"
@@ -45,7 +43,7 @@ def apply_terminal_check_overrides(
         ]
         return payload
 
-    if not write_intent and not file_changes and check_passed and missing_read_refs:
+    if not file_changes and missing_read_refs and not tool_gap:
         refs_text = "、".join(missing_read_refs[:3])
         payload["passed"] = False
         payload["status"] = "needs_attention"

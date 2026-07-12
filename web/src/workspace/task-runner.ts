@@ -488,7 +488,7 @@ function resultPreviewHtml(payload: Record<string, any>): string {
   if (toolName === 'provided_file_context' || toolName === 'selection_context') return '';
   if (toolName === 'parse_file_to_text' && payload.success !== false) return '';
   if (looksLikeFullAnswerText(preview)) {
-    return '<div class="wa-task-result-text">' + esc('已收到较长内容，详细内容见总结与回答。') + '</div>';
+    return '<div class="wa-task-result-text">' + esc('已收到较长内容，详细内容见任务结果。') + '</div>';
   }
   const summary = toolPreviewSummary(toolName, preview);
   if (!summary) return '';
@@ -666,7 +666,7 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
   if (data.mode) card.dataset.taskMode = String(data.mode || '').trim();
   const eventAnswer = terminalAnswerText(data);
   if (eventAnswer) {
-    card.dataset.taskSummary = compactFlowSummary(eventAnswer, '详细内容见总结与回答。');
+    card.dataset.taskSummary = compactFlowSummary(eventAnswer, '详细内容见任务结果。');
     card.dataset.taskFinalAnswer = eventAnswer;
   }
   if (data.quick_action_mode) {
@@ -802,9 +802,9 @@ function taskResultOutcomeCopy(result: TerminalResult): ReturnType<typeof fileTa
   if (taskResultNeedsAttention(result)) {
     return {
       title: '需处理',
-      detail: '当前任务未完成，原因和可继续处理的建议已整理到总结与回答区域。',
+      detail: '当前任务未完成，原因和可继续处理的建议已整理到任务结果区域。',
       stepSummary: '任务需要处理，进度已保留。',
-      toast: '任务需要处理，请查看总结与回答',
+      toast: '任务需要处理，请查看任务结果',
       toastType: 'info',
     };
   }
@@ -902,6 +902,34 @@ function taskResultActionsHtml(card: TaskCardElement): string {
     '  </div>',
     '</div>',
   ].join('');
+}
+
+function renderTaskResultSummaryBar(card: TaskCardElement, _result: Record<string, any>): string {
+  const state = ensureTaskUiState(card);
+  const changes = Array.isArray(state.fileChanges) ? state.fileChanges : [];
+  if (!changes.length) return '';
+  const imgRe = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+  const seen = new Set<string>();
+  const items: Array<{ name: string; path: string; isImg: boolean }> = [];
+  for (const c of changes) {
+    const rawPath = String(c.path || c.file_path || '').trim();
+    if (!rawPath) continue;
+    const normalized = rawPath.replace(/\\/g, '/');
+    const name = normalized.split('/').pop() || rawPath;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    items.push({ name, path: normalized, isImg: imgRe.test(name) });
+    if (items.length >= 4) break;
+  }
+  if (!items.length) return '';
+  const chips = items.map((item) => {
+    if (item.isImg) {
+      const src = escAttr(encodeURIComponent(item.path));
+      return '<span class="wa-task-summary-chip has-thumb"><img src="/api/file/raw?path=' + src + '" alt="' + esc(item.name) + '" loading="lazy" /><span>' + esc(item.name) + '</span></span>';
+    }
+    return '<span class="wa-task-summary-chip">' + esc(item.name) + '</span>';
+  }).join('');
+  return '<div class="wa-task-result-summary-bar"><span class="wa-task-summary-label">已生成</span>' + chips + '</div>';
 }
 
 function scheduleTaskLiveProgressCollapse(card: TaskCardElement): void {
@@ -1103,7 +1131,7 @@ function makeRunCard(loadingEl?: TaskCardElement | null): TaskCardElement {
   const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div') as TaskCardElement;
   card.className = 'wa-msg ai wa-task-run is-compact';
   card._fatalErrorText = '';
-  card.innerHTML = '<div class="wa-task-header"><div class="wa-task-title-wrap"><div class="wa-task-title">文件任务</div><div class="wa-task-progress" data-role="ui-progress" data-status="running"><div class="wa-task-progress-meta"><span data-role="ui-phase">执行任务</span><span data-role="ui-progress-value">准备识别任务</span></div><div class="wa-task-progress-track"><i data-role="ui-progress-fill"></i></div></div></div><div class="wa-task-status" data-role="status">处理中</div><button type="button" class="wa-task-cancel-btn" data-role="cancel" title="取消任务">取消</button></div><details class="wa-task-process" data-role="process" open><summary><span data-role="process-title">执行过程</span><span data-role="process-state">进行中</span></summary><div class="wa-task-plan" data-role="plan"></div><div class="wa-task-steps" data-role="steps"></div></details><div class="wa-task-summary" data-role="summary"></div>';
+  card.innerHTML = '<div class="wa-task-header"><div class="wa-task-title-wrap"><div class="wa-task-title">文件任务</div><div class="wa-task-progress" data-role="ui-progress" data-status="running"><div class="wa-task-progress-meta"><span data-role="ui-phase">处理中</span><span data-role="ui-progress-value">初始化</span></div><div class="wa-task-progress-track"><i data-role="ui-progress-fill"></i></div></div></div><div class="wa-task-status" data-role="status">处理中</div><button type="button" class="wa-task-cancel-btn" data-role="cancel" title="取消任务">取消</button></div><details class="wa-task-process" data-role="process" open><summary><span data-role="process-title">执行过程</span><span data-role="process-state">进行中</span></summary><div class="wa-task-plan" data-role="plan"></div><div class="wa-task-steps" data-role="steps"></div></details><div class="wa-task-summary" data-role="summary"></div>';
   ensureTaskReportAfterProcess(card);
   const attached = attachRunCardBehavior(card);
   syncTaskLiveProgress(attached);
@@ -1119,7 +1147,7 @@ function ensureTaskLiveProgressHost(): HTMLElement | null {
   host.id = 'wa-task-live-progress';
   host.className = 'wa-task-live-progress';
   host.hidden = true;
-  host.innerHTML = '<div class="wa-task-live-top"><span class="wa-task-live-title">文件任务</span><span class="wa-task-live-status" data-role="live-status">处理中</span></div><div class="wa-task-live-meta"><span data-role="live-phase">执行任务</span><span data-role="live-plan" style="display:none"></span><span data-role="live-progress-value">准备识别任务</span></div><div class="wa-task-live-track"><i data-role="live-progress-fill"></i></div>';
+  host.innerHTML = '<div class="wa-task-live-top"><span class="wa-task-live-title">文件任务</span><span class="wa-task-live-status" data-role="live-status">处理中</span></div><div class="wa-task-live-meta"><span data-role="live-phase">处理中</span><span data-role="live-plan" style="display:none"></span><span data-role="live-progress-value">初始化</span></div><div class="wa-task-live-track"><i data-role="live-progress-fill"></i></div>';
   msgs.parentNode.insertBefore(host, msgs.nextSibling);
   return host;
 }
@@ -1155,7 +1183,7 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
   let percent = Number(state.uiProgress || 0);
   let valueText = valueEl ? String(valueEl.textContent || '').trim() : '';
   if (!explicit && plan.total) { percent = terminal && !plan.completed ? 100 : Math.round((plan.completed / plan.total) * 100); valueText = '步骤 ' + plan.completed + '/' + plan.total; }
-  else if (!explicit) valueText = plan.running ? '执行中' : (valueText && valueText !== '准备中' ? valueText : '准备识别任务');
+  else if (!explicit) valueText = plan.running ? '执行中' : (valueText && valueText !== '初始化' ? valueText : '初始化');
   if (terminal && explicit) percent = Math.max(percent, statusRaw === 'failed' ? percent : 100);
   percent = Math.max(0, Math.min(100, Math.round(percent)));
   if (progressEl) (progressEl as HTMLElement).dataset.basis = basis;
@@ -1170,7 +1198,7 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
   const liveValue = host.querySelector('[data-role="live-progress-value"]');
   const liveFill = host.querySelector('[data-role="live-progress-fill"]') as HTMLElement | null;
   if (liveStatus) liveStatus.textContent = statusEl ? String(statusEl.textContent || '').trim() || '处理中' : '处理中';
-  if (livePhase) livePhase.textContent = phaseEl ? String(phaseEl.textContent || '').trim() || '执行任务' : '执行任务';
+  if (livePhase) livePhase.textContent = phaseEl ? String(phaseEl.textContent || '').trim() || '处理中' : '处理中';
   if (livePlan) { livePlan.textContent = plan.total ? '规划 ' + plan.completed + '/' + plan.total : '等待规划'; (livePlan as HTMLElement).style.display = plan.total ? '' : 'none'; }
   if (liveValue) liveValue.textContent = explicit ? percent + '%' : valueText;
   if (liveFill) liveFill.style.width = percent + '%';
@@ -1254,7 +1282,7 @@ function taskRecognitionText(data: Record<string, any>): string {
   const output = classificationValueLabel('output', data.output_mode || data.outputMode || '');
   const fileCount = Number(data.file_count || data.fileCount || 0);
   const writeIntent = data.write_intent === true || String(data.output_mode || data.outputMode || '').trim().toLowerCase() === 'write';
-  const taskLabel = [family, operation].filter(Boolean).join(' · ');
+  const taskLabel = [family, operation].filter(Boolean).join(' · ') || '准备识别任务';
   return uniqueTextParts([
     taskLabel,
     fileCount > 0 ? `${fileCount} 个文件` : '',
@@ -1372,7 +1400,7 @@ function planSummaryFromPayload(data: Record<string, any>): string {
     || data.summary
     || data.goal
     || (data.execution_plan && (data.execution_plan.plan_summary || data.execution_plan.goal))
-    || '已生成执行方案'
+    || '已生成执行计划'
   ).trim();
 }
 
@@ -1389,7 +1417,7 @@ function renderPlanIntoCard(card: TaskCardElement, data: Record<string, any>): v
 
 function terminalStepCompactText(card: TaskCardElement, stepId: string, title: string, result: TerminalResult): string {
   if (result && result.status === 'error') {
-    if (stepId === 'check') return '已记录失败原因，详见总结与回答。';
+    if (stepId === 'check') return '已记录失败原因，详见任务结果。';
     if (stepId === 'execute') return '执行未完成，已停止继续处理。';
   }
   if (result && result.status === 'pending') {
@@ -1406,7 +1434,11 @@ function terminalStepCompactText(card: TaskCardElement, stepId: string, title: s
     return '仍在处理中或等待同步。';
   }
   const sharedDoneText = taskReportStageDoneText(stepId);
-  if (sharedDoneText && stepId !== 'execute') return sharedDoneText;
+  if (sharedDoneText && stepId !== 'execute') {
+    return stepId === 'check'
+      ? sharedDoneText
+      : '步骤已结束，详细内容见任务结果。';
+  }
   if (stepId === 'context') return '已读取并整理必要文件内容。';
   if (stepId === 'execute') {
     const changes = ensureTaskUiState(card).fileChanges || [];
@@ -1451,7 +1483,7 @@ function handleEvent_task_classified(card: TaskCardElement, evt: Record<string, 
   const recognition = taskRecognitionText(data);
   const confidence = Number(data.confidence);
   const confidenceText = Number.isFinite(confidence) && confidence > 0 ? ` · 置信度 ${Math.round(confidence * 100)}%` : '';
-  upsertStepSingletonRow(step, 'task.classified', 'plan', '<span class="wa-task-chip success">识别</span>' + esc((recognition || '已完成任务识别') + confidenceText) + supervisorAuditHtml(data, { compact: true }));
+  upsertStepSingletonRow(step, 'task.classified', 'plan', '<span class="wa-task-chip success">识别</span>' + esc((recognition || '已完成需求分析') + confidenceText) + supervisorAuditHtml(data, { compact: true }));
   updateTaskPerformanceRow(card, data);
   markStepDone(step);
   setStatus(card, '已识别');
@@ -1536,7 +1568,7 @@ function handleEvent_supervisor_intervention(card: TaskCardElement, evt: Record<
   setTaskRunContext(card, evt, payload);
   const step = taskStageStep(card, 'plan');
   const reason = String(data.reason || '').trim();
-  const summary = String(data.summary || data.message || data.text || '监管已纠偏执行方案。').trim();
+  const summary = String(data.summary || data.message || data.text || '监管已纠偏执行计划。').trim();
   upsertStepSingletonRow(
     step,
     'supervisor.intervention:' + (reason || 'default'),
@@ -1651,7 +1683,7 @@ function handleEvent_run_started(card: TaskCardElement, evt: Record<string, any>
   card.classList.add('streaming');
   const step = taskStageStep(card, 'execute');
   markStepRunning(step);
-  const summaryRow = upsertStepSingletonRow(step, 'run.started', 'plan', '<span class="wa-task-chip">' + esc(data.mode || '启动') + '</span>' + esc(data.summary || data.text || data.error || '开始执行任务'));
+  const summaryRow = upsertStepSingletonRow(step, 'run.started', 'plan', '<span class="wa-task-chip">' + esc(data.mode || '启动') + '</span>' + esc(data.summary || data.text || data.error || '执行中'));
   if (summaryRow) {
     const state = ensureTaskUiState(card);
     state.modelSummaryRows.set('operation', summaryRow);
@@ -1720,7 +1752,8 @@ function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any
       + auditHtml
       + taskArtifactsSummaryHtml(card)
       + taskResultActionsHtml(card)
-      + '<div class="wa-task-final-report" data-role="final-report" tabindex="-1"><div class="wa-task-final-report-title">总结与回答</div><div class="wa-task-final-report-content">'
+      + renderTaskResultSummaryBar(card, result)
+      + '<div class="wa-task-final-report" data-role="final-report" tabindex="-1"><div class="wa-task-final-report-title">任务结果</div><div class="wa-task-final-report-content">'
       + renderTaskFinalReport(visibleSummary)
       + '</div></div>';
     summaryContainer.hidden = false;
@@ -1730,11 +1763,26 @@ function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any
   }
   const process = card.querySelector('[data-role="process"]') as HTMLDetailsElement | null;
   if (process) {
-    process.open = true;
-    const title = process.querySelector('[data-role="process-title"]');
+    const terminalOk = result.status !== 'error' && result.status !== 'pending';
+    const stateText = result.status === 'error' ? '未完成'
+      : (result.status === 'pending'
+        ? (taskResultRequiresUserConfirmation(result) ? '待确认' : (needsAttention ? '需处理' : '进行中'))
+        : '已完成');
+    if (terminalOk) {
+      process.open = false;
+      const title = process.querySelector('[data-role="process-title"]');
+      if (title) {
+        const artifactCount = (card.querySelectorAll('[data-role="process"] .wa-task-artifact-row') || []).length;
+        const suffix = artifactCount > 0 ? ' · ' + artifactCount + '个产出' : '';
+        title.textContent = '执行过程' + suffix;
+      }
+    } else {
+      process.open = true;
+      const title = process.querySelector('[data-role="process-title"]');
+      if (title) title.textContent = '执行过程';
+    }
     const state = process.querySelector('[data-role="process-state"]');
-    if (title) title.textContent = '执行过程';
-    if (state) state.textContent = result.status === 'error' ? '未完成' : (result.status === 'pending' ? (taskResultRequiresUserConfirmation(result) ? '待确认' : (needsAttention ? '需处理' : '进行中')) : '已完成');
+    if (state) state.textContent = stateText;
   }
   const loadedSummary = terminalAnswerText(data, result.summary);
   card.dataset.taskSummary = loadedSummary || card.dataset.taskSummary || '';
@@ -1956,7 +2004,7 @@ function handleEvent_step_result(card: TaskCardElement, evt: Record<string, any>
   else if (pending) markStepRunning(step);
   else markStepDone(step);
   const title = String(data.title || evt.step_id || stepId || '任务步骤').trim();
-  const summary = compactFlowSummary(String(data.summary || data.text || data.message || '').trim(), '步骤已结束，详细内容见总结与回答。');
+  const summary = compactFlowSummary(String(data.summary || data.text || data.message || '').trim(), '已完成');
   const chip = failed ? '需处理' : (pending ? '待处理' : '完成');
   const kind = failed ? 'warn' : (pending ? 'progress' : 'success');
   upsertStepSingletonRow(

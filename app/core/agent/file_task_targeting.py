@@ -662,7 +662,16 @@ def files_explicitly_mentioned_in_task(
         _weak_files_explicitly_mentioned_in_task(
             task_text,
             output_reference_names=output_reference_names,
-            existing_keys={_context_file_key(item) for item in resolved},
+            workspace_reference_names={
+                *basename_matches.keys(),
+                *(path.name.casefold() for path in exact_matches.values()),
+            },
+            existing_keys={
+                key
+                for item in resolved
+                for key in _context_file_seen_keys(item)
+                if key
+            },
         )
     )
     return resolved
@@ -672,6 +681,7 @@ def _weak_files_explicitly_mentioned_in_task(
     task_text: str,
     *,
     output_reference_names: set[str],
+    workspace_reference_names: set[str],
     existing_keys: set[str],
 ) -> List[FileTaskFile]:
     result: List[FileTaskFile] = []
@@ -685,11 +695,17 @@ def _weak_files_explicitly_mentioned_in_task(
         name = Path(normalized_path).name
         if name.casefold() in output_reference_names:
             continue
+        if any(
+            name.casefold().endswith(workspace_name)
+            for workspace_name in workspace_reference_names
+        ):
+            continue
         file_info = FileTaskFile(path=raw_path, name=name, type=suffix, target=False)
         key = _context_file_key(file_info)
-        if key in seen:
+        basename_key = _context_file_basename_key(file_info)
+        if key in seen or (basename_key and basename_key in seen):
             continue
-        seen.add(key)
+        seen.update(item for item in (key, basename_key) if item)
         result.append(file_info)
     return result
 

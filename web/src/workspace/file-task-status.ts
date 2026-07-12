@@ -109,9 +109,9 @@ export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = fals
   if (isFileTaskFailureStatus(normalized)) {
     return {
       title: '任务未完成',
-      detail: '失败原因和可继续处理的建议已整理到总结与回答区域。',
-      stepSummary: '执行失败，错误信息已写入总结与回答。',
-      toast: '任务未完成，请查看总结与回答中的原因与建议',
+      detail: '失败原因和可继续处理的建议已整理到任务结果区域。',
+      stepSummary: '执行失败，错误信息已写入任务结果。',
+      toast: '任务未完成，请查看任务结果中的原因与建议',
       toastType: 'error',
     };
   }
@@ -144,9 +144,9 @@ export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = fals
   if (normalized === 'needs_attention') {
     return {
       title: '需处理',
-      detail: '当前任务未完成，原因和可继续处理的建议已整理到总结与回答区域。',
+      detail: '当前任务未完成，原因和可继续处理的建议已整理到任务结果区域。',
       stepSummary: '任务需要处理，进度已保留。',
-      toast: '任务需要处理，请查看总结与回答',
+      toast: '任务需要处理，请查看任务结果',
       toastType: 'info',
     };
   }
@@ -161,8 +161,8 @@ export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = fals
   }
   return {
     title: '任务完成',
-    detail: '总结与回答已生成，显示在执行过程之后。',
-    stepSummary: '总结与回答已生成。',
+    detail: '任务结果已生成，显示在执行过程之后。',
+    stepSummary: '任务结果已生成。',
     toast: '任务已完成，结果已显示在步骤下方',
     toastType: 'success',
   };

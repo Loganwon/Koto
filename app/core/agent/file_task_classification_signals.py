@@ -70,7 +70,6 @@ def _semantic_write_intent_reason_codes(semantic: Mapping[str, bool]) -> list[st
         docx_bound_markers = {
             "docx_write_phrase": "semantic_write:docx_write_phrase",
             "docx_create_phrase": "semantic_write:docx_create_phrase",
-            "docx_report_request": "semantic_write:docx_report",
             "financial_xlsx_docx_chart_report": "semantic_write:financial_xlsx_docx_chart_report",
         }
         reasons.extend(

@@ -19,6 +19,7 @@ from typing import Any, Iterable
 
 from app.core.llm.model_mode import normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
+from web.blueprints.editor_ai import _clean_selection_text
 from web.sse.protocol import sse
 
 logger = logging.getLogger("koto.app")
@@ -91,6 +92,14 @@ def _normalize_file_task_payload(data: dict) -> dict:
     from web.runtime_context import get_configured_local_model_id
 
     payload = dict(data or {})
+
+    raw_task = str(payload.get("task") or payload.get("instruction") or "")
+    if raw_task:
+        payload["task"] = _clean_selection_text(raw_task)
+    raw_selection = str(payload.get("selection") or "")
+    if raw_selection:
+        payload["selection"] = _clean_selection_text(raw_selection)
+
     model_mode = normalize_model_mode(payload.get("model_mode"), default="deepseek")
     payload["model_mode"] = model_mode
     raw_options = payload.get("options")
@@ -308,6 +317,65 @@ def _file_task_progress(event_type: str) -> int:
     if event_type.startswith("step."):
         return 36 if event_type.endswith("started") else 70
     return 40
+
+
+def _compact_file_task_stream_payload(payload: dict) -> dict:
+    """Remove internal runtime state before sending a file-task SSE frame.
+
+    The supervisor keeps full workflow and plan objects for persistence and
+    recovery.  They are both large and implementation-private, so the browser
+    receives the stable compact projection instead.
+    """
+    compact = dict(payload or {})
+    compact.pop("workflow_state", None)
+    compact.pop("task_plan", None)
+    compact["stream_payload_version"] = "compact_v1"
+    return compact
+
+
+def _file_task_frontend_progress(event_type: str, payload: dict) -> dict | None:
+    """Return the browser progress projection for milestone events.
+
+    Keep this mapping aligned with ``file_task_ui_stream.normalize_ui_state``.
+    It is emitted independently of optional UI-message normalization so the
+    task card always has an explicit, machine-readable progress update.
+    """
+    stages = {
+        "run.started": (4, "执行任务", "run", "running"),
+        "task.classified": (12, "任务识别", "plan", "running"),
+        "plan.checked": (20, "规划检查", "plan", "running"),
+        "plan.created": (28, "准备计划", "plan", "running"),
+        "step.started": (36, "执行步骤", "step", "running"),
+        "tool.started": (52, "执行工具", "tool", "running"),
+        "tool.finished": (68, "执行任务", "execute", "running"),
+        "step.finished": (68, "执行任务", "execute", "running"),
+        "step.result": (68, "执行任务", "execute", "running"),
+        "check.started": (84, "检查结果", "check", "running"),
+        "check.finished": (92, "检查结果", "check", "running"),
+        "run.finished": (100, "任务完成", "done", "succeeded"),
+        "run.error": (100, "任务失败", "error", "failed"),
+        "run.cancelled": (100, "已取消", "cancelled", "cancelled"),
+    }
+    stage = stages.get(event_type)
+    if stage is None:
+        return None
+    progress, fallback_label, phase, status = stage
+    if event_type == "plan.checked" and payload.get("passed") is False:
+        status = "warning"
+    if event_type in {"tool.finished", "step.finished", "step.result"}:
+        if payload.get("success") is False or str(payload.get("status") or "").lower() in {"failed", "error"}:
+            status = "failed"
+    label = _trim_file_task_text(
+        payload.get("title") or payload.get("tool_name"),
+        120,
+    ) or fallback_label
+    return {
+        "progress": progress,
+        "label": label,
+        "phase": phase,
+        "status": status,
+        "source_event": event_type,
+    }
 
 
 def _file_task_terminal_status(event_type: str, event_payload: dict) -> str:
@@ -809,16 +877,61 @@ def _iter_file_task_stream_events(
         persist_progress_fn(request_payload, safe_event)
         outbound_seq += 1
         outbound_event = dict(safe_event)
+        outbound_event["payload"] = _compact_file_task_stream_payload(
+            safe_event.get("payload")
+            if isinstance(safe_event.get("payload"), dict)
+            else {}
+        )
+        terminal_event = str(outbound_event.get("type") or "") in {
+            "run.finished",
+            "run.error",
+            "run.cancelled",
+            "multi_target.finished",
+        }
+        progress_payload = _file_task_frontend_progress(
+            str(safe_event.get("type") or "").strip(),
+            safe_event.get("payload") if isinstance(safe_event.get("payload"), dict) else {},
+        )
+        progress_sse = None
+        if progress_payload is not None and terminal_event:
+            progress_sse = _file_task_event_to_safe_sse({
+                "type": "progress",
+                "task_id": outbound_event.get("task_id") or getattr(request_payload, "task_id", "") or "",
+                "run_id": outbound_event.get("run_id") or getattr(request_payload, "run_id", "") or "file_task",
+                "seq": outbound_seq,
+                "step_id": outbound_event.get("step_id") or "progress",
+                "ts": outbound_event.get("ts") or time.time(),
+                "payload": progress_payload,
+            })
+            outbound_seq += 1
         outbound_event["seq"] = outbound_seq
         raw_sse = _file_task_event_to_safe_sse(outbound_event)
+        if progress_payload is not None and not terminal_event:
+            outbound_seq += 1
+            progress_sse = _file_task_event_to_safe_sse({
+                "type": "progress",
+                "task_id": outbound_event.get("task_id") or getattr(request_payload, "task_id", "") or "",
+                "run_id": outbound_event.get("run_id") or getattr(request_payload, "run_id", "") or "file_task",
+                "seq": outbound_seq,
+                "step_id": outbound_event.get("step_id") or "progress",
+                "ts": outbound_event.get("ts") or time.time(),
+                "payload": progress_payload,
+            })
         next_ui_seq = outbound_seq + 1
         ui_sse = _build_file_task_ui_message_sse(
             request_payload,
-            event,
+            safe_event,
             normalize_event_fn=normalize_event_fn,
             seq_override=next_ui_seq,
         )
+        # Keep terminal artifact results as the final event in their run.  The
+        # preceding progress frame receives the lower sequence number so every
+        # consumer can require monotonically increasing SSE sequence values.
+        if progress_sse is not None and terminal_event:
+            yield progress_sse
         yield raw_sse
+        if progress_sse is not None and not terminal_event:
+            yield progress_sse
         if ui_sse is not None:
             outbound_seq = next_ui_seq
             yield ui_sse
