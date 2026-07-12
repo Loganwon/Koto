@@ -691,39 +691,10 @@ def toggle_skill_v2(skill_id: str):
     data = request.json or {}
     enabled = bool(data.get("enabled", True))
     try:
-        sm = _sm()
-        ok = sm.set_enabled(skill_id, enabled)
-        if not ok:
-            return (
-                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
-                404,
-            )
-        # 记录亲和度
-        if enabled:
-            try:
-                from app.core.skills.skill_affinity import SkillAffinityTracker
+        from app.core.skills.skill_mutations import set_skill_enabled
 
-                SkillAffinityTracker.get_instance().record_activation(skill_id)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-        try:
-            from app.core.hooks.hook_manager import HookContext, get_hook_manager
-
-            get_hook_manager().fire_on_skill_change(
-                skill_id,
-                enabled,
-                HookContext(task_type="skill_toggle", skill_id=skill_id),
-            )
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
-            )
+        if not set_skill_enabled(skill_id, enabled):
+            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

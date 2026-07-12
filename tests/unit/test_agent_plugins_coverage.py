@@ -364,6 +364,13 @@ class TestMemoryToolsPlugin:
         names = {t["name"] for t in tools}
         assert names == {"memory_search", "memory_save", "context_recall"}
 
+    def test_memory_manager_uses_memory_runtime_owner(self):
+        p = self._make()
+        manager = MagicMock()
+
+        with patch("web.memory_runtime.get_memory_manager", return_value=manager):
+            assert p._get_memory_manager() is manager
+
     def test_memory_search_no_manager(self):
         p = self._make()
         with patch.object(type(p), "_get_memory_manager", return_value=None):
@@ -1249,11 +1256,11 @@ class TestAnnotationPlugin:
         names = {t["name"] for t in tools}
         assert names == {"annotate_document", "read_docx_paragraphs"}
 
-    def test_annotate_document_relative_path(self):
+    def test_annotate_document_missing_relative_path_reports_resolution_error(self):
         p = self._make()
         result = p.annotate_document(file_path="relative/path.docx")
         assert "错误" in result
-        assert "绝对路径" in result
+        assert "文件不存在" in result
 
     def test_annotate_document_file_not_found(self):
         p = self._make()

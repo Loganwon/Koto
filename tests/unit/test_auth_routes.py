@@ -97,7 +97,7 @@ class TestJWTStartupValidation:
 
     def test_cloud_mode_with_empty_secret_raises(self):
         """Cloud mode with no JWT secret must raise RuntimeError."""
-        import web.blueprints.auth as auth as auth_mod
+        import web.blueprints.auth as auth_mod
 
         saved = self._save_restore()
         try:
@@ -110,7 +110,7 @@ class TestJWTStartupValidation:
 
     def test_local_mode_with_empty_secret_does_not_raise(self):
         """Local mode without JWT secret logs a warning but does not raise."""
-        import web.blueprints.auth as auth as auth_mod
+        import web.blueprints.auth as auth_mod
 
         saved = self._save_restore()
         try:
@@ -123,7 +123,7 @@ class TestJWTStartupValidation:
 
     def test_with_secret_set_returns_it(self):
         """When KOTO_JWT_SECRET is set, _validate_jwt_secret returns it."""
-        import web.blueprints.auth as auth as auth_mod
+        import web.blueprints.auth as auth_mod
 
         saved = self._save_restore()
         try:
@@ -135,7 +135,7 @@ class TestJWTStartupValidation:
 
     def test_cloud_error_message_includes_generation_hint(self):
         """Error message should include how to generate a secret."""
-        import web.blueprints.auth as auth as auth_mod
+        import web.blueprints.auth as auth_mod
 
         saved = self._save_restore()
         try:

@@ -76,7 +76,7 @@ def run_web_server(
     def check_ollama_async() -> None:
         time.sleep(2)
         if os.environ.get("KOTO_DEPLOY_MODE") == "cloud":
-            print("Ollama: Disabled (cloud mode - using Gemini API)")
+            print("Ollama: Disabled (cloud mode - using DeepSeek API)")
             return
         print("Ollama: Running" if local_dispatcher.is_ollama_running() else "Ollama: Not Running")
 

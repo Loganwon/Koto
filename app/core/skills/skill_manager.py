@@ -131,6 +131,7 @@ class SkillManager:
         entry["enabled"] = bool(enabled_value)
 
         optional_list_fields = (
+            "tags",
             "executor_tools",
             "plan_template",
             "permissions",

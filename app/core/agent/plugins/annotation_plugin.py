@@ -22,7 +22,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
-from app.core.agent.path_utils import is_within_roots
+from app.core.agent.path_utils import has_parent_path_segment, is_within_roots
 
 logger = logging.getLogger(__name__)
 
@@ -110,18 +110,35 @@ class AnnotationPlugin(AgentPlugin):
         raw = (file_path or "").strip().strip('"').strip("'")
         if not raw:
             return None, "文件路径不能为空"
-        if not os.path.isabs(raw):
-            return None, f"文件路径必须为绝对路径: {file_path}"
-
-        candidate = os.path.abspath(os.path.expandvars(os.path.expanduser(raw)))
         roots = cls._allowed_roots()
-        if roots and not is_within_roots(candidate, roots):
+        expanded = os.path.expandvars(os.path.expanduser(raw))
+
+        if os.path.isabs(expanded):
+            candidates = [os.path.abspath(expanded)]
+        else:
+            normalized = expanded.replace("\\", "/")
+            if has_parent_path_segment(normalized):
+                return None, f"不在允许的目录范围内: {file_path}"
+            # Support both ``report.docx`` (search allowed roots) and
+            # ``workspace/report.docx`` (relative to the process directory).
+            candidates = [os.path.abspath(expanded)]
+            candidates.extend(os.path.abspath(os.path.join(root, expanded)) for root in roots)
+
+        allowed_candidates = [
+            candidate
+            for candidate in candidates
+            if not roots or is_within_roots(candidate, roots)
+        ]
+        if not allowed_candidates:
             return None, f"不在允许的目录范围内: {file_path}"
-        if not os.path.exists(candidate):
-            return None, f"文件不存在: {candidate}"
-        if not candidate.lower().endswith(".docx"):
-            return None, f"当前只支持 .docx 格式，收到: {file_path}"
-        return candidate, None
+
+        for candidate in allowed_candidates:
+            if not os.path.exists(candidate):
+                continue
+            if not candidate.lower().endswith(".docx"):
+                return None, f"当前只支持 .docx 格式，收到: {file_path}"
+            return candidate, None
+        return None, f"文件不存在: {allowed_candidates[0]}"
 
     def annotate_document(
         self,
@@ -141,8 +158,11 @@ class AnnotationPlugin(AgentPlugin):
         try:
             try:
                 from web.document_batch_annotator import annotate_large_document
-            except Exception:
-                from web.document_batch_annotator_v2 import annotate_large_document
+            except ImportError as exc:
+                # The v2 fallback was retired.  Preserve the actionable
+                # original import error instead of masking it with a second
+                # ModuleNotFoundError from the removed module.
+                return f"标注模块不可用: {exc}"
 
             events = []
             output_file = None

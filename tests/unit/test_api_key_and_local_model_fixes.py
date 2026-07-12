@@ -117,7 +117,7 @@ def _read_template_with_includes(rel_path: str) -> str:
 # ── 1. _client cache reset on API key save ─────────────────────────────────
 
 
-class TestClientCacheReset:
+class TestDeepSeekClientCacheReset:
     """settings_bp /api/setup/apikey must reset mod._client so the next
     get_client() call creates a fresh client with the new key."""
 
@@ -136,12 +136,11 @@ class TestClientCacheReset:
         mod = self._make_mod_mock(old_client)
 
         # Simulate the fixed handler logic
-        api_key = "AIzaSyNEWKEY_valid_enough"
+        api_key = "sk-deepseek-new-key-valid-enough"
         import os
 
         with patch("os.makedirs"), patch("builtins.open", mock_open()):
-            os.environ["GEMINI_API_KEY"] = api_key
-            os.environ["API_KEY"] = api_key
+            os.environ["DEEPSEEK_API_KEY"] = api_key
             mod.API_KEY = api_key
             mod._client = None  # <-- our fix
             mod.client = mod.create_client()
@@ -152,21 +151,19 @@ class TestClientCacheReset:
     def test_new_client_created(self):
         """create_client() must be invoked with updated API_KEY."""
         mod = self._make_mod_mock(MagicMock())
-        new_key = "AIzaSyFRESH_valid_enough"
+        new_key = "sk-deepseek-fresh-key-valid-enough"
         mod.API_KEY = new_key
         mod._client = None
         mod.client = mod.create_client()
         assert mod.client == mod.create_client.return_value
 
     def test_env_vars_updated(self):
-        """Both GEMINI_API_KEY and API_KEY env vars must be set."""
+        """The active DeepSeek runtime key is updated."""
         import os
 
-        new_key = "AIzaSyENV_valid_key_here"
-        os.environ["GEMINI_API_KEY"] = new_key
-        os.environ["API_KEY"] = new_key
-        assert os.environ["GEMINI_API_KEY"] == new_key
-        assert os.environ["API_KEY"] == new_key
+        new_key = "sk-deepseek-env-valid-key-here"
+        os.environ["DEEPSEEK_API_KEY"] = new_key
+        assert os.environ["DEEPSEEK_API_KEY"] == new_key
 
 
 class TestGetClientLocalIsolation:
@@ -292,10 +289,10 @@ class TestStdoutEncodingFix:
 
     def test_startup_url_uses_runtime_koto_port(self):
         """Startup output should point to the actual configured server port."""
-        source = Path("web/app.py").read_text(encoding="utf-8")
+        source = Path("web/app_entrypoint.py").read_text(encoding="utf-8")
         assert 'port = int(os.environ.get("KOTO_PORT", "5000"))' in source
-        assert 'print(f"\\n🌐 Open http://localhost:{port} in your browser\\n")' in source
-        assert 'print("\\n🌐 Open http://localhost:5000 in your browser\\n")' not in source
+        assert 'print(f"\\nOpen http://localhost:{port} in your browser\\n")' in source
+        assert 'print("\\nOpen http://localhost:5000 in your browser\\n")' not in source
 
 
 # ── 3. API key settings panel HTML ─────────────────────────────────────────

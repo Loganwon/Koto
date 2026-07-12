@@ -737,23 +737,12 @@ def toggle_skill(skill_id: str):
     data = request.json or {}
     enabled = bool(data.get("enabled", True))
 
-    sm = _sm()
-    success = sm.set_enabled(skill_id, enabled)
+    from app.core.skills.skill_mutations import set_skill_enabled
+
+    success = set_skill_enabled(skill_id, enabled)
 
     if not success:
         return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
-
-    # 同步更新自定义 Skill 文件（内置 Skill 状态存 user_settings.json，已由 set_enabled 处理）
-    skill_file = _SKILLS_DIR / f"{skill_id}.json"
-    if skill_file.exists():
-        try:
-            d = json.loads(skill_file.read_text(encoding="utf-8"))
-            d["enabled"] = enabled
-            skill_file.write_text(
-                json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-        except Exception as e:
-            logger.warning(f"[toggle] 同步文件失败: {e}")
 
     return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
 
@@ -766,27 +755,9 @@ def toggle_skill(skill_id: str):
 @marketplace_bp.route("/disable_all", methods=["POST"])
 def disable_all_skills():
     """一键关闭所有当前已启用的 Skill（system 性质的除外）。"""
-    sm = _sm()
-    sm._ensure_init()
+    from app.core.skills.skill_mutations import disable_all_non_system_skills
 
-    disabled = []
-    for skill_id, s in sm._registry.items():
-        if s.get("skill_nature") == "system":
-            continue
-        if s.get("enabled", False):
-            sm.set_enabled(skill_id, False)
-            # 同步自定义 Skill 文件
-            skill_file = _SKILLS_DIR / f"{skill_id}.json"
-            if skill_file.exists():
-                try:
-                    d = json.loads(skill_file.read_text(encoding="utf-8"))
-                    d["enabled"] = False
-                    skill_file.write_text(
-                        json.dumps(d, ensure_ascii=False, indent=2), encoding="utf-8"
-                    )
-                except Exception as e:
-                    logger.warning(f"[disable_all] 同步文件失败 {skill_id}: {e}")
-            disabled.append(skill_id)
+    disabled = disable_all_non_system_skills()
 
     return jsonify(
         {"success": True, "disabled_count": len(disabled), "disabled": disabled}

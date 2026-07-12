@@ -909,7 +909,7 @@ class TestSearchService:
                 svc = SearchService(api_key=None)
                 assert svc.client is None
 
-    def test_search_no_genai(self):
+    def test_search_no_provider_compat(self):
         with patch("app.core.services.search_service.HAS_GENAI_V2", False):
             from app.core.services.search_service import SearchService
 
@@ -924,7 +924,7 @@ class TestSearchService:
             try:
                 result = svc.search("test query")
                 assert result["success"] is False
-                assert "not installed" in result.get("error", "")
+                assert "use the web search workflow" in result.get("error", "")
             finally:
                 ss_mod.HAS_GENAI_V2 = original
 
@@ -940,12 +940,11 @@ class TestSearchService:
             svc.client = None
             result = svc.search("query")
             assert result["success"] is False
-            assert "not initialized" in result.get("error", "")
+            assert "use the web search workflow" in result.get("error", "")
         finally:
             ss_mod.HAS_GENAI_V2 = original
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_search_success(self):
+    def test_search_does_not_call_legacy_provider(self):
         import app.core.services.search_service as ss_mod
         from app.core.services.search_service import SearchService
 
@@ -954,14 +953,11 @@ class TestSearchService:
         try:
             svc = SearchService.__new__(SearchService)
             svc.api_key = "fake-key"
-            mock_response = MagicMock()
-            mock_response.text = "Search result text"
-            mock_response.candidates = []
             svc.client = MagicMock()
-            svc.client.models.generate_content.return_value = mock_response
             result = svc.search("test query")
-            assert result["success"] is True
-            assert result["data"] == "Search result text"
+            assert result["success"] is False
+            assert "use the web search workflow" in result["error"]
+            svc.client.models.generate_content.assert_not_called()
         finally:
             ss_mod.HAS_GENAI_V2 = original
 
@@ -980,11 +976,12 @@ class TestSearchService:
             svc.client.models.generate_content.return_value = mock_response
             result = svc.search("query")
             assert result["success"] is False
+            assert "use the web search workflow" in result["error"]
+            svc.client.models.generate_content.assert_not_called()
         finally:
             ss_mod.HAS_GENAI_V2 = original
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_search_exception(self):
+    def test_search_ignores_legacy_provider_errors(self):
         import app.core.services.search_service as ss_mod
         from app.core.services.search_service import SearchService
 
@@ -997,7 +994,8 @@ class TestSearchService:
             svc.client.models.generate_content.side_effect = Exception("API error")
             result = svc.search("query")
             assert result["success"] is False
-            assert "API error" in result["error"]
+            assert "use the web search workflow" in result["error"]
+            svc.client.models.generate_content.assert_not_called()
         finally:
             ss_mod.HAS_GENAI_V2 = original
 

@@ -247,10 +247,11 @@ def evt_rag_info(total_chunks: int, retrieved_chunks: int) -> AgentEvent:
 
 
 def evt_task_complete(result: str = "", has_proposals: bool = False,
-                      error: str = "") -> AgentEvent:
+                      error: str = "", **kwargs) -> AgentEvent:
     d: Dict[str, Any] = {"result": result, "has_proposals": has_proposals}
     if error:
         d["error"] = error
+    d.update(kwargs)
     return AgentEvent(EventType.TASK_COMPLETE, d)
 
 

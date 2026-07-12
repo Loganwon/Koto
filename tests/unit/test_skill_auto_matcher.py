@@ -194,7 +194,7 @@ class TestOllamaFallback:
             return_value=([{"id": "concise_mode", "description": "x"}], "catalog"),
         )
         mocker.patch.object(matcher, "_match_with_local_model", return_value=None)
-        mocker.patch.object(matcher, "_match_with_gemini", return_value=None)
+        mocker.patch.object(matcher, "_match_with_cloud_provider", return_value=None)
         mocker.patch.object(matcher, "_match_with_intent_ngram", return_value=[])
         mocker.patch.object(
             matcher, "_match_with_patterns", return_value=["concise_mode"]
