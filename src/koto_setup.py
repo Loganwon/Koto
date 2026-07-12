@@ -867,7 +867,9 @@ if __name__ == "__main__":
     # 这里再加一道保险：用命名 Mutex 确保只有一个 Koto 主窗口实例在运行。
     # 这对所有子进程（包括 pystray、pythonnet/WebView2 产生的子进程）都有效。
     _mutex_handle = None
-    if sys.platform == "win32":
+    # Service-only release checks do not create a desktop window, so they do
+    # not compete with a user's already-running desktop instance.
+    if sys.platform == "win32" and os.environ.get("KOTO_SERVER_ONLY") != "1":
         try:
             import ctypes
             import ctypes.wintypes

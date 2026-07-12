@@ -156,7 +156,8 @@ Write-Host "`n[Step 3] Seeding config and launching..."
 & (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $ExtractDir
 
 $env:KOTO_PORT = $Port
-if ($env:KOTO_SERVER_ONLY) { Write-Host "  KOTO_SERVER_ONLY=$env:KOTO_SERVER_ONLY (server-only mode)" }
+$env:KOTO_SERVER_ONLY = "1"
+Write-Host "  KOTO_SERVER_ONLY=1 (server-only mode)"
 $kotoProc = Start-Process -FilePath $exePath `
     -WorkingDirectory $ExtractDir `
     -PassThru
