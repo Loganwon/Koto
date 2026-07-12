@@ -64,37 +64,36 @@ class TestKotoSetup:
             import koto_setup
         return koto_setup
 
-    # -- _write_gemini_config -----------------------------------------------
+    # -- _write_deepseek_config ---------------------------------------------
 
-    def test_write_gemini_config_creates_file(self, tmp_path):
+    def test_write_deepseek_config_creates_file(self, tmp_path):
         mod = self._import_module()
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
             (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-            mod._write_gemini_config(
-                "AIzaTestKey12345678901234567890", "https://custom.api"
+            mod._write_deepseek_config(
+                "sk-test-key-123456789", "https://custom.api"
             )
-            content = (tmp_path / "config" / "gemini_config.env").read_text(
+            content = (tmp_path / "config" / "deepseek_config.env").read_text(
                 encoding="utf-8"
             )
-            assert "GEMINI_API_KEY=AIzaTestKey12345678901234567890" in content
-            assert "GEMINI_API_BASE=https://custom.api" in content
-            assert "FORCE_PROXY=auto" in content
+            assert "DEEPSEEK_API_KEY=sk-test-key-123456789" in content
+            assert "DEEPSEEK_BASE_URL=https://custom.api" in content
         finally:
             mod.APP_ROOT = orig
 
-    def test_write_gemini_config_default_base(self, tmp_path):
+    def test_write_deepseek_config_default_base(self, tmp_path):
         mod = self._import_module()
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
             (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-            mod._write_gemini_config("AIzaKey123456789012345678901234")
-            content = (tmp_path / "config" / "gemini_config.env").read_text(
+            mod._write_deepseek_config("sk-test-key-123456789")
+            content = (tmp_path / "config" / "deepseek_config.env").read_text(
                 encoding="utf-8"
             )
-            assert "GEMINI_API_BASE=\n" in content
+            assert "DEEPSEEK_BASE_URL=https://api.deepseek.com\n" in content
         finally:
             mod.APP_ROOT = orig
 
@@ -105,10 +104,10 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
             cfg.write_text(
-                "GEMINI_API_KEY=AIzaRealKeyValue1234567890\n", encoding="utf-8"
+                "DEEPSEEK_API_KEY=sk-real-key-value-1234567890\n", encoding="utf-8"
             )
             assert mod._api_key_configured() is True
         finally:
@@ -128,9 +127,9 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=your_api_key_here\n", encoding="utf-8")
+            cfg.write_text("DEEPSEEK_API_KEY=your_api_key_here\n", encoding="utf-8")
             assert mod._api_key_configured() is False
         finally:
             mod.APP_ROOT = orig
@@ -140,9 +139,9 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=None\n", encoding="utf-8")
+            cfg.write_text("DEEPSEEK_API_KEY=None\n", encoding="utf-8")
             assert mod._api_key_configured() is False
         finally:
             mod.APP_ROOT = orig
@@ -152,9 +151,9 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=\n", encoding="utf-8")
+            cfg.write_text("DEEPSEEK_API_KEY=\n", encoding="utf-8")
             assert mod._api_key_configured() is False
         finally:
             mod.APP_ROOT = orig
@@ -166,10 +165,10 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
             cfg.write_text(
-                "GEMINI_API_KEY=mykey123\nGEMINI_API_BASE=https://custom\n",
+                "DEEPSEEK_API_KEY=mykey123\nDEEPSEEK_BASE_URL=https://custom\n",
                 encoding="utf-8",
             )
             key, base = mod._read_config_values()
@@ -198,7 +197,7 @@ class TestKotoSetup:
         mock_resp.__enter__ = Mock(return_value=mock_resp)
         mock_resp.__exit__ = Mock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            ok, msg = mod._validate_api_key("AIzaTestKey")
+            ok, msg = mod._validate_api_key("sk-test-key")
             assert ok is True
             assert msg == ""
 
@@ -236,7 +235,7 @@ class TestKotoSetup:
         mock_resp.__enter__ = Mock(return_value=mock_resp)
         mock_resp.__exit__ = Mock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_resp) as mock_open:
-            mod._validate_api_key("AIzaKey", "https://my-proxy.com/")
+            mod._validate_api_key("sk-key", "https://my-proxy.com/")
             # Verify custom base URL was used
             req_obj = mock_open.call_args[0][0]
             assert "my-proxy.com" in req_obj.full_url
@@ -248,10 +247,10 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
             cfg.write_text(
-                "GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8"
+                "DEEPSEEK_API_KEY=sk-valid-key-1234567890123456\n", encoding="utf-8"
             )
             with patch.object(mod, "_validate_api_key", return_value=(True, "")):
                 mod._run_setup_if_needed()
@@ -263,10 +262,10 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
             cfg.write_text(
-                "GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8"
+                "DEEPSEEK_API_KEY=sk-valid-key-1234567890123456\n", encoding="utf-8"
             )
             with patch.object(
                 mod, "_validate_api_key", return_value=(False, "⚠️ timeout")
@@ -281,10 +280,10 @@ class TestKotoSetup:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
             cfg.write_text(
-                "GEMINI_API_KEY=AIzaValidKey1234567890123456\n", encoding="utf-8"
+                "DEEPSEEK_API_KEY=sk-valid-key-1234567890123456\n", encoding="utf-8"
             )
             wizard_result = {"key": None, "base": "", "cancelled": True}
             with patch.object(
@@ -1149,7 +1148,7 @@ class TestKotoApp:
             mod.APP_ROOT = tmp_path
             with patch.object(mod, "_write_log"):
                 mod.check_config()
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             assert cfg.exists()
             content = cfg.read_text(encoding="utf-8")
             assert "your_api_key_here" in content
@@ -1161,12 +1160,12 @@ class TestKotoApp:
         orig = mod.APP_ROOT
         try:
             mod.APP_ROOT = tmp_path
-            cfg = tmp_path / "config" / "gemini_config.env"
+            cfg = tmp_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True, exist_ok=True)
-            cfg.write_text("GEMINI_API_KEY=real_key\n", encoding="utf-8")
+            cfg.write_text("DEEPSEEK_API_KEY=real_key\n", encoding="utf-8")
             with patch.object(mod, "_write_log"):
                 mod.check_config()
-            assert cfg.read_text(encoding="utf-8") == "GEMINI_API_KEY=real_key\n"
+            assert cfg.read_text(encoding="utf-8") == "DEEPSEEK_API_KEY=real_key\n"
         finally:
             mod.APP_ROOT = orig
 

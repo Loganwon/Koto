@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from web.llm_client_compat import ProviderClientCompat
+from app.core.llm.llm_client_compat import ProviderClientCompat
 
 
 class _Provider:

@@ -272,13 +272,13 @@ class TestEnhancedMemoryManager:
 
 @pytest.mark.unit
 class TestKnowledgeBase:
-    """Tests for web.knowledge_base.KnowledgeBase."""
+    """Tests for app.core.services.knowledge_base.KnowledgeBase."""
 
     @pytest.fixture()
     def kb(self, tmp_path):
         with patch.dict(os.environ, {"GEMINI_API_KEY": ""}, clear=False):
-            with patch("web.knowledge_base.genai", None):
-                from web.knowledge_base import KnowledgeBase
+            with patch("app.core.services.knowledge_base.genai", None):
+                from app.core.services.knowledge_base import KnowledgeBase
 
                 return KnowledgeBase(workspace_dir=str(tmp_path))
 

@@ -1340,7 +1340,7 @@ class TestSummarizeFile:
             "app.core.file.file_registry._extract_text_preview",
             return_value="Important document content",
         ):
-            with patch("app.core.llm.gemini.GeminiProvider") as MockLLM:
+            with patch("app.core.llm.provider_factory.get_llm_provider") as MockLLM:
                 mock_llm = MagicMock()
                 mock_llm.generate_content.return_value = {
                     "text": "This is a summary of the document."
@@ -1365,7 +1365,7 @@ class TestSummarizeFile:
             return_value="Some content here",
         ):
             with patch(
-                "app.core.llm.gemini.GeminiProvider",
+                "app.core.llm.provider_factory.get_llm_provider",
                 side_effect=Exception("API key missing"),
             ):
                 result = plugin.summarize_file(str(f))
@@ -1381,7 +1381,7 @@ class TestSummarizeFile:
             "app.core.file.file_registry._extract_text_preview",
             return_value="Data analysis report with charts.",
         ):
-            with patch("app.core.llm.gemini.GeminiProvider") as MockLLM:
+            with patch("app.core.llm.provider_factory.get_llm_provider") as MockLLM:
                 mock_llm = MagicMock()
                 mock_llm.generate_content.return_value = {"text": "Focused summary."}
                 MockLLM.return_value = mock_llm

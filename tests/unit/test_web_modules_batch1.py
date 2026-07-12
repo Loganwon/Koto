@@ -25,12 +25,12 @@ import pytest
 
 @pytest.mark.unit
 class TestSettingsManager:
-    """Tests for web.settings.SettingsManager (singleton)."""
+    """Tests for app.core.config.user_settings.SettingsManager (singleton)."""
 
     @pytest.fixture(autouse=True)
     def _reset_singleton(self):
         """Reset the singleton between tests so each test is independent."""
-        import web.settings as mod
+        import app.core.config.user_settings as mod
 
         old_instance = mod.SettingsManager._instance
         old_settings = mod.SettingsManager._settings
@@ -52,10 +52,10 @@ class TestSettingsManager:
 
     def test_init_loads_defaults_when_no_file(self):
         """When no settings file exists, defaults are used."""
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             assert mgr._settings is not None
@@ -68,8 +68,8 @@ class TestSettingsManager:
         settings_file = tmp_path / "user_settings.json"
         settings_file.write_text(json.dumps(saved), encoding="utf-8")
 
-        with patch("web.settings.SETTINGS_FILE", str(settings_file)):
-            from web.settings import SettingsManager
+        with patch("app.core.config.user_settings.SETTINGS_FILE", str(settings_file)):
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             # User override is preserved
@@ -82,8 +82,8 @@ class TestSettingsManager:
         settings_file = tmp_path / "user_settings.json"
         settings_file.write_text("{bad json", encoding="utf-8")
 
-        with patch("web.settings.SETTINGS_FILE", str(settings_file)):
-            from web.settings import SettingsManager
+        with patch("app.core.config.user_settings.SETTINGS_FILE", str(settings_file)):
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             assert "storage" in mgr._settings
@@ -91,10 +91,10 @@ class TestSettingsManager:
     # -- get / set / update ----------------------------------------------------
 
     def test_get_category(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             ai_settings = mgr.get("ai")
@@ -102,32 +102,32 @@ class TestSettingsManager:
             assert "default_model" in ai_settings
 
     def test_get_key(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             assert mgr.get("appearance", "theme") == "light"
 
     def test_get_missing_returns_none(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             assert mgr.get("nonexistent") is None
             assert mgr.get("appearance", "nonexistent") is None
 
     def test_set_value(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()), patch(
-            "web.settings.threading.Timer"
+            "app.core.config.user_settings.threading.Timer"
         ) as MockTimer:
             MockTimer.return_value = MagicMock()
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             result = mgr.set("appearance", "theme", "light")
@@ -136,13 +136,13 @@ class TestSettingsManager:
             assert mgr._dirty is True
 
     def test_update_values(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()), patch(
-            "web.settings.threading.Timer"
+            "app.core.config.user_settings.threading.Timer"
         ) as MockTimer:
             MockTimer.return_value = MagicMock()
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             result = mgr.update("appearance", {"theme": "auto", "font_size": "large"})
@@ -153,10 +153,10 @@ class TestSettingsManager:
     # -- reset / flush ---------------------------------------------------------
 
     def test_reset_category(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import DEFAULT_SETTINGS, SettingsManager
+            from app.core.config.user_settings import DEFAULT_SETTINGS, SettingsManager
 
             mgr = SettingsManager()
             mgr._settings["appearance"]["theme"] = "light"
@@ -167,10 +167,10 @@ class TestSettingsManager:
             )
 
     def test_reset_all(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import DEFAULT_SETTINGS, SettingsManager
+            from app.core.config.user_settings import DEFAULT_SETTINGS, SettingsManager
 
             mgr = SettingsManager()
             mgr._settings["ai"]["default_model"] = "custom"
@@ -181,10 +181,10 @@ class TestSettingsManager:
             )
 
     def test_flush_writes_when_dirty(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ) as mk, patch("builtins.open", mock_open()) as mo:
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             mgr._dirty = True
@@ -193,10 +193,10 @@ class TestSettingsManager:
             assert mgr._dirty is False
 
     def test_flush_noop_when_clean(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             mgr._dirty = False
@@ -206,10 +206,10 @@ class TestSettingsManager:
     # -- convenience properties ------------------------------------------------
 
     def test_property_accessors(self):
-        with patch("web.settings.os.path.exists", return_value=False), patch(
-            "web.settings.os.makedirs"
+        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
+            "app.core.config.user_settings.os.makedirs"
         ), patch("builtins.open", mock_open()):
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             assert mgr.workspace_dir is not None
@@ -347,12 +347,12 @@ class TestMemoryManager:
 
 @pytest.mark.unit
 class TestTokenTracker:
-    """Tests for web.token_tracker module functions."""
+    """Tests for app.core.analytics.token_tracker module functions."""
 
     @pytest.fixture(autouse=True)
     def _reset_module_state(self):
         """Reset module-level globals before each test and prevent disk I/O."""
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         tt._data = {}
         tt._dirty = False
@@ -364,37 +364,37 @@ class TestTokenTracker:
     # -- _normalize_model ------------------------------------------------------
 
     def test_normalize_model_strips_prefix(self):
-        from web.token_tracker import _normalize_model
+        from app.core.analytics.token_tracker import _normalize_model
 
         assert _normalize_model("models/gemini-2.5-pro") == "gemini-2.5-pro"
 
     def test_normalize_model_lowercases(self):
-        from web.token_tracker import _normalize_model
+        from app.core.analytics.token_tracker import _normalize_model
 
         assert _normalize_model("Gemini-2.5-Pro") == "gemini-2.5-pro"
 
     def test_normalize_model_strips_whitespace(self):
-        from web.token_tracker import _normalize_model
+        from app.core.analytics.token_tracker import _normalize_model
 
         assert _normalize_model("  gemini-3-flash  ") == "gemini-3-flash"
 
     # -- _get_price / _calc_cost -----------------------------------------------
 
     def test_get_price_known_model(self):
-        from web.token_tracker import _get_price
+        from app.core.analytics.token_tracker import _get_price
 
         price = _get_price("gemini-2.5-pro")
         assert price["input"] == 1.25
         assert price["output"] == 10.00
 
     def test_get_price_falls_back_to_default(self):
-        from web.token_tracker import _PRICING, _get_price
+        from app.core.analytics.token_tracker import _PRICING, _get_price
 
         price = _get_price("totally-unknown-model-xyz")
         assert price == _PRICING["default"]
 
     def test_calc_cost(self):
-        from web.token_tracker import _calc_cost
+        from app.core.analytics.token_tracker import _calc_cost
 
         cost = _calc_cost("gemini-2.5-flash", 1_000_000, 1_000_000)
         expected = 0.075 + 0.30  # input + output per 1M
@@ -403,14 +403,14 @@ class TestTokenTracker:
     # -- record_usage ----------------------------------------------------------
 
     def test_record_usage_skips_zero_tokens(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         with patch.object(tt, "_load"):
             tt.record_usage("gemini-2.5-pro", 0, 0)
         assert tt._dirty is False
 
     def test_record_usage_updates_daily_and_monthly(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         today = date.today().isoformat()
         month = today[:7]
@@ -426,7 +426,7 @@ class TestTokenTracker:
         assert day_model["calls"] == 1
 
     def test_record_usage_accumulates(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         today = date.today().isoformat()
 
@@ -442,7 +442,7 @@ class TestTokenTracker:
     # -- record_usage_with_skill -----------------------------------------------
 
     def test_record_usage_with_skill(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         with patch.object(tt, "_save_if_dirty"):
             tt.record_usage_with_skill(
@@ -463,7 +463,7 @@ class TestTokenTracker:
     # -- get_stats / reset_stats -----------------------------------------------
 
     def test_get_stats_returns_structure(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         with patch.object(tt, "_save_if_dirty"), patch.object(tt, "_load"):
             tt.record_usage("gemini-2.5-flash", 100, 50)
@@ -475,7 +475,7 @@ class TestTokenTracker:
         assert stats["today"]["total"] == 150
 
     def test_reset_stats_all(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         with patch.object(tt, "_save_if_dirty"):
             tt.record_usage("gemini-2.5-flash", 100, 50)
@@ -484,7 +484,7 @@ class TestTokenTracker:
         assert tt._data.get("daily") == {}
 
     def test_reset_stats_today(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         today = date.today().isoformat()
         with patch.object(tt, "_save_if_dirty"):
@@ -495,7 +495,7 @@ class TestTokenTracker:
     # -- _aggregate_period / _last_n_days (internal) ---------------------------
 
     def test_aggregate_period_empty(self):
-        from web.token_tracker import _aggregate_period
+        from app.core.analytics.token_tracker import _aggregate_period
 
         agg = _aggregate_period({})
         assert agg["total"] == 0
@@ -503,10 +503,10 @@ class TestTokenTracker:
         assert agg["cost_usd"] == 0
 
     def test_last_n_days_length(self):
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         tt._data = tt._empty_data()
-        from web.token_tracker import _last_n_days
+        from app.core.analytics.token_tracker import _last_n_days
 
         result = _last_n_days(7)
         assert len(result) == 7
@@ -944,27 +944,27 @@ class TestWorkFileLibrary:
 
 @pytest.mark.unit
 class TestWorkFileLibraryHelpers:
-    """Tests for module-level helper functions in work_file_library."""
+    """Tests for shared formatting and work-file category helpers."""
 
     def test_human_size_bytes(self):
-        from web.work_file_library import _human_size
+        from web.shared import human_size
 
-        assert _human_size(500) == "500 B"
+        assert human_size(500) == "500 B"
 
     def test_human_size_kb(self):
-        from web.work_file_library import _human_size
+        from web.shared import human_size
 
-        assert "KB" in _human_size(2048)
+        assert "KB" in human_size(2048)
 
     def test_human_size_mb(self):
-        from web.work_file_library import _human_size
+        from web.shared import human_size
 
-        assert "MB" in _human_size(5_000_000)
+        assert "MB" in human_size(5_000_000)
 
     def test_human_time(self):
-        from web.work_file_library import _human_time
+        from web.shared import human_time
 
-        result = _human_time(1700000000.0)
+        result = human_time(1700000000.0)
         assert len(result) > 0
         assert "-" in result  # date format
 

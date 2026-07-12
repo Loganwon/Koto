@@ -16,7 +16,7 @@ import types
 
 import pytest
 
-from web.settings import settings as web_settings
+from app.core.config.user_settings import settings as web_settings
 
 
 def _check(resp, ok_status=(200, 201)):

@@ -39,13 +39,7 @@ _QA_SYSTEM = """\
 """
 
 
-def _ollama_available() -> bool:
-    try:
-        s = socket.create_connection((_OLLAMA_HOST, _OLLAMA_PORT), timeout=1)
-        s.close()
-        return True
-    except OSError:
-        return False
+
 
 
 def _extract_content_local(file_path: str) -> str:
@@ -174,7 +168,7 @@ def answer_file_question(
             "error": str or None,
         }
     """
-    if not _ollama_available():
+    if not ollama_available():
         return {
             "success": False,
             "error": "Ollama 未运行（localhost:11434 不可达），请先启动 Ollama",
@@ -302,7 +296,7 @@ def filter_files_by_criterion(
             "error": str or None,
         }
     """
-    if not _ollama_available():
+    if not ollama_available():
         return {
             "success": False,
             "error": "Ollama 未运行（localhost:11434 不可达）",

@@ -134,7 +134,7 @@ class LLMProvider(ABC):
             return
 
         try:
-            import web.token_tracker as token_tracker
+            import app.core.analytics.token_tracker as token_tracker
 
             if skill_id or session_id:
                 token_tracker.record_usage_with_skill(

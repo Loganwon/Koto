@@ -11,6 +11,18 @@ def test_pick_online_model_prefers_request_model() -> None:
     assert pick_online_model(request) == "gemini-custom"
 
 
+def test_pick_online_model_uses_core_configuration_selector(monkeypatch) -> None:
+    from app.core.agent import llm_provider_helpers
+
+    monkeypatch.setattr(
+        llm_provider_helpers,
+        "get_configured_cloud_model",
+        lambda **_kwargs: "configured-model",
+    )
+
+    assert llm_provider_helpers.pick_online_model() == "configured-model"
+
+
 def test_call_llm_sync_uses_local_only_provider(monkeypatch) -> None:
     from app.core.agent import llm_provider_helpers
 

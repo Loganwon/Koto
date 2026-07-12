@@ -16,7 +16,7 @@ from __future__ import annotations
 class LocalExecutor:
     """
     本地系统信息执行器。
-    高风险的任意系统原生命令、应用控制、电源操作、按键模拟已移除。
+    高风险的任意系统原生命令、电源操作、按键模拟已移除；仅允许严格匹配的白名单应用启动。
     """
 
     APP_LAUNCHERS = {
@@ -96,6 +96,9 @@ class LocalExecutor:
         if len(text_lower) > 30:
             return False
 
+        if cls._match_app_launch(text_lower):
+            return True
+
         action_keywords = [
             "时间",
             "几点",
@@ -140,6 +143,10 @@ class LocalExecutor:
         """执行系统操作"""
         text_lower = user_input.lower()
         result = {"success": False, "action": "", "message": "", "details": ""}
+
+        app_key = cls._match_app_launch(user_input)
+        if app_key:
+            return cls.open_whitelisted_app(app_key)
 
         # === 系统时间/日期 ===
         if any(

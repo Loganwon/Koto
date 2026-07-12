@@ -211,7 +211,7 @@ def pdf_to_pptx(pdf_path: str) -> bytes:
     Requires PyMuPDF (fitz) and python-pptx.
     """
     try:
-        import fitz  # type: ignore  # PyMuPDF
+        import pymupdf as fitz  # type: ignore
     except ImportError as exc:
         raise RuntimeError("PyMuPDF is required for PDF→PPTX conversion") from exc
     try:
@@ -246,18 +246,16 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
 
     Strategy 1: Structural detection — find repeated light-coloured or
     keyword-matched text that appears on multiple pages and redact it.
-    Strategy 2: Gemini Vision fallback — if structural detection finds nothing
-    and *use_ai* is True and *api_key* is provided, ask Gemini to identify
-    watermark text, then redact matching regions.
+    Cloud-vision fallback is disabled; structural detection is deterministic.
 
     Returns (pdf_bytes, n_regions_removed, method_used).
     """
     try:
-        import fitz  # PyMuPDF  # noqa: F401
+        import pymupdf as fitz  # type: ignore
     except ImportError as exc:
         raise RuntimeError("PyMuPDF is required for watermark removal") from exc
 
-    import fitz  # noqa: E402 (conditional import above handles missing dep)
+    use_ai = False
 
     doc = fitz.open(pdf_path)
     page_count = len(doc)
@@ -332,7 +330,7 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
             import base64
             img_b64 = base64.b64encode(pix.tobytes("png")).decode()
 
-            import google.generativeai as genai  # type: ignore
+            raise RuntimeError("Cloud vision watermark detection is archived")
             import PIL.Image
             import io as _io
             import json

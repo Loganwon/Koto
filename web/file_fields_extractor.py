@@ -47,13 +47,7 @@ _EXTRACT_PROMPT = """\
 """
 
 
-def _ollama_available() -> bool:
-    try:
-        s = socket.create_connection((_OLLAMA_HOST, _OLLAMA_PORT), timeout=1)
-        s.close()
-        return True
-    except OSError:
-        return False
+
 
 
 def extract_fields(
@@ -65,7 +59,7 @@ def extract_fields(
     """
     if not content or not content.strip():
         return None
-    if not _ollama_available():
+    if not ollama_available():
         return None
     try:
         import requests as _req

@@ -341,7 +341,7 @@ class TestPPTContentPlanner:
     def test_init_no_client(self):
         planner = self._make_planner()
         assert planner.ai_client is None
-        assert planner.model_name == "gemini-2.5-flash"
+        assert planner.model_name == "deepseek-chat"
 
     def test_generate_default_plan(self):
         planner = self._make_planner()

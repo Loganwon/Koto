@@ -234,10 +234,10 @@ def _extract_text_preview(path: str, max_chars: int = 3000) -> str:
 
         if ext == ".pdf":
             try:
-                import PyPDF2
+                import pypdf
 
                 with open(path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
+                    reader = pypdf.PdfReader(f)
                     parts = []
                     for page in reader.pages[:8]:
                         parts.append(page.extract_text() or "")
@@ -390,11 +390,11 @@ def _extract_text_full(path: str, max_chars: int = 200_000) -> str:
         # ── PDF：读取全部页面 ─────────────────────────────────────────────────
         if ext == ".pdf":
             try:
-                import PyPDF2
+                import pypdf
 
                 parts = []
                 with open(path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
+                    reader = pypdf.PdfReader(f)
                     total = len(reader.pages)
                     for i, page in enumerate(reader.pages, 1):
                         text = page.extract_text() or ""

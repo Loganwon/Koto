@@ -12,10 +12,6 @@ file_scanner.py — Koto 全盘文件扫描器
 
 使用示例:
     from web.file_scanner import FileScanner
-import logging
-
-logger = logging.getLogger(__name__)
-
     FileScanner.start_scan()                        # 后台扫描
     results = FileScanner.search("报告 2025", limit=10)
     print(results[0]["path"])
@@ -25,6 +21,7 @@ from __future__ import annotations
 
 import difflib
 import json
+import logging
 import os
 import re
 import string
@@ -34,6 +31,10 @@ import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+
+from web.shared import human_size, human_time
+
+logger = logging.getLogger(__name__)
 
 # ─── Configuration ────────────────────────────────────────────────────────────
 
@@ -500,9 +501,9 @@ class FileScanner:
                     "name": entry.name,
                     "ext": entry.ext,
                     "size": entry.size,
-                    "size_str": _human_size(entry.size),
+                    "size_str": human_size(entry.size),
                     "mtime": entry.mtime,
-                    "mtime_str": _human_time(entry.mtime),
+                    "mtime_str": human_time(entry.mtime),
                     "category": entry.category,
                     "score": round(score, 3),
                 }
@@ -545,21 +546,7 @@ class FileScanner:
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 
-def _human_size(n: int) -> str:
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if n < 1024:
-            return f"{n:.1f} {unit}" if unit != "B" else f"{n} B"
-        n /= 1024
-    return f"{n:.1f} PB"
 
-
-def _human_time(ts: float) -> str:
-    import datetime
-
-    try:
-        return datetime.datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return "未知"
 
 
 # ─── Extract search query from natural language ───────────────────────────────

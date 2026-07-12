@@ -102,44 +102,51 @@ class FileProcessor:
 
     @staticmethod
     def _process_pdf(filepath: str, result: Dict) -> Dict:
-        """处理PDF文件 - 优先以二进制字节提交给 Gemini（支持图表/排版），同时尝试提取文本作为补充"""
+        """处理 PDF 文件：保留原始字节并提取文本；云端二进制输入由上层能力守卫。"""
         try:
-            # 始终读取原始字节（Gemini 原生支持 application/pdf 内联 blob）
+            # 保留原始字节供本地解析器与文件工具使用。
             with open(filepath, "rb") as f:
                 raw_bytes = f.read()
             result["binary_data"] = raw_bytes
             result["mime_type"] = "application/pdf"
 
-# 尝试提文本，供质量评估使用
+            # 尝试提取文本，供质量评估使用。
             try:
                 import warnings
-                
+
                 extracted = ""
                 max_pages = 20
-                
+                page_count = 0
+
                 # 优先尝试 pdfplumber 因为它的文本提取更精准
                 try:
                     import pdfplumber
+
                     with pdfplumber.open(filepath) as pdf:
+                        page_count = len(pdf.pages)
                         text_parts = []
-                        max_pages = min(20, len(pdf.pages))
+                        max_pages = min(20, page_count)
                         for page_num in range(max_pages):
                             text = pdf.pages[page_num].extract_text()
                             if text:
                                 text_parts.append(text)
                         extracted = "\n".join(text_parts)
-                except ImportError:
-                    pass
-                
-                # 回退：PyPDF2
+                except Exception as exc:
+                    logger.debug(
+                        "[FileProcessor] pdfplumber 提取失败，尝试 pypdf: %s", exc
+                    )
+
+                # 回退：pypdf
                 if not extracted.strip():
-                    import PyPDF2
+                    import pypdf
+
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
                         with open(filepath, "rb") as f:
-                            reader = PyPDF2.PdfReader(f)
+                            reader = pypdf.PdfReader(f)
+                            page_count = len(reader.pages)
                             text_parts = []
-                            max_pages = min(20, len(reader.pages))
+                            max_pages = min(20, page_count)
                             for page_num in range(max_pages):
                                 page = reader.pages[page_num]
                                 text = page.extract_text()
@@ -176,7 +183,7 @@ class FileProcessor:
 
                 if extracted.strip() and not _is_garbled(extracted):
                     result["text_content"] = extracted
-                    result["metadata"]["pages"] = len(reader.pages)
+                    result["metadata"]["pages"] = page_count
                     result["metadata"]["extracted_pages"] = max_pages
                     result["metadata"]["text_quality"] = "good"
                     logger.info(
@@ -329,7 +336,8 @@ class FileProcessor:
                             text_parts.append("\n【统计信息】")
                             try:
                                 text_parts.append(df.describe(include='all').to_markdown())
-                            except:
+                            except Exception:
+                                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                                 pass
                         else:
                             text_parts.append(df.to_markdown(index=False))
