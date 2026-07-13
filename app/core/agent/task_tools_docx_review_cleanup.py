@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, List
 
-
 DOCX_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
 DOCX_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 DOCX_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
@@ -129,7 +128,10 @@ def remove_comments_relationships_xml(xml_bytes: bytes) -> tuple[bytes, int]:
             continue
         target = str(element.get("Target") or "").strip().lower()
         relation_type = str(element.get("Type") or "").strip().lower()
-        if target.endswith("comments.xml") or relation_type == DOCX_COMMENTS_REL_TYPE.lower():
+        if (
+            target.endswith("comments.xml")
+            or relation_type == DOCX_COMMENTS_REL_TYPE.lower()
+        ):
             root.remove(element)
             removed += 1
     return _serialize_xml_root(root), removed
@@ -146,7 +148,10 @@ def remove_comments_content_type_override(xml_bytes: bytes) -> tuple[bytes, int]
             continue
         part_name = str(element.get("PartName") or "").strip().lower()
         content_type = str(element.get("ContentType") or "").strip().lower()
-        if part_name == "/word/comments.xml" or content_type == DOCX_COMMENTS_CONTENT_TYPE.lower():
+        if (
+            part_name == "/word/comments.xml"
+            or content_type == DOCX_COMMENTS_CONTENT_TYPE.lower()
+        ):
             root.remove(element)
             removed += 1
     return _serialize_xml_root(root), removed

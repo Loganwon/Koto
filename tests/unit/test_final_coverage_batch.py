@@ -374,7 +374,9 @@ class TestPptGeneratorDeep:
     def test_generate_from_text_creates_pptx(self):
         gen = self._make_gen()
         mock_prs = MagicMock()
-        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_text(
@@ -390,7 +392,9 @@ class TestPptGeneratorDeep:
         outline = [
             {"title": "Intro", "points": ["Point 1"], "slide_type": "detail"},
         ]
-        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 gen.generate_from_outline("Title", outline, out, progress_callback=cb)
@@ -401,7 +405,9 @@ class TestPptGeneratorDeep:
         mock_prs = MagicMock()
         mock_prs.save.side_effect = PermissionError("locked")
         outline = [{"title": "T", "points": ["P"], "slide_type": "detail"}]
-        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with pytest.raises(PermissionError):
                 gen.generate_from_outline("T", outline, "/locked/out.pptx")
 
@@ -416,7 +422,9 @@ class TestPptGeneratorDeep:
                 "slide_type": "image_full",
             }
         ]
-        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_outline(
@@ -434,7 +442,9 @@ class TestPptGeneratorDeep:
                 "slide_type": "content_image",
             }
         ]
-        with patch("app.core.services.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_outline(

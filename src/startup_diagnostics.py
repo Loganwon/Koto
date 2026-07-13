@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 from urllib.request import build_opener, ProxyHandler, Request
 
-
 _CRITICAL_FILES = (
     "web/app.py",
     "src/koto_app.py",
@@ -40,8 +39,7 @@ _COMPATIBILITY_MODULES = (
     "app.core.services.knowledge_base",
 )
 
-_OPTIONAL_MODULES = {
-}
+_OPTIONAL_MODULES = {}
 
 
 def _check(name: str, level: str, message: str, *, action: str = "") -> dict[str, str]:
@@ -49,6 +47,11 @@ def _check(name: str, level: str, message: str, *, action: str = "") -> dict[str
 
 
 def _module_exists(module: str) -> bool:
+    # Test runners and embedded launchers may already hold a module object
+    # without an import spec.  ``find_spec`` raises ValueError in that case,
+    # even though the runtime dependency is available to this process.
+    if sys.modules.get(module) is not None:
+        return True
     try:
         return importlib.util.find_spec(module) is not None
     except (ImportError, ModuleNotFoundError, ValueError):
@@ -68,7 +71,9 @@ def _source_shadowing_extensions(root: Path) -> list[Path]:
     return artifacts
 
 
-def remove_source_shadowing_extensions(root: Path) -> tuple[list[Path], list[tuple[Path, str]]]:
+def remove_source_shadowing_extensions(
+    root: Path,
+) -> tuple[list[Path], list[tuple[Path, str]]]:
     """Remove in-place compiled artifacts and report files that remain locked.
 
     This is intentionally separate from ``run_startup_diagnostics``: diagnostics
@@ -154,17 +159,35 @@ def run_startup_diagnostics(
             checks.append(_check(relative, "ok", "found"))
         else:
             checks.append(
-                _check(relative, "error", "missing", action="restore this file from the release package")
+                _check(
+                    relative,
+                    "error",
+                    "missing",
+                    action="restore this file from the release package",
+                )
             )
 
     for directory in ("logs", "chats", "workspace", "config"):
         path = root / directory
         if path.is_dir() and os.access(path, os.W_OK):
-            checks.append(_check(f"{directory} directory", "ok", "available and writable"))
+            checks.append(
+                _check(f"{directory} directory", "ok", "available and writable")
+            )
         elif path.exists():
-            checks.append(_check(f"{directory} directory", "error", "not writable", action="check folder permissions"))
+            checks.append(
+                _check(
+                    f"{directory} directory",
+                    "error",
+                    "not writable",
+                    action="check folder permissions",
+                )
+            )
         else:
-            checks.append(_check(f"{directory} directory", "warning", "will be created at startup"))
+            checks.append(
+                _check(
+                    f"{directory} directory", "warning", "will be created at startup"
+                )
+            )
 
     checks.append(
         _check(
@@ -180,7 +203,11 @@ def run_startup_diagnostics(
             _check(
                 label,
                 "ok" if _module_exists(module) else "error",
-                "available" if _module_exists(module) else f"missing Python module: {module}",
+                (
+                    "available"
+                    if _module_exists(module)
+                    else f"missing Python module: {module}"
+                ),
                 action="run the packaged installer or pip install -r config/requirements.txt",
             )
         )
@@ -190,7 +217,11 @@ def run_startup_diagnostics(
             _check(
                 module,
                 "ok" if _module_exists(module) else "error",
-                "compatibility bridge available" if _module_exists(module) else "missing compatibility bridge",
+                (
+                    "compatibility bridge available"
+                    if _module_exists(module)
+                    else "missing compatibility bridge"
+                ),
                 action="restore the web compatibility shim",
             )
         )
@@ -218,7 +249,12 @@ def run_startup_diagnostics(
             checks.append(_check("web/app.py syntax", "ok", "syntax check passed"))
         except (OSError, SyntaxError, UnicodeError) as exc:
             checks.append(
-                _check("web/app.py syntax", "error", str(exc), action="fix the reported source line")
+                _check(
+                    "web/app.py syntax",
+                    "error",
+                    str(exc),
+                    action="fix the reported source line",
+                )
             )
 
     if include_import_check and app_file.is_file():
@@ -228,7 +264,11 @@ def run_startup_diagnostics(
                 "web application import",
                 "ok" if imported else "error",
                 detail,
-                action="inspect the first missing module or import error above" if not imported else "",
+                action=(
+                    "inspect the first missing module or import error above"
+                    if not imported
+                    else ""
+                ),
             )
         )
 
@@ -237,7 +277,9 @@ def run_startup_diagnostics(
         if state == "free":
             checks.append(_check(f"port {port}", "ok", "available"))
         elif _http_health(port):
-            checks.append(_check(f"port {port}", "ok", "occupied by a healthy Koto backend"))
+            checks.append(
+                _check(f"port {port}", "ok", "occupied by a healthy Koto backend")
+            )
         else:
             checks.append(
                 _check(

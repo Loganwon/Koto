@@ -15,9 +15,19 @@ def test_whitelisted_app_launch_is_system_command() -> None:
 def test_whitelisted_app_launch_uses_resolved_target(monkeypatch) -> None:
     launched = []
 
-    monkeypatch.setattr(LocalExecutor, "_is_app_running", classmethod(lambda cls, config: False))
-    monkeypatch.setattr(LocalExecutor, "_resolve_app_launch_target", classmethod(lambda cls, config: r"C:\Apps\WeChat.exe"))
-    monkeypatch.setattr(LocalExecutor, "_launch_target", classmethod(lambda cls, target: launched.append(target)))
+    monkeypatch.setattr(
+        LocalExecutor, "_is_app_running", classmethod(lambda cls, config: False)
+    )
+    monkeypatch.setattr(
+        LocalExecutor,
+        "_resolve_app_launch_target",
+        classmethod(lambda cls, config: r"C:\Apps\WeChat.exe"),
+    )
+    monkeypatch.setattr(
+        LocalExecutor,
+        "_launch_target",
+        classmethod(lambda cls, target: launched.append(target)),
+    )
 
     result = LocalExecutor.execute("打开微信")
 
@@ -28,8 +38,12 @@ def test_whitelisted_app_launch_uses_resolved_target(monkeypatch) -> None:
 
 
 def test_missing_whitelisted_app_does_not_request_model_retry(monkeypatch) -> None:
-    monkeypatch.setattr(LocalExecutor, "_is_app_running", classmethod(lambda cls, config: False))
-    monkeypatch.setattr(LocalExecutor, "_resolve_app_launch_target", classmethod(lambda cls, config: ""))
+    monkeypatch.setattr(
+        LocalExecutor, "_is_app_running", classmethod(lambda cls, config: False)
+    )
+    monkeypatch.setattr(
+        LocalExecutor, "_resolve_app_launch_target", classmethod(lambda cls, config: "")
+    )
 
     result = LocalExecutor.execute("打开微信")
 

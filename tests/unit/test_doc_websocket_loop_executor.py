@@ -62,7 +62,9 @@ def test_doc_websocket_executor_delegates_chat_requests_to_doc_agent(monkeypatch
     assert events[0].data["result"] == "doc:sid-2"
 
 
-def test_doc_websocket_executor_delegates_inline_proposal_path_to_doc_agent(monkeypatch):
+def test_doc_websocket_executor_delegates_inline_proposal_path_to_doc_agent(
+    monkeypatch,
+):
     from app.core.agent import doc_websocket_loop_executor as executor
 
     captured = {}
@@ -101,7 +103,9 @@ def test_doc_websocket_executor_delegates_inline_proposal_path_to_doc_agent(monk
     assert complete.data["has_proposals"] is True
 
 
-def test_doc_websocket_executor_delegates_inline_doc_tool_path_to_doc_agent(monkeypatch):
+def test_doc_websocket_executor_delegates_inline_doc_tool_path_to_doc_agent(
+    monkeypatch,
+):
     from app.core.agent import doc_websocket_loop_executor as executor
 
     captured = {}
@@ -117,7 +121,9 @@ def test_doc_websocket_executor_delegates_inline_doc_tool_path_to_doc_agent(monk
     monkeypatch.setattr(executor, "DocWebSocketAgentExecutor", FakeDocAgent)
 
     queue = SessionQueue()
-    request = AgentRequest(prompt="写一段话", session_id="sid-tool", output_mode="inline")
+    request = AgentRequest(
+        prompt="写一段话", session_id="sid-tool", output_mode="inline"
+    )
     events = list(executor.DocWebSocketLoopExecutor().iter_events(request, queue))
 
     assert captured["request"] is request
@@ -129,7 +135,9 @@ def test_doc_websocket_executor_delegates_inline_doc_tool_path_to_doc_agent(monk
     assert complete.data["has_proposals"] is False
 
 
-def test_doc_websocket_executor_delegates_live_doc_commit_path_to_doc_agent(monkeypatch):
+def test_doc_websocket_executor_delegates_live_doc_commit_path_to_doc_agent(
+    monkeypatch,
+):
     from app.core.agent import doc_websocket_loop_executor as executor
 
     captured = {}

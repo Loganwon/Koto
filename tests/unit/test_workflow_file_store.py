@@ -70,6 +70,8 @@ def test_validate_workflow_download_path_rejects_non_workflow_temp_file(tmp_path
 
 def test_validate_workflow_download_path_rejects_missing_file(tmp_path):
     with pytest.raises(WorkflowFileAccessError) as exc:
-        validate_workflow_download_path(str(tmp_path / "koto_wf_x" / "missing.txt"), temp_root=tmp_path)
+        validate_workflow_download_path(
+            str(tmp_path / "koto_wf_x" / "missing.txt"), temp_root=tmp_path
+        )
 
     assert exc.value.status_code == 404

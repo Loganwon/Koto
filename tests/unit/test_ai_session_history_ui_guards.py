@@ -37,15 +37,15 @@ def test_ai_session_history_header_actions_are_koto_buttons():
     assert ".wa-ai-session-actions > .wa-ai-session-new-btn" in css
     assert ".wa-ai-session-actions > .wa-ai-session-clear-btn:hover" in css
     assert ".wa-ai-session-list::-webkit-scrollbar-thumb" in css
-    assert "id=\"wa-ai-session-clear\"" in template
+    assert 'id="wa-ai-session-clear"' in template
     assert "WA.clearAiSessions" in template
-    assert "id=\"wa-ai-session-summary\"" in template
+    assert 'id="wa-ai-session-summary"' in template
 
 
 def test_ai_session_history_clear_all_requires_confirmation():
-    src = (_repo_root() / "web" / "src" / "workspace" / "conversation-list.ts").read_text(
-        encoding="utf-8"
-    )
+    src = (
+        _repo_root() / "web" / "src" / "workspace" / "conversation-list.ts"
+    ).read_text(encoding="utf-8")
 
     assert "export async function clearAiSessions" in src
     assert "window.confirm(`确认清除全部 ${count} 条历史对话？此操作不可撤销。`)" in src
@@ -61,16 +61,25 @@ def test_completed_task_history_cards_are_readonly_and_collapsible():
     conversation_src = (
         _repo_root() / "web" / "src" / "workspace" / "conversation.ts"
     ).read_text(encoding="utf-8")
-    task_src = (_repo_root() / "web" / "src" / "workspace" / "task-runner.ts").read_text(
-        encoding="utf-8"
-    )
+    task_src = (
+        _repo_root() / "web" / "src" / "workspace" / "task-runner.ts"
+    ).read_text(encoding="utf-8")
     css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
         encoding="utf-8"
     )
 
-    assert "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void" in conversation_src
-    assert "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'" in conversation_src
-    assert "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard" not in conversation_src
+    assert (
+        "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void"
+        in conversation_src
+    )
+    assert (
+        "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'"
+        in conversation_src
+    )
+    assert (
+        "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard"
+        not in conversation_src
+    )
     assert "element.dataset.taskMemorySummary = memorySummary" in conversation_src
     assert "workspaceApi.syncTaskInteractionSummary(element)" in conversation_src
     assert "function markTaskRunCardAsHistory" in task_src
@@ -78,5 +87,8 @@ def test_completed_task_history_cards_are_readonly_and_collapsible():
     assert "process.removeAttribute('open')" in task_src
     assert "process.dataset.historyCollapsed = 'true'" in task_src
     assert "statusEl.textContent = statusText" in task_src
-    assert "#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-header" in css
-    assert ".wa-task-history-badge[data-status=\"completed\"]" in css
+    assert (
+        "#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-header"
+        in css
+    )
+    assert '.wa-task-history-badge[data-status="completed"]' in css

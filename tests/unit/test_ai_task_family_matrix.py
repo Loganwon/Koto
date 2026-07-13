@@ -15,7 +15,6 @@ from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_validation import build_file_task_requirements
 from app.core.agent.file_task_whitebox import build_recipe_skeleton
 
-
 TOOL_DEFS = [
     {"name": "parse_file_to_text"},
     {"name": "read_docx_content"},
@@ -188,7 +187,10 @@ TASK_FAMILY_CASES = (
         task="总结这个 PDF 并写入 Word 文档",
         expected_recipe="docx_report_write",
         target_path="summary.docx",
-        files=(MatrixFile("source.pdf", "pdf"), MatrixFile("summary.docx", "docx", target=True)),
+        files=(
+            MatrixFile("source.pdf", "pdf"),
+            MatrixFile("summary.docx", "docx", target=True),
+        ),
     ),
     MatrixCase(
         label="pptx_design",
@@ -258,8 +260,12 @@ def _request(case: MatrixCase) -> FileTaskRequest:
     )
 
 
-@pytest.mark.parametrize("case", TASK_FAMILY_CASES, ids=[case.label for case in TASK_FAMILY_CASES])
-def test_ai_task_family_matrix_classifies_to_expected_contract(case: MatrixCase) -> None:
+@pytest.mark.parametrize(
+    "case", TASK_FAMILY_CASES, ids=[case.label for case in TASK_FAMILY_CASES]
+)
+def test_ai_task_family_matrix_classifies_to_expected_contract(
+    case: MatrixCase,
+) -> None:
     request = _request(case)
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
 
@@ -278,7 +284,9 @@ def test_ai_task_family_matrix_classifies_to_expected_contract(case: MatrixCase)
     [case for case in TASK_FAMILY_CASES if case.write_required],
     ids=[case.label for case in TASK_FAMILY_CASES if case.write_required],
 )
-def test_ai_task_family_matrix_builds_non_empty_write_contract(case: MatrixCase) -> None:
+def test_ai_task_family_matrix_builds_non_empty_write_contract(
+    case: MatrixCase,
+) -> None:
     request = _request(case)
     runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
     classification = runtime._classify_request(request, request.files)

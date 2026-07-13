@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Regression coverage for non-fatal PPTX geometry fallbacks."""
+
 from __future__ import annotations
 
 import logging
@@ -30,7 +31,9 @@ def test_pptx_geometry_logs_presentation_defaults_fallbacks(monkeypatch, caplog)
 
     monkeypatch.setattr(pptx, "Presentation", lambda _path: BrokenPresentation())
 
-    with caplog.at_level(logging.WARNING, logger="app.core.file.parsers.pptx_geometry_parser"):
+    with caplog.at_level(
+        logging.WARNING, logger="app.core.file.parsers.pptx_geometry_parser"
+    ):
         result = parse_pptx_geometry("broken-metadata.pptx")
 
     assert result["default_font_size_pt"] == 18.0

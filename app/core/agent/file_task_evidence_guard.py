@@ -9,9 +9,7 @@ _EXPLICIT_QUOTE_REQUEST = re.compile(
     r"(?:直接)?引(?:用|文)|原文(?:句|摘录|原话)|\b(?:quote|citation|cite)\b",
     re.IGNORECASE,
 )
-_BLOCK_QUOTE_LINE = re.compile(
-    r'(?m)^\s*>\s*(?:“([^”\n]+)”|"([^"\n]+)")\s*$'
-)
+_BLOCK_QUOTE_LINE = re.compile(r'(?m)^\s*>\s*(?:“([^”\n]+)”|"([^"\n]+)")\s*$')
 _BLOCK_QUOTE_PREFIX = re.compile(r"(?m)^\s*>\s+")
 
 

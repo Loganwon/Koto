@@ -178,7 +178,9 @@ class ProviderModelsCompat:
                 )
 
     def generate_images(self, *args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError("当前 DeepSeek 云模型不支持图像生成，请使用独立图像生成能力。")
+        raise RuntimeError(
+            "当前 DeepSeek 云模型不支持图像生成，请使用独立图像生成能力。"
+        )
 
 
 class ProviderClientCompat:

@@ -30,9 +30,11 @@ if str(ROOT) not in sys.path:
 # 1. lifecycle.py tests
 # ══════════════════════════════════════════════════════════════
 
+
 class TestLifecycle:
     def test_run_state_terminal(self):
         from app.core.agent.lifecycle import RunState
+
         assert RunState.SUCCEEDED.is_terminal
         assert RunState.FAILED.is_terminal
         assert RunState.CANCELLED.is_terminal
@@ -42,12 +44,14 @@ class TestLifecycle:
 
     def test_agent_event_repr(self):
         from app.core.agent.lifecycle import AgentEvent, EventType
+
         e = AgentEvent(EventType.STREAM_CHUNK, {"chunk": "hello"})
         assert "stream_chunk" in repr(e)
         assert "chunk" in repr(e)
 
     def test_run_metadata_lifecycle(self):
         from app.core.agent.lifecycle import RunMetadata, RunState
+
         meta = RunMetadata(session_id="s1")
         assert meta.state == RunState.QUEUED
         assert meta.elapsed == 0.0
@@ -64,9 +68,16 @@ class TestLifecycle:
 
     def test_event_constructors(self):
         from app.core.agent.lifecycle import (
-            EventType, evt_lifecycle_start, evt_plan, evt_step_done,
-            evt_step_start, evt_stream_chunk, evt_task_complete, evt_error,
+            EventType,
+            evt_lifecycle_start,
+            evt_plan,
+            evt_step_done,
+            evt_step_start,
+            evt_stream_chunk,
+            evt_task_complete,
+            evt_error,
         )
+
         e = evt_lifecycle_start("run1", "sess1")
         assert e.type == EventType.LIFECYCLE_START
         assert e.data["run_id"] == "run1"
@@ -94,6 +105,7 @@ class TestLifecycle:
 
     def test_agent_request_defaults(self):
         from app.core.agent.lifecycle import AgentRequest
+
         req = AgentRequest(prompt="test")
         assert req.session_id == ""
         assert req.model_mode == "auto"
@@ -104,6 +116,7 @@ class TestLifecycle:
 # ══════════════════════════════════════════════════════════════
 # 2. hooks.py tests
 # ══════════════════════════════════════════════════════════════
+
 
 class TestHooks:
     def test_register_and_fire(self):
@@ -133,9 +146,15 @@ class TestHooks:
         registry = HookRegistry()
         order = []
 
-        registry.register("low", HookPoint.BEFORE_REPLY, lambda c: order.append("low"), priority=200)
-        registry.register("high", HookPoint.BEFORE_REPLY, lambda c: order.append("high"), priority=10)
-        registry.register("mid", HookPoint.BEFORE_REPLY, lambda c: order.append("mid"), priority=100)
+        registry.register(
+            "low", HookPoint.BEFORE_REPLY, lambda c: order.append("low"), priority=200
+        )
+        registry.register(
+            "high", HookPoint.BEFORE_REPLY, lambda c: order.append("high"), priority=10
+        )
+        registry.register(
+            "mid", HookPoint.BEFORE_REPLY, lambda c: order.append("mid"), priority=100
+        )
 
         registry.fire(HookPoint.BEFORE_REPLY, HookContext())
         assert order == ["high", "mid", "low"]
@@ -153,7 +172,9 @@ class TestHooks:
         def second(ctx):
             call_log.append("second")
 
-        registry.register("aborter", HookPoint.BEFORE_PROMPT_BUILD, aborter, priority=10)
+        registry.register(
+            "aborter", HookPoint.BEFORE_PROMPT_BUILD, aborter, priority=10
+        )
         registry.register("second", HookPoint.BEFORE_PROMPT_BUILD, second, priority=20)
 
         ctx = HookContext()
@@ -205,6 +226,7 @@ class TestHooks:
 # ══════════════════════════════════════════════════════════════
 # 3. session_queue.py tests
 # ══════════════════════════════════════════════════════════════
+
 
 class TestSessionQueue:
     def test_basic_serialization(self):
@@ -285,6 +307,7 @@ class TestSessionQueue:
 # 4. doc_websocket_agent_executor.py tests (with mocked LLM)
 # ══════════════════════════════════════════════════════════════
 
+
 class TestDocWebSocketAgentExecutor:
     """Tests for the current doc WebSocket executor with mocked LLM providers."""
 
@@ -293,7 +316,9 @@ class TestDocWebSocketAgentExecutor:
         provider = MagicMock()
         idx = [0]
 
-        def fake_generate(prompt=None, model=None, system_instruction=None, stream=False, **kw):
+        def fake_generate(
+            prompt=None, model=None, system_instruction=None, stream=False, **kw
+        ):
             text = responses[min(idx[0], len(responses) - 1)]
             idx[0] += 1
             if stream:
@@ -334,12 +359,18 @@ class TestDocWebSocketAgentExecutor:
 
     def test_basic_text_response(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
         provider = self._make_fake_provider(["你好世界 这是AI回复"])
-        monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-        monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "test-model")
+        monkeypatch.setattr(
+            llm_provider_helpers, "get_provider", lambda **kwargs: provider
+        )
+        monkeypatch.setattr(
+            llm_provider_helpers, "pick_online_model", lambda: "test-model"
+        )
 
         request = AgentRequest(
             prompt="你好",
@@ -357,12 +388,18 @@ class TestDocWebSocketAgentExecutor:
 
     def test_plan_and_step_events_emitted_for_text_request(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
         provider = self._make_fake_provider(["统一主链返回结果"])
-        monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-        monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "test-model")
+        monkeypatch.setattr(
+            llm_provider_helpers, "get_provider", lambda **kwargs: provider
+        )
+        monkeypatch.setattr(
+            llm_provider_helpers, "pick_online_model", lambda: "test-model"
+        )
 
         request = AgentRequest(
             prompt="请整理这段文字",
@@ -382,18 +419,26 @@ class TestDocWebSocketAgentExecutor:
         plan_events = [e for e in events if e.type == EventType.PLAN]
         assert plan_events[0].data["steps"]
 
-        step_start_ids = [e.data["step_id"] for e in events if e.type == EventType.STEP_START]
+        step_start_ids = [
+            e.data["step_id"] for e in events if e.type == EventType.STEP_START
+        ]
         assert any(step_id in step_start_ids for step_id in ("understand", "generate"))
 
     def test_tool_call_parsing(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
         response = '已修改。<TOOL>{"type":"set_html","value":"<p>新内容</p>"}</TOOL>'
         provider = self._make_fake_provider([response])
-        monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-        monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "test-model")
+        monkeypatch.setattr(
+            llm_provider_helpers, "get_provider", lambda **kwargs: provider
+        )
+        monkeypatch.setattr(
+            llm_provider_helpers, "pick_online_model", lambda: "test-model"
+        )
 
         request = AgentRequest(
             prompt="写一段文字",
@@ -411,13 +456,21 @@ class TestDocWebSocketAgentExecutor:
 
     def test_proposal_with_selection(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
-        response = '已润色。<TOOL>{"type":"set_html","value":"<p>润色后的文字</p>"}</TOOL>'
+        response = (
+            '已润色。<TOOL>{"type":"set_html","value":"<p>润色后的文字</p>"}</TOOL>'
+        )
         provider = self._make_fake_provider([response])
-        monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-        monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "test-model")
+        monkeypatch.setattr(
+            llm_provider_helpers, "get_provider", lambda **kwargs: provider
+        )
+        monkeypatch.setattr(
+            llm_provider_helpers, "pick_online_model", lambda: "test-model"
+        )
 
         request = AgentRequest(
             prompt="润色这段文字",
@@ -437,7 +490,9 @@ class TestDocWebSocketAgentExecutor:
         assert proposals[0]["original_text"] == "原始文字"
 
     def test_empty_prompt_error(self):
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
         request = AgentRequest(prompt="")
@@ -448,7 +503,9 @@ class TestDocWebSocketAgentExecutor:
 
     def test_hooks_modify_prompt(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.hooks import HookContext, HookPoint, HookRegistry
         from app.core.agent.lifecycle import AgentRequest
 
@@ -462,8 +519,12 @@ class TestDocWebSocketAgentExecutor:
         registry.register("test_hook", HookPoint.BEFORE_PROMPT_BUILD, my_hook)
 
         provider = MagicMock()
-        provider.generate_content = MagicMock(side_effect=lambda **kw: iter([{"content": "OK "}]))
-        monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
+        provider.generate_content = MagicMock(
+            side_effect=lambda **kw: iter([{"content": "OK "}])
+        )
+        monkeypatch.setattr(
+            llm_provider_helpers, "get_provider", lambda **kwargs: provider
+        )
         monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "m")
 
         request = AgentRequest(prompt="test", file_type="txt", output_mode="chat")
@@ -472,7 +533,9 @@ class TestDocWebSocketAgentExecutor:
         assert hook_called[0]
 
     def test_hook_abort(self):
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.hooks import HookPoint, HookRegistry
         from app.core.agent.lifecycle import AgentRequest, EventType
 
@@ -484,7 +547,9 @@ class TestDocWebSocketAgentExecutor:
         registry.register("abort", HookPoint.BEFORE_PROMPT_BUILD, abort_hook)
 
         request = AgentRequest(prompt="bad content", file_type="txt")
-        events = list(DocWebSocketAgentExecutor(hook_registry=registry).iter_events(request))
+        events = list(
+            DocWebSocketAgentExecutor(hook_registry=registry).iter_events(request)
+        )
         types = [e.type for e in events]
 
         assert EventType.ERROR in types
@@ -493,7 +558,9 @@ class TestDocWebSocketAgentExecutor:
 
     def test_local_mode_reports_local_specific_unavailable_error(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
         monkeypatch.setattr(llm_provider_helpers, "is_ollama_alive", lambda: False)
@@ -514,7 +581,9 @@ class TestDocWebSocketAgentExecutor:
 
     def test_local_mode_provider_exception_returns_local_error(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
-        from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
+        )
         from app.core.agent.lifecycle import AgentRequest, EventType
 
         class FailingLocalProvider:
@@ -548,6 +617,7 @@ class TestDocWebSocketAgentExecutor:
 # ══════════════════════════════════════════════════════════════
 # 5. parse_tool_calls tests
 # ══════════════════════════════════════════════════════════════
+
 
 class TestParseToolCalls:
     def test_tool_tag_parsing(self):

@@ -67,13 +67,21 @@ WORKFLOW_SKILL_MAPPINGS: tuple[WorkflowSkillMapping, ...] = (
     ),
     WorkflowSkillMapping(
         skill_id="contract_reviewer",
-        executor_ids=("contract_clause_matrix", "contract_diff_markup", "doc_ai_review"),
+        executor_ids=(
+            "contract_clause_matrix",
+            "contract_diff_markup",
+            "doc_ai_review",
+        ),
         relation="candidate",
         note="Legal review prompts guide language; workflow selection must remain explicit.",
     ),
     WorkflowSkillMapping(
         skill_id="legal_doc_review",
-        executor_ids=("contract_clause_matrix", "contract_diff_markup", "doc_ai_review"),
+        executor_ids=(
+            "contract_clause_matrix",
+            "contract_diff_markup",
+            "doc_ai_review",
+        ),
         relation="candidate",
         note="Legal document review can map to clause extraction, diff markup, or AI review by task intent.",
     ),

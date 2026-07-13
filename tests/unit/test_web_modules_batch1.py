@@ -52,9 +52,11 @@ class TestSettingsManager:
 
     def test_init_loads_defaults_when_no_file(self):
         """When no settings file exists, defaults are used."""
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
@@ -91,9 +93,11 @@ class TestSettingsManager:
     # -- get / set / update ----------------------------------------------------
 
     def test_get_category(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
@@ -102,18 +106,22 @@ class TestSettingsManager:
             assert "default_model" in ai_settings
 
     def test_get_key(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
             assert mgr.get("appearance", "theme") == "light"
 
     def test_get_missing_returns_none(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
@@ -121,9 +129,11 @@ class TestSettingsManager:
             assert mgr.get("appearance", "nonexistent") is None
 
     def test_set_value(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()), patch(
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ), patch(
             "app.core.config.user_settings.threading.Timer"
         ) as MockTimer:
             MockTimer.return_value = MagicMock()
@@ -136,9 +146,11 @@ class TestSettingsManager:
             assert mgr._dirty is True
 
     def test_update_values(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()), patch(
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ), patch(
             "app.core.config.user_settings.threading.Timer"
         ) as MockTimer:
             MockTimer.return_value = MagicMock()
@@ -153,9 +165,11 @@ class TestSettingsManager:
     # -- reset / flush ---------------------------------------------------------
 
     def test_reset_category(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import DEFAULT_SETTINGS, SettingsManager
 
             mgr = SettingsManager()
@@ -167,9 +181,11 @@ class TestSettingsManager:
             )
 
     def test_reset_all(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import DEFAULT_SETTINGS, SettingsManager
 
             mgr = SettingsManager()
@@ -181,9 +197,11 @@ class TestSettingsManager:
             )
 
     def test_flush_writes_when_dirty(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ) as mk, patch("builtins.open", mock_open()) as mo:
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs") as mk, patch(
+            "builtins.open", mock_open()
+        ) as mo:
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
@@ -193,9 +211,11 @@ class TestSettingsManager:
             assert mgr._dirty is False
 
     def test_flush_noop_when_clean(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()
@@ -206,9 +226,11 @@ class TestSettingsManager:
     # -- convenience properties ------------------------------------------------
 
     def test_property_accessors(self):
-        with patch("app.core.config.user_settings.os.path.exists", return_value=False), patch(
-            "app.core.config.user_settings.os.makedirs"
-        ), patch("builtins.open", mock_open()):
+        with patch(
+            "app.core.config.user_settings.os.path.exists", return_value=False
+        ), patch("app.core.config.user_settings.os.makedirs"), patch(
+            "builtins.open", mock_open()
+        ):
             from app.core.config.user_settings import SettingsManager
 
             mgr = SettingsManager()

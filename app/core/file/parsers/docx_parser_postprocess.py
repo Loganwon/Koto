@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """HTML post-processing helpers for the DOCX parser facade."""
+
 from __future__ import annotations
 
 import re

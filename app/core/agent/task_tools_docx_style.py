@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Shared, user-visible DOCX style fallback handling for task tools."""
+
 from __future__ import annotations
 
 from typing import Any

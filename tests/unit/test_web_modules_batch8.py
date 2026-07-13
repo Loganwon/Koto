@@ -776,7 +776,9 @@ class TestMemoryIntegration:
         )
         assert "Base instruction." in result
 
-    def test_enhanced_memory_manager_coerces_dict_memories_before_append(self, tmp_path):
+    def test_enhanced_memory_manager_coerces_dict_memories_before_append(
+        self, tmp_path
+    ):
         from web.enhanced_memory_manager import EnhancedMemoryManager
 
         memory_path = tmp_path / "memory.json"
@@ -795,7 +797,9 @@ class TestMemoryIntegration:
             vector_path=str(vector_path),
         )
         manager._memory_rag = False
-        item = manager.add_memory("用户偏好真实前端验证", category="user_preference", source="extraction")
+        item = manager.add_memory(
+            "用户偏好真实前端验证", category="user_preference", source="extraction"
+        )
 
         assert item is not None
         assert isinstance(manager.memories, list)

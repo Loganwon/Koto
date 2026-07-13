@@ -35,11 +35,17 @@ def test_skill_list_returns_all_enabled_runtime_entries(monkeypatch):
     monkeypatch.setattr(
         SkillManager,
         "list_runtime_entries",
-        classmethod(lambda cls: {
-            "xlsx": {"id": "xlsx", "enabled": True, "file_types": ["xlsx"]},
-            "docx": {"id": "docx", "file_types": ["docx"]},
-            "disabled": {"id": "disabled", "enabled": False, "file_types": ["xlsx"]},
-        }),
+        classmethod(
+            lambda cls: {
+                "xlsx": {"id": "xlsx", "enabled": True, "file_types": ["xlsx"]},
+                "docx": {"id": "docx", "file_types": ["docx"]},
+                "disabled": {
+                    "id": "disabled",
+                    "enabled": False,
+                    "file_types": ["xlsx"],
+                },
+            }
+        ),
     )
 
     response = _client().get("/api/editor/ai/skill-list")
@@ -59,12 +65,18 @@ def test_skill_list_filters_enabled_runtime_entries_by_file_type(monkeypatch):
     monkeypatch.setattr(
         SkillManager,
         "list_runtime_entries",
-        classmethod(lambda cls: {
-            "xlsx": {"id": "xlsx", "enabled": True, "file_types": ["xlsx"]},
-            "tagged": {"id": "tagged", "enabled": True, "tags": ["xlsx"]},
-            "docx": {"id": "docx", "enabled": True, "file_types": ["docx"]},
-            "disabled": {"id": "disabled", "enabled": False, "file_types": ["xlsx"]},
-        }),
+        classmethod(
+            lambda cls: {
+                "xlsx": {"id": "xlsx", "enabled": True, "file_types": ["xlsx"]},
+                "tagged": {"id": "tagged", "enabled": True, "tags": ["xlsx"]},
+                "docx": {"id": "docx", "enabled": True, "file_types": ["docx"]},
+                "disabled": {
+                    "id": "disabled",
+                    "enabled": False,
+                    "file_types": ["xlsx"],
+                },
+            }
+        ),
     )
 
     response = _client().get("/api/editor/ai/skill-list?file_type=xlsx")

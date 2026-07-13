@@ -109,7 +109,9 @@ def test_task_stream_quick_action_reuses_internal_stream_handler(monkeypatch):
         received.update(data)
         return editor_ai._sse_response(iter(['data: {"type":"done"}\n\n']))
 
-    monkeypatch.setattr(editor_ai, "_stream_editor_quick_action", fake_quick_action_stream)
+    monkeypatch.setattr(
+        editor_ai, "_stream_editor_quick_action", fake_quick_action_stream
+    )
     app = Flask(__name__)
     app.register_blueprint(editor_ai.editor_ai_bp)
 
@@ -149,7 +151,9 @@ def test_chart_validation_errors_use_same_sse_headers():
 def test_frontend_task_runner_matches_backend_stream_contract():
     runner = Path("web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
     parser = Path("web/src/workspace/file-task-sse.ts").read_text(encoding="utf-8")
-    dispatcher = Path("web/src/workspace/file-task-dispatch.ts").read_text(encoding="utf-8")
+    dispatcher = Path("web/src/workspace/file-task-dispatch.ts").read_text(
+        encoding="utf-8"
+    )
     bundle = Path("web/static/js/build/workspace-bundle.js").read_text(encoding="utf-8")
 
     assert "from './file-task-sse';" in runner

@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Terminal verification and completion-event emission for file tasks."""
+
 from __future__ import annotations
 
 import logging
@@ -141,8 +142,12 @@ class FileTaskFinalizationPhase:
             check_payload = dict(check_payload)
             check_payload["passed"] = False
             check_payload["status"] = "awaiting_confirmation"
-            check_payload["summary"] = "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。"
-            check_payload["remaining"] = ["用户说“继续”后处理下一页窗口，并继续追加 DOCX。"]
+            check_payload["summary"] = (
+                "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。"
+            )
+            check_payload["remaining"] = [
+                "用户说“继续”后处理下一页窗口，并继续追加 DOCX。"
+            ]
             check_payload["next_action_artifact"] = stepwise_artifact
         terminal_runtime = runtime._build_runtime_metadata(
             terminal_status=str(check_payload.get("status") or "").strip(),
@@ -201,7 +206,8 @@ class FileTaskFinalizationPhase:
                     plan=recipe_skeleton,
                     step_results=file_changes + readonly_tool_outputs,
                     completion_criteria=completion_criteria,
-                    output_text=final_summary or str(check_payload.get("summary") or ""),
+                    output_text=final_summary
+                    or str(check_payload.get("summary") or ""),
                 )
                 if supervisor_result is not None:
                     yield ledger.event(
@@ -217,11 +223,27 @@ class FileTaskFinalizationPhase:
                         step_id=check_step_id,
                     )
             except Exception as exc:
-                logger.warning("[FileTaskRuntime] supervisor verification failed: %s", exc)
+                logger.warning(
+                    "[FileTaskRuntime] supervisor verification failed: %s", exc
+                )
 
-        is_text_quick_action = bool(quick_action_mode and quick_action_mode in ("simple", "polish", "translate", "summary", "rewrite", "continue", "check"))
+        is_text_quick_action = bool(
+            quick_action_mode
+            and quick_action_mode
+            in (
+                "simple",
+                "polish",
+                "translate",
+                "summary",
+                "rewrite",
+                "continue",
+                "check",
+            )
+        )
         if is_text_quick_action and not file_changes:
-            result_text = str(check_payload.get("summary") or final_summary or run_summary or "").strip()
+            result_text = str(
+                check_payload.get("summary") or final_summary or run_summary or ""
+            ).strip()
             if result_text:
                 run_payload_base = {
                     "can_insert": True,
@@ -251,13 +273,15 @@ class FileTaskFinalizationPhase:
             "quick_action_mode": quick_action_mode,
         }
         if not is_text_quick_action:
-            run_payload.update({
-                "workflow_version": recipe_skeleton.get("version"),
-                "workflow_state": workflow_state,
-                "recipe_skeleton": recipe_skeleton,
-                "completion_contract": completion_contract_payload,
-                **classification_payload,
-            })
+            run_payload.update(
+                {
+                    "workflow_version": recipe_skeleton.get("version"),
+                    "workflow_state": workflow_state,
+                    "recipe_skeleton": recipe_skeleton,
+                    "completion_contract": completion_contract_payload,
+                    **classification_payload,
+                }
+            )
         if not is_text_quick_action:
             if tool_gap:
                 run_payload["tool_gap"] = tool_gap

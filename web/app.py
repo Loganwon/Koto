@@ -638,7 +638,9 @@ try:
         score_model_for_task=_score_model_for_task,
     )
 except Exception:
-    pass
+    logging.getLogger(__name__).warning(
+        "Model resolver initialization failed; using fallback routing.", exc_info=True
+    )
 
 from web.sse.sanitizer import sanitize_sse_text_field as _sanitize_sse_text_field
 from web.sse.sanitizer import safe_sse as _safe_sse

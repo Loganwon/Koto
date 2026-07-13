@@ -21,7 +21,12 @@ def test_editor_code_action_executor_generates_and_runs_python(monkeypatch):
 
     def fake_run_python(code):
         captured["code"] = code
-        return {"stdout": "chart", "stderr": "", "files": {"chart.png": "ZmFrZQ=="}, "error": ""}
+        return {
+            "stdout": "chart",
+            "stderr": "",
+            "files": {"chart.png": "ZmFrZQ=="},
+            "error": "",
+        }
 
     monkeypatch.setattr(llm_provider_helpers, "call_llm_sync", fake_call_llm_sync)
     monkeypatch.setattr(sandbox, "run_python", fake_run_python)
@@ -60,16 +65,22 @@ def test_editor_code_action_executor_honors_local_only_generation(monkeypatch):
         lambda code: {"stdout": "local", "stderr": "", "files": {}, "error": ""},
     )
 
-    events = _events_for(AgentRequest(prompt="生成图表", language="python", model_mode="local"))
+    events = _events_for(
+        AgentRequest(prompt="生成图表", language="python", model_mode="local")
+    )
 
     assert captured["use_local_only"] is True
     assert [event for event in events if event.type.value == "code_result"]
 
 
-def test_editor_code_action_executor_returns_code_result_on_generation_failure(monkeypatch):
+def test_editor_code_action_executor_returns_code_result_on_generation_failure(
+    monkeypatch,
+):
     from app.core.agent import llm_provider_helpers
 
-    monkeypatch.setattr(llm_provider_helpers, "call_llm_sync", lambda *args, **kwargs: "")
+    monkeypatch.setattr(
+        llm_provider_helpers, "call_llm_sync", lambda *args, **kwargs: ""
+    )
 
     events = _events_for(AgentRequest(prompt="生成图表", language="python"))
 
@@ -79,6 +90,12 @@ def test_editor_code_action_executor_returns_code_result_on_generation_failure(m
 
 
 def test_editor_code_action_executor_supports_only_code_languages() -> None:
-    assert EditorCodeActionExecutor.supports(AgentRequest(prompt="x", language="python")) is True
-    assert EditorCodeActionExecutor.supports(AgentRequest(prompt="x", language="r")) is True
+    assert (
+        EditorCodeActionExecutor.supports(AgentRequest(prompt="x", language="python"))
+        is True
+    )
+    assert (
+        EditorCodeActionExecutor.supports(AgentRequest(prompt="x", language="r"))
+        is True
+    )
     assert EditorCodeActionExecutor.supports(AgentRequest(prompt="x")) is False

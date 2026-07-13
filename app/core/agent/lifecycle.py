@@ -16,11 +16,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Dict, List, Optional
 
-
 # ── Run States ─────────────────────────────────────────────────────────────
+
 
 class RunState(Enum):
     """Lifecycle states for an agent run."""
+
     QUEUED = "queued"
     RUNNING = "running"
     STREAMING = "streaming"
@@ -33,39 +34,47 @@ class RunState(Enum):
     @property
     def is_terminal(self) -> bool:
         return self in (
-            RunState.SUCCEEDED, RunState.FAILED,
-            RunState.CANCELLED, RunState.TIMED_OUT,
+            RunState.SUCCEEDED,
+            RunState.FAILED,
+            RunState.CANCELLED,
+            RunState.TIMED_OUT,
         )
 
 
 # ── Agent Request ──────────────────────────────────────────────────────────
 
+
 @dataclass
 class AgentRequest:
     """Input to agent executors."""
+
     prompt: str
     session_id: str = ""
     file_type: str = ""
     file_name: str = ""
-    context: str = ""                   # document context
-    selection: str = ""                 # pinned selection text
+    context: str = ""  # document context
+    selection: str = ""  # pinned selection text
     has_selection: bool = False
     history: List[Dict[str, str]] = field(default_factory=list)
-    output_mode: str = "inline"         # "inline" | "chat"
-    model_mode: str = "auto"            # "auto" | "local"
-    language: str = ""                  # "python" | "r" | "" (text mode)
-    csv_data: str = ""                  # CSV table data
-    action_type: str = ""               # "polish" | "translate" | etc.
-    action_system_prompt: str = ""      # pre-built prompt from FloatingToolbar
-    live_doc: bool = False               # stream tokens to document in parallel
-    live_mode: str = "replace"           # "replace" (overwrite selection) | "append" (insert at cursor)
+    output_mode: str = "inline"  # "inline" | "chat"
+    model_mode: str = "auto"  # "auto" | "local"
+    language: str = ""  # "python" | "r" | "" (text mode)
+    csv_data: str = ""  # CSV table data
+    action_type: str = ""  # "polish" | "translate" | etc.
+    action_system_prompt: str = ""  # pre-built prompt from FloatingToolbar
+    live_doc: bool = False  # stream tokens to document in parallel
+    live_mode: str = (
+        "replace"  # "replace" (overwrite selection) | "append" (insert at cursor)
+    )
     extra: Dict[str, Any] = field(default_factory=dict)
 
 
 # ── Agent Events (the stream protocol) ────────────────────────────────────
 
+
 class EventType(Enum):
     """All event types emitted by the agent loop."""
+
     # Lifecycle
     LIFECYCLE_START = "lifecycle_start"
     LIFECYCLE_END = "lifecycle_end"
@@ -120,6 +129,7 @@ class EventType(Enum):
 @dataclass
 class AgentEvent:
     """A single event emitted during an agent run."""
+
     type: EventType
     data: Dict[str, Any] = field(default_factory=dict)
     ts: float = field(default_factory=time.time)
@@ -130,34 +140,58 @@ class AgentEvent:
 
 # ── Event constructors (ergonomic helpers) ─────────────────────────────────
 
+
 def evt_lifecycle_start(run_id: str, session_id: str = "") -> AgentEvent:
-    return AgentEvent(EventType.LIFECYCLE_START, {
-        "run_id": run_id, "session_id": session_id, "state": RunState.RUNNING.value,
-    })
+    return AgentEvent(
+        EventType.LIFECYCLE_START,
+        {
+            "run_id": run_id,
+            "session_id": session_id,
+            "state": RunState.RUNNING.value,
+        },
+    )
 
 
 def evt_lifecycle_end(run_id: str, state: RunState = RunState.SUCCEEDED) -> AgentEvent:
-    return AgentEvent(EventType.LIFECYCLE_END, {
-        "run_id": run_id, "state": state.value,
-    })
+    return AgentEvent(
+        EventType.LIFECYCLE_END,
+        {
+            "run_id": run_id,
+            "state": state.value,
+        },
+    )
 
 
 def evt_lifecycle_error(run_id: str, error: str) -> AgentEvent:
-    return AgentEvent(EventType.LIFECYCLE_ERROR, {
-        "run_id": run_id, "state": RunState.FAILED.value, "error": error,
-    })
+    return AgentEvent(
+        EventType.LIFECYCLE_ERROR,
+        {
+            "run_id": run_id,
+            "state": RunState.FAILED.value,
+            "error": error,
+        },
+    )
 
 
 def evt_queue_position(position: int, estimated_wait: float = 0) -> AgentEvent:
-    return AgentEvent(EventType.QUEUE_POSITION, {
-        "position": position, "estimated_wait": estimated_wait,
-    })
+    return AgentEvent(
+        EventType.QUEUE_POSITION,
+        {
+            "position": position,
+            "estimated_wait": estimated_wait,
+        },
+    )
 
 
 def evt_phase(phases: List[Dict], current: str, status: str = "running") -> AgentEvent:
-    return AgentEvent(EventType.PHASE, {
-        "phases": phases, "current": current, "status": status,
-    })
+    return AgentEvent(
+        EventType.PHASE,
+        {
+            "phases": phases,
+            "current": current,
+            "status": status,
+        },
+    )
 
 
 def evt_stream_chunk(
@@ -166,12 +200,15 @@ def evt_stream_chunk(
     live_mode: str = "replace",
     request_id: str = "",
 ) -> AgentEvent:
-    return AgentEvent(EventType.STREAM_CHUNK, {
-        "chunk": chunk,
-        "live_doc": live_doc,
-        "live_mode": live_mode,
-        "request_id": request_id,
-    })
+    return AgentEvent(
+        EventType.STREAM_CHUNK,
+        {
+            "chunk": chunk,
+            "live_doc": live_doc,
+            "live_mode": live_mode,
+            "request_id": request_id,
+        },
+    )
 
 
 def evt_stream_block(text: str) -> AgentEvent:
@@ -184,12 +221,15 @@ def evt_live_doc_commit(
     original_selection: str = "",
     request_id: str = "",
 ) -> AgentEvent:
-    return AgentEvent(EventType.LIVE_DOC_COMMIT, {
-        "full_text": full_text,
-        "live_mode": live_mode,
-        "original_selection": original_selection,
-        "request_id": request_id,
-    })
+    return AgentEvent(
+        EventType.LIVE_DOC_COMMIT,
+        {
+            "full_text": full_text,
+            "live_mode": live_mode,
+            "original_selection": original_selection,
+            "request_id": request_id,
+        },
+    )
 
 
 def evt_tool_call(tool_call: Dict[str, Any]) -> AgentEvent:
@@ -197,15 +237,23 @@ def evt_tool_call(tool_call: Dict[str, Any]) -> AgentEvent:
 
 
 def evt_tool_result(tool_name: str, result_preview: str) -> AgentEvent:
-    return AgentEvent(EventType.TOOL_RESULT, {
-        "tool_name": tool_name, "result_preview": result_preview[:500],
-    })
+    return AgentEvent(
+        EventType.TOOL_RESULT,
+        {
+            "tool_name": tool_name,
+            "result_preview": result_preview[:500],
+        },
+    )
 
 
 def evt_proposal(proposals: List[Dict], summary: str = "") -> AgentEvent:
-    return AgentEvent(EventType.PROPOSAL, {
-        "proposals": proposals, "summary": summary,
-    })
+    return AgentEvent(
+        EventType.PROPOSAL,
+        {
+            "proposals": proposals,
+            "summary": summary,
+        },
+    )
 
 
 def evt_doc_tool_call(tc: Dict[str, Any]) -> AgentEvent:
@@ -241,13 +289,18 @@ def evt_skill_suggestions(suggestions: List[Dict]) -> AgentEvent:
 
 
 def evt_rag_info(total_chunks: int, retrieved_chunks: int) -> AgentEvent:
-    return AgentEvent(EventType.RAG_INFO, {
-        "total_chunks": total_chunks, "retrieved_chunks": retrieved_chunks,
-    })
+    return AgentEvent(
+        EventType.RAG_INFO,
+        {
+            "total_chunks": total_chunks,
+            "retrieved_chunks": retrieved_chunks,
+        },
+    )
 
 
-def evt_task_complete(result: str = "", has_proposals: bool = False,
-                      error: str = "", **kwargs) -> AgentEvent:
+def evt_task_complete(
+    result: str = "", has_proposals: bool = False, error: str = "", **kwargs
+) -> AgentEvent:
     d: Dict[str, Any] = {"result": result, "has_proposals": has_proposals}
     if error:
         d["error"] = error
@@ -260,9 +313,13 @@ def evt_error(text: str) -> AgentEvent:
 
 
 def evt_status_message(text: str, is_error: bool = False) -> AgentEvent:
-    return AgentEvent(EventType.STATUS_MESSAGE, {
-        "text": text, "is_error": is_error,
-    })
+    return AgentEvent(
+        EventType.STATUS_MESSAGE,
+        {
+            "text": text,
+            "is_error": is_error,
+        },
+    )
 
 
 def evt_code_result(result: Dict[str, Any]) -> AgentEvent:
@@ -271,9 +328,11 @@ def evt_code_result(result: Dict[str, Any]) -> AgentEvent:
 
 # ── Run metadata ───────────────────────────────────────────────────────────
 
+
 @dataclass
 class RunMetadata:
     """Tracks a single agent run's metadata."""
+
     run_id: str = field(default_factory=lambda: uuid.uuid4().hex[:12])
     session_id: str = ""
     state: RunState = RunState.QUEUED

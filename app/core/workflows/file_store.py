@@ -21,8 +21,7 @@ WORKFLOW_TEMP_PREFIX = "koto_wf_"
 class WorkflowUploadFile(Protocol):
     filename: str
 
-    def save(self, dst: str) -> None:
-        ...
+    def save(self, dst: str) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -41,9 +40,13 @@ def workflow_temp_root() -> Path:
     return Path(tempfile.gettempdir()).resolve()
 
 
-def workflow_upload_dir(session_id: str | None = None, *, temp_root: Path | None = None) -> Path:
+def workflow_upload_dir(
+    session_id: str | None = None, *, temp_root: Path | None = None
+) -> Path:
     safe_session_id = _safe_session_id(session_id)
-    return (temp_root or workflow_temp_root()) / f"{WORKFLOW_TEMP_PREFIX}{safe_session_id}"
+    return (
+        temp_root or workflow_temp_root()
+    ) / f"{WORKFLOW_TEMP_PREFIX}{safe_session_id}"
 
 
 def save_workflow_uploads(
@@ -67,12 +70,16 @@ def save_workflow_uploads(
             upload.save(str(destination))
             saved_paths.append(str(destination))
         except Exception as exc:
-            logger.warning("[WorkflowFileStore] Failed to save upload %s: %s", safe_name, exc)
+            logger.warning(
+                "[WorkflowFileStore] Failed to save upload %s: %s", safe_name, exc
+            )
 
     return WorkflowUploadResult(session_id=safe_session_id, paths=saved_paths)
 
 
-def validate_workflow_download_path(path: str, *, temp_root: Path | None = None) -> Path:
+def validate_workflow_download_path(
+    path: str, *, temp_root: Path | None = None
+) -> Path:
     raw_path = str(path or "").strip()
     if not raw_path:
         raise WorkflowFileAccessError("缺少 path 参数", 400)
@@ -89,7 +96,9 @@ def validate_workflow_download_path(path: str, *, temp_root: Path | None = None)
 
     if not _is_relative_to(resolved, root):
         raise WorkflowFileAccessError("无权访问该路径", 403)
-    if len(resolved.parts) < 2 or not resolved.parent.name.startswith(WORKFLOW_TEMP_PREFIX):
+    if len(resolved.parts) < 2 or not resolved.parent.name.startswith(
+        WORKFLOW_TEMP_PREFIX
+    ):
         raise WorkflowFileAccessError("无权访问该路径", 403)
     if not resolved.is_file():
         raise WorkflowFileAccessError("文件不存在", 404)

@@ -62,6 +62,7 @@ _success_result = _task_tools_helper("_success_result")
 
 _logger = logging.getLogger(__name__)
 
+
 def read_sheet_data(path: str, sheet_name: str = "", max_rows: int = 500) -> str:
     """Read spreadsheet cells as structured JSON.
 
@@ -125,6 +126,7 @@ def read_sheet_data(path: str, sheet_name: str = "", max_rows: int = 500) -> str
         return json.dumps({"error": "openpyxl not installed"}, ensure_ascii=False)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
+
 
 def inspect_workbook_structure(
     path: str,

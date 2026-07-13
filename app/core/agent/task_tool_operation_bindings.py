@@ -4,6 +4,7 @@ The imports stay inside the factory so ``task_tools`` can import this module
 without forming an import-time cycle.  The registry receives only the stable,
 registered operation surface instead of the complete implementation module.
 """
+
 from __future__ import annotations
 
 from types import SimpleNamespace

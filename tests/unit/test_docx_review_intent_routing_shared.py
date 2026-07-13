@@ -36,12 +36,17 @@ def test_rule_router_uses_shared_docx_review_intent_behavior():
 
 def test_shared_docx_review_intent_requires_file_context():
     assert should_use_docx_review_system("帮我润色这篇文章", has_file=False) is False
-    assert RuleRouter.should_use_annotation_system("帮我润色这篇文章", has_file=False) is False
+    assert (
+        RuleRouter.should_use_annotation_system("帮我润色这篇文章", has_file=False)
+        is False
+    )
 
 
 def test_shared_docx_review_intent_ignores_unrelated_file_requests():
     assert should_use_docx_review_system("帮我写一首诗", has_file=True) is False
-    assert RuleRouter.should_use_annotation_system("帮我写一首诗", has_file=True) is False
+    assert (
+        RuleRouter.should_use_annotation_system("帮我写一首诗", has_file=True) is False
+    )
 
 
 def test_rule_chain_docx_file_edit_uses_shared_broad_edit_intent():

@@ -18,6 +18,9 @@ def apply_write_intent_reason_codes(
     reasons = list(reason_codes or [])
     if write_intent:
         reasons.append("write_intent")
-        if str(explicit_output_mode or "").strip().lower() == "answer" and not diagnostic_request:
+        if (
+            str(explicit_output_mode or "").strip().lower() == "answer"
+            and not diagnostic_request
+        ):
             reasons.append("answer_mode_overridden_by_write_intent")
     return FileTaskWriteIntentReasons(reason_codes=reasons)

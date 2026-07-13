@@ -3,7 +3,6 @@
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -39,5 +38,8 @@ def test_workspace_compatibility_exports_use_the_single_api_boundary() -> None:
 
     assert "const wa = getWorkspaceApi();" in state
     assert "(window as any).WA = wa;" not in state
-    assert "publishWorkspaceApi({ renderArtifactResult, loadBackgroundArtifactResult });" in results
+    assert (
+        "publishWorkspaceApi({ renderArtifactResult, loadBackgroundArtifactResult });"
+        in results
+    )
     assert "publishWorkspaceApi({ createWorkspaceAiResultsRuntime });" in results

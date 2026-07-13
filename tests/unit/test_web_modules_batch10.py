@@ -678,7 +678,9 @@ class TestIntelligentDocumentAnalyzer:
         with patch.dict(
             "sys.modules", {"docx": MagicMock(), "docx.shared": MagicMock()}
         ):
-            from app.core.services.intelligent_document_analyzer import IntelligentDocumentAnalyzer
+            from app.core.services.intelligent_document_analyzer import (
+                IntelligentDocumentAnalyzer,
+            )
 
             return IntelligentDocumentAnalyzer(llm_client=MagicMock())
 

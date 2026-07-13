@@ -629,11 +629,15 @@ class ModelManager:
 
             cloud_provider = get_configured_cloud_provider()
             for task in ("CHAT", "CODER", "FILE_TASK", "AGENT"):
-                configured_model = get_configured_cloud_model(task_type=task, provider=cloud_provider)
+                configured_model = get_configured_cloud_model(
+                    task_type=task, provider=cloud_provider
+                )
                 if configured_model:
                     discovered.append(configured_model)
         except Exception as exc:
-            logger.debug("[ModelManager] configured cloud model injection skipped: %s", exc)
+            logger.debug(
+                "[ModelManager] configured cloud model injection skipped: %s", exc
+            )
 
         # 路由使用 Gemini API 发现结果 + 当前配置的非 Gemini 云端主模型。
         self._available_ids = list(dict.fromkeys(discovered))  # 去重保序
@@ -732,7 +736,9 @@ class ModelManager:
             try:
                 return list(page)
             except TypeError as exc:
-                raise RuntimeError("client.models.list() returned a non-iterable response") from exc
+                raise RuntimeError(
+                    "client.models.list() returned a non-iterable response"
+                ) from exc
 
         model_ids: List[str] = []
         try:

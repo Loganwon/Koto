@@ -110,14 +110,17 @@ def _normalize_tools(tools: Any) -> list[dict[str, Any]]:
     for tool in tools or []:
         declarations = getattr(tool, "function_declarations", None) or []
         for declaration in declarations:
-            values = vars(declaration) if hasattr(declaration, "__dict__") else declaration
+            values = (
+                vars(declaration) if hasattr(declaration, "__dict__") else declaration
+            )
             if not isinstance(values, dict) or not values.get("name"):
                 continue
             normalized.append(
                 {
                     "name": values["name"],
                     "description": values.get("description", ""),
-                    "parameters": values.get("parameters") or {"type": "object", "properties": {}},
+                    "parameters": values.get("parameters")
+                    or {"type": "object", "properties": {}},
                 }
             )
         if isinstance(tool, dict) and tool.get("name"):
@@ -178,7 +181,9 @@ class _ModelsProxy:
         request_kwargs.update(kwargs)
         payload = provider.generate_content(
             prompt=_normalize_contents(contents),
-            model=(model if str(model or "").startswith("deepseek") else "deepseek-chat"),
+            model=(
+                model if str(model or "").startswith("deepseek") else "deepseek-chat"
+            ),
             **request_kwargs,
         )
         return _Response(payload)
@@ -192,7 +197,9 @@ class _ModelsProxy:
         request_kwargs.update(kwargs)
         return provider.generate_content(
             prompt=_normalize_contents(contents),
-            model=(model if str(model or "").startswith("deepseek") else "deepseek-chat"),
+            model=(
+                model if str(model or "").startswith("deepseek") else "deepseek-chat"
+            ),
             stream=True,
             **request_kwargs,
         )

@@ -25,6 +25,8 @@ import socket
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from web.shared import ollama_available as _ollama_available
+
 # ── Ollama ───────────────────────────────────────────────────────────────────
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
@@ -168,7 +170,7 @@ def answer_file_question(
             "error": str or None,
         }
     """
-    if not ollama_available():
+    if not _ollama_available():
         return {
             "success": False,
             "error": "Ollama 未运行（localhost:11434 不可达），请先启动 Ollama",
@@ -296,7 +298,7 @@ def filter_files_by_criterion(
             "error": str or None,
         }
     """
-    if not ollama_available():
+    if not _ollama_available():
         return {
             "success": False,
             "error": "Ollama 未运行（localhost:11434 不可达）",

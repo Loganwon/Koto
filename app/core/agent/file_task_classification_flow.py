@@ -35,9 +35,15 @@ def build_classification_flow(
 ) -> FileTaskClassificationFlow:
     followup_action = _followup_field(followup_context, "followup_action")
     previous_task_family = _followup_field(followup_context, "previous_task_family")
-    previous_task_execution_mode = _followup_field(followup_context, "previous_task_execution_mode")
-    previous_task_output_mode = _followup_field(followup_context, "previous_task_output_mode")
-    previous_task_intent_can_apply = _followup_field(followup_context, "previous_task_intent_can_apply")
+    previous_task_execution_mode = _followup_field(
+        followup_context, "previous_task_execution_mode"
+    )
+    previous_task_output_mode = _followup_field(
+        followup_context, "previous_task_output_mode"
+    )
+    previous_task_intent_can_apply = _followup_field(
+        followup_context, "previous_task_intent_can_apply"
+    )
     resume_adapter = (
         str(resume_control.get("adapter") or "").strip().lower()
         if isinstance(resume_control, Mapping)

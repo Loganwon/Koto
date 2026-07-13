@@ -31,9 +31,14 @@ def test_call_llm_sync_uses_local_only_provider(monkeypatch) -> None:
             return {"content": f"local:{kwargs['prompt']}"}
 
     monkeypatch.setattr(llm_provider_helpers, "is_ollama_alive", lambda: True)
-    monkeypatch.setattr(llm_provider_helpers, "get_local_provider", lambda: FakeLocalProvider())
+    monkeypatch.setattr(
+        llm_provider_helpers, "get_local_provider", lambda: FakeLocalProvider()
+    )
 
-    assert llm_provider_helpers.call_llm_sync("prompt", use_local_only=True) == "local:prompt"
+    assert (
+        llm_provider_helpers.call_llm_sync("prompt", use_local_only=True)
+        == "local:prompt"
+    )
 
 
 def test_call_llm_sync_falls_back_to_local_when_cloud_fails(monkeypatch) -> None:
@@ -46,10 +51,14 @@ def test_call_llm_sync_falls_back_to_local_when_cloud_fails(monkeypatch) -> None
     def fail_cloud(**kwargs):
         raise RuntimeError("cloud failed")
 
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
     monkeypatch.setattr(llm_provider_helpers, "get_provider", fail_cloud)
     monkeypatch.setattr(llm_provider_helpers, "is_ollama_alive", lambda: True)
-    monkeypatch.setattr(llm_provider_helpers, "get_local_provider", lambda: FakeLocalProvider())
+    monkeypatch.setattr(
+        llm_provider_helpers, "get_local_provider", lambda: FakeLocalProvider()
+    )
 
     assert llm_provider_helpers.call_llm_sync("prompt") == "fallback"
 

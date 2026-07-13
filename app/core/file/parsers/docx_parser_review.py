@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """DOCX comments, revisions, footnotes, and stable anchor extraction."""
+
 from __future__ import annotations
 
 import logging
@@ -7,6 +8,7 @@ import re
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
 
 def _xml_local_name(tag: Any) -> str:
     text = str(tag or "")

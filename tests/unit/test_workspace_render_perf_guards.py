@@ -131,8 +131,9 @@ def test_workspace_close_warning_requires_real_unsaved_snapshot_and_clear_ui():
     assert "isTabActuallyUnsaved" in workspace_bundle
 
     close_warn_css = workspace_css[
-        workspace_css.index(".wa-close-warn-overlay"):
-        workspace_css.index("/* ── File rows", workspace_css.index(".wa-close-warn-overlay"))
+        workspace_css.index(".wa-close-warn-overlay") : workspace_css.index(
+            "/* ── File rows", workspace_css.index(".wa-close-warn-overlay")
+        )
     ]
     assert "backdrop-filter" not in close_warn_css
     assert "background: rgba(17, 24, 39, 0.42);" in close_warn_css
@@ -141,8 +142,9 @@ def test_workspace_close_warning_requires_real_unsaved_snapshot_and_clear_ui():
     assert "overflow: auto;" in close_warn_css
 
     dialog_overlay_css = workspace_css[
-        workspace_css.index(".wa-dlg-overlay"):
-        workspace_css.index(".wa-close-warn-overlay")
+        workspace_css.index(".wa-dlg-overlay") : workspace_css.index(
+            ".wa-close-warn-overlay"
+        )
     ]
     assert "backdrop-filter" not in dialog_overlay_css
     assert "background: rgba(17, 24, 39, 0.38);" in dialog_overlay_css

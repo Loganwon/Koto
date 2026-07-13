@@ -251,8 +251,16 @@ def test_file_task_stream_preserves_artifact_result_artifacts_as_changes():
                     "status": "completed",
                     "summary": "已完成处理：operations_report.md",
                     "artifacts": [
-                        {"path": "operations_report.md", "type": "markdown", "title": "operations_report.md"},
-                        {"path": "restock_plan.csv", "type": "data", "title": "restock_plan.csv"},
+                        {
+                            "path": "operations_report.md",
+                            "type": "markdown",
+                            "title": "operations_report.md",
+                        },
+                        {
+                            "path": "restock_plan.csv",
+                            "type": "data",
+                            "title": "restock_plan.csv",
+                        },
                     ],
                     "changes": [],
                     "sources": [],
@@ -299,13 +307,16 @@ def test_file_task_artifact_status_preserves_attention_diagnostics():
         "model_unavailable",
         "quality_gate_failed",
     ]:
-        assert _file_task_artifact_status(
-            "run.finished",
-            {
-                "completed_task": False,
-                "runtime": {"terminal_status": status},
-            },
-        ) == status
+        assert (
+            _file_task_artifact_status(
+                "run.finished",
+                {
+                    "completed_task": False,
+                    "runtime": {"terminal_status": status},
+                },
+            )
+            == status
+        )
 
 
 def test_task_route_serializer_extracts_artifact_result_from_metadata():

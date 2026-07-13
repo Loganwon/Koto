@@ -97,7 +97,6 @@ def _followup_has_prior_excel_docx_insert(followup_context: Dict[str, Any]) -> b
     return False
 
 
-
 def workflow_checkpoint_from_options(options: Mapping[str, Any]) -> Dict[str, Any]:
     checkpoint = options.get("workflow_checkpoint")
     if isinstance(checkpoint, Mapping):

@@ -6,11 +6,12 @@ from pathlib import Path
 
 import pytest
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_mammoth_fallback_keeps_page_layout_and_navigation_contract(tmp_path, monkeypatch):
+def test_mammoth_fallback_keeps_page_layout_and_navigation_contract(
+    tmp_path, monkeypatch
+):
     docx = pytest.importorskip("docx", reason="python-docx is required")
     pytest.importorskip("mammoth", reason="mammoth is required")
     from docx.shared import Inches
@@ -56,7 +57,9 @@ def test_mammoth_fallback_keeps_page_layout_and_navigation_contract(tmp_path, mo
 
 
 def test_workspace_maps_parser_docx_layout_keys_once_at_the_editor_boundary():
-    source = (ROOT / "web" / "src" / "workspace" / "file-open.ts").read_text(encoding="utf-8")
+    source = (ROOT / "web" / "src" / "workspace" / "file-open.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "function _toDocxRenderOptions(data: any)" in source
     assert "_docxNumber(source, 'pageWidthPx', 'page_width_px')" in source

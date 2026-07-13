@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -80,7 +79,9 @@ def test_trusted_file_task_route_skips_default_adjudicator(monkeypatch):
     )
 
     def fail_model(**_kwargs):
-        raise AssertionError("AI intent adjudicator should not run for non-ambiguous trusted route")
+        raise AssertionError(
+            "AI intent adjudicator should not run for non-ambiguous trusted route"
+        )
 
     request = FileTaskRequest.from_mapping(
         {
@@ -117,7 +118,9 @@ def test_trusted_file_task_route_still_adjudicates_ambiguous_write_intent():
         FileTaskFile,
         FileTaskRequest,
     )
-    from app.core.agent.file_task_intent_adjudicator import should_adjudicate_trusted_route
+    from app.core.agent.file_task_intent_adjudicator import (
+        should_adjudicate_trusted_route,
+    )
     from app.core.agent.file_task_runtime import FileTaskRuntime
 
     request = FileTaskRequest.from_mapping(
@@ -156,7 +159,9 @@ def test_workspace_file_task_payload_exposes_top_level_routing_decision():
     assert "routing_decision: routingDecision" in source
     assert "explicitTaskPayload.routing_decision = explicitRoutingDecision;" in source
     assert "normalized.candidate_workflows = candidateWorkflows;" in source
-    assert "normalized.requires_adjudication = !!source.requires_adjudication;" in source
+    assert (
+        "normalized.requires_adjudication = !!source.requires_adjudication;" in source
+    )
     assert "normalized.frontend_label = frontendLabel;" in source
     assert "normalized.plan_steps = planSteps;" in source
 
@@ -210,12 +215,19 @@ def test_runtime_decision_context_groups_route_classification_and_plan():
 
 def test_workspace_runner_expands_decision_context_for_legacy_consumers():
     runner = (ROOT / "web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
-    dispatcher = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(encoding="utf-8")
-    workbench = (ROOT / "web/src/workspace/task-workbench.ts").read_text(encoding="utf-8")
+    dispatcher = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(
+        encoding="utf-8"
+    )
+    workbench = (ROOT / "web/src/workspace/task-workbench.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "const decisionContext = data.decision_context" in runner
     assert "decisionContext.classification" in runner
     assert "normalized.routing_decision = routingDecision;" in runner
-    assert "card.dataset.taskRoutingDecision = encodeURIComponent(JSON.stringify(routingDecision));" in runner
+    assert (
+        "card.dataset.taskRoutingDecision = encodeURIComponent(JSON.stringify(routingDecision));"
+        in runner
+    )
     assert "metadata.route_intent = JSON.parse(decodeURIComponent" in dispatcher
     assert "requestPayload.routing_decision" in workbench

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -16,6 +15,8 @@ def _body_between(source: str, start_marker: str, end_marker: str) -> str:
     start = source.index(start_marker)
     end = source.index(end_marker, start)
     return source[start:end]
+
+
 def test_file_task_doc_annotate_request_detection_is_extracted_from_runtime() -> None:
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/file_task_doc_annotate_request.py")
@@ -33,12 +34,21 @@ def test_file_task_doc_annotate_request_detection_is_extracted_from_runtime() ->
     assert "_is_docx_annotation_request" not in runtime
     assert "_is_docx_clear_review_request" not in runtime
     assert "_classification_contract_docx_annotation_has_contract" not in runtime
-    assert "is_docx_annotation_request=_doc_annotate_is_annotation_request" in classify_body
-    assert "is_docx_clear_review_request=_doc_annotate_is_clear_review_request" in classify_body
+    assert (
+        "is_docx_annotation_request=_doc_annotate_is_annotation_request"
+        in classify_body
+    )
+    assert (
+        "is_docx_clear_review_request=_doc_annotate_is_clear_review_request"
+        in classify_body
+    )
     assert "docx_annotation_has_contract=_doc_annotate_contract_for_request" in runtime
     assert "apply_doc_annotate_bridge_fallback" not in runtime
     assert "from app.core.agent.file_task_doc_annotate_request import" in planning
-    assert "docx_annotation_has_request_contract as _doc_annotate_has_request_contract" in planning
+    assert (
+        "docx_annotation_has_request_contract as _doc_annotate_has_request_contract"
+        in planning
+    )
     assert "apply_doc_annotate_bridge_fallback(" in planning
     assert "docx_annotation_has_contract=_doc_annotate_has_request_contract" in planning
     assert "def is_docx_annotation_request(" in helper
@@ -193,7 +203,10 @@ def test_file_task_execution_messaging_is_extracted_from_runtime() -> None:
     )
 
     assert "from app.core.agent.file_task_execution_messaging import" in runtime
-    assert "return _execution_messaging_output_mode_guidance(classification)" in output_guidance_body
+    assert (
+        "return _execution_messaging_output_mode_guidance(classification)"
+        in output_guidance_body
+    )
     assert "return _execution_messaging_plan_repair_message(" in repair_body
     assert "① 核心结果" not in output_guidance_body
     assert "白盒计划审查未通过或不完整" not in repair_body

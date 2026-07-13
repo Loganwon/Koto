@@ -714,7 +714,9 @@ class TaskLedger:
         for row in rows:
             started_raw = row["started_at"] or row["created_at"] or ""
             try:
-                started_at = datetime.strptime(str(started_raw)[:26], "%Y-%m-%dT%H:%M:%S.%f")
+                started_at = datetime.strptime(
+                    str(started_raw)[:26], "%Y-%m-%dT%H:%M:%S.%f"
+                )
             except Exception:
                 continue
             if (now - started_at).total_seconds() < timeout:

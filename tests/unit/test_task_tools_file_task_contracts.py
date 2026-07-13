@@ -60,7 +60,9 @@ def test_parse_file_to_text_reads_office_windows(tmp_path):
     assert "Slide 4" not in pptx_text
 
 
-def test_parse_file_to_text_pdf_letter_window_skips_table_of_contents(tmp_path, monkeypatch):
+def test_parse_file_to_text_pdf_letter_window_skips_table_of_contents(
+    tmp_path, monkeypatch
+):
     from app.core.agent import task_tools
 
     pdf_path = tmp_path / "schiller.pdf"
@@ -836,7 +838,10 @@ def test_verify_task_completion_summarizes_multiple_docx_images_once():
     assert result["completed"] is True
     assert "文件已成功修改：report.docx" in result["summary"]
     assert "已插入 3 张图片" in result["summary"]
-    assert "chart1_revenue_profit_trend.png、chart2_product_mix.png、chart3_margin_analysis.png" in result["summary"]
+    assert (
+        "chart1_revenue_profit_trend.png、chart2_product_mix.png、chart3_margin_analysis.png"
+        in result["summary"]
+    )
     assert result["summary"].count("已插入") == 1
 
 

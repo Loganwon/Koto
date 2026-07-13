@@ -4,14 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from app.core.agent.file_task_contract import FileTaskClassification, FileTaskFile, FileTaskRequest
+from app.core.agent.file_task_contract import (
+    FileTaskClassification,
+    FileTaskFile,
+    FileTaskRequest,
+)
 from app.core.agent.file_task_doc_annotate_request import is_docx_clear_review_request
 from app.core.agent.file_task_prompt_sections import (
     clear_docx_review_guidance as _prompt_clear_docx_review_guidance,
     docx_compare_annotate_guidance as _prompt_docx_compare_annotate_guidance,
     single_docx_annotate_guidance as _prompt_single_docx_annotate_guidance,
 )
-
 
 DisplayPath = Callable[[Any], str]
 FirstFileName = Callable[[Sequence[FileTaskFile], set[str]], str]
@@ -63,6 +66,5 @@ def build_docx_prompt_guidance(
 
 def _file_type(file_info: FileTaskFile) -> str:
     return (
-        file_info.type
-        or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
+        file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
     ).lower()

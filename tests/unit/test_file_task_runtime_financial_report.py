@@ -212,9 +212,7 @@ def test_file_task_runtime_repairs_docx_image_path_from_generated_artifact(tmp_p
 
 
 def test_file_task_runtime_requires_all_generated_chart_images_inserted(tmp_path):
-    image_payload = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
-    )
+    image_payload = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
     image1 = tmp_path / "chart1_revenue_profit_trend.png"
     image2 = tmp_path / "chart2_product_mix.png"
     image1.write_bytes(base64.b64decode(image_payload))
@@ -305,7 +303,9 @@ def test_file_task_runtime_requires_all_generated_chart_images_inserted(tmp_path
                 "images_inserted": 1,
             }
         if tool_name == "verify_task_completion":
-            return json.dumps({"completed": True, "summary": "DOCX 已更新。"}, ensure_ascii=False)
+            return json.dumps(
+                {"completed": True, "summary": "DOCX 已更新。"}, ensure_ascii=False
+            )
         return ""
 
     request = FileTaskRequest(
@@ -313,7 +313,9 @@ def test_file_task_runtime_requires_all_generated_chart_images_inserted(tmp_path
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -351,10 +353,10 @@ def test_file_task_runtime_requires_all_generated_chart_images_inserted(tmp_path
     assert run_finished.payload["completed_task"] is True
 
 
-def test_file_task_runtime_fails_when_generated_chart_images_remain_uninserted(tmp_path):
-    image_payload = (
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
-    )
+def test_file_task_runtime_fails_when_generated_chart_images_remain_uninserted(
+    tmp_path,
+):
+    image_payload = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
     image1 = tmp_path / "chart1_revenue_profit_trend.png"
     image2 = tmp_path / "chart2_product_mix.png"
     image1.write_bytes(base64.b64decode(image_payload))
@@ -421,7 +423,9 @@ def test_file_task_runtime_fails_when_generated_chart_images_remain_uninserted(t
                 "images_inserted": 1,
             }
         if tool_name == "verify_task_completion":
-            return json.dumps({"completed": True, "summary": "DOCX 已更新。"}, ensure_ascii=False)
+            return json.dumps(
+                {"completed": True, "summary": "DOCX 已更新。"}, ensure_ascii=False
+            )
         return ""
 
     request = FileTaskRequest(
@@ -429,7 +433,9 @@ def test_file_task_runtime_fails_when_generated_chart_images_remain_uninserted(t
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 

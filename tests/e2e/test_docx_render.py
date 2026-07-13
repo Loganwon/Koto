@@ -950,23 +950,26 @@ class TestPageCount:
             f"expected {expected_lower}–{expected_upper} (Word: {WORD_PAGE_COUNT}, ±30%)."
         )
 
-    def test_soft_page_breaks_do_not_overlap_floating_images(self, e2e_page, e2e_base_url):
+    def test_soft_page_breaks_do_not_overlap_floating_images(
+        self, e2e_page, e2e_base_url
+    ):
         svg = (
             '<svg xmlns="http://www.w3.org/2000/svg" width="220" height="220">'
             '<rect width="220" height="220" fill="#4f7eff"/>'
             '<text x="110" y="116" text-anchor="middle" font-size="24" fill="#ffffff">IMG</text>'
-            '</svg>'
+            "</svg>"
         )
-        img_src = "data:image/svg+xml;base64," + base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        img_src = "data:image/svg+xml;base64," + base64.b64encode(
+            svg.encode("utf-8")
+        ).decode("ascii")
         spacer = "".join(
             '<p style="font-size:16px;line-height:24px;margin:0 0 8px 0">prefill line</p>'
             for _ in range(8)
         )
         html = (
-            spacer
-            + f'<p style="font-size:16px;line-height:24px;margin:0">'
-              f'<img src="{img_src}" alt="" style="float:right;width:220px;height:220px;margin:0 0 8px 12px;max-width:100%" />'
-              f'</p>'
+            spacer + f'<p style="font-size:16px;line-height:24px;margin:0">'
+            f'<img src="{img_src}" alt="" style="float:right;width:220px;height:220px;margin:0 0 8px 12px;max-width:100%" />'
+            f"</p>"
             + '<p style="font-size:16px;line-height:24px;margin:0">after image</p>'
         )
         opts = {
@@ -993,8 +996,7 @@ class TestPageCount:
             timeout=20_000,
         )
 
-        metrics = e2e_page.evaluate(
-            """() => {
+        metrics = e2e_page.evaluate("""() => {
                 const img = document.querySelector('#wa-docx-editor .ProseMirror img.koto-docx-img');
                 const imgRect = img.getBoundingClientRect();
                 const breaks = Array.from(document.querySelectorAll('[data-page-break],[data-soft-page-break]'));
@@ -1008,8 +1010,7 @@ class TestPageCount:
                     maxOverlap: Math.max(0, ...overlaps),
                     totalPages: window._testEditor ? window._testEditor._totalPages : 0,
                 };
-            }"""
-        )
+            }""")
         assert metrics["breakCount"] > 0, metrics
         assert metrics["imageHeight"] > 100, metrics
         assert metrics["maxOverlap"] <= 1, metrics
@@ -1042,8 +1043,7 @@ class TestPageCount:
             timeout=20_000,
         )
 
-        metrics = e2e_page.evaluate(
-            """() => {
+        metrics = e2e_page.evaluate("""() => {
                 const pm = document.querySelector('#wa-docx-editor .ProseMirror');
                 const breaks = Array.from(document.querySelectorAll('[data-soft-page-break]'));
                 const breakRects = breaks
@@ -1113,8 +1113,7 @@ class TestPageCount:
                     realOverlapCount,
                     totalPages: window._testEditor ? window._testEditor._totalPages : 0,
                 };
-            }"""
-        )
+            }""")
         assert metrics["breakCount"] > 0, metrics
         assert metrics["inlineBreakCount"] > 0, metrics
         assert metrics["textRectCount"] > 0, metrics
@@ -1159,8 +1158,7 @@ class TestPageCount:
             timeout=20_000,
         )
 
-        metrics = e2e_page.evaluate(
-            """() => {
+        metrics = e2e_page.evaluate("""() => {
                 const page = document.querySelector('#wa-docx-editor .ProseMirror');
                 const pageRect = page.getBoundingClientRect();
                 const breaks = Array.from(
@@ -1174,8 +1172,7 @@ class TestPageCount:
                     };
                 });
                 return { breakCount: breaks.length, breaks };
-            }"""
-        )
+            }""")
         assert metrics["breakCount"] > 0, metrics
         assert all(item["leftDelta"] <= 1 for item in metrics["breaks"]), metrics
         assert all(item["rightDelta"] <= 1 for item in metrics["breaks"]), metrics
@@ -1228,7 +1225,11 @@ class TestPageCount:
                 };
             }""")
             assert metrics["pages"] == baseline["pages"], (zoom, metrics, baseline)
-            assert metrics["boundaries"] == baseline["boundaries"], (zoom, metrics, baseline)
+            assert metrics["boundaries"] == baseline["boundaries"], (
+                zoom,
+                metrics,
+                baseline,
+            )
             assert metrics["remainingScroll"] is not None
             assert metrics["remainingScroll"] <= 1, (zoom, metrics)
 

@@ -2,7 +2,9 @@ from web.document_feedback_ai_call import call_with_timeout
 
 
 def test_call_with_timeout_returns_provider_response() -> None:
-    response, error = call_with_timeout(lambda contents: {"echo": contents}, "review", 1)
+    response, error = call_with_timeout(
+        lambda contents: {"echo": contents}, "review", 1
+    )
 
     assert response == {"echo": "review"}
     assert error is None

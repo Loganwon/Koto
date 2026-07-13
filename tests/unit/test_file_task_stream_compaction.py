@@ -51,7 +51,11 @@ def test_file_task_stream_compacts_repeated_internal_workflow_state():
             persist_progress_fn=lambda *_: None,
         )
     )
-    parsed = [json.loads(chunk.strip()[6:]) for chunk in chunks if chunk.strip().startswith("data: ")]
+    parsed = [
+        json.loads(chunk.strip()[6:])
+        for chunk in chunks
+        if chunk.strip().startswith("data: ")
+    ]
 
     payload = parsed[0]["payload"]
     assert payload["stream_payload_version"] == "compact_v1"
@@ -85,7 +89,11 @@ def test_file_task_stream_emits_frontend_progress_events_for_known_stages():
             persist_progress_fn=lambda *_: None,
         )
     )
-    parsed = [json.loads(chunk.strip()[6:]) for chunk in chunks if chunk.strip().startswith("data: ")]
+    parsed = [
+        json.loads(chunk.strip()[6:])
+        for chunk in chunks
+        if chunk.strip().startswith("data: ")
+    ]
 
     assert parsed[0]["type"] == "plan.checked"
     assert parsed[0]["ui_state"]["progress"] == 20
@@ -125,7 +133,11 @@ def test_file_task_terminal_progress_uses_needs_attention_ui_state():
             persist_progress_fn=lambda *_: None,
         )
     )
-    parsed = [json.loads(chunk.strip()[6:]) for chunk in chunks if chunk.strip().startswith("data: ")]
+    parsed = [
+        json.loads(chunk.strip()[6:])
+        for chunk in chunks
+        if chunk.strip().startswith("data: ")
+    ]
 
     assert parsed[0]["type"] == "progress"
     assert parsed[0]["payload"] == {

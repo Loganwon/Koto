@@ -10,7 +10,6 @@ from app.core.agent.file_task_contract import (
     FileTaskRequest,
 )
 
-
 DocxAnnotationContractPredicate = Callable[
     [FileTaskRequest, Sequence[FileTaskFile], FileTaskClassification],
     bool,

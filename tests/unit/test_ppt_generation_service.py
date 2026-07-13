@@ -148,7 +148,9 @@ def test_ppt_generation_service_renders_editor_pptx_payload():
 
 
 def test_normalize_slide_accepts_legacy_shapes():
-    assert normalize_slide({"heading": "H", "slide_type": "detail", "bullets": ["x"]}) == {
+    assert normalize_slide(
+        {"heading": "H", "slide_type": "detail", "bullets": ["x"]}
+    ) == {
         "title": "H",
         "type": "detail",
         "points": ["x"],

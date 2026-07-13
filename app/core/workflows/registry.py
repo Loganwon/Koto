@@ -62,7 +62,9 @@ WORKFLOW_EXECUTOR_SPECS: tuple[WorkflowExecutorSpec, ...] = (
         "app.core.workflows.data_format_cleaner",
         "DataFormatCleaner",
     ),
-    WorkflowExecutorSpec("doc_ai_review", "app.core.workflows.doc_ai_review", "DocAIReview"),
+    WorkflowExecutorSpec(
+        "doc_ai_review", "app.core.workflows.doc_ai_review", "DocAIReview"
+    ),
     WorkflowExecutorSpec(
         "doc_deep_compare",
         "app.core.workflows.doc_deep_compare",
@@ -95,9 +97,7 @@ WORKFLOW_EXECUTOR_SPECS: tuple[WorkflowExecutorSpec, ...] = (
     ),
 )
 
-_EXECUTOR_SPEC_BY_ID = {
-    spec.workflow_id: spec for spec in WORKFLOW_EXECUTOR_SPECS
-}
+_EXECUTOR_SPEC_BY_ID = {spec.workflow_id: spec for spec in WORKFLOW_EXECUTOR_SPECS}
 
 
 def registered_workflow_ids() -> tuple[str, ...]:
@@ -115,5 +115,7 @@ def get_workflow_executor(workflow_id: str) -> Any | None:
         executor_cls = getattr(module, spec.class_name)
         return executor_cls()
     except Exception as exc:
-        logger.error("[WorkflowRegistry] Failed to load executor %s: %s", workflow_id, exc)
+        logger.error(
+            "[WorkflowRegistry] Failed to load executor %s: %s", workflow_id, exc
+        )
         return None

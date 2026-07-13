@@ -10,7 +10,9 @@ def test_ollama_llm_provider_prefers_configured_model_over_auto_cache(monkeypatc
     from app.core.llm import local_model_runtime
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
-    monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest")
+    monkeypatch.setattr(
+        local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest"
+    )
     monkeypatch.setattr(OllamaLLMProvider, "_auto_model", "stale:auto")
     monkeypatch.setattr(OllamaLLMProvider, "_auto_model_ts", 1e20)
 
@@ -21,7 +23,9 @@ def test_shared_local_provider_uses_configured_model_before_tag_heuristic(monkey
     from app.core.llm import local_model_runtime
     from app.core.shared.llm_helpers import get_local_provider
 
-    monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest")
+    monkeypatch.setattr(
+        local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest"
+    )
     provider = get_local_provider()
 
     assert provider.model == "chosen:latest"
@@ -33,12 +37,19 @@ def test_router_response_model_uses_configured_tag(monkeypatch):
 
     monkeypatch.setattr(LocalModelRouter, "_response_model", None)
     monkeypatch.setattr(LocalModelRouter, "_response_model_inited", False)
-    monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest")
+    monkeypatch.setattr(
+        local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest"
+    )
     monkeypatch.setattr(LocalModelRouter, "is_ollama_available", lambda: True)
     response = MagicMock()
     response.status_code = 200
-    response.json.return_value = {"models": [{"name": "chosen:latest"}, {"name": "qwen3:8b"}]}
-    monkeypatch.setattr("app.core.routing.local_model_router.requests.get", lambda *args, **kwargs: response)
+    response.json.return_value = {
+        "models": [{"name": "chosen:latest"}, {"name": "qwen3:8b"}]
+    }
+    monkeypatch.setattr(
+        "app.core.routing.local_model_router.requests.get",
+        lambda *args, **kwargs: response,
+    )
 
     assert LocalModelRouter._init_response_model() is True
     assert LocalModelRouter._response_model == "chosen:latest"
@@ -48,7 +59,9 @@ def test_router_plan_uses_configured_tag(monkeypatch):
     from app.core.llm import local_model_runtime
     from app.core.routing.local_model_router import LocalModelRouter
 
-    monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest")
+    monkeypatch.setattr(
+        local_model_runtime, "get_configured_local_model_tag", lambda: "chosen:latest"
+    )
     monkeypatch.setattr(LocalModelRouter, "_initialized", True)
     monkeypatch.setattr(LocalModelRouter, "_model_name", "router:auto")
     response = MagicMock()
@@ -65,7 +78,11 @@ def test_ollama_provider_no_longer_reads_user_settings_file_directly():
     from pathlib import Path
 
     source = Path("app/core/llm/ollama_provider.py").read_text(encoding="utf-8")
-    resolver = source[source.index("def _resolve_model_from_settings") : source.index("def get_local_model_info")]
+    resolver = source[
+        source.index("def _resolve_model_from_settings") : source.index(
+            "def get_local_model_info"
+        )
+    ]
 
     assert "get_configured_local_model_tag" in resolver
     assert '"config" / "user_settings.json"' not in resolver
@@ -92,14 +109,18 @@ def test_ollama_provider_disables_qwen_thinking_only_when_requested(monkeypatch)
     assert "think" not in captured["payload"]
 
 
-def test_file_task_local_call_uses_longer_budget_disables_thinking_and_checks_tools(monkeypatch):
+def test_file_task_local_call_uses_longer_budget_disables_thinking_and_checks_tools(
+    monkeypatch,
+):
     import app.core.agent.file_task_model as file_task_model
     import app.core.llm.local_model_capabilities as capabilities
     import app.core.llm.ollama_llm_provider as provider_module
     from app.core.agent.file_task_contract import FileTaskRequest
 
     captured = {}
-    monkeypatch.setattr(file_task_model.FileTaskModelClient, "_is_local_available", lambda _self: True)
+    monkeypatch.setattr(
+        file_task_model.FileTaskModelClient, "_is_local_available", lambda _self: True
+    )
     monkeypatch.setattr(capabilities, "local_model_supports_tools", lambda _model: True)
 
     class FakeProvider:
@@ -136,7 +157,9 @@ def test_file_task_rejects_known_model_without_tool_support(monkeypatch):
     import app.core.agent.file_task_model as file_task_model
     import app.core.llm.local_model_capabilities as capabilities
 
-    monkeypatch.setattr(capabilities, "local_model_supports_tools", lambda _model: False)
+    monkeypatch.setattr(
+        capabilities, "local_model_supports_tools", lambda _model: False
+    )
 
     try:
         file_task_model.FileTaskModelClient._ensure_local_tool_support(
@@ -146,4 +169,6 @@ def test_file_task_rejects_known_model_without_tool_support(monkeypatch):
         assert "gemma3:1b" in str(exc)
         assert "qwen3.5:9b" in str(exc)
     else:
-        raise AssertionError("a tool-less model must be rejected before file-task execution")
+        raise AssertionError(
+            "a tool-less model must be rejected before file-task execution"
+        )

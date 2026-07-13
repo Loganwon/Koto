@@ -25,9 +25,7 @@ def test_docx_prompt_guidance_builds_single_annotation_guidance():
     request = FileTaskRequest(
         task="请批注这份文稿",
         target_path="C:/docs/draft.docx",
-        files=[
-            FileTaskFile(path="C:/docs/draft.docx", name="draft.docx", type="docx")
-        ],
+        files=[FileTaskFile(path="C:/docs/draft.docx", name="draft.docx", type="docx")],
     )
     classification = FileTaskClassification(docx_annotation_request=True)
 
@@ -49,7 +47,9 @@ def test_docx_prompt_guidance_builds_clear_review_guidance_for_clear_request():
     request = FileTaskRequest(
         task="取消docx里面所有批注",
         files=[
-            FileTaskFile(path="interview.docx", name="interview.docx", type="docx", target=True)
+            FileTaskFile(
+                path="interview.docx", name="interview.docx", type="docx", target=True
+            )
         ],
     )
     classification = FileTaskClassification(docx_annotation_request=False)
@@ -73,7 +73,9 @@ def test_docx_prompt_guidance_builds_compare_annotation_guidance():
         target_path="revised.docx",
         files=[
             FileTaskFile(path="original.docx", name="original.docx", type="docx"),
-            FileTaskFile(path="revised.docx", name="revised.docx", type="docx", target=True),
+            FileTaskFile(
+                path="revised.docx", name="revised.docx", type="docx", target=True
+            ),
         ],
     )
     classification = FileTaskClassification(

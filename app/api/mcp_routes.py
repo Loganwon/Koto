@@ -103,11 +103,13 @@ def _validate_auth_token(token: str | None) -> bool:
     return token == expected
 
 
-_MCP_POST_AUTH_EXEMPT_PATHS = frozenset({
-    "/api/mcp/frontend-event",
-    "/api/mcp/frontend-action-result",
-    "/api/mcp/frontend-action",
-})
+_MCP_POST_AUTH_EXEMPT_PATHS = frozenset(
+    {
+        "/api/mcp/frontend-event",
+        "/api/mcp/frontend-action-result",
+        "/api/mcp/frontend-action",
+    }
+)
 
 
 @mcp_bp.before_request
@@ -119,9 +121,19 @@ def _reject_untrusted_browser_origin():
         return jsonify({"success": False, "error": "Untrusted MCP origin"}), 403
     if request.path in _MCP_POST_AUTH_EXEMPT_PATHS:
         return None
-    token = request.headers.get("X-Koto-MCP-Key") or request.headers.get("Authorization")
+    token = request.headers.get("X-Koto-MCP-Key") or request.headers.get(
+        "Authorization"
+    )
     if not _validate_auth_token(token):
-        return jsonify({"success": False, "error": "Invalid or missing MCP API key. Set KOTO_MCP_API_KEY env var or pass X-Koto-MCP-Key / Authorization header."}), 401
+        return (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Invalid or missing MCP API key. Set KOTO_MCP_API_KEY env var or pass X-Koto-MCP-Key / Authorization header.",
+                }
+            ),
+            401,
+        )
     return None
 
 
@@ -226,35 +238,39 @@ def _koto_project_overview(**_: Any) -> Dict[str, Any]:
     }
 
 
-_MCP_WRITABLE_PATHS = frozenset({
-    "workspace",
-    "logs",
-    "chats",
-    "models",
-})
+_MCP_WRITABLE_PATHS = frozenset(
+    {
+        "workspace",
+        "logs",
+        "chats",
+        "models",
+    }
+)
 
-_MCP_BLOCKED_PATHS = frozenset({
-    "app",
-    "config",
-    "web",
-    "src",
-    "build",
-    "tests",
-    "docs",
-    "scripts",
-    "launcher",
-    "node_modules",
-    ".git",
-    ".venv",
-    ".koto",
-    ".agents",
-    ".claude",
-    ".codex",
-    ".codex_runtime",
-    ".nodeenv",
-    ".vscode",
-    ".webview2_profile",
-})
+_MCP_BLOCKED_PATHS = frozenset(
+    {
+        "app",
+        "config",
+        "web",
+        "src",
+        "build",
+        "tests",
+        "docs",
+        "scripts",
+        "launcher",
+        "node_modules",
+        ".git",
+        ".venv",
+        ".koto",
+        ".agents",
+        ".claude",
+        ".codex",
+        ".codex_runtime",
+        ".nodeenv",
+        ".vscode",
+        ".webview2_profile",
+    }
+)
 
 
 def _koto_write_file(path: str = "", content: str = "", **_: Any) -> Dict[str, Any]:
@@ -265,12 +281,21 @@ def _koto_write_file(path: str = "", content: str = "", **_: Any) -> Dict[str, A
     relative = resolved.relative_to(project_root())
     top_dir = relative.parts[0] if len(relative.parts) > 0 else ""
     if resolved.suffix == ".py" and top_dir not in _MCP_WRITABLE_PATHS:
-        return {"success": False, "error": f"Writing .py files to '{top_dir}' is not allowed. Only writable in: {', '.join(sorted(_MCP_WRITABLE_PATHS))}"}
+        return {
+            "success": False,
+            "error": f"Writing .py files to '{top_dir}' is not allowed. Only writable in: {', '.join(sorted(_MCP_WRITABLE_PATHS))}",
+        }
     if top_dir in _MCP_BLOCKED_PATHS:
-        return {"success": False, "error": f"Writing to '{top_dir}' is blocked. Allowed directories: {', '.join(sorted(_MCP_WRITABLE_PATHS))}"}
+        return {
+            "success": False,
+            "error": f"Writing to '{top_dir}' is blocked. Allowed directories: {', '.join(sorted(_MCP_WRITABLE_PATHS))}",
+        }
     if top_dir not in _MCP_WRITABLE_PATHS and top_dir != "":
         if not resolved.is_relative_to(project_root() / "workspace"):
-            return {"success": False, "error": f"Writing to '{top_dir}' is not allowed. Only writable in: {', '.join(sorted(_MCP_WRITABLE_PATHS))}"}
+            return {
+                "success": False,
+                "error": f"Writing to '{top_dir}' is not allowed. Only writable in: {', '.join(sorted(_MCP_WRITABLE_PATHS))}",
+            }
     try:
         resolved.parent.mkdir(parents=True, exist_ok=True)
         resolved.write_text(content, encoding="utf-8")
@@ -299,91 +324,93 @@ def _koto_read_file(path: str = "", max_chars: int = 50000, **_: Any) -> Dict[st
         return {"success": False, "error": str(exc)}
 
 
-_MCP_COMMAND_ALLOWLIST = frozenset({
-    "git",
-    "pytest",
-    "python",
-    "python3",
-    "pip",
-    "pip3",
-    "npm",
-    "npx",
-    "node",
-    "make",
-    "dir",
-    "ls",
-    "echo",
-    "cat",
-    "type",
-    "find",
-    "where",
-    "which",
-    "pwd",
-    "cd",
-    "tree",
-    "head",
-    "tail",
-    "wc",
-    "sort",
-    "uniq",
-    "grep",
-    "rg",
-    "curl",
-    "wget",
-    "tar",
-    "zip",
-    "unzip",
-    "cp",
-    "copy",
-    "mv",
-    "move",
-    "rm",
-    "del",
-    "mkdir",
-    "rmdir",
-    "chmod",
-    "chown",
-    "du",
-    "df",
-    "ps",
-    "tasklist",
-    "netstat",
-    "ipconfig",
-    "ifconfig",
-    "nslookup",
-    "ping",
-    "tracert",
-    "traceroute",
-    "docker",
-    "docker-compose",
-    "kubectl",
-    "helm",
-    "gh",
-    "openssl",
-    "ssh",
-    "scp",
-    "rsync",
-    "black",
-    "isort",
-    "flake8",
-    "mypy",
-    "bandit",
-    "ruff",
-    "pre-commit",
-    "coverage",
-    "pyinstaller",
-    "cython",
-    "gcc",
-    "g++",
-    "clang",
-    "cargo",
-    "go",
-    "java",
-    "javac",
-    "dotnet",
-    "pwsh",
-    "powershell",
-})
+_MCP_COMMAND_ALLOWLIST = frozenset(
+    {
+        "git",
+        "pytest",
+        "python",
+        "python3",
+        "pip",
+        "pip3",
+        "npm",
+        "npx",
+        "node",
+        "make",
+        "dir",
+        "ls",
+        "echo",
+        "cat",
+        "type",
+        "find",
+        "where",
+        "which",
+        "pwd",
+        "cd",
+        "tree",
+        "head",
+        "tail",
+        "wc",
+        "sort",
+        "uniq",
+        "grep",
+        "rg",
+        "curl",
+        "wget",
+        "tar",
+        "zip",
+        "unzip",
+        "cp",
+        "copy",
+        "mv",
+        "move",
+        "rm",
+        "del",
+        "mkdir",
+        "rmdir",
+        "chmod",
+        "chown",
+        "du",
+        "df",
+        "ps",
+        "tasklist",
+        "netstat",
+        "ipconfig",
+        "ifconfig",
+        "nslookup",
+        "ping",
+        "tracert",
+        "traceroute",
+        "docker",
+        "docker-compose",
+        "kubectl",
+        "helm",
+        "gh",
+        "openssl",
+        "ssh",
+        "scp",
+        "rsync",
+        "black",
+        "isort",
+        "flake8",
+        "mypy",
+        "bandit",
+        "ruff",
+        "pre-commit",
+        "coverage",
+        "pyinstaller",
+        "cython",
+        "gcc",
+        "g++",
+        "clang",
+        "cargo",
+        "go",
+        "java",
+        "javac",
+        "dotnet",
+        "pwsh",
+        "powershell",
+    }
+)
 
 
 def _koto_run_shell(
@@ -394,6 +421,7 @@ def _koto_run_shell(
 ) -> Dict[str, Any]:
     import shlex
     import subprocess as _sp
+
     if not command or not command.strip():
         return {"success": False, "error": "Empty command"}
     try:
@@ -437,6 +465,7 @@ def _koto_run_shell(
 
 def _koto_task_logs(tail: int = 20, **_: Any) -> Dict[str, Any]:
     import glob as _glob
+
     root = project_root()
     log_dir = root / "logs"
     entries = []
@@ -445,7 +474,7 @@ def _koto_task_logs(tail: int = 20, **_: Any) -> Dict[str, Any]:
             try:
                 lines = []
                 with open(log_path, encoding="utf-8", errors="replace") as fh:
-                    lines = [line.rstrip("\n") for line in fh][-int(tail):]
+                    lines = [line.rstrip("\n") for line in fh][-int(tail) :]
                 entries.append({"file": str(Path(log_path).name), "lines": lines})
             except Exception:
                 pass

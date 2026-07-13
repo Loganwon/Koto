@@ -15,7 +15,6 @@ from typing import Any
 
 from app.core.workflows.skill_mapping import get_skill_ids_for_workflow
 
-
 WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
     "cross_format_extractor": {
         "id": "cross_format_extractor",
@@ -27,9 +26,23 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "左侧拖入 N 个源文件，右侧拖入 Excel 模板，AI 自动识别字段并填报到对应列。"
         ),
         "params_schema": {
-            "source_files": {"label": "源文件", "type": "file_list", "required": True, "accept": ".pdf,.docx,.doc,.txt"},
-            "template_file": {"label": "Excel 模板（可选）", "type": "file", "required": False, "accept": ".xlsx,.xls"},
-            "fields": {"label": "字段列表（逗号分隔，不用模板时填写）", "type": "text", "required": False},
+            "source_files": {
+                "label": "源文件",
+                "type": "file_list",
+                "required": True,
+                "accept": ".pdf,.docx,.doc,.txt",
+            },
+            "template_file": {
+                "label": "Excel 模板（可选）",
+                "type": "file",
+                "required": False,
+                "accept": ".xlsx,.xls",
+            },
+            "fields": {
+                "label": "字段列表（逗号分隔，不用模板时填写）",
+                "type": "text",
+                "required": False,
+            },
         },
     },
     "data_format_cleaner": {
@@ -42,8 +55,16 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "AI 生成 pandas 代码在沙盒中执行，预览变更后一键回写。"
         ),
         "params_schema": {
-            "csv_data": {"label": "表格数据（CSV 格式）", "type": "textarea", "required": True},
-            "instruction": {"label": "清洗指令（例：统一日期格式为 YYYY-MM-DD）", "type": "text", "required": True},
+            "csv_data": {
+                "label": "表格数据（CSV 格式）",
+                "type": "textarea",
+                "required": True,
+            },
+            "instruction": {
+                "label": "清洗指令（例：统一日期格式为 YYYY-MM-DD）",
+                "type": "text",
+                "required": True,
+            },
         },
     },
     "questionnaire_filler": {
@@ -56,10 +77,28 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "参考文档支持 PDF/Word/TXT，低置信度答案自动标黄提醒人工复核。"
         ),
         "params_schema": {
-            "question_file": {"label": "问题 Excel 文件", "type": "file", "required": True, "accept": ".xlsx,.xls"},
-            "reference_files": {"label": "参考文档", "type": "file_list", "required": True, "accept": ".pdf,.docx,.doc,.txt"},
-            "question_col": {"label": "问题所在列标题（可选，默认自动识别）", "type": "text", "required": False},
-            "answer_col": {"label": "答案写入列标题（可选，默认\"AI回答\"）", "type": "text", "required": False},
+            "question_file": {
+                "label": "问题 Excel 文件",
+                "type": "file",
+                "required": True,
+                "accept": ".xlsx,.xls",
+            },
+            "reference_files": {
+                "label": "参考文档",
+                "type": "file_list",
+                "required": True,
+                "accept": ".pdf,.docx,.doc,.txt",
+            },
+            "question_col": {
+                "label": "问题所在列标题（可选，默认自动识别）",
+                "type": "text",
+                "required": False,
+            },
+            "answer_col": {
+                "label": '答案写入列标题（可选，默认"AI回答"）',
+                "type": "text",
+                "required": False,
+            },
         },
     },
     "comm_digest": {
@@ -73,8 +112,17 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "输出 DOCX 纪要文档、彩色 Excel 待办表或 Markdown 报告。"
         ),
         "params_schema": {
-            "texts": {"label": "直接粘贴文本（可选）", "type": "textarea", "required": False},
-            "files": {"label": "上传文件（可选）", "type": "file_list", "required": False, "accept": ".txt,.eml,.docx,.pdf,.md"},
+            "texts": {
+                "label": "直接粘贴文本（可选）",
+                "type": "textarea",
+                "required": False,
+            },
+            "files": {
+                "label": "上传文件（可选）",
+                "type": "file_list",
+                "required": False,
+                "accept": ".txt,.eml,.docx,.pdf,.md",
+            },
             "output_mode": {
                 "label": "输出格式",
                 "type": "select",
@@ -91,7 +139,10 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
                 "label": "输出语言",
                 "type": "select",
                 "required": False,
-                "options": [{"value": "zh", "label": "中文"}, {"value": "en", "label": "English"}],
+                "options": [
+                    {"value": "zh", "label": "中文"},
+                    {"value": "en", "label": "English"},
+                ],
                 "default": "zh",
             },
         },
@@ -107,8 +158,18 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "其他格式输出可视化 HTML 比对报告。高风险变更自动预警。"
         ),
         "params_schema": {
-            "file_a": {"label": "原始文档", "type": "file", "required": True, "accept": ".docx,.doc,.pdf,.txt"},
-            "file_b": {"label": "对比文档", "type": "file", "required": True, "accept": ".docx,.doc,.pdf,.txt"},
+            "file_a": {
+                "label": "原始文档",
+                "type": "file",
+                "required": True,
+                "accept": ".docx,.doc,.pdf,.txt",
+            },
+            "file_b": {
+                "label": "对比文档",
+                "type": "file",
+                "required": True,
+                "accept": ".docx,.doc,.pdf,.txt",
+            },
             "output_mode": {
                 "label": "输出格式",
                 "type": "select",
@@ -132,9 +193,23 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "批量替换生成成品文档。支持 {{字段}}、<<字段>>、[字段] 等占位符格式。"
         ),
         "params_schema": {
-            "data_file": {"label": "数据文件", "type": "file", "required": True, "accept": ".xlsx,.xls,.csv"},
-            "template_file": {"label": "模板文件", "type": "file", "required": True, "accept": ".docx,.pptx"},
-            "instruction": {"label": "填写说明（可选）", "type": "text", "required": False},
+            "data_file": {
+                "label": "数据文件",
+                "type": "file",
+                "required": True,
+                "accept": ".xlsx,.xls,.csv",
+            },
+            "template_file": {
+                "label": "模板文件",
+                "type": "file",
+                "required": True,
+                "accept": ".docx,.pptx",
+            },
+            "instruction": {
+                "label": "填写说明（可选）",
+                "type": "text",
+                "required": False,
+            },
         },
     },
     "contract_clause_matrix": {
@@ -147,8 +222,17 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "生成风险等级着色的 Excel 矩阵，快速识别高风险条款。"
         ),
         "params_schema": {
-            "contract_files": {"label": "合同文件", "type": "file_list", "required": True, "accept": ".docx,.pdf,.txt"},
-            "custom_clauses": {"label": "额外条款类型（逗号分隔，可选）", "type": "text", "required": False},
+            "contract_files": {
+                "label": "合同文件",
+                "type": "file_list",
+                "required": True,
+                "accept": ".docx,.pdf,.txt",
+            },
+            "custom_clauses": {
+                "label": "额外条款类型（逗号分隔，可选）",
+                "type": "text",
+                "required": False,
+            },
         },
     },
     "multi_file_synthesis_report": {
@@ -161,8 +245,17 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "交叉分析共同主题与矛盾点，生成含执行摘要的结构化 DOCX 报告。"
         ),
         "params_schema": {
-            "source_files": {"label": "源文件", "type": "file_list", "required": True, "accept": ".pdf,.docx,.txt,.md"},
-            "report_title": {"label": "报告标题（可选）", "type": "text", "required": False},
+            "source_files": {
+                "label": "源文件",
+                "type": "file_list",
+                "required": True,
+                "accept": ".pdf,.docx,.txt,.md",
+            },
+            "report_title": {
+                "label": "报告标题（可选）",
+                "type": "text",
+                "required": False,
+            },
             "focus": {"label": "分析重点（可选）", "type": "text", "required": False},
         },
     },
@@ -176,9 +269,23 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "上传 PPT + 新 Excel，AI 自动匹配并替换旧数据，保留原始格式。"
         ),
         "params_schema": {
-            "pptx_file": {"label": "现有 PPT", "type": "file", "required": True, "accept": ".pptx"},
-            "data_file": {"label": "新数据", "type": "file", "required": True, "accept": ".xlsx,.xls,.csv"},
-            "instruction": {"label": "更新说明（可选）", "type": "text", "required": False},
+            "pptx_file": {
+                "label": "现有 PPT",
+                "type": "file",
+                "required": True,
+                "accept": ".pptx",
+            },
+            "data_file": {
+                "label": "新数据",
+                "type": "file",
+                "required": True,
+                "accept": ".xlsx,.xls,.csv",
+            },
+            "instruction": {
+                "label": "更新说明（可选）",
+                "type": "text",
+                "required": False,
+            },
         },
     },
     "doc_ai_review": {
@@ -191,7 +298,12 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "AI 逐段审阅后以 Word 批注形式输出建议，可直接在 Word 中处理。"
         ),
         "params_schema": {
-            "doc_file": {"label": "Word 文档", "type": "file", "required": True, "accept": ".docx"},
+            "doc_file": {
+                "label": "Word 文档",
+                "type": "file",
+                "required": True,
+                "accept": ".docx",
+            },
             "review_focus": {
                 "label": "审阅重点",
                 "type": "select",
@@ -217,7 +329,12 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
             "生成着色标注的数据表 + 异常汇总报告。支持完全离线运行。"
         ),
         "params_schema": {
-            "data_file": {"label": "数据文件", "type": "file", "required": True, "accept": ".xlsx,.xls,.csv"},
+            "data_file": {
+                "label": "数据文件",
+                "type": "file",
+                "required": True,
+                "accept": ".xlsx,.xls,.csv",
+            },
         },
     },
     "source_grounded_qa": {
@@ -289,13 +406,20 @@ WORKFLOW_CATALOG: dict[str, dict[str, Any]] = {
 
 def list_workflow_definitions() -> list[dict[str, Any]]:
     """Return public workflow definitions without exposing mutable globals."""
-    return [_with_related_skill_ids(workflow_id, workflow) for workflow_id, workflow in WORKFLOW_CATALOG.items()]
+    return [
+        _with_related_skill_ids(workflow_id, workflow)
+        for workflow_id, workflow in WORKFLOW_CATALOG.items()
+    ]
 
 
 def get_workflow_definition(workflow_id: str) -> dict[str, Any] | None:
     normalized_id = str(workflow_id or "").strip()
     workflow = WORKFLOW_CATALOG.get(normalized_id)
-    return _with_related_skill_ids(normalized_id, workflow) if workflow is not None else None
+    return (
+        _with_related_skill_ids(normalized_id, workflow)
+        if workflow is not None
+        else None
+    )
 
 
 def is_chat_workflow(workflow_id: str) -> bool:
@@ -303,7 +427,9 @@ def is_chat_workflow(workflow_id: str) -> bool:
     return bool(workflow and workflow.get("mode") == "chat")
 
 
-def _with_related_skill_ids(workflow_id: str, workflow: dict[str, Any]) -> dict[str, Any]:
+def _with_related_skill_ids(
+    workflow_id: str, workflow: dict[str, Any]
+) -> dict[str, Any]:
     public_workflow = deepcopy(workflow)
     related_skill_ids = get_skill_ids_for_workflow(workflow_id)
     if related_skill_ids:

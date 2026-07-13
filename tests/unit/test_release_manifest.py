@@ -42,7 +42,9 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
             "size_bytes": artifact.stat().st_size,
         }
     ]
-    assert checksums.read_text(encoding="utf-8") == f"{expected_hash} *{artifact.name}\n"
+    assert (
+        checksums.read_text(encoding="utf-8") == f"{expected_hash} *{artifact.name}\n"
+    )
 
 
 def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(

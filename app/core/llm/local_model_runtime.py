@@ -26,6 +26,10 @@ def get_configured_model_mode() -> str:
     try:
         from app.core.config.user_settings import SettingsManager
 
-        return str(SettingsManager().get_all().get("model_mode") or "cloud").strip().lower()
+        return (
+            str(SettingsManager().get_all().get("model_mode") or "cloud")
+            .strip()
+            .lower()
+        )
     except Exception:
         return "cloud"

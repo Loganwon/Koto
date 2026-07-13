@@ -140,7 +140,11 @@ def test_file_task_runtime_pdf_letter_window_overrides_conflicting_page_hint():
         ],
     )
 
-    list(FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(request))
+    list(
+        FileTaskRuntime(tool_executor=fake_executor, model_client=fake_model).run(
+            request
+        )
+    )
 
     parse_calls = [args for name, args in calls if name == "parse_file_to_text"]
     assert parse_calls
@@ -276,19 +280,31 @@ def test_file_task_runtime_readonly_investment_report_fallback_uses_risk_opportu
                                 ["项目", "2025H1", "2024"],
                                 ["营业收入", "13,172.52万元", "8,938.61万元"],
                                 ["净利润", "-11,500.29万元", "-25,213.18万元"],
-                                ["经营活动产生的现金流量净额", "-8,733.63万元", "-22,872万元"],
+                                [
+                                    "经营活动产生的现金流量净额",
+                                    "-8,733.63万元",
+                                    "-22,872万元",
+                                ],
                                 ["毛利率", "21.09%", "-1.12%"],
                             ]
                         },
                         {
                             "rows": [
-                                ["前十大客户", "深圳市雷鸟网络传媒有限公司", "占总销售额53.55%"],
+                                [
+                                    "前十大客户",
+                                    "深圳市雷鸟网络传媒有限公司",
+                                    "占总销售额53.55%",
+                                ],
                                 ["前十大供应商", "惠州TCL移动通信", "占总采购额47.31%"],
                             ]
                         },
                         {
                             "rows": [
-                                ["盈利预测", "2027年乐观收入253,875万元", "净利润33,796万元"],
+                                [
+                                    "盈利预测",
+                                    "2027年乐观收入253,875万元",
+                                    "净利润33,796万元",
+                                ],
                                 ["退出测算", "PS 8倍", "IRR 60%"],
                             ]
                         },
@@ -644,7 +660,10 @@ def test_file_task_runtime_treats_advisory_analysis_about_modifications_as_hybri
     assert run_started.payload["write_intent"] is False
     assert run_started.payload["intent_plan"]["can_apply"] is True
     assert run_started.payload["intent_plan"]["requires_confirmation"] is False
-    assert run_started.payload["intent_plan"]["recommended_strategy"] == "analyze_then_optional_apply"
+    assert (
+        run_started.payload["intent_plan"]["recommended_strategy"]
+        == "analyze_then_optional_apply"
+    )
     assert (
         plan_created.payload["steps"][1]["description"]
         == "模型先读取文件并给出可应用的分析建议；当前轮不默认直接写入原文件。"

@@ -63,7 +63,9 @@ class FileTaskModelClient:
         system: str,
         tools: List[Dict[str, Any]],
     ) -> Dict[str, Any]:
-        return self._call_native(request=request, messages=messages, system=system, tools=tools)
+        return self._call_native(
+            request=request, messages=messages, system=system, tools=tools
+        )
 
     def _call_native(
         self,
@@ -75,10 +77,14 @@ class FileTaskModelClient:
     ) -> Dict[str, Any]:
         mode = normalize_model_mode(request.model_mode, default="deepseek")
         if mode == "local":
-            return self._call_local(request=request, messages=messages, system=system, tools=tools)
+            return self._call_local(
+                request=request, messages=messages, system=system, tools=tools
+            )
 
         try:
-            return self._call_cloud(request=request, messages=messages, system=system, tools=tools)
+            return self._call_cloud(
+                request=request, messages=messages, system=system, tools=tools
+            )
         except Exception as exc:
             if not bool(request.options.get("allow_local_fallback", True)):
                 raise
@@ -92,7 +98,9 @@ class FileTaskModelClient:
                 "[FileTaskModelClient] cloud call failed (network/timeout), falling back to local model: %s",
                 exc,
             )
-            return self._call_local(request=request, messages=messages, system=system, tools=tools)
+            return self._call_local(
+                request=request, messages=messages, system=system, tools=tools
+            )
 
     @staticmethod
     def _is_api_layer_error(exc: Exception) -> bool:
@@ -100,7 +108,15 @@ class FileTaskModelClient:
         refusing the request (e.g. invalid key, quota exceeded, bad request).
         These should NOT trigger a local-model fallback."""
         msg = str(exc).lower()
-        api_signals = ("401", "403", "429", "invalid api key", "permission denied", "quota exceeded", "rate limit")
+        api_signals = (
+            "401",
+            "403",
+            "429",
+            "invalid api key",
+            "permission denied",
+            "quota exceeded",
+            "rate limit",
+        )
         return any(s in msg for s in api_signals)
 
     def _call_cloud(
@@ -185,7 +201,9 @@ class FileTaskModelClient:
         resolved_model = str(model_id or "").strip()
         if not resolved_model:
             try:
-                from app.core.llm.local_model_runtime import get_configured_local_model_tag
+                from app.core.llm.local_model_runtime import (
+                    get_configured_local_model_tag,
+                )
 
                 resolved_model = str(get_configured_local_model_tag() or "").strip()
             except Exception:
@@ -223,7 +241,9 @@ class FileTaskModelClient:
         )
 
     def _local_model_id(self, request: FileTaskRequest) -> str:
-        configured = str(request.options.get("local_model") or request.model_id or "").strip()
+        configured = str(
+            request.options.get("local_model") or request.model_id or ""
+        ).strip()
         if configured.lower() in {"auto", "cloud", "local", "deepseek", "ollama"}:
             return ""
         return configured

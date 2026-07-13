@@ -17,9 +17,9 @@ from typing import FrozenSet, Optional
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_BASE_URL = os.environ.get(
-    "OLLAMA_BASE_URL", "http://127.0.0.1:11434"
-).rstrip("/")
+_OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434").rstrip(
+    "/"
+)
 
 
 @lru_cache(maxsize=64)

@@ -36,7 +36,9 @@ def normalize_cloud_provider(value: Any, default: str = DEFAULT_CLOUD_PROVIDER) 
 
 def is_archived_cloud_model(model_id: Any) -> bool:
     normalized = str(model_id or "").strip().lower()
-    return any(normalized.startswith(prefix) for prefix in ARCHIVED_CLOUD_MODEL_PREFIXES)
+    return any(
+        normalized.startswith(prefix) for prefix in ARCHIVED_CLOUD_MODEL_PREFIXES
+    )
 
 
 def get_configured_cloud_provider(default: str = DEFAULT_CLOUD_PROVIDER) -> str:

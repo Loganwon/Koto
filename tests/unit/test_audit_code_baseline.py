@@ -84,7 +84,9 @@ def test_collect_baseline_keeps_audit_contract_fields(
         "docx",
         encoding="utf-8",
     )
-    (tmp_path / "web" / "static" / "univer-dist" / "assets" / "sheets-main.js").write_text(
+    (
+        tmp_path / "web" / "static" / "univer-dist" / "assets" / "sheets-main.js"
+    ).write_text(
         "sheets",
         encoding="utf-8",
     )
@@ -122,8 +124,14 @@ def test_collect_baseline_keeps_audit_contract_fields(
         for item in result["large_production_files"]
     )
     assert result["web_app_top_level_exports"] == ["chat", "KotoBrain"]
-    assert "app/core/agent/runtime.py" in result["agent_entrypoint_hits"][file_task_runtime]
-    assert "app/core/agent/unified_agent.py" in result["agent_entrypoint_hits"][unified_agent]
+    assert (
+        "app/core/agent/runtime.py"
+        in result["agent_entrypoint_hits"][file_task_runtime]
+    )
+    assert (
+        "app/core/agent/unified_agent.py"
+        in result["agent_entrypoint_hits"][unified_agent]
+    )
     assert "deleted_agent_entrypoint_hits" in result
     assert all(not files for files in result["deleted_agent_entrypoint_hits"].values())
     assert (
@@ -138,7 +146,9 @@ def test_current_agent_entrypoint_scan_keeps_deleted_loop_out() -> None:
 
     assert all(not files for files in deleted_hits.values())
     assert "web/file_task_stream.py" in production_hits["FileTaskRuntime"]
-    assert "web/services/chat_stream/agent_handler.py" in production_hits["LangGraphAgent"]
+    assert (
+        "web/services/chat_stream/agent_handler.py" in production_hits["LangGraphAgent"]
+    )
     assert "app/api/agent_routes.py" in production_hits["UnifiedAgent"]
 
 
@@ -198,9 +208,7 @@ def test_current_frontend_assets_stay_within_budget() -> None:
         "web/static/vendor",
     }
     assert set(status) == expected_assets
-    assert {
-        rel: item for rel, item in status.items() if item["over_budget"]
-    } == {}
+    assert {rel: item for rel, item in status.items() if item["over_budget"]} == {}
     assert status["web/static/vendor"]["budget"] <= 6_800_000
 
 
@@ -211,11 +219,15 @@ def test_vendor_reference_graph_tracks_package_refs(
     (tmp_path / "web" / "static" / "vendor" / "react").mkdir(parents=True)
     (tmp_path / "web" / "templates").mkdir(parents=True)
     (tmp_path / "web" / "src").mkdir(parents=True)
-    (tmp_path / "web" / "static" / "vendor" / "mermaid" / "10.9.0" / "mermaid.min.js").write_text(
+    (
+        tmp_path / "web" / "static" / "vendor" / "mermaid" / "10.9.0" / "mermaid.min.js"
+    ).write_text(
         "mermaid",
         encoding="utf-8",
     )
-    (tmp_path / "web" / "static" / "vendor" / "react" / "react.production.min.js").write_text(
+    (
+        tmp_path / "web" / "static" / "vendor" / "react" / "react.production.min.js"
+    ).write_text(
         "react",
         encoding="utf-8",
     )

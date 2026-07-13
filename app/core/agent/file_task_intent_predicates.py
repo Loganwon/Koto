@@ -27,7 +27,6 @@ from app.core.agent.file_task_runtime_patterns import (
     _WRITE_TARGET_HINT_WORDS,
 )
 
-
 _TARGETED_FILE_WRITE_CONTEXT_PATTERN = re.compile(
     r"(?:继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|"
     r"continue|improve|modify|edit|update|save|write|append|insert|copy|put|place)",
@@ -130,10 +129,9 @@ def has_strong_write_intent(task: str) -> bool:
         return True
     if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
         return True
-    if (
-        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
-        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
-    ):
+    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
+        task_text
+    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
         return True
     markers = semantic_markers(task_text)
     if (
@@ -174,10 +172,9 @@ def has_explicit_write_intent(task: str) -> bool:
         return True
     if any(pattern.search(task_text) for pattern in _IMPERATIVE_WRITE_PATTERNS):
         return True
-    if (
-        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
-        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
-    ):
+    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
+        task_text
+    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
         return True
     has_soft_action = any(word in lowered for word in _SOFT_WRITE_ACTION_WORDS)
     has_target_hint = any(word in lowered for word in _WRITE_TARGET_HINT_WORDS)
@@ -232,7 +229,9 @@ def has_readonly_write_negation(task: str) -> bool:
         for pattern in _READONLY_WRITE_NEGATION_PATTERNS
         for match in pattern.finditer(task_text)
     ]
-    if has_source_scoped_write_negation(task_text) and has_target_scoped_write_intent(task_text):
+    if has_source_scoped_write_negation(task_text) and has_target_scoped_write_intent(
+        task_text
+    ):
         source_spans = _source_scoped_write_negation_spans(task_text)
         return any(
             not _span_overlaps_any(readonly_match.span(), source_spans)
@@ -258,7 +257,9 @@ def has_global_readonly_write_negation(task: str) -> bool:
     ]
     if not global_matches:
         return False
-    if has_source_scoped_write_negation(task_text) and has_target_scoped_write_intent(task_text):
+    if has_source_scoped_write_negation(task_text) and has_target_scoped_write_intent(
+        task_text
+    ):
         source_spans = _source_scoped_write_negation_spans(task_text)
         return any(
             not _span_overlaps_any(global_match.span(), source_spans)
@@ -278,8 +279,7 @@ def has_source_scoped_write_negation(task: str) -> bool:
     if not task_text:
         return False
     return any(
-        pattern.search(task_text)
-        for pattern in _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS
+        pattern.search(task_text) for pattern in _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS
     )
 
 
@@ -291,9 +291,14 @@ def _source_scoped_write_negation_spans(task: str) -> List[tuple[int, int]]:
     ]
 
 
-def _span_overlaps_any(span: tuple[int, int], candidates: List[tuple[int, int]]) -> bool:
+def _span_overlaps_any(
+    span: tuple[int, int], candidates: List[tuple[int, int]]
+) -> bool:
     start, end = span
-    return any(max(start, candidate_start) < min(end, candidate_end) for candidate_start, candidate_end in candidates)
+    return any(
+        max(start, candidate_start) < min(end, candidate_end)
+        for candidate_start, candidate_end in candidates
+    )
 
 
 def _is_confirmation_only_negation_match(match: re.Match[str]) -> bool:
@@ -345,10 +350,9 @@ def has_artifact_creation_intent(task: str) -> bool:
         return True
     if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
         return True
-    if (
-        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
-        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
-    ):
+    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
+        task_text
+    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
         return True
     markers = semantic_markers(task_text)
     return bool(
@@ -392,9 +396,7 @@ def is_advisory_analysis_request(task: str) -> bool:
     has_analysis_cue = any(word in lowered for word in _ANALYSIS_CUE_WORDS)
     has_advice_cue = any(word in lowered for word in _ADVICE_CUE_WORDS)
     return (
-        has_analysis_cue
-        and has_advice_cue
-        and not has_explicit_write_intent(task_text)
+        has_analysis_cue and has_advice_cue and not has_explicit_write_intent(task_text)
     )
 
 

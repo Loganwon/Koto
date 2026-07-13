@@ -67,7 +67,12 @@ class EditorQuickActionExecutor:
             return
 
         is_text_quick_action = request.action_type in {
-            "polish", "translate", "summary", "check", "rewrite", "continue",
+            "polish",
+            "translate",
+            "summary",
+            "check",
+            "rewrite",
+            "continue",
         }
         if not is_text_quick_action:
             yield evt_status_message("正在分析上下文…")
@@ -110,16 +115,28 @@ class EditorQuickActionExecutor:
         result_text: Optional[str] = None
         if use_local:
             try:
-                result_text = yield from self._try_local(full_prompt, system_instruction, request)
+                result_text = yield from self._try_local(
+                    full_prompt, system_instruction, request
+                )
             except Exception as exc:
-                logger.warning("[EditorQuickActionExecutor] local failed: %s: %s", type(exc).__name__, exc)
+                logger.warning(
+                    "[EditorQuickActionExecutor] local failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
                 result_text = None
             return result_text
 
         try:
-            result_text = yield from self._try_online(full_prompt, system_instruction, request)
+            result_text = yield from self._try_online(
+                full_prompt, system_instruction, request
+            )
         except Exception as exc:
-            logger.warning("[EditorQuickActionExecutor] online failed: %s: %s", type(exc).__name__, exc)
+            logger.warning(
+                "[EditorQuickActionExecutor] online failed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
             if not llm_provider_helpers.is_online_failure(exc):
                 raise
             result_text = None
@@ -131,7 +148,9 @@ class EditorQuickActionExecutor:
             "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。"
         )
         try:
-            return (yield from self._try_local(full_prompt, system_instruction, request))
+            return (
+                yield from self._try_local(full_prompt, system_instruction, request)
+            )
         except Exception as exc:
             logger.error("[EditorQuickActionExecutor] local fallback failed: %s", exc)
             return None
@@ -143,7 +162,9 @@ class EditorQuickActionExecutor:
         request: AgentRequest,
     ) -> Iterator[AgentEvent]:
         model = self._pick_model(False, request)
-        provider = llm_provider_helpers.get_provider(model=model, model_mode=request.model_mode)
+        provider = llm_provider_helpers.get_provider(
+            model=model, model_mode=request.model_mode
+        )
         gen = provider.generate_content(
             prompt=full_prompt,
             model=model,
@@ -155,7 +176,9 @@ class EditorQuickActionExecutor:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=request.live_doc, live_mode=request.live_mode)
+                yield evt_stream_chunk(
+                    part, live_doc=request.live_doc, live_mode=request.live_mode
+                )
         return "".join(parts) or None
 
     def _try_local(
@@ -174,7 +197,9 @@ class EditorQuickActionExecutor:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=request.live_doc, live_mode=request.live_mode)
+                yield evt_stream_chunk(
+                    part, live_doc=request.live_doc, live_mode=request.live_mode
+                )
         return "".join(parts) or None
 
     def _resolve_phases(self, request: AgentRequest) -> list[dict[str, str]]:
@@ -244,7 +269,9 @@ class EditorQuickActionExecutor:
             return preferred_model
         return ""
 
-    def _build_model_unavailable_error(self, request: AgentRequest, use_local: bool) -> str:
+    def _build_model_unavailable_error(
+        self, request: AgentRequest, use_local: bool
+    ) -> str:
         normalized_mode = normalize_model_mode(request.model_mode, default="auto")
         if use_local or normalized_mode == "local":
             local_model = self._pick_local_model(request)

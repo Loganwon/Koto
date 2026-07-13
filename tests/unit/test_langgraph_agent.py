@@ -486,7 +486,9 @@ class TestLangGraphAgent:
             enable_pii_filter=False,
             enable_output_validation=False,
         )
-        with patch.object(agent, "stream", return_value=iter([{"type": "answer", "content": "ok"}])):
+        with patch.object(
+            agent, "stream", return_value=iter([{"type": "answer", "content": "ok"}])
+        ):
             steps = list(agent.run("health check", record_task=False))
 
         assert steps[-1].content == "ok"

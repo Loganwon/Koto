@@ -3,7 +3,10 @@ from __future__ import annotations
 
 
 def test_request_with_task_preserves_routing_decision() -> None:
-    from app.core.agent.file_task_contract import FileTaskRequest, FileTaskRoutingDecision
+    from app.core.agent.file_task_contract import (
+        FileTaskRequest,
+        FileTaskRoutingDecision,
+    )
     from app.core.agent.file_task_intent_adjudication import request_with_task
 
     decision = FileTaskRoutingDecision(route="file_task", confidence=0.91)
@@ -16,7 +19,10 @@ def test_request_with_task_preserves_routing_decision() -> None:
 
 
 def test_workflow_checkpoint_resume_preserves_routing_decision() -> None:
-    from app.core.agent.file_task_contract import FileTaskRequest, FileTaskRoutingDecision
+    from app.core.agent.file_task_contract import (
+        FileTaskRequest,
+        FileTaskRoutingDecision,
+    )
     from app.core.agent.file_task_workflow_state import request_with_workflow_checkpoint
 
     decision = FileTaskRoutingDecision(route="file_task", confidence=0.91)
@@ -47,14 +53,21 @@ def test_file_task_classification_facade_exports_routing_helpers() -> None:
 
 
 def test_hybrid_plan_only_requires_confirmation_when_explicit() -> None:
-    from app.core.agent.file_task_contract import FileTaskClassification, FileTaskRequest
+    from app.core.agent.file_task_contract import (
+        FileTaskClassification,
+        FileTaskRequest,
+    )
     from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
 
     planner = FileTaskIntentPlanner()
     classification = FileTaskClassification(output_mode="hybrid")
 
-    optional = planner.plan(FileTaskRequest(task="分析问题并给出修改建议"), [], classification)
-    confirmed = planner.plan(FileTaskRequest(task="先分析，等我确认后再应用"), [], classification)
+    optional = planner.plan(
+        FileTaskRequest(task="分析问题并给出修改建议"), [], classification
+    )
+    confirmed = planner.plan(
+        FileTaskRequest(task="先分析，等我确认后再应用"), [], classification
+    )
 
     assert optional.recommended_strategy == "analyze_then_optional_apply"
     assert optional.requires_confirmation is False
@@ -96,9 +109,12 @@ def test_explicit_output_name_does_not_include_the_instruction_prefix() -> None:
         "不要修改原文件。"
     )
 
-    assert explicit_output_path_from_task(
-        task, has_artifact_creation_intent=lambda _task: True
-    ) == "艺术全球规则_目录摘要.docx"
+    assert (
+        explicit_output_path_from_task(
+            task, has_artifact_creation_intent=lambda _task: True
+        )
+        == "艺术全球规则_目录摘要.docx"
+    )
     assert explicit_output_paths_from_task(
         task, has_artifact_creation_intent=lambda _task: True
     ) == ["艺术全球规则_目录摘要.docx"]
@@ -109,7 +125,10 @@ def test_named_new_output_is_not_reintroduced_as_a_source_file(tmp_path) -> None
 
     task = "生成一份名为《任务标识恢复验证.docx》的 DOCX 文档，写入标题。"
 
-    assert files_explicitly_mentioned_in_task(
-        workspace_root=tmp_path,
-        task=task,
-    ) == []
+    assert (
+        files_explicitly_mentioned_in_task(
+            workspace_root=tmp_path,
+            task=task,
+        )
+        == []
+    )

@@ -183,7 +183,9 @@ def execute_step_summary(
             detail = "；".join(parts[:4])
             more = f" 等{len(file_changes)}项" if len(file_changes) > 4 else ""
             return f"第{round_index}轮完成{len(file_changes)}项变更：{detail}{more}"
-        return f"已完成第{round_index}轮工具执行，累计记录{len(file_changes)}次文件变更。"
+        return (
+            f"已完成第{round_index}轮工具执行，累计记录{len(file_changes)}次文件变更。"
+        )
     if round_index > 0:
         return f"第{round_index}轮处理完毕，继续执行。"
     return "本轮无新增文件变更，继续执行。"

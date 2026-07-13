@@ -546,9 +546,7 @@ def create_ollama_client(
         model_tag = _resolve_model_from_settings()
 
     if not model_tag:
-        raise ValueError(
-            "未指定 Ollama 模型，且统一运行时设置中未配置 local_model"
-        )
+        raise ValueError("未指定 Ollama 模型，且统一运行时设置中未配置 local_model")
 
     return OllamaClientProxy(model_tag=model_tag, base_url=base_url)
 
@@ -630,10 +628,14 @@ def get_local_model_info() -> Dict[str, Any]:
         capabilities = None
         if local_model and ollama_reachable:
             try:
-                from app.core.llm.local_model_capabilities import get_ollama_model_capabilities
+                from app.core.llm.local_model_capabilities import (
+                    get_ollama_model_capabilities,
+                )
 
                 capability_set = get_ollama_model_capabilities(local_model)
-                capabilities = sorted(capability_set) if capability_set is not None else None
+                capabilities = (
+                    sorted(capability_set) if capability_set is not None else None
+                )
             except Exception:
                 pass
 

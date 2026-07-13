@@ -16,7 +16,6 @@ from app.core.file.path_policy import (
 )
 from app.core.services.file_service import FileService
 
-
 logger = logging.getLogger(__name__)
 
 _INVALID_NAME_RE = re.compile(r'[/\\<>:"|?*\x00-\x1f]')
@@ -54,7 +53,9 @@ class WorkspaceFsService:
     ) -> WorkspaceFsPathResult:
         if not parent_raw:
             raise WorkspaceFsError("缺少 parent 参数", status_code=400)
-        self._validate_name(name, empty_message="文件名不能为空", invalid_message="文件名包含非法字符")
+        self._validate_name(
+            name, empty_message="文件名不能为空", invalid_message="文件名包含非法字符"
+        )
 
         parent = Path(parent_raw).resolve()
         if not path_guard(parent):
@@ -66,7 +67,9 @@ class WorkspaceFsService:
         if target.exists():
             raise WorkspaceFsError(f'"{name}" 已存在', status_code=409)
         if target.suffix.lower() not in allowed_extensions:
-            raise WorkspaceFsError(f"不支持的格式: {target.suffix.lower()}", status_code=400)
+            raise WorkspaceFsError(
+                f"不支持的格式: {target.suffix.lower()}", status_code=400
+            )
 
         try:
             seed_file(target)
@@ -84,7 +87,11 @@ class WorkspaceFsService:
     ) -> WorkspaceFsPathResult:
         if not parent_raw:
             raise WorkspaceFsError("缺少 parent 参数", status_code=400)
-        self._validate_name(name, empty_message="文件夹名不能为空", invalid_message="文件夹名包含非法字符")
+        self._validate_name(
+            name,
+            empty_message="文件夹名不能为空",
+            invalid_message="文件夹名包含非法字符",
+        )
 
         parent = Path(parent_raw).resolve()
         if not path_guard(parent):
@@ -244,7 +251,9 @@ class WorkspaceFsService:
             try:
                 file_obj.save(str(target))
             except PermissionError as exc:
-                raise WorkspaceFsError(f"权限不足，无法写入 {target.name}", status_code=403) from exc
+                raise WorkspaceFsError(
+                    f"权限不足，无法写入 {target.name}", status_code=403
+                ) from exc
             except Exception as exc:
                 raise WorkspaceFsError(f"上传失败: {exc}", status_code=500) from exc
             saved.append(WorkspaceFsPathResult(path=str(target), name=target.name))
@@ -279,7 +288,11 @@ class WorkspaceFsService:
     ) -> WorkspaceFsPathResult:
         if not rel_path or not new_name:
             raise WorkspaceFsError("缺少 path 或 name 参数", status_code=400)
-        self._validate_name(new_name, empty_message="文件名无效", invalid_message="文件名不能包含路径分隔符")
+        self._validate_name(
+            new_name,
+            empty_message="文件名无效",
+            invalid_message="文件名不能包含路径分隔符",
+        )
 
         root = self._root(workspace_dir)
         old_target = self._resolve_under_root(root, rel_path)
@@ -338,7 +351,9 @@ class WorkspaceFsService:
         allowed_extensions: set[str] | frozenset[str],
         seed_file: Callable[[Path], None],
     ) -> WorkspaceFsPathResult:
-        self._validate_name(name, empty_message="文件名不能为空", invalid_message="文件名包含非法字符")
+        self._validate_name(
+            name, empty_message="文件名不能为空", invalid_message="文件名包含非法字符"
+        )
 
         root = self._root(workspace_dir)
         parent = self._resolve_under_root(root, folder.strip("/")) if folder else root
@@ -349,14 +364,18 @@ class WorkspaceFsService:
         if target.exists():
             raise WorkspaceFsError(f'"{name}" 已存在', status_code=409)
         if target.suffix.lower() not in allowed_extensions:
-            raise WorkspaceFsError(f"不支持的格式: {target.suffix.lower()}", status_code=400)
+            raise WorkspaceFsError(
+                f"不支持的格式: {target.suffix.lower()}", status_code=400
+            )
 
         try:
             seed_file(target)
         except Exception as exc:
             raise WorkspaceFsError(f"创建失败: {exc}", status_code=500) from exc
 
-        return WorkspaceFsPathResult(path=target.relative_to(root).as_posix(), name=name)
+        return WorkspaceFsPathResult(
+            path=target.relative_to(root).as_posix(), name=name
+        )
 
     def create_folder(
         self,
@@ -365,10 +384,18 @@ class WorkspaceFsService:
         parent_rel: str,
         name: str,
     ) -> WorkspaceFsPathResult:
-        self._validate_name(name, empty_message="文件夹名不能为空", invalid_message="文件夹名包含非法字符")
+        self._validate_name(
+            name,
+            empty_message="文件夹名不能为空",
+            invalid_message="文件夹名包含非法字符",
+        )
 
         root = self._root(workspace_dir)
-        parent = self._resolve_under_root(root, parent_rel.strip("/")) if parent_rel else root
+        parent = (
+            self._resolve_under_root(root, parent_rel.strip("/"))
+            if parent_rel
+            else root
+        )
         if not parent.is_dir():
             raise WorkspaceFsError("父目录不存在", status_code=404)
 
@@ -385,7 +412,9 @@ class WorkspaceFsService:
         except Exception as exc:
             raise WorkspaceFsError(f"创建失败: {exc}", status_code=500) from exc
 
-        return WorkspaceFsPathResult(path=target.relative_to(root).as_posix(), name=name)
+        return WorkspaceFsPathResult(
+            path=target.relative_to(root).as_posix(), name=name
+        )
 
     def _root(self, workspace_dir: str | Path) -> Path:
         return self.path_policy.root(workspace_dir)
@@ -396,7 +425,9 @@ class WorkspaceFsService:
         except PathPolicyError as exc:
             raise WorkspaceFsError("路径不合法", status_code=403) from exc
 
-    def _validate_name(self, name: str, *, empty_message: str, invalid_message: str) -> None:
+    def _validate_name(
+        self, name: str, *, empty_message: str, invalid_message: str
+    ) -> None:
         if not name:
             raise WorkspaceFsError(empty_message, status_code=400)
         if _INVALID_NAME_RE.search(name):
@@ -418,7 +449,9 @@ class WorkspaceFsService:
         if not result.get("success"):
             self._raise_file_service_error(result, fallback="删除失败")
 
-    def _raise_file_service_error(self, result: dict[str, Any], *, fallback: str) -> None:
+    def _raise_file_service_error(
+        self, result: dict[str, Any], *, fallback: str
+    ) -> None:
         message = str(result.get("error") or fallback)
         status_code = 500
         if "不存在" in message:

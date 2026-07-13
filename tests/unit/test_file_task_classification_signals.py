@@ -9,7 +9,9 @@ def test_classification_signals_collects_intent_and_semantic_markers():
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 
@@ -31,7 +33,9 @@ def test_classification_signals_collects_intent_and_semantic_markers():
     assert signals.docx_report_request is True
 
 
-def test_classification_signals_compare_annotation_strips_generic_annotation(monkeypatch):
+def test_classification_signals_compare_annotation_strips_generic_annotation(
+    monkeypatch,
+):
     monkeypatch.setattr(
         signals_module,
         "matched_native_capability_names",

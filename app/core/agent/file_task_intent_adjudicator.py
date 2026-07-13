@@ -16,7 +16,9 @@ from app.core.agent.file_task_intent_adjudication import (
 )
 from app.core.agent.file_task_runtime_utils import _preview
 
-ShouldAdjudicate = Callable[[FileTaskRequest, List[FileTaskFile], FileTaskClassification], bool]
+ShouldAdjudicate = Callable[
+    [FileTaskRequest, List[FileTaskFile], FileTaskClassification], bool
+]
 ModelCaller = Callable[..., Dict[str, Any]]
 
 

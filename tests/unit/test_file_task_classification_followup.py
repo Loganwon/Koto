@@ -34,10 +34,7 @@ def test_followup_improve_from_previous_annotation_restores_docx_annotation():
     assert result.write_intent is True
     assert result.execution_mode == "followup_contextual"
     assert "followup_previous_task_family:annotate" in result.reason_codes
-    assert (
-        "followup_previous_execution_mode:annotate_tool_loop"
-        in result.reason_codes
-    )
+    assert "followup_previous_execution_mode:annotate_tool_loop" in result.reason_codes
     assert "docx_annotation_request" in result.reason_codes
     assert "docx_annotation_forced_write_intent" in result.reason_codes
 
@@ -45,7 +42,9 @@ def test_followup_improve_from_previous_annotation_restores_docx_annotation():
 def test_followup_improve_from_doc_annotate_bridge_keeps_bridge_mode():
     request = FileTaskRequest(
         task="继续优化上一轮批注",
-        files=[FileTaskFile(path="translation.docx", name="translation.docx", type="docx")],
+        files=[
+            FileTaskFile(path="translation.docx", name="translation.docx", type="docx")
+        ],
         target_path="translation.docx",
     )
 

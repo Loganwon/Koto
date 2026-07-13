@@ -77,9 +77,7 @@ def test_infer_capabilities_does_not_mutate_infer_rules():
 def test_select_best_chat_prefers_flash_over_heavier_pro_when_available():
     manager = ModelManager(client=None)
     manager._cached_caps = {
-        "gemini-2.5-pro": _caps(
-            speed=4, quality=10, reasoning=10, context=10, tier=10
-        ),
+        "gemini-2.5-pro": _caps(speed=4, quality=10, reasoning=10, context=10, tier=10),
         "gemini-2.5-flash": _caps(
             speed=9,
             quality=7,

@@ -15,7 +15,9 @@ from app.core.workflows.skill_mapping import (
 def test_workflow_skill_mapped_skill_ids_exist_in_builtin_skills():
     builtin_ids = {skill["id"] for skill in BUILTIN_SKILLS}
 
-    assert {mapping.skill_id for mapping in WORKFLOW_SKILL_MAPPINGS}.issubset(builtin_ids)
+    assert {mapping.skill_id for mapping in WORKFLOW_SKILL_MAPPINGS}.issubset(
+        builtin_ids
+    )
 
 
 def test_workflow_skill_mapped_executor_ids_are_registered():

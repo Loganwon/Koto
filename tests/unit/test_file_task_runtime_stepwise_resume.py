@@ -212,9 +212,7 @@ def test_file_task_runtime_treats_awaiting_confirmation_tool_result_as_paused_st
         ).run(request)
     )
 
-    check_finished = [
-        event for event in events if event.type == "check.finished"
-    ][-1]
+    check_finished = [event for event in events if event.type == "check.finished"][-1]
     run_finished = events[-1]
 
     assert any(event.type == "plan.confirmed" for event in events)
@@ -336,9 +334,7 @@ def test_file_task_runtime_forces_windowed_pdf_read_for_stepwise_docx_summary():
         for event in events
     )
     assert any(event.type == "file.changed" for event in events)
-    check_finished = [
-        event for event in events if event.type == "check.finished"
-    ][-1]
+    check_finished = [event for event in events if event.type == "check.finished"][-1]
     run_finished = next(event for event in events if event.type == "run.finished")
     assert check_finished.payload["status"] == "awaiting_confirmation"
     assert (
@@ -887,9 +883,7 @@ def test_file_task_runtime_stepwise_resume_rehydrates_files_and_falls_back_when_
     )
 
     parse_call = next(args for name, args in tool_calls if name == "parse_file_to_text")
-    check_finished = [
-        event for event in events if event.type == "check.finished"
-    ][-1]
+    check_finished = [event for event in events if event.type == "check.finished"][-1]
 
     assert parse_call["start_page"] == 7
     assert parse_call["end_page"] == 9
@@ -1304,13 +1298,17 @@ def test_stepwise_pdf_fallback_helpers_build_structured_docx_paragraphs():
 
 def test_stepwise_docx_target_path_prefers_explicit_target_then_context_files():
     explicit = FileTaskRequest(task="分步总结", target_path="summary.docx")
-    assert stepwise_docx_target_path(explicit, []) == str(Path("summary.docx").resolve())
+    assert stepwise_docx_target_path(explicit, []) == str(
+        Path("summary.docx").resolve()
+    )
 
     target_docx = FileTaskRequest(
         task="分步总结",
         files=[
             FileTaskFile(path="source.pdf", name="source.pdf", type="pdf"),
-            FileTaskFile(path="target.docx", name="target.docx", type="docx", target=True),
+            FileTaskFile(
+                path="target.docx", name="target.docx", type="docx", target=True
+            ),
             FileTaskFile(path="other.docx", name="other.docx", type="docx"),
         ],
     )

@@ -72,13 +72,16 @@ def test_web_app_configures_settings_runtime_services(monkeypatch):
 
 
 def test_web_executable_entrypoint_uses_canonical_compat_service_imports():
-    source = (Path(__file__).resolve().parents[2] / "web" / "app_entrypoint.py").read_text(
-        encoding="utf-8"
-    )
+    source = (
+        Path(__file__).resolve().parents[2] / "web" / "app_entrypoint.py"
+    ).read_text(encoding="utf-8")
 
     assert "def _start_compat_background_services" in source
     assert "_start_compat_background_services()" in source
-    assert "from app.core.services.clipboard_manager import get_clipboard_manager" in source
+    assert (
+        "from app.core.services.clipboard_manager import get_clipboard_manager"
+        in source
+    )
     assert "from web.task_scheduler import get_task_scheduler" in source
     assert "from web.task_queue import task_queue" in source
     assert "from web.auto_catalog_scheduler import get_auto_catalog_scheduler" in source

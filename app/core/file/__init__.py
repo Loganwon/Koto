@@ -12,6 +12,7 @@ def __getattr__(name: str):
         return register_file_tools
     raise AttributeError(name)
 
+
 __all__ = [
     "FileRegistry",
     "FileEntry",

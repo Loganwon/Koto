@@ -5,11 +5,17 @@ from __future__ import annotations
 import re
 from typing import Any, Callable
 
-
 PDF_ROMAN_DIGITS = ((10, "X"), (9, "IX"), (5, "V"), (4, "IV"), (1, "I"))
 PDF_CHINESE_DIGITS = {
-    1: "一", 2: "二", 3: "三", 4: "四", 5: "五",
-    6: "六", 7: "七", 8: "八", 9: "九",
+    1: "一",
+    2: "二",
+    3: "三",
+    4: "四",
+    5: "五",
+    6: "六",
+    7: "七",
+    8: "八",
+    9: "九",
 }
 
 
@@ -37,7 +43,9 @@ def read_pdf_excerpt(
                 try:
                     page_text = pdf.pages[index].extract_text() or ""
                 except Exception as exc:
-                    logger.debug("[TaskTools] pdfplumber page %s failed: %s", index + 1, exc)
+                    logger.debug(
+                        "[TaskTools] pdfplumber page %s failed: %s", index + 1, exc
+                    )
                     page_text = ""
                 if page_text.strip():
                     block = f"[Page {index + 1}]\n{page_text.strip()}"
@@ -103,8 +111,10 @@ def int_to_chinese_letter_number(value: int) -> str:
     if number < 20:
         return "十" + PDF_CHINESE_DIGITS.get(number - 10, "")
     tens, ones = divmod(number, 10)
-    return PDF_CHINESE_DIGITS.get(tens, "") + "十" + (
-        PDF_CHINESE_DIGITS.get(ones, "") if ones else ""
+    return (
+        PDF_CHINESE_DIGITS.get(tens, "")
+        + "十"
+        + (PDF_CHINESE_DIGITS.get(ones, "") if ones else "")
     )
 
 
@@ -112,8 +122,11 @@ def pdf_letter_heading_terms(value: int) -> list[str]:
     chinese = int_to_chinese_letter_number(value)
     roman = int_to_pdf_roman(value)
     return [
-        f"第{chinese}封信", f"第 {chinese} 封信", f"Letter {roman}",
-        f"LETTER {roman}", f"letter {roman.lower()}",
+        f"第{chinese}封信",
+        f"第 {chinese} 封信",
+        f"Letter {roman}",
+        f"LETTER {roman}",
+        f"letter {roman.lower()}",
     ]
 
 
@@ -146,7 +159,10 @@ def read_pdf_letter_window(
     found_end_page = 0
     for page in range(1, 400):
         page_text = read_excerpt(
-            path, max_chars=240_000, start_page=page, end_page=page,
+            path,
+            max_chars=240_000,
+            start_page=page,
+            end_page=page,
             allow_full_fallback=False,
         )
         if not page_text.strip():
@@ -155,7 +171,11 @@ def read_pdf_letter_window(
             continue
         if not found_start_page and pdf_page_has_letter_heading(page_text, start_terms):
             found_start_page = page
-        elif found_start_page and page > found_start_page and pdf_page_has_letter_heading(page_text, next_terms):
+        elif (
+            found_start_page
+            and page > found_start_page
+            and pdf_page_has_letter_heading(page_text, next_terms)
+        ):
             found_end_page = page - 1
             break
     if not found_start_page:
@@ -166,7 +186,9 @@ def read_pdf_letter_window(
         f"resolved pages {found_start_page}-{found_end_page}]\n"
     )
     body = read_excerpt(
-        path, max_chars=max(1, max_chars - len(header)),
-        start_page=found_start_page, end_page=found_end_page,
+        path,
+        max_chars=max(1, max_chars - len(header)),
+        start_page=found_start_page,
+        end_page=found_end_page,
     )
     return (header + body).strip()[:max_chars]

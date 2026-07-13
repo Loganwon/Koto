@@ -26,7 +26,6 @@ except ImportError:
     logger.warning("Warning: python-pptx not installed. PPT generation will fail.")
 
 
-
 class SlideContent:
     """幻灯片内容"""
 
@@ -257,7 +256,11 @@ class PPTGenerator:
                         _type_name_map.get(s_type, s_type),
                     )
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "Silenced exception caught", exc_info=True
+                    )
                     pass
 
             # --- AI Image Generation Logic ---
@@ -470,7 +473,11 @@ class PPTGenerator:
                     bg_image, 0, 0, width=prs.slide_width, height=prs.slide_height
                 )
             except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                import logging
+
+                logging.getLogger(__name__).warning(
+                    "Silenced exception caught", exc_info=True
+                )
                 pass
         else:
             # Use solid color background

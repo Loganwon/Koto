@@ -14,7 +14,6 @@ from app.core.agent.file_task_classification_signals import (
 )
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 
-
 DiagnosticPredicate = Callable[[str], bool]
 
 

@@ -210,10 +210,11 @@ class RAGService:
         self._vectorstore = None
         self._doc_count = 0
         self._prefer_local = (
-        prefer_local_embeddings
-        if prefer_local_embeddings is not None
-        else os.environ.get("KOTO_PREFER_LOCAL_EMBEDDINGS", "").lower() in ("1", "true", "yes")
-    )
+            prefer_local_embeddings
+            if prefer_local_embeddings is not None
+            else os.environ.get("KOTO_PREFER_LOCAL_EMBEDDINGS", "").lower()
+            in ("1", "true", "yes")
+        )
         self._metadata_path = self.index_dir / "metadata.json"
         self._index_path = str(self.index_dir / "faiss_index")
         self._bm25_cache: Optional[Tuple] = (

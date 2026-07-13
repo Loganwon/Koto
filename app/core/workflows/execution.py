@@ -34,7 +34,9 @@ def prepare_workflow_execution(workflow_id: str) -> WorkflowExecutionPlan:
         raise WorkflowExecutionError(f"未知的工作流: {normalized_id}", 404)
 
     if is_chat_workflow(normalized_id):
-        raise WorkflowExecutionError(f"工作流 {normalized_id} 为对话模式，请通过聊天发送", 400)
+        raise WorkflowExecutionError(
+            f"工作流 {normalized_id} 为对话模式，请通过聊天发送", 400
+        )
 
     executor = get_workflow_executor(normalized_id)
     if executor is None:

@@ -21,7 +21,7 @@ def test_pdf_viewer_forces_initial_visible_page_render_passes():
     assert "const workspaceApi = getWorkspaceApi();" in src
     assert "publishWorkspaceApi({" in src
     assert "(window as any).WA" not in src
-    assert "onclick=\"WA._pdfPageMgr" not in src
+    assert 'onclick="WA._pdfPageMgr' not in src
     assert "data-wa-pdf-page-action" in src
 
 

@@ -18,7 +18,9 @@ from app.core.file.parsers.docx_parser_fallback import (
     extract_fallback_docx_metadata as _extract_fallback_docx_metadata,
     normalize_mammoth_heading_contract as _normalize_mammoth_heading_contract,
 )
-from app.core.file.parsers.docx_parser_postprocess import deduplicate_images as _deduplicate_images
+from app.core.file.parsers.docx_parser_postprocess import (
+    deduplicate_images as _deduplicate_images,
+)
 from app.core.file.parsers.docx_parser_review import (
     _extract_docx_comments,
     _extract_docx_footnotes,
@@ -706,7 +708,9 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
             "headings": headings,
             "progressive": {
                 "pending": False,
-                "target_pages": _DOCX_PREVIEW_TARGET_PAGES if progressive_preview else None,
+                "target_pages": (
+                    _DOCX_PREVIEW_TARGET_PAGES if progressive_preview else None
+                ),
             },
             "render_contract_version": _DOCX_RENDER_CONTRACT_VERSION,
             "render_source": "mammoth_fallback",

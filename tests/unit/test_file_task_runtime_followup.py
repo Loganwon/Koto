@@ -89,10 +89,25 @@ def test_file_task_runtime_target_repair_allows_generic_source_file_protection()
         task=task,
         target_path=target_path,
         files=[
-            FileTaskFile(path="service_agreement_v1.docx", name="service_agreement_v1.docx", type="docx"),
-            FileTaskFile(path="service_agreement_v2.docx", name="service_agreement_v2.docx", type="docx"),
-            FileTaskFile(path="renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"),
-            FileTaskFile(path=target_path, name="service_agreement_full_test.docx", type="docx", target=True),
+            FileTaskFile(
+                path="service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="service_agreement_v2.docx",
+                name="service_agreement_v2.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"
+            ),
+            FileTaskFile(
+                path=target_path,
+                name="service_agreement_full_test.docx",
+                type="docx",
+                target=True,
+            ),
         ],
     )
 
@@ -120,10 +135,24 @@ def test_file_task_runtime_frontend_target_repair_ignores_confirmation_negation(
         task=task,
         target_path=target_name,
         files=[
-            FileTaskFile(path=f"{source_dir}/service_agreement_v1.docx", name="service_agreement_v1.docx", type="docx"),
-            FileTaskFile(path=f"{source_dir}/service_agreement_v2.docx", name="service_agreement_v2.docx", type="docx"),
-            FileTaskFile(path=f"{source_dir}/renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"),
-            FileTaskFile(path=f"{source_dir}/{target_name}", name=target_name, type="docx"),
+            FileTaskFile(
+                path=f"{source_dir}/service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path=f"{source_dir}/service_agreement_v2.docx",
+                name="service_agreement_v2.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path=f"{source_dir}/renewal_budget.xlsx",
+                name="renewal_budget.xlsx",
+                type="xlsx",
+            ),
+            FileTaskFile(
+                path=f"{source_dir}/{target_name}", name=target_name, type="docx"
+            ),
             FileTaskFile(path=target_name, name=target_name, type="docx", target=True),
         ],
     )

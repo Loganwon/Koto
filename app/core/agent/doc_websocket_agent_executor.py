@@ -40,7 +40,12 @@ from app.core.shared.tool_parser import parse_tool_calls
 logger = logging.getLogger(__name__)
 
 _INSERT_TRIGGERS = (
-    "在光标处插入", "插入文档", "插入到文档", "请插入", "插入内容", "写入文档",
+    "在光标处插入",
+    "插入文档",
+    "插入到文档",
+    "请插入",
+    "插入内容",
+    "写入文档",
 )
 
 
@@ -92,10 +97,12 @@ class DocWebSocketAgentExecutor:
             {"id": "understand", "label": "理解需求"},
             {"id": "generate", "label": "生成回复"},
         ]
-        yield evt_plan([
-            {"id": "understand", "description": "理解需求"},
-            {"id": "generate", "description": "生成回复"},
-        ])
+        yield evt_plan(
+            [
+                {"id": "understand", "description": "理解需求"},
+                {"id": "generate", "description": "生成回复"},
+            ]
+        )
 
         yield evt_step_start("understand", "理解需求")
         yield evt_phase(phases, "understand", "running")
@@ -120,7 +127,9 @@ class DocWebSocketAgentExecutor:
             meta.finish(RunState.FAILED, hook_ctx.abort_reason)
             return
 
-        system_instruction = hook_ctx.metadata.get("system_instruction", system_instruction)
+        system_instruction = hook_ctx.metadata.get(
+            "system_instruction", system_instruction
+        )
         prompt = hook_ctx.metadata.get("prompt", prompt)
         pipeline_skill_ids = hook_ctx.metadata.get("skill_ids", [])
         pipeline_mask_result = hook_ctx.metadata.get("mask_result")
@@ -145,7 +154,9 @@ class DocWebSocketAgentExecutor:
         if result_text is None:
             meta.finish(RunState.FAILED, "LLM returned empty")
             yield evt_step_error("generate", "未能生成有效回复")
-            yield evt_task_complete(error=self._build_model_unavailable_error(request, use_local))
+            yield evt_task_complete(
+                error=self._build_model_unavailable_error(request, use_local)
+            )
             return
 
         reply_ctx = HookContext(
@@ -186,7 +197,9 @@ class DocWebSocketAgentExecutor:
                 doc_tool_step_open = False
                 for tool_call in tool_calls:
                     if not doc_tool_step_open:
-                        yield evt_step_start("prepare_doc_tool_calls", "生成文档变更指令")
+                        yield evt_step_start(
+                            "prepare_doc_tool_calls", "生成文档变更指令"
+                        )
                         doc_tool_step_open = True
                     yield evt_doc_tool_call(tool_call)
                 if doc_tool_step_open:
@@ -231,16 +244,28 @@ class DocWebSocketAgentExecutor:
         result_text: Optional[str] = None
         if use_local:
             try:
-                result_text = yield from self._try_local(full_prompt, system_instruction, request)
+                result_text = yield from self._try_local(
+                    full_prompt, system_instruction, request
+                )
             except Exception as exc:
-                logger.warning("[DocWebSocketAgentExecutor] local failed: %s: %s", type(exc).__name__, exc)
+                logger.warning(
+                    "[DocWebSocketAgentExecutor] local failed: %s: %s",
+                    type(exc).__name__,
+                    exc,
+                )
                 result_text = None
             return result_text
 
         try:
-            result_text = yield from self._try_online(full_prompt, system_instruction, request)
+            result_text = yield from self._try_online(
+                full_prompt, system_instruction, request
+            )
         except Exception as exc:
-            logger.warning("[DocWebSocketAgentExecutor] online failed: %s: %s", type(exc).__name__, exc)
+            logger.warning(
+                "[DocWebSocketAgentExecutor] online failed: %s: %s",
+                type(exc).__name__,
+                exc,
+            )
             if not llm_provider_helpers.is_online_failure(exc):
                 raise
             result_text = None
@@ -252,7 +277,9 @@ class DocWebSocketAgentExecutor:
             "⚠️ 云端 AI 暂时不可用，已自动切换到本地模型 (Ollama)，响应速度可能较慢。"
         )
         try:
-            return (yield from self._try_local(full_prompt, system_instruction, request))
+            return (
+                yield from self._try_local(full_prompt, system_instruction, request)
+            )
         except Exception as exc:
             logger.error("[DocWebSocketAgentExecutor] local fallback failed: %s", exc)
             return None
@@ -264,7 +291,9 @@ class DocWebSocketAgentExecutor:
         request: AgentRequest,
     ) -> Iterator[AgentEvent]:
         model = self._pick_model(False, request)
-        provider = llm_provider_helpers.get_provider(model=model, model_mode=request.model_mode)
+        provider = llm_provider_helpers.get_provider(
+            model=model, model_mode=request.model_mode
+        )
         chunks = provider.generate_content(
             prompt=full_prompt,
             model=model,
@@ -276,7 +305,9 @@ class DocWebSocketAgentExecutor:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=request.live_doc, live_mode=request.live_mode)
+                yield evt_stream_chunk(
+                    part, live_doc=request.live_doc, live_mode=request.live_mode
+                )
         return "".join(parts) or None
 
     def _try_local(
@@ -295,7 +326,9 @@ class DocWebSocketAgentExecutor:
             part = chunk.get("content", "") if isinstance(chunk, dict) else str(chunk)
             if part:
                 parts.append(part)
-                yield evt_stream_chunk(part, live_doc=request.live_doc, live_mode=request.live_mode)
+                yield evt_stream_chunk(
+                    part, live_doc=request.live_doc, live_mode=request.live_mode
+                )
         return "".join(parts) or None
 
     def _apply_context(self, request: AgentRequest, prompt: str) -> str:
@@ -321,7 +354,9 @@ class DocWebSocketAgentExecutor:
             if turn.get("role") != "assistant":
                 continue
             content = str(turn.get("content", "")).strip()
-            content_clean = re.sub(r"<TOOL>.*?</TOOL>", "", content, flags=re.DOTALL).strip()
+            content_clean = re.sub(
+                r"<TOOL>.*?</TOOL>", "", content, flags=re.DOTALL
+            ).strip()
             if len(content_clean) > 10:
                 last_ai = content_clean
                 break
@@ -329,12 +364,20 @@ class DocWebSocketAgentExecutor:
         if not last_ai:
             return tool_calls
 
-        paragraphs = [paragraph.strip() for paragraph in last_ai.split("\n") if paragraph.strip()]
-        html_value = "".join(f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs)
-        logger.info("[DocWebSocketAgentExecutor] Synthesised set_html from last assistant turn")
+        paragraphs = [
+            paragraph.strip() for paragraph in last_ai.split("\n") if paragraph.strip()
+        ]
+        html_value = "".join(
+            f"<p>{html.escape(paragraph)}</p>" for paragraph in paragraphs
+        )
+        logger.info(
+            "[DocWebSocketAgentExecutor] Synthesised set_html from last assistant turn"
+        )
         return [{"type": "set_html", "value": html_value}]
 
-    def _should_use_local(self, request: AgentRequest, force_local: bool = False) -> bool:
+    def _should_use_local(
+        self, request: AgentRequest, force_local: bool = False
+    ) -> bool:
         normalized_mode = normalize_model_mode(request.model_mode, default="auto")
         if normalized_mode == "local":
             return True
@@ -369,7 +412,9 @@ class DocWebSocketAgentExecutor:
             return preferred_model
         return ""
 
-    def _build_model_unavailable_error(self, request: AgentRequest, use_local: bool) -> str:
+    def _build_model_unavailable_error(
+        self, request: AgentRequest, use_local: bool
+    ) -> str:
         normalized_mode = normalize_model_mode(request.model_mode, default="auto")
         if use_local or normalized_mode == "local":
             local_model = self._pick_local_model(request)

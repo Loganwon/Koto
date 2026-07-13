@@ -26,7 +26,9 @@ class _WorkspaceAncestorParser(HTMLParser):
         values = dict(attrs)
         if values.get("id") == "workspaceView":
             self.workspace_ancestors = list(self.stack)
-        self.stack.append((tag, values.get("id", "") or "", values.get("class", "") or ""))
+        self.stack.append(
+            (tag, values.get("id", "") or "", values.get("class", "") or "")
+        )
 
     def handle_endtag(self, tag: str) -> None:
         if tag not in {"div", "main"}:
@@ -74,7 +76,11 @@ def test_workspace_view_stays_inside_main_application_shell() -> None:
     parser.feed(_read("web/templates/index.html"))
 
     assert ("main", "", "main-content chatgpt-main") in parser.workspace_ancestors
-    assert ("div", "", "app-shell chatgpt-app koto-unified-workspace") in parser.workspace_ancestors
+    assert (
+        "div",
+        "",
+        "app-shell chatgpt-app koto-unified-workspace",
+    ) in parser.workspace_ancestors
 
 
 def test_workspace_ai_entry_opens_a_conversation_not_the_history_browser() -> None:
@@ -82,7 +88,10 @@ def test_workspace_ai_entry_opens_a_conversation_not_the_history_browser() -> No
     conversation_list = _read("web/src/workspace/conversation-list.ts")
     embedded_mode = _read("web/src/ui/embedded-mode.ts")
 
-    assert 'id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史" hidden' in html
+    assert (
+        'id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史" hidden'
+        in html
+    )
     assert 'id="wa-ai-chat-view" class="wa-ai-chat-view">' in html
     assert "export function showAiChat(): void" in conversation_list
     assert "_showChatView();" in conversation_list
@@ -99,8 +108,14 @@ def test_workspace_ai_panel_rejects_narrow_persisted_split_sizes() -> None:
 
     assert "const _EMBEDDED_AI_MIN_WIDTH = 420;" in panel_layout
     assert "function _enforceEmbeddedAiWidth" in panel_layout
-    assert "requestAnimationFrame(() => _enforceEmbeddedAiWidth(splitKey, canvas, ai));" in panel_layout
-    assert "minSize: embedded ? [420, _EMBEDDED_AI_MIN_WIDTH] : [150, 400, _EMBEDDED_AI_MIN_WIDTH]" in panel_layout
+    assert (
+        "requestAnimationFrame(() => _enforceEmbeddedAiWidth(splitKey, canvas, ai));"
+        in panel_layout
+    )
+    assert (
+        "minSize: embedded ? [420, _EMBEDDED_AI_MIN_WIDTH] : [150, 400, _EMBEDDED_AI_MIN_WIDTH]"
+        in panel_layout
+    )
     assert "wa_split_sizes_embedded" not in embedded_mode
     assert "min-width: 420px;" in css
     assert "wa_split_sizes_v2" in panel_layout
@@ -122,7 +137,10 @@ def test_workspace_uses_only_current_file_menu_and_skill_message_paths() -> None
     assert "#wa-ai-input-area" in skill_extensions
     assert "#wa-ai-messages .wa-msg.ai" in skill_extensions
     assert "#wa-ai-messages, #messages" in skill_extensions
-    assert "el.classList.contains('wa-msg') && el.classList.contains('ai')" in skill_extensions
+    assert (
+        "el.classList.contains('wa-msg') && el.classList.contains('ai')"
+        in skill_extensions
+    )
     assert "#wa-user-input, #messageInput" in skill_ui
     assert "getActiveKotoComposer" in skill_ui
     assert "from '../shared/active-composer';" in skill_ui
@@ -135,7 +153,9 @@ def test_workspace_ai_controls_have_an_actionable_default_state() -> None:
     html = _read("web/templates/index.html")
 
     assert "sessionTitle(meta, _activeAiSessionId) || 'Koto AI'" in conversation_list
-    assert "button.disabled = !input || input.disabled || !input.value.trim();" in composer
+    assert (
+        "button.disabled = !input || input.disabled || !input.value.trim();" in composer
+    )
     assert "const showAiChat = (window as any).WA?.showAiChat;" in panel_layout
     assert "点击左侧快捷卡片" not in html
 
@@ -146,7 +166,9 @@ def test_workspace_click_targets_expose_keyboard_and_expanded_state() -> None:
     css = _read("web/static/css/workspace.css")
 
     assert 'id="tokenChip" role="button" tabindex="0"' in html
-    assert 'id="statusIndicator"' in html and 'onkeydown="if(event.key===\'Enter\'' in html
+    assert (
+        'id="statusIndicator"' in html and "onkeydown=\"if(event.key==='Enter'" in html
+    )
     assert 'data-wa-section-toggle="workspace"' in html
     assert 'data-wa-section-toggle="recent"' in html
     assert "function _syncSectionToggleState" in state

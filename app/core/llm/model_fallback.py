@@ -138,8 +138,17 @@ _DEEPSEEK_FALLBACK_CHAIN: List[str] = [
 _TASK_FALLBACK_CHAINS: Dict[str, List[str]] = {
     task: ["deepseek-chat"]
     for task in (
-        "CHAT", "CODER", "RESEARCH", "WEB_SEARCH", "FILE_GEN", "FILE_TASK",
-        "AGENT", "DOC_ANNOTATE", "FILE_SEARCH", "MULTI_STEP", "COMPLEX",
+        "CHAT",
+        "CODER",
+        "RESEARCH",
+        "WEB_SEARCH",
+        "FILE_GEN",
+        "FILE_TASK",
+        "AGENT",
+        "DOC_ANNOTATE",
+        "FILE_SEARCH",
+        "MULTI_STEP",
+        "COMPLEX",
     )
 }
 

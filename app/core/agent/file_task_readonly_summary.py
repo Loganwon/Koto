@@ -253,15 +253,26 @@ def _looks_like_summary_task(task: Any) -> bool:
 
 def _looks_like_investment_risk_opportunity_task(task: Any) -> bool:
     text = str(task or "").lower()
-    has_investment_context = any(token in text for token in ("一级市场", "投资报告", "投资建议", "尽调", "融资", "估值"))
-    asks_for_judgment = any(token in text for token in ("风险", "机会", "投资机会", "投资价值", "建议", "判断"))
+    has_investment_context = any(
+        token in text
+        for token in ("一级市场", "投资报告", "投资建议", "尽调", "融资", "估值")
+    )
+    asks_for_judgment = any(
+        token in text
+        for token in ("风险", "机会", "投资机会", "投资价值", "建议", "判断")
+    )
     return has_investment_context and asks_for_judgment
 
 
 def _looks_like_argument_improvement_task(task: Any) -> bool:
     text = str(task or "").lower()
-    asks_about_argument = any(token in text for token in ("论点", "论证", "观点", "argument", "thesis"))
-    asks_for_improvement = any(token in text for token in ("优化", "改进", "修改", "调整", "建议", "问题", "值得", "improv"))
+    asks_about_argument = any(
+        token in text for token in ("论点", "论证", "观点", "argument", "thesis")
+    )
+    asks_for_improvement = any(
+        token in text
+        for token in ("优化", "改进", "修改", "调整", "建议", "问题", "值得", "improv")
+    )
     return asks_about_argument and asks_for_improvement
 
 
@@ -279,7 +290,9 @@ def _build_argument_improvement_summary(
         readonly_tool_outputs=readonly_tool_outputs,
         display_path=display_path,
     )
-    thesis = _clean_claim_text(_extract_thesis(paragraphs) or _first_substantial_sentence(paragraphs))
+    thesis = _clean_claim_text(
+        _extract_thesis(paragraphs) or _first_substantial_sentence(paragraphs)
+    )
     structure_points = _select_structure_points(paragraphs, limit=5)
     if not thesis and structure_points:
         thesis = structure_points[0]
@@ -304,7 +317,10 @@ def _build_argument_improvement_summary(
         ("身体", "主体", "观看者", "虚拟", "技术", "艺术"),
     )
     content_text = " ".join(paragraphs[:8])
-    game_body_argument = any(token in content_text for token in ("电子游戏", "游戏", "身体", "观看者", "电影"))
+    game_body_argument = any(
+        token in content_text
+        for token in ("电子游戏", "游戏", "身体", "观看者", "电影")
+    )
 
     improvements: List[str] = []
     if thesis:
@@ -410,14 +426,20 @@ def _build_investment_risk_opportunity_summary(
     if not lines:
         return ""
 
-    def matches(*tokens: str, limit: int = 3, prefer: tuple[str, ...] = ()) -> List[str]:
+    def matches(
+        *tokens: str, limit: int = 3, prefer: tuple[str, ...] = ()
+    ) -> List[str]:
         candidates: List[str] = []
         for line in lines:
-            if any(token in line for token in tokens) and not _near_duplicate(line, candidates):
+            if any(token in line for token in tokens) and not _near_duplicate(
+                line, candidates
+            ):
                 candidates.append(_compact_line(line, 220))
         if not prefer:
             return candidates[:limit]
-        preferred = [line for line in candidates if any(token in line for token in prefer)]
+        preferred = [
+            line for line in candidates if any(token in line for token in prefer)
+        ]
         found: List[str] = []
         for line in [*preferred, *candidates]:
             if line and not _near_duplicate(line, found):
@@ -426,13 +448,52 @@ def _build_investment_risk_opportunity_summary(
                 break
         return found
 
-    market = matches("AI眼镜", "智能眼镜", "全球实际销量", "国内实际销量", "市场份额", limit=4)
+    market = matches(
+        "AI眼镜", "智能眼镜", "全球实际销量", "国内实际销量", "市场份额", limit=4
+    )
     technology = matches("专利", "MicroLED", "光波导", "全彩显示", "核心技术", limit=4)
-    sales = matches("营业收入", "销量", "2025H1", "2024年销量", "前十大客户", "销售额", limit=5, prefer=("营业收入", "销量", "销售额"))
-    financing = matches("估值", "融资", "回购", "本次增资", "投资金额", "IRR", "回报倍数", limit=5)
-    finance = matches("净利润", "经营活动产生的现金流量净额", "货币资金", "毛利率", "营业利润", "资产负债率", limit=6, prefer=("净利润", "经营活动产生的现金流量净额", "毛利率"))
-    concentration = matches("前十大客户", "前十大供应商", "占总销售额", "占总采购额", "深圳市雷鸟网络", "惠州TCL", limit=5, prefer=("前十大客户", "前十大供应商", "占总销售额", "占总采购额"))
-    forecast = matches("盈利预测", "2027年", "盈亏平衡", "净利率", "预测依据", limit=5, prefer=("盈利预测", "预测依据", "净利率"))
+    sales = matches(
+        "营业收入",
+        "销量",
+        "2025H1",
+        "2024年销量",
+        "前十大客户",
+        "销售额",
+        limit=5,
+        prefer=("营业收入", "销量", "销售额"),
+    )
+    financing = matches(
+        "估值", "融资", "回购", "本次增资", "投资金额", "IRR", "回报倍数", limit=5
+    )
+    finance = matches(
+        "净利润",
+        "经营活动产生的现金流量净额",
+        "货币资金",
+        "毛利率",
+        "营业利润",
+        "资产负债率",
+        limit=6,
+        prefer=("净利润", "经营活动产生的现金流量净额", "毛利率"),
+    )
+    concentration = matches(
+        "前十大客户",
+        "前十大供应商",
+        "占总销售额",
+        "占总采购额",
+        "深圳市雷鸟网络",
+        "惠州TCL",
+        limit=5,
+        prefer=("前十大客户", "前十大供应商", "占总销售额", "占总采购额"),
+    )
+    forecast = matches(
+        "盈利预测",
+        "2027年",
+        "盈亏平衡",
+        "净利率",
+        "预测依据",
+        limit=5,
+        prefer=("盈利预测", "预测依据", "净利率"),
+    )
 
     opportunity_points = [
         _join_evidence("赛道增长窗口明确", market),
@@ -442,7 +503,9 @@ def _build_investment_risk_opportunity_summary(
     ]
     risk_points = [
         _join_evidence("亏损、现金流和资金消耗仍是首要风险", finance),
-        _join_evidence("客户和供应商集中度较高，需核查关联交易与真实终端销售", concentration),
+        _join_evidence(
+            "客户和供应商集中度较高，需核查关联交易与真实终端销售", concentration
+        ),
         _join_evidence("盈利预测弹性很大，估值回报高度依赖乐观情形", forecast),
         "竞争风险：AI/AR 眼镜赛道已有 Meta、手机厂商、AR 厂商和互联网生态玩家持续进入，早期份额可能被新品周期、渠道补贴和生态绑定快速稀释。",
     ]
@@ -528,7 +591,9 @@ def _table_lines_from_payload(payload: Dict[str, Any]) -> List[str]:
         for row in table.get("rows") or []:
             if not isinstance(row, list):
                 continue
-            cells = [_normalize_article_text(cell) for cell in row if str(cell or "").strip()]
+            cells = [
+                _normalize_article_text(cell) for cell in row if str(cell or "").strip()
+            ]
             if cells:
                 lines.append(" | ".join(cells))
     return lines
@@ -537,7 +602,9 @@ def _table_lines_from_payload(payload: Dict[str, Any]) -> List[str]:
 def _docx_table_lines_from_request(request: FileTaskRequest) -> List[str]:
     candidates: List[str] = []
     if request.current_file:
-        candidates.append(str(request.current_file.path or request.current_file.name or ""))
+        candidates.append(
+            str(request.current_file.path or request.current_file.name or "")
+        )
     for file_info in request.files or []:
         candidates.append(str(file_info.path or file_info.name or ""))
     paths: List[Path] = []
@@ -564,7 +631,11 @@ def _docx_table_lines_from_request(request: FileTaskRequest) -> List[str]:
             continue
         for table in doc.tables:
             for row in table.rows:
-                cells = [_normalize_article_text(cell.text) for cell in row.cells if str(cell.text or "").strip()]
+                cells = [
+                    _normalize_article_text(cell.text)
+                    for cell in row.cells
+                    if str(cell.text or "").strip()
+                ]
                 if cells:
                     lines.append(" | ".join(cells))
     return lines[:500]

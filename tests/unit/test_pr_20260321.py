@@ -187,9 +187,7 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             os.environ.pop(k, None)
         with patch(
             "app.core.llm.provider_factory.has_deepseek_api_key", return_value=False
-        ), self.assertRaises(
-            CloudProviderUnavailableError
-        ):
+        ), self.assertRaises(CloudProviderUnavailableError):
             get_llm_provider(provider="nonexistent_provider")
 
     def test_allow_local_fallback_returns_ollama_when_cloud_missing(self):
@@ -212,9 +210,7 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             os.environ.pop(k, None)
         with patch(
             "app.core.llm.provider_factory.has_deepseek_api_key", return_value=False
-        ), patch(
-            "app.core.llm.provider_factory._load_ollama", return_value=mock_inst
-        ):
+        ), patch("app.core.llm.provider_factory._load_ollama", return_value=mock_inst):
             result = get_llm_provider(allow_local_fallback=True)
         self.assertIs(result, mock_inst)
 

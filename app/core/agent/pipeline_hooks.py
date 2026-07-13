@@ -6,7 +6,6 @@ import logging
 
 from app.core.agent.hooks import HookContext, HookPoint, HookRegistry
 
-
 logger = logging.getLogger(__name__)
 
 

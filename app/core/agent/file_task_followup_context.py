@@ -49,7 +49,9 @@ def followup_context(request: FileTaskRequest) -> dict[str, Any]:
         if text:
             cleaned[key] = _preview(text, 2000)
     # Normalize legacy key: previous_task_mode -> previous_task_execution_mode
-    if not cleaned.get("previous_task_execution_mode") and cleaned.get("previous_task_mode"):
+    if not cleaned.get("previous_task_execution_mode") and cleaned.get(
+        "previous_task_mode"
+    ):
         cleaned["previous_task_execution_mode"] = cleaned["previous_task_mode"]
 
     previous_task_file_changes = _sanitize_followup_file_changes(

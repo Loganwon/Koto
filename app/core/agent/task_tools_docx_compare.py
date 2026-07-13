@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Pure DOCX comparison helpers kept separate from the task-tools registry."""
+
 from __future__ import annotations
 
 import os
@@ -53,14 +54,79 @@ def _docx_diff_comment(kind: str, other_text: str = "", target_text: str = "") -
 
 
 _CONTRACT_RISK_RULES: tuple[tuple[str, tuple[str, ...], str], ...] = (
-    ("付款/费用", ("付款", "支付", "价款", "费用", "发票", "逾期", "payment", "invoice", "fee"), "付款或费用条款发生变化，需确认金额、期限、开票和逾期责任是否可接受。"),
-    ("违约责任", ("违约", "违约金", "赔偿", "损害", "breach", "default", "penalty", "damages"), "违约或赔偿安排发生变化，可能影响责任承担和救济成本。"),
-    ("终止/解除", ("终止", "解除", "到期", "续约", "termination", "terminate", "renewal", "expire"), "终止、解除或续约条款发生变化，需关注退出条件和通知期限。"),
-    ("责任限制", ("责任限制", "责任上限", "间接损失", "liability", "limitation", "cap", "indirect"), "责任限制或损失范围发生变化，可能扩大或缩小一方承担的风险。"),
-    ("保密/数据", ("保密", "数据", "隐私", "confidential", "privacy", "data"), "保密、数据或隐私义务发生变化，需核对披露范围和保护责任。"),
-    ("知识产权", ("知识产权", "著作权", "许可", "授权", "ip", "intellectual property", "license"), "知识产权或许可安排发生变化，需确认权利归属和使用范围。"),
-    ("争议解决", ("管辖", "仲裁", "适用法律", "诉讼", "jurisdiction", "arbitration", "governing law"), "争议解决或适用法律发生变化，可能影响维权地点、成本和程序。"),
-    ("交付/验收", ("交付", "验收", "服务水平", "sla", "delivery", "acceptance", "service level"), "交付、验收或服务水平条款发生变化，需关注履约标准和验收责任。"),
+    (
+        "付款/费用",
+        ("付款", "支付", "价款", "费用", "发票", "逾期", "payment", "invoice", "fee"),
+        "付款或费用条款发生变化，需确认金额、期限、开票和逾期责任是否可接受。",
+    ),
+    (
+        "违约责任",
+        ("违约", "违约金", "赔偿", "损害", "breach", "default", "penalty", "damages"),
+        "违约或赔偿安排发生变化，可能影响责任承担和救济成本。",
+    ),
+    (
+        "终止/解除",
+        (
+            "终止",
+            "解除",
+            "到期",
+            "续约",
+            "termination",
+            "terminate",
+            "renewal",
+            "expire",
+        ),
+        "终止、解除或续约条款发生变化，需关注退出条件和通知期限。",
+    ),
+    (
+        "责任限制",
+        (
+            "责任限制",
+            "责任上限",
+            "间接损失",
+            "liability",
+            "limitation",
+            "cap",
+            "indirect",
+        ),
+        "责任限制或损失范围发生变化，可能扩大或缩小一方承担的风险。",
+    ),
+    (
+        "保密/数据",
+        ("保密", "数据", "隐私", "confidential", "privacy", "data"),
+        "保密、数据或隐私义务发生变化，需核对披露范围和保护责任。",
+    ),
+    (
+        "知识产权",
+        (
+            "知识产权",
+            "著作权",
+            "许可",
+            "授权",
+            "ip",
+            "intellectual property",
+            "license",
+        ),
+        "知识产权或许可安排发生变化，需确认权利归属和使用范围。",
+    ),
+    (
+        "争议解决",
+        (
+            "管辖",
+            "仲裁",
+            "适用法律",
+            "诉讼",
+            "jurisdiction",
+            "arbitration",
+            "governing law",
+        ),
+        "争议解决或适用法律发生变化，可能影响维权地点、成本和程序。",
+    ),
+    (
+        "交付/验收",
+        ("交付", "验收", "服务水平", "sla", "delivery", "acceptance", "service level"),
+        "交付、验收或服务水平条款发生变化，需关注履约标准和验收责任。",
+    ),
 )
 
 
@@ -70,7 +136,10 @@ def _contract_risk_summary_from_annotations(
     matched: List[str] = []
     seen: set[str] = set()
     combined_items = [
-        " ".join(str(annotation.get(key) or "") for key in ("原文片段", "批注内容", "修改原因")).lower()
+        " ".join(
+            str(annotation.get(key) or "")
+            for key in ("原文片段", "批注内容", "修改原因")
+        ).lower()
         for annotation in annotations
     ]
     combined = "\n".join(combined_items)
@@ -144,7 +213,9 @@ def _build_docx_compare_annotations(
 
     counterpart_keys = [_docx_diff_key(text) for text in counterpart_paragraphs]
     target_keys = [_docx_diff_key(text) for text in target_paragraphs]
-    matcher = difflib.SequenceMatcher(None, counterpart_keys, target_keys, autojunk=False)
+    matcher = difflib.SequenceMatcher(
+        None, counterpart_keys, target_keys, autojunk=False
+    )
     annotations: List[Dict[str, str]] = []
     seen_anchors: set[str] = set()
     differences_detected = 0
@@ -154,7 +225,14 @@ def _build_docx_compare_annotations(
             return
         anchor = _unique_docx_anchor(anchor_text, seen_anchors)
         if anchor:
-            annotations.append({"原文片段": anchor, "批注内容": comment, "批注标签": "差异：", "修改原因": reason})
+            annotations.append(
+                {
+                    "原文片段": anchor,
+                    "批注内容": comment,
+                    "批注标签": "差异：",
+                    "修改原因": reason,
+                }
+            )
 
     for tag, i1, i2, j1, j2 in matcher.get_opcodes():
         if tag == "equal":
@@ -164,7 +242,9 @@ def _build_docx_compare_annotations(
             counterpart_slice = counterpart_paragraphs[i1:i2]
             target_slice = target_paragraphs[j1:j2]
             for offset in range(max(len(counterpart_slice), len(target_slice))):
-                other_text = counterpart_slice[offset] if offset < len(counterpart_slice) else ""
+                other_text = (
+                    counterpart_slice[offset] if offset < len(counterpart_slice) else ""
+                )
                 target_text = target_slice[offset] if offset < len(target_slice) else ""
                 if target_text:
                     add_annotation(
@@ -180,10 +260,25 @@ def _build_docx_compare_annotations(
                     "",
                 )
         elif tag == "delete":
-            missing_text = "；".join(_short_docx_diff_text(text, 120) for text in counterpart_paragraphs[i1:i2])
-            anchor_text = target_paragraphs[j1] if 0 <= j1 < len(target_paragraphs) else (target_paragraphs[j1 - 1] if 0 <= j1 - 1 < len(target_paragraphs) else "")
+            missing_text = "；".join(
+                _short_docx_diff_text(text, 120)
+                for text in counterpart_paragraphs[i1:i2]
+            )
+            anchor_text = (
+                target_paragraphs[j1]
+                if 0 <= j1 < len(target_paragraphs)
+                else (
+                    target_paragraphs[j1 - 1]
+                    if 0 <= j1 - 1 < len(target_paragraphs)
+                    else ""
+                )
+            )
             if anchor_text:
-                add_annotation(anchor_text, _docx_diff_comment("delete", other_text=missing_text), "")
+                add_annotation(
+                    anchor_text,
+                    _docx_diff_comment("delete", other_text=missing_text),
+                    "",
+                )
         if len(annotations) >= max_differences:
             break
     return annotations, differences_detected
@@ -191,7 +286,9 @@ def _build_docx_compare_annotations(
 
 def _same_resolved_path(left: str, right: str) -> bool:
     try:
-        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(os.path.abspath(right))
+        return os.path.normcase(os.path.abspath(left)) == os.path.normcase(
+            os.path.abspath(right)
+        )
     except Exception:
         return os.path.normcase(str(left or "")) == os.path.normcase(str(right or ""))
 
@@ -208,10 +305,18 @@ def _docx_compare_annotation_candidates(
     target_paragraphs = _docx_nonempty_paragraph_texts(target_resolved)
     if not original_paragraphs and not revised_paragraphs:
         return [], 0
-    counterpart_paragraphs = revised_paragraphs if _same_resolved_path(target_resolved, original_resolved) else original_paragraphs
+    counterpart_paragraphs = (
+        revised_paragraphs
+        if _same_resolved_path(target_resolved, original_resolved)
+        else original_paragraphs
+    )
     return _build_docx_compare_annotations(
         counterpart_paragraphs,
         target_paragraphs,
         max_differences=max_differences,
-        target_label="被标注原文" if _same_resolved_path(target_resolved, original_resolved) else "被标注文档",
+        target_label=(
+            "被标注原文"
+            if _same_resolved_path(target_resolved, original_resolved)
+            else "被标注文档"
+        ),
     )

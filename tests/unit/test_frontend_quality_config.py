@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 EXPECTED_BUNDLES = {
     "auth-bundle": "src/shared/auth.ts",
     "app-bundle": "src/bundles/app.ts",
@@ -54,7 +53,10 @@ def test_frontend_bundle_build_entries_match_templates_and_outputs():
         encoding="utf-8"
     )
 
-    assert package_json["scripts"]["build"] == "tsc --noEmit && node scripts/build-bundles.mjs"
+    assert (
+        package_json["scripts"]["build"]
+        == "tsc --noEmit && node scripts/build-bundles.mjs"
+    )
     assert "const OUT = resolve(ROOT, 'static/js/build');" in build_script
     assert "emptyOutDir: false" in build_script
     assert "format: 'iife'" in build_script
@@ -70,6 +72,8 @@ def test_frontend_bundle_build_entries_match_templates_and_outputs():
     assert "js/build/skills-ui-bundle.js" in index_template
     assert "js/build/workspace-bundle.js" in workspace_assets
     assert "js/build/review-bundle.js" in workspace_assets
-    assert workspace_assets.index("workspace-bundle.js") < workspace_assets.index("review-bundle.js")
+    assert workspace_assets.index("workspace-bundle.js") < workspace_assets.index(
+        "review-bundle.js"
+    )
     assert "js/build/skill-marketplace-bundle.js" in marketplace_template
     assert "js/build/skill-community-bundle.js" in community_template

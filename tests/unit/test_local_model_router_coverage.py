@@ -795,7 +795,9 @@ class TestLocalModelRouterCoverage:
         from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
-        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         LocalModelRouter._response_model = None
         LocalModelRouter._response_model_inited = False
 
@@ -809,7 +811,9 @@ class TestLocalModelRouterCoverage:
         from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
-        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         LocalModelRouter._response_model = None
         LocalModelRouter._response_model_inited = False
         LocalModelRouter._model_name = "qwen3:4b"
@@ -1223,7 +1227,9 @@ class TestLocalModelRouterCoverage:
         from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
-        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         LocalModelRouter.reset_response_model()
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):
             mock_get.return_value = _mock_tags_response(["qwen3:8b"])
@@ -1236,7 +1242,9 @@ class TestLocalModelRouterCoverage:
         from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
-        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         LocalModelRouter.reset_response_model()
         LocalModelRouter._model_name = "qwen3:4b"
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):

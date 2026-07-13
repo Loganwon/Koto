@@ -12,7 +12,6 @@ import json
 
 import pytest
 
-
 PAGE_TIMEOUT = 15_000
 THINK_SHORT = 400
 THINK_MEDIUM = 800
@@ -64,8 +63,7 @@ def _open_workspace_ai(page, base_url: str):
 
 def _sse_body(events: list[dict]) -> str:
     return "".join(
-        f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-        for event in events
+        f"data: {json.dumps(event, ensure_ascii=False)}\n\n" for event in events
     )
 
 
@@ -85,7 +83,9 @@ def _mock_file_task_route(page):
 
 @pytest.mark.e2e
 class TestWorkspaceAiAssistantSmoke:
-    def test_workspace_ai_panel_shell_loads(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_panel_shell_loads(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         _open_workspace_ai(e2e_page, e2e_base_url)
 
         e2e_page.locator("#wa-ai").wait_for(timeout=PAGE_TIMEOUT)
@@ -94,7 +94,9 @@ class TestWorkspaceAiAssistantSmoke:
         e2e_page.locator("#wa-ai-messages").wait_for(timeout=PAGE_TIMEOUT)
 
         assert e2e_page.locator("#wa-ai-route-info").count() > 0
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     def test_workspace_model_toggle_is_unique_and_switches_modes(
         self, e2e_page, console_errors, e2e_base_url
@@ -144,15 +146,40 @@ class TestWorkspaceAiAssistantSmoke:
 
         expected_modes = (["deepseek"] if not initially_deepseek else []) + ["local"]
         assert captured_modes == expected_modes
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_send_message_renders_mocked_whitebox_task_card(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_send_message_renders_mocked_whitebox_task_card(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         captured = {}
         sse_events = [
-            {"type": "run.started", "run_id": "browser_smoke", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-            {"type": "plan.created", "run_id": "browser_smoke", "seq": 2, "payload": {"summary": "准备处理任务。"}},
-            {"type": "step.started", "run_id": "browser_smoke", "seq": 3, "step_id": "execute", "payload": {"title": "处理中"}},
-            {"type": "run.finished", "run_id": "browser_smoke", "seq": 4, "payload": {"summary": "模拟任务已完成", "completed_task": True}},
+            {
+                "type": "run.started",
+                "run_id": "browser_smoke",
+                "seq": 1,
+                "payload": {"mode": "whitebox_v1"},
+            },
+            {
+                "type": "plan.created",
+                "run_id": "browser_smoke",
+                "seq": 2,
+                "payload": {"summary": "准备处理任务。"},
+            },
+            {
+                "type": "step.started",
+                "run_id": "browser_smoke",
+                "seq": 3,
+                "step_id": "execute",
+                "payload": {"title": "处理中"},
+            },
+            {
+                "type": "run.finished",
+                "run_id": "browser_smoke",
+                "seq": 4,
+                "payload": {"summary": "模拟任务已完成", "completed_task": True},
+            },
         ]
 
         def fulfill_task_stream(route):
@@ -183,23 +210,78 @@ class TestWorkspaceAiAssistantSmoke:
         assert "模拟任务已完成" in summary
         assert captured["payload"]["task"] == "总结当前文件"
         assert isinstance(captured["payload"].get("history"), list)
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_task_card_renders_terminal_process_in_browser(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_task_card_renders_terminal_process_in_browser(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         sse_events = [
-            {"type": "run.started", "run_id": "browser_step_result", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-            {"type": "plan.created", "run_id": "browser_step_result", "seq": 2, "payload": {"summary": "准备处理任务。"}},
-            {"type": "step.started", "run_id": "browser_step_result", "seq": 3, "step_id": "context", "payload": {"title": "读取显式上下文"}},
-            {"type": "step.result", "run_id": "browser_step_result", "seq": 4, "step_id": "context", "payload": {"title": "读取显式上下文", "summary": "已整理 1 份上下文片段。", "status": "completed", "snippet_count": 1}},
-            {"type": "step.started", "run_id": "browser_step_result", "seq": 5, "step_id": "execute", "payload": {"title": "模型规划并调用工具"}},
-            {"type": "step.result", "run_id": "browser_step_result", "seq": 6, "step_id": "execute", "payload": {"title": "模型工具执行完成", "summary": "已完成第 1 轮工具执行。", "status": "completed", "round": 1}},
-            {"type": "run.finished", "run_id": "browser_step_result", "seq": 7, "payload": {"summary": "模拟任务已完成", "completed_task": True}},
+            {
+                "type": "run.started",
+                "run_id": "browser_step_result",
+                "seq": 1,
+                "payload": {"mode": "whitebox_v1"},
+            },
+            {
+                "type": "plan.created",
+                "run_id": "browser_step_result",
+                "seq": 2,
+                "payload": {"summary": "准备处理任务。"},
+            },
+            {
+                "type": "step.started",
+                "run_id": "browser_step_result",
+                "seq": 3,
+                "step_id": "context",
+                "payload": {"title": "读取显式上下文"},
+            },
+            {
+                "type": "step.result",
+                "run_id": "browser_step_result",
+                "seq": 4,
+                "step_id": "context",
+                "payload": {
+                    "title": "读取显式上下文",
+                    "summary": "已整理 1 份上下文片段。",
+                    "status": "completed",
+                    "snippet_count": 1,
+                },
+            },
+            {
+                "type": "step.started",
+                "run_id": "browser_step_result",
+                "seq": 5,
+                "step_id": "execute",
+                "payload": {"title": "模型规划并调用工具"},
+            },
+            {
+                "type": "step.result",
+                "run_id": "browser_step_result",
+                "seq": 6,
+                "step_id": "execute",
+                "payload": {
+                    "title": "模型工具执行完成",
+                    "summary": "已完成第 1 轮工具执行。",
+                    "status": "completed",
+                    "round": 1,
+                },
+            },
+            {
+                "type": "run.finished",
+                "run_id": "browser_step_result",
+                "seq": 7,
+                "payload": {"summary": "模拟任务已完成", "completed_task": True},
+            },
         ]
 
         _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
-            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=_sse_body(sse_events)
+            ),
         )
 
         _open_workspace_ai(e2e_page, e2e_base_url)
@@ -223,7 +305,9 @@ class TestWorkspaceAiAssistantSmoke:
         assert "读取文件" in card_text
         assert "完成核验" in card_text
         assert "模拟任务已完成" in card_text
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
     @pytest.mark.parametrize(
         ("terminal_status", "expected_title", "expected_detail"),
@@ -243,8 +327,18 @@ class TestWorkspaceAiAssistantSmoke:
     ):
         summary_text = "模型未返回完整答案，当前只保留临时结果。"
         sse_events = [
-            {"type": "run.started", "run_id": f"browser_{terminal_status}", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-            {"type": "plan.created", "run_id": f"browser_{terminal_status}", "seq": 2, "payload": {"summary": "准备处理任务。"}},
+            {
+                "type": "run.started",
+                "run_id": f"browser_{terminal_status}",
+                "seq": 1,
+                "payload": {"mode": "whitebox_v1"},
+            },
+            {
+                "type": "plan.created",
+                "run_id": f"browser_{terminal_status}",
+                "seq": 2,
+                "payload": {"summary": "准备处理任务。"},
+            },
             {
                 "type": "run.finished",
                 "run_id": f"browser_{terminal_status}",
@@ -260,7 +354,9 @@ class TestWorkspaceAiAssistantSmoke:
         _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
-            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=_sse_body(sse_events)
+            ),
         )
 
         _open_workspace_ai(e2e_page, e2e_base_url)
@@ -289,9 +385,13 @@ class TestWorkspaceAiAssistantSmoke:
         assert expected_title in card_text
         assert expected_detail in card_text
         assert "任务完成" not in card_text
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_task_card_renders_supervisor_audit(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_task_card_renders_supervisor_audit(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         supervisor_audit = {
             "version": "file_task_supervisor_audit_v1",
             "status": "warning",
@@ -315,16 +415,66 @@ class TestWorkspaceAiAssistantSmoke:
             "task_plan": {"mainline_locked": True, "steps": []},
         }
         sse_events = [
-            {"type": "run.started", "run_id": "browser_supervisor", "seq": 1, "payload": {"mode": "whitebox_v1", "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
-            {"type": "supervisor.status", "run_id": "browser_supervisor", "seq": 2, "step_id": "plan", "payload": {"stage": "planned", "summary": supervisor_audit["summary"], "mainline_locked": True, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
-            {"type": "task.classified", "run_id": "browser_supervisor", "seq": 3, "step_id": "plan", "payload": {"classification": {"task_family": "analyze", "operation_kind": "read", "output_mode": "answer", "write_intent": False, "confidence": 0.42, "reason_codes": ["low_classification_confidence"]}, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
-            {"type": "run.finished", "run_id": "browser_supervisor", "seq": 4, "payload": {"summary": "模拟监管任务已完成", "completed_task": True, "workflow_state": workflow_state, "supervisor_audit": supervisor_audit}},
+            {
+                "type": "run.started",
+                "run_id": "browser_supervisor",
+                "seq": 1,
+                "payload": {
+                    "mode": "whitebox_v1",
+                    "workflow_state": workflow_state,
+                    "supervisor_audit": supervisor_audit,
+                },
+            },
+            {
+                "type": "supervisor.status",
+                "run_id": "browser_supervisor",
+                "seq": 2,
+                "step_id": "plan",
+                "payload": {
+                    "stage": "planned",
+                    "summary": supervisor_audit["summary"],
+                    "mainline_locked": True,
+                    "workflow_state": workflow_state,
+                    "supervisor_audit": supervisor_audit,
+                },
+            },
+            {
+                "type": "task.classified",
+                "run_id": "browser_supervisor",
+                "seq": 3,
+                "step_id": "plan",
+                "payload": {
+                    "classification": {
+                        "task_family": "analyze",
+                        "operation_kind": "read",
+                        "output_mode": "answer",
+                        "write_intent": False,
+                        "confidence": 0.42,
+                        "reason_codes": ["low_classification_confidence"],
+                    },
+                    "workflow_state": workflow_state,
+                    "supervisor_audit": supervisor_audit,
+                },
+            },
+            {
+                "type": "run.finished",
+                "run_id": "browser_supervisor",
+                "seq": 4,
+                "payload": {
+                    "summary": "模拟监管任务已完成",
+                    "completed_task": True,
+                    "workflow_state": workflow_state,
+                    "supervisor_audit": supervisor_audit,
+                },
+            },
         ]
 
         _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
-            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=_sse_body(sse_events)
+            ),
         )
 
         _open_workspace_ai(e2e_page, e2e_base_url)
@@ -346,9 +496,13 @@ class TestWorkspaceAiAssistantSmoke:
         card_text = task_card.evaluate("(el) => el.textContent || ''")
         assert "监管需关注" in card_text
         assert "置信度 42%" in card_text
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_task_card_shows_refresh_state_when_file_changes(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_task_card_shows_refresh_state_when_file_changes(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         open_counts = {"report.txt": 0}
 
         def fulfill_open_file(route):
@@ -376,19 +530,74 @@ class TestWorkspaceAiAssistantSmoke:
             )
 
         sse_events = [
-            {"type": "run.started", "run_id": "browser_refresh", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-            {"type": "plan.created", "run_id": "browser_refresh", "seq": 2, "payload": {"summary": "准备刷新文件。"}},
-            {"type": "step.started", "run_id": "browser_refresh", "seq": 3, "step_id": "execute", "payload": {"title": "模型规划并调用工具"}},
-            {"type": "file.changed", "run_id": "browser_refresh", "seq": 4, "step_id": "execute", "payload": {"path": "report.txt", "file_path": "report.txt", "file_type": "txt", "operation": "annotate_file", "summary": "已更新 report.txt。", "annotations_added": 1, "supported": True}},
-            {"type": "step.result", "run_id": "browser_refresh", "seq": 5, "step_id": "execute", "payload": {"title": "模型工具执行完成", "summary": "已写回 report.txt 并刷新前端视图。", "status": "completed", "file_change_count": 1, "file_changes": [{"path": "report.txt", "operation": "annotate_file", "summary": "已更新 report.txt。"}]}},
-            {"type": "run.finished", "run_id": "browser_refresh", "seq": 6, "payload": {"summary": "模拟刷新已完成", "completed_task": True}},
+            {
+                "type": "run.started",
+                "run_id": "browser_refresh",
+                "seq": 1,
+                "payload": {"mode": "whitebox_v1"},
+            },
+            {
+                "type": "plan.created",
+                "run_id": "browser_refresh",
+                "seq": 2,
+                "payload": {"summary": "准备刷新文件。"},
+            },
+            {
+                "type": "step.started",
+                "run_id": "browser_refresh",
+                "seq": 3,
+                "step_id": "execute",
+                "payload": {"title": "模型规划并调用工具"},
+            },
+            {
+                "type": "file.changed",
+                "run_id": "browser_refresh",
+                "seq": 4,
+                "step_id": "execute",
+                "payload": {
+                    "path": "report.txt",
+                    "file_path": "report.txt",
+                    "file_type": "txt",
+                    "operation": "annotate_file",
+                    "summary": "已更新 report.txt。",
+                    "annotations_added": 1,
+                    "supported": True,
+                },
+            },
+            {
+                "type": "step.result",
+                "run_id": "browser_refresh",
+                "seq": 5,
+                "step_id": "execute",
+                "payload": {
+                    "title": "模型工具执行完成",
+                    "summary": "已写回 report.txt 并刷新前端视图。",
+                    "status": "completed",
+                    "file_change_count": 1,
+                    "file_changes": [
+                        {
+                            "path": "report.txt",
+                            "operation": "annotate_file",
+                            "summary": "已更新 report.txt。",
+                        }
+                    ],
+                },
+            },
+            {
+                "type": "run.finished",
+                "run_id": "browser_refresh",
+                "seq": 6,
+                "payload": {"summary": "模拟刷新已完成", "completed_task": True},
+            },
         ]
 
         _mock_file_task_route(e2e_page)
         e2e_page.route("**/api/v1/workspace/open_file_by_path", fulfill_open_file)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
-            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=_sse_body(sse_events)
+            ),
         )
 
         _open_workspace_ai(e2e_page, e2e_base_url)
@@ -417,9 +626,13 @@ class TestWorkspaceAiAssistantSmoke:
         assert "report.txt" in card_text
         assert "模拟刷新已完成" in card_text
         assert "已刷新" not in card_text
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_history_survives_file_switch_within_runtime_session(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_history_survives_file_switch_within_runtime_session(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         captured = {"payloads": []}
 
         def fulfill_open_file(route):
@@ -459,9 +672,24 @@ class TestWorkspaceAiAssistantSmoke:
                 content_type="text/event-stream",
                 body=_sse_body(
                     [
-                        {"type": "run.started", "run_id": f"browser_smoke_{idx}", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-                        {"type": "plan.created", "run_id": f"browser_smoke_{idx}", "seq": 2, "payload": {"summary": "准备处理任务。"}},
-                        {"type": "run.finished", "run_id": f"browser_smoke_{idx}", "seq": 3, "payload": {"summary": summary, "completed_task": True}},
+                        {
+                            "type": "run.started",
+                            "run_id": f"browser_smoke_{idx}",
+                            "seq": 1,
+                            "payload": {"mode": "whitebox_v1"},
+                        },
+                        {
+                            "type": "plan.created",
+                            "run_id": f"browser_smoke_{idx}",
+                            "seq": 2,
+                            "payload": {"summary": "准备处理任务。"},
+                        },
+                        {
+                            "type": "run.finished",
+                            "run_id": f"browser_smoke_{idx}",
+                            "seq": 3,
+                            "payload": {"summary": summary, "completed_task": True},
+                        },
                     ]
                 ),
             )
@@ -531,28 +759,77 @@ class TestWorkspaceAiAssistantSmoke:
 
         assert first_payload.get("session_id")
         assert second_payload.get("session_id") == first_payload.get("session_id")
-        assert any(item.get("role") == "user" and item.get("content") == "先分析文档A" for item in second_history)
-        assert any(item.get("role") == "assistant" and item.get("content") == "模拟任务1已完成" for item in second_history)
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert any(
+            item.get("role") == "user" and item.get("content") == "先分析文档A"
+            for item in second_history
+        )
+        assert any(
+            item.get("role") == "assistant" and item.get("content") == "模拟任务1已完成"
+            for item in second_history
+        )
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_completed_task_persists_and_restores_final_answer_last(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_completed_task_persists_and_restores_final_answer_last(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         summary_text = "browser final answer is last"
         sse_events = [
-            {"type": "run.started", "run_id": "browser_history_restore", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-            {"type": "plan.created", "run_id": "browser_history_restore", "seq": 2, "payload": {"summary": "准备处理任务。"}},
-            {"type": "step.started", "run_id": "browser_history_restore", "seq": 3, "step_id": "execute", "payload": {"title": "执行处理"}},
-            {"type": "step.result", "run_id": "browser_history_restore", "seq": 4, "step_id": "execute", "payload": {"title": "执行处理", "summary": "步骤完成，结果见总结与回答。", "status": "completed"}},
-            {"type": "run.finished", "run_id": "browser_history_restore", "seq": 5, "payload": {"summary": summary_text, "completed_task": True, "status": "completed"}},
+            {
+                "type": "run.started",
+                "run_id": "browser_history_restore",
+                "seq": 1,
+                "payload": {"mode": "whitebox_v1"},
+            },
+            {
+                "type": "plan.created",
+                "run_id": "browser_history_restore",
+                "seq": 2,
+                "payload": {"summary": "准备处理任务。"},
+            },
+            {
+                "type": "step.started",
+                "run_id": "browser_history_restore",
+                "seq": 3,
+                "step_id": "execute",
+                "payload": {"title": "执行处理"},
+            },
+            {
+                "type": "step.result",
+                "run_id": "browser_history_restore",
+                "seq": 4,
+                "step_id": "execute",
+                "payload": {
+                    "title": "执行处理",
+                    "summary": "步骤完成，结果见总结与回答。",
+                    "status": "completed",
+                },
+            },
+            {
+                "type": "run.finished",
+                "run_id": "browser_history_restore",
+                "seq": 5,
+                "payload": {
+                    "summary": summary_text,
+                    "completed_task": True,
+                    "status": "completed",
+                },
+            },
         ]
 
         _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
-            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=_sse_body(sse_events)
+            ),
         )
 
         _open_workspace_ai(e2e_page, e2e_base_url)
-        session_id = e2e_page.evaluate("""() => window._waSession && window._waSession()""")
+        session_id = e2e_page.evaluate(
+            """() => window._waSession && window._waSession()"""
+        )
         assert session_id and not str(session_id).startswith("workspace_runtime_")
 
         e2e_page.locator("#wa-user-input").fill("生成一份任务总结")
@@ -586,7 +863,12 @@ class TestWorkspaceAiAssistantSmoke:
                 }""",
                 [session_id, summary_text],
             )
-            if persisted and persisted.get("schema") == 2 and persisted.get("entry_schema") == 2 and persisted.get("has_structure"):
+            if (
+                persisted
+                and persisted.get("schema") == 2
+                and persisted.get("entry_schema") == 2
+                and persisted.get("has_structure")
+            ):
                 break
             e2e_page.wait_for_timeout(250)
 
@@ -603,7 +885,10 @@ class TestWorkspaceAiAssistantSmoke:
             timeout=PAGE_TIMEOUT,
         )
         e2e_page.evaluate("""() => window.WA.openInMainView()""")
-        e2e_page.evaluate("""(sessionId) => window.WA.openAiSession(sessionId, { force: true })""", session_id)
+        e2e_page.evaluate(
+            """(sessionId) => window.WA.openAiSession(sessionId, { force: true })""",
+            session_id,
+        )
         e2e_page.wait_for_function(
             """(summaryText) => {
                 const host = document.querySelector('.wa-task-report-turn');
@@ -620,15 +905,35 @@ class TestWorkspaceAiAssistantSmoke:
             timeout=PAGE_TIMEOUT,
         )
 
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"
 
-    def test_workspace_ai_multichart_artifacts_render_as_grid_and_guard_is_readable(self, e2e_page, console_errors, e2e_base_url):
+    def test_workspace_ai_multichart_artifacts_render_as_grid_and_guard_is_readable(
+        self, e2e_page, console_errors, e2e_base_url
+    ):
         chart_png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
         final_summary = "仍有生成图表未插入 DOCX：chart2_product_mix.png"
         sse_events = [
-            {"type": "run.started", "run_id": "browser_multichart_guard", "seq": 1, "payload": {"mode": "whitebox_v1"}},
-            {"type": "plan.created", "run_id": "browser_multichart_guard", "seq": 2, "payload": {"summary": "准备生成多张财务图表并写入 Word。"}},
-            {"type": "step.started", "run_id": "browser_multichart_guard", "seq": 3, "step_id": "execute", "payload": {"title": "执行代码生成图表"}},
+            {
+                "type": "run.started",
+                "run_id": "browser_multichart_guard",
+                "seq": 1,
+                "payload": {"mode": "whitebox_v1"},
+            },
+            {
+                "type": "plan.created",
+                "run_id": "browser_multichart_guard",
+                "seq": 2,
+                "payload": {"summary": "准备生成多张财务图表并写入 Word。"},
+            },
+            {
+                "type": "step.started",
+                "run_id": "browser_multichart_guard",
+                "seq": 3,
+                "step_id": "execute",
+                "payload": {"title": "执行代码生成图表"},
+            },
             {
                 "type": "tool.finished",
                 "run_id": "browser_multichart_guard",
@@ -639,9 +944,24 @@ class TestWorkspaceAiAssistantSmoke:
                     "success": True,
                     "result_preview": "已生成 2 张图表",
                     "artifacts": [
-                        {"kind": "image", "name": "chart1_revenue_profit_trend.png", "mime_type": "image/png", "data": chart_png},
-                        {"kind": "image", "name": "chart2_product_mix.png", "mime_type": "image/png", "data": chart_png},
-                        {"kind": "image", "name": "chart2_product_mix.png", "mime_type": "image/png", "data": chart_png},
+                        {
+                            "kind": "image",
+                            "name": "chart1_revenue_profit_trend.png",
+                            "mime_type": "image/png",
+                            "data": chart_png,
+                        },
+                        {
+                            "kind": "image",
+                            "name": "chart2_product_mix.png",
+                            "mime_type": "image/png",
+                            "data": chart_png,
+                        },
+                        {
+                            "kind": "image",
+                            "name": "chart2_product_mix.png",
+                            "mime_type": "image/png",
+                            "data": chart_png,
+                        },
                     ],
                 },
             },
@@ -657,18 +977,31 @@ class TestWorkspaceAiAssistantSmoke:
                     "pending_image_count": 1,
                 },
             },
-            {"type": "run.finished", "run_id": "browser_multichart_guard", "seq": 6, "payload": {"summary": final_summary, "completed_task": False, "status": "quality_gate_failed"}},
+            {
+                "type": "run.finished",
+                "run_id": "browser_multichart_guard",
+                "seq": 6,
+                "payload": {
+                    "summary": final_summary,
+                    "completed_task": False,
+                    "status": "quality_gate_failed",
+                },
+            },
         ]
 
         _mock_file_task_route(e2e_page)
         e2e_page.route(
             "**/api/editor/ai/task-stream",
-            lambda route: route.fulfill(status=200, content_type="text/event-stream", body=_sse_body(sse_events)),
+            lambda route: route.fulfill(
+                status=200, content_type="text/event-stream", body=_sse_body(sse_events)
+            ),
         )
 
         _open_workspace_ai(e2e_page, e2e_base_url)
 
-        e2e_page.locator("#wa-user-input").fill("分析 xlsx 财务预测，生成多张图并加入 docx")
+        e2e_page.locator("#wa-user-input").fill(
+            "分析 xlsx 财务预测，生成多张图并加入 docx"
+        )
         e2e_page.locator("#wa-send-btn").click()
 
         e2e_page.wait_for_function(
@@ -680,8 +1013,7 @@ class TestWorkspaceAiAssistantSmoke:
             timeout=PAGE_TIMEOUT,
         )
 
-        layout = e2e_page.evaluate(
-            """() => {
+        layout = e2e_page.evaluate("""() => {
                 const host = document.querySelector('.wa-task-artifacts');
                 const images = Array.from(document.querySelectorAll('.wa-task-artifact-image'));
                 const card = document.querySelector('.wa-task-run');
@@ -695,8 +1027,7 @@ class TestWorkspaceAiAssistantSmoke:
                     aspectRatio: imageStyle ? imageStyle.aspectRatio : '',
                     cardText: card ? (card.textContent || '') : '',
                 };
-            }"""
-        )
+            }""")
 
         assert layout["imageCount"] == 2
         assert layout["display"] == "grid"
@@ -705,4 +1036,6 @@ class TestWorkspaceAiAssistantSmoke:
         assert layout["aspectRatio"] == "16 / 10"
         assert "image_insert_guard" not in layout["cardText"]
         assert "chart2_product_mix.png" in layout["cardText"]
-        assert _real_errors(console_errors) == [], f"JS errors: {_real_errors(console_errors)}"
+        assert (
+            _real_errors(console_errors) == []
+        ), f"JS errors: {_real_errors(console_errors)}"

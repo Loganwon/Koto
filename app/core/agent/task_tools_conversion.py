@@ -4,6 +4,7 @@ The public task-tools module owns workspace-path policy and keeps compatibility
 symbols for existing callers.  This module owns converter selection and the
 stable result payloads for DOCX/PDF and general file conversion.
 """
+
 from __future__ import annotations
 
 import json
@@ -104,10 +105,14 @@ def convert_docx_to_pdf(
     if not resolved:
         return json.dumps({"error": f"File not found: {path}"}, ensure_ascii=False)
     if Path(resolved).suffix.lower() not in {".docx", ".doc"}:
-        return json.dumps({"error": "Only DOCX/DOC inputs are supported"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": "Only DOCX/DOC inputs are supported"}, ensure_ascii=False
+        )
     target = resolve_output_path(path, resolved, target_path, ".pdf")
     if not target:
-        return json.dumps({"error": f"Invalid target path: {target_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"Invalid target path: {target_path}"}, ensure_ascii=False
+        )
     os.makedirs(os.path.dirname(target), exist_ok=True)
     target_exists_before = os.path.exists(target)
     display_path = target_path or str(Path(path).with_suffix(".pdf"))
@@ -164,7 +169,9 @@ def convert_file(
 
     target = resolve_output_path(file_path, resolved, output_path, target_ext)
     if not target:
-        return json.dumps({"error": f"Invalid output path: {output_path}"}, ensure_ascii=False)
+        return json.dumps(
+            {"error": f"Invalid output path: {output_path}"}, ensure_ascii=False
+        )
     os.makedirs(os.path.dirname(target), exist_ok=True)
     target_exists_before = os.path.exists(target)
     display_path = output_path or str(Path(file_path).with_suffix(target_ext))
@@ -172,7 +179,9 @@ def convert_file(
     try:
         from web.file_converter import convert
 
-        result = convert(source_path=resolved, target_format=target_ext, output_path=target)
+        result = convert(
+            source_path=resolved, target_format=target_ext, output_path=target
+        )
     except Exception as exc:
         return blocked_write_result(
             result_path(display_path, target),
@@ -199,13 +208,20 @@ def convert_file(
 
     output = os.path.normpath(str(result.get("output_path") or target))
     to_format = str(result.get("to_format") or target_ext.lstrip(".")).strip().lower()
-    from_format = str(result.get("from_format") or Path(resolved).suffix.lstrip(".")).strip().lower()
+    from_format = (
+        str(result.get("from_format") or Path(resolved).suffix.lstrip("."))
+        .strip()
+        .lower()
+    )
     warning = str(result.get("warning") or "").strip()
     if result.get("success") and os.path.exists(output):
         return success_result(
             result_path(display_path, output),
             operation="convert_file",
-            summary=str(result.get("message") or f"已转换为 {to_format.upper()}：{Path(output).name}"),
+            summary=str(
+                result.get("message")
+                or f"已转换为 {to_format.upper()}：{Path(output).name}"
+            ),
             file_type=to_format or target_ext.lstrip("."),
             change_type="modify" if target_exists_before else "create",
             summary_code="CONVERT_OK",

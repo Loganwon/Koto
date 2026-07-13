@@ -33,27 +33,40 @@ def test_retargeting_preserves_the_client_task_id() -> None:
 
     request = FileTaskRequest(task="生成报告", task_id="task_reconnect_456")
 
-    assert request_with_target_path(request, "report.docx").task_id == "task_reconnect_456"
+    assert (
+        request_with_target_path(request, "report.docx").task_id == "task_reconnect_456"
+    )
 
 
 def test_context_reader_ignores_instruction_prefixed_target_alias() -> None:
-    from app.core.agent.file_task_context_read import _is_instruction_prefixed_target_alias
+    from app.core.agent.file_task_context_read import (
+        _is_instruction_prefixed_target_alias,
+    )
     from app.core.agent.file_task_contract import FileTaskFile
 
     request = FileTaskRequest(task="生成报告", target_path="report.docx")
-    malformed = FileTaskFile(path="生成一份名为《report.docx", name="report.docx", type="docx")
-    target = FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True)
+    malformed = FileTaskFile(
+        path="生成一份名为《report.docx", name="report.docx", type="docx"
+    )
+    target = FileTaskFile(
+        path="report.docx", name="report.docx", type="docx", target=True
+    )
 
     assert _is_instruction_prefixed_target_alias(request, malformed) is True
     assert _is_instruction_prefixed_target_alias(request, target) is False
 
 
-def test_workspace_task_runner_keeps_one_task_id_across_initial_and_recovery_streams() -> None:
+def test_workspace_task_runner_keeps_one_task_id_across_initial_and_recovery_streams() -> (
+    None
+):
     source = open("web/src/workspace/task-runner.ts", encoding="utf-8").read()
 
     assert "function createFileTaskId(): string" in source
     assert "payload.task_id = createFileTaskId();" in source
-    assert "card.dataset.taskId = String(payload.task_id || payload.taskId || '').trim();" in source
+    assert (
+        "card.dataset.taskId = String(payload.task_id || payload.taskId || '').trim();"
+        in source
+    )
     assert "function persistedTaskStreamEvent(event: Record<string, any>)" in source
     assert "events.map(persistedTaskStreamEvent)" in source
     assert "showTaskStreamReconnectNotice(card);" in source

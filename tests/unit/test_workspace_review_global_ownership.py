@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -46,7 +45,10 @@ def test_global_owners_keep_docx_review_and_toolbar_close_contracts() -> None:
     assert "_syncReviewStateForActiveFile().catch(() => {});" in ai_review
     assert "_refreshReviewShell();" in ai_review
 
-    assert "WA.openReviewCenter = () => { _setReviewCenterOpen(true); _renderReviewShell(); };" in docx_review_runtime
+    assert (
+        "WA.openReviewCenter = () => { _setReviewCenterOpen(true); _renderReviewShell(); };"
+        in docx_review_runtime
+    )
     assert "WA.toggleReviewCommentMode" in docx_review_runtime
 
     assert "if (state.fileType === 'docx')" in selection_toolbar

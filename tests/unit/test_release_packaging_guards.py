@@ -31,9 +31,9 @@ def test_release_build_includes_mcp_websocket_dependencies():
 
 def test_univer_build_clears_stale_source_maps_before_esbuild_runs():
     package = Path("web/univer-editor/package.json").read_text(encoding="utf-8")
-    prepare = Path(
-        "web/univer-editor/scripts/prepare-univer-assets.js"
-    ).read_text(encoding="utf-8")
+    prepare = Path("web/univer-editor/scripts/prepare-univer-assets.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "node ./scripts/prepare-univer-assets.js && esbuild" in package
     assert "sheets-main.js.map" in prepare
@@ -42,8 +42,12 @@ def test_univer_build_clears_stale_source_maps_before_esbuild_runs():
 
 def test_release_checks_deepseek_configuration_not_archived_gemini_example():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
-    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(encoding="utf-8")
-    portable_e2e = Path("tests/installer/test_portable_e2e.ps1").read_text(encoding="utf-8")
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+    portable_e2e = Path("tests/installer/test_portable_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
 
     for source in (release, installer_e2e, portable_e2e):
         assert "deepseek_config.env.example" in source
@@ -78,7 +82,10 @@ def test_runtime_requirements_exclude_dev_only_tools():
     assert "send2trash" in runtime_requirements
     assert "send2trash" not in dev_requirements
     assert "pyaudio==" not in lock_requirements
-    assert "pip install -r config/requirements.txt -r config/requirements-dev.txt" in dev_requirements
+    assert (
+        "pip install -r config/requirements.txt -r config/requirements-dev.txt"
+        in dev_requirements
+    )
 
 
 def test_pre_commit_bandit_references_existing_setup_cfg_section():
@@ -155,8 +162,8 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
         assert "::error::ZIP not found; portable E2E is required" in pipeline
 
     assert '$webDir = Join-Path $REPO_ROOT "web"' in local_release
-    assert "[pscustomobject]@{ Label = \"主 Web 前端\"" in local_release
-    assert "[pscustomobject]@{ Label = \"Univer 文件助手前端\"" in local_release
+    assert '[pscustomobject]@{ Label = "主 Web 前端"' in local_release
+    assert '[pscustomobject]@{ Label = "Univer 文件助手前端"' in local_release
     assert "[switch]$AllowPrebuiltFrontend" in local_release
     assert "[switch]$AllowNoInstaller" in local_release
     assert "[switch]$AllowDirtyWorktree" in local_release
@@ -169,7 +176,10 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert 'Join-Path $StaticRoot "univer-dist\\index.html"' in local_release
     assert "包含已废弃的 Univer index.html" in local_release
     assert "Get-UniverIndexAssetRefs" not in local_release
-    assert 'Join-Path $REPO_ROOT "scripts\\clean_inplace_cython_artifacts.py"' in local_release
+    assert (
+        'Join-Path $REPO_ROOT "scripts\\clean_inplace_cython_artifacts.py"'
+        in local_release
+    )
     assert "Cython 编译前清理源码覆盖产物" in local_release
     assert "发布收尾：清理源码覆盖产物" in local_release
     assert "版本号仅可包含字母、数字、点、下划线、加号和连字符" in local_release
@@ -184,15 +194,19 @@ def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     assert 'Name = "personality_matrix.json"' in release_build
     assert '"exploratory": 0.5' in release_build
     assert release_build.count("Set-PackagedRuntimeConfigDefaults -ConfigRoot") == 2
-    assert release_build.index("Set-PackagedRuntimeConfigDefaults -ConfigRoot") < release_build.index(
-        "Test-PackagedConfigDefaults -ConfigRoot"
-    )
+    assert release_build.index(
+        "Set-PackagedRuntimeConfigDefaults -ConfigRoot"
+    ) < release_build.index("Test-PackagedConfigDefaults -ConfigRoot")
 
 
 def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
     setup = Path("src/koto_setup.py").read_text(encoding="utf-8")
-    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(encoding="utf-8")
-    portable_e2e = Path("tests/installer/test_portable_e2e.ps1").read_text(encoding="utf-8")
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+    portable_e2e = Path("tests/installer/test_portable_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert 'os.environ.get("KOTO_SERVER_ONLY") != "1"' in setup
     for source in (installer_e2e, portable_e2e):
@@ -237,10 +251,12 @@ def test_inno_setup_path_resolution_is_shared():
 
 def test_installer_places_the_start_menu_shortcut_in_the_koto_group():
     installer = Path("koto_installer.iss").read_text(encoding="utf-8")
-    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(encoding="utf-8")
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert 'Name: "{group}\\{#AppName}"; Filename: "{app}\\{#AppExeName}"' in installer
-    assert 'Start Menu shortcut missing: $startMenu\\Koto.lnk' in installer_e2e
+    assert "Start Menu shortcut missing: $startMenu\\Koto.lnk" in installer_e2e
 
 
 def test_sandbox_uses_writable_matplotlib_config_dir():
@@ -296,7 +312,10 @@ def test_explicit_internal_hiddenimports_resolve():
         node.value.elts
         for node in tree.body
         if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "hiddenimports" for target in node.targets)
+        and any(
+            isinstance(target, ast.Name) and target.id == "hiddenimports"
+            for target in node.targets
+        )
         and isinstance(node.value, ast.List)
     )
     internal_modules = [
@@ -306,7 +325,9 @@ def test_explicit_internal_hiddenimports_resolve():
         and isinstance(node.value, str)
         and node.value.startswith(("app.", "web.", "launcher.", "src."))
     ]
-    missing = [name for name in internal_modules if importlib.util.find_spec(name) is None]
+    missing = [
+        name for name in internal_modules if importlib.util.find_spec(name) is None
+    ]
 
     assert missing == []
 

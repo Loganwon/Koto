@@ -12,9 +12,7 @@ logger = logging.getLogger(__name__)
 def _resolve_api_key(api_key: Optional[str] = None) -> Optional[str]:
     """统一读取 API Key，兼容项目内所有环境变量命名。"""
     return (
-        api_key
-        or os.environ.get("DEEPSEEK_API_KEY")
-        or os.environ.get("DEEPSEEK_KEY")
+        api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY")
     )
 
 

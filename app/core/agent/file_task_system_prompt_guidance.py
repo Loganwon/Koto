@@ -3,7 +3,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
-from app.core.agent.file_task_contract import FileTaskClassification, FileTaskFile, FileTaskRequest
+from app.core.agent.file_task_contract import (
+    FileTaskClassification,
+    FileTaskFile,
+    FileTaskRequest,
+)
 from app.core.agent.file_task_docx_guidance import build_docx_prompt_guidance
 from app.core.agent.file_task_prompt_sections import (
     financial_chart_docx_guidance as _prompt_financial_chart_docx_guidance,

@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 # Backward-compatible test/extension hook. Cloud embedding initialization is disabled.
 genai = None
 
+
 class KnowledgeBase:
     """知识库管理器 - 本地索引和余弦相似度搜索。"""
 

@@ -89,13 +89,12 @@ def test_docx_annotation_request_respects_skip_option():
 
 def test_docx_annotation_contract_accepts_selected_bridge_recipe():
     request = _docx_request("继续优化批注")
-    classification = FileTaskClassification(
-        selected_recipe="single_docx_review_bridge"
-    )
+    classification = FileTaskClassification(selected_recipe="single_docx_review_bridge")
 
-    assert docx_annotation_has_request_contract(
-        request, request.files, classification
-    ) is True
+    assert (
+        docx_annotation_has_request_contract(request, request.files, classification)
+        is True
+    )
 
 
 def test_docx_annotation_contract_accepts_followup_annotation_context():
@@ -110,9 +109,10 @@ def test_docx_annotation_contract_accepts_followup_annotation_context():
     )
     classification = FileTaskClassification(docx_annotation_request=True)
 
-    assert docx_annotation_has_request_contract(
-        request, request.files, classification
-    ) is True
+    assert (
+        docx_annotation_has_request_contract(request, request.files, classification)
+        is True
+    )
 
 
 def test_docx_annotation_contract_rejects_non_docx_request():
@@ -120,13 +120,12 @@ def test_docx_annotation_contract_rejects_non_docx_request():
         task="Please annotate this document.",
         files=[FileTaskFile(path="source.pdf", name="source.pdf", type="pdf")],
     )
-    classification = FileTaskClassification(
-        selected_recipe="single_docx_review_bridge"
-    )
+    classification = FileTaskClassification(selected_recipe="single_docx_review_bridge")
 
-    assert docx_annotation_has_request_contract(
-        request, request.files, classification
-    ) is False
+    assert (
+        docx_annotation_has_request_contract(request, request.files, classification)
+        is False
+    )
 
 
 def test_docx_annotation_contract_for_request_builds_classification_predicate():

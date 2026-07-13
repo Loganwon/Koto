@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 
 def _get_settings_manager():
     from app.core.config.user_settings import SettingsManager
+
     return SettingsManager()
 
 
@@ -98,14 +99,14 @@ def get_llm_provider(
     allow_local_fallback: bool = False,
 ) -> LLMProvider:
     """
-      Return an initialised LLMProvider.
+    Return an initialised LLMProvider.
 
-      Selection logic (highest to lowest priority):
-      1. `provider` argument (explicit override)
-      2. `model` string prefix
-      3. Per-request API key in flask.g (set by auth middleware)
-      4. Available cloud API keys: DEEPSEEK_API_KEY → OPENAI_API_KEY → ANTHROPIC_API_KEY
-      5. Local fallback only when explicitly allowed
+    Selection logic (highest to lowest priority):
+    1. `provider` argument (explicit override)
+    2. `model` string prefix
+    3. Per-request API key in flask.g (set by auth middleware)
+    4. Available cloud API keys: DEEPSEEK_API_KEY → OPENAI_API_KEY → ANTHROPIC_API_KEY
+    5. Local fallback only when explicitly allowed
     """
     # Collect per-request key from Flask g (if inside a request context)
     request_api_key: Optional[str] = None

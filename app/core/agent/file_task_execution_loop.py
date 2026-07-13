@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """The model-and-tool execution phase extracted from ``FileTaskRuntime.run``."""
+
 from __future__ import annotations
 
 import json
@@ -166,7 +167,6 @@ class FileTaskExecutionLoop:
         active_execution_plan: Optional[WhiteboxExecutionPlan] = None
         last_execution_plan_signature = ""
 
-
         def _result(*, cancelled: bool = False) -> FileTaskExecutionResult:
             return FileTaskExecutionResult(
                 cancelled=cancelled,
@@ -233,17 +233,19 @@ class FileTaskExecutionLoop:
                     },
                     step_id=execute_step_id,
                 )
-                deterministic_change = yield from runtime._write_stepwise_pdf_docx_native(
-                    ledger,
-                    request,
-                    executor,
-                    snippets,
-                    context_files,
-                    recipe_skeleton,
-                    execute_step_id,
-                    reason="model_unavailable",
-                    fallback=True,
-                    model_unavailable=True,
+                deterministic_change = (
+                    yield from runtime._write_stepwise_pdf_docx_native(
+                        ledger,
+                        request,
+                        executor,
+                        snippets,
+                        context_files,
+                        recipe_skeleton,
+                        execute_step_id,
+                        reason="model_unavailable",
+                        fallback=True,
+                        model_unavailable=True,
+                    )
                 )
                 if deterministic_change:
                     file_changes.append(deterministic_change)
@@ -352,9 +354,7 @@ class FileTaskExecutionLoop:
                 tool_calls=tool_calls,
             )
             tool_calls = answer_only_tool_calls.tool_calls
-            discarded_answer_only_tool_calls = (
-                answer_only_tool_calls.discarded_count
-            )
+            discarded_answer_only_tool_calls = answer_only_tool_calls.discarded_count
             yield ledger.event(
                 "model.call.finished",
                 {
@@ -379,8 +379,8 @@ class FileTaskExecutionLoop:
             execution_brief, content_text = runtime._extract_execution_brief(
                 response, content_text
             )
-            tool_execution_brief, tool_calls = runtime._extract_execution_brief_tool_call(
-                tool_calls
+            tool_execution_brief, tool_calls = (
+                runtime._extract_execution_brief_tool_call(tool_calls)
             )
             if tool_execution_brief and not execution_brief:
                 execution_brief = tool_execution_brief
@@ -423,7 +423,9 @@ class FileTaskExecutionLoop:
                             )
                             messages.append({"role": "user", "content": repair_message})
                             continue
-                        final_summary = str(gate_payload.get("summary") or "白盒计划审查未通过。")
+                        final_summary = str(
+                            gate_payload.get("summary") or "白盒计划审查未通过。"
+                        )
                         completed_task = False
                         yield ledger.event(
                             "step.result",
@@ -436,11 +438,7 @@ class FileTaskExecutionLoop:
                             step_id=execute_step_id,
                         )
                         break
-            if (
-                not tool_gap
-                and known_tool_gap
-                and not tool_calls
-            ):
+            if not tool_gap and known_tool_gap and not tool_calls:
                 tool_gap = known_tool_gap
 
             if execution_brief:
@@ -602,7 +600,9 @@ class FileTaskExecutionLoop:
                         request, execution_brief
                     )
                     final_summary = (
-                        execution_brief.summary or content_text or "已完成任务分析，准备继续执行。"
+                        execution_brief.summary
+                        or content_text
+                        or "已完成任务分析，准备继续执行。"
                     )
                     yield ledger.event(
                         "step.result",
@@ -789,7 +789,8 @@ class FileTaskExecutionLoop:
                             runtime._build_step_result_payload(
                                 title="检查执行状态",
                                 summary=str(
-                                    repair_check_payload.get("summary") or "检查未通过。"
+                                    repair_check_payload.get("summary")
+                                    or "检查未通过。"
                                 ),
                                 status=(
                                     "completed"
@@ -1068,11 +1069,11 @@ class FileTaskExecutionLoop:
                     supervisor_status_payload(
                         workflow_state,
                         stage=tool_stage,
-                        summary=(
-                            f"准备调用 {tool_name}，监管层保持主线和工具边界。"
-                        ),
+                        summary=(f"准备调用 {tool_name}，监管层保持主线和工具边界。"),
                         active_step_id=(
-                            "write_output" if tool_stage == "writing" else "model_reasoning"
+                            "write_output"
+                            if tool_stage == "writing"
+                            else "model_reasoning"
                         ),
                         completed_step_ids=["read_context"],
                         file_changes=file_changes,
@@ -1081,9 +1082,7 @@ class FileTaskExecutionLoop:
                 )
 
                 if not is_file_task_tool(tool_name):
-                    error_text = (
-                        f"工具 {tool_name or '<empty>'} 不在 Koto 文件任务 allowlist 中。"
-                    )
+                    error_text = f"工具 {tool_name or '<empty>'} 不在 Koto 文件任务 allowlist 中。"
                     guard = build_tool_guard_emission(
                         tool_name=tool_name,
                         tool_args=tool_args,
@@ -1314,9 +1313,7 @@ class FileTaskExecutionLoop:
                     target = write_target_for_tool(tool_name, tool_args)
                     write_key = runtime._write_dedupe_key_for_tool(tool_name, tool_args)
                     if completed_write_ops.get(write_key, 0) >= max_write_ops_per_file:
-                        skip_text = (
-                            f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
-                        )
+                        skip_text = f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
                         guard = build_tool_guard_emission(
                             tool_name=tool_name,
                             tool_args=tool_args,
@@ -1469,7 +1466,9 @@ class FileTaskExecutionLoop:
                     artifact = current_tool_runtime_outcome.get("next_action_artifact")
                     if isinstance(artifact, dict):
                         next_action_artifact = artifact
-                runtime_status = runtime._tool_runtime_status(current_tool_runtime_outcome)
+                runtime_status = runtime._tool_runtime_status(
+                    current_tool_runtime_outcome
+                )
                 runtime_blocked = runtime_status in {"blocked", "write_blocked"}
                 result_text = stringify_result(model_result)
                 if success and not is_write_tool(tool_name):
@@ -1674,12 +1673,12 @@ class FileTaskExecutionLoop:
                     repair_check_payload["runtime"] = repair_runtime
                     repair_check_payload["repair_attempt"] = repair_attempts
                     yield ledger.event(
-                            "check.started",
-                            {
-                                "title": "检查执行状态",
-                                "criteria": completion_criteria,
-                                "repair_attempt": repair_attempts,
-                            },
+                        "check.started",
+                        {
+                            "title": "检查执行状态",
+                            "criteria": completion_criteria,
+                            "repair_attempt": repair_attempts,
+                        },
                         step_id="check",
                     )
                     yield ledger.event(
@@ -1798,6 +1797,5 @@ class FileTaskExecutionLoop:
             if final_summary:
                 readonly_fallback_used = True
                 completed_task = False
-
 
         return _result()

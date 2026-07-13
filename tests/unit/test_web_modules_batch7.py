@@ -173,7 +173,11 @@ class TestPPTMasterDataclasses:
         assert ContentDensity.DENSE.value == "dense"
 
     def test_slide_blueprint_to_dict(self):
-        from app.core.services.ppt_master import ContentDensity, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            ContentDensity,
+            SlideBlueprint,
+            SlideType,
+        )
 
         sb = SlideBlueprint(
             slide_index=0,
@@ -276,7 +280,11 @@ class TestPPTLayoutPlanner:
         assert "balanced" in planner.layout_rules
 
     def test_plan_layout_title(self):
-        from app.core.services.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTLayoutPlanner,
+            SlideBlueprint,
+            SlideType,
+        )
 
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(slide_index=0, slide_type=SlideType.TITLE, title="T")
@@ -284,7 +292,11 @@ class TestPPTLayoutPlanner:
         assert config["title_size"] == 54
 
     def test_plan_layout_comparison(self):
-        from app.core.services.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTLayoutPlanner,
+            SlideBlueprint,
+            SlideType,
+        )
 
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(slide_index=1, slide_type=SlideType.COMPARISON, title="C")
@@ -384,7 +396,11 @@ class TestPPTImageMatcher:
         assert m.image_cache == {}
 
     def test_generate_prompts_for_content_image(self):
-        from app.core.services.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
@@ -397,7 +413,11 @@ class TestPPTImageMatcher:
         assert "AI Tech" in prompts[0]
 
     def test_generate_prompts_for_comparison(self):
-        from app.core.services.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
@@ -409,7 +429,11 @@ class TestPPTImageMatcher:
         assert len(prompts) == 2
 
     def test_generate_prompts_for_content_returns_empty(self):
-        from app.core.services.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
@@ -421,7 +445,11 @@ class TestPPTImageMatcher:
         assert prompts == []
 
     def test_generate_image_prompts_updates_slides(self):
-        from app.core.services.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         slides = [
@@ -818,7 +846,10 @@ class TestWorkflowManager:
 
         with patch("builtins.open", mock_open()):
             with patch("app.core.services.workflow_manager.json.dump"):
-                with patch("app.core.services.workflow_manager.os.path.exists", return_value=False):
+                with patch(
+                    "app.core.services.workflow_manager.os.path.exists",
+                    return_value=False,
+                ):
                     mgr = WorkflowManager(storage_dir="/tmp/wf")
                     wf = mgr.create_workflow("ToDelete")
                     assert mgr.delete_workflow(wf.id) is True

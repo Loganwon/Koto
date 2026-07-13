@@ -22,7 +22,7 @@ def test_main_chat_onboarding_uses_actionable_examples():
     assert "快速开始 — 点击任意卡片填入示例" not in html
     assert "insertSuggestionWithSkill(" not in html
     assert "window.insertSuggestion" not in html
-    assert "onclick=\"insertSuggestion" not in html
+    assert 'onclick="insertSuggestion' not in html
     assert html.count("data-koto-suggestion=") == 9
     primary_composer = _read("web/src/workspace/primary-composer.ts")
     assert "setActiveKotoComposerText(text)" in primary_composer
@@ -47,7 +47,10 @@ def test_hidden_legacy_composer_delegates_to_workspace_sender():
 
     assert "function delegateHiddenLegacySendToWorkspace(event?: Event)" in main_ts
     assert "const workspaceSender = (window as any).WA?.sendMessage" in main_ts
-    assert "if (legacyMessage || workspaceInput.value.trim()) workspaceSender();" in main_ts
+    assert (
+        "if (legacyMessage || workspaceInput.value.trim()) workspaceSender();"
+        in main_ts
+    )
     assert "Double-click / rapid-submit prevention" not in html
     assert "_kotoResetSending" not in html
     assert 'target: "#wa-chat-panel, #wa-user-input"' in html
@@ -66,12 +69,20 @@ def test_cross_feature_composer_access_has_one_workspace_first_boundary():
     assert boundary.index("wa-user-input") < boundary.index("messageInput")
     assert "from '../shared/active-composer';" in skill_ui
     assert "getActiveKotoComposer" in skill_ui
-    assert "import { submitActiveKotoComposerText } from '../shared/active-composer';" in skill_extensions
+    assert (
+        "import { submitActiveKotoComposerText } from '../shared/active-composer';"
+        in skill_extensions
+    )
     assert "function _setChatInputValue" not in skill_extensions
     assert "getActiveKotoMessageContainer" in skill_ui
     assert "submitActiveKotoComposerText(final);" in tarot
     assert "getActiveKotoMessageContainer" in tarot
-    on_confirm = tarot[tarot.index("function onConfirm(): void {"):tarot.index("function renderPostReadingScreen", tarot.index("function onConfirm(): void {"))]
+    on_confirm = tarot[
+        tarot.index("function onConfirm(): void {") : tarot.index(
+            "function renderPostReadingScreen",
+            tarot.index("function onConfirm(): void {"),
+        )
+    ]
     assert "messageInput" not in on_confirm
     assert "sendBtn" not in on_confirm
 

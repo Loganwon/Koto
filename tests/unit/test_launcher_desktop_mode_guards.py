@@ -20,5 +20,5 @@ def test_desktop_launcher_requires_json_health_contract():
     src = (_repo_root() / "Koto_Start.ps1").read_text(encoding="utf-8-sig")
 
     assert "Invoke-RestMethod" in src
-    assert '$status -in @(\"healthy\", \"degraded\")' in src
+    assert '$status -in @("healthy", "degraded")' in src
     assert "$response -is [string]" in src

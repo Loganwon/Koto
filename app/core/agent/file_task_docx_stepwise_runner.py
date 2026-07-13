@@ -449,9 +449,7 @@ def _docx_stepwise_polished_paragraphs(
             messages=[
                 {
                     "role": "user",
-                    "content": docx_polish_window_prompt(
-                        request, window["paragraphs"]
-                    ),
+                    "content": docx_polish_window_prompt(request, window["paragraphs"]),
                 }
             ],
             system=(
@@ -469,10 +467,7 @@ def _docx_stepwise_polished_paragraphs(
         logger.warning("[FileTaskRuntime] stepwise DOCX polish model failed: %s", exc)
 
     if not polished:
-        polished = [
-            simple_polish_docx_paragraph(text)
-            for text in window["paragraphs"]
-        ]
+        polished = [simple_polish_docx_paragraph(text) for text in window["paragraphs"]]
     return DocxStepwisePolishResult(
         paragraphs=polished,
         model_failed=model_failed,

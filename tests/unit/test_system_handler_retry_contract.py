@@ -7,4 +7,4 @@ def test_system_handler_respects_non_retryable_local_executor_failures():
     )
 
     assert "Utils.is_failure_output(response_text)" in source
-    assert "exec_result.get(\"retryable\") is not False" in source
+    assert 'exec_result.get("retryable") is not False' in source

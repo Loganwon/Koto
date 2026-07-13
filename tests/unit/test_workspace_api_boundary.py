@@ -7,7 +7,9 @@ def _repo_root() -> Path:
 
 def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods():
     root = _repo_root()
-    api = (root / "web" / "src" / "shared" / "workspace-api.ts").read_text(encoding="utf-8")
+    api = (root / "web" / "src" / "shared" / "workspace-api.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "export function getWorkspaceApi" in api
     assert "export function publishWorkspaceApi" in api
@@ -85,7 +87,10 @@ def test_workspace_state_file_rows_use_delegated_actions():
     source = (root / "web/src/workspace/state.ts").read_text(encoding="utf-8")
 
     assert 'onclick="WA.openRecentFile' not in source
-    assert 'oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx' not in source
+    assert (
+        'oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx'
+        not in source
+    )
     assert 'data-wa-file-draggable="true"' in source
     assert 'data-wa-file-action="open"' in source
     assert 'data-wa-workspace-row-action="remove-my"' in source

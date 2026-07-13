@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from flask import Flask
 
-
 TEST_MCP_API_KEY = "test-mcp-key"
 
 
@@ -116,7 +115,9 @@ def test_mcp_routes_list_and_call_status_tool(monkeypatch):
     assert '"server_count": 0' in body["result"]["content"][0]["text"]
 
 
-def test_mcp_json_rpc_works_without_browser_csrf_but_rejects_untrusted_origin(monkeypatch):
+def test_mcp_json_rpc_works_without_browser_csrf_but_rejects_untrusted_origin(
+    monkeypatch,
+):
     from app.api import mcp_routes
     from app.api.mcp_routes import mcp_bp
     from web.app_blueprints import _exempt_csrf_blueprint
@@ -171,7 +172,9 @@ def test_mcp_write_file_blocks_source_tree_but_allows_workspace(tmp_path, monkey
 
     monkeypatch.setattr(mcp_routes, "_project_root", lambda: tmp_path)
     monkeypatch.setattr(mcp_routes, "project_root", lambda: tmp_path)
-    monkeypatch.setattr(mcp_routes, "resolve_project_path", lambda value: (tmp_path / value).resolve())
+    monkeypatch.setattr(
+        mcp_routes, "resolve_project_path", lambda value: (tmp_path / value).resolve()
+    )
     (tmp_path / "workspace").mkdir()
     (tmp_path / "app").mkdir()
 
@@ -906,11 +909,14 @@ def test_mcp_frontend_action_allows_task_result_evidence(tmp_path, monkeypatch):
 
 
 def test_mcp_frontend_observer_can_render_task_result_evidence_overlay():
-    source = (Path(__file__).resolve().parents[2] / "web/src/mcp/frontend-observer.ts").read_text(
-        encoding="utf-8"
-    )
+    source = (
+        Path(__file__).resolve().parents[2] / "web/src/mcp/frontend-observer.ts"
+    ).read_text(encoding="utf-8")
 
-    assert "function _renderTaskEvidenceOverlay(evidence: Record<string, unknown>): HTMLElement" in source
+    assert (
+        "function _renderTaskEvidenceOverlay(evidence: Record<string, unknown>): HTMLElement"
+        in source
+    )
     assert "overlay.id = 'koto-task-evidence-capture'" in source
     assert "if (opts.renderOverlay)" in source
     assert "evidence.overlaySelector = '#koto-task-evidence-capture'" in source
@@ -921,13 +927,15 @@ def test_deferred_blueprint_registration_exempts_mcp_api_from_csrf():
     source = (Path(__file__).resolve().parents[2] / "web/app_blueprints.py").read_text(
         encoding="utf-8"
     )
-    mcp_registration = source[source.index("from app.api.mcp_routes import mcp_bp as _mcp_bp") :]
+    mcp_registration = source[
+        source.index("from app.api.mcp_routes import mcp_bp as _mcp_bp") :
+    ]
 
     assert "app.register_blueprint(_mcp_bp)" in mcp_registration
     assert "_exempt_csrf_blueprint(app, _mcp_bp)" in mcp_registration
-    assert mcp_registration.index("app.register_blueprint(_mcp_bp)") < mcp_registration.index(
-        "_exempt_csrf_blueprint(app, _mcp_bp)"
-    )
+    assert mcp_registration.index(
+        "app.register_blueprint(_mcp_bp)"
+    ) < mcp_registration.index("_exempt_csrf_blueprint(app, _mcp_bp)")
 
 
 def test_mcp_frontend_action_sticks_to_recent_action_session(tmp_path, monkeypatch):
@@ -1132,7 +1140,9 @@ def test_websocket_mcp_auth_uses_runtime_api_key(monkeypatch):
         assert _authorized_ws_request() is False
     with app.test_request_context("/ws/mcp", headers={"X-Koto-MCP-Key": "secret"}):
         assert _authorized_ws_request() is True
-    with app.test_request_context("/ws/mcp", headers={"Authorization": "Bearer secret"}):
+    with app.test_request_context(
+        "/ws/mcp", headers={"Authorization": "Bearer secret"}
+    ):
         assert _authorized_ws_request() is True
 
 

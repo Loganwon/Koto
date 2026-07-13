@@ -22,7 +22,7 @@ import logging
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
-from app.core.agent.path_utils import has_parent_path_segment, is_within_roots
+from app.core.agent.path_utils import is_within_roots
 
 logger = logging.getLogger(__name__)
 
@@ -46,7 +46,7 @@ class AnnotationPlugin(AgentPlugin):
                 "description": (
                     "对本地 Word (.docx) 文档执行批量标注/修改，直接写回原始 DOCX。"
                     "适用于翻译润色、学术批注、商务文稿规范化等场景。"
-                    "file_path: 文档路径（支持绝对路径/工作目录相对路径）；"
+                    "file_path: 文档绝对路径；"
                     "requirement: 用户标注需求描述。"
                 ),
                 "parameters": {
@@ -54,7 +54,7 @@ class AnnotationPlugin(AgentPlugin):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Word 文档路径（.docx，支持绝对或相对路径）",
+                            "description": "Word 文档绝对路径（.docx）",
                         },
                         "requirement": {
                             "type": "string",
@@ -77,7 +77,7 @@ class AnnotationPlugin(AgentPlugin):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Word 文档路径（.docx，支持绝对或相对路径）",
+                            "description": "Word 文档绝对路径（.docx）",
                         },
                         "max_paragraphs": {
                             "type": "integer",
@@ -113,16 +113,9 @@ class AnnotationPlugin(AgentPlugin):
         roots = cls._allowed_roots()
         expanded = os.path.expandvars(os.path.expanduser(raw))
 
-        if os.path.isabs(expanded):
-            candidates = [os.path.abspath(expanded)]
-        else:
-            normalized = expanded.replace("\\", "/")
-            if has_parent_path_segment(normalized):
-                return None, f"不在允许的目录范围内: {file_path}"
-            # Support both ``report.docx`` (search allowed roots) and
-            # ``workspace/report.docx`` (relative to the process directory).
-            candidates = [os.path.abspath(expanded)]
-            candidates.extend(os.path.abspath(os.path.join(root, expanded)) for root in roots)
+        if not os.path.isabs(expanded):
+            return None, f"文件路径必须是绝对路径: {file_path}"
+        candidates = [os.path.abspath(expanded)]
 
         allowed_candidates = [
             candidate

@@ -236,9 +236,7 @@ def evaluate_task_quality_gate(
     recipe_match = select_task_recipe(
         request, request.files or [], write_intent=write_intent
     )
-    explicit_source_content_gate = _source_content_in_output_gate(
-        request, file_changes
-    )
+    explicit_source_content_gate = _source_content_in_output_gate(request, file_changes)
     explicit_top_table_gate = _top_table_requirement_gate(request, file_changes)
     explicit_section_gates = _explicit_docx_section_gates(request, file_changes)
     explicit_phrase_gate = _explicit_required_phrase_gate(request, file_changes)
@@ -337,9 +335,7 @@ def evaluate_task_quality_gate(
             ],
         }
 
-    if _looks_like_financial_xlsx_docx_chart_report_task(
-        request, request.files or []
-    ):
+    if _looks_like_financial_xlsx_docx_chart_report_task(request, request.files or []):
         criteria.extend(
             [
                 quality_gate_result(
@@ -428,14 +424,11 @@ def evaluate_task_quality_gate(
             )
         )
 
-    if (
-        target_type in {"docx", "doc"}
-        and (
-            _looks_like_docx_table_output_request(task_text)
-            or (
-                _looks_like_table_request(task_text)
-                and not _looks_like_problem_analysis_request(task_text)
-            )
+    if target_type in {"docx", "doc"} and (
+        _looks_like_docx_table_output_request(task_text)
+        or (
+            _looks_like_table_request(task_text)
+            and not _looks_like_problem_analysis_request(task_text)
         )
     ):
         criteria.append(
@@ -573,7 +566,12 @@ def evaluate_task_quality_gate(
 
     if target_type == "csv" and not criteria:
         csv_metric_total = rows_written + cells_written
-        csv_write_ops = {"create_file", "extract_to_file", "run_python_code", "write_sheet_data"}
+        csv_write_ops = {
+            "create_file",
+            "extract_to_file",
+            "run_python_code",
+            "write_sheet_data",
+        }
         csv_output_text = _target_text_for_quality_gate(request, file_changes)
         csv_has_content = bool(str(csv_output_text or "").strip())
         criteria.append(
@@ -656,7 +654,9 @@ def _source_content_in_output_gate(
 
 def _task_requires_source_content_in_output(task: str) -> bool:
     task_text = str(task or "")
-    return any(pattern.search(task_text) for pattern in _SOURCE_CONTENT_REQUIRED_PATTERNS)
+    return any(
+        pattern.search(task_text) for pattern in _SOURCE_CONTENT_REQUIRED_PATTERNS
+    )
 
 
 def _source_content_candidates(
@@ -1000,7 +1000,9 @@ def _explicit_required_phrases(task: str) -> List[str]:
                     if section_name
                     else _should_keep_required_phrase(phrase)
                 )
-                if keep_phrase and phrase.casefold() not in {item.casefold() for item in phrases}:
+                if keep_phrase and phrase.casefold() not in {
+                    item.casefold() for item in phrases
+                }:
                     phrases.append(phrase)
     return phrases
 
@@ -1105,7 +1107,9 @@ def _workbook_chart_count(path_text: str) -> int:
     except Exception:
         return 0
     try:
-        return sum(len(getattr(sheet, "_charts", []) or []) for sheet in workbook.worksheets)
+        return sum(
+            len(getattr(sheet, "_charts", []) or []) for sheet in workbook.worksheets
+        )
     finally:
         workbook.close()
 
@@ -1246,9 +1250,15 @@ def _top_table_requirement_gate(
     if requirement.get("columns"):
         detail += f"期望列：{', '.join(requirement['columns'])}。"
     details = []
-    details.append("排序顺序已匹配。" if rows_passed else "目标 Word 表格未包含该排序结果。")
+    details.append(
+        "排序顺序已匹配。" if rows_passed else "目标 Word 表格未包含该排序结果。"
+    )
     if requirement.get("columns"):
-        details.append("表格列已匹配。" if columns_passed else "目标 Word 表格列未严格匹配用户要求。")
+        details.append(
+            "表格列已匹配。"
+            if columns_passed
+            else "目标 Word 表格列未严格匹配用户要求。"
+        )
     if duplicate_rows:
         details.append("Top 表格行被重复写成了段落清单。")
     detail += "".join(details)
@@ -1311,7 +1321,9 @@ def _extract_requested_table_columns(task: str) -> List[str]:
         r"\b(?:columns?|fields?)\b", "", match.group("columns"), flags=re.IGNORECASE
     )
     columns_text = re.sub(r"\s+", " ", columns_text).strip(" ,，、")
-    raw_parts = re.split(r"\s*(?:,|，|、|\band\b)\s*", columns_text, flags=re.IGNORECASE)
+    raw_parts = re.split(
+        r"\s*(?:,|，|、|\band\b)\s*", columns_text, flags=re.IGNORECASE
+    )
     columns: List[str] = []
     for part in raw_parts:
         clean = re.sub(r"^(?:the|a|an)\s+", "", part.strip(), flags=re.IGNORECASE)
@@ -1349,15 +1361,16 @@ def _first_source_spreadsheet_path(
         if not isinstance(change, dict):
             continue
         source_path = str(change.get("source_path") or "").strip()
-        if source_path.lower().endswith((".xlsx", ".xlsm", ".csv")) and Path(
-            source_path
-        ).exists():
+        if (
+            source_path.lower().endswith((".xlsx", ".xlsm", ".csv"))
+            and Path(source_path).exists()
+        ):
             return source_path
     for file_info in request.files or []:
         path = str(file_info.path or file_info.name or "").strip()
-        if path.lower().endswith((".xlsx", ".xlsm", ".csv")) and not _quality_file_is_target(
-            file_info, target_paths
-        ):
+        if path.lower().endswith(
+            (".xlsx", ".xlsm", ".csv")
+        ) and not _quality_file_is_target(file_info, target_paths):
             return path
     return ""
 
@@ -1399,10 +1412,16 @@ def _expected_top_row_labels(source_path: str, sort_by: str, count: int) -> List
     data_rows = rows[1:]
     sorted_rows = sorted(
         data_rows,
-        key=lambda row: _quality_sort_value(row[sort_index] if sort_index < len(row) else ""),
+        key=lambda row: _quality_sort_value(
+            row[sort_index] if sort_index < len(row) else ""
+        ),
         reverse=True,
     )
-    return [str(row[0]).strip() for row in sorted_rows[:count] if row and str(row[0]).strip()]
+    return [
+        str(row[0]).strip()
+        for row in sorted_rows[:count]
+        if row and str(row[0]).strip()
+    ]
 
 
 def _read_docx_quality_tables(path_text: str) -> List[List[List[str]]]:
@@ -1470,7 +1489,11 @@ def _docx_tables_match_top_requirement(
         any_rows_match = True
         if not expected_headers:
             return True, True
-        headers = [_normalize_quality_text(cell) for cell in table[0] if _normalize_quality_text(cell)]
+        headers = [
+            _normalize_quality_text(cell)
+            for cell in table[0]
+            if _normalize_quality_text(cell)
+        ]
         columns_match = headers == expected_headers
         if columns_match:
             return True, True
@@ -1489,7 +1512,8 @@ def _top_table_rows_duplicated_as_paragraphs(
         if not any(label in normalized for label in expected):
             continue
         if re.search(r"^\s*(?:customer|客户)\s*[:：]", paragraph, re.IGNORECASE) or (
-            "|" in paragraph and re.search(r"\b(?:region|revenue|margin)\b", paragraph, re.IGNORECASE)
+            "|" in paragraph
+            and re.search(r"\b(?:region|revenue|margin)\b", paragraph, re.IGNORECASE)
         ):
             duplicate_like_count += 1
     return duplicate_like_count >= min(2, len(expected))
@@ -1537,7 +1561,11 @@ def _explicit_docx_section_gates(
                 passed=passed,
                 detail=(
                     "用户要求独立风险 section；"
-                    + ("目标 Word 中已找到风险章节。" if passed else "目标 Word 中未找到独立风险章节。")
+                    + (
+                        "目标 Word 中已找到风险章节。"
+                        if passed
+                        else "目标 Word 中未找到独立风险章节。"
+                    )
                 ),
                 priority="critical",
             )
@@ -1595,10 +1623,16 @@ def _read_docx_quality_paragraphs(path_text: str) -> List[str]:
         document = Document(str(path_text))
     except Exception:
         return []
-    return [paragraph.text.strip() for paragraph in document.paragraphs if paragraph.text.strip()]
+    return [
+        paragraph.text.strip()
+        for paragraph in document.paragraphs
+        if paragraph.text.strip()
+    ]
 
 
-def _has_heading_like_paragraph(paragraphs: List[str], keywords: tuple[str, ...]) -> bool:
+def _has_heading_like_paragraph(
+    paragraphs: List[str], keywords: tuple[str, ...]
+) -> bool:
     for paragraph in paragraphs:
         normalized = _normalize_quality_text(paragraph)
         if len(normalized) > 80:
@@ -1687,12 +1721,17 @@ def repair_retry_message(
             if text:
                 lines.append(f"{index}. {text}")
 
-    if any("表格" in str(item or "") and "Word" in str(item or "") for item in remaining):
+    if any(
+        "表格" in str(item or "") and "Word" in str(item or "") for item in remaining
+    ):
         target_path = str(request.target_path or "").strip()
         xlsx_sources = [
             str(file_info.path or file_info.name or "").strip()
             for file_info in request_files
-            if str(file_info.type or Path(str(file_info.path or file_info.name)).suffix.lstrip("."))
+            if str(
+                file_info.type
+                or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
+            )
             .lower()
             .strip()
             in {"xlsx", "xlsm", "xls", "csv"}
@@ -1721,7 +1760,9 @@ def repair_retry_message(
             elif path_text:
                 lines.append(f"- {path_text}")
 
-    lines.append("要求：先理解核验失败原因；只有当参数、代码、工具选择或写入位置已经改变时，才允许再次调用工具；修复后再结束。")
+    lines.append(
+        "要求：先理解核验失败原因；只有当参数、代码、工具选择或写入位置已经改变时，才允许再次调用工具；修复后再结束。"
+    )
     return "\n".join(lines)
 
 

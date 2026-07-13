@@ -327,9 +327,11 @@ from app.core.agent.tool_design_protocol import (
     extract_tool_gap_from_response,
     merge_tool_gaps,
 )
+
 logger = logging.getLogger(__name__)
 
 ModelCaller = Callable[..., Dict[str, Any]]
+
 
 def request_cancel(run_id: str) -> bool:
     return _request_cancel(run_id)
@@ -379,8 +381,7 @@ class FileTaskRuntime:
         self._task_supervisor = task_supervisor
         self._yield_thinking = yield_thinking
 
-
-# ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
     # Main Entry Point
     # ═══════════════════════════════════════════════════════════════
     def run(self, request: FileTaskRequest) -> Iterable[FileTaskEvent]:
@@ -396,7 +397,9 @@ class FileTaskRuntime:
 
         def _performance_snapshot(*, total: bool = False) -> Dict[str, Any]:
             snapshot = dict(performance)
-            snapshot["elapsed_ms"] = round((time.perf_counter() - run_started_at) * 1000, 2)
+            snapshot["elapsed_ms"] = round(
+                (time.perf_counter() - run_started_at) * 1000, 2
+            )
             if total:
                 snapshot["total_ms"] = snapshot["elapsed_ms"]
             return snapshot
@@ -553,6 +556,7 @@ class FileTaskRuntime:
             readonly_tool_outputs=readonly_tool_outputs,
             performance_snapshot=_performance_snapshot,
         )
+
     def _is_cancelled(self, request: FileTaskRequest) -> bool:
         return is_cancel_requested(str(request.run_id or ""))
 
@@ -687,7 +691,9 @@ class FileTaskRuntime:
         explicit_output = self._explicit_output_path_from_task(request.task)
         if explicit_output:
             current_target = str(request.target_path or "").strip()
-            if not current_target or not self._same_task_path(current_target, explicit_output):
+            if not current_target or not self._same_task_path(
+                current_target, explicit_output
+            ):
                 return self._request_with_target_path(request, explicit_output)
             return request
 
@@ -714,7 +720,9 @@ class FileTaskRuntime:
             return updated
 
         def retarget_file(file_info: FileTaskFile) -> FileTaskFile:
-            is_target = self._same_task_path(file_info.path or file_info.name, clean_target)
+            is_target = self._same_task_path(
+                file_info.path or file_info.name, clean_target
+            )
             if bool(file_info.target) == is_target:
                 return file_info
             return FileTaskFile(
@@ -799,8 +807,7 @@ class FileTaskRuntime:
             resolve_task_file_path=self._resolve_task_file_path,
         )
 
-
-# ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
     # File Context & Targeting
     # ═══════════════════════════════════════════════════════════════
     def _context_files(self, request: FileTaskRequest) -> List[FileTaskFile]:
@@ -833,7 +840,9 @@ class FileTaskRuntime:
         return FileTaskToolGateway(
             context=FileTaskToolContext(
                 task_files=[file_info.public_dict() for file_info in context_files],
-                workspace_root=str(self._resolved_workspace_root() or self._workspace_root),
+                workspace_root=str(
+                    self._resolved_workspace_root() or self._workspace_root
+                ),
                 gemini_client=self._gemini_client,
                 request_context={
                     "task": request.task,
@@ -918,7 +927,9 @@ class FileTaskRuntime:
         constraint_audit: Dict[str, Any],
         quick_action_mode: str,
     ) -> Iterable[FileTaskEvent]:
-        from app.core.agent.file_task_doc_annotate_runner import FileTaskDocAnnotateRunner
+        from app.core.agent.file_task_doc_annotate_runner import (
+            FileTaskDocAnnotateRunner,
+        )
 
         yield from FileTaskDocAnnotateRunner(self).stream_bridge_execution(
             ledger,
@@ -949,7 +960,9 @@ class FileTaskRuntime:
         classification_payload: Dict[str, Any],
         intent_plan_payload: Dict[str, Any],
     ) -> Iterable[FileTaskEvent]:
-        from app.core.agent.file_task_docx_stepwise_runner import FileTaskDocxStepwiseRunner
+        from app.core.agent.file_task_docx_stepwise_runner import (
+            FileTaskDocxStepwiseRunner,
+        )
 
         yield from FileTaskDocxStepwiseRunner(self).stream_polish_writeback(
             ledger,
@@ -1011,8 +1024,7 @@ class FileTaskRuntime:
                 final_result = chunk.payload
         return final_result
 
-
-# ═══════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════
     # Intent Predicates (delegated to file_task_intent_predicates)
     # ═══════════════════════════════════════════════════════════════
     def _has_write_intent(self, task: str) -> bool:
@@ -1106,9 +1118,7 @@ class FileTaskRuntime:
         readonly_write_negation = classification_signals.readonly_write_negation
         raw_write_intent = classification_signals.raw_write_intent
         write_intent = classification_signals.write_intent
-        raw_docx_annotation_request = (
-            classification_signals.raw_docx_annotation_request
-        )
+        raw_docx_annotation_request = classification_signals.raw_docx_annotation_request
         docx_annotation_request = classification_signals.docx_annotation_request
         clear_docx_review_request = classification_signals.clear_docx_review_request
         docx_compare_annotate_request = (
@@ -1156,9 +1166,7 @@ class FileTaskRuntime:
             artifact_creation_intent=self._has_artifact_creation_intent(
                 classification_task
             ),
-            explicit_write_intent=self._has_explicit_write_intent(
-                classification_task
-            ),
+            explicit_write_intent=self._has_explicit_write_intent(classification_task),
             strong_write_intent=self._has_strong_write_intent(classification_task),
             force_long_pdf_docx_write=classification_flow.force_long_pdf_docx_write,
             stepwise_pdf_docx_resume=stepwise_pdf_docx_resume,
@@ -1703,7 +1711,10 @@ class FileTaskRuntime:
         output_mode = (
             str(classification.output_mode or "answer").strip().lower() or "answer"
         )
-        requires_confirmation = output_mode == "hybrid" and self._fallback_requires_explicit_confirmation(request)
+        requires_confirmation = (
+            output_mode == "hybrid"
+            and self._fallback_requires_explicit_confirmation(request)
+        )
         recommended_strategy = self._fallback_intent_strategy(
             classification,
             output_mode,
@@ -1780,10 +1791,16 @@ class FileTaskRuntime:
         if output_mode == "write":
             return "write_through"
         if output_mode == "hybrid":
-            return "analyze_then_confirm" if requires_confirmation else "analyze_then_optional_apply"
+            return (
+                "analyze_then_confirm"
+                if requires_confirmation
+                else "analyze_then_optional_apply"
+            )
         return "answer_only"
 
-    def _fallback_requires_explicit_confirmation(self, request: FileTaskRequest) -> bool:
+    def _fallback_requires_explicit_confirmation(
+        self, request: FileTaskRequest
+    ) -> bool:
         task_text = str(request.task or "").strip()
         if re.search(
             r"(?:确认后|等(?:我|用户)?确认|等待(?:我|用户)?确认|我确认后|用户确认后|"
@@ -1795,7 +1812,9 @@ class FileTaskRuntime:
         ):
             return True
         options = request.options if isinstance(request.options, dict) else {}
-        return bool(options.get("requires_confirmation") or options.get("confirm_before_apply"))
+        return bool(
+            options.get("requires_confirmation") or options.get("confirm_before_apply")
+        )
 
     def _fallback_intent_has_apply_target(
         self, request: FileTaskRequest, files: List[FileTaskFile]
@@ -1815,7 +1834,9 @@ class FileTaskRuntime:
         known_tool_gap: Optional[Dict[str, Any]],
     ) -> str:
         if known_tool_gap:
-            capability = str(known_tool_gap.get("missing_capability") or "缺失能力").strip()
+            capability = str(
+                known_tool_gap.get("missing_capability") or "缺失能力"
+            ).strip()
             return f"当前任务触发 Koto 原生能力缺口：{capability}；模型需要产出 {TOOL_DESIGN_PROTOCOL} 工具规格，不调用未注册工具。"
         if write_intent:
             return "模型在 Koto allowlist 工具目录内规划并执行，写入后产生 file.changed 事件。"
@@ -1949,7 +1970,9 @@ class FileTaskRuntime:
             }
         )
 
-        clean_summary = _preview(content_text, 180) if content_text else "AI 已确认执行方案。"
+        clean_summary = (
+            _preview(content_text, 180) if content_text else "AI 已确认执行方案。"
+        )
         return {
             "summary": clean_summary,
             "steps": steps,
@@ -1967,7 +1990,9 @@ class FileTaskRuntime:
         files: List[FileTaskFile],
         request: FileTaskRequest,
     ) -> str:
-        return _plan_presentation_description(self, tool_name, tool_args, files, request)
+        return _plan_presentation_description(
+            self, tool_name, tool_args, files, request
+        )
 
     def _inferred_write_plan_step(
         self, request: FileTaskRequest, files: List[FileTaskFile]
@@ -2142,8 +2167,9 @@ class FileTaskRuntime:
                 )
                 if generated_image:
                     args["image_path"] = generated_image
-        if tool_name == "insert_docx_paragraph" and self._task_requests_docx_append_end(
-            request.task
+        if (
+            tool_name == "insert_docx_paragraph"
+            and self._task_requests_docx_append_end(request.task)
         ):
             args.pop("before_heading", None)
             args.pop("after_heading", None)
@@ -2220,7 +2246,10 @@ class FileTaskRuntime:
             for artifact in reversed(images):
                 artifact_name = str(artifact.get("name") or "").strip().lower()
                 artifact_path = str(artifact.get("path") or "").strip()
-                if artifact_name == requested_name or Path(artifact_path).name.lower() == requested_name:
+                if (
+                    artifact_name == requested_name
+                    or Path(artifact_path).name.lower() == requested_name
+                ):
                     return artifact_path
         return str(images[len(images) - 1].get("path") or "").strip()
 
@@ -2232,7 +2261,9 @@ class FileTaskRuntime:
             return f"{tool_name}::{target}"
         image_path = str(tool_args.get("image_path") or "").strip()
         resolved_image = self._resolve_task_file_path(image_path) or image_path
-        image_key = os.path.normcase(os.path.normpath(resolved_image)) if resolved_image else ""
+        image_key = (
+            os.path.normcase(os.path.normpath(resolved_image)) if resolved_image else ""
+        )
         if not image_key:
             image_key = Path(image_path.replace("\\", "/")).name.lower()
         return f"{tool_name}::{target}::{image_key}"
@@ -2241,12 +2272,16 @@ class FileTaskRuntime:
         self, request: FileTaskRequest, files: List[FileTaskFile]
     ) -> bool:
         target = self._single_target_path_for_types(request, files, {"docx", "doc"})
-        target_type = Path(str(request.target_path or target or "")).suffix.lstrip(".").lower()
+        target_type = (
+            Path(str(request.target_path or target or "")).suffix.lstrip(".").lower()
+        )
         return bool(
             target_type in {"docx", "doc"}
             and (
                 self._looks_like_chart_request(request.task)
-                or self._looks_like_financial_xlsx_docx_chart_report_task(request, files)
+                or self._looks_like_financial_xlsx_docx_chart_report_task(
+                    request, files
+                )
             )
         )
 
@@ -2274,7 +2309,9 @@ class FileTaskRuntime:
         generated_artifacts: List[Dict[str, Any]],
         file_changes: List[Dict[str, Any]],
     ) -> List[Dict[str, Any]]:
-        if not generated_artifacts or not self._is_docx_chart_write_request(request, files):
+        if not generated_artifacts or not self._is_docx_chart_write_request(
+            request, files
+        ):
             return []
 
         inserted_keys: set[str] = set()
@@ -2351,9 +2388,8 @@ class FileTaskRuntime:
             for item in pending_images[:8]
             if isinstance(item, dict)
         ]
-        remaining_text = (
-            "仍有生成图表未插入 DOCX："
-            + ("、".join(name for name in names if name) or "剩余图表图片")
+        remaining_text = "仍有生成图表未插入 DOCX：" + (
+            "、".join(name for name in names if name) or "剩余图表图片"
         )
         payload = dict(check_payload or {})
         criteria = list(payload.get("criteria_results") or [])
@@ -3078,7 +3114,9 @@ class FileTaskRuntime:
             tool_runtime_outcome=tool_runtime_outcome,
             tool_gap=tool_gap,
             next_action_artifact=next_action_artifact,
-            requires_file_change_before_pause=self._requires_file_change_before_pause(request),
+            requires_file_change_before_pause=self._requires_file_change_before_pause(
+                request
+            ),
         )
         if precheck is not None:
             return precheck
@@ -3088,7 +3126,10 @@ class FileTaskRuntime:
             verify_args = {
                 "task_description": request.task,
                 "file_states": json.dumps(
-                    file_states_for_changes(file_changes, workspace_root=self._workspace_root), ensure_ascii=False
+                    file_states_for_changes(
+                        file_changes, workspace_root=self._workspace_root
+                    ),
+                    ensure_ascii=False,
                 ),
                 "file_changes": json.dumps(file_changes, ensure_ascii=False),
                 "target_path": verify_target_path,
@@ -3158,7 +3199,8 @@ class FileTaskRuntime:
                 "passed": passed,
                 "status": "verified" if passed else "needs_attention",
                 "summary": str(
-                    payload.get("summary") or ("文件变更已记录。" if passed else "核验未通过。")
+                    payload.get("summary")
+                    or ("文件变更已记录。" if passed else "核验未通过。")
                 ),
                 "confidence": payload.get("confidence"),
                 "remaining": payload.get("remaining_steps")
@@ -3170,7 +3212,9 @@ class FileTaskRuntime:
             "passed": True,
             "status": "completed" if not model_failed else "context_only",
             "summary": (
-                "已完成分析建议，当前未直接写入文件。" if output_mode == "hybrid" else "已完成只读任务，没有产生文件写入。"
+                "已完成分析建议，当前未直接写入文件。"
+                if output_mode == "hybrid"
+                else "已完成只读任务，没有产生文件写入。"
             ),
             "remaining": [],
         }
@@ -3180,7 +3224,11 @@ class FileTaskRuntime:
     ) -> bool:
         if context_files:
             return True
-        if request.current_file or request.files or str(request.target_path or "").strip():
+        if (
+            request.current_file
+            or request.files
+            or str(request.target_path or "").strip()
+        ):
             return True
         return bool(
             re.search(
@@ -3207,7 +3255,9 @@ class FileTaskRuntime:
             )
         ]
         if satisfied_refs:
-            return [reference for reference in references if reference not in satisfied_refs]
+            return [
+                reference for reference in references if reference not in satisfied_refs
+            ]
         return references
 
     @staticmethod
@@ -3240,15 +3290,16 @@ class FileTaskRuntime:
     ) -> bool:
         ref_norm = reference.replace("\\", "/").casefold()
         ref_name = Path(reference.replace("\\", "/")).name.casefold()
+
         def _matches_path(value: Any) -> bool:
             text = str(value or "").replace("\\", "/").casefold()
             if not text:
                 return False
             return ref_norm in text or bool(ref_name and ref_name in text)
+
         for snippet in snippets:
             if any(
-                _matches_path(snippet.get(key))
-                for key in ("path", "source", "name")
+                _matches_path(snippet.get(key)) for key in ("path", "source", "name")
             ):
                 return True
         content_read_tools = {
@@ -3268,6 +3319,7 @@ class FileTaskRuntime:
             ):
                 return True
         return False
+
     def _requires_file_change_before_pause(self, request: FileTaskRequest) -> bool:
         request_files = getattr(request, "files", []) or []
         recipe_match = select_task_recipe(request, request_files, write_intent=True)

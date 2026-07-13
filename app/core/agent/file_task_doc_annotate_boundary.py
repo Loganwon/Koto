@@ -30,7 +30,6 @@ from app.core.agent.file_task_doc_annotate_intent import (
 )
 from app.core.agent.file_task_review_intent import request_has_file_type
 
-
 should_use_bridge_execution = _should_use_bridge_exec
 
 

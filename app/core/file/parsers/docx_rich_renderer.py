@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """High-fidelity OOXML-to-HTML renderer used by the DOCX parser facade."""
+
 from __future__ import annotations
 
 import base64

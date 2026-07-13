@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -94,14 +93,20 @@ def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> 
 
     assert "_csrfFetch('/api/workspace/ai/route-intent'" in source
     assert "function deterministicWorkspaceRouteDecision(" in source
-    assert "const deterministicRoute = deterministicWorkspaceRouteDecision(context);" in route_body
+    assert (
+        "const deterministicRoute = deterministicWorkspaceRouteDecision(context);"
+        in route_body
+    )
     assert route_body.index("deterministicWorkspaceRouteDecision") < route_body.index(
         "resolveWorkspaceRouteIntent"
     )
     assert "const EXPLICIT_FILE_REFERENCE_RE" in source
     assert "function mentionsExplicitTaskFile(" in source
     assert "frontend_deterministic_explicit_file_reference" in source
-    assert "mentionsExplicitTaskFile(text) && FILE_TASK_CONTEXT_CUE_RE.test(text)" in source
+    assert (
+        "mentionsExplicitTaskFile(text) && FILE_TASK_CONTEXT_CUE_RE.test(text)"
+        in source
+    )
     assert (
         "routeSource === 'frontend_deterministic_explicit_file_reference'"
     ) in source
@@ -114,7 +119,10 @@ def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> 
     assert "keyword_policy: 'hint_only'" in source
     assert "skip_ai_intent_adjudicator" in source
     assert "fileTaskRouteDecision('explicit_task_payload')" in route_body
-    assert "fileTaskRouteDecision('frontend_file_context_guard', routeDecision)" in route_body
+    assert (
+        "fileTaskRouteDecision('frontend_file_context_guard', routeDecision)"
+        in route_body
+    )
     assert "overrideOptions.enable_ai_intent_adjudicator = true;" not in payload_body
     assert "overrideOptions.disable_ai_intent_adjudicator = true;" in payload_body
     assert "delete overrideOptions.enable_ai_intent_adjudicator;" in payload_body
@@ -128,26 +136,31 @@ def test_workspace_route_intent_has_deterministic_fast_path_before_model() -> No
     editor_ai = _read("web/blueprints/editor_ai.py")
     route_endpoint = _body_between(
         editor_ai,
-        'def workspace_ai_route_intent():',
+        "def workspace_ai_route_intent():",
         '\n\n@editor_ai_bp.route("/api/editor/ai/stream", methods=["POST"])',
     )
 
     assert "/api/workspace/ai/direct-response" not in editor_ai
     assert "def workspace_ai_direct_response(" not in editor_ai
     assert "def _deterministic_workspace_route(data: dict) -> dict | None:" in editor_ai
-    assert "source=\"deterministic:file_context\"" in editor_ai
+    assert 'source="deterministic:file_context"' in editor_ai
     assert "_EXPLICIT_FILE_REFERENCE_RE" in editor_ai
     assert "def _workspace_mentions_explicit_task_file(text: str) -> bool:" in editor_ai
-    assert "source=\"deterministic:explicit_file_reference\"" in editor_ai
-    assert "_workspace_mentions_explicit_task_file(text) and _FILE_CONTEXT_TASK_RE.search(text)" in editor_ai
+    assert 'source="deterministic:explicit_file_reference"' in editor_ai
+    assert (
+        "_workspace_mentions_explicit_task_file(text) and _FILE_CONTEXT_TASK_RE.search(text)"
+        in editor_ai
+    )
     assert '"skip_ai_intent_adjudicator": True' in editor_ai
-    assert "deterministic_route = _deterministic_workspace_route(data)" in route_endpoint
+    assert (
+        "deterministic_route = _deterministic_workspace_route(data)" in route_endpoint
+    )
     assert "started_at = time.perf_counter()" in route_endpoint
     assert '"route_decision_ms"' in route_endpoint
     assert '"route_path"' in route_endpoint
-    assert route_endpoint.index("_deterministic_workspace_route") < route_endpoint.index(
-        "_model_workspace_route"
-    )
+    assert route_endpoint.index(
+        "_deterministic_workspace_route"
+    ) < route_endpoint.index("_model_workspace_route")
 
 
 def test_workspace_direct_response_is_locked_to_chat_stream() -> None:
@@ -230,7 +243,9 @@ def test_runtime_records_decision_and_supervisor_verification_per_tool_step() ->
     assert "FileTaskFinalizationPhase(self).stream(" in runtime_source
     assert '"decision.made"' in execution_source
     assert '"supervisor.step_verified"' in execution_source
-    assert execution_source.index('"decision.made"') < execution_source.index('"supervisor.step_verified"')
+    assert execution_source.index('"decision.made"') < execution_source.index(
+        '"supervisor.step_verified"'
+    )
     assert '"check.finished"' in finalization_source
     assert '"supervisor.verified"' in finalization_source
 

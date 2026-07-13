@@ -1849,8 +1849,7 @@ class SkillAutoMatcher:
             ][:_MAX_AUTO_SKILLS]
 
             logger.info(
-                f"[AutoMatcher] ☁️ 云端匹配 ({latency:.2f}s): "
-                f"{task_type} → {valid}"
+                f"[AutoMatcher] ☁️ 云端匹配 ({latency:.2f}s): " f"{task_type} → {valid}"
             )
             return valid
 

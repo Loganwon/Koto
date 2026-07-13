@@ -50,10 +50,14 @@ def explicit_file_list(files: Sequence[FileTaskFile]) -> str:
 def capability_profiles_text(capability_profiles: Sequence[Mapping[str, Any]]) -> str:
     if not capability_profiles:
         return ""
-    return "文件能力概览：" + json.dumps(
-        list(capability_profiles),
-        ensure_ascii=False,
-    ) + "\n"
+    return (
+        "文件能力概览："
+        + json.dumps(
+            list(capability_profiles),
+            ensure_ascii=False,
+        )
+        + "\n"
+    )
 
 
 def known_tool_gap_text(known_tool_gap: Mapping[str, Any] | None) -> str:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -28,7 +27,9 @@ def test_file_task_classification_runtime_uses_package_surface() -> None:
 
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "from app.core.agent.file_task_classification_flags import" not in runtime
-    assert "from app.core.agent.file_task_classification_finalizer import" not in runtime
+    assert (
+        "from app.core.agent.file_task_classification_finalizer import" not in runtime
+    )
     assert "from app.core.agent.file_task_classification_followup import" not in runtime
     assert "from app.core.agent.file_task_classification_recipes import" not in runtime
     assert "from app.core.agent.file_task_classification_reasons import" not in runtime
@@ -76,7 +77,9 @@ def test_file_task_intent_adjudicator_orchestration_is_extracted_from_runtime() 
     assert "normalize_intent_adjudication_response" in helper
 
 
-def test_file_task_intent_adjudication_contract_context_is_extracted_from_runtime() -> None:
+def test_file_task_intent_adjudication_contract_context_is_extracted_from_runtime() -> (
+    None
+):
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/file_task_classification_contract.py")
     facade = _classification_facade()
@@ -86,10 +89,7 @@ def test_file_task_intent_adjudication_contract_context_is_extracted_from_runtim
         "    def _normalize_mainline_contract(",
     )
 
-    assert (
-        "from app.core.agent.file_task_classification_contract import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_contract import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "build_intent_adjudication_contract_context(" in body
     assert "_has_readonly_write_negation(" not in body
@@ -176,10 +176,7 @@ def test_file_task_classification_pipeline_state_builds_signals_and_flow() -> No
         "    def _effective_planner_classification(",
     )
 
-    assert (
-        "from app.core.agent.file_task_classification_state import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_state import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "build_classification_pipeline_state(" in runtime
     assert "build_classification_signals(" not in classify_body
@@ -195,10 +192,7 @@ def test_file_task_classification_flags_are_extracted_from_runtime() -> None:
     helper = _read("app/core/agent/file_task_classification_flags.py")
     facade = _classification_facade()
 
-    assert (
-        "from app.core.agent.file_task_classification_flags import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_flags import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "apply_classification_intent_overrides(" in runtime
     assert "def apply_classification_intent_overrides(" in helper
@@ -212,10 +206,7 @@ def test_file_task_followup_annotation_overrides_are_extracted_from_runtime() ->
     helper = _read("app/core/agent/file_task_classification_followup.py")
     facade = _classification_facade()
 
-    assert (
-        "from app.core.agent.file_task_classification_followup import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_followup import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "apply_followup_annotation_overrides(" in runtime
     assert "followup_previous_task_family:annotate" not in runtime
@@ -237,10 +228,7 @@ def test_file_task_write_intent_reasons_are_extracted_from_runtime() -> None:
         "    def _effective_planner_classification(",
     )
 
-    assert (
-        "from app.core.agent.file_task_classification_write import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_write import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "apply_write_intent_reason_codes(" in runtime
     assert '"write_intent"' not in classify_body
@@ -255,10 +243,7 @@ def test_file_task_classification_recipes_are_extracted_from_runtime() -> None:
     helper = _read("app/core/agent/file_task_classification_recipes.py")
     facade = _classification_facade()
 
-    assert (
-        "from app.core.agent.file_task_classification_recipes import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_recipes import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "apply_recipe_classification(" in runtime
     assert "recipe_matches(" not in runtime
@@ -274,10 +259,7 @@ def test_file_task_classification_reasons_are_extracted_from_runtime() -> None:
     helper = _read("app/core/agent/file_task_classification_reasons.py")
     facade = _classification_facade()
 
-    assert (
-        "from app.core.agent.file_task_classification_reasons import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_reasons import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "build_classification_reason_codes(" in runtime
     assert "planner_deferred:model_first" not in runtime
@@ -296,10 +278,7 @@ def test_file_task_classification_finalizer_is_extracted_from_runtime() -> None:
     helper = _read("app/core/agent/file_task_classification_finalizer.py")
     facade = _classification_facade()
 
-    assert (
-        "from app.core.agent.file_task_classification_finalizer import"
-        in facade
-    )
+    assert "from app.core.agent.file_task_classification_finalizer import" in facade
     assert "from app.core.agent.file_task_classification import" in runtime
     assert "build_final_classification(" in runtime
     assert "return FileTaskClassification(" not in runtime
@@ -309,4 +288,3 @@ def test_file_task_classification_finalizer_is_extracted_from_runtime() -> None:
     assert "def classification_target_file_type(" in helper
     assert "def classification_confidence(" in helper
     assert "return FileTaskClassification(" in helper
-

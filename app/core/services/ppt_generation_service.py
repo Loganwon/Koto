@@ -63,7 +63,9 @@ class PPTGenerationService:
         self, user_input: str, *, search_results=None
     ) -> dict[str, Any]:
         planner = self._get_planner()
-        return await planner.plan_content_structure(user_input, search_results=search_results)
+        return await planner.plan_content_structure(
+            user_input, search_results=search_results
+        )
 
     async def expand_slide_content(
         self,

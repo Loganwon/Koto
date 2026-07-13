@@ -34,7 +34,9 @@ def _requires_explicit_confirmation(request: FileTaskRequest) -> bool:
     if _EXPLICIT_CONFIRMATION_PATTERN.search(task_text):
         return True
     options = request.options if isinstance(request.options, dict) else {}
-    return bool(options.get("requires_confirmation") or options.get("confirm_before_apply"))
+    return bool(
+        options.get("requires_confirmation") or options.get("confirm_before_apply")
+    )
 
 
 class FileTaskIntentPlanner:
@@ -46,16 +48,24 @@ class FileTaskIntentPlanner:
         *,
         known_tool_gap: Optional[Dict[str, Any]] = None,
     ) -> FileTaskIntentPlan:
-        output_mode = str(classification.output_mode or "answer").strip().lower() or "answer"
-        recipe_match = select_task_recipe(request, files, write_intent=bool(classification.write_intent))
-        requires_confirmation = output_mode == "hybrid" and _requires_explicit_confirmation(request)
+        output_mode = (
+            str(classification.output_mode or "answer").strip().lower() or "answer"
+        )
+        recipe_match = select_task_recipe(
+            request, files, write_intent=bool(classification.write_intent)
+        )
+        requires_confirmation = (
+            output_mode == "hybrid" and _requires_explicit_confirmation(request)
+        )
         recommended_strategy = self._recommended_strategy(
             classification,
             output_mode,
             known_tool_gap,
             requires_confirmation=requires_confirmation,
         )
-        can_apply = output_mode in {"write", "hybrid"} and self._has_apply_target(request, files)
+        can_apply = output_mode in {"write", "hybrid"} and self._has_apply_target(
+            request, files
+        )
         reason_codes = [item for item in classification.reason_codes if item]
         reason_codes.extend(
             [
@@ -70,7 +80,9 @@ class FileTaskIntentPlanner:
 
         return FileTaskIntentPlan(
             intent_type=classification.task_family or "analyze",
-            goal_statement=self._goal_statement(request, classification, output_mode, known_tool_gap),
+            goal_statement=self._goal_statement(
+                request, classification, output_mode, known_tool_gap
+            ),
             output_mode=output_mode,
             confidence=float(classification.confidence or 0.0),
             write_intent=bool(classification.write_intent),
@@ -127,10 +139,16 @@ class FileTaskIntentPlanner:
         if output_mode == "write":
             return "write_through"
         if output_mode == "hybrid":
-            return "analyze_then_confirm" if requires_confirmation else "analyze_then_optional_apply"
+            return (
+                "analyze_then_confirm"
+                if requires_confirmation
+                else "analyze_then_optional_apply"
+            )
         return "answer_only"
 
-    def _has_apply_target(self, request: FileTaskRequest, files: List[FileTaskFile]) -> bool:
+    def _has_apply_target(
+        self, request: FileTaskRequest, files: List[FileTaskFile]
+    ) -> bool:
         if str(request.target_path or "").strip():
             return True
         for file_info in files:
@@ -151,7 +169,11 @@ class FileTaskIntentPlanner:
         known_tool_gap: Optional[Dict[str, Any]],
         recipe_match: Any = None,
     ) -> List[Dict[str, Any]]:
-        if recipe_match and getattr(recipe_match, "recipe", None) and recipe_match.recipe.plan_steps:
+        if (
+            recipe_match
+            and getattr(recipe_match, "recipe", None)
+            and recipe_match.recipe.plan_steps
+        ):
             return [dict(step) for step in recipe_match.recipe.plan_steps]
         context_parts: List[str] = []
         if files:
@@ -163,12 +185,18 @@ class FileTaskIntentPlanner:
             {
                 "id": "context",
                 "title": "读取显式上下文",
-                "description": f"读取 {context_detail}，并保留来源引用。" if context_detail else "检查是否有选区、附件或明确当前文件。",
+                "description": (
+                    f"读取 {context_detail}，并保留来源引用。"
+                    if context_detail
+                    else "检查是否有选区、附件或明确当前文件。"
+                ),
             },
             {
                 "id": "execute",
                 "title": "执行任务",
-                "description": self._execute_step_description(write_intent, output_mode, known_tool_gap),
+                "description": self._execute_step_description(
+                    write_intent, output_mode, known_tool_gap
+                ),
             },
             {
                 "id": "check",
@@ -184,7 +212,9 @@ class FileTaskIntentPlanner:
         known_tool_gap: Optional[Dict[str, Any]],
     ) -> str:
         if known_tool_gap:
-            capability = str(known_tool_gap.get("missing_capability") or "缺失能力").strip()
+            capability = str(
+                known_tool_gap.get("missing_capability") or "缺失能力"
+            ).strip()
             return f"当前任务触发 Koto 原生能力缺口：{capability}；模型需要产出 tool_design_v1 工具规格，不调用未注册工具。"
         if write_intent:
             return "模型在 Koto allowlist 工具目录内规划并执行，写入后产生 file.changed 事件。"

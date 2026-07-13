@@ -72,9 +72,7 @@ class TestKotoSetup:
         try:
             mod.APP_ROOT = tmp_path
             (tmp_path / "config").mkdir(parents=True, exist_ok=True)
-            mod._write_deepseek_config(
-                "sk-test-key-123456789", "https://custom.api"
-            )
+            mod._write_deepseek_config("sk-test-key-123456789", "https://custom.api")
             content = (tmp_path / "config" / "deepseek_config.env").read_text(
                 encoding="utf-8"
             )

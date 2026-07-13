@@ -2,9 +2,9 @@ from pathlib import Path
 
 
 def test_workspace_model_init_does_not_restore_retired_inline_output_mode():
-    source = (Path(__file__).resolve().parents[2] / "web/src/workspace/model-settings.ts").read_text(
-        encoding="utf-8"
-    )
+    source = (
+        Path(__file__).resolve().parents[2] / "web/src/workspace/model-settings.ts"
+    ).read_text(encoding="utf-8")
     init_start = source.index("export function initSocket(): void")
     init_end = source.index("export function setLockedModel", init_start)
     init_body = source[init_start:init_end]
@@ -29,14 +29,17 @@ def test_workspace_model_controls_have_one_scoped_typescript_click_boundary():
     assert "root.addEventListener('click'" in source
     assert "root.contains(button)" in source
     assert "setLockedModel(mode);" in source
-    assert "controlsRoot?.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]')" in source
+    assert (
+        "controlsRoot?.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]')"
+        in source
+    )
     assert index_html.count("{% include '_workspace_model_controls.html' %}") == 1
 
 
 def test_workspace_toggle_changes_mode_without_owning_model_selection():
-    source = (Path(__file__).resolve().parents[2] / "web/src/workspace/model-settings.ts").read_text(
-        encoding="utf-8"
-    )
+    source = (
+        Path(__file__).resolve().parents[2] / "web/src/workspace/model-settings.ts"
+    ).read_text(encoding="utf-8")
 
     switch_start = source.index("function _setWorkspaceModelMode")
     switch_body = source[switch_start:]

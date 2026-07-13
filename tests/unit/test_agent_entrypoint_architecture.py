@@ -5,7 +5,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -41,8 +40,14 @@ def test_legacy_agent_loop_bridges_use_facade_only() -> None:
     editor_executor = _read("app/core/agent/editor_quick_action_executor.py")
     editor_loop_executor = _read("app/core/agent/editor_loop_executor.py")
 
-    assert "from app.core.agent.editor_loop_executor import EditorLoopExecutor" in editor_ai
-    assert "from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor" in socket_handler
+    assert (
+        "from app.core.agent.editor_loop_executor import EditorLoopExecutor"
+        in editor_ai
+    )
+    assert (
+        "from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor"
+        in socket_handler
+    )
     assert "app.core.agent.agent_loop import KotoAgentLoop" not in editor_ai
     assert "app.core.agent.agent_loop import KotoAgentLoop" not in socket_handler
     assert "from app.core.agent import agent_loop" not in code_executor
@@ -56,7 +61,10 @@ def test_legacy_agent_loop_bridges_use_facade_only() -> None:
     assert "DocWebSocketAgentExecutor().iter_events(request)" in doc_executor
     assert "EditorCodeActionExecutor.supports(request)" in editor_loop_executor
     assert "EditorQuickActionExecutor().iter_events(request)" in editor_loop_executor
-    assert "from app.core.agent.doc_websocket_event_mapper import emit_agent_event" in socket_handler
+    assert (
+        "from app.core.agent.doc_websocket_event_mapper import emit_agent_event"
+        in socket_handler
+    )
 
 
 def test_agent_execution_entrypoint_matrix_documents_current_boundaries() -> None:

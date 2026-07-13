@@ -29,7 +29,9 @@ def test_system_prompt_guidance_combines_followup_financial_and_docx_sections():
         target_path="report.docx",
         files=[
             FileTaskFile(path="forecast.xlsx", name="forecast.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
     classification = FileTaskClassification(docx_annotation_request=True)
@@ -45,7 +47,9 @@ def test_system_prompt_guidance_combines_followup_financial_and_docx_sections():
     )
 
     assert "继续优化" in guidance.followup_guidance
-    assert "Excel 财务预测图表写入 DOCX 任务规则" in guidance.financial_chart_docx_guidance
+    assert (
+        "Excel 财务预测图表写入 DOCX 任务规则" in guidance.financial_chart_docx_guidance
+    )
     assert "DOCX 审校/批注任务规则" in guidance.single_docx_annotate_guidance
     assert "- 目标 DOCX：report.docx" in guidance.single_docx_annotate_guidance
 

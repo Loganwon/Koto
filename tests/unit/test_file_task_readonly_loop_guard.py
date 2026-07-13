@@ -33,20 +33,26 @@ def test_answer_only_round_disables_tools_after_readonly_guard_with_context():
 def test_answer_only_round_keeps_tools_for_write_or_missing_context():
     tools = [{"name": "parse_file_to_text"}]
 
-    assert answer_only_round(
-        write_intent=True,
-        readonly_answer_guard_injected=True,
-        readonly_duplicate_guard_injected=False,
-        has_context=True,
-        tool_defs=tools,
-    ).tool_defs == tools
-    assert answer_only_round(
-        write_intent=False,
-        readonly_answer_guard_injected=True,
-        readonly_duplicate_guard_injected=False,
-        has_context=False,
-        tool_defs=tools,
-    ).tool_defs == tools
+    assert (
+        answer_only_round(
+            write_intent=True,
+            readonly_answer_guard_injected=True,
+            readonly_duplicate_guard_injected=False,
+            has_context=True,
+            tool_defs=tools,
+        ).tool_defs
+        == tools
+    )
+    assert (
+        answer_only_round(
+            write_intent=False,
+            readonly_answer_guard_injected=True,
+            readonly_duplicate_guard_injected=False,
+            has_context=False,
+            tool_defs=tools,
+        ).tool_defs
+        == tools
+    )
 
 
 def test_discard_answer_only_tool_calls_only_in_answer_only_round():
@@ -68,60 +74,84 @@ def test_discard_answer_only_tool_calls_only_in_answer_only_round():
 
 
 def test_readonly_duplicate_guard_retries_once_before_last_round():
-    assert should_retry_readonly_duplicate_guard(
-        readonly_duplicate_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is True
-    assert should_retry_readonly_duplicate_guard(
-        readonly_duplicate_guard_injected=True,
-        round_index=2,
-        max_rounds=3,
-    ) is False
+    assert (
+        should_retry_readonly_duplicate_guard(
+            readonly_duplicate_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is True
+    )
+    assert (
+        should_retry_readonly_duplicate_guard(
+            readonly_duplicate_guard_injected=True,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
 
 
 def test_readonly_answer_guard_retries_only_for_blank_answer_with_context():
-    assert should_retry_readonly_answer_guard(
-        content_text="",
-        has_context=True,
-        readonly_answer_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is True
-    assert should_retry_readonly_answer_guard(
-        content_text="已有答案",
-        has_context=True,
-        readonly_answer_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is False
-    assert should_retry_readonly_answer_guard(
-        content_text="",
-        has_context=False,
-        readonly_answer_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is False
-    assert should_retry_readonly_answer_guard(
-        content_text="",
-        has_context=True,
-        readonly_answer_guard_injected=True,
-        round_index=2,
-        max_rounds=3,
-    ) is False
-    assert should_retry_readonly_answer_guard(
-        content_text="",
-        has_context=True,
-        readonly_answer_guard_injected=False,
-        round_index=3,
-        max_rounds=3,
-    ) is False
+    assert (
+        should_retry_readonly_answer_guard(
+            content_text="",
+            has_context=True,
+            readonly_answer_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is True
+    )
+    assert (
+        should_retry_readonly_answer_guard(
+            content_text="已有答案",
+            has_context=True,
+            readonly_answer_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
+    assert (
+        should_retry_readonly_answer_guard(
+            content_text="",
+            has_context=False,
+            readonly_answer_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
+    assert (
+        should_retry_readonly_answer_guard(
+            content_text="",
+            has_context=True,
+            readonly_answer_guard_injected=True,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
+    assert (
+        should_retry_readonly_answer_guard(
+            content_text="",
+            has_context=True,
+            readonly_answer_guard_injected=False,
+            round_index=3,
+            max_rounds=3,
+        )
+        is False
+    )
     assert "生成可见分析结果" in READONLY_ANSWER_GUARD_PENDING_SUMMARY
-    assert should_retry_readonly_duplicate_guard(
-        readonly_duplicate_guard_injected=False,
-        round_index=3,
-        max_rounds=3,
-    ) is False
+    assert (
+        should_retry_readonly_duplicate_guard(
+            readonly_duplicate_guard_injected=False,
+            round_index=3,
+            max_rounds=3,
+        )
+        is False
+    )
 
 
 def test_readonly_duplicate_guard_reminder_includes_task_and_source_lines():
@@ -137,56 +167,80 @@ def test_readonly_duplicate_guard_reminder_includes_task_and_source_lines():
 
 
 def test_readonly_duplicate_final_summary_prefers_context_then_content_then_fallback():
-    assert readonly_duplicate_final_summary(
-        context_summary="上下文总结",
-        content_text="模型文本",
-    ) == "上下文总结"
-    assert readonly_duplicate_final_summary(
-        context_summary="",
-        content_text="模型文本",
-    ) == "模型文本"
-    assert readonly_duplicate_final_summary(
-        context_summary="",
-        content_text="",
-    ) == READONLY_DUPLICATE_FALLBACK_SUMMARY
+    assert (
+        readonly_duplicate_final_summary(
+            context_summary="上下文总结",
+            content_text="模型文本",
+        )
+        == "上下文总结"
+    )
+    assert (
+        readonly_duplicate_final_summary(
+            context_summary="",
+            content_text="模型文本",
+        )
+        == "模型文本"
+    )
+    assert (
+        readonly_duplicate_final_summary(
+            context_summary="",
+            content_text="",
+        )
+        == READONLY_DUPLICATE_FALLBACK_SUMMARY
+    )
 
 
 def test_write_duplicate_guard_retries_only_when_write_is_unmodified_and_not_last_round():
-    assert should_retry_write_duplicate_guard(
-        write_intent=True,
-        has_file_changes=False,
-        duplicate_supervisor_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is True
-    assert should_retry_write_duplicate_guard(
-        write_intent=False,
-        has_file_changes=False,
-        duplicate_supervisor_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is False
-    assert should_retry_write_duplicate_guard(
-        write_intent=True,
-        has_file_changes=True,
-        duplicate_supervisor_guard_injected=False,
-        round_index=2,
-        max_rounds=3,
-    ) is False
-    assert should_retry_write_duplicate_guard(
-        write_intent=True,
-        has_file_changes=False,
-        duplicate_supervisor_guard_injected=True,
-        round_index=2,
-        max_rounds=3,
-    ) is False
-    assert should_retry_write_duplicate_guard(
-        write_intent=True,
-        has_file_changes=False,
-        duplicate_supervisor_guard_injected=False,
-        round_index=3,
-        max_rounds=3,
-    ) is False
+    assert (
+        should_retry_write_duplicate_guard(
+            write_intent=True,
+            has_file_changes=False,
+            duplicate_supervisor_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is True
+    )
+    assert (
+        should_retry_write_duplicate_guard(
+            write_intent=False,
+            has_file_changes=False,
+            duplicate_supervisor_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
+    assert (
+        should_retry_write_duplicate_guard(
+            write_intent=True,
+            has_file_changes=True,
+            duplicate_supervisor_guard_injected=False,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
+    assert (
+        should_retry_write_duplicate_guard(
+            write_intent=True,
+            has_file_changes=False,
+            duplicate_supervisor_guard_injected=True,
+            round_index=2,
+            max_rounds=3,
+        )
+        is False
+    )
+    assert (
+        should_retry_write_duplicate_guard(
+            write_intent=True,
+            has_file_changes=False,
+            duplicate_supervisor_guard_injected=False,
+            round_index=3,
+            max_rounds=3,
+        )
+        is False
+    )
 
 
 def test_write_duplicate_guard_summaries_are_centralized():

@@ -54,7 +54,9 @@ def test_web_searcher_synthesizes_retrieved_sources(monkeypatch):
             return {"content": "当前金价为 100。[1]"}
 
     monkeypatch.setattr(web.search_backend, "search_web", lambda query: sources)
-    monkeypatch.setattr(provider_factory, "get_llm_provider", lambda **kwargs: _Provider())
+    monkeypatch.setattr(
+        provider_factory, "get_llm_provider", lambda **kwargs: _Provider()
+    )
 
     result = WebSearcher.search_with_grounding("当前金价")
 

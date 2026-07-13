@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from flask import Blueprint, jsonify
 
-
 response_bp = Blueprint("response", __name__)
 
 

@@ -28,15 +28,21 @@ WORKFLOW_FILE_STORE = ROOT / "app" / "core" / "workflows" / "file_store.py"
 WORKFLOW_SKILL_MAPPING = ROOT / "app" / "core" / "workflows" / "skill_mapping.py"
 PPT_WORKFLOW_SKILL_MATRIX = ROOT / "docs" / "PPT_WORKFLOW_SKILL_ROUTE_MATRIX.md"
 PPT_PLUGIN = ROOT / "app" / "core" / "agent" / "plugins" / "ppt_plugin.py"
-PPT_GENERATION_SERVICE = ROOT / "app" / "core" / "services" / "ppt_generation_service.py"
-PPT_GENERATION_CONTRACT = ROOT / "app" / "core" / "services" / "ppt_generation_contract.py"
+PPT_GENERATION_SERVICE = (
+    ROOT / "app" / "core" / "services" / "ppt_generation_service.py"
+)
+PPT_GENERATION_CONTRACT = (
+    ROOT / "app" / "core" / "services" / "ppt_generation_contract.py"
+)
 TEMPLATE_LIBRARY = ROOT / "web" / "template_library.py"
 PPT_API_ROUTES = ROOT / "web" / "ppt_api_routes.py"
 PPT_GENERATOR = ROOT / "web" / "ppt_generator.py"
 CHAT_BP = ROOT / "web" / "blueprints" / "chat.py"
 CHAT_FILE_HANDLERS = ROOT / "web" / "chat_file_handlers.py"
 CHAT_STREAM_DIR = ROOT / "web" / "services" / "chat_stream"
-CHAT_REGULAR_HANDLER = ROOT / "web" / "services" / "chat_stream" / "generate" / "regular_handler.py"
+CHAT_REGULAR_HANDLER = (
+    ROOT / "web" / "services" / "chat_stream" / "generate" / "regular_handler.py"
+)
 CHAT_GENERATION_POLICY = ROOT / "app" / "core" / "llm" / "chat_generation_policy.py"
 SESSIONS_BP = ROOT / "web" / "blueprints" / "sessions.py"
 SETTINGS_BP = ROOT / "web" / "blueprints" / "settings.py"
@@ -115,7 +121,10 @@ def test_proxy_candidate_discovery_is_extracted_from_app_wiring():
     app_source = _read(WEB_APP)
     proxy_source = _read(ROOT / "web" / "app_proxy.py")
 
-    assert "from web.app_proxy import configure_proxy, extract_system_proxy_candidates" in app_source
+    assert (
+        "from web.app_proxy import configure_proxy, extract_system_proxy_candidates"
+        in app_source
+    )
     assert "configure_proxy(" in app_source
     assert "return extract_system_proxy_candidates(" in app_source
     assert "def extract_system_proxy_candidates(" in proxy_source
@@ -152,12 +161,16 @@ def test_background_file_tasks_call_the_file_task_stream_owner_directly():
 def test_core_llm_provider_helpers_do_not_reflect_through_web_runtime_context():
     source = _read(ROOT / "app" / "core" / "agent" / "llm_provider_helpers.py")
 
-    assert "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    assert (
+        "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    )
     assert "web.runtime_context" not in source
 
 
 def test_memory_tools_plugin_uses_the_memory_runtime_owner_directly():
-    source = _read(ROOT / "app" / "core" / "agent" / "plugins" / "memory_tools_plugin.py")
+    source = _read(
+        ROOT / "app" / "core" / "agent" / "plugins" / "memory_tools_plugin.py"
+    )
 
     assert "from web.memory_runtime import get_memory_manager" in source
     assert "web.runtime_context" not in source
@@ -175,7 +188,9 @@ def test_web_app_keeps_executable_lifecycle_outside_application_factory():
 def test_direct_web_app_imports_do_not_expand():
     """Runtime context is the migration bridge; new modules should not import web.app."""
     offenders: set[str] = set()
-    package_import_pattern = re.compile(r"from\s+web\s+import\s+app(?:\s+as\s+\w+|\s*,|$)")
+    package_import_pattern = re.compile(
+        r"from\s+web\s+import\s+app(?:\s+as\s+\w+|\s*,|$)"
+    )
     for root in [ROOT / "web", ROOT / "app"]:
         for path in root.rglob("*.py"):
             source = _read(path)
@@ -192,6 +207,7 @@ def test_direct_web_app_imports_do_not_expand():
 
 def test_production_code_uses_runtime_context_instead_of_sys_modules_web_app():
     """Only runtime_context may inspect sys.modules for the transitional app module."""
+
     def _touches_web_app_sys_modules(path: Path) -> bool:
         tree = ast.parse(path.read_text(encoding="utf-8-sig"), filename=str(path))
         for node in ast.walk(tree):
@@ -349,13 +365,19 @@ def test_editor_ai_blueprint_uses_runtime_context_not_web_app_imports():
     assert "from web.app import" not in source
     assert "get_app_attr(" not in source
     assert "_stream_file_task_request" not in source
-    assert "from web.file_task_stream import safe_editor_sse, stream_file_task_request" in source
+    assert (
+        "from web.file_task_stream import safe_editor_sse, stream_file_task_request"
+        in source
+    )
     assert "from web.editor_ai_text import clean_selection_text" in source
     runtime_source = _read(ROOT / "web" / "runtime_context.py")
     assert "def stream_file_task_request(" not in runtime_source
     assert "def safe_editor_sse(" not in runtime_source
     stream_source = _read(FILE_TASK_STREAM)
-    assert "from web.blueprints.editor_ai import _clean_selection_text" not in stream_source
+    assert (
+        "from web.blueprints.editor_ai import _clean_selection_text"
+        not in stream_source
+    )
 
 
 def test_file_task_stream_lives_outside_web_app():
@@ -384,7 +406,10 @@ def test_ppt_api_handlers_stay_outside_web_app():
     assert "def get_ppt_session(" not in app_source
     assert '@ppt_api_bp.route("/session/<session_id>", methods=["GET"])' in ppt_source
     assert '@ppt_api_bp.route("/download/<session_id>", methods=["GET"])' in ppt_source
-    assert "from app.core.services.ppt_generation_service import PPTGenerationService" in ppt_source
+    assert (
+        "from app.core.services.ppt_generation_service import PPTGenerationService"
+        in ppt_source
+    )
     assert "PPTGenerationService().render_editor_pptx(" in ppt_source
     assert "from app.core.services.ppt_generator import" not in ppt_source
     assert '"/api/ppt/download", methods=["POST"]' not in app_source
@@ -447,9 +472,9 @@ def test_session_manager_implementation_stays_outside_web_app():
 def test_local_dispatcher_removed_from_web():
     """LocalDispatcher was unused dead code and has been removed."""
     local_dispatcher_path = ROOT / "web" / "local_dispatcher.py"
-    assert not local_dispatcher_path.exists(), (
-        "web/local_dispatcher.py should not exist (dead code, removed)"
-    )
+    assert (
+        not local_dispatcher_path.exists()
+    ), "web/local_dispatcher.py should not exist (dead code, removed)"
 
 
 def test_memory_api_registration_stays_outside_web_app():
@@ -475,13 +500,20 @@ def test_memory_runtime_implementation_stays_outside_web_app():
     assert "def _start_memory_extraction(" in memory_source
     assert "def get_knowledge_base(" in memory_source
     assert "from web.memory_manager import MemoryManager" not in memory_source
-    assert "from enhanced_memory_manager import EnhancedMemoryManager" not in memory_source
+    assert (
+        "from enhanced_memory_manager import EnhancedMemoryManager" not in memory_source
+    )
 
 
 def test_regular_chat_uses_the_canonical_memory_runtime():
-    source = _read(ROOT / "web" / "services" / "chat_stream" / "generate" / "regular_handler.py")
+    source = _read(
+        ROOT / "web" / "services" / "chat_stream" / "generate" / "regular_handler.py"
+    )
 
-    assert "from web.memory_runtime import _start_memory_extraction, get_memory_manager" in source
+    assert (
+        "from web.memory_runtime import _start_memory_extraction, get_memory_manager"
+        in source
+    )
     assert "def _start_memory_extraction(*args, **kwargs):" not in source
     assert "class _CompatMemoryManager" not in source
 
@@ -517,9 +549,12 @@ def test_task_orchestrator_result_merge_is_pure_helper():
     orchestrator_source = _read(TASK_ORCHESTRATOR)
     results_source = _read(TASK_ORCHESTRATOR_RESULTS)
 
-    assert "from web.task_orchestrator_results import merge_task_results" in orchestrator_source
+    assert (
+        "from web.task_orchestrator_results import merge_task_results"
+        in orchestrator_source
+    )
     assert "return merge_task_results(subtasks, context)" in orchestrator_source
-    assert "merged = {\"summary\": \"任务执行完成\"" not in orchestrator_source
+    assert 'merged = {"summary": "任务执行完成"' not in orchestrator_source
     assert "def merge_task_results(subtasks: list" in results_source
     assert "get_app_attr(" not in results_source
     assert "call_app_factory(" not in results_source
@@ -599,7 +634,10 @@ def test_task_orchestrator_ppt_multi_step_lives_outside_orchestrator_class():
         in orchestrator_source
     )
     assert "async def execute_ppt_multi_step(" in ppt_source
-    assert "from app.core.services.ppt_generation_service import PPTGenerationService" in ppt_source
+    assert (
+        "from app.core.services.ppt_generation_service import PPTGenerationService"
+        in ppt_source
+    )
     assert "PPTGenerationService(" in ppt_source
     assert "from app.core.services.ppt_master import" not in ppt_source
     assert "from app.core.services.ppt_generator import" not in ppt_source
@@ -645,11 +683,20 @@ def test_workflow_api_uses_core_executor_registry():
     assert "from app.core.workflows.execution import" in workflow_api_source
     assert "prepare_workflow_execution(workflow_id)" in workflow_api_source
     assert "iter_workflow_events(execution_plan, params)" in workflow_api_source
-    assert "from app.core.workflows.registry import get_workflow_executor" not in workflow_api_source
-    assert "from app.core.workflows.registry import get_workflow_executor" in execution_source
+    assert (
+        "from app.core.workflows.registry import get_workflow_executor"
+        not in workflow_api_source
+    )
+    assert (
+        "from app.core.workflows.registry import get_workflow_executor"
+        in execution_source
+    )
     assert "def prepare_workflow_execution(workflow_id: str)" in execution_source
     assert "def iter_workflow_events(" in execution_source
-    assert "from app.core.workflows.cross_format_extractor import CrossFormatExtractor" not in workflow_api_source
+    assert (
+        "from app.core.workflows.cross_format_extractor import CrossFormatExtractor"
+        not in workflow_api_source
+    )
     assert "WorkflowExecutorSpec(" in registry_source
     assert "def get_workflow_executor(workflow_id: str)" in registry_source
 
@@ -663,7 +710,10 @@ def test_workflow_api_uses_core_metadata_catalog():
     assert "list_workflow_definitions()" in workflow_api_source
     assert "get_workflow_definition(workflow_id)" not in workflow_api_source
     assert "is_chat_workflow(workflow_id)" not in workflow_api_source
-    assert "from app.core.workflows.catalog import get_workflow_definition, is_chat_workflow" in execution_source
+    assert (
+        "from app.core.workflows.catalog import get_workflow_definition, is_chat_workflow"
+        in execution_source
+    )
     assert "get_workflow_definition(normalized_id)" in execution_source
     assert "is_chat_workflow(normalized_id)" in execution_source
     assert "_WORKFLOW_REGISTRY =" not in workflow_api_source
@@ -723,7 +773,9 @@ def test_ppt_plugin_uses_core_generation_service_facade():
     assert "from app.core.services.ppt_generator import" not in plugin_source
     assert "from app.core.services.ppt_generation_contract import" in service_source
     # Service facade now imports PPTContentPlanner/PPTGenerator directly (legacy adapter removed)
-    assert "from app.core.services.ppt_master import PPTContentPlanner" in service_source
+    assert (
+        "from app.core.services.ppt_master import PPTContentPlanner" in service_source
+    )
     assert "from app.core.services.ppt_generator import PPTGenerator" in service_source
     assert "_PPTContentPlanner" in service_source
     assert "_PPTGenerator" in service_source
@@ -740,7 +792,10 @@ def test_ppt_plugin_uses_core_generation_service_facade():
 def test_template_library_ppt_generation_uses_service_facade():
     template_source = _read(TEMPLATE_LIBRARY)
 
-    assert "from app.core.services.ppt_generation_service import PPTGenerationService" in template_source
+    assert (
+        "from app.core.services.ppt_generation_service import PPTGenerationService"
+        in template_source
+    )
     assert "PPTGenerationService().generate_outline_result(" in template_source
     assert "from app.core.services.ppt_generator import" not in template_source
     assert "PPTGenerator(" not in template_source
@@ -771,7 +826,10 @@ def test_legacy_ppt_pipeline_stays_unwired_from_production_paths():
             if path == ROOT / "web" / "ppt_pipeline.py":
                 continue
             source = _read(path)
-            if "app.core.services.ppt_pipeline" in source or "from app.core.services.ppt_pipeline import" in source:
+            if (
+                "app.core.services.ppt_pipeline" in source
+                or "from app.core.services.ppt_pipeline import" in source
+            ):
                 offenders.append(path.relative_to(ROOT).as_posix())
 
     assert offenders == []
@@ -878,7 +936,7 @@ def test_runtime_services_keep_lazy_services_out_of_app_bridge():
     source = _read(ROOT / "web" / "runtime_services.py")
     runtime_context = _read(ROOT / "web" / "runtime_context.py")
 
-    assert "importlib.import_module(\"web.app\")" not in source
+    assert 'importlib.import_module("web.app")' not in source
     assert "sys.modules" not in source
     assert "from web.lazy_loaders." in source
     for helper in [

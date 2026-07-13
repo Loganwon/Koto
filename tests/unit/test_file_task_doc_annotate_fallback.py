@@ -48,9 +48,7 @@ def test_doc_annotate_bridge_fallback_applies_with_boundary_and_contract(monkeyp
     assert "existing" in classification.matched_capabilities
     assert "annotate_file" in classification.matched_capabilities
     assert "read_docx_content" in classification.matched_capabilities
-    assert (
-        "doc_annotate_bridge_execution_fallback" in classification.reason_codes
-    )
+    assert "doc_annotate_bridge_execution_fallback" in classification.reason_codes
 
 
 def test_doc_annotate_bridge_fallback_preserves_existing_bridge(monkeypatch):

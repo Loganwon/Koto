@@ -59,9 +59,7 @@ def test_remove_watermark_removes_repeated_light_text(tmp_path):
     doc.save(source)
     doc.close()
 
-    cleaned_bytes, removed_count, method = remove_watermark(
-        str(source), use_ai=False
-    )
+    cleaned_bytes, removed_count, method = remove_watermark(str(source), use_ai=False)
 
     cleaned = pymupdf.open(stream=cleaned_bytes, filetype="pdf")
     cleaned_text = "\n".join(page.get_text() for page in cleaned)

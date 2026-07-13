@@ -83,7 +83,9 @@ def test_unified_agent_record_task_false_skips_agent_ledger(monkeypatch):
     def fail_if_ledger_requested():
         raise AssertionError("record_task=False must not create an agent ledger task")
 
-    monkeypatch.setattr(unified_agent_module, "_get_task_ledger", fail_if_ledger_requested)
+    monkeypatch.setattr(
+        unified_agent_module, "_get_task_ledger", fail_if_ledger_requested
+    )
     monkeypatch.setattr(
         unified_agent_module,
         "_get_progress_bus",

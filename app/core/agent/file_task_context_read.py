@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Explicit file-context reading phase for the whitebox task runtime."""
+
 from __future__ import annotations
 
 import logging
@@ -76,6 +77,7 @@ class FileTaskContextReadPhase:
 
         def _result(*, cancelled: bool = False) -> FileTaskContextReadResult:
             return FileTaskContextReadResult(cancelled=cancelled, snippets=snippets)
+
         context_step_id = "context"
         if runtime._is_cancelled(request):
             yield runtime._cancelled_event(ledger, request)
@@ -234,7 +236,9 @@ class FileTaskContextReadPhase:
                 snippets.append(snippet)
 
         context_summary = (
-            f"已整理 {len(snippets)} 份上下文片段。" if snippets else "没有显式文件或选区可读取。"
+            f"已整理 {len(snippets)} 份上下文片段。"
+            if snippets
+            else "没有显式文件或选区可读取。"
         )
         yield ledger.event(
             "step.finished",

@@ -14,11 +14,22 @@ def test_verify_task_completion_rejects_missing_explicit_output_file() -> None:
                 "和 optimized_operations_report.md。"
             ),
             file_states=json.dumps(
-                [{"path": "optimized_restock_plan.csv", "exists": True, "modified": True}],
+                [
+                    {
+                        "path": "optimized_restock_plan.csv",
+                        "exists": True,
+                        "modified": True,
+                    }
+                ],
                 ensure_ascii=False,
             ),
             file_changes=json.dumps(
-                [{"path": "optimized_restock_plan.csv", "operation": "run_python_code"}],
+                [
+                    {
+                        "path": "optimized_restock_plan.csv",
+                        "operation": "run_python_code",
+                    }
+                ],
                 ensure_ascii=False,
             ),
         )

@@ -562,10 +562,7 @@ def _read_config_values(provider: str | None = None) -> tuple:
             and not key
         ):
             key = line.split("=", 1)[1].strip()
-        elif (
-            line.startswith(("DEEPSEEK_BASE_URL=", "DEEPSEEK_API_BASE="))
-            and not base
-        ):
+        elif line.startswith(("DEEPSEEK_BASE_URL=", "DEEPSEEK_API_BASE=")) and not base:
             base = line.split("=", 1)[1].strip()
     return key, base
 
@@ -585,7 +582,10 @@ def _validate_api_key(key: str, base: str = "", provider: str = "deepseek") -> t
         for url in urls:
             req = urllib.request.Request(
                 url,
-                headers={"Accept": "application/json", "Authorization": f"Bearer {key}"},
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {key}",
+                },
             )
             try:
                 with urllib.request.urlopen(req, timeout=8) as r:

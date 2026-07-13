@@ -320,7 +320,10 @@ def write_has_contract_anchor(
         "long_docx_stepwise_polish_writeback",
     }:
         return True
-    if str(classification.selected_recipe or "").strip() and classification.write_intent:
+    if (
+        str(classification.selected_recipe or "").strip()
+        and classification.write_intent
+    ):
         return True
     if strong_write_intent:
         return True
@@ -407,7 +410,6 @@ def docx_annotation_has_contract(
     return False
 
 
-
 @dataclass(frozen=True)
 class IntentAdjudicationContractContext:
     readonly_write_negation: bool = False
@@ -427,6 +429,7 @@ class MainlineContractContext:
     write_has_contract_anchor: Callable[[FileTaskClassification], bool] = (
         lambda _classification: False
     )
+
 
 def build_intent_adjudication_contract_context(
     task_text: str,
@@ -469,4 +472,3 @@ def build_mainline_contract_context(
         docx_annotation_has_contract=docx_annotation_anchor,
         write_has_contract_anchor=write_anchor,
     )
-

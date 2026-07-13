@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Classification, planning, and plan-audit stage for file tasks."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -402,7 +403,9 @@ class FileTaskPlanningPhase:
             yield ledger.event(
                 "plan.created",
                 {
-                    "summary": runtime._plan_summary(request, context_files, write_intent),
+                    "summary": runtime._plan_summary(
+                        request, context_files, write_intent
+                    ),
                     "steps": plan_steps,
                     "success_criteria": completion_criteria,
                     "tool_families": supported_file_workflows(),

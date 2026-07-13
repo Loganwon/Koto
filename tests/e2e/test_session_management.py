@@ -86,7 +86,9 @@ def test_refresh_preserves_current_session(e2e_page, e2e_base_url, console_error
         refresh = page.locator("#wa-ai-session-refresh")
         assert refresh.count() == 1
         refresh.click()
-        current = page.locator(f'.wa-ai-session-item[data-ai-session-id="{session_id}"]')
+        current = page.locator(
+            f'.wa-ai-session-item[data-ai-session-id="{session_id}"]'
+        )
         current.wait_for(state="visible", timeout=5000)
         assert console_errors == []
     finally:
@@ -103,9 +105,9 @@ def test_delete_session_from_unified_history(e2e_page, e2e_base_url, console_err
         assert delete_button.count() == 1
         page.on("dialog", lambda dialog: dialog.accept())
         delete_button.click()
-        page.locator(f'.wa-ai-session-item[data-ai-session-id="{session_id}"]').wait_for(
-            state="detached", timeout=5000
-        )
+        page.locator(
+            f'.wa-ai-session-item[data-ai-session-id="{session_id}"]'
+        ).wait_for(state="detached", timeout=5000)
         session_id = ""
         assert console_errors == []
     finally:
@@ -128,9 +130,9 @@ def test_session_lifecycle_has_no_client_or_server_errors(
         assert delete_button.count() == 1
         page.on("dialog", lambda dialog: dialog.accept())
         delete_button.click()
-        page.locator(f'.wa-ai-session-item[data-ai-session-id="{session_id}"]').wait_for(
-            state="detached", timeout=5000
-        )
+        page.locator(
+            f'.wa-ai-session-item[data-ai-session-id="{session_id}"]'
+        ).wait_for(state="detached", timeout=5000)
         session_id = ""
 
         assert console_errors == []

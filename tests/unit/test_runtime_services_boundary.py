@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -52,7 +51,7 @@ def test_runtime_services_do_not_depend_on_web_app_bridge() -> None:
     runtime_context = _read("web/runtime_context.py")
 
     assert "sys.modules" not in source
-    assert "importlib.import_module(\"web.app\")" not in source
+    assert 'importlib.import_module("web.app")' not in source
     assert "from web.lazy_loaders." in source
     for helper in [
         "get_behavior_monitor",

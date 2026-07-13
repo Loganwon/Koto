@@ -1,4 +1,5 @@
 """Prompt and instruction building helpers for doc/editor agent executors."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -122,7 +123,7 @@ class RequestValidator:
         Includes recent conversation history, selected text, and CSV data.
         """
         history = request.history or []
-        recent = history[-MAX_HISTORY_TURNS * 2:] if history else []
+        recent = history[-MAX_HISTORY_TURNS * 2 :] if history else []
         history_text = ""
         if recent:
             parts = []
@@ -135,7 +136,9 @@ class RequestValidator:
                     parts.append(f"Koto AI：{content}")
             history_text = "\n".join(parts) + "\n\n"
 
-        csv_block = f"[表格数据（CSV）]\n{request.csv_data}\n\n" if request.csv_data else ""
+        csv_block = (
+            f"[表格数据（CSV）]\n{request.csv_data}\n\n" if request.csv_data else ""
+        )
         if request.selection:
             return (
                 f'[用户选中的文字]\n"{request.selection}"\n\n'

@@ -4,9 +4,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.core.llm.model_mode import normalize_model_mode
-from app.core.llm.model_selection import is_archived_cloud_model, normalize_cloud_provider
+from app.core.llm.model_selection import (
+    is_archived_cloud_model,
+    normalize_cloud_provider,
+)
 from app.core.llm.provider_boundary import sanitize_public_settings
-
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -90,7 +92,9 @@ def test_health_and_painter_surfaces_do_not_invoke_archived_provider() -> None:
     assert "imagen" not in painter
 
 
-def test_legacy_interactions_models_fail_closed_at_the_web_compatibility_boundary() -> None:
+def test_legacy_interactions_models_fail_closed_at_the_web_compatibility_boundary() -> (
+    None
+):
     source = _read("web/app.py")
 
     tracked_models_start = source.index("class _TrackedModels:")
@@ -120,7 +124,12 @@ def test_web_app_drops_unreachable_interactions_execution_implementation() -> No
 
 def test_chat_error_guidance_does_not_send_users_to_archived_gemini_setup() -> None:
     source = _read("web/app.py")
-    error_guidance = source[source.index('"location is not supported"'):source.index("session_manager.append_and_save", source.index('"location is not supported"'))]
+    error_guidance = source[
+        source.index('"location is not supported"') : source.index(
+            "session_manager.append_and_save",
+            source.index('"location is not supported"'),
+        )
+    ]
 
     assert "gemini_config.env" not in error_guidance
     assert "aistudio.google.com" not in error_guidance

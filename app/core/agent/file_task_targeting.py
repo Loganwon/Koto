@@ -156,7 +156,9 @@ def explicit_output_path_from_task(
             continue
         if _candidate_path_is_immediate_source_reference(before, after, suffix):
             continue
-        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
+        candidate_path = _path_with_split_output_directory(
+            task_text, raw_path, start, end
+        )
         score = 0
         if suffix in {"doc", "docx", "ppt", "pptx", "xls", "xlsx", "pdf"}:
             score += 2
@@ -205,7 +207,9 @@ def explicit_output_paths_from_task(
             continue
         if _candidate_path_is_immediate_source_reference(before, after, suffix):
             continue
-        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
+        candidate_path = _path_with_split_output_directory(
+            task_text, raw_path, start, end
+        )
         score = 0
         if any(pattern.search(near) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS):
             score += 5
@@ -241,7 +245,9 @@ def _explicitly_named_output_paths(task_text: str) -> List[tuple[int, str]]:
         if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
             continue
         start, end = match.span("path")
-        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
+        candidate_path = _path_with_split_output_directory(
+            task_text, raw_path, start, end
+        )
         if candidate_path:
             candidates.append((start, candidate_path))
     return candidates
@@ -280,7 +286,9 @@ def explicit_write_target_path_from_task(task: str) -> str:
             continue
         if _readonly_attached_source_reference(task_text, near, before):
             continue
-        candidate_path = _path_with_split_output_directory(task_text, raw_path, start, end)
+        candidate_path = _path_with_split_output_directory(
+            task_text, raw_path, start, end
+        )
         score = 0
         if any(pattern.search(near) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS):
             score += 5
@@ -341,7 +349,9 @@ def _candidate_path_has_local_write_negation(before: str) -> bool:
     )
 
 
-def _candidate_path_is_immediate_source_reference(before: str, after: str, suffix: str) -> bool:
+def _candidate_path_is_immediate_source_reference(
+    before: str, after: str, suffix: str
+) -> bool:
     before_text = str(before or "")
     after_text = str(after or "")
     local_before = re.split(r"[。!?！？；;\r\n]", before_text)[-1]
@@ -375,7 +385,9 @@ def _path_with_split_output_directory(
         return clean_path
     before = str(task_text or "")[max(0, start - 140) : start]
     after = str(task_text or "")[end : min(len(str(task_text or "")), end + 140)]
-    directory = _split_output_directory_after_file(after) or _split_output_directory_before_file(before)
+    directory = _split_output_directory_after_file(
+        after
+    ) or _split_output_directory_before_file(before)
     if not directory:
         return clean_path
     file_name = Path(normalized_path).name
@@ -713,10 +725,7 @@ def files_explicitly_mentioned_in_task(
                 *(path.name.casefold() for path in exact_matches.values()),
             },
             existing_keys={
-                key
-                for item in resolved
-                for key in _context_file_seen_keys(item)
-                if key
+                key for item in resolved for key in _context_file_seen_keys(item) if key
             },
         )
     )
@@ -736,7 +745,10 @@ def _weak_files_explicitly_mentioned_in_task(
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
         normalized_path = raw_path.replace("\\", "/").rstrip("/")
         suffix = Path(normalized_path).suffix.lower().lstrip(".")
-        if suffix not in _TASK_TEXT_FILE_EXTENSIONS and f".{suffix}" not in _TASK_TEXT_FILE_EXTENSIONS:
+        if (
+            suffix not in _TASK_TEXT_FILE_EXTENSIONS
+            and f".{suffix}" not in _TASK_TEXT_FILE_EXTENSIONS
+        ):
             continue
         name = Path(normalized_path).name
         if name.casefold() in output_reference_names:

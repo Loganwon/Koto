@@ -3,12 +3,13 @@
 from pathlib import Path
 import json
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_docx_extensions_use_only_tiptap_prosemirror_entrypoints():
-    source = (ROOT / "web" / "tiptap-editor" / "docx-extensions.js").read_text(encoding="utf-8")
+    source = (ROOT / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "from '@tiptap/pm/state'" in source
     assert "from '@tiptap/pm/view'" in source
@@ -34,12 +35,16 @@ def test_docx_editor_pins_the_single_verified_tiptap_release():
         (ROOT / "web" / "tiptap-editor" / "package.json").read_text(encoding="utf-8")
     )
     lock_json = json.loads(
-        (ROOT / "web" / "tiptap-editor" / "package-lock.json").read_text(encoding="utf-8")
+        (ROOT / "web" / "tiptap-editor" / "package-lock.json").read_text(
+            encoding="utf-8"
+        )
     )
     declared = package_json["dependencies"]
     locked = lock_json["packages"][""]["dependencies"]
     tiptap_dependencies = {
-        name: version for name, version in declared.items() if name.startswith("@tiptap/")
+        name: version
+        for name, version in declared.items()
+        if name.startswith("@tiptap/")
     }
 
     assert tiptap_dependencies

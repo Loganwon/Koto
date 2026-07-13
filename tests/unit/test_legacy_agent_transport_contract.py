@@ -41,6 +41,8 @@ def test_editor_sse_agent_event_payload_contract() -> None:
         "type": "done",
         "result": "done",
         "has_proposals": False,
+        "can_insert": True,
+        "action_type": "",
     }
     assert _agent_event_payload(
         AgentEvent(EventType.TASK_COMPLETE, {"text": "fallback text"})
@@ -48,6 +50,8 @@ def test_editor_sse_agent_event_payload_contract() -> None:
         "type": "done",
         "text": "fallback text",
         "result": "fallback text",
+        "can_insert": True,
+        "action_type": "",
     }
     assert _agent_event_payload(evt_error("bad")) == {"type": "error", "text": "bad"}
     assert _agent_event_payload(evt_status_message("working")) == {
@@ -82,7 +86,9 @@ def _emit(event):
     return socketio.emitted
 
 
-def test_socket_handler_emit_wrapper_delegates_to_doc_websocket_mapper(monkeypatch) -> None:
+def test_socket_handler_emit_wrapper_delegates_to_doc_websocket_mapper(
+    monkeypatch,
+) -> None:
     import app.core.socket_handler as socket_handler
 
     captured = {}
@@ -255,7 +261,12 @@ def test_doc_websocket_tool_status_and_lifecycle_contract() -> None:
     assert _emit(evt_lifecycle_start("run-1", "sid-1")) == [
         (
             "agent_lifecycle",
-            {"type": "lifecycle_start", "run_id": "run-1", "session_id": "sid-1", "state": "running"},
+            {
+                "type": "lifecycle_start",
+                "run_id": "run-1",
+                "session_id": "sid-1",
+                "state": "running",
+            },
             "/doc",
             "sid-1",
         )
@@ -279,10 +290,15 @@ def test_doc_websocket_secondary_event_contracts() -> None:
             "sid-1",
         )
     ]
-    assert _emit(evt_proposal([{"original_text": "原文", "new_text": "新文"}], summary="润色")) == [
+    assert _emit(
+        evt_proposal([{"original_text": "原文", "new_text": "新文"}], summary="润色")
+    ) == [
         (
             "agent_proposals",
-            {"proposals": [{"original_text": "原文", "new_text": "新文"}], "summary": "润色"},
+            {
+                "proposals": [{"original_text": "原文", "new_text": "新文"}],
+                "summary": "润色",
+            },
             "/doc",
             "sid-1",
         )

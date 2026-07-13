@@ -21,12 +21,7 @@ def apply_terminal_check_overrides(
     payload = dict(check_payload)
     no_read_context = not snippets and not readonly_tool_outputs
 
-    if (
-        not file_changes
-        and no_read_context
-        and requires_file_context
-        and not tool_gap
-    ):
+    if not file_changes and no_read_context and requires_file_context and not tool_gap:
         payload["passed"] = False
         payload["status"] = "needs_attention"
         payload["summary"] = "任务明确要求读取文件，但没有成功读取任何显式文件上下文。"

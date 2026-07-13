@@ -76,9 +76,7 @@ def test_meeting_extraction_uses_active_text_provider(monkeypatch):
     )
     transcript = "会议讨论了上线计划。" * 10
 
-    response = _client().post(
-        "/api/speech/extract-actions", json={"text": transcript}
-    )
+    response = _client().post("/api/speech/extract-actions", json={"text": transcript})
     payload = response.get_json()
 
     assert response.status_code == 200

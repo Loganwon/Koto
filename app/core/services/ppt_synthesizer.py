@@ -54,7 +54,11 @@ class PPTSynthesizer:
                 try:
                     progress_callback(msg, p)
                 except Exception:
-                    import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        "Silenced exception caught", exc_info=True
+                    )
                     pass
 
         try:
@@ -139,7 +143,6 @@ class PPTSynthesizer:
         image_paths: Optional[Dict[int, List[str]]] = None,
     ):
         """填充幻灯片内容"""
-
 
         layout_config = slide_blueprint.layout_config
 
@@ -401,18 +404,18 @@ class PPTSynthesizer:
         text_frame = content_box.text_frame
         text_frame.word_wrap = True
 
-        max_items = 6 # 限制最多显示6条
-        max_chars_per_point = 80 # 单条中文字数限制
-        
+        max_items = 6  # 限制最多显示6条
+        max_chars_per_point = 80  # 单条中文字数限制
+
         display_content = slide_blueprint.content[:max_items]
-        
+
         # 动态调整字号
         font_size = 24 if len(display_content) <= 4 else 20
-        
+
         for i, point in enumerate(display_content):
             if i > 0:
                 text_frame.add_paragraph()
-                
+
             # 截断过长的文本
             point_str = str(point)
             if len(point_str) > max_chars_per_point:
@@ -461,16 +464,16 @@ class PPTSynthesizer:
         )
         text_frame = content_box.text_frame
         text_frame.word_wrap = True
-        
+
         max_items = 5
-        max_chars_per_point = 65 # 半屏显示，字数限制更严
+        max_chars_per_point = 65  # 半屏显示，字数限制更严
         display_content = slide_blueprint.content[:max_items]
         font_size = 20 if len(display_content) <= 3 else 16
 
         for i, point in enumerate(display_content):
             if i > 0:
                 text_frame.add_paragraph()
-                
+
             point_str = str(point)
             if len(point_str) > max_chars_per_point:
                 point_str = point_str[:max_chars_per_point] + "..."
@@ -529,7 +532,6 @@ class PPTSynthesizer:
     ):
         """应用美化规则"""
 
-
         # 为所有形状添加阴影和边框（如果配置了）
         layout_config = slide_blueprint.layout_config
 
@@ -574,7 +576,6 @@ class PPTBeautyOptimizer:
     @staticmethod
     def optimize_slide_aesthetics(slide, slide_blueprint, theme_colors: Dict):
         """优化幻灯片美观度"""
-
 
         # 1. 文本对齐和间距优化
         for shape in slide.shapes:

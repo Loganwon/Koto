@@ -10,7 +10,6 @@ from app.core.agent.file_task_contract import (
     FileTaskRequest,
 )
 
-
 OutputModeResolver = Callable[
     [
         FileTaskRequest,

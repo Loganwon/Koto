@@ -17,6 +17,8 @@ import socket
 from datetime import date
 from typing import Any, Dict, Optional
 
+from web.shared import ollama_available as _ollama_available
+
 # ── Ollama 连接 ──────────────────────────────────────────────────────────────
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
@@ -59,7 +61,7 @@ def extract_fields(
     """
     if not content or not content.strip():
         return None
-    if not ollama_available():
+    if not _ollama_available():
         return None
     try:
         import requests as _req

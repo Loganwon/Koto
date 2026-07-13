@@ -52,10 +52,12 @@ def configure_default_brain_runtime(runtime: BrainRuntimeServices) -> None:
     global _default_brain_runtime
     _default_brain_runtime = runtime
 
+
 # ContextAnalyzer - lazy import with fallback
 try:
     from web.context_analyzer import ContextAnalyzer as _ContextAnalyzer
 except Exception:
+
     class _ContextAnalyzer:
         @staticmethod
         def filter_history(_query, history):
@@ -72,15 +74,14 @@ from web.chat_system_instruction import (
     get_default_chat_system_instruction as _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION,
 )
 
+
 def _get_system_instruction():
     """Build the FILE_GEN system instruction with a current time anchor."""
     from datetime import datetime
 
     now = datetime.now()
     date_str = now.strftime("%Y年%m月%d日")
-    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][
-        now.weekday()
-    ]
+    weekday = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"][now.weekday()]
     base_instruction = f"""你是 Koto 文档生成专家，专注于生成高质量、可用的文档。
 
 ## 当前时间上下文
@@ -111,6 +112,7 @@ def _get_system_instruction():
     except Exception:
         return base_instruction
 
+
 def _is_interactions_only(model_id: str) -> bool:
     """Return whether a model requires the archived Interactions API."""
     if not model_id:
@@ -118,10 +120,17 @@ def _is_interactions_only(model_id: str) -> bool:
     interactions_models = {"o4-mini", "o3", "o3-mini", "o1", "o1-mini", "o1-pro"}
     return model_id in interactions_models
 
+
 def _call_interactions_api_sync(
-    model_id, messages, system_instruction=None,
-    session_name="", start_time=0, original_input="",
-    history=None, smart_dispatcher=None, target_key="CHAT",
+    model_id,
+    messages,
+    system_instruction=None,
+    session_name="",
+    start_time=0,
+    original_input="",
+    history=None,
+    smart_dispatcher=None,
+    target_key="CHAT",
     _interactions_fallback_model="deepseek-chat",
 ):
     """Compatibility error for the archived Interactions API path."""
@@ -247,10 +256,13 @@ class KotoBrain:
                 try:
                     from app.core.llm.model_selection import get_configured_cloud_model
 
-                    model_id = get_configured_cloud_model(
-                        task_type=target_key,
-                        fallback_model=model_id,
-                    ) or model_id
+                    model_id = (
+                        get_configured_cloud_model(
+                            task_type=target_key,
+                            fallback_model=model_id,
+                        )
+                        or model_id
+                    )
                 except Exception as model_select_err:
                     _app_logger.debug(
                         "[ModelSelect] configured cloud model lookup skipped: %s",
@@ -481,14 +493,16 @@ class KotoBrain:
                                 f"[IMAGE_EDIT] Trying model: {edit_model}"
                             )
                             _app_logger.debug(f"[IMAGE_EDIT] Sending request to API...")
-                            raise RuntimeError(_gemini_archived_error())  # was: response = _client.models.generate_content(
-#                                 model=edit_model,
-#                                 contents=edit_instruction,
-#                                 config=types.GenerateContentConfig(
-#                                     max_output_tokens=4096, temperature=0.5
-#                                 ),
-#                             )
-#                             _app_logger.debug(f"[IMAGE_EDIT] Got API response")
+                            raise RuntimeError(
+                                _gemini_archived_error()
+                            )  # was: response = _client.models.generate_content(
+                            #                                 model=edit_model,
+                            #                                 contents=edit_instruction,
+                            #                                 config=types.GenerateContentConfig(
+                            #                                     max_output_tokens=4096, temperature=0.5
+                            #                                 ),
+                            #                             )
+                            #                             _app_logger.debug(f"[IMAGE_EDIT] Got API response")
 
                             if (
                                 response.candidates
@@ -531,34 +545,34 @@ class KotoBrain:
                         )
                     retry_models = ["deepseek-chat", "deepseek-chat"]
                     for retry_model in retry_models:
-                            try:
-                                _app_logger.debug(
-                                    f"[IMAGE_EDIT] Retry with model: {retry_model}"
+                        try:
+                            _app_logger.debug(
+                                f"[IMAGE_EDIT] Retry with model: {retry_model}"
+                            )
+                            raise RuntimeError(
+                                _gemini_archived_error()
+                            )  # was: retry_resp = _client.models.generate_content(
+                            #                                     model=retry_model,
+                            #                                     contents=fix_prompt,
+                            #                                     config=types.GenerateContentConfig(
+                            #                                         max_output_tokens=4096
+                            #                                     ),
+                            #                                 )
+                            if (
+                                retry_resp.candidates
+                                and retry_resp.candidates[0].content.parts
+                            ):
+                                retry_code = (
+                                    retry_resp.candidates[0].content.parts[0].text
                                 )
-                                raise RuntimeError(_gemini_archived_error())  # was: retry_resp = _client.models.generate_content(
-#                                     model=retry_model,
-#                                     contents=fix_prompt,
-#                                     config=types.GenerateContentConfig(
-#                                         max_output_tokens=4096
-#                                     ),
-#                                 )
-                                if (
-                                    retry_resp.candidates
-                                    and retry_resp.candidates[0].content.parts
-                                ):
-                                    retry_code = (
-                                        retry_resp.candidates[0].content.parts[0].text
-                                    )
-                                    retry_run = _process_code_response(retry_code)
-                                    if retry_run["images"]:
-                                        result["images"] = retry_run["images"]
-                                        result["response"] = retry_run["response"]
-                                        break
+                                retry_run = _process_code_response(retry_code)
+                                if retry_run["images"]:
+                                    result["images"] = retry_run["images"]
                                     result["response"] = retry_run["response"]
-                            except Exception as retry_err:
-                                _app_logger.debug(
-                                    f"[IMAGE_EDIT] Retry failed: {retry_err}"
-                                )
+                                    break
+                                result["response"] = retry_run["response"]
+                        except Exception as retry_err:
+                            _app_logger.debug(f"[IMAGE_EDIT] Retry failed: {retry_err}")
 
                     result["total_time"] = time.time() - start_time
                     return result
@@ -566,27 +580,29 @@ class KotoBrain:
                     # 纯图像生成使用 gemini-3.1-flash-image-preview
                     try:
                         _app_logger.info(f"[图像生成] 开始生成: {user_input[:50]}...")
-                        raise RuntimeError(_gemini_archived_error())  # was: response = _client.models.generate_content(
-#                             model="gemini-3.1-flash-image-preview",
-#                             contents=user_input,
-#                             config=types.GenerateContentConfig(
-#                                 response_modalities=["TEXT", "IMAGE"]
-#                             ),
-#                         )
-#                         _app_logger.info(
-#                             f"[图像生成] 响应成功，候选数: {len(response.candidates) if response.candidates else 0}"
-#                         )
+                        raise RuntimeError(
+                            _gemini_archived_error()
+                        )  # was: response = _client.models.generate_content(
+                        #                             model="gemini-3.1-flash-image-preview",
+                        #                             contents=user_input,
+                        #                             config=types.GenerateContentConfig(
+                        #                                 response_modalities=["TEXT", "IMAGE"]
+                        #                             ),
+                        #                         )
+                        #                         _app_logger.info(
+                        #                             f"[图像生成] 响应成功，候选数: {len(response.candidates) if response.candidates else 0}"
+                        #                         )
 
                         # 保存生成的图片
-#                         if response.candidates and response.candidates[0].content.parts:
-#                             for part in response.candidates[0].content.parts:
-#                                 if hasattr(part, "inline_data") and part.inline_data:
-#                                     img_filename = _Utils.save_image_part(part)
-#                                     if img_filename:
-#                                         result["images"].append(img_filename)
-#                                         _app_logger.info(
-#                                             f"[图像生成] 已保存: {img_filename}"
-#                                         )
+                        #                         if response.candidates and response.candidates[0].content.parts:
+                        #                             for part in response.candidates[0].content.parts:
+                        #                                 if hasattr(part, "inline_data") and part.inline_data:
+                        #                                     img_filename = _Utils.save_image_part(part)
+                        #                                     if img_filename:
+                        #                                         result["images"].append(img_filename)
+                        #                                         _app_logger.info(
+                        #                                             f"[图像生成] 已保存: {img_filename}"
+                        #                                         )
 
                         if result["images"]:
                             save_path = self._settings_manager.images_dir
@@ -716,6 +732,7 @@ class KotoBrain:
             try:
                 from app.core.llm.model_selection import is_deepseek_model
             except Exception:
+
                 def is_deepseek_model(_model_id):
                     return False
 
@@ -746,14 +763,16 @@ class KotoBrain:
                         )
                         model_id = _doc_model
                         result["model"] = model_id
-                    raise RuntimeError(_gemini_archived_error())  # was: response = _client.models.generate_content(
-#                         model=model_id,
-#                         contents=[original_input, doc_part],
-#                         config=types.GenerateContentConfig(
-#                             system_instruction=_brain_sys_instruction
-#                         ),
-#                     )
-#                     accumulated_text = response.text if response.text else ""
+                    raise RuntimeError(
+                        _gemini_archived_error()
+                    )  # was: response = _client.models.generate_content(
+                #                         model=model_id,
+                #                         contents=[original_input, doc_part],
+                #                         config=types.GenerateContentConfig(
+                #                             system_instruction=_brain_sys_instruction
+                #                         ),
+                #                     )
+                #                     accumulated_text = response.text if response.text else ""
                 elif _is_interactions_only(model_id):
                     # 图片文件 + gemini-3-preview 模型：走 Interactions API
                     try:
@@ -770,24 +789,28 @@ class KotoBrain:
                         )
                         model_id = _INTERACTIONS_FALLBACK_MODEL
                         result["model"] = model_id
-                        raise RuntimeError(_gemini_archived_error())  # was: _fb_resp = _client.models.generate_content(
-#                             model=model_id,
-#                             contents=[original_input, doc_part],
-#                             config=types.GenerateContentConfig(
-#                                 system_instruction=_brain_sys_instruction
-#                             ),
-#                         )
+                        raise RuntimeError(
+                            _gemini_archived_error()
+                        )  # was: _fb_resp = _client.models.generate_content(
+                        #                             model=model_id,
+                        #                             contents=[original_input, doc_part],
+                        #                             config=types.GenerateContentConfig(
+                        #                                 system_instruction=_brain_sys_instruction
+                        #                             ),
+                        #                         )
                         accumulated_text = _fb_resp.text if _fb_resp.text else ""
                 else:
                     # 图片文件 + 普通 generate_content 模型
-                    raise RuntimeError(_gemini_archived_error())  # was: response = _client.models.generate_content(
-#                         model=model_id,
-#                         contents=[original_input, doc_part],
-#                         config=types.GenerateContentConfig(
-#                             system_instruction=_brain_sys_instruction
-#                         ),
-#                     )
-#                     accumulated_text = response.text if response.text else ""
+                    raise RuntimeError(
+                        _gemini_archived_error()
+                    )  # was: response = _client.models.generate_content(
+            #                         model=model_id,
+            #                         contents=[original_input, doc_part],
+            #                         config=types.GenerateContentConfig(
+            #                             system_instruction=_brain_sys_instruction
+            #                         ),
+            #                     )
+            #                     accumulated_text = response.text if response.text else ""
             else:
                 if is_deepseek_model(model_id):
                     from app.core.llm.provider_factory import get_llm_provider
@@ -799,8 +822,16 @@ class KotoBrain:
                     )
                     messages = []
                     for turn in history_for_model[-6:]:
-                        role = "assistant" if turn.get("role") == "model" else turn.get("role", "user")
-                        content = "\n".join(str(p) for p in turn.get("parts", []) if str(p or "").strip())
+                        role = (
+                            "assistant"
+                            if turn.get("role") == "model"
+                            else turn.get("role", "user")
+                        )
+                        content = "\n".join(
+                            str(p)
+                            for p in turn.get("parts", [])
+                            if str(p or "").strip()
+                        )
                         if content:
                             messages.append({"role": role, "content": content})
                     messages.append({"role": "user", "content": model_input})
@@ -810,7 +841,11 @@ class KotoBrain:
                         system_instruction=_brain_sys_instruction,
                         stream=False,
                     )
-                    accumulated_text = response.get("content", "") if isinstance(response, dict) else str(response)
+                    accumulated_text = (
+                        response.get("content", "")
+                        if isinstance(response, dict)
+                        else str(response)
+                    )
                 else:
                     # gemini-3-preview 只支持 Interactions API，不支持 generate_content
                     if _is_interactions_only(model_id):
@@ -820,17 +855,23 @@ class KotoBrain:
                             if formatted_history:
                                 history_lines = []
                                 for turn in formatted_history[-6:]:  # 最近 3 轮
-                                    role_label = "用户" if turn.role == "user" else "助手"
+                                    role_label = (
+                                        "用户" if turn.role == "user" else "助手"
+                                    )
                                     turn_text = " ".join(
                                         p.text
                                         for p in turn.parts
                                         if hasattr(p, "text") and p.text
                                     )
                                     if turn_text:
-                                        history_lines.append(f"{role_label}: {turn_text}")
+                                        history_lines.append(
+                                            f"{role_label}: {turn_text}"
+                                        )
                                 if history_lines:
                                     history_prefix = (
-                                        "[对话历史]\n" + "\n".join(history_lines) + "\n\n"
+                                        "[对话历史]\n"
+                                        + "\n".join(history_lines)
+                                        + "\n\n"
                                     )
                             full_prompt = history_prefix + model_input
                             accumulated_text = _call_interactions_api_sync(
@@ -846,35 +887,39 @@ class KotoBrain:
                             )
                             model_id = _INTERACTIONS_FALLBACK_MODEL
                             result["model"] = model_id
-                            raise RuntimeError(_gemini_archived_error())  # was: _fb_resp = _client.models.generate_content(
-#                                 model=model_id,
-#                                 contents=formatted_history
-#                                 + [
-#                                     types.Content(
-#                                         role="user",
-#                                         parts=[types.Part.from_text(text=model_input)],
-#                                     )
-#                                 ],
-#                                 config=types.GenerateContentConfig(
-#                                     system_instruction=_brain_sys_instruction
-#                                 ),
-#                             )
+                            raise RuntimeError(
+                                _gemini_archived_error()
+                            )  # was: _fb_resp = _client.models.generate_content(
+                            #                                 model=model_id,
+                            #                                 contents=formatted_history
+                            #                                 + [
+                            #                                     types.Content(
+                            #                                         role="user",
+                            #                                         parts=[types.Part.from_text(text=model_input)],
+                            #                                     )
+                            #                                 ],
+                            #                                 config=types.GenerateContentConfig(
+                            #                                     system_instruction=_brain_sys_instruction
+                            #                                 ),
+                            #                             )
                             accumulated_text = _fb_resp.text if _fb_resp.text else ""
                     else:
-                        raise RuntimeError(_gemini_archived_error())  # was: response = _client.models.generate_content(
-#                             model=model_id,
-#                             contents=formatted_history
-#                             + [
-#                                 types.Content(
-#                                     role="user",
-#                                     parts=[types.Part.from_text(text=model_input)],
-#                                 )
-#                             ],
-#                             config=types.GenerateContentConfig(
-#                                 system_instruction=_brain_sys_instruction
-#                             ),
-#                         )
-#                         accumulated_text = response.text if response.text else ""
+                        raise RuntimeError(
+                            _gemini_archived_error()
+                        )  # was: response = _client.models.generate_content(
+            #                             model=model_id,
+            #                             contents=formatted_history
+            #                             + [
+            #                                 types.Content(
+            #                                     role="user",
+            #                                     parts=[types.Part.from_text(text=model_input)],
+            #                                 )
+            #                             ],
+            #                             config=types.GenerateContentConfig(
+            #                                 system_instruction=_brain_sys_instruction
+            #                             ),
+            #                         )
+            #                         accumulated_text = response.text if response.text else ""
 
             first_token_latency = (time.time() - start_time) * 1000
             result["latency"] = first_token_latency
@@ -889,9 +934,7 @@ class KotoBrain:
             # 添加文件保存提示
             if saved_files:
                 files_list = ", ".join(saved_files)
-                accumulated_text += (
-                    f"\n\n📁 文件已保存: **{files_list}**\n📂 位置: `{self._workspace_dir}`"
-                )
+                accumulated_text += f"\n\n📁 文件已保存: **{files_list}**\n📂 位置: `{self._workspace_dir}`"
 
             result["response"] = accumulated_text
             result["total_time"] = time.time() - start_time
@@ -909,22 +952,24 @@ class KotoBrain:
                 )
                 try:
                     model_id = _INTERACTIONS_FALLBACK_MODEL
-                    raise RuntimeError(_gemini_archived_error())  # was: _fb = _client.models.generate_content(
-#                         model=model_id,
-#                         contents=(
-#                             formatted_history
-#                             + [
-#                                 types.Content(
-#                                     role="user",
-#                                     parts=[types.Part.from_text(text=model_input)],
-#                                 )
-#                             ]
-#                         ),
-#                         config=types.GenerateContentConfig(
-#                             system_instruction=_brain_sys_instruction
-#                         ),
-#                     )
-#                     result["response"] = _fb.text if _fb.text else ""
+                    raise RuntimeError(
+                        _gemini_archived_error()
+                    )  # was: _fb = _client.models.generate_content(
+                    #                         model=model_id,
+                    #                         contents=(
+                    #                             formatted_history
+                    #                             + [
+                    #                                 types.Content(
+                    #                                     role="user",
+                    #                                     parts=[types.Part.from_text(text=model_input)],
+                    #                                 )
+                    #                             ]
+                    #                         ),
+                    #                         config=types.GenerateContentConfig(
+                    #                             system_instruction=_brain_sys_instruction
+                    #                         ),
+                    #                     )
+                    #                     result["response"] = _fb.text if _fb.text else ""
                     result["model"] = model_id
                     result["total_time"] = time.time() - start_time
                     return result
@@ -973,20 +1018,22 @@ class KotoBrain:
                             _fh = locals().get("formatted_history") or []
                             _mi = locals().get("model_input") or original_input
                             _si = locals().get("_brain_sys_instruction") or ""
-                            raise RuntimeError(_gemini_archived_error())  # was: _fb_r = _client.models.generate_content(
-#                                 model=_fb_model,
-#                                 contents=_fh
-#                                 + [
-#                                     types.Content(
-#                                         role="user",
-#                                         parts=[types.Part.from_text(text=_mi)],
-#                                     )
-#                                 ],
-#                                 config=types.GenerateContentConfig(
-#                                     system_instruction=_si
-#                                 ),
-#                             )
-#                             result["response"] = _fb_r.text if _fb_r.text else ""
+                            raise RuntimeError(
+                                _gemini_archived_error()
+                            )  # was: _fb_r = _client.models.generate_content(
+                            #                                 model=_fb_model,
+                            #                                 contents=_fh
+                            #                                 + [
+                            #                                     types.Content(
+                            #                                         role="user",
+                            #                                         parts=[types.Part.from_text(text=_mi)],
+                            #                                     )
+                            #                                 ],
+                            #                                 config=types.GenerateContentConfig(
+                            #                                     system_instruction=_si
+                            #                                 ),
+                            #                             )
+                            #                             result["response"] = _fb_r.text if _fb_r.text else ""
                             result["model"] = _fb_model
                             _retried = True
                 except Exception as _r_err:

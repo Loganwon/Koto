@@ -12,7 +12,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-
 WINDOWS_PROTECTED_DIR_NAMES: frozenset[str] = frozenset(
     {
         "windows",

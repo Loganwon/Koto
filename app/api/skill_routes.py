@@ -694,7 +694,10 @@ def toggle_skill_v2(skill_id: str):
         from app.core.skills.skill_mutations import set_skill_enabled
 
         if not set_skill_enabled(skill_id, enabled):
-            return jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}), 404
+            return (
+                jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
+                404,
+            )
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500

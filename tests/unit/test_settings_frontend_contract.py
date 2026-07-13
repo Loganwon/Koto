@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -26,8 +25,16 @@ def test_settings_frontend_posts_backend_category_contract() -> None:
 
 def test_settings_open_does_not_override_server_zoom_with_stale_local_storage() -> None:
     settings = _read("web/src/app/settings.ts")
-    open_body = settings[settings.index("export function openSettings") : settings.index("export function closeSettings")]
-    apply_body = settings[settings.index("export function applySettingsToUI") : settings.index("function setActivityActive")]
+    open_body = settings[
+        settings.index("export function openSettings") : settings.index(
+            "export function closeSettings"
+        )
+    ]
+    apply_body = settings[
+        settings.index("export function applySettingsToUI") : settings.index(
+            "function setActivityActive"
+        )
+    ]
     theme = _read("web/src/app/theme.ts")
 
     assert "localStorage.getItem('koto.uiZoom')" not in open_body
@@ -42,12 +49,17 @@ def test_settings_controls_have_one_persisted_runtime_path() -> None:
     theme = _read("web/src/app/theme.ts")
     chat_ui = _read("web/src/app/chat-ui.ts")
 
-    assert "oninput=\"previewUIZoom(this.value / 100)\"" in panel
-    assert "onchange=\"setUIZoom(this.value / 100)\"" in panel
+    assert 'oninput="previewUIZoom(this.value / 100)"' in panel
+    assert 'onchange="setUIZoom(this.value / 100)"' in panel
     assert "onBooleanSettingChange(this, 'ai', 'enable_mini_game')" in panel
     assert "export async function onBooleanSettingChange" in settings
-    assert "return false;" in settings[settings.index("export async function updateSetting") :]
-    local_model_change = settings[settings.index("export async function onLocalModelChange") :]
+    assert (
+        "return false;"
+        in settings[settings.index("export async function updateSetting") :]
+    )
+    local_model_change = settings[
+        settings.index("export async function onLocalModelChange") :
+    ]
     assert "body: JSON.stringify({ model_tag: nextModel })" in local_model_change
     assert "if (localOnly)" not in local_model_change.split("// ── Setup Wizard", 1)[0]
     assert "export function previewUIZoom" in theme

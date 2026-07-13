@@ -200,6 +200,8 @@ def _workspace_wa_method_names() -> set[str]:
         r"(?:\bWA|\bwa|window\.WA|\(window as any\)\.WA)\.([A-Za-z_$][\w$]*)\s*="
     )
     export_pattern = re.compile(r"export function ([A-Za-z_$][\w$]*)\s*\(")
+    publish_pattern = re.compile(r"publishWorkspaceApi\(\s*\{(.*?)\}\s*\)", re.S)
+    published_name_pattern = re.compile(r"^\s*([A-Za-z_$][\w$]*)\s*(?=[:,}]|$)", re.M)
     names: set[str] = set()
     for path in Path("web/src").rglob("*.ts"):
         if not path.is_file():
@@ -207,6 +209,8 @@ def _workspace_wa_method_names() -> set[str]:
         text = path.read_text(encoding="utf-8")
         names.update(assign_pattern.findall(text))
         names.update(export_pattern.findall(text))
+        for entries in publish_pattern.findall(text):
+            names.update(published_name_pattern.findall(entries))
     return names
 
 

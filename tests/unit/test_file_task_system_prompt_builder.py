@@ -30,7 +30,9 @@ def test_runtime_system_prompt_builder_preserves_prompt_sections():
         target_path="report.docx",
         files=[
             FileTaskFile(path="forecast.xlsx", name="forecast.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
         options={
             "followup_context": {

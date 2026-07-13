@@ -23,7 +23,9 @@ def test_editor_quick_action_executor_streams_cloud_response(monkeypatch):
 
     provider = _FakeProvider([{"content": "云端"}, {"content": "响应"}])
     monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
 
     request = AgentRequest(
         prompt="润色这句话",
@@ -49,7 +51,9 @@ def test_editor_quick_action_executor_uses_local_when_requested(monkeypatch):
 
     provider = _FakeProvider([{"content": "本地"}, {"content": "响应"}])
     monkeypatch.setattr(llm_provider_helpers, "is_ollama_alive", lambda: True)
-    monkeypatch.setattr(llm_provider_helpers, "get_local_provider", lambda model="": provider)
+    monkeypatch.setattr(
+        llm_provider_helpers, "get_local_provider", lambda model="": provider
+    )
 
     request = AgentRequest(
         prompt="润色这句话",
@@ -65,7 +69,9 @@ def test_editor_quick_action_executor_uses_local_when_requested(monkeypatch):
     assert provider.calls[0]["stream"] is True
 
 
-def test_editor_quick_action_executor_falls_back_to_local_on_online_failure(monkeypatch):
+def test_editor_quick_action_executor_falls_back_to_local_on_online_failure(
+    monkeypatch,
+):
     from app.core.agent import llm_provider_helpers
 
     local_provider = _FakeProvider([{"content": "fallback"}])
@@ -76,7 +82,9 @@ def test_editor_quick_action_executor_falls_back_to_local_on_online_failure(monk
     monkeypatch.setattr(llm_provider_helpers, "get_provider", fail_cloud)
     monkeypatch.setattr(llm_provider_helpers, "is_online_failure", lambda exc: True)
     monkeypatch.setattr(llm_provider_helpers, "is_ollama_alive", lambda: True)
-    monkeypatch.setattr(llm_provider_helpers, "get_local_provider", lambda model="": local_provider)
+    monkeypatch.setattr(
+        llm_provider_helpers, "get_local_provider", lambda model="": local_provider
+    )
 
     request = AgentRequest(prompt="润色", model_mode="cloud")
     events = list(EditorQuickActionExecutor().iter_events(request))
@@ -111,5 +119,11 @@ def test_editor_quick_action_executor_returns_error_when_local_unavailable(monke
 
 def test_editor_quick_action_executor_does_not_claim_code_mode() -> None:
     assert EditorQuickActionExecutor.supports(AgentRequest(prompt="x")) is True
-    assert EditorQuickActionExecutor.supports(AgentRequest(prompt="x", language="python")) is False
-    assert EditorQuickActionExecutor.supports(AgentRequest(prompt="x", language="r")) is False
+    assert (
+        EditorQuickActionExecutor.supports(AgentRequest(prompt="x", language="python"))
+        is False
+    )
+    assert (
+        EditorQuickActionExecutor.supports(AgentRequest(prompt="x", language="r"))
+        is False
+    )

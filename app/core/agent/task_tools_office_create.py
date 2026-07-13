@@ -5,6 +5,7 @@ contract.  This module owns only the format-specific package construction so
 that DOCX, XLSX, and PPTX dependencies do not keep accumulating in the tool
 registry module.
 """
+
 from __future__ import annotations
 
 import csv

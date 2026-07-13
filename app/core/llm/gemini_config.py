@@ -164,7 +164,11 @@ def validate_gemini_config() -> list[str]:
 
     proxy = os.getenv("FORCE_PROXY", "auto").strip().lower()
     if proxy not in ("auto", "none", "system", ""):
-        if not (proxy.startswith("http://") or proxy.startswith("https://") or proxy.startswith("socks5://")):
+        if not (
+            proxy.startswith("http://")
+            or proxy.startswith("https://")
+            or proxy.startswith("socks5://")
+        ):
             warnings.append(
                 f"FORCE_PROXY ({proxy!r}) does not look like a valid proxy URL."
             )

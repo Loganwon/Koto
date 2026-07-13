@@ -26,7 +26,9 @@ else:
     # resolved to app/core, creating a second settings file that the launcher,
     # setup tools and packaged runtime never use.  Development must use the
     # same project-root config directory as every other entry point.
-    PROJECT_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir))
+    PROJECT_ROOT = os.path.abspath(
+        os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir)
+    )
 SETTINGS_FILE = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
 
 # ????
@@ -95,7 +97,6 @@ class SettingsManager:
                 self._dirty = False
             return result
 
-
     def reload(self):
         """Force re-read settings from disk."""
         with self._lock:
@@ -105,6 +106,7 @@ class SettingsManager:
     def _load_settings(self):
         """????"""
         import copy
+
         if os.path.exists(SETTINGS_FILE):
             try:
                 # utf-8-sig handles both plain UTF-8 and UTF-8 with BOM (PowerShell default)
@@ -128,6 +130,7 @@ class SettingsManager:
 
     def _has_missing_defaults(self, raw: dict) -> bool:
         """?? raw ?????? DEFAULT_SETTINGS ?????????"""
+
         def _missing(default: dict, current: dict) -> bool:
             for k, v in default.items():
                 if k not in current:
@@ -136,19 +139,23 @@ class SettingsManager:
                     if _missing(v, current[k]):
                         return True
             return False
+
         return _missing(DEFAULT_SETTINGS, raw)
 
     def _normalize_storage(self):
         """???????????????????????????"""
         storage = self._settings.get("storage", {})
         for key, default_value in DEFAULT_SETTINGS.get("storage", {}).items():
-            if not storage.get(key) or (isinstance(storage.get(key), str) and not storage.get(key).strip()):
+            if not storage.get(key) or (
+                isinstance(storage.get(key), str) and not storage.get(key).strip()
+            ):
                 storage[key] = default_value
         self._settings["storage"] = storage
 
     def _merge_settings(self, default, current):
         """????????????????????????????"""
         import copy
+
         result = copy.deepcopy(default)
         for key, value in current.items():
             if (
@@ -257,7 +264,11 @@ class SettingsManager:
             # ?? storage ???????????????
             if category == "storage":
                 for k, v in values.items():
-                    if k in DEFAULT_SETTINGS.get("storage", {}) and isinstance(v, str) and not v.strip():
+                    if (
+                        k in DEFAULT_SETTINGS.get("storage", {})
+                        and isinstance(v, str)
+                        and not v.strip()
+                    ):
                         values[k] = DEFAULT_SETTINGS["storage"].get(k)
 
             self._settings[category].update(values)
@@ -267,11 +278,13 @@ class SettingsManager:
     def get_all(self):
         """??????"""
         import copy
+
         return copy.deepcopy(self._settings)
 
     def reset(self, category=None):
         """????"""
         import copy
+
         with self._lock:
             if category:
                 if category in DEFAULT_SETTINGS:

@@ -78,9 +78,7 @@ def _import_filegen_time_context():
 class TestGetLocalModelConfig:
     def test_returns_cloud_none_on_missing_file(self, tmp_path):
         app = _import_app()
-        with patch(
-            "app.core.llm.provider_factory.is_local_mode", return_value=False
-        ):
+        with patch("app.core.llm.provider_factory.is_local_mode", return_value=False):
             mode, tag = app._get_local_model_config()
         assert mode == "cloud"
         assert tag is None
@@ -914,9 +912,9 @@ class TestGetMemoryManager:
         ctx_mod = types.ModuleType("app.core.app_context")
         ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
 
-        with patch.dict(
-            sys.modules, {"app.core.app_context": ctx_mod}
-        ), patch.object(memory_runtime, "_inject_memory_adapters"):
+        with patch.dict(sys.modules, {"app.core.app_context": ctx_mod}), patch.object(
+            memory_runtime, "_inject_memory_adapters"
+        ):
             assert app.get_memory_manager() is mock_mgr
 
     def test_has_no_legacy_manager_fallback(self):

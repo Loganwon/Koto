@@ -157,9 +157,19 @@ def test_recipe_does_not_treat_frontend_status_output_as_file_convert():
         task=task,
         target_path="service_agreement_full_test_20260628.docx",
         files=[
-            FileTaskFile(path="service_agreement_v1.docx", name="service_agreement_v1.docx", type="docx"),
-            FileTaskFile(path="service_agreement_v2.docx", name="service_agreement_v2.docx", type="docx"),
-            FileTaskFile(path="renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"),
+            FileTaskFile(
+                path="service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="service_agreement_v2.docx",
+                name="service_agreement_v2.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"
+            ),
             FileTaskFile(
                 path="service_agreement_full_test_20260628.docx",
                 name="service_agreement_full_test_20260628.docx",
@@ -169,7 +179,9 @@ def test_recipe_does_not_treat_frontend_status_output_as_file_convert():
         ],
     )
 
-    markers = semantic_markers(task, file_types={"docx", "xlsx"}, target_file_type="docx")
+    markers = semantic_markers(
+        task, file_types={"docx", "xlsx"}, target_file_type="docx"
+    )
     match = select_task_recipe(request, request.files, write_intent=True)
 
     assert markers["file_format_convert_request"] is False
@@ -490,7 +502,10 @@ def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
         "docx_pdf_export": {"docx_pdf_export_uses_converter"},
         "docx_clear_review_marks": {"docx_clear_review_uses_cleanup_tool"},
         "docx_chart_report": {"docx_chart_request_has_image"},
-        "docx_report_table_write": {"docx_report_has_narrative", "docx_table_request_has_table"},
+        "docx_report_table_write": {
+            "docx_report_has_narrative",
+            "docx_table_request_has_table",
+        },
         "docx_report_write": {"docx_report_has_narrative"},
         "spreadsheet_cell_write": {"spreadsheet_write_has_cells"},
         "workspace_file_copy": {"workspace_file_copy_uses_copy_tool"},

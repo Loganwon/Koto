@@ -19,7 +19,9 @@ def test_doc_websocket_agent_executor_streams_chat_response(monkeypatch):
 
     provider = _FakeProvider([{"content": "doc"}, {"content": " chat"}])
     monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
 
     request = AgentRequest(
         prompt="总结一下",
@@ -54,7 +56,9 @@ def test_doc_websocket_agent_executor_local_unavailable_returns_task_error(monke
     assert "Ollama 未运行" in errors[-1].data["error"]
 
 
-def test_doc_websocket_agent_executor_delegates_python_requests_to_code_executor(monkeypatch):
+def test_doc_websocket_agent_executor_delegates_python_requests_to_code_executor(
+    monkeypatch,
+):
     from app.core.agent import doc_websocket_agent_executor as executor
 
     captured = {}
@@ -92,7 +96,12 @@ def test_doc_websocket_agent_executor_runs_python_code_request(monkeypatch):
 
     def fake_run_python(code):
         captured["code"] = code
-        return {"stdout": "chart", "stderr": "", "files": {"chart.png": "ZmFrZQ=="}, "error": ""}
+        return {
+            "stdout": "chart",
+            "stderr": "",
+            "files": {"chart.png": "ZmFrZQ=="},
+            "error": "",
+        }
 
     monkeypatch.setattr(llm_provider_helpers, "call_llm_sync", fake_call_llm_sync)
     monkeypatch.setattr(sandbox, "run_python", fake_run_python)
@@ -116,14 +125,18 @@ def test_doc_websocket_agent_executor_runs_python_code_request(monkeypatch):
     assert code_result.data["files"] == {"chart.png": "ZmFrZQ=="}
 
 
-def test_doc_websocket_agent_executor_emits_doc_tool_calls_for_inline_request(monkeypatch):
+def test_doc_websocket_agent_executor_emits_doc_tool_calls_for_inline_request(
+    monkeypatch,
+):
     from app.core.agent import llm_provider_helpers
 
-    provider = _FakeProvider([
-        {"content": '已生成<TOOL>{"type":"set_html","value":"<p>新内容</p>"}</TOOL>'}
-    ])
+    provider = _FakeProvider(
+        [{"content": '已生成<TOOL>{"type":"set_html","value":"<p>新内容</p>"}</TOOL>'}]
+    )
     monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
 
     request = AgentRequest(
         prompt="写一段话",
@@ -141,19 +154,25 @@ def test_doc_websocket_agent_executor_emits_doc_tool_calls_for_inline_request(mo
     assert complete.data["has_proposals"] is False
 
 
-def test_doc_websocket_agent_executor_emits_proposals_for_selected_inline_request(monkeypatch):
+def test_doc_websocket_agent_executor_emits_proposals_for_selected_inline_request(
+    monkeypatch,
+):
     from app.core.agent import llm_provider_helpers
 
-    provider = _FakeProvider([
-        {
-            "content": (
-                '建议改得更自然<TOOL>{"type":"set_html",'
-                '"value":"润色后的文字"}</TOOL>'
-            )
-        }
-    ])
+    provider = _FakeProvider(
+        [
+            {
+                "content": (
+                    '建议改得更自然<TOOL>{"type":"set_html",'
+                    '"value":"润色后的文字"}</TOOL>'
+                )
+            }
+        ]
+    )
     monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
 
     request = AgentRequest(
         prompt="润色",
@@ -181,7 +200,9 @@ def test_doc_websocket_agent_executor_emits_live_doc_commit(monkeypatch):
 
     provider = _FakeProvider([{"content": "实时"}, {"content": "写入"}])
     monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
 
     request = AgentRequest(
         prompt="续写",
@@ -195,7 +216,9 @@ def test_doc_websocket_agent_executor_emits_live_doc_commit(monkeypatch):
     )
     events = list(DocWebSocketAgentExecutor().iter_events(request))
 
-    start_event = [event for event in events if event.type.value == "lifecycle_start"][0]
+    start_event = [event for event in events if event.type.value == "lifecycle_start"][
+        0
+    ]
     stream_events = [event for event in events if event.type.value == "stream_chunk"]
     assert stream_events
     assert stream_events[0].data["live_doc"] is True
@@ -217,14 +240,18 @@ def test_doc_websocket_agent_executor_synthesizes_insert_doc_tool_call(monkeypat
 
     provider = _FakeProvider([{"content": "好的，我会插入。"}])
     monkeypatch.setattr(llm_provider_helpers, "get_provider", lambda **kwargs: provider)
-    monkeypatch.setattr(llm_provider_helpers, "pick_online_model", lambda: "gemini-test")
+    monkeypatch.setattr(
+        llm_provider_helpers, "pick_online_model", lambda: "gemini-test"
+    )
 
     request = AgentRequest(
         prompt="请插入",
         output_mode="inline",
         file_type="docx",
         model_mode="cloud",
-        history=[{"role": "assistant", "content": "第一段内容比较完整\n第二段内容也完整"}],
+        history=[
+            {"role": "assistant", "content": "第一段内容比较完整\n第二段内容也完整"}
+        ],
     )
     events = list(DocWebSocketAgentExecutor().iter_events(request))
 
@@ -236,7 +263,9 @@ def test_doc_websocket_agent_executor_synthesizes_insert_doc_tool_call(monkeypat
     }
 
 
-def test_doc_websocket_agent_executor_supports_chat_and_no_selection_inline_requests() -> None:
+def test_doc_websocket_agent_executor_supports_chat_and_no_selection_inline_requests() -> (
+    None
+):
     assert DocWebSocketAgentExecutor.supports(
         AgentRequest(prompt="x", output_mode="chat")
     )
@@ -244,7 +273,9 @@ def test_doc_websocket_agent_executor_supports_chat_and_no_selection_inline_requ
         AgentRequest(prompt="x", output_mode="inline")
     )
     assert DocWebSocketAgentExecutor.supports(
-        AgentRequest(prompt="x", output_mode="inline", selection="text", has_selection=True)
+        AgentRequest(
+            prompt="x", output_mode="inline", selection="text", has_selection=True
+        )
     )
     assert DocWebSocketAgentExecutor.supports(
         AgentRequest(prompt="x", output_mode="inline", live_doc=True)

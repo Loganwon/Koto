@@ -48,7 +48,11 @@ def test_editor_skill_list_uses_public_skill_manager_surface(monkeypatch):
         classmethod(
             lambda cls: {
                 "xlsx": {"id": "xlsx", "enabled": True, "file_types": ["xlsx"]},
-                "disabled": {"id": "disabled", "enabled": False, "file_types": ["xlsx"]},
+                "disabled": {
+                    "id": "disabled",
+                    "enabled": False,
+                    "file_types": ["xlsx"],
+                },
             }
         ),
     )

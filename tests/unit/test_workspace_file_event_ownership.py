@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2] / "web" / "src" / "workspace"
 FS_TREE = (WORKSPACE_ROOT / "fs-tree.ts").read_text(encoding="utf-8")
 FS_ACTIONS = (WORKSPACE_ROOT / "fs-actions.ts").read_text(encoding="utf-8")

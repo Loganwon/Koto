@@ -73,11 +73,15 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
     if not raw_type:
         return None
 
-    quick_action_mode = str(
-        payload.get("quick_action_mode") or ""
-    ).strip().lower()
+    quick_action_mode = str(payload.get("quick_action_mode") or "").strip().lower()
     is_text_qa = quick_action_mode in {
-        "simple", "polish", "translate", "summary", "rewrite", "continue", "check",
+        "simple",
+        "polish",
+        "translate",
+        "summary",
+        "rewrite",
+        "continue",
+        "check",
     }
 
     if raw_type == "run.started":

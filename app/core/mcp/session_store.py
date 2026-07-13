@@ -28,7 +28,9 @@ def unregister_session(session_id: str) -> None:
         _SESSIONS.pop(session_id, None)
 
 
-def mark_initialized(session_id: str, client_info: Dict[str, Any] | None = None) -> None:
+def mark_initialized(
+    session_id: str, client_info: Dict[str, Any] | None = None
+) -> None:
     with _LOCK:
         session = _SESSIONS.setdefault(
             session_id,

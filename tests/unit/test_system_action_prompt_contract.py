@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -32,4 +31,7 @@ def test_agent_handler_uses_shared_local_model_helpers():
     assert "from app.core.shared.llm_helpers import (" in source
     assert "get_local_provider as _get_local_provider" in source
     assert "is_ollama_alive as _is_ollama_alive" in source
-    assert "from app.core.socket_handler import _is_ollama_alive, _get_local_provider" not in source
+    assert (
+        "from app.core.socket_handler import _is_ollama_alive, _get_local_provider"
+        not in source
+    )

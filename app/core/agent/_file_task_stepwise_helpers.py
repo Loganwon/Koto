@@ -4,6 +4,7 @@
 These stateless helpers detect stepwise task patterns and extract
 window/page parameters from FileTaskRequest objects.
 """
+
 from __future__ import annotations
 
 import json
@@ -48,15 +49,18 @@ def looks_like_windowed_pdf_task(
     if str(
         resume_control.get("policy") or ""
     ).strip().lower() == "confirm_each_step" and (
-        "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
+        "pdf" in request_file_types(request.files)
+        or resume_source_path.endswith(".pdf")
     ):
         return True
     if explicit_pdf_page_window(request) and (
-        "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
+        "pdf" in request_file_types(request.files)
+        or resume_source_path.endswith(".pdf")
     ):
         return True
     if explicit_pdf_letter_window(request) and (
-        "pdf" in request_file_types(request.files) or resume_source_path.endswith(".pdf")
+        "pdf" in request_file_types(request.files)
+        or resume_source_path.endswith(".pdf")
     ):
         return True
     return bool(
@@ -275,9 +279,7 @@ def pdf_context_read_args(
         start_page = step_index * window_pages + 1
         end_page = start_page + window_pages - 1
     source_path = str(
-        resume_control.get("source_path")
-        or getattr(file_info, "path", "")
-        or ""
+        resume_control.get("source_path") or getattr(file_info, "path", "") or ""
     ).strip()
     return {
         "window_pages": window_pages,
@@ -286,7 +288,11 @@ def pdf_context_read_args(
         "end_page": end_page,
         "path": source_path,
         "source_path": source_path,
-        **({"window_unit": window_unit, "start": start_page, "end": end_page} if window_unit else {}),
+        **(
+            {"window_unit": window_unit, "start": start_page, "end": end_page}
+            if window_unit
+            else {}
+        ),
     }
 
 
@@ -306,12 +312,20 @@ def stepwise_pdf_step_index(request: FileTaskRequest) -> int:
         return 0
 
 
-def stepwise_docx_target_path(request: FileTaskRequest, files: list[FileTaskFile]) -> str:
+def stepwise_docx_target_path(
+    request: FileTaskRequest, files: list[FileTaskFile]
+) -> str:
     raw_target = str(request.target_path or "").strip()
     if raw_target:
-        return raw_target if os.path.isabs(raw_target) else str(Path(raw_target).resolve())
+        return (
+            raw_target if os.path.isabs(raw_target) else str(Path(raw_target).resolve())
+        )
     docx_file = next(
-        (file_info for file_info in files if file_task_suffix(file_info) == "docx" and file_info.target),
+        (
+            file_info
+            for file_info in files
+            if file_task_suffix(file_info) == "docx" and file_info.target
+        ),
         None,
     ) or next(
         (file_info for file_info in files if file_task_suffix(file_info) == "docx"),
@@ -348,7 +362,9 @@ def pdf_text_quality(value: Any) -> Dict[str, Any]:
     alpha_num = len(re.findall(r"[A-Za-z0-9\u4e00-\u9fff]", body))
     cjk_chars = len(re.findall(r"[\u4e00-\u9fff]", body))
     repeated_watermark = bool(
-        re.fullmatch(r"(?:考参通海泰国供仅|仅供国泰海通参考|用使点原禾元供仅荐推苇一|-)+", body)
+        re.fullmatch(
+            r"(?:考参通海泰国供仅|仅供国泰海通参考|用使点原禾元供仅荐推苇一|-)+", body
+        )
     )
     low_density = alpha_num < 80 or unique_chars < 18
     mostly_single_repeats = (
@@ -405,7 +421,9 @@ def latest_pdf_snippet_quality(snippets: list[dict[str, Any]]) -> Dict[str, Any]
             "char_count": 0,
             "unique_chars": 0,
         }
-    text = str(pdf_snippets[-1].get("_raw_text") or pdf_snippets[-1].get("preview") or "")
+    text = str(
+        pdf_snippets[-1].get("_raw_text") or pdf_snippets[-1].get("preview") or ""
+    )
     return pdf_text_quality(text)
 
 
@@ -583,9 +601,7 @@ def stepwise_docx_write_block_message(
         )
 
     text = tool_args_docx_paragraph_text(tool_args)
-    if tool_name != "create_file" and re.search(
-        r"^\s*#{1,6}\s+", text, re.MULTILINE
-    ):
+    if tool_name != "create_file" and re.search(r"^\s*#{1,6}\s+", text, re.MULTILINE):
         return (
             "监管层阻止写入：write_docx_content 的 paragraphs 不能包含 Markdown 标题符号 #。"
             " 请使用 paragraph.style='Heading 1' 这类 Word 段落样式。"
@@ -644,7 +660,9 @@ def stepwise_docx_wait_artifact(
         or target_path_fallback
         or ""
     ).strip()
-    pdf_file = next((file_info for file_info in files if file_task_suffix(file_info) == "pdf"), None)
+    pdf_file = next(
+        (file_info for file_info in files if file_task_suffix(file_info) == "pdf"), None
+    )
     latest_pdf_snippet = next(
         (
             item
@@ -809,9 +827,7 @@ def _stepwise_pdf_body_lines(source_lines: list[str]) -> list[str]:
 
 
 def stepwise_pdf_fallback_insights(preview: str) -> list[str]:
-    cleaned = re.sub(
-        r"\[Page\s+\d+\]", "\n", str(preview or ""), flags=re.IGNORECASE
-    )
+    cleaned = re.sub(r"\[Page\s+\d+\]", "\n", str(preview or ""), flags=re.IGNORECASE)
     raw_lines = [
         re.sub(r"\s+", " ", line).strip(" \t|-") for line in cleaned.splitlines()
     ]
@@ -936,7 +952,9 @@ def stepwise_pdf_fallback_insights(preview: str) -> list[str]:
         )
     if toc_lines:
         insights.append(
-            "结构线索：" + "；".join(_compact_line(line, 120) for line in toc_lines) + "。"
+            "结构线索："
+            + "；".join(_compact_line(line, 120) for line in toc_lines)
+            + "。"
         )
     if content_lines:
         insights.append(
@@ -947,7 +965,9 @@ def stepwise_pdf_fallback_insights(preview: str) -> list[str]:
     if not insights:
         excerpt_lines = [_compact_line(line, 140) for line in lines[:4]]
         if excerpt_lines:
-            insights.append("当前页窗可读内容集中在：" + "；".join(excerpt_lines) + "。")
+            insights.append(
+                "当前页窗可读内容集中在：" + "；".join(excerpt_lines) + "。"
+            )
     if not insights:
         insights.append("当前页窗未提取到足够正文，暂不能形成可靠内容摘要。")
     return insights
@@ -958,10 +978,10 @@ def stepwise_pdf_fallback_paragraphs(
     exc: Exception,
 ) -> list[dict[str, str]]:
     del exc
-    preview = str(pdf_snippet.get("_raw_text") or pdf_snippet.get("preview") or "").strip()
-    pages = [
-        int(match.group(1)) for match in re.finditer(r"\[Page\s+(\d+)\]", preview)
-    ]
+    preview = str(
+        pdf_snippet.get("_raw_text") or pdf_snippet.get("preview") or ""
+    ).strip()
+    pages = [int(match.group(1)) for match in re.finditer(r"\[Page\s+(\d+)\]", preview)]
     start_page = int(pdf_snippet.get("start_page") or 0)
     end_page = int(pdf_snippet.get("end_page") or 0)
     if start_page and end_page:
@@ -991,7 +1011,9 @@ def stepwise_pdf_fallback_paragraphs(
         return ""
 
     source_name = _compact_line(
-        Path(str(pdf_snippet.get("source") or pdf_snippet.get("path") or "PDF 文档")).stem,
+        Path(
+            str(pdf_snippet.get("source") or pdf_snippet.get("path") or "PDF 文档")
+        ).stem,
         160,
     )
     document_value = _field("文档识别") or f"当前页窗来自“{source_name}”。"
@@ -1009,9 +1031,14 @@ def stepwise_pdf_fallback_paragraphs(
     ]
     if not topic_value:
         topic_seed = (
-            content_value or (supplemental[0] if supplemental else "") or cleaned_preview
+            content_value
+            or (supplemental[0] if supplemental else "")
+            or cleaned_preview
         )
-        topic_value = _compact_line(topic_seed, 180) or "当前页窗文本较短，主题需结合后续页窗继续确认。"
+        topic_value = (
+            _compact_line(topic_seed, 180)
+            or "当前页窗文本较短，主题需结合后续页窗继续确认。"
+        )
     if not structure_value:
         structure_seed = "；".join(supplemental[:2])
         structure_value = (
@@ -1020,7 +1047,9 @@ def stepwise_pdf_fallback_paragraphs(
             else "当前页窗作为本步骤材料，记录可提取的结构与上下文线索，供后续页窗衔接。"
         )
     if not content_value:
-        content_seed = cleaned_preview or "当前页窗未提取到足够正文，暂不能形成可靠内容摘要。"
+        content_seed = (
+            cleaned_preview or "当前页窗未提取到足够正文，暂不能形成可靠内容摘要。"
+        )
         content_value = _compact_line(content_seed, 260)
     return [
         {"text": f"当前页窗摘要（{page_range}）", "style": "Heading 1"},

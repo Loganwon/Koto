@@ -549,7 +549,9 @@ class TestFileService:
         assert delete_result["success"] is True
         assert not moved_dir.exists()
 
-    def test_path_operations_reject_existing_destination_without_overwrite(self, tmp_dir):
+    def test_path_operations_reject_existing_destination_without_overwrite(
+        self, tmp_dir
+    ):
         svc = self._make_svc(tmp_dir)
         src_dir = Path(tmp_dir) / "src_existing"
         dst_dir = Path(tmp_dir) / "dst_existing"

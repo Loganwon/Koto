@@ -45,12 +45,14 @@ class EditorCodeActionExecutor:
             logger.exception("[EditorCodeActionExecutor] failed: %s", exc)
             meta.finish(RunState.FAILED, str(exc))
             yield evt_lifecycle_error(meta.run_id, str(exc))
-            yield evt_code_result({
-                "error": f"内部错误：{exc}",
-                "stdout": "",
-                "stderr": "",
-                "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": f"内部错误：{exc}",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             return
 
         if not meta.state.is_terminal:
@@ -71,14 +73,18 @@ class EditorCodeActionExecutor:
         phase_steps = [
             {
                 "id": phase.get("id") or f"step_{idx + 1}",
-                "description": phase.get("label") or phase.get("id") or f"步骤 {idx + 1}",
+                "description": phase.get("label")
+                or phase.get("id")
+                or f"步骤 {idx + 1}",
             }
             for idx, phase in enumerate(phases)
         ]
         if phase_steps:
             yield evt_plan(phase_steps)
 
-        analyze_phase = phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        analyze_phase = (
+            phases[0] if phases else {"id": "understand", "label": "理解需求"}
+        )
         analyze_step_id = analyze_phase.get("id", "understand")
         analyze_label = analyze_phase.get("label", "理解需求")
 
@@ -99,16 +105,22 @@ class EditorCodeActionExecutor:
         try:
             from app.core.sandbox import run_python, run_r
         except ImportError as exc:
-            yield evt_code_result({
-                "error": f"Sandbox 模块加载失败: {exc}",
-                "stdout": "",
-                "stderr": "",
-                "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": f"Sandbox 模块加载失败: {exc}",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             meta.finish(RunState.FAILED, str(exc))
             return
 
-        lang_label = "Python (matplotlib/pandas)" if request.language == "python" else "R (ggplot2)"
+        lang_label = (
+            "Python (matplotlib/pandas)"
+            if request.language == "python"
+            else "R (ggplot2)"
+        )
         gen_prompt = (
             f"请根据以下任务，编写一段可以直接运行的 {lang_label} 代码。\n"
             "要求：\n"
@@ -131,12 +143,14 @@ class EditorCodeActionExecutor:
             use_local_only=(request.model_mode == "local"),
         )
         if not code:
-            yield evt_code_result({
-                "error": "AI 代码生成失败，请检查 API Key 配置。",
-                "stdout": "",
-                "stderr": "",
-                "files": {},
-            })
+            yield evt_code_result(
+                {
+                    "error": "AI 代码生成失败，请检查 API Key 配置。",
+                    "stdout": "",
+                    "stderr": "",
+                    "files": {},
+                }
+            )
             meta.finish(RunState.FAILED, "code gen failed")
             return
 

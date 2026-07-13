@@ -3,6 +3,7 @@
 Path policy and result envelopes stay in the public tool module; this module
 contains only document-content transformations and must not import it back.
 """
+
 from __future__ import annotations
 
 from typing import Any, Dict

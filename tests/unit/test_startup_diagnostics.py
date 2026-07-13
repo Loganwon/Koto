@@ -9,7 +9,9 @@ def test_diagnostics_reports_source_readiness_without_importing_app():
     original = diagnostics._source_shadowing_extensions
     diagnostics._source_shadowing_extensions = lambda _root: []
     try:
-        report = diagnostics.run_startup_diagnostics(Path.cwd(), include_import_check=False)
+        report = diagnostics.run_startup_diagnostics(
+            Path.cwd(), include_import_check=False
+        )
     finally:
         diagnostics._source_shadowing_extensions = original
 
@@ -77,14 +79,20 @@ def test_diagnostics_blocks_source_shadowing_extensions(monkeypatch):
     assert any(item["name"] == "compiled source shadowing" for item in report["checks"])
 
 
-def test_removing_source_shadowing_extensions_reports_locked_files(monkeypatch, tmp_path):
+def test_removing_source_shadowing_extensions_reports_locked_files(
+    monkeypatch, tmp_path
+):
     import src.startup_diagnostics as diagnostics
 
     artifact = tmp_path / "app" / "example.cp311-win_amd64.pyd"
     artifact.parent.mkdir(parents=True)
     artifact.write_bytes(b"compiled")
-    monkeypatch.setattr(diagnostics, "_source_shadowing_extensions", lambda root: [artifact])
-    monkeypatch.setattr(Path, "unlink", lambda self: (_ for _ in ()).throw(PermissionError("locked")))
+    monkeypatch.setattr(
+        diagnostics, "_source_shadowing_extensions", lambda root: [artifact]
+    )
+    monkeypatch.setattr(
+        Path, "unlink", lambda self: (_ for _ in ()).throw(PermissionError("locked"))
+    )
 
     removed, blocked = diagnostics.remove_source_shadowing_extensions(tmp_path)
 

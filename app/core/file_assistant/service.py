@@ -9,12 +9,39 @@ from typing import Any, Callable
 import zipfile
 
 TEXT_EXTENSIONS = {
-    ".txt", ".md", ".markdown", ".csv",
-    ".py", ".js", ".ts", ".json", ".html", ".css", ".xml",
-    ".sh", ".bash", ".yaml", ".yml",
-    ".c", ".cpp", ".h", ".hpp", ".java", ".rb", ".go",
-    ".rs", ".cs", ".php", ".swift", ".kt", ".r", ".sql",
-    ".toml", ".ini", ".cfg", ".conf",
+    ".txt",
+    ".md",
+    ".markdown",
+    ".csv",
+    ".py",
+    ".js",
+    ".ts",
+    ".json",
+    ".html",
+    ".css",
+    ".xml",
+    ".sh",
+    ".bash",
+    ".yaml",
+    ".yml",
+    ".c",
+    ".cpp",
+    ".h",
+    ".hpp",
+    ".java",
+    ".rb",
+    ".go",
+    ".rs",
+    ".cs",
+    ".php",
+    ".swift",
+    ".kt",
+    ".r",
+    ".sql",
+    ".toml",
+    ".ini",
+    ".cfg",
+    ".conf",
 }
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp", ".svg"}
@@ -129,10 +156,16 @@ class FileAssistantService:
         if ext in TEXT_EXTENSIONS:
             source = Path(text_source_path) if text_source_path is not None else path
             content = source.read_text(encoding="utf-8", errors="replace")
-            file_type = "text" if ext in {".txt", ".md", ".markdown", ".csv"} else "code"
+            file_type = (
+                "text" if ext in {".txt", ".md", ".markdown", ".csv"} else "code"
+            )
             return ParsedEditorFile(
                 file_type=file_type,
-                data={"content": content, "language": ext.lstrip("."), "extension": ext},
+                data={
+                    "content": content,
+                    "language": ext.lstrip("."),
+                    "extension": ext,
+                },
             )
 
         raise UnsupportedFileTypeError(f"不支持的格式: {ext}")
@@ -153,7 +186,11 @@ class FileAssistantService:
         try:
             data = parse_docx(str(tmp))
         except Exception as exc:
-            if source is None or copy_to_tmp is None or not self.should_retry_docx_tmp_parse(exc, tmp):
+            if (
+                source is None
+                or copy_to_tmp is None
+                or not self.should_retry_docx_tmp_parse(exc, tmp)
+            ):
                 raise
             copy_to_tmp(source, tmp, ext=".docx")
             data = parse_docx(str(tmp))
@@ -214,9 +251,17 @@ class FileAssistantService:
             )
 
         if kind in {"text", "code"}:
-            content = data if isinstance(data, str) else (data.get("content", "") if isinstance(data, dict) else "")
+            content = (
+                data
+                if isinstance(data, str)
+                else (data.get("content", "") if isinstance(data, dict) else "")
+            )
             suffix = Path(file_name).suffix.lower() if file_name else ".txt"
-            mime = "text/markdown; charset=utf-8" if suffix == ".md" else "text/plain; charset=utf-8"
+            mime = (
+                "text/markdown; charset=utf-8"
+                if suffix == ".md"
+                else "text/plain; charset=utf-8"
+            )
             return ExportedEditorFile(
                 raw_bytes=content.encode("utf-8"),
                 mime=mime,
@@ -239,7 +284,9 @@ class FileAssistantService:
         return Path(file_name).stem + suffix
 
     @staticmethod
-    def _original_tmp_path(tmp_dir: str | Path | None, file_id: str, suffix: str) -> str | None:
+    def _original_tmp_path(
+        tmp_dir: str | Path | None, file_id: str, suffix: str
+    ) -> str | None:
         if not tmp_dir or not file_id:
             return None
         original = Path(tmp_dir) / f"{file_id}{suffix}"

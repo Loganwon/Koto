@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -29,10 +28,21 @@ def test_file_task_runtime_phase_modules_do_not_import_runtime_facade() -> None:
         "file_task_plan_presentation.py",
     )
 
-    assert "from app.core.agent.file_task_context_read import FileTaskContextReadPhase" in runtime
-    assert "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop" in runtime
-    assert "from app.core.agent.file_task_finalization import FileTaskFinalizationPhase" in runtime
-    assert "from app.core.agent.file_task_planning import FileTaskPlanningPhase" in runtime
+    assert (
+        "from app.core.agent.file_task_context_read import FileTaskContextReadPhase"
+        in runtime
+    )
+    assert (
+        "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop"
+        in runtime
+    )
+    assert (
+        "from app.core.agent.file_task_finalization import FileTaskFinalizationPhase"
+        in runtime
+    )
+    assert (
+        "from app.core.agent.file_task_planning import FileTaskPlanningPhase" in runtime
+    )
     assert "from app.core.agent.file_task_plan_presentation import" in runtime
 
     for module_name in phase_modules:
@@ -48,11 +58,13 @@ def test_file_task_doc_annotate_bridge_fallback_is_extracted_from_runtime() -> N
     body = _body_between(
         planning,
         "        write_intent = execution_context.write_intent",
-        "        bridge_execution_mode = classification.execution_mode == \"doc_annotate_bridge\"",
+        '        bridge_execution_mode = classification.execution_mode == "doc_annotate_bridge"',
     )
 
     assert "from app.core.agent.file_task_doc_annotate_fallback import" not in runtime
-    assert "from app.core.agent.file_task_planning import FileTaskPlanningPhase" in runtime
+    assert (
+        "from app.core.agent.file_task_planning import FileTaskPlanningPhase" in runtime
+    )
     assert "from app.core.agent.file_task_doc_annotate_fallback import" in planning
     assert "apply_doc_annotate_bridge_fallback(" in body
     assert "file_task_doc_annotate_boundary.should_use_bridge_execution" not in body
@@ -78,7 +90,10 @@ def test_file_task_readonly_answer_only_loop_guard_is_extracted_from_runtime() -
     )
 
     assert "from app.core.agent.file_task_readonly_loop_guard import" in runtime
-    assert "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop" in runtime
+    assert (
+        "from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop"
+        in runtime
+    )
     assert "_readonly_answer_only_round(" in loop_body
     assert "_readonly_discard_answer_only_tool_calls(" in loop_body
     assert "_readonly_should_retry_answer_guard(" in loop_body
@@ -143,7 +158,9 @@ def test_file_task_runtime_drops_unused_external_planner_fallback_state() -> Non
     assert "planner_runtime_fallback_attempted" not in execution_loop
 
 
-def test_file_task_native_stepwise_pdf_guard_payload_is_extracted_from_runtime() -> None:
+def test_file_task_native_stepwise_pdf_guard_payload_is_extracted_from_runtime() -> (
+    None
+):
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/_file_task_stepwise_helpers.py")
     native_write_body = _body_between(
@@ -180,7 +197,7 @@ def test_file_task_stepwise_docx_target_path_is_extracted_from_runtime() -> None
     assert "_分步总结.docx" not in target_body
     assert "def stepwise_docx_target_path(" in helper
     assert "_分步总结.docx" in helper
-    assert "file_task_suffix(file_info) == \"docx\"" in helper
+    assert 'file_task_suffix(file_info) == "docx"' in helper
 
 
 def test_file_task_docx_stepwise_polish_runner_is_extracted_from_runtime() -> None:
@@ -219,7 +236,9 @@ def test_file_task_docx_stepwise_polish_runner_is_extracted_from_runtime() -> No
     assert "for event in read_result.events:" in stream_body
     assert "if read_result.terminal or read_result.window is None:" in stream_body
     assert "window = read_result.window" in stream_body
-    assert "target_path=stepwise_docx_polish_target_path(request, context_files)" in runner
+    assert (
+        "target_path=stepwise_docx_polish_target_path(request, context_files)" in runner
+    )
     assert "file_changes=[]" in runner
     assert "payload_context = DocxStepwisePayloadContext(" not in runner
     assert "file_changes: List[Dict[str, Any]] = []" not in runner
@@ -323,7 +342,9 @@ def test_file_task_docx_stepwise_polish_runner_is_extracted_from_runtime() -> No
     assert "rewrite_docx_paragraph_window" in runner
 
 
-def test_file_task_stepwise_docx_content_quality_guard_is_extracted_from_runtime() -> None:
+def test_file_task_stepwise_docx_content_quality_guard_is_extracted_from_runtime() -> (
+    None
+):
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/_file_task_stepwise_helpers.py")
     wrapper_body = _body_between(
@@ -336,7 +357,9 @@ def test_file_task_stepwise_docx_content_quality_guard_is_extracted_from_runtime
         "stepwise_docx_content_quality_block_message as "
         "_stepwise_docx_content_quality_block_message"
     ) in runtime
-    assert "_stepwise_docx_content_quality_block_message(snippets, text)" in wrapper_body
+    assert (
+        "_stepwise_docx_content_quality_block_message(snippets, text)" in wrapper_body
+    )
     assert "当前分步 DOCX 正文为空" not in wrapper_body
     assert "文档识别\\s*/\\s*核心要点" not in wrapper_body
     assert "DOCX 页窗标签与当前读取窗口不一致" not in wrapper_body
@@ -368,7 +391,9 @@ def test_file_task_stepwise_docx_wait_artifact_is_extracted_from_runtime() -> No
     assert '"followup_action": "resume"' in helper
 
 
-def test_file_task_stepwise_pdf_fallback_paragraphs_are_extracted_from_runtime() -> None:
+def test_file_task_stepwise_pdf_fallback_paragraphs_are_extracted_from_runtime() -> (
+    None
+):
     runtime = _read("app/core/agent/file_task_runtime.py")
     helper = _read("app/core/agent/_file_task_stepwise_helpers.py")
     fallback_body = _body_between(
@@ -382,8 +407,7 @@ def test_file_task_stepwise_pdf_fallback_paragraphs_are_extracted_from_runtime()
         in runtime
     )
     assert (
-        "stepwise_pdf_fallback_insights as _stepwise_pdf_fallback_insights"
-        in runtime
+        "stepwise_pdf_fallback_insights as _stepwise_pdf_fallback_insights" in runtime
     )
     assert "return _stepwise_pdf_fallback_paragraphs(pdf_snippet, exc)" in fallback_body
     assert "return _stepwise_pdf_fallback_insights(preview)" in fallback_body
@@ -410,7 +434,10 @@ def test_file_task_stepwise_docx_write_guard_is_extracted_from_runtime() -> None
     )
     assert "return _stepwise_docx_write_block_message(" in wrapper_body
     assert "当前 PDF 页窗的可提取文本质量不足" not in wrapper_body
-    assert "write_docx_content 的 paragraphs 不能包含 Markdown 标题符号" not in wrapper_body
+    assert (
+        "write_docx_content 的 paragraphs 不能包含 Markdown 标题符号"
+        not in wrapper_body
+    )
     assert "DOCX 正文不能包含任务进度" not in wrapper_body
     assert "def stepwise_docx_write_block_message(" in helper
     assert "def latest_pdf_snippet_quality(" in helper

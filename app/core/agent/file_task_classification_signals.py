@@ -17,7 +17,6 @@ from app.core.agent.file_task_recipes import (
     semantic_markers,
 )
 
-
 DocxRequestPredicate = Callable[[FileTaskRequest], bool]
 
 
@@ -104,9 +103,7 @@ def build_classification_signals(
     raw_docx_annotation_request = is_docx_annotation_request(classification_request)
     docx_annotation_request = raw_docx_annotation_request
     clear_docx_review_request = is_docx_clear_review_request(classification_request)
-    docx_compare_annotate_request = (
-        "compare_docx_and_annotate" in matched_capabilities
-    )
+    docx_compare_annotate_request = "compare_docx_and_annotate" in matched_capabilities
     if docx_compare_annotate_request:
         matched_capabilities = [
             name for name in matched_capabilities if name != "annotate_file"
@@ -156,9 +153,7 @@ def build_classification_signals(
         translation_request=bool(semantic.get("translation_request", False)),
         polish_request=bool(semantic.get("polish_request", False)),
         financial_request=bool(semantic.get("financial_request", False)),
-        ppt_slide_write_request=bool(
-            semantic.get("ppt_slide_write_request", False)
-        ),
+        ppt_slide_write_request=bool(semantic.get("ppt_slide_write_request", False)),
         ppt_design_request=bool(semantic.get("ppt_design_request", False)),
         docx_report_request=bool(semantic.get("docx_report_request", False)),
     )

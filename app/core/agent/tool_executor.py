@@ -1,4 +1,5 @@
 """Tool registry construction and result-formatting helpers."""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
@@ -30,7 +31,9 @@ class ToolExecutor:
         from app.core.agent.tool_registry import ToolRegistry
 
         registry = ToolRegistry()
-        registry.register_plugin(TaskToolsPlugin(socketio=socketio, task_files=task_files))
+        registry.register_plugin(
+            TaskToolsPlugin(socketio=socketio, task_files=task_files)
+        )
         return registry
 
     @staticmethod
@@ -41,4 +44,5 @@ class ToolExecutor:
         tool result serialisation goes through one code path.
         """
         from app.core.shared.tool_parser import stringify_tool_result
+
         return stringify_tool_result(result)

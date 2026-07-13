@@ -244,11 +244,11 @@ def _create_comment_via_launcher(
     _select_docx_text(page, anchor_text)
     _wait_until_visible(page, "#wa-review-selection-launcher")
     _wait_until_text_includes(
-        page, "#wa-review-selection-launcher .wa-review-selection-title", "添加批注或修订"
+        page,
+        "#wa-review-selection-launcher .wa-review-selection-title",
+        "添加批注或修订",
     )
-    page.locator(
-        '#wa-review-selection-launcher [data-review-create="comment"]'
-    ).click()
+    page.locator('#wa-review-selection-launcher [data-review-create="comment"]').click()
     _wait_until_visible(page, "#wa-review-shell .koto-docx-comment-edit")
     textarea = page.locator("#wa-review-shell .koto-docx-comment-edit").last
     textarea.fill(comment_text)

@@ -31,8 +31,12 @@ def _clean_plan_steps(value: Any, *, limit: int = 8) -> List[Dict[str, str]]:
         if isinstance(item, Mapping):
             step = {
                 "id": _clean_str(item.get("id") or f"route_step_{index}", 64),
-                "label": _clean_str(item.get("label") or item.get("title") or item.get("step"), 160),
-                "description": _clean_str(item.get("description") or item.get("detail"), 320),
+                "label": _clean_str(
+                    item.get("label") or item.get("title") or item.get("step"), 160
+                ),
+                "description": _clean_str(
+                    item.get("description") or item.get("detail"), 320
+                ),
                 "tool": _clean_str(item.get("tool") or item.get("tool_name"), 120),
             }
         else:
@@ -58,14 +62,18 @@ class FileTaskFile:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "FileTaskFile":
-        path = _clean_str(data.get("path") or data.get("source_path") or data.get("ws_source_path"))
+        path = _clean_str(
+            data.get("path") or data.get("source_path") or data.get("ws_source_path")
+        )
         name = _clean_str(data.get("name") or data.get("file_name"))
         if not name and path:
             name = path.replace("\\", "/").rstrip("/").split("/")[-1]
         return cls(
             path=path,
             name=name,
-            type=_clean_str(data.get("type") or data.get("file_type")).lower().lstrip("."),
+            type=_clean_str(data.get("type") or data.get("file_type"))
+            .lower()
+            .lstrip("."),
             content=_clean_str(data.get("content"), 24_000),
             target=bool(data.get("target") or data.get("is_target")),
         )
@@ -140,7 +148,9 @@ class FileTaskRoutingDecision:
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
-        return {key: value for key, value in data.items() if value not in ("", None, [], {})}
+        return {
+            key: value for key, value in data.items() if value not in ("", None, [], {})
+        }
 
 
 @dataclass
@@ -165,7 +175,11 @@ class FileTaskRequest:
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, Any]) -> "FileTaskRequest":
-        options = dict(data.get("options") or {}) if isinstance(data.get("options"), Mapping) else {}
+        options = (
+            dict(data.get("options") or {})
+            if isinstance(data.get("options"), Mapping)
+            else {}
+        )
         raw_routing_decision = (
             data.get("routing_decision")
             or data.get("route_decision")
@@ -196,7 +210,10 @@ class FileTaskRequest:
             history = []
 
         return cls(
-            task=_clean_str(data.get("task") or data.get("instruction") or data.get("selection"), 8_000),
+            task=_clean_str(
+                data.get("task") or data.get("instruction") or data.get("selection"),
+                8_000,
+            ),
             task_id=_clean_str(data.get("task_id") or data.get("taskId"), 128),
             run_id=_clean_str(data.get("run_id")) or uuid.uuid4().hex[:12],
             session_id=_clean_str(data.get("session_id"), 96),
@@ -204,8 +221,11 @@ class FileTaskRequest:
             current_file=current_file,
             selection=_clean_str(data.get("selection"), 12_000),
             selection_source=_clean_str(data.get("selection_source"), 240),
-            target_path=_clean_str(data.get("target_path") or data.get("target"), 1_000),
-            model_mode=_clean_str(data.get("model_mode") or "deepseek", 32) or "deepseek",
+            target_path=_clean_str(
+                data.get("target_path") or data.get("target"), 1_000
+            ),
+            model_mode=_clean_str(data.get("model_mode") or "deepseek", 32)
+            or "deepseek",
             model_id=_clean_str(data.get("model_id"), 160),
             history=history[-20:],
             options=options,
@@ -234,11 +254,20 @@ class FileTaskExecutionBrief:
             for index, item in enumerate(raw_steps[:8], start=1):
                 if not isinstance(item, Mapping):
                     continue
-                title = _clean_str(item.get("title") or item.get("step") or item.get("tool_name") or item.get("name"), 160)
-                description = _clean_str(item.get("description") or item.get("detail"), 400)
+                title = _clean_str(
+                    item.get("title")
+                    or item.get("step")
+                    or item.get("tool_name")
+                    or item.get("name"),
+                    160,
+                )
+                description = _clean_str(
+                    item.get("description") or item.get("detail"), 400
+                )
                 tool_name = _clean_str(item.get("tool_name") or item.get("name"), 120)
                 step_payload: Dict[str, Any] = {
-                    "id": _clean_str(item.get("id") or f"brief_step_{index}", 64) or f"brief_step_{index}",
+                    "id": _clean_str(item.get("id") or f"brief_step_{index}", 64)
+                    or f"brief_step_{index}",
                 }
                 if title:
                     step_payload["title"] = title
@@ -249,8 +278,12 @@ class FileTaskExecutionBrief:
                 if len(step_payload) > 1:
                     steps.append(step_payload)
 
-        summary = _clean_str(data.get("summary") or data.get("brief") or data.get("status"), 600)
-        objective = _clean_str(data.get("objective") or data.get("goal") or data.get("outcome"), 800)
+        summary = _clean_str(
+            data.get("summary") or data.get("brief") or data.get("status"), 600
+        )
+        objective = _clean_str(
+            data.get("objective") or data.get("goal") or data.get("outcome"), 800
+        )
         if not summary and objective:
             summary = objective
 
@@ -259,10 +292,21 @@ class FileTaskExecutionBrief:
             summary=summary,
             objective=objective,
             steps=steps,
-            planned_tools=_clean_str_list(data.get("planned_tools") or data.get("tools"), item_limit=120),
-            read_targets=_clean_str_list(data.get("read_targets") or data.get("inputs"), item_limit=240),
-            write_targets=_clean_str_list(data.get("write_targets") or data.get("targets"), item_limit=240),
-            verification=_clean_str(data.get("verification") or data.get("verify") or data.get("success_check"), 400),
+            planned_tools=_clean_str_list(
+                data.get("planned_tools") or data.get("tools"), item_limit=120
+            ),
+            read_targets=_clean_str_list(
+                data.get("read_targets") or data.get("inputs"), item_limit=240
+            ),
+            write_targets=_clean_str_list(
+                data.get("write_targets") or data.get("targets"), item_limit=240
+            ),
+            verification=_clean_str(
+                data.get("verification")
+                or data.get("verify")
+                or data.get("success_check"),
+                400,
+            ),
             note=_clean_str(data.get("note") or data.get("notes"), 400),
             estimated=bool(data.get("estimated", True)),
         )
@@ -316,10 +360,16 @@ class FileTaskClassification:
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
         data["file_types"] = [item for item in self.file_types if item]
-        data["matched_capabilities"] = [item for item in self.matched_capabilities if item]
+        data["matched_capabilities"] = [
+            item for item in self.matched_capabilities if item
+        ]
         data["reason_codes"] = [item for item in self.reason_codes if item]
-        data["recipe_candidates"] = [dict(item) for item in self.recipe_candidates if isinstance(item, dict)]
-        data["decision_trace"] = [dict(item) for item in self.decision_trace if isinstance(item, dict)]
+        data["recipe_candidates"] = [
+            dict(item) for item in self.recipe_candidates if isinstance(item, dict)
+        ]
+        data["decision_trace"] = [
+            dict(item) for item in self.decision_trace if isinstance(item, dict)
+        ]
         return data
 
 
@@ -338,7 +388,9 @@ class FileTaskIntentPlan:
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
-        data["dynamic_steps"] = [dict(step) for step in self.dynamic_steps if isinstance(step, dict)]
+        data["dynamic_steps"] = [
+            dict(step) for step in self.dynamic_steps if isinstance(step, dict)
+        ]
         data["reason_codes"] = [item for item in self.reason_codes if item]
         return data
 
@@ -356,9 +408,15 @@ class FileTaskRequirementSet:
 
     def public_dict(self) -> Dict[str, Any]:
         data = asdict(self)
-        data["required_capabilities"] = [item for item in self.required_capabilities if item]
-        data["forbidden_capabilities"] = [item for item in self.forbidden_capabilities if item]
-        data["acceptance_criteria"] = [item for item in self.acceptance_criteria if item]
+        data["required_capabilities"] = [
+            item for item in self.required_capabilities if item
+        ]
+        data["forbidden_capabilities"] = [
+            item for item in self.forbidden_capabilities if item
+        ]
+        data["acceptance_criteria"] = [
+            item for item in self.acceptance_criteria if item
+        ]
         data["reason_codes"] = [item for item in self.reason_codes if item]
         return data
 
@@ -468,7 +526,9 @@ class FileTaskCompletionContract:
 
 @dataclass
 class FileTaskExecutionContext:
-    classification: FileTaskClassification = field(default_factory=FileTaskClassification)
+    classification: FileTaskClassification = field(
+        default_factory=FileTaskClassification
+    )
     intent_plan: FileTaskIntentPlan = field(default_factory=FileTaskIntentPlan)
     requirements: FileTaskRequirementSet = field(default_factory=FileTaskRequirementSet)
     plan_check: FileTaskPlanCheck = field(default_factory=FileTaskPlanCheck)
@@ -498,7 +558,13 @@ class FileTaskExecutionContext:
             data["known_tool_gap"] = dict(self.known_tool_gap)
         if isinstance(self.intent_adjudication, dict) and self.intent_adjudication:
             data["intent_adjudication"] = dict(self.intent_adjudication)
-        if any((self.effective_planner_policy, self.effective_planner_reason, self.effective_planner_backend)):
+        if any(
+            (
+                self.effective_planner_policy,
+                self.effective_planner_reason,
+                self.effective_planner_backend,
+            )
+        ):
             data["effective_planner"] = {
                 "policy": self.effective_planner_policy,
                 "reason": self.effective_planner_reason,
@@ -511,7 +577,9 @@ class FileTaskExecutionContext:
 class FileTaskDecisionContext:
     version: str = "file_task_decision_context_v1"
     routing_decision: Dict[str, Any] = field(default_factory=dict)
-    classification: FileTaskClassification = field(default_factory=FileTaskClassification)
+    classification: FileTaskClassification = field(
+        default_factory=FileTaskClassification
+    )
     intent_plan: FileTaskIntentPlan = field(default_factory=FileTaskIntentPlan)
     requirements: FileTaskRequirementSet = field(default_factory=FileTaskRequirementSet)
     plan_check: FileTaskPlanCheck = field(default_factory=FileTaskPlanCheck)
@@ -622,7 +690,13 @@ class FileTaskLedger:
         self.run_id = run_id or uuid.uuid4().hex[:12]
         self._seq = 0
 
-    def event(self, event_type: str, payload: Optional[Dict[str, Any]] = None, *, step_id: str = "") -> FileTaskEvent:
+    def event(
+        self,
+        event_type: str,
+        payload: Optional[Dict[str, Any]] = None,
+        *,
+        step_id: str = "",
+    ) -> FileTaskEvent:
         self._seq += 1
         return FileTaskEvent(
             type=event_type,

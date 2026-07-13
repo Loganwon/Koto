@@ -315,7 +315,9 @@ def test_supervisor_audit_does_not_request_confirmation_for_optional_apply_analy
     request = FileTaskRequest(
         task="分析这个文章内容，看看有没有值得优化的论点",
         files=[
-            FileTaskFile(path="essay.docx", name="essay.docx", type="docx", target=True),
+            FileTaskFile(
+                path="essay.docx", name="essay.docx", type="docx", target=True
+            ),
         ],
     )
     classification = FileTaskClassification(
@@ -349,7 +351,12 @@ def test_supervisor_audit_does_not_request_confirmation_for_optional_apply_analy
 
     combined_text = " ".join(
         str(item)
-        for key in ("warnings", "required_actions", "execution_constraints", "user_actions")
+        for key in (
+            "warnings",
+            "required_actions",
+            "execution_constraints",
+            "user_actions",
+        )
         for item in audit.get(key, [])
     )
     assert audit["status"] == "clear"

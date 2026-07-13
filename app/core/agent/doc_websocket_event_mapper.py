@@ -19,7 +19,9 @@ def emit_agent_event(socketio, sid, event, namespace: str = "/doc") -> None:
 
     if etype == EventType.STREAM_CHUNK:
         chunk = data.get("chunk", "")
-        socketio.emit("agent_stream_chunk", {"chunk": chunk}, namespace=namespace, to=sid)
+        socketio.emit(
+            "agent_stream_chunk", {"chunk": chunk}, namespace=namespace, to=sid
+        )
         if data.get("live_doc"):
             socketio.emit(
                 "doc_live_chunk",
