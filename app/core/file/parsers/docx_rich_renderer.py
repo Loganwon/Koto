@@ -2816,8 +2816,12 @@ def _docx_to_rich_html(
                                                 "chineseCounting",
                                             ):
                                                 list_tag = "ol"
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.warning(
+                        "[DocxRichRenderer] Failed to resolve list numbering; "
+                        "rendering the paragraph with the safe list fallback: %s",
+                        exc,
+                    )
 
                 if num_id != current_list_id or list_tag != current_list_tag:
                     if not _flush_list():
@@ -2868,8 +2872,12 @@ def _docx_to_rich_html(
                         )
                         if _stype != "continuous":
                             _has_section_pb = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "[DocxRichRenderer] Failed to inspect a section page break; "
+                    "continuing without an inferred section boundary: %s",
+                    exc,
+                )
 
             block_tag, block_role = _classify_paragraph_block(
                 para,
@@ -2974,8 +2982,12 @@ def _docx_to_rich_html(
                         _gval = _dpg.get(qn("w:val"), "")
                         if "Table of Contents" in _gval or "目录" in _gval:
                             _is_toc_sdt = True
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "[DocxRichRenderer] Failed to classify a structured document tag; "
+                    "rendering it without the TOC wrapper: %s",
+                    exc,
+                )
             if _is_toc_sdt:
                 body_parts.append('<div class="koto-toc">')
                 _record_preview_units(1)

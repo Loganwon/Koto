@@ -22,6 +22,10 @@ def _read_bundle_js():
     return (_repo_root() / "web" / "static" / "js" / "tiptap-docx-bundle.js").read_text(encoding="utf-8")
 
 
+def _read_scheduler_js():
+    return (_repo_root() / "web" / "tiptap-editor" / "docx-pagination-scheduler.js").read_text(encoding="utf-8")
+
+
 # -- Current-layout signature tests --
 
 def test_document_only_break_cache_is_not_used():
@@ -46,12 +50,31 @@ def test_layout_signature_prevents_redundant_dispatch_only():
 
 
 def test_font_and_window_reflow_schedule_a_fresh_measurement():
+    scheduler = _read_scheduler_js()
+    assert "document.fonts?.ready?.then(() => schedule('fonts', 40))" in scheduler
+    assert "window.addEventListener('resize', onWindowResize" in scheduler
+    assert "window.removeEventListener('resize', onWindowResize);" in scheduler
+    assert "const watchLayoutWidth" in scheduler
+    assert "layoutResizeObserver.observe(pmDom);" in scheduler
+
+
+def test_layout_observer_ignores_pagination_height_writes():
+    scheduler = _read_scheduler_js()
+    assert "entry?.contentRect?.width" in scheduler
+    assert "observedWidth === lastObservedLayoutWidth" in scheduler
+    assert "lastObservedLayoutWidth = observedWidth;" in scheduler
+
+
+def test_pagination_uses_one_scheduler_owner_for_all_browser_triggers():
     src = _read_ext_js()
-    assert "document.fonts?.ready?.then(() => _schedule(40))" in src
-    assert "window.addEventListener('resize', _onWindowResize" in src
-    assert "window.removeEventListener('resize', _onWindowResize);" in src
-    assert "const _watchLayoutForPagination" in src
-    assert "_layoutResizeObserver.observe(pmDom);" in src
+    scheduler = _read_scheduler_js()
+
+    assert "createDocxPaginationScheduler" in src
+    assert "new ResizeObserver" not in src
+    assert "addEventListener('koto-hdrftr-changed'" not in src
+    assert "document.fonts" not in src
+    for trigger in ("new ResizeObserver", "koto-hdrftr-changed", "document.fonts", "onDocumentChanged"):
+        assert trigger in scheduler
 
 
 # -- Phantom page tests --
@@ -203,12 +226,10 @@ def test_hdrftr_notify_dispatches_custom_event():
 
 
 def test_hdrftr_event_listener_registered_in_view():
-    src = _read_ext_js()
-    assert "addEventListener" in src
-    assert "koto-hdrftr-changed" in src
+    scheduler = _read_scheduler_js()
+    assert "addEventListener('koto-hdrftr-changed'" in scheduler
 
 
 def test_hdrftr_event_listener_cleaned_up_on_destroy():
-    src = _read_ext_js()
-    assert "removeEventListener" in src
-    assert "koto-hdrftr-changed" in src
+    scheduler = _read_scheduler_js()
+    assert "removeEventListener('koto-hdrftr-changed'" in scheduler

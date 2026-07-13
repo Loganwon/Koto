@@ -7,10 +7,9 @@ registered operation surface instead of the complete implementation module.
 from __future__ import annotations
 
 from types import SimpleNamespace
-from typing import Any
 
 
-def build_task_tool_operations() -> Any:
+def build_task_tool_operations() -> SimpleNamespace:
     """Return exactly the module-level operations declared by the registry."""
     from app.core.agent.task_tools import (
         add_pptx_slides,

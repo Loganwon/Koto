@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import base64
-import html
 import io
 import logging
 import math
@@ -15,6 +14,11 @@ from typing import Any
 
 from app.core.file.image_utils import compress_image_bytes as _compress_image_bytes
 from app.core.file.parsers.docx_rich_renderer import _docx_to_rich_html
+from app.core.file.parsers.docx_parser_fallback import (
+    extract_fallback_docx_metadata as _extract_fallback_docx_metadata,
+    normalize_mammoth_heading_contract as _normalize_mammoth_heading_contract,
+)
+from app.core.file.parsers.docx_parser_postprocess import deduplicate_images as _deduplicate_images
 from app.core.file.parsers.docx_parser_review import (
     _extract_docx_comments,
     _extract_docx_footnotes,
@@ -27,6 +31,7 @@ logger = logging.getLogger(__name__)
 _DOCX_PREVIEW_TARGET_PAGES = 3
 _DOCX_PREVIEW_UNITS_PER_PAGE = 34
 _DOCX_PREVIEW_MAX_TABLE_ROWS = 18
+_DOCX_RENDER_CONTRACT_VERSION = 1
 
 
 def _extract_table_styles(docx_path: str) -> list[dict]:
@@ -425,42 +430,6 @@ def _unwrap_layout_tables(html: str) -> str:
     return str(soup) if changed else html
 
 
-def _deduplicate_images(html: str) -> str:
-    """
-    Remove duplicate inline base64 images from HTML.
-
-    Compares the first 200 chars of each data URI.  If two <img> tags share
-    the same base64 prefix (i.e. are the same image), only the first is kept.
-    """
-    # Quick check — fewer than 2 images means nothing to deduplicate
-    if html.count("<img") < 2:
-        return html
-
-    seen_prefixes: set[str] = set()
-    result_parts: list[str] = []
-    pos = 0
-
-    for m in re.finditer(r"<img\s[^>]*>", html, re.IGNORECASE):
-        img_tag = m.group()
-        src_m = re.search(r'src="(data:[^"]{0,200})', img_tag)
-        if src_m:
-            prefix = src_m.group(1)
-            if prefix in seen_prefixes:
-                # Duplicate — skip this <img> tag
-                result_parts.append(html[pos : m.start()])
-                pos = m.end()
-                continue
-            seen_prefixes.add(prefix)
-
-        result_parts.append(html[pos : m.end()])
-        pos = m.end()
-
-    result_parts.append(html[pos:])
-    return "".join(result_parts)
-
-
-
-
 def _extract_images_from_paragraphs(html: str) -> str:
     """将 <p> 标签内的 <img> 元素移到段落外部，避免编辑器路径错误。
 
@@ -598,7 +567,14 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         except Exception as meta_exc:
             logger.debug("[DocxParser] 页面元数据提取失败 (非致命): %s", meta_exc)
 
-        result = {"html": rich_html, "messages": messages_out, "headings": headings}
+        result = {
+            "html": rich_html,
+            "messages": messages_out,
+            "headings": headings,
+            "render_contract_version": _DOCX_RENDER_CONTRACT_VERSION,
+            "render_source": "rich",
+            "render_degraded": False,
+        }
         result.update(page_meta)
         if progressive_preview:
             result["progressive"] = {
@@ -719,7 +695,24 @@ def parse_docx(file_path: str, *, progressive_preview: bool = False) -> dict[str
         except Exception as exc:
             logger.warning("[DocxParser] 图片去重失败 (非致命): %s", exc)
 
-        fallback_result = {"html": clean_html, "messages": messages_out}
+        clean_html, headings = _normalize_mammoth_heading_contract(clean_html)
+        fallback_metadata = _extract_fallback_docx_metadata(file_path)
+        fallback_result = {
+            "html": clean_html,
+            "messages": [
+                *messages_out,
+                "文档以兼容渲染模式打开；复杂版式可能与原始 Word 存在差异。",
+            ],
+            "headings": headings,
+            "progressive": {
+                "pending": False,
+                "target_pages": _DOCX_PREVIEW_TARGET_PAGES if progressive_preview else None,
+            },
+            "render_contract_version": _DOCX_RENDER_CONTRACT_VERSION,
+            "render_source": "mammoth_fallback",
+            "render_degraded": True,
+            **fallback_metadata,
+        }
         try:
             comments = _extract_docx_comments(file_path)
             if comments:

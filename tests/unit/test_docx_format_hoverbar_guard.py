@@ -586,10 +586,13 @@ def test_docx_pagination_remeasures_after_media_load_and_visual_overflow():
     ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
         encoding="utf-8"
     )
+    scheduler_js = (_repo_root() / "web" / "tiptap-editor" / "docx-pagination-scheduler.js").read_text(
+        encoding="utf-8"
+    )
 
     assert "function _measureDocxBlockContentHeightPx(element)" in ext_js
     assert "_measureDocxBlockOuterHeightPx(domEl)" in ext_js
-    assert "'img,svg,canvas,video,.koto-img-wrapper'" in ext_js
-    assert "new ResizeObserver" in ext_js
-    assert "node.addEventListener('load', onSettled" in ext_js
-    assert "_scheduleAfterMediaSettles" in ext_js
+    assert "'img,svg,canvas,video,.koto-img-wrapper'" in scheduler_js
+    assert "new ResizeObserver" in scheduler_js
+    assert "node.addEventListener('load', onSettled" in scheduler_js
+    assert "scheduleAfterMediaSettles" in scheduler_js
