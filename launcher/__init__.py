@@ -7,4 +7,4 @@ Usage:
     python -m launcher --health     # environment health check
 """
 
-__version__ = "1.7.4"
+__version__ = "1.0.0"

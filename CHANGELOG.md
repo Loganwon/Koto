@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [1.0.0] - 2026-07-14
+
+This is Koto's first stable public release. Earlier numbered releases are
+maintained as prerelease/test history.
+
+### Added
+- Release-quality gates covering package dependencies, frontend builds,
+  installer and portable artifacts, checksums, and release manifests.
+- A guided first-run workspace experience and clearer task progress/reporting
+  for new users.
+
+### Changed
+- Consolidated workspace, document-feedback, and file-task runtime boundaries
+  while preserving the browser and streaming contracts.
+- Standardized the release build on clean worktrees, reproducible dependency
+  installation, and runtime health checks.
+
+### Fixed
+- Hardened file-task delivery verification, read-only safety, streamed terminal
+  status, and local-model selection.
+- Made lazy cloud-client access safe for unavailable-provider and mocked test
+  environments.
+
+### Tests
+- Added release, packaging, workspace E2E, and task-flow regression coverage;
+  the release lane now exercises the shipped AI assistant paths end to end.
+
 ## [1.7.4] - 2026-06-09
 
 ### Fixed

@@ -1,9 +1,29 @@
 import ast
 import configparser
 import importlib.util
+import json
 from pathlib import Path
+import re
 
 from build_config import PROTECTED_DIRS
+
+
+def test_release_metadata_uses_one_valid_semantic_version():
+    version = Path("VERSION").read_text(encoding="utf-8").strip()
+    launcher = Path("launcher/__init__.py").read_text(encoding="utf-8")
+    package = json.loads(Path("web/package.json").read_text(encoding="utf-8"))
+    lock = json.loads(Path("web/package-lock.json").read_text(encoding="utf-8"))
+    changelog = Path("CHANGELOG.md").read_text(encoding="utf-8")
+
+    assert re.fullmatch(
+        r"(?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)",
+        version,
+    )
+    assert f'__version__ = "{version}"' in launcher
+    assert package["version"] == version
+    assert lock["version"] == version
+    assert lock["packages"][""]["version"] == version
+    assert f"## [{version}]" in changelog
 
 
 def test_release_build_includes_file_task_chart_dependencies():

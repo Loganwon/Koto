@@ -1,6 +1,6 @@
 {
   "name": "koto-web",
-  "version": "1.7.4",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "scripts": {
