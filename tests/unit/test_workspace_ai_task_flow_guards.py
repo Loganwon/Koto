@@ -34,7 +34,7 @@ def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     final_report_js = _read("web/src/workspace/task-final-report.ts")
     quick_actions_js = _read("web/src/workspace/quick-actions.ts")
 
-    assert "WA.createTaskDispatcher = createTaskDispatcher" in dispatcher_js
+    assert "publishWorkspaceApi({ createTaskDispatcher })" in dispatcher_js
     assert "taskDispatcher.dispatchMessage({" in assistant_js
     assert "taskDispatcher.dispatchQuickAction(action, {" in assistant_js
     assert "WA.streamTaskFlow = streamTaskFlow" in task_js

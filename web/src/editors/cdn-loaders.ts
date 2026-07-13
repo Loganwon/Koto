@@ -3,6 +3,8 @@
  * Workspace editor dependency loaders.
  */
 
+import { publishWorkspaceApi } from '../shared/workspace-api';
+
 declare global {
   var KotoDocxEditorLib: any;
   var KotoSheetsAPI: any;
@@ -172,8 +174,8 @@ export function _updateDocxZoomUI(pct: number) {
   if (slider) slider.value = String(pct);
 }
 
-// Backward compat
-Object.assign((window as any).WA || ((window as any).WA = {}), {
+// Cross-bundle compatibility boundary; editor callers should import directly.
+publishWorkspaceApi({
   _ensureTipTap,
   _ensureUniverSheets,
   _ensurePdfJS,

@@ -2,7 +2,9 @@
 // Order: infrastructure → state → everything else (depends on WA namespace)
 
 import { installErrorBoundary } from '../shared/error-boundary';
+import { getWorkspaceApi } from '../shared/workspace-api';
 installErrorBoundary();
+getWorkspaceApi();
 
 import { installFrontendObserver } from '../mcp/frontend-observer';
 

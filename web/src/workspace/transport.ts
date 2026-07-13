@@ -4,6 +4,7 @@
  */
 
 import { csrfFetch as _sharedCsrfFetch } from '../shared/csrf';
+import { publishWorkspaceApi } from '../shared/workspace-api';
 
 interface SseEvent {
   type?: string;
@@ -140,6 +141,4 @@ export function createWorkspaceAiTransport(deps: TransportDeps = {}) {
   };
 }
 
-const WA = (window as any).WA || {};
-WA.createWorkspaceAiTransport = createWorkspaceAiTransport;
-(window as any).WA = WA;
+publishWorkspaceApi({ createWorkspaceAiTransport });

@@ -3,6 +3,8 @@
  * and triggers reloads after AI tasks complete.
  */
 
+import { publishWorkspaceApi } from '../shared/workspace-api';
+
 interface TaskCard {
   _taskUiState?: TaskUiState;
   _pendingFileRefreshes?: Set<string>;
@@ -199,6 +201,4 @@ export function createFileTaskRefreshController(options: RefreshControllerDeps =
   };
 }
 
-const WA = (window as any).WA || {};
-WA.createFileTaskRefreshController = createFileTaskRefreshController;
-(window as any).WA = WA;
+publishWorkspaceApi({ createFileTaskRefreshController });

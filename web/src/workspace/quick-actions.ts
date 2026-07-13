@@ -1,3 +1,5 @@
+import { publishWorkspaceApi } from '../shared/workspace-api';
+
 export interface QuickActionDefinition {
   action: string;
   id?: string;
@@ -344,7 +346,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
   };
 }
 
-const WA = (window as any).WA || {};
-WA.createQuickActionDispatcher = createQuickActionDispatcher;
-WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher;
-(window as any).WA = WA;
+publishWorkspaceApi({
+  createQuickActionDispatcher,
+  createWorkspaceQuickActionRuntime: createQuickActionDispatcher,
+});

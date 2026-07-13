@@ -1,5 +1,6 @@
 import { _csrfFetch } from './infrastructure';
 import { isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import { publishWorkspaceApi } from '../shared/workspace-api';
 
 export interface TaskDispatcherDeps {
   state?: Record<string, any>;
@@ -1701,6 +1702,4 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   };
 }
 
-const WA = (window as any).WA || {};
-WA.createTaskDispatcher = createTaskDispatcher;
-(window as any).WA = WA;
+publishWorkspaceApi({ createTaskDispatcher });
