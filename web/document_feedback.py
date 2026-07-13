@@ -38,6 +38,8 @@ from web.document_feedback_progress import (
     build_analysis_progress_event,
     build_apply_progress_event,
 )
+from web.document_feedback_background import BackgroundProgressBridge
+from web.document_feedback_preflight import prepare_analysis_preflight
 from web.document_feedback_stream import (
     collect_annotation_result,
     iter_annotation_progress_events,
@@ -1733,55 +1735,15 @@ class DocumentFeedbackSystem:
             ),
         }
 
-        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
-            chunk_size = (
-                self._env_int("KOTO_DOC_REVIEW_LOCAL_CHUNK_SIZE", 2400, minimum=1200)
-                if self._is_local_client()
-                else 4000
-            )
-        else:
-            chunk_size = 10000
-
-        # ===== 🔌 AI 连通性预检 —— 在开始分段之前快速验证 API 可用，503时自动切模型 =====
-        _preflight_error = ""
-        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
-            _probed_model = self._probe_working_model(effective_model_id)
-            if _probed_model is None:
-                # 所有候选模型均不可用
-                _preflight_error = "所有可用模型当前均不可用（503或其他错误）"
-                logger.error(
-                    f"[DocumentFeedback] ❌ AI 预检：所有模型不可用，将使用本地规则兜底"
-                )
-                yield {
-                    "stage": "warning",
-                    "progress": 16,
-                    "message": "⚠️ Gemini API 暂时全部不可用，将使用本地规则兜底（质量有限）",
-                    "detail": "建议稍后重试",
-                }
-            elif _probed_model != effective_model_id:
-                logger.info(
-                    f"[DocumentFeedback] 🔄 预检：{effective_model_id} 过载，切换为 {_probed_model}"
-                )
-                yield {
-                    "stage": "info",
-                    "progress": 16,
-                    "message": f"🔄 {effective_model_id} 当前负载过高，已自动切换到 {_probed_model}",
-                    "detail": "系统自动选择可用模型继续任务",
-                }
-                effective_model_id = _probed_model
-            else:
-                logger.info(f"[DocumentFeedback] ✅ AI 预检通过: {effective_model_id}")
-        # ───────────────────────────────────────────────────────────────────────
+        preflight = prepare_analysis_preflight(self, effective_model_id)
+        effective_model_id = preflight.model_id
+        chunk_size = preflight.chunk_size
+        yield from preflight.events
 
         # ===== 使用线程 + Queue 实现真正实时进度推送 =====
         import queue as queue_module
-        import threading
-
-        progress_q = queue_module.Queue()
-        result_holder = {"result": None, "error": None}
+        analysis_bridge = BackgroundProgressBridge()
         last_yield_time = [0.0]
-
-        _SENTINEL = object()  # 线程完成的标记
 
         def on_analysis_progress(current, total, message, **meta):
             """进度回调 — 在分析线程中调用，通过 Queue 发送到主线程"""
@@ -1789,29 +1751,23 @@ class DocumentFeedbackSystem:
             force_emit = str(meta.get("chunk_status") or "").strip().lower() == "completed"
             if force_emit or current_time - last_yield_time[0] >= 0.3:
                 last_yield_time[0] = current_time
-                progress_q.put(
+                analysis_bridge.emit(
                     build_analysis_progress_event(current, total, message, meta)
                 )
 
         def run_analysis():
             """在后台线程中运行分析"""
-            try:
-                result_holder["result"] = self.analyze_for_annotation_chunked(
-                    file_path,
-                    user_requirement,
-                    model_id=effective_model_id,
-                    chunk_size=chunk_size,
-                    progress_callback=on_analysis_progress,
-                    reference_context=reference_context,
-                    chunk_range=chunk_range,
-                )
-            except Exception as e:
-                result_holder["error"] = e
-            finally:
-                progress_q.put(_SENTINEL)
+            return self.analyze_for_annotation_chunked(
+                file_path,
+                user_requirement,
+                model_id=effective_model_id,
+                chunk_size=chunk_size,
+                progress_callback=on_analysis_progress,
+                reference_context=reference_context,
+                chunk_range=chunk_range,
+            )
 
-        analysis_thread = threading.Thread(target=run_analysis, daemon=True)
-        analysis_thread.start()
+        analysis_bridge.start(run_analysis)
 
         # 主线程：实时从 Queue 取出进度事件并 yield（SSE 推送给浏览器）
         heartbeat_interval = 3.0  # 每3秒发一次心跳防止 SSE 超时
@@ -1836,8 +1792,8 @@ class DocumentFeedbackSystem:
                     }
                     return
                 try:
-                    evt = progress_q.get(timeout=1.0)
-                    if evt is _SENTINEL:
+                    evt = analysis_bridge.get(timeout=1.0)
+                    if analysis_bridge.is_complete(evt):
                         break
                     current_progress[0] = max(
                         current_progress[0], evt.get("progress", 15)
@@ -1848,7 +1804,7 @@ class DocumentFeedbackSystem:
                     yield evt
                     last_heartbeat = time.time()
                 except queue_module.Empty:
-                    if not analysis_thread.is_alive():
+                    if not analysis_bridge.is_alive():
                         break
                     # 发送心跳防止浏览器 SSE 超时断连
                     now = time.time()
@@ -1861,13 +1817,13 @@ class DocumentFeedbackSystem:
                             "detail": f"{current_detail[0]}；等待 AI 响应中..." if current_detail[0] else "等待 AI 响应中...",
                         }
 
-            analysis_thread.join(timeout=10)
+            analysis_bridge.join(timeout=10)
 
             # 检查线程执行结果
-            if result_holder["error"]:
-                raise result_holder["error"]
+            if analysis_bridge.error:
+                raise analysis_bridge.error
 
-            analysis_result = result_holder["result"]
+            analysis_result = analysis_bridge.result
 
             if not analysis_result or not analysis_result.get("success"):
                 error_msg = (analysis_result or {}).get("error", "未知错误")
@@ -1987,11 +1943,10 @@ class DocumentFeedbackSystem:
             }
 
             # 文件助手主链路统一写回原生修订，不再混入批注气泡。
-            apply_q = queue_module.Queue()
-            apply_result_holder = {"result": None, "error": None}
+            apply_bridge = BackgroundProgressBridge()
 
             def on_apply_progress(current, total, status, detail, **meta):
-                apply_q.put(
+                apply_bridge.emit(
                     build_apply_progress_event(
                         current,
                         total,
@@ -2003,19 +1958,13 @@ class DocumentFeedbackSystem:
                 )
 
             def run_apply():
-                try:
-                    apply_result_holder["result"] = self._apply_docx_revisions(
-                        revised_file,
-                        annotations,
-                        progress_callback=on_apply_progress,
-                    )
-                except Exception as e:
-                    apply_result_holder["error"] = e
-                finally:
-                    apply_q.put(_SENTINEL)
+                return self._apply_docx_revisions(
+                    revised_file,
+                    annotations,
+                    progress_callback=on_apply_progress,
+                )
 
-            apply_thread = threading.Thread(target=run_apply, daemon=True)
-            apply_thread.start()
+            apply_bridge.start(run_apply)
 
             while True:
                 if _is_cancelled():
@@ -2027,20 +1976,20 @@ class DocumentFeedbackSystem:
                     }
                     return
                 try:
-                    evt = apply_q.get(timeout=1.0)
-                    if evt is _SENTINEL:
+                    evt = apply_bridge.get(timeout=1.0)
+                    if apply_bridge.is_complete(evt):
                         break
                     yield evt
                 except queue_module.Empty:
-                    if not apply_thread.is_alive():
+                    if not apply_bridge.is_alive():
                         break
 
-            apply_thread.join(timeout=10)
+            apply_bridge.join(timeout=10)
 
-            if apply_result_holder["error"]:
-                raise apply_result_holder["error"]
+            if apply_bridge.error:
+                raise apply_bridge.error
 
-            edit_result = apply_result_holder["result"]
+            edit_result = apply_bridge.result
 
             applied = edit_result.get("applied", 0)
             failed = edit_result.get("failed", 0)
