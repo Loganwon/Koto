@@ -32,6 +32,7 @@ from web.document_feedback_text import (
     select_reference_context,
     split_into_paragraph_chunks,
 )
+from web.document_feedback_rules import append_pattern_annotations
 from web.document_feedback_stream import (
     collect_annotation_result,
     iter_annotation_progress_events,
@@ -809,13 +810,7 @@ class DocumentFeedbackSystem:
             (r"被(视)为", suggest_remove_bei),  # 新增：被视为
             (r"被(认)为", suggest_remove_bei),  # 新增：被认为
         ]
-        for pattern, suggest_func in passive_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, passive_patterns, min_length=3, max_length=15)
 
         # ==================== 优化策略2：名词化问题 ====================
         # 对X进行Y → YX
@@ -840,13 +835,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in nominalization_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 12:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, nominalization_patterns, min_length=4, max_length=12)
 
         # ==================== 优化策略3：冗余转移词 ====================
         # 通过X来Y → 用X或XY
@@ -880,13 +869,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in connector_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, connector_patterns, min_length=4, max_length=15)
 
         # ==================== 优化策略4：学术虚词 ====================
         # 影响/作用等 → 具体动词
@@ -937,13 +920,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in abstract_terms:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 2 <= len(text) <= 6:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, abstract_terms, min_length=2, max_length=6)
 
         # ==================== 优化策略5：所字结构 ====================
         # 所+动词+的 → 去掉"所"
@@ -959,13 +936,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in suo_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 10:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, suo_patterns, min_length=3, max_length=10)
 
         # ==================== 优化策略6：模糊限定词 ====================
         # 非常/极其等 → 删除或换更强动词
@@ -989,13 +960,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in hedge_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)[:12]
-                if 3 <= len(text) <= 12:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, hedge_patterns, min_length=3, max_length=12, truncate_to=12)
 
         # ==================== 优化策略7：冗长表达 ====================
         # X之间的Y → X的Y
@@ -1019,13 +984,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in redundant_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, redundant_patterns, min_length=4, max_length=15)
 
         # ==================== 优化策略8：消极表述 ====================
         negative_patterns = [
@@ -1048,13 +1007,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in negative_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)[:10]
-                if 3 <= len(text) <= 10:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, negative_patterns, min_length=3, max_length=10, truncate_to=10)
 
         # ==================== 优化策略9：高频虚词提取 ====================
         freq_words = [
@@ -1121,13 +1074,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in redundancy_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 12:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, redundancy_patterns, min_length=4, max_length=12)
 
         # ==================== 优化策略11：学术翻译常见问题 ====================
         academic_patterns = [
@@ -1202,13 +1149,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in academic_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, academic_patterns, min_length=3, max_length=15)
 
         # ==================== 优化策略12：常见 AI 套话 ====================
         ai_style_patterns = [
@@ -1258,13 +1199,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in ai_style_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 20:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, ai_style_patterns, min_length=3, max_length=20)
 
         # ==================== 去重+均匀分布 ====================
         # 注：策略12（图标符号）、策略13（中英文混排空格）、策略14（格式标记）
