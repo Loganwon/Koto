@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
@@ -22,6 +23,29 @@ from app.core.agent.file_task_workflow_state import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _is_instruction_prefixed_target_alias(request: Any, file_info: Any) -> bool:
+    """Reject a broad-parser artifact such as ``生成一份名为《报告.docx``.
+
+    The canonical target is already available on the request.  Treating the
+    broader, instruction-prefixed match as a second source causes a needless
+    failed read before a new file is created.
+    """
+    target = str(getattr(request, "target_path", "") or "").strip().replace("\\", "/")
+    candidate = str(getattr(file_info, "path", "") or "").strip().replace("\\", "/")
+    if not target or not candidate or candidate.casefold() == target.casefold():
+        return False
+    if not candidate.casefold().endswith(target.casefold()):
+        return False
+    prefix = candidate[: -len(target)]
+    return bool(
+        re.search(
+            r"(?:文件名为|文件名是|文件命名为|命名为|名为|filename\\s*(?:is|:)?|named|called)",
+            prefix,
+            re.IGNORECASE,
+        )
+    )
 
 
 @dataclass
@@ -88,6 +112,8 @@ class FileTaskContextReadPhase:
             if runtime._is_cancelled(request):
                 yield runtime._cancelled_event(ledger, request)
                 return _result(cancelled=True)
+            if _is_instruction_prefixed_target_alias(request, file_info):
+                continue
             if runtime._should_skip_uncreated_target_context(request, file_info):
                 continue
             if (

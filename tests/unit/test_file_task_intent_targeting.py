@@ -102,3 +102,14 @@ def test_explicit_output_name_does_not_include_the_instruction_prefix() -> None:
     assert explicit_output_paths_from_task(
         task, has_artifact_creation_intent=lambda _task: True
     ) == ["艺术全球规则_目录摘要.docx"]
+
+
+def test_named_new_output_is_not_reintroduced_as_a_source_file(tmp_path) -> None:
+    from app.core.agent.file_task_targeting import files_explicitly_mentioned_in_task
+
+    task = "生成一份名为《任务标识恢复验证.docx》的 DOCX 文档，写入标题。"
+
+    assert files_explicitly_mentioned_in_task(
+        workspace_root=tmp_path,
+        task=task,
+    ) == []

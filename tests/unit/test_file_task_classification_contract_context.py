@@ -16,6 +16,17 @@ def test_intent_adjudication_contract_context_marks_readonly_guard():
     assert context.strong_write_intent is False
 
 
+def test_intent_context_does_not_turn_negated_creation_into_write_intent():
+    context = build_intent_adjudication_contract_context(
+        "读取并简要说明 VERSION 文件的内容；只读取，不要修改或创建任何文件。"
+    )
+
+    assert context.readonly_write_negation is True
+    assert context.global_readonly_write_negation is True
+    assert context.artifact_creation_intent is False
+    assert context.strong_write_intent is False
+
+
 def test_intent_adjudication_contract_context_preserves_artifact_write_signal():
     context = build_intent_adjudication_contract_context(
         "请创建一个新的 docx 报告并保存为 summary.docx"

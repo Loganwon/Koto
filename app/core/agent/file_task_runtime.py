@@ -722,6 +722,7 @@ class FileTaskRuntime:
             current_file = retarget_file(current_file)
         return FileTaskRequest(
             task=updated.task,
+            task_id=updated.task_id,
             run_id=updated.run_id,
             session_id=updated.session_id,
             files=[retarget_file(file_info) for file_info in updated.files],
@@ -1542,6 +1543,7 @@ class FileTaskRuntime:
     ) -> FileTaskRequest:
         return FileTaskRequest(
             task=request.task,
+            task_id=request.task_id,
             run_id=request.run_id,
             session_id=request.session_id,
             files=list(request.files),

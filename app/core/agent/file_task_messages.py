@@ -15,6 +15,7 @@ from app.core.agent.file_task_prompt_sections import followup_prompt_prefix
 from app.core.agent.file_task_runtime_utils import _preview
 from app.core.agent.file_task_whitebox import whitebox_execution_plan_schema
 from app.core.agent.tool_design_protocol import TOOL_DESIGN_PROTOCOL
+from app.core.agent.file_task_evidence_guard import source_grounding_policy
 
 
 def build_file_task_messages(
@@ -52,6 +53,11 @@ def build_file_task_messages(
         "execution_brief_schema": execution_brief_schema,
         "tool_design_protocol": TOOL_DESIGN_PROTOCOL,
     }
+    if not classification.write_intent and (snippets or files or request.selection):
+        context["source_grounding"] = source_grounding_policy(
+            task=request.task,
+            has_source_context=bool(snippets or files or request.selection),
+        )
     if isinstance(request.options, dict):
         memory_context = str(request.options.get("memory_context") or "").strip()
         if memory_context:

@@ -333,6 +333,12 @@ def has_artifact_creation_intent(task: str) -> bool:
     task_text = str(task or "").strip()
     if not task_text:
         return False
+    # A creation verb inside a global read-only instruction (for example,
+    # "do not modify or create any files") is a prohibition, not a request to
+    # create an artifact.  This check must precede the broad creation regexes
+    # below, otherwise their keyword match can suppress the read-only guard.
+    if has_global_readonly_write_negation(task_text):
+        return False
     if is_readonly_existing_artifact_followup(task_text):
         return False
     if any(pattern.search(task_text) for pattern in _ARTIFACT_CREATION_INTENT_PATTERNS):

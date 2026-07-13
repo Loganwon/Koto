@@ -2,6 +2,24 @@ from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_runtime import FileTaskRuntime
 
 
+def test_file_task_runtime_keeps_explicit_readonly_request_out_of_write_loop():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "", workspace_root=".")
+    request = FileTaskRequest(
+        task="读取并简要说明 VERSION 文件的内容；只读取，不要修改或创建任何文件。",
+        target_path="VERSION",
+        files=[FileTaskFile(path="VERSION", name="VERSION", type="txt", target=True)],
+    )
+
+    classification = runtime._classify_request(request, request.files)
+    details = classification.public_dict()
+
+    assert runtime._has_readonly_write_negation(request.task) is True
+    assert runtime._has_write_intent(request.task) is False
+    assert classification.write_intent is False, details
+    assert classification.output_mode != "write", details
+    assert "readonly_write_negation" in classification.reason_codes, details
+
+
 def test_file_task_runtime_followup_existing_docx_write_allows_source_file_protection():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",

@@ -56,6 +56,7 @@ def request_with_target_path(
         return request
     return FileTaskRequest(
         task=request.task,
+        task_id=request.task_id,
         run_id=request.run_id,
         session_id=request.session_id,
         files=list(request.files),
@@ -425,6 +426,12 @@ def _strong_output_reference_file_names(task_text: str) -> set[str]:
     source = str(task_text or "")
     if not source:
         return names
+    # Named outputs are unambiguous. Seed these first so the broad matcher
+    # cannot turn “生成一份名为《报告.docx》” into a fake source-file path.
+    for _start, output_path in _explicitly_named_output_paths(source):
+        name = Path(output_path.replace("\\", "/")).name.casefold()
+        if name:
+            names.add(name)
     for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(source):
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
         suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
@@ -733,6 +740,15 @@ def _weak_files_explicitly_mentioned_in_task(
             continue
         name = Path(normalized_path).name
         if name.casefold() in output_reference_names:
+            continue
+        # The broad matcher may include the natural-language prefix before a
+        # named output (for example ``生成一份名为《报告.docx``).  Its basename
+        # is then no longer equal to ``报告.docx``, but it still ends with the
+        # known output name and must not become a phantom source file.
+        if any(
+            normalized_path.casefold().endswith(output_name)
+            for output_name in output_reference_names
+        ):
             continue
         if any(
             name.casefold().endswith(workspace_name)

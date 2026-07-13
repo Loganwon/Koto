@@ -1595,6 +1595,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   function explicitWriteTargetPathFromText(text: string): string {
     const source = String(text || '').trim();
     if (!source) return '';
+    const namedOutputPattern = /(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*(?:[《「“"'])?([^\s"'<>|:：,，。；;、!?！？()[\]【】《》「」“”]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
     const filePattern = /((?:[A-Za-z]:[\\/])?[^\s"'<>|:：,，。；;、!?！？()[\]【】]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
     const writePattern = /(继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|continue|improve|modify|edit|update|save|write|append|insert)/i;
     const protectPattern = /(不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without).{0,24}(修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)/i;
@@ -1603,6 +1604,18 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const sourceBeforePattern = /(读取|阅读|查看|分析|基于|来自|当前打开|当前文件|原文|原文件|源文件|输入文件|已添加|source|input|read).{0,36}$/i;
     const filenameLabelBeforePattern = /(文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*$/i;
     const candidates: Array<{ path: string; score: number; index: number }> = [];
+    let namedMatch: RegExpExecArray | null;
+    while ((namedMatch = namedOutputPattern.exec(source)) !== null) {
+      const rawPath = String(namedMatch[1] || '').trim();
+      if (!rawPath) continue;
+      const start = namedMatch.index + namedMatch[0].lastIndexOf(rawPath);
+      const end = start + rawPath.length;
+      candidates.push({
+        path: joinSplitDirectoryTargetPath(source, rawPath, start, end),
+        score: 100,
+        index: start,
+      });
+    }
     let match: RegExpExecArray | null;
     while ((match = filePattern.exec(source)) !== null) {
       const rawPath = String(match[1] || '').replace(/[ \t\r\n,，。；;、!?！？()[\]【】"']+$/g, '');

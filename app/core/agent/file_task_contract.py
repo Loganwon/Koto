@@ -146,6 +146,10 @@ class FileTaskRoutingDecision:
 @dataclass
 class FileTaskRequest:
     task: str
+    # Keep a browser-provided id when present.  The task record is created
+    # before the first SSE frame, so knowing this id lets the client resume a
+    # stream that drops before it receives ``run.started``.
+    task_id: str = ""
     run_id: str = ""
     session_id: str = ""
     files: List[FileTaskFile] = field(default_factory=list)
@@ -193,6 +197,7 @@ class FileTaskRequest:
 
         return cls(
             task=_clean_str(data.get("task") or data.get("instruction") or data.get("selection"), 8_000),
+            task_id=_clean_str(data.get("task_id") or data.get("taskId"), 128),
             run_id=_clean_str(data.get("run_id")) or uuid.uuid4().hex[:12],
             session_id=_clean_str(data.get("session_id"), 96),
             files=files,

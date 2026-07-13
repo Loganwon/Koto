@@ -283,6 +283,7 @@ def _ensure_file_task_record(request_payload) -> str:
         task_type="file_task",
         source=_FILE_TASK_SOURCE,
         metadata=_file_task_record_metadata(request_payload),
+        task_id=requested_task_id or None,
     )
     request_payload.task_id = record.task_id
     return record.task_id

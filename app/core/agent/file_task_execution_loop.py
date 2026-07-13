@@ -10,6 +10,7 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskEvent, FileTaskToolStreamResult
 from app.core.agent.file_task_guard_emission import build_tool_guard_emission
+from app.core.agent.file_task_evidence_guard import sanitize_unverified_readonly_quotes
 from app.core.agent.file_task_readonly_loop_guard import (
     READONLY_ANSWER_GUARD_PENDING_SUMMARY,
     READONLY_DUPLICATE_GUARD_SUMMARY,
@@ -383,6 +384,11 @@ class FileTaskExecutionLoop:
             )
             if tool_execution_brief and not execution_brief:
                 execution_brief = tool_execution_brief
+            if not write_intent and not tool_calls:
+                content_text = sanitize_unverified_readonly_quotes(
+                    task=request.task,
+                    text=content_text,
+                )
             execution_plan = extract_whitebox_execution_plan(response, content_text)
             if execution_plan:
                 plan_payload = execution_plan.public_dict()
