@@ -33,6 +33,7 @@ from web.document_feedback_text import (
     split_into_paragraph_chunks,
 )
 from web.document_feedback_rules import append_pattern_annotations
+from web.document_feedback_result import collect_annotation_loop_result
 from web.document_feedback_stream import (
     collect_annotation_result,
     iter_annotation_progress_events,
@@ -2170,43 +2171,15 @@ class DocumentFeedbackSystem:
         logger.info("=" * 60)
         logger.info("🔄 启动文档自动修订系统（同步兼容包装）")
         logger.info("=" * 60)
-        final_error = ""
-        for progress_event in self.full_annotation_loop_streaming(
-            file_path,
-            user_requirement,
-            model_id=model_id,
-            reference_context=reference_context,
-        ):
-            stage = str(progress_event.get("stage") or "").strip().lower()
-            if stage == "complete":
-                result = progress_event.get("result")
-                if isinstance(result, dict):
-                    return result
-                return {
-                    "success": False,
-                    "error": "文档修订完成但未返回结果。",
-                    "original_file": file_path,
-                }
-            if stage == "cancelled":
-                return {
-                    "success": False,
-                    "cancelled": True,
-                    "message": str(progress_event.get("message") or progress_event.get("detail") or "文档修订任务已取消").strip() or "文档修订任务已取消",
-                    "original_file": file_path,
-                }
-            if stage == "error":
-                final_error = str(progress_event.get("message") or progress_event.get("detail") or "文档修订失败").strip()
-                return {
-                    "success": False,
-                    "error": final_error or "文档修订失败",
-                    "original_file": file_path,
-                }
-
-        return {
-            "success": False,
-            "error": final_error or "文档修订失败",
-            "original_file": file_path,
-        }
+        return collect_annotation_loop_result(
+            self.full_annotation_loop_streaming(
+                file_path,
+                user_requirement,
+                model_id=model_id,
+                reference_context=reference_context,
+            ),
+            file_path=file_path,
+        )
 
     @staticmethod
     def _strip_markdown_for_annotation(text: str) -> str:
