@@ -11,6 +11,9 @@ import {
   taskReportUniqueTexts as uniqueTexts,
 } from './task-report-layout';
 import { fileTaskStatusLabel, isFileTaskAttentionStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 /**
  * Task Workbench UI — batch task management
  * Workspace task workbench.
@@ -531,17 +534,17 @@ function taskMetaLine(task: any): string {
 
 function openTaskFile(path: any): void {
   const value = String(path || '').trim();
-  if (!value || !(window as any).WA) return;
-  if (typeof (window as any).WA.openRecentFile === 'function') {
-    void (window as any).WA.openRecentFile(value);
+  if (!value) return;
+  if (typeof workspaceApi.openRecentFile === 'function') {
+    void workspaceApi.openRecentFile(value);
     return;
   }
-  if (/^[a-z]:[\\/]/i.test(value) && typeof (window as any).WA.openBrowserFile === 'function') {
-    void (window as any).WA.openBrowserFile(value, true);
+  if (/^[a-z]:[\\/]/i.test(value) && typeof workspaceApi.openBrowserFile === 'function') {
+    void workspaceApi.openBrowserFile(value, true);
     return;
   }
-  if (typeof (window as any).WA.openWorkspaceFile === 'function') {
-    void (window as any).WA.openWorkspaceFile(value.replace(/^workspace[\\/]/i, ''));
+  if (typeof workspaceApi.openWorkspaceFile === 'function') {
+    void workspaceApi.openWorkspaceFile(value.replace(/^workspace[\\/]/i, ''));
   }
 }
 
@@ -1067,7 +1070,7 @@ function renderDetail(state: WorkbenchState, task: WorkbenchTask | null): void {
   const artifactButton = task.artifact_result
     ? '<button type="button" data-task-detail-action="artifact">查看产物</button>'
     : '';
-  const canResume = typeof (window as any).WA.resumePersistedFileTask === 'function';
+  const canResume = typeof workspaceApi.resumePersistedFileTask === 'function';
   const processButton = !state.focusedOnly && canResume
     ? '<button type="button" data-task-detail-action="process">定位对话</button>'
     : '';
@@ -1205,13 +1208,13 @@ function bindWorkbench(state: WorkbenchState): void {
     const detailAction = target.getAttribute('data-task-detail-action');
     const task = state.tasks.find((item) => item.task_id === state.activeTaskId);
     if (!task) return;
-    if (detailAction === 'artifact' && task.artifact_result && (window as any).WA && typeof (window as any).WA.renderArtifactResult === 'function') {
-      (window as any).WA.renderArtifactResult(task.artifact_result);
+    if (detailAction === 'artifact' && task.artifact_result && typeof workspaceApi.renderArtifactResult === 'function') {
+      workspaceApi.renderArtifactResult(task.artifact_result);
     } else if (detailAction === 'focus') {
       focusTaskCard(task.task_id, runIdForTask(task));
-    } else if (detailAction === 'process' && (window as any).WA && typeof (window as any).WA.resumePersistedFileTask === 'function') {
+    } else if (detailAction === 'process' && typeof workspaceApi.resumePersistedFileTask === 'function') {
       if (focusTaskCard(task.task_id, runIdForTask(task))) return;
-      const syncPromise = (window as any).WA.resumePersistedFileTask({
+      const syncPromise = workspaceApi.resumePersistedFileTask({
         taskId: task.task_id,
         runId: runIdForTask(task),
         initialStatus: terminalStatus(task),
@@ -1304,10 +1307,9 @@ if (document.readyState === 'loading') {
   ready();
 }
 
-// Backward compat
-const WA = (window as any).WA || {};
-WA.initTaskWorkbench = initTaskWorkbench;
-WA.refreshCurrentTaskFlow = refreshCurrentTaskFlow;
-WA.notifyTaskFlowChanged = notifyTaskFlowChanged;
-WA.openTaskWorkbenchForCurrentRun = openTaskWorkbenchForCurrentRun;
-(window as any).WA = WA;
+publishWorkspaceApi({
+  initTaskWorkbench,
+  refreshCurrentTaskFlow,
+  notifyTaskFlowChanged,
+  openTaskWorkbenchForCurrentRun,
+});

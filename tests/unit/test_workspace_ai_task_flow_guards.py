@@ -37,7 +37,8 @@ def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     assert "publishWorkspaceApi({ createTaskDispatcher })" in dispatcher_js
     assert "taskDispatcher.dispatchMessage({" in assistant_js
     assert "taskDispatcher.dispatchQuickAction(action, {" in assistant_js
-    assert "WA.streamTaskFlow = streamTaskFlow" in task_js
+    assert "publishWorkspaceApi({" in task_js
+    assert "streamTaskFlow," in task_js
     assert "csrfFetch('/api/editor/ai/task-stream'" in task_js
     assert "fetch('/api/editor/ai/task-stream'" not in assistant_js
     assert "legacyEditorFallback: true" not in quick_actions_js
@@ -188,13 +189,14 @@ def test_unified_workspace_restores_pdf_annotation_toolbar_and_ai_bridge():
     ]:
         assert marker in index_template
 
-    assert "(window as any).WA.pdfAIAnnotate" in pdf_viewer_ts
+    assert "pdfAIAnnotate," in pdf_viewer_ts
+    assert "publishWorkspaceApi({" in pdf_viewer_ts
     assert "typeof ed.aiAnnotate === 'function'" in pdf_viewer_ts
     assert "AI 标注功能正在迁移" not in pdf_viewer_ts
     assert "_applyAiAnnotationSuggestions" in pdf_viewer_ts
     assert "_locateAiAnnotationQuote" in pdf_viewer_ts
     assert "pdf_ai_annotate: true" in pdf_viewer_ts
-    assert "window.WA.pdfAIAnnotate" in workspace_bundle
+    assert "pdfAIAnnotate" in workspace_bundle
 
 
 def test_terminal_file_task_results_remain_in_followup_model_context():
@@ -229,12 +231,14 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "window.WA.refreshTaskWorkbench" not in workbench_js
     assert "window.WA.notifyTaskWorkbenchChanged" not in workbench_js
     assert "window.WA.focusTaskWorkbenchTask" not in workbench_js
-    assert "WA.refreshCurrentTaskFlow = refreshCurrentTaskFlow" in workbench_js
-    assert "WA.notifyTaskFlowChanged = notifyTaskFlowChanged" in workbench_js
-    assert "WA.openTaskWorkbenchForCurrentRun = openTaskWorkbenchForCurrentRun" in workbench_js
+    assert "publishWorkspaceApi({" in workbench_js
+    assert "refreshCurrentTaskFlow," in workbench_js
+    assert "notifyTaskFlowChanged," in workbench_js
+    assert "openTaskWorkbenchForCurrentRun," in workbench_js
     assert "function focusTaskCard(taskId: any, runId: any): boolean" in workbench_js
     assert "fetchJson('/api/tasks?limit=120&order_by=created_at')" in workbench_js
-    assert "WA.resumePersistedFileTask = resumePersistedFileTask" in task_js
+    assert "publishWorkspaceApi({" in task_js
+    assert "resumePersistedFileTask," in task_js
     assert "renderArtifactResult" in _read("web/src/workspace/results.ts")
     assert "data-task-open-workbench" not in task_js
     assert "scheduleTaskLiveProgressCollapse" in task_js
@@ -274,7 +278,7 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "visibleSteps.map((step, index) => renderWorkbenchStep(step, index)).join('')" not in workbench_js
     assert "任务步骤" not in workbench_js
     assert "详细过程" not in workbench_js
-    assert "(window as any).WA.notifyTaskFlowChanged(taskId)" in task_js
+    assert "workspaceApi.notifyTaskFlowChanged(taskId)" in task_js
     assert "function notifyTaskWorkbenchForCard(card: TaskCardElement, options?: { delayed?: boolean }): void" in task_js
     assert "if (options && options.delayed)" in task_js
     assert "seedRouteModelContext(card, payload)" in task_js
@@ -284,7 +288,8 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "function supervisorAuditHtml(data: Record<string, any>, options: { compact?: boolean } = {})" in task_js
     assert "const showDetails = !options.compact || status === 'blocked';" in task_js
     assert "supervisorAuditHtml(data, { compact: true })" in task_js
-    assert "const auditHtml = supervisorAuditHtml(data);" in task_js
+    assert "function shouldShowSupervisorAuditInResult(data: Record<string, any>): boolean" in task_js
+    assert "shouldShowSupervisorAuditInResult(data)" in task_js
     assert "function supervisorAuditStatusLabel(status: unknown): string" in task_js
     assert "需关注" in task_js
     assert "supervisor_audit" in task_js
@@ -450,13 +455,14 @@ def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation()
     assert index_template.index('id="wa-ai-session-list-view"') < index_template.index('id="wa-ai-chat-view"') < index_template.index('id="wa-ai-messages"')
     assert "import '../workspace/conversation-list';" in workspace_bundle_entry
     assert "fetch('/api/sessions?preview=1'" in conversation_sessions_ts
-    assert "WA.openAiSession = openAiSession" in conversation_list_ts
-    assert "WA.showAiSessionList = showAiSessionList" in conversation_list_ts
-    assert "WA.newAiSession = newAiSession" in conversation_list_ts
-    assert "WA.sendSessionListComposer = sendSessionListComposer" in conversation_list_ts
-    assert "WA.handleSessionListComposerKeydown = handleSessionListComposerKeydown" in conversation_list_ts
-    assert "WA.deleteAiSession = deleteAiSession" in conversation_list_ts
-    assert "WA._syncAiSessionSelection = syncAiSessionSelection" in conversation_list_ts
+    assert "publishWorkspaceApi({" in conversation_list_ts
+    assert "openAiSession," in conversation_list_ts
+    assert "showAiSessionList," in conversation_list_ts
+    assert "newAiSession," in conversation_list_ts
+    assert "sendSessionListComposer," in conversation_list_ts
+    assert "handleSessionListComposerKeydown," in conversation_list_ts
+    assert "deleteAiSession," in conversation_list_ts
+    assert "_syncAiSessionSelection: syncAiSessionSelection," in conversation_list_ts
     assert "const _SESSION_PREVIEW_LIMIT = 5;" in conversation_list_ts
     assert "let _sessionsExpanded = false;" in conversation_list_ts
     assert "_sessions.slice(0, _SESSION_PREVIEW_LIMIT)" in conversation_list_ts
@@ -466,7 +472,7 @@ def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation()
     assert "export function sendSessionListComposer(): Promise<any>" in conversation_list_ts
     assert "function _openLatestTaskFlowForSession(sessionId: string): void" in conversation_list_ts
     assert "function _syncHistoricalTaskLiveProgress(session?: AiSessionPreview): void" in conversation_list_ts
-    assert "WA.openTaskWorkbenchForCurrentRun({" in conversation_list_ts
+    assert "workspaceApi.openTaskWorkbenchForCurrentRun({" in conversation_list_ts
     assert "查看执行过程" in conversation_list_ts
     assert "查看下方步骤" not in conversation_list_ts
     assert "在输入框输入即可开始新对话" in conversation_list_ts
@@ -480,7 +486,7 @@ def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation()
     assert "if (taskTitle) return taskTitle;" in conversation_sessions_ts
     assert "const sessionId = await createAiSessionRecord();" in conversation_list_ts
     assert "await openAiSession(sessionId, { force: true });" in conversation_list_ts
-    assert "WA.sendMessage();" in conversation_list_ts
+    assert "workspaceApi.sendMessage();" in conversation_list_ts
     assert "function _closeSkillLibrary" in conversation_list_ts
     assert "if (!options.silent) _closeSkillLibrary();" in conversation_list_ts
     assert "task_count?: number;" in conversation_sessions_ts
@@ -495,7 +501,8 @@ def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation()
     assert "latest_task_id: String(record.latest_task_id || '').trim()" in conversation_sessions_ts
     assert "taskCount ? `${taskCount} 个任务` : ''" in conversation_list_ts
     assert "export function closeSkillLibrary()" in model_settings_ts
-    assert "WA.closeSkillLibrary = closeSkillLibrary" in model_settings_ts
+    assert "publishWorkspaceApi({" in model_settings_ts
+    assert "closeSkillLibrary," in model_settings_ts
     assert "syncSelection(_hostSessionId)" in runtime_init_ts
     assert 'request.args.get("preview")' in sessions_bp
     assert "def _session_preview(session_filename: str, history: list[object]) -> dict:" in sessions_bp
@@ -716,9 +723,10 @@ def test_workspace_find_replace_tools_are_split_from_assistant_shell():
     asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
     workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
 
-    assert "WA.installWorkspaceFindReplace" in find_replace_js
-    assert "WA.docxFindInput" in find_replace_js
-    assert "WA.pptxFindInput" in find_replace_js
+    assert "publishWorkspaceApi({ installWorkspaceFindReplace })" in find_replace_js
+    assert "docxFindInput," in find_replace_js
+    assert "pptxFindInput," in find_replace_js
+    assert "function _installFindReplaceActionDelegation(): void" in find_replace_js
     assert "installWorkspaceFindReplace({" in _read("web/src/bundles/workspace.ts")
     assert "window.WA.docxFindInput = " not in assistant_js
     assert "window.WA.pptxFindInput = " not in assistant_js
@@ -805,7 +813,8 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "function _queueWorkspaceTurnRetry" in runtime_init_ts
     assert "showToast('对话保存失败，已暂存并自动重试'" in runtime_init_ts
     assert "export async function retryWorkspaceConversationPersistence" in runtime_init_ts
-    assert "WA.retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence" in runtime_init_ts
+    assert "retryWorkspaceConversationPersistence," in runtime_init_ts
+    assert "publishWorkspaceApi({" in runtime_init_ts
     assert "async function _ensureWorkspacePersistenceSession()" in runtime_init_ts
     assert "_hostSessionId = sessionId;" in runtime_init_ts
     assert "ensureSessionId: _ensureWorkspacePersistenceSession" in runtime_init_ts
@@ -816,7 +825,7 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "card.dataset.taskTitle = taskTitle" in runtime_init_ts
     assert "const memorySummary = String(data && (data.memory_summary || data.model_context_text) || '').trim();" in runtime_init_ts
     assert "card.dataset.taskMemorySummary = memorySummary" in runtime_init_ts
-    assert "WA.syncTaskInteractionSummary(card)" in runtime_init_ts
+    assert "workspaceApi.syncTaskInteractionSummary(card)" in runtime_init_ts
     assert "task_card_snapshot: payload.task_card_snapshot" in runtime_init_ts
     assert "from './task-interaction-summary';" in task_runner_ts
     assert "export function taskContextSummaryText(context: any): string" in task_interaction_summary_ts
@@ -824,8 +833,11 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "export function renderTaskMemoryCard(card:" in task_interaction_summary_ts
     assert "function syncTaskInteractionSummary(card: TaskCardElement): void" in task_runner_ts
     assert "const semanticTitle = String(card.dataset.taskTitle || '').trim();" in task_runner_ts
-    assert "WA.syncTaskInteractionSummary = syncTaskInteractionSummary" in task_runner_ts
-    assert "+ renderTaskMemoryCard(card)\n      + auditHtml\n      + taskArtifactsSummaryHtml(card)\n      + taskResultActionsHtml(card)\n      + renderTaskResultSummaryBar(card, result)\n      + '<div class=\"wa-task-final-report\"" in task_runner_ts
+    assert "publishWorkspaceApi({" in task_runner_ts
+    assert "syncTaskInteractionSummary," in task_runner_ts
+    assert "const artifactsHtml = taskArtifactsSummaryHtml(card);" in task_runner_ts
+    assert "+ artifactsHtml\n      + auditHtml\n      + taskResultActionsHtml(card)\n      + taskResultContextDetailsHtml(card)\n      + (artifactsHtml ? '' : renderTaskResultSummaryBar(card, result))\n      + '<div class=\"wa-task-final-report\" data-role=\"final-report\" tabindex=\"-1\"><div class=\"wa-task-final-report-content\">'" in task_runner_ts
+    assert "function taskResultContextDetailsHtml(card: TaskCardElement): string" in task_runner_ts
     assert ".wa-task-interaction-card" in workspace_css
     assert ".wa-task-memory-card" in workspace_css
     assert "_SESSION_HISTORY_SCHEMA_VERSION = 2" in sessions_bp
@@ -941,7 +953,7 @@ def test_workspace_blocked_plan_checked_is_not_rendered_as_confirmation_wait():
     assert "if (normalized === 'needs_attention') {" in status_ts
     assert "任务需要处理，请查看任务结果" in status_ts
     assert "失败原因和可继续处理的建议已整理到任务结果区域。" in status_ts
-    assert "任务已完成，结果已显示在步骤下方" in status_ts
+    assert "任务已完成，结果和产物已就绪" in status_ts
     assert "任务需要复核：当前只是临时摘要" in status_ts
     assert "已完成核验，任务结果已更新。" not in task_runner_ts
     assert "核验已结束，结论已同步到任务结果。" in _read("web/src/workspace/task-report-layout.ts")
@@ -1224,9 +1236,10 @@ def test_workspace_selection_toolbar_restores_pin_and_context_bridge():
 
     assert "document.addEventListener('mouseup'" in selection_ts
     assert "document.addEventListener('selectionchange'" in selection_ts
-    assert "WA.sendSelectionToAI = sendSelectionToAI" in selection_ts
-    assert "WA.clearSelection = clearSelection" in selection_ts
-    assert "WA._showSelectionToolbarForCurrentSelection = _showSelectionToolbarForCurrentSelection" in selection_ts
+    assert "publishWorkspaceApi({" in selection_ts
+    assert "sendSelectionToAI," in selection_ts
+    assert "clearSelection," in selection_ts
+    assert "_showSelectionToolbarForCurrentSelection," in selection_ts
     assert "export function _resetDocxSelection(): void" in selection_ts
     assert "(window as any)._resetDocxSelection = _resetDocxSelection" in selection_ts
     assert "(window as any)._hideDocxHoverBar = _hideDocxHoverBar" in selection_ts
@@ -1238,7 +1251,7 @@ def test_workspace_selection_toolbar_restores_pin_and_context_bridge():
     assert "input.addEventListener('mousedown'" in selection_ts
     assert "this._ta.addEventListener('select', this._handleSelectionChange)" in text_editor_ts
     assert "this._ta.addEventListener('keyup', this._handleSelectionChange)" in text_editor_ts
-    assert "WA._showSelectionToolbarForCurrentSelection" in text_editor_ts
+    assert "getWorkspaceApi()._showSelectionToolbarForCurrentSelection" in text_editor_ts
     assert "已注入选中文本" in workspace_bundle
     assert "取消选择" in workspace_bundle
     assert "ctx-bar-clear-selection" in selection_ts
@@ -1247,12 +1260,12 @@ def test_workspace_selection_toolbar_restores_pin_and_context_bridge():
     assert "export function removeAIFileContext" in ai_context_ts
     assert "export function clearAIFileContext" in ai_context_ts
     assert '<button type="button" class="ctx-row-remove"' in ai_context_ts
-    assert "WA.removeAIFileContext" in workspace_bundle
+    assert "removeAIFileContext" in workspace_bundle
     assert "_resetDocxSelection" in workspace_bundle
     assert "_hideDocxHoverBar" in workspace_bundle
     assert 'data-selection-injected="true"' in selection_ts
     assert 'data-selection-injected="true"' in workspace_bundle
-    assert "const update = (window as any).WA && (window as any).WA._updateContextBar;" in ai_context_ts
+    assert "const update = getWorkspaceApi()._updateContextBar;" in ai_context_ts
 
 
 def test_workspace_unified_shell_restores_save_contract():
@@ -1261,13 +1274,14 @@ def test_workspace_unified_shell_restores_save_contract():
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert "import '../workspace/save';" in bundle_entry
-    assert "(window as any).WA.saveFile = saveFile" in save_ts
-    assert "(window as any).WA.saveAs = saveAs" in save_ts
-    assert "(window as any).WA.scheduleAutoSave = scheduleAutoSave" in save_ts
-    assert "(window as any).WA.markExternalFileChange = markExternalFileChange" in save_ts
-    assert "(window as any).WA.clearExternalFileChange = clearExternalFileChange" in save_ts
+    assert "publishWorkspaceApi({" in save_ts
+    assert "saveFile," in save_ts
+    assert "saveAs," in save_ts
+    assert "scheduleAutoSave," in save_ts
+    assert "markExternalFileChange," in save_ts
+    assert "clearExternalFileChange," in save_ts
     assert "文件已被任务更新，请重新打开后再保存，避免覆盖任务结果。" in save_ts
-    assert "(window as any).WA.autoSave = autoSave" in save_ts
+    assert "autoSave," in save_ts
     assert "/api/v1/workspace/auto_save" in save_ts
     assert "/api/v1/workspace/raw/" in save_ts
     assert "showSaveFilePicker" in save_ts
@@ -1357,7 +1371,8 @@ def test_workspace_quick_action_aliases_keep_hoverbars_wired():
     assert "aliasesForAction(action.action).forEach" in quick_actions_js
     assert "normalizeQuickActionId(actionId)" in quick_actions_js
     assert "WA.docxHoverAI('polish')" in index_template
-    assert "WA.closeSelectionToolbar = closeSelectionToolbar" in selection_toolbar_js
+    assert "publishWorkspaceApi({" in selection_toolbar_js
+    assert "closeSelectionToolbar," in selection_toolbar_js
 
 
 def test_workspace_task_payload_extracts_explicit_text_write_target():
@@ -1615,11 +1630,12 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert 'draggable="true"' in assistant_js
     assert "application/wa-file-path" in assistant_js
     assert "_getAIAttachmentDropPayload" in embedded
-    assert "wa.attachFilesToTask = _attachFilesToTask" in ai_context
+    assert "attachFilesToTask: _attachFilesToTask," in ai_context
+    assert "publishWorkspaceApi({" in ai_context
     assert "WA._pendingSendBrowserFilesToAI = WA._pendingSendBrowserFilesToAI || []" in asset_scripts
     assert "WA.sendBrowserFileToAI = WA.sendBrowserFileToAI || function(path)" in asset_scripts
     assert "WA._pendingSendBrowserFilesToAI.push(path)" in asset_scripts
-    assert "const pendingBrowserFilesToAI = Array.isArray(wa._pendingSendBrowserFilesToAI)" in ai_context
+    assert "const pendingBrowserFilesToAI = Array.isArray(workspaceApi._pendingSendBrowserFilesToAI)" in ai_context
     assert "_attachFilesToTask(pendingBrowserFilesToAI" in ai_context
     assert "await _attachFilesToTask([payload.filePath], { source, focusInput: !_isAiSessionListVisible() })" in embedded
     assert "'ai_panel_drop'" in embedded
@@ -1629,20 +1645,19 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert "wa._browserFileRowMouseDown =" in fs_tree
     assert "wa._browserFileRowClick =" in fs_tree
     assert "wa._browserFileRowPointerDown =" in fs_tree
-    assert "onpointerdown=\"WA._browserFileRowPointerDown(event,this)\"" in fs_tree
-    assert "onpointerdown=\"WA._browserFileRowPointerDown(event,this.closest(\\'.wa-file-item\\'))\"" in fs_tree
+    assert 'data-wa-file-draggable="true"' in fs_tree
+    assert "document.addEventListener('pointerdown'" in fs_tree
     assert "document.addEventListener('pointermove', (event) => _onBrowserPointerMove(event));" in fs_tree
     assert "document.addEventListener('pointerup', (event) => {" in fs_tree
-    assert "WA._browserFileDragStart(event,this)" in fs_tree
-    assert "WA._browserFileDragStart(event,this.closest(\\'.wa-file-item\\'))" in fs_tree
+    assert "document.addEventListener('dragstart'" in fs_tree
     assert "wa._browserFileDragStart = _browserFileDragStart" in fs_tree
     assert "async function _attachBrowserFileToAI" in fs_tree
     assert "async function _sendBrowserFileToAI" in fs_tree
     assert "function _installBrowserFileActionDelegation()" in fs_tree
     assert 'data-wa-file-action="send-ai"' in fs_tree
     assert "target.closest('.wa-file-send-ai[data-wa-file-action=\"send-ai\"]')" in fs_tree
-    assert "onpointerdown=\"window.WA._sendBrowserFileButton(event,this)\"" in fs_tree
-    assert "onclick=\"window.WA._sendBrowserFileButton(event,this)\"" in fs_tree
+    assert "onpointerdown=\"window.WA._sendBrowserFileButton(event,this)\"" not in fs_tree
+    assert "onclick=\"window.WA._sendBrowserFileButton(event,this)\"" not in fs_tree
     assert "function _sendBrowserFileButtonToAI(event: Event, button: HTMLElement | null): void" in fs_tree
     assert "wa._sendBrowserFileButton = _sendBrowserFileButtonToAI" in fs_tree
     assert "onclick=\"event.preventDefault();event.stopPropagation();window.WA.sendBrowserFileToAI" not in fs_tree
@@ -1659,13 +1674,16 @@ def test_workspace_file_tree_drag_to_ai_stays_readonly_attachment_flow():
     assert "_installBrowserFileActionDelegation();" in fs_tree
     assert "_installBrowserPointerDragFallback();" in fs_tree
     assert "` ${_fileDragAttrs()}`" in fs_tree
-    assert "`${_fileDragAttrs()} `" in fs_tree
+    assert "`${_fileDragAttrs()} data-wa-file-kind=\"file\" `" in fs_tree
     assert "const sessionListComposer = document.getElementById('wa-ai-session-list-composer')" in embedded
     assert "sessionListComposer.classList.add('wa-session-list-drag-over')" in embedded
     assert "focusInput: !_isAiSessionListVisible()" in embedded
     assert "_focusVisibleAIComposer();" in embedded
     assert "document.getElementById('wa-ai-file-chips')" in ai_context
     assert "document.getElementById('wa-ai-file-chip-list')" in ai_context
+    assert "onclick=\"WA." not in ai_context
+    assert "data-wa-context-action" in ai_context
+    assert "function _installAIContextActionDelegation(): void" in ai_context
     assert 'id="wa-ai-file-chips"' in workspace_template
     assert 'id="wa-ai-file-chips"' in index_template
     assert ".wa-session-list-drag-over" in workspace_css
@@ -1753,9 +1771,10 @@ def test_workspace_file_task_refresh_normalizes_paths_and_blocks_stale_save():
     assert ".replace(/^workspace\\//i, '')" in fs_tree
     assert "const rawPath = payload.path || payload.file_path || payload.output_path || payload.target_path;" in task_refresh
     assert "const path = normalizePath(rawPath || '') || rawPath;" in task_refresh
-    assert "WA.markExternalFileChange(refreshPath || path)" in task_runner
+    assert "workspaceApi.markExternalFileChange(refreshPath || path)" in task_runner
     assert "reload(refreshPath || path, true)" in task_runner
-    assert "WA.clearExternalFileChange(resolvedPath)" in file_open
+    assert "const clearExternalFileChange = getWorkspaceApi().clearExternalFileChange;" in file_open
+    assert "clearExternalFileChange(resolvedPath);" in file_open
 
 
 def test_workspace_file_browser_folder_actions_are_available():
@@ -1821,7 +1840,9 @@ def test_workspace_file_browser_bootstraps_from_bundle_runtime():
     assert 'id="wa-left"' in index_template
     assert 'id="wa-files-list"' in index_template
     assert 'id="wa-recent-list"' in index_template
-    assert 'id="wa-left-latency-slot"' in index_template
+    assert 'id="statusIndicator"' in index_template
+    assert 'id="latencyDetail"' in index_template
+    assert 'id="wa-left-latency-slot"' not in index_template
     assert 'id="wa-local-file-input"' in index_template
     assert 'id="wa-local-folder-input"' in index_template
     assert 'for="wa-file-input-left"' in index_template
@@ -1829,17 +1850,23 @@ def test_workspace_file_browser_bootstraps_from_bundle_runtime():
     assert index_template.index('id="wa-left"') < index_template.index('id="wa-canvas"') < index_template.index('id="wa-ai"')
     assert ".wa-local-folder-picker" in workspace_css
     assert "#wa-recent-list .wa-file-item.wa-recent-file" in workspace_css
-    assert ".wa-left-latency-slot .latency-detail.open" in workspace_css
-    assert "const leftSlot = document.getElementById('wa-left-latency-slot')" in app_settings_ts
-    assert "leftSlot.appendChild(detail)" in app_settings_ts
-    assert "wa-left-latency-slot" in app_bundle
+    assert ".koto-activity-bar .latency-detail.open" in workspace_css
+    assert "Keep its DOM owner stable" in app_settings_ts
+    assert "const leftSlot = document.getElementById('wa-left-latency-slot')" not in app_settings_ts
+    assert "wa-left-latency-slot" not in app_bundle
     assert "function _recentFileDragAttrs()" in state_ts
     assert "function _recentFileOpenHitDragAttrs()" in state_ts
     assert 'class="wa-file-item file wa-recent-file"' in state_ts
     assert "_mergeRecentFiles(localRecent, apiRecent)" in state_ts
     assert "if (localRecent.length)" in state_ts
     assert "_loadLocalRecentFiles()" in state_ts
-    assert "WA._browserFileDragStart(event,this.closest(\\'.wa-file-item\\'))" in state_ts
+    assert 'data-wa-file-draggable="true"' in state_ts
+    assert 'data-wa-file-action="open"' in state_ts
+    assert 'onclick="WA.openRecentFile' not in state_ts
+    assert 'oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx' not in state_ts
+    assert "function _installWorkspaceRowActionDelegation(): void" in state_ts
+    assert 'data-wa-workspace-row-action="remove-my"' in state_ts
+    assert 'data-wa-workspace-row-action="remove-temp"' in state_ts
 
     assert "loadFileBrowser" in workspace_bundle
     assert "refreshRecent" in workspace_bundle
@@ -1858,32 +1885,34 @@ def test_workspace_bundle_restores_legacy_interaction_entrypoints():
     index_template = _read("web/templates/index.html")
 
     for expected in (
-        "WA.handleInputKeydown = handleInputKeydown",
-        "WA.closeReviewCenter = closeReviewCenter",
-        "WA.setReviewMode = setReviewMode",
+        "handleInputKeydown,",
+        "closeReviewCenter,",
+        "setReviewMode,",
     ):
         assert expected in ai_review
+    assert "publishWorkspaceApi({" in ai_review
 
     for expected in (
-        "WA.pptxFmt = pptxFmt",
-        "WA.pptxAlign = pptxAlign",
-        "WA.pptxFontSize = pptxFontSize",
-        "WA.pptxFontName = pptxFontName",
-        "WA.pptxFontColor = pptxFontColor",
-        "WA.pptxColorPicker = pptxColorPicker",
-        "WA._pptxPickColor = _pptxPickColor",
-        "WA.pptxHoverAI = pptxHoverAI",
-        "WA.pptxZoom = pptxZoom",
-        "WA.pptxNav = pptxNav",
-        "WA.pptxInsertShape = pptxInsertShape",
-        "WA.pptxSetShapeSize = pptxSetShapeSize",
-        "WA.pptxSetShapePos = pptxSetShapePos",
-        "WA.pptxSetShapeRot = pptxSetShapeRot",
-        "WA.pptxInsertImageClick = pptxInsertImageClick",
-        "WA.pptxInsertImageFile = pptxInsertImageFile",
-        "WA.docxZoom = docxZoom",
+        "pptxFmt,",
+        "pptxAlign,",
+        "pptxFontSize,",
+        "pptxFontName,",
+        "pptxFontColor,",
+        "pptxColorPicker,",
+        "_pptxPickColor,",
+        "pptxHoverAI,",
+        "pptxZoom,",
+        "pptxNav,",
+        "pptxInsertShape,",
+        "pptxSetShapeSize,",
+        "pptxSetShapePos,",
+        "pptxSetShapeRot,",
+        "pptxInsertImageClick,",
+        "pptxInsertImageFile,",
+        "docxZoom,",
     ):
         assert expected in toolbar
+    assert "publishWorkspaceApi({" in toolbar
     assert "document.getElementById('wa-pptx-img-input')" in toolbar
     assert "PPT 图片插入正在迁移" not in toolbar
     for template in (workspace_template, index_template):
@@ -1906,18 +1935,19 @@ def test_workspace_bundle_restores_legacy_interaction_entrypoints():
             assert marker in template
 
     for expected in (
-        "WA.pdfZoom =",
-        "WA.pdfSearchOpen =",
-        "WA.pdfSearchInput =",
-        "WA.pdfAnnotOpen =",
-        "WA.pdfAnnotMode =",
-        "WA.pdfPageMgrOpen =",
-        "WA.pdfPageMgrApply =",
-        "WA.pdfConvert =",
-        "WA.pdfWatermarkClose =",
+        "pdfZoom,",
+        "pdfSearchOpen,",
+        "pdfSearchInput,",
+        "pdfAnnotOpen,",
+        "pdfAnnotMode,",
+        "pdfPageMgrOpen,",
+        "pdfPageMgrApply,",
+        "pdfConvert,",
+        "pdfWatermarkClose,",
         "_pdfDocumentForEditor(ed)",
     ):
         assert expected in pdf_viewer
+    assert "publishWorkspaceApi({" in pdf_viewer
 
     for expected in (
         "wa._openLocalFile =",
@@ -2083,17 +2113,18 @@ def test_workspace_visible_ai_runtime_actions_are_registered():
     state_js = _read("web/src/workspace/state.ts")
     fs_actions = _read("web/src/workspace/fs-actions.ts")
 
-    assert "WA.sendCustomMessage" in pdf_viewer
+    assert "workspaceApi.sendCustomMessage" in pdf_viewer
     assert "export function sendCustomMessage(text: string): void" in ai_review
-    assert "(window as any).WA.sendCustomMessage = sendCustomMessage" in ai_review
+    assert "publishWorkspaceApi({" in ai_review
+    assert "sendCustomMessage," in ai_review
 
-    assert "WA.stopStream" in ai_review
+    assert "workspaceApi.stopStream" in ai_review
     assert "export function stopStream(): boolean" in ai_review
-    assert "(window as any).WA.stopStream = stopStream" in ai_review
+    assert "stopStream," in ai_review
     assert "state._streamAbortCtrl" in ai_review
     assert "ctrl.abort()" in ai_review
 
-    assert "WA?._removeOpenTabAfterFileDeleted" in fs_actions
+    assert "workspaceApi._removeOpenTabAfterFileDeleted" in fs_actions
     assert "export async function _removeOpenTabAfterFileDeleted(path: string): Promise<boolean>" in state_js
     assert "wa._removeOpenTabAfterFileDeleted = _removeOpenTabAfterFileDeleted" in state_js
 
@@ -2102,8 +2133,9 @@ def test_workspace_file_row_actions_do_not_start_drag_fallback():
     fs_tree = _read("web/src/workspace/fs-tree.ts")
 
     assert 'const isolatedPressAttrs = \'draggable="false"' in fs_tree
-    assert 'onpointerdown="event.stopPropagation()"' in fs_tree
-    assert 'ondragstart="event.preventDefault();event.stopPropagation()"' in fs_tree
+    assert 'onpointerdown="event.stopPropagation()"' not in fs_tree
+    assert 'ondragstart="event.preventDefault();event.stopPropagation()"' not in fs_tree
+    assert "target?.closest('[data-wa-file-action], .wa-file-check')" in fs_tree
     assert "function _isBrowserFileActionTarget(target: EventTarget | null): boolean" in fs_tree
     assert "el.closest('.wa-file-actions, .wa-file-check, input, select, textarea, a')" in fs_tree
     assert "if (_isBrowserFileActionTarget(event.target)) return;" in fs_tree
@@ -2195,9 +2227,10 @@ def test_workspace_browser_select_mode_rerenders_and_toggles_rows():
     assert "wa._browserFileRowMouseDown = (event: MouseEvent, el: HTMLElement): void =>" in workspace_js
     assert "wa._browserFileRowClick = (event: MouseEvent, el: HTMLElement): void =>" in workspace_js
     assert "(event.target as HTMLElement).closest('.wa-file-check')" in workspace_js
-    assert 'onmousedown="WA._browserFileRowMouseDown(event,this)" onclick="WA._browserFileRowClick(event,this)"' in workspace_js
-    assert 'onclick="WA._browserFileRowClick(event,this)"' in workspace_js
+    assert 'onmousedown="WA._browserFileRowMouseDown(event,this)"' not in workspace_js
+    assert 'onclick="WA._browserFileRowClick(event,this)"' not in workspace_js
+    assert "document.addEventListener('click'" in workspace_js
     assert "if (!state._searchActive || `${state.searchQuery}" in workspace_js
-    assert "(window as any).WA._renderBrowserTree();" in fs_actions
+    assert "workspaceApi._renderBrowserTree();" in fs_actions
     assert "flex: 1 1 0;" in workspace_css
     assert "contain: paint;" in workspace_css

@@ -1325,39 +1325,6 @@
       flex-shrink: 0;
     }
 
-    .wa-left-latency-slot {
-      flex: 0 0 auto;
-      margin: 4px 8px 2px;
-    }
-
-    .wa-left-latency-slot:empty {
-      display: none;
-    }
-
-    .wa-left-latency-slot .latency-detail {
-      position: static !important;
-      width: auto !important;
-      max-height: 0;
-      opacity: 0;
-      overflow: hidden;
-      border: 1px solid transparent;
-      border-radius: 8px;
-      background: transparent;
-      box-shadow: none;
-    }
-
-    .wa-left-latency-slot .latency-detail.open {
-        display: block !important;
-      max-height: 180px;
-      opacity: 1;
-      border-color: var(--border);
-      background: var(--surface);
-    }
-
-    .wa-left-latency-slot .latency-detail-inner {
-      padding: 8px 10px;
-    }
-
     /* ── Right-click context menu ── */
     #wa-ctx-menu {
       position: fixed;
@@ -9168,6 +9135,14 @@ body.koto-unified-workspace .app-shell.chatgpt-app {
   display: flex !important;
   grid-column: 1;
   grid-row: 1;
+  /* This rail is owned by the unified grid.  Reset the legacy responsive
+     drawer offsets (left:-320px below 1200px), otherwise the grid still
+     reserves the rail column while its contents are rendered off-screen. */
+  position: relative;
+  inset: auto;
+  width: var(--koto-activity-rail-width);
+  height: 100%;
+  z-index: auto;
 }
 
 .app-shell.koto-unified-workspace .main-content.chatgpt-main {
@@ -9306,7 +9281,6 @@ body.koto-unified-workspace.skills-panel-open .main-content {
     padding-inline: 10px;
   }
 
-  .wa-icon-btn,
 }
 
 .koto-activity-bar {
@@ -9423,7 +9397,9 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 .koto-activity-bar .sb-icon-btn,
 .koto-activity-bar .status-expand-arrow,
 .koto-activity-bar #jobsRunningPill,
-.koto-activity-bar .resize-handle,
+.koto-activity-bar .resize-handle {
+  display: none !important;
+}
 
 .koto-activity-bar .latency-detail.open {
   display: block !important;
@@ -12065,6 +12041,29 @@ body.koto-unified-workspace.skills-panel-open .main-content {
   border: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.22));
   border-radius: 8px;
   background: color-mix(in srgb, var(--surface, #fff) 82%, #4f8cff 5%);
+}
+
+.wa-task-result-context {
+  margin-top: 8px;
+  border: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.22));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface, #fff) 86%, #4f8cff 4%);
+}
+
+.wa-task-result-context > summary {
+  padding: 8px 10px;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.wa-task-result-context .wa-task-interaction-card {
+  margin: 0;
+  border: 0;
+  border-top: 1px solid var(--wa-border-soft, rgba(148, 163, 184, 0.22));
+  border-radius: 0 0 8px 8px;
+  background: transparent;
 }
 
 .wa-task-memory-card {

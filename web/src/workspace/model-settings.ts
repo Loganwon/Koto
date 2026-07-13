@@ -3,6 +3,8 @@
  * Workspace model settings and provider controls.
  */
 
+import { publishWorkspaceApi } from '../shared/workspace-api';
+
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
 declare let _waAiResultsRuntime: any;
@@ -468,20 +470,20 @@ function _setWorkspaceModelMode(mode: string): void {
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.toggleSettings = toggleSettings;
-  (window as any).WA.toggleSkillLibrary = toggleSkillLibrary;
-  (window as any).WA.closeSkillLibrary = closeSkillLibrary;
-  (window as any).WA.toggleWorkflowPanel = toggleWorkflowPanel;
-  (window as any).WA.toggleTheme = toggleTheme;
-  (window as any).WA.setLockedModel = setLockedModel;
-  (window as any).WA.getLockedModel = getLockedModel;
-  (window as any).WA.refreshModelCatalog = (force: boolean = true) => _refreshModelCatalog(force);
-  (window as any).WA.checkOllamaStatus = _checkOllamaStatus;
-  (window as any).WA.syncModelStatusUi = _syncModelStatusUi;
-  (window as any).WA.syncLockedModelFromServer = _syncLockedModelFromServer;
-  (window as any).WA.initSocket = initSocket;
-  (window as any).initSocket = initSocket;
+  publishWorkspaceApi({
+    toggleSettings,
+    toggleSkillLibrary,
+    closeSkillLibrary,
+    toggleWorkflowPanel,
+    toggleTheme,
+    setLockedModel,
+    getLockedModel,
+    refreshModelCatalog: (force: boolean = true) => _refreshModelCatalog(force),
+    checkOllamaStatus: _checkOllamaStatus,
+    syncModelStatusUi: _syncModelStatusUi,
+    syncLockedModelFromServer: _syncLockedModelFromServer,
+    initSocket,
+  });
 }
 
 initSocket();

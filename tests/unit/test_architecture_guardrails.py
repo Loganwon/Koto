@@ -57,7 +57,7 @@ TEST_WEB_APP_COVERAGE = ROOT / "tests" / "unit" / "test_web_app_coverage.py"
 TEST_WEB_APP_UTILS = ROOT / "tests" / "unit" / "test_web_app.py"
 
 EXPECTED_WEB_APP_ROUTES: set[str] = set()
-WEB_APP_LINE_BUDGET = 2213
+WEB_APP_LINE_BUDGET = 1800
 TASK_ORCHESTRATOR_LINE_BUDGET = 199
 ALLOWED_DIRECT_WEB_APP_IMPORTS: set[str] = set()
 
@@ -109,6 +109,18 @@ def test_training_api_routes_live_outside_training_data_builder():
 def test_web_app_line_budget_does_not_regress():
     """The app module is still large; keep new work out while migration continues."""
     assert len(_read(WEB_APP).splitlines()) <= WEB_APP_LINE_BUDGET
+
+
+def test_proxy_candidate_discovery_is_extracted_from_app_wiring():
+    app_source = _read(WEB_APP)
+    proxy_source = _read(ROOT / "web" / "app_proxy.py")
+
+    assert "from web.app_proxy import configure_proxy, extract_system_proxy_candidates" in app_source
+    assert "configure_proxy(" in app_source
+    assert "return extract_system_proxy_candidates(" in app_source
+    assert "def extract_system_proxy_candidates(" in proxy_source
+    assert "def configure_proxy(" in proxy_source
+    assert "Internet Settings" in proxy_source
 
 
 def test_web_app_uses_core_koto_brain_compatibility_alias():

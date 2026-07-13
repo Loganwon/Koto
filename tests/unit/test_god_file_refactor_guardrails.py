@@ -20,9 +20,13 @@ DOCX_PARSER = ROOT / "app" / "core" / "file" / "parsers" / "docx_parser.py"
 DOCX_RICH_RENDERER = ROOT / "app" / "core" / "file" / "parsers" / "docx_rich_renderer.py"
 OFFICE_CREATE = ROOT / "app" / "core" / "agent" / "task_tools_office_create.py"
 XLSX_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools_xlsx.py"
+XLSX_SHEET_SELECTION = ROOT / "app" / "core" / "agent" / "task_tools_xlsx_sheet_selection.py"
+XLSX_STRUCTURE = ROOT / "app" / "core" / "agent" / "task_tools_xlsx_structure.py"
 CONVERSION_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools_conversion.py"
 DOCX_TEMPLATE_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools_docx_template.py"
 DOCX_COMPARE_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools_docx_compare.py"
+DOCX_REVIEW_CLEANUP_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools_docx_review_cleanup.py"
+PDF_WINDOW_TOOLS = ROOT / "app" / "core" / "agent" / "task_tools_pdf_window.py"
 PLAN_PRESENTATION = ROOT / "app" / "core" / "agent" / "file_task_plan_presentation.py"
 DOCX_REVIEW = ROOT / "app" / "core" / "file" / "parsers" / "docx_parser_review.py"
 DOCX_FALLBACK = ROOT / "app" / "core" / "file" / "parsers" / "docx_parser_fallback.py"
@@ -40,6 +44,7 @@ DOCUMENT_FEEDBACK_RESULT = ROOT / "web" / "document_feedback_result.py"
 DOCUMENT_FEEDBACK_PROGRESS = ROOT / "web" / "document_feedback_progress.py"
 DOCUMENT_FEEDBACK_BACKGROUND = ROOT / "web" / "document_feedback_background.py"
 DOCUMENT_FEEDBACK_PREFLIGHT = ROOT / "web" / "document_feedback_preflight.py"
+DOCUMENT_FEEDBACK_STREAM_STAGES = ROOT / "web" / "document_feedback_stream_stages.py"
 
 
 def _source(path: Path) -> str:
@@ -48,10 +53,10 @@ def _source(path: Path) -> str:
 
 def test_god_file_line_budgets_only_ratchet_down() -> None:
     """Keep future work in focused modules rather than restoring monoliths."""
-    assert len(_source(TASK_TOOLS).splitlines()) <= 5395
+    assert len(_source(TASK_TOOLS).splitlines()) <= 4620
     assert len(_source(TASK_RUNTIME).splitlines()) <= 3421
     assert len(_source(DOCX_PARSER).splitlines()) <= 762
-    assert len(_source(DOCUMENT_FEEDBACK).splitlines()) <= 2320
+    assert len(_source(DOCUMENT_FEEDBACK).splitlines()) <= 2250
 
 
 def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
@@ -67,9 +72,13 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     docx_rich_renderer = _source(DOCX_RICH_RENDERER)
     office_create = _source(OFFICE_CREATE)
     xlsx_tools = _source(XLSX_TOOLS)
+    xlsx_sheet_selection = _source(XLSX_SHEET_SELECTION)
+    xlsx_structure = _source(XLSX_STRUCTURE)
     conversion_tools = _source(CONVERSION_TOOLS)
     docx_template_tools = _source(DOCX_TEMPLATE_TOOLS)
     docx_compare_tools = _source(DOCX_COMPARE_TOOLS)
+    docx_review_cleanup_tools = _source(DOCX_REVIEW_CLEANUP_TOOLS)
+    pdf_window_tools = _source(PDF_WINDOW_TOOLS)
     plan_presentation = _source(PLAN_PRESENTATION)
     docx_review = _source(DOCX_REVIEW)
     docx_fallback = _source(DOCX_FALLBACK)
@@ -87,11 +96,16 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     document_feedback_progress = _source(DOCUMENT_FEEDBACK_PROGRESS)
     document_feedback_background = _source(DOCUMENT_FEEDBACK_BACKGROUND)
     document_feedback_preflight = _source(DOCUMENT_FEEDBACK_PREFLIGHT)
+    document_feedback_stream_stages = _source(DOCUMENT_FEEDBACK_STREAM_STAGES)
 
     assert "from app.core.agent.task_tools_office_create import" in task_tools
     assert "from app.core.agent.task_tools_conversion import (" in task_tools
     assert "from app.core.agent.task_tools_docx_template import (" in task_tools
     assert "from app.core.agent.task_tools_docx_compare import (" in task_tools
+    assert "from app.core.agent.task_tools_docx_review_cleanup import (" in task_tools
+    assert "from app.core.agent.task_tools_pdf_window import (" in task_tools
+    assert "from app.core.agent.task_tools_xlsx_sheet_selection import (" in task_tools
+    assert "from app.core.agent.task_tools_xlsx_structure import (" in task_tools
     assert "from app.core.agent.task_tools_registry import build_task_tool_definitions" in task_tools
     assert "from app.core.agent.task_tool_operation_bindings import build_task_tool_operations" in task_tools
     assert "from app.core.agent.file_task_plan_presentation import" in task_runtime
@@ -109,6 +123,14 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "from app.core.agent.task_tools import" not in docx_template_tools
     assert "from app.core.agent.task_tools import" not in docx_compare_tools
     assert "def _task_tools_helper(" in xlsx_tools
+    assert "from app.core.agent.task_tools_xlsx_sheet_selection import (" in xlsx_tools
+    assert "def select_workbook_sheet(" in xlsx_sheet_selection
+    assert "def sample_sheet_rows(" in xlsx_structure
+    assert "def remove_docx_comment_markup(" in docx_review_cleanup_tools
+    assert "def accept_docx_revision_markup(" in docx_review_cleanup_tools
+    assert "def remove_comments_relationships_xml(" in docx_review_cleanup_tools
+    assert "def read_pdf_excerpt(" in pdf_window_tools
+    assert "def read_pdf_letter_window(" in pdf_window_tools
     assert "file_task_runtime import" not in task_tool_registry
     assert "from app.core.agent.task_tools import" not in task_tool_registry
     assert "from app.core.agent.task_tools import (" in operation_bindings
@@ -133,6 +155,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "from web.document_feedback_progress import (" in document_feedback
     assert "from web.document_feedback_background import BackgroundProgressBridge" in document_feedback
     assert "from web.document_feedback_preflight import prepare_analysis_preflight" in document_feedback
+    assert "from web.document_feedback_stream_stages import (" in document_feedback
     assert "def parse_annotation_response(" in document_feedback_annotations
     assert "def stream_annotation_events(" in document_feedback_stream
     assert "def probe_working_model(" in document_feedback_models
@@ -144,7 +167,10 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "def collect_annotation_loop_result(" in document_feedback_result
     assert "def build_analysis_progress_event(" in document_feedback_progress
     assert "class BackgroundProgressBridge:" in document_feedback_background
+    assert "def stream_events(" in document_feedback_background
     assert "def prepare_analysis_preflight(" in document_feedback_preflight
+    assert "def read_document_stage(" in document_feedback_stream_stages
+    assert "def build_complete_event(" in document_feedback_stream_stages
     stream_tree = ast.parse(document_feedback_stream)
     assert not any(
         isinstance(node, ast.ImportFrom) and node.module == "web.document_feedback"

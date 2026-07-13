@@ -161,9 +161,9 @@ export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = fals
   }
   return {
     title: '任务完成',
-    detail: '任务结果已生成，显示在执行过程之后。',
-    stepSummary: '任务结果已生成。',
-    toast: '任务已完成，结果已显示在步骤下方',
+    detail: '结果与产物已整理，可直接查看或继续处理。',
+    stepSummary: '结果与产物已就绪。',
+    toast: '任务已完成，结果和产物已就绪',
     toastType: 'success',
   };
 }

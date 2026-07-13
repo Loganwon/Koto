@@ -5,7 +5,7 @@
 
 import { _escHtml, showToast, _FOLDER_SVG, _DEFAULT_FILE_SVG } from './infrastructure';
 import { state } from './state';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
 const workspaceApi = getWorkspaceApi();
 
@@ -195,7 +195,6 @@ function _closeCtxMenu(): void {
   const menu = document.getElementById('wa-ctx-menu');
   if (menu) menu.classList.remove('open');
 }
-(window as any)._closeCtxMenu = _closeCtxMenu;
 
 // ── SVG Icons for Context Menu ──
 
@@ -233,39 +232,39 @@ function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void {
 
   let html = '';
   if (isFolder) {
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserNewFile();_closeCtxMenu()">${CTX_SVG.newf} 新建文件</div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserNewFolder();_closeCtxMenu()">${CTX_SVG.newdir} 新建子文件夹</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-new-file">${CTX_SVG.newf} 新建文件</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-new-folder">${CTX_SVG.newdir} 新建子文件夹</div>`;
     html += `<div class="wa-ctx-separator"></div>`;
     if (clip) {
-      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserPaste();_closeCtxMenu()">${CTX_SVG.paste} 粘贴 <span style="font-size:11px;color:var(--text-muted);margin-left:4px">${_escHtml(clip.name)}</span></div>`;
+      html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-paste">${CTX_SVG.paste} 粘贴 <span style="font-size:11px;color:var(--text-muted);margin-left:4px">${_escHtml(clip.name)}</span></div>`;
       html += `<div class="wa-ctx-separator"></div>`;
     }
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserRename();_closeCtxMenu()">${CTX_SVG.rename} 重命名</div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopyPath();_closeCtxMenu()">${CTX_SVG.copy} 复制路径</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-rename">${CTX_SVG.rename} 重命名</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-copy-path">${CTX_SVG.copy} 复制路径</div>`;
     html += `<div class="wa-ctx-separator"></div>`;
-    html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${CTX_SVG.del} 删除文件夹</div>`;
+    html += `<div class="wa-ctx-item danger" data-wa-context-menu-action="browser-delete">${CTX_SVG.del} 删除文件夹</div>`;
   } else {
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserOpen();_closeCtxMenu()">${CTX_SVG.open} 打开</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-open">${CTX_SVG.open} 打开</div>`;
     html += `<div class="wa-ctx-separator"></div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToTempWorkspace();_closeCtxMenu()">${CTX_SVG.newf} 加入临时工作区</div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAddToWorkspace();_closeCtxMenu()">${CTX_SVG.newf} 加入我的工作区</div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserSendToAI();_closeCtxMenu()">${CTX_SVG.ai} 发送给AI分析</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-add-temp">${CTX_SVG.newf} 加入临时工作区</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-add-workspace">${CTX_SVG.newf} 加入我的工作区</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-send-ai">${CTX_SVG.ai} 发送给AI分析</div>`;
     html += `<div class="wa-ctx-separator"></div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopy();_closeCtxMenu()">${CTX_SVG.copy} 复制</div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCut();_closeCtxMenu()">${CTX_SVG.cut} 剪切</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-copy">${CTX_SVG.copy} 复制</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-cut">${CTX_SVG.cut} 剪切</div>`;
     if (clip) {
-      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserPaste();_closeCtxMenu()">${CTX_SVG.paste} 粘贴到此处</div>`;
+      html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-paste">${CTX_SVG.paste} 粘贴到此处</div>`;
     }
     html += `<div class="wa-ctx-separator"></div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserRename();_closeCtxMenu()">${CTX_SVG.rename} 重命名</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-rename">${CTX_SVG.rename} 重命名</div>`;
     if (supported) {
       html += `<div class="wa-ctx-separator"></div>`;
-      html += `<div class="wa-ctx-item" onclick="WA._fsBrowserAISummary();_closeCtxMenu()">${CTX_SVG.ai} AI 概括</div>`;
+      html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-ai-summary">${CTX_SVG.ai} AI 概括</div>`;
     }
     html += `<div class="wa-ctx-separator"></div>`;
-    html += `<div class="wa-ctx-item" onclick="WA._fsBrowserCopyPath();_closeCtxMenu()">${CTX_SVG.copy} 复制路径</div>`;
+    html += `<div class="wa-ctx-item" data-wa-context-menu-action="browser-copy-path">${CTX_SVG.copy} 复制路径</div>`;
     html += `<div class="wa-ctx-separator"></div>`;
-    html += `<div class="wa-ctx-item danger" onclick="WA._fsBrowserDelete();_closeCtxMenu()">${CTX_SVG.del} 删除</div>`;
+    html += `<div class="wa-ctx-item danger" data-wa-context-menu-action="browser-delete">${CTX_SVG.del} 删除</div>`;
   }
   menu.innerHTML = html;
   _positionCtxMenu(menu, event, {
@@ -610,21 +609,21 @@ function _showCtxMenu(event: MouseEvent, path: string, name: string): void {
   const menu = document.getElementById('wa-ctx-menu');
   if (!menu) return;
   menu.innerHTML = `
-    <div class="wa-ctx-item" onclick="WA._ctxOpen()">
+    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-open">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       打开
     </div>
     <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item" onclick="WA._ctxRename()">
+    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-rename">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       重命名
     </div>
-    <div class="wa-ctx-item" onclick="WA._ctxCopyPath()">
+    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-copy-path">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
       复制路径
     </div>
     <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item danger" onclick="WA._ctxDelete()">
+    <div class="wa-ctx-item danger" data-wa-context-menu-action="workspace-delete">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
       删除
     </div>`;
@@ -638,21 +637,21 @@ function _showFolderCtxMenu(event: MouseEvent, path: string, name: string): void
   const menu = document.getElementById('wa-ctx-menu');
   if (!menu) return;
   menu.innerHTML = `
-    <div class="wa-ctx-item" onclick="WA.startNewFile('${path.replace(/'/g, "\\'")}');_closeCtxMenu()">
+    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-new-file">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
       新建文件
     </div>
-    <div class="wa-ctx-item" onclick="WA.startNewFolder('${path.replace(/'/g, "\\'")}');_closeCtxMenu()">
+    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-new-folder">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
       新建子文件夹
     </div>
     <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item" onclick="WA._ctxFolderRename()">
+    <div class="wa-ctx-item" data-wa-context-menu-action="workspace-folder-rename">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
       重命名
     </div>
     <div class="wa-ctx-separator"></div>
-    <div class="wa-ctx-item danger" onclick="WA._ctxFolderDelete()">
+    <div class="wa-ctx-item danger" data-wa-context-menu-action="workspace-folder-delete">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
       删除文件夹
     </div>`;
@@ -702,6 +701,52 @@ function _ctxFolderDelete(): void {
   deleteFolderWorkspace(_ctxTarget.path, _ctxTarget.name || '');
 }
 
+let _contextMenuActionDelegationInstalled = false;
+
+function _installContextMenuActionDelegation(): void {
+  if (_contextMenuActionDelegationInstalled) return;
+  _contextMenuActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const item = target && target.closest ? target.closest<HTMLElement>('[data-wa-context-menu-action]') : null;
+    if (!item) return;
+    const action = String(item.dataset.waContextMenuAction || '');
+    const actions: Record<string, () => any> = {
+      'browser-open': _fsBrowserOpen,
+      'browser-add-workspace': _fsBrowserAddToWorkspace,
+      'browser-add-temp': _fsBrowserAddToTempWorkspace,
+      'browser-send-ai': _fsBrowserSendToAI,
+      'browser-copy': _fsBrowserCopy,
+      'browser-cut': _fsBrowserCut,
+      'browser-paste': _fsBrowserPaste,
+      'browser-copy-path': _fsBrowserCopyPath,
+      'browser-rename': _fsBrowserRename,
+      'browser-delete': _fsBrowserDelete,
+      'browser-new-file': _fsBrowserNewFile,
+      'browser-new-folder': _fsBrowserNewFolder,
+      'browser-ai-summary': _fsBrowserAISummary,
+      'workspace-open': _ctxOpen,
+      'workspace-rename': _ctxRename,
+      'workspace-copy-path': _ctxCopyPath,
+      'workspace-delete': _ctxDelete,
+      'workspace-new-file': () => {
+        if (_ctxTarget.path && typeof workspaceApi.startNewFile === 'function') workspaceApi.startNewFile(_ctxTarget.path);
+      },
+      'workspace-new-folder': () => {
+        if (_ctxTarget.path && typeof workspaceApi.startNewFolder === 'function') workspaceApi.startNewFolder(_ctxTarget.path);
+      },
+      'workspace-folder-rename': _ctxFolderRename,
+      'workspace-folder-delete': _ctxFolderDelete,
+    };
+    const run = actions[action];
+    if (!run) return;
+    event.preventDefault();
+    event.stopPropagation();
+    _closeCtxMenu();
+    Promise.resolve(run()).catch((error) => console.warn('[WA] context menu action failed:', error));
+  });
+}
+
 // ── Register document event listeners for closing context menu ──
 
 document.addEventListener(
@@ -715,22 +760,22 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') _closeCtxMenu();
 });
 
-// ── Backward compatibility ──
+_installContextMenuActionDelegation();
 
-const wa = workspaceApi;
-
-wa._showBrowserCtx = _showBrowserCtx;
-wa._closeCtxMenu = _closeCtxMenu;
-wa._fsBrowserOpen = _fsBrowserOpen;
-wa._fsBrowserAddToWorkspace = _fsBrowserAddToWorkspace;
-wa._fsBrowserAddToTempWorkspace = _fsBrowserAddToTempWorkspace;
-wa._fsBrowserSendToAI = _fsBrowserSendToAI;
-wa._fsBrowserCopy = _fsBrowserCopy;
-wa._fsBrowserCut = _fsBrowserCut;
-wa._fsBrowserPaste = _fsBrowserPaste;
-wa._fsBrowserCopyPath = _fsBrowserCopyPath;
-wa._fsBrowserRename = _fsBrowserRename;
-wa._fsBrowserDelete = _fsBrowserDelete;
-wa._fsBrowserNewFile = _fsBrowserNewFile;
-wa._fsBrowserNewFolder = _fsBrowserNewFolder;
-wa._fsBrowserAISummary = _fsBrowserAISummary;
+publishWorkspaceApi({
+  _showBrowserCtx,
+  _closeCtxMenu,
+  _fsBrowserOpen,
+  _fsBrowserAddToWorkspace,
+  _fsBrowserAddToTempWorkspace,
+  _fsBrowserSendToAI,
+  _fsBrowserCopy,
+  _fsBrowserCut,
+  _fsBrowserPaste,
+  _fsBrowserCopyPath,
+  _fsBrowserRename,
+  _fsBrowserDelete,
+  _fsBrowserNewFile,
+  _fsBrowserNewFolder,
+  _fsBrowserAISummary,
+});

@@ -121,6 +121,38 @@ from app.core.agent.task_tools_conversion import (
 from app.core.agent.task_tools_docx_template import (
     replace_docx_placeholders_in_paragraph as _replace_docx_placeholders_in_paragraph,
 )
+from app.core.agent.task_tools_docx_review_cleanup import (
+    DOCX_COMMENT_MARKUP_TAGS as _DOCX_COMMENT_MARKUP_TAGS,
+    DOCX_W_NS as _DOCX_W_NS,
+    accept_docx_revision_markup as _accept_docx_revision_markup,
+    build_docx_review_clear_summary as _build_docx_review_clear_summary,
+    normalize_docx_review_clear_scope as _review_normalize_docx_review_clear_scope,
+    remove_comments_content_type_override as _remove_comments_content_type_override,
+    remove_comments_relationships_xml as _remove_comments_relationships_xml,
+    remove_docx_comment_markup as _remove_docx_comment_markup,
+    _serialize_xml_root,
+)
+from app.core.agent.task_tools_pdf_window import (
+    int_to_chinese_letter_number as _int_to_chinese_letter_number,
+    int_to_pdf_roman as _int_to_pdf_roman,
+    pdf_letter_heading_terms as _pdf_letter_heading_terms,
+    pdf_page_has_letter_heading as _pdf_page_has_letter_heading,
+    read_pdf_excerpt as _pdf_read_excerpt,
+    read_pdf_letter_window as _pdf_read_letter_window,
+)
+from app.core.agent.task_tools_xlsx_sheet_selection import (
+    select_workbook_sheet as _select_workbook_sheet,
+    sheet_matches_statement as _sheet_matches_statement,
+)
+from app.core.agent.task_tools_xlsx_structure import (
+    collect_formula_examples as _collect_formula_examples,
+    detect_year_header as _detect_year_header,
+    extract_external_link_targets as _extract_external_link_targets,
+    sample_sheet_rows as _sample_sheet_rows,
+    row_label_for_year_series as _row_label_for_year_series,
+    display_series_value as _display_series_value,
+    severity_for_financial_label as _xlsx_severity_for_financial_label,
+)
 from app.core.agent.task_tool_operation_bindings import build_task_tool_operations
 from app.core.agent.task_tools_registry import build_task_tool_definitions
 from app.core.services.file_service import FileService
@@ -530,173 +562,6 @@ _HIGH_PRIORITY_FINANCIAL_LABEL_HINTS = (
 )
 
 
-def _select_workbook_sheet(
-    workbook: Any, requested_sheet: Any = ""
-) -> tuple[str, str, str]:
-    sheetnames = list(getattr(workbook, "sheetnames", []) or [])
-    requested = str(requested_sheet or "").strip()
-    if not sheetnames:
-        return "", requested, "Workbook has no sheets"
-    if not requested:
-        return sheetnames[0], requested, ""
-    if requested in sheetnames:
-        return requested, requested, ""
-    requested_key = requested.casefold()
-    if len(sheetnames) == 1 or requested_key in _GENERIC_SHEET_NAME_GUESSES:
-        fallback = sheetnames[0]
-        return (
-            fallback,
-            requested,
-            f"Sheet '{requested}' not found; used '{fallback}' instead.",
-        )
-    return "", requested, f"Sheet '{requested}' not found. Available: {sheetnames}"
-
-
-def _sheet_matches_statement(sheet_name: Any, statement_key: str) -> bool:
-    name = str(sheet_name or "").strip()
-    if not name:
-        return False
-    for pattern in _FINANCIAL_STATEMENT_PATTERNS.get(
-        statement_key, ()
-    ):  # pragma: no branch - tiny tuple
-        if pattern.search(name):
-            return True
-    return False
-
-
-def _extract_external_link_targets(workbook: Any) -> List[str]:
-    targets: List[str] = []
-    for link in list(getattr(workbook, "_external_links", []) or []):
-        relation = getattr(link, "file_link", None)
-        target = (
-            getattr(relation, "Target", None)
-            or getattr(relation, "target", None)
-            or getattr(link, "target", None)
-        )
-        target_text = str(target or "").strip()
-        if target_text and target_text not in targets:
-            targets.append(target_text)
-    return targets
-
-
-def _trim_trailing_empty(values: List[Any]) -> List[Any]:
-    trimmed = list(values)
-    while trimmed and trimmed[-1] in (None, ""):
-        trimmed.pop()
-    return trimmed
-
-
-def _normalize_preview_value(value: Any) -> Any:
-    if value is None:
-        return ""
-    return value
-
-
-def _sample_sheet_rows(
-    worksheet: Any, *, max_rows: int, max_cols: int = 12
-) -> List[Dict[str, Any]]:
-    samples: List[Dict[str, Any]] = []
-    limit_rows = min(max(getattr(worksheet, "max_row", 0), 0), 200)
-    limit_cols = min(max(getattr(worksheet, "max_column", 0), 0), max_cols)
-    if limit_rows < 1 or limit_cols < 1:
-        return samples
-
-    for row_index, row in enumerate(
-        worksheet.iter_rows(
-            min_row=1, max_row=limit_rows, max_col=limit_cols, values_only=True
-        ),
-        start=1,
-    ):
-        trimmed = _trim_trailing_empty(list(row))
-        if not any(value not in (None, "") for value in trimmed):
-            continue
-        samples.append(
-            {
-                "row": row_index,
-                "values": [_normalize_preview_value(value) for value in trimmed],
-            }
-        )
-        if len(samples) >= max_rows:
-            break
-    return samples
-
-
-def _detect_year_header(
-    worksheet: Any, *, max_scan_rows: int = 10, max_scan_cols: int = 40
-) -> Dict[str, Any]:
-    try:
-        from openpyxl.utils import get_column_letter
-    except Exception:  # pragma: no cover - openpyxl is already required by caller
-        return {}
-
-    best_row = 0
-    best_matches: List[Dict[str, Any]] = []
-    limit_rows = min(max(getattr(worksheet, "max_row", 0), 0), max_scan_rows)
-    limit_cols = min(max(getattr(worksheet, "max_column", 0), 0), max_scan_cols)
-    if limit_rows < 1 or limit_cols < 1:
-        return {}
-
-    for row in worksheet.iter_rows(min_row=1, max_row=limit_rows, max_col=limit_cols):
-        matches: List[Dict[str, Any]] = []
-        for cell in row:
-            raw = cell.value
-            text = str(raw or "").strip()
-            if not text or len(text) > 24:
-                continue
-            match = _YEAR_HEADER_RE.fullmatch(text) or _YEAR_HEADER_RE.search(text)
-            if not match:
-                continue
-            matches.append(
-                {
-                    "index": int(cell.column),
-                    "letter": get_column_letter(int(cell.column)),
-                    "header": text,
-                }
-            )
-        if len(matches) > len(best_matches):
-            best_row = int(row[0].row)
-            best_matches = matches
-
-    if len(best_matches) < 2:
-        return {}
-    return {"row": best_row, "columns": best_matches}
-
-
-def _collect_formula_examples(
-    worksheet: Any,
-    *,
-    max_formula_examples: int,
-) -> Dict[str, Any]:
-    formula_count = 0
-    external_formula_count = 0
-    formula_examples: List[Dict[str, str]] = []
-    external_formula_examples: List[Dict[str, str]] = []
-
-    for row in worksheet.iter_rows():
-        for cell in row:
-            if getattr(cell, "data_type", "") != "f":
-                continue
-            formula_count += 1
-            formula_text = str(cell.value or "")
-            if len(formula_examples) < max_formula_examples:
-                formula_examples.append(
-                    {"cell": cell.coordinate, "formula": formula_text[:200]}
-                )
-            if "[" in formula_text:
-                external_formula_count += 1
-                if len(external_formula_examples) < max_formula_examples:
-                    external_formula_examples.append(
-                        {"cell": cell.coordinate, "formula": formula_text[:200]}
-                    )
-
-    return {
-        "formula_count": formula_count,
-        "formula_examples": formula_examples,
-        "external_formula_count": external_formula_count,
-        "external_formula_examples": external_formula_examples,
-    }
-
-
 def _build_workbook_structure_payload(
     resolved_path: str,
     *,
@@ -780,30 +645,11 @@ def _build_workbook_structure_payload(
         wb_values.close()
 
 
-def _row_label_for_year_series(
-    worksheet: Any, row_index: int, *, before_column: int
-) -> str:
-    last_text = ""
-    for col_index in range(1, max(before_column, 1)):
-        raw = worksheet.cell(row=row_index, column=col_index).value
-        text = str(raw or "").strip()
-        if text:
-            last_text = text
-    return last_text
-
-
 def _severity_for_financial_label(label: str) -> str:
-    if any(hint in label for hint in _HIGH_PRIORITY_FINANCIAL_LABEL_HINTS):
-        return "high"
-    return "medium"
-
-
-def _display_series_value(value: Any, formula_text: str) -> Any:
-    if value not in (None, ""):
-        return value
-    if formula_text:
-        return formula_text[:160]
-    return ""
+    return _xlsx_severity_for_financial_label(
+        label,
+        _HIGH_PRIORITY_FINANCIAL_LABEL_HINTS,
+    )
 
 
 def _detect_financial_series_gap_findings(
@@ -908,142 +754,14 @@ def _read_pdf_excerpt(
     end_page: int = 0,
     allow_full_fallback: bool = True,
 ) -> str:
-    """Read only a window of PDF pages to avoid full-document extraction stalls."""
-    start_page = max(1, int(start_page or 1))
-    end_page = max(0, int(end_page or 0))
-
-    def _collect_from_pdfplumber() -> str:
-        import pdfplumber  # type: ignore
-
-        parts: list[str] = []
-        total = 0
-        with pdfplumber.open(path) as pdf:
-            last_page = min(end_page or len(pdf.pages), len(pdf.pages))
-            for index in range(start_page - 1, last_page):
-                page_text = ""
-                try:
-                    page_text = pdf.pages[index].extract_text() or ""
-                except Exception as exc:
-                    logger.debug(
-                        "[TaskTools] pdfplumber page %s failed: %s", index + 1, exc
-                    )
-                if not page_text.strip():
-                    continue
-                block = f"[Page {index + 1}]\n{page_text.strip()}"
-                parts.append(block)
-                total += len(block)
-                if total >= max_chars:
-                    break
-        return "\n\n".join(parts)
-
-    def _collect_from_pypdf() -> str:
-        from pypdf import PdfReader  # type: ignore
-
-        reader = PdfReader(path)
-
-        parts: list[str] = []
-        total = 0
-        last_page = min(end_page or len(reader.pages), len(reader.pages))
-        for index in range(start_page - 1, last_page):
-            try:
-                page_text = reader.pages[index].extract_text() or ""
-            except Exception as exc:
-                logger.debug("[TaskTools] pypdf page %s failed: %s", index + 1, exc)
-                page_text = ""
-            if not page_text.strip():
-                continue
-            block = f"[Page {index + 1}]\n{page_text.strip()}"
-            parts.append(block)
-            total += len(block)
-            if total >= max_chars:
-                break
-        return "\n\n".join(parts)
-
-    for collector in (_collect_from_pdfplumber, _collect_from_pypdf):
-        try:
-            excerpt = collector()
-            if excerpt.strip():
-                return excerpt[:max_chars]
-        except ImportError:
-            continue
-        except Exception as exc:
-            logger.debug("[TaskTools] PDF excerpt collector failed: %s", exc)
-
-    if not allow_full_fallback:
-        return ""
-
-    from app.core.workflow_engine import parse_source_file
-    return parse_source_file(path)[:max_chars]
-
-
-_PDF_ROMAN_DIGITS = (
-    (10, "X"),
-    (9, "IX"),
-    (5, "V"),
-    (4, "IV"),
-    (1, "I"),
-)
-_PDF_CHINESE_DIGITS = {
-    1: "一",
-    2: "二",
-    3: "三",
-    4: "四",
-    5: "五",
-    6: "六",
-    7: "七",
-    8: "八",
-    9: "九",
-}
-
-
-def _int_to_pdf_roman(value: int) -> str:
-    number = max(1, int(value or 1))
-    output = []
-    for unit, symbol in _PDF_ROMAN_DIGITS:
-        while number >= unit:
-            output.append(symbol)
-            number -= unit
-    return "".join(output)
-
-
-def _int_to_chinese_letter_number(value: int) -> str:
-    number = max(1, int(value or 1))
-    if number < 10:
-        return _PDF_CHINESE_DIGITS.get(number, "")
-    if number == 10:
-        return "十"
-    if number < 20:
-        return "十" + _PDF_CHINESE_DIGITS.get(number - 10, "")
-    tens = number // 10
-    ones = number % 10
-    return _PDF_CHINESE_DIGITS.get(tens, "") + "十" + (
-        _PDF_CHINESE_DIGITS.get(ones, "") if ones else ""
+    return _pdf_read_excerpt(
+        path,
+        max_chars=max_chars,
+        start_page=start_page,
+        end_page=end_page,
+        allow_full_fallback=allow_full_fallback,
+        logger=logger,
     )
-
-
-def _pdf_letter_heading_terms(value: int) -> list[str]:
-    chinese = _int_to_chinese_letter_number(value)
-    roman = _int_to_pdf_roman(value)
-    return [
-        f"第{chinese}封信",
-        f"第 {chinese} 封信",
-        f"Letter {roman}",
-        f"LETTER {roman}",
-        f"letter {roman.lower()}",
-    ]
-
-
-def _pdf_page_has_letter_heading(page_text: str, terms: list[str]) -> bool:
-    text = str(page_text or "")
-    if "目 录" in text or "目录" in text:
-        if len(re.findall(r"第[一二三四五六七八九十]+封信", text)) >= 5:
-            return False
-    normalized_terms = {re.sub(r"\s+", "", term).lower() for term in terms}
-    for line in text.splitlines():
-        cleaned = re.sub(r"\s+", "", line).strip().lower()
-        if cleaned in normalized_terms:
-            return True
-    return False
 
 
 def _read_pdf_letter_window(
@@ -1053,52 +771,13 @@ def _read_pdf_letter_window(
     start_letter: int,
     end_letter: int,
 ) -> str:
-    start_letter = max(1, int(start_letter or 1))
-    end_letter = max(start_letter, int(end_letter or start_letter))
-    next_letter = end_letter + 1
-    start_terms = _pdf_letter_heading_terms(start_letter)
-    next_terms = _pdf_letter_heading_terms(next_letter)
-
-    found_start_page = 0
-    found_end_page = 0
-    probe_limit = 240_000
-    for page in range(1, 400):
-        page_text = _read_pdf_excerpt(
-            path,
-            max_chars=probe_limit,
-            start_page=page,
-            end_page=page,
-            allow_full_fallback=False,
-        )
-        if not page_text.strip():
-            if found_start_page and page > found_start_page + 30:
-                break
-            continue
-        if not found_start_page and _pdf_page_has_letter_heading(page_text, start_terms):
-            found_start_page = page
-            continue
-        if (
-            found_start_page
-            and page > found_start_page
-            and _pdf_page_has_letter_heading(page_text, next_terms)
-        ):
-            found_end_page = page - 1
-            break
-    if not found_start_page:
-        return ""
-    if not found_end_page:
-        found_end_page = min(found_start_page + 30, 399)
-    header = (
-        f"[PDF letter window: {start_letter}-{end_letter}; "
-        f"resolved pages {found_start_page}-{found_end_page}]\n"
-    )
-    body = _read_pdf_excerpt(
+    return _pdf_read_letter_window(
         path,
-        max_chars=max(1, max_chars - len(header)),
-        start_page=found_start_page,
-        end_page=found_end_page,
+        max_chars=max_chars,
+        start_letter=start_letter,
+        end_letter=end_letter,
+        read_excerpt=_read_pdf_excerpt,
     )
-    return (header + body).strip()[:max_chars]
 
 
 def _success_result(
@@ -3149,186 +2828,11 @@ _DOCX_REVIEW_CLEAR_SCOPE_ALIASES = {
     "tracked_changes": "revisions",
 }
 
-_DOCX_W_NS = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-_DOCX_PKG_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
-_DOCX_CT_NS = "http://schemas.openxmlformats.org/package/2006/content-types"
-_DOCX_COMMENTS_REL_TYPE = (
-    "http://schemas.openxmlformats.org/officeDocument/2006/relationships/comments"
-)
-_DOCX_COMMENTS_CONTENT_TYPE = (
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
-)
-_DOCX_COMMENT_MARKUP_TAGS = ("commentRangeStart", "commentRangeEnd", "commentReference")
-_DOCX_ACCEPT_REVIEW_REMOVE_TAGS = (
-    "del",
-    "moveFrom",
-    "moveFromRangeStart",
-    "moveFromRangeEnd",
-)
-_DOCX_ACCEPT_REVIEW_UNWRAP_TAGS = ("ins", "moveTo")
-_DOCX_ACCEPT_REVIEW_METADATA_TAGS = (
-    "moveToRangeStart",
-    "moveToRangeEnd",
-    "pPrChange",
-    "rPrChange",
-    "tblPrChange",
-    "trPrChange",
-    "tcPrChange",
-    "sectPrChange",
-    "numPrChange",
-    "tblGridChange",
-)
-
-
 def _normalize_docx_review_clear_scope(scope: str) -> str:
-    normalized = str(scope or "").strip().lower()
-    resolved = _DOCX_REVIEW_CLEAR_SCOPE_ALIASES.get(normalized, normalized)
-    if resolved not in {"comments", "revisions", "all"}:
-        raise ValueError("scope must be one of: comments, revisions, all")
-    return resolved or "comments"
-
-
-def _docx_w_tag(local_name: str) -> str:
-    return f"{{{_DOCX_W_NS}}}{local_name}"
-
-
-def _serialize_xml_root(root: Any) -> bytes:
-    from lxml import etree
-
-    return etree.tostring(root, encoding="UTF-8", xml_declaration=True, standalone=True)
-
-
-def _unwrap_xml_element(element: Any) -> bool:
-    parent = element.getparent()
-    if parent is None:
-        return False
-    index = parent.index(element)
-    children = list(element)
-    for offset, child in enumerate(children):
-        parent.insert(index + offset, child)
-    parent.remove(element)
-    return True
-
-
-def _remove_comment_reference_element(element: Any) -> bool:
-    parent = element.getparent()
-    if parent is None:
-        return False
-    if parent.tag == _docx_w_tag("r"):
-        parent.remove(element)
-        has_visible_children = any(child.tag != _docx_w_tag("rPr") for child in parent)
-        if not has_visible_children and not str(parent.text or "").strip():
-            grand = parent.getparent()
-            if grand is not None:
-                grand.remove(parent)
-        return True
-    parent.remove(element)
-    return True
-
-
-def _remove_docx_comment_markup(root: Any) -> int:
-    count = 0
-    namespaces = {"w": _DOCX_W_NS}
-    for tag_name in ("commentRangeStart", "commentRangeEnd"):
-        for element in list(root.xpath(f".//w:{tag_name}", namespaces=namespaces)):
-            parent = element.getparent()
-            if parent is None:
-                continue
-            parent.remove(element)
-            count += 1
-    for element in list(root.xpath(".//w:commentReference", namespaces=namespaces)):
-        if _remove_comment_reference_element(element):
-            count += 1
-    return count
-
-
-def _accept_docx_revision_markup(root: Any) -> int:
-    count = 0
-    namespaces = {"w": _DOCX_W_NS}
-    for tag_name in _DOCX_ACCEPT_REVIEW_REMOVE_TAGS:
-        for element in list(root.xpath(f".//w:{tag_name}", namespaces=namespaces)):
-            parent = element.getparent()
-            if parent is None:
-                continue
-            parent.remove(element)
-            count += 1
-    for tag_name in _DOCX_ACCEPT_REVIEW_UNWRAP_TAGS:
-        for element in list(root.xpath(f".//w:{tag_name}", namespaces=namespaces)):
-            if _unwrap_xml_element(element):
-                count += 1
-    for tag_name in _DOCX_ACCEPT_REVIEW_METADATA_TAGS:
-        for element in list(root.xpath(f".//w:{tag_name}", namespaces=namespaces)):
-            parent = element.getparent()
-            if parent is None:
-                continue
-            parent.remove(element)
-            count += 1
-    return count
-
-
-def _remove_comments_relationships_xml(xml_bytes: bytes) -> tuple[bytes, int]:
-    from lxml import etree
-
-    root = etree.fromstring(xml_bytes)
-    removed = 0
-    relationship_tag = f"{{{_DOCX_PKG_REL_NS}}}Relationship"
-    for element in list(root):
-        if element.tag != relationship_tag:
-            continue
-        target = str(element.get("Target") or "").strip().lower()
-        rel_type = str(element.get("Type") or "").strip().lower()
-        if (
-            target.endswith("comments.xml")
-            or rel_type == _DOCX_COMMENTS_REL_TYPE.lower()
-        ):
-            root.remove(element)
-            removed += 1
-    return _serialize_xml_root(root), removed
-
-
-def _remove_comments_content_type_override(xml_bytes: bytes) -> tuple[bytes, int]:
-    from lxml import etree
-
-    root = etree.fromstring(xml_bytes)
-    removed = 0
-    override_tag = f"{{{_DOCX_CT_NS}}}Override"
-    for element in list(root):
-        if element.tag != override_tag:
-            continue
-        part_name = str(element.get("PartName") or "").strip().lower()
-        content_type = str(element.get("ContentType") or "").strip().lower()
-        if (
-            part_name == "/word/comments.xml"
-            or content_type == _DOCX_COMMENTS_CONTENT_TYPE.lower()
-        ):
-            root.remove(element)
-            removed += 1
-    return _serialize_xml_root(root), removed
-
-
-def _build_docx_review_clear_summary(
-    scope: str, comments_removed: int, revisions_accepted: int, *, changed: bool
-) -> str:
-    if not changed:
-        if scope == "comments":
-            return "未发现可清除的 DOCX 批注。"
-        if scope == "revisions":
-            return "未发现可清除的 DOCX 修订标记。"
-        return "未发现可清除的 DOCX 批注或修订。"
-
-    details: List[str] = []
-    if scope in {"comments", "all"} and comments_removed:
-        details.append(f"已清除 {comments_removed} 条批注")
-    if scope in {"revisions", "all"} and revisions_accepted:
-        details.append(f"已接受 {revisions_accepted} 处修订")
-    if not details:
-        if scope == "comments":
-            details.append("已清除批注标记")
-        elif scope == "revisions":
-            details.append("已清除修订标记")
-        else:
-            details.append("已清除审阅标记")
-    return "；".join(details)
+    return _review_normalize_docx_review_clear_scope(
+        scope,
+        _DOCX_REVIEW_CLEAR_SCOPE_ALIASES,
+    )
 
 
 def clear_docx_review_marks(path: str, scope: str = "comments") -> str:

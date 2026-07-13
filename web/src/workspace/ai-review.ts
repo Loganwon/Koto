@@ -8,10 +8,12 @@ import {
   resizeWorkspaceAiComposer,
   setWorkspaceAiComposerValue,
 } from './ai-composer';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
-declare let WA: any;
 declare let _LIGHTBULB_SVG: string;
 declare let _CLIPBOARD_SVG: string;
 declare let _PIN_SVG: string;
@@ -116,7 +118,7 @@ export function _createPinnedSelectionContext(text: any, sourceMeta?: any): any 
 }
 
 function _getLiveEditorSelectionForAI(): any {
-  const live = (window as any).WA && (window as any).WA._getLiveEditorSelectionForAI;
+  const live = workspaceApi._getLiveEditorSelectionForAI;
   if (typeof live === 'function') {
     try { return live(); } catch (_) { return null; }
   }
@@ -124,7 +126,7 @@ function _getLiveEditorSelectionForAI(): any {
 }
 
 function _saveEditorRange(): void {
-  const saveRange = (window as any).WA && (window as any).WA._saveEditorRange;
+  const saveRange = workspaceApi._saveEditorRange;
   if (typeof saveRange === 'function') {
     try { saveRange(); } catch (_) { /* noop */ }
   }
@@ -138,8 +140,8 @@ export function _setStreamBtn(streaming: boolean): void {
   sendBtn.setAttribute('aria-label', streaming ? '停止当前任务' : '发送');
   sendBtn.innerHTML = streaming ? _PAUSE_SVG : _SEND_SVG;
   sendBtn.onclick = streaming
-    ? () => ((window as any).WA && (window as any).WA.stopStream && (window as any).WA.stopStream())
-    : () => ((window as any).WA && (window as any).WA.sendMessage && (window as any).WA.sendMessage());
+    ? () => workspaceApi.stopStream?.()
+    : () => workspaceApi.sendMessage?.();
 }
 
 export function stopStream(): boolean {
@@ -303,9 +305,9 @@ export function _makeProposalCard(proposal: ProposalData, index: number, total: 
   const actions = document.createElement('div');
   actions.className = 'wa-proposal-actions';
   actions.innerHTML = canApply
-    ? `<button class="wa-proposal-btn accept" onclick="WA.acceptProposal('${proposal.id}',this)">\u63a5\u53d7</button>` +
-      `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">\u62d2\u7edd</button>`
-    : `<button class="wa-proposal-btn reject" onclick="WA.rejectProposal('${proposal.id}',this)">\u5173\u95ed</button>`;
+    ? `<button type="button" class="wa-proposal-btn accept" data-wa-review-action="accept" data-proposal-id="${_escHtml(proposal.id)}">\u63a5\u53d7</button>` +
+      `<button type="button" class="wa-proposal-btn reject" data-wa-review-action="reject" data-proposal-id="${_escHtml(proposal.id)}">\u62d2\u7edd</button>`
+    : `<button type="button" class="wa-proposal-btn reject" data-wa-review-action="reject" data-proposal-id="${_escHtml(proposal.id)}">\u5173\u95ed</button>`;
 
   card.appendChild(header);
   card.appendChild(diffView);
@@ -322,13 +324,13 @@ export function _makeProposalBatchBar(proposals: ProposalData[]): HTMLElement {
   const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
   const canDownload = actionableCount > 0 && targetFile && /\.(docx|txt|md)$/i.test(targetFile.name);
   const downloadBtn = canDownload
-    ? `<button class="wa-proposal-btn download small" onclick="WA.downloadPatchedFile()" title="\u5c06\u5168\u90e8\u4fee\u6539\u5e94\u7528\u5230\u76ee\u6807\u6587\u4ef6\u5e76\u4e0b\u8f7d">\u5e94\u7528\u5e76\u4e0b\u8f7d ${_escHtml(targetFile.name)}</button>`
+    ? `<button type="button" class="wa-proposal-btn download small" data-wa-review-action="download" title="\u5c06\u5168\u90e8\u4fee\u6539\u5e94\u7528\u5230\u76ee\u6807\u6587\u4ef6\u5e76\u4e0b\u8f7d">\u5e94\u7528\u5e76\u4e0b\u8f7d ${_escHtml(targetFile.name)}</button>`
     : '';
   bar.innerHTML =
     `<span class="wa-proposal-batch-label">\u5171 ${proposals.length} \u6761\u4fee\u6539\u5efa\u8bae</span>` +
     '<span class="wa-proposal-batch-counter" id="wa-proposal-counter">0/' + actionableCount + ' \u5df2\u5904\u7406</span>' +
-    (actionableCount > 0 ? '<button class="wa-proposal-btn accept small" onclick="WA.batchAcceptAll()">\u5168\u90e8\u63a5\u53d7</button>' : '') +
-    '<button class="wa-proposal-btn reject small" onclick="WA.batchRejectAll()">\u5168\u90e8\u62d2\u7edd</button>' +
+    (actionableCount > 0 ? '<button type="button" class="wa-proposal-btn accept small" data-wa-review-action="batch-accept">\u5168\u90e8\u63a5\u53d7</button>' : '') +
+    '<button type="button" class="wa-proposal-btn reject small" data-wa-review-action="batch-reject">\u5168\u90e8\u62d2\u7edd</button>' +
     downloadBtn;
   return bar;
 }
@@ -362,7 +364,7 @@ export async function acceptProposal(proposalId: string, btn?: HTMLElement): Pro
       if (_isImportedDocxRevisionProposal(proposal) && typeof state.activeEditor.applyImportedReviewDecision === 'function') {
         state.activeEditor.applyImportedReviewDecision(proposal, 'accept');
       } else if (proposal.tool_call) {
-        const handled = (window as any).WA.applyStructuredDocToolCall(proposal.tool_call, { notify: false });
+        const handled = workspaceApi.applyStructuredDocToolCall?.(proposal.tool_call, { notify: false });
         if (!handled) state.activeEditor.applyToolCall(proposal.tool_call);
       } else if (proposal.original_text && proposal.proposed_text) {
         const proposedPlain = (proposal.proposed_text || '').replace(/<[^>]+>/g, '').trim();
@@ -380,7 +382,7 @@ export async function acceptProposal(proposalId: string, btn?: HTMLElement): Pro
   _setProposalReviewStatus(proposalId, 'accepted');
   _syncProposalDomState(proposalId, 'accepted');
   showToast('\u5df2\u63a5\u53d7\u4fee\u6539', 'success');
-  WA.scheduleAutoSave();
+  workspaceApi.scheduleAutoSave?.();
   _updateProposalCounter();
   _syncReviewStateForActiveFile().catch(() => {});
 }
@@ -434,8 +436,8 @@ export async function modifyProposal(proposalId: string, btn?: HTMLElement): Pro
   inputWrap.innerHTML =
     '<textarea class="wa-proposal-modify-textarea" placeholder="\u8f93\u5165\u4fee\u6539\u610f\u89c1\uff0c\u5982\uff1a\u8bed\u6c14\u518d\u6b63\u5f0f\u4e00\u4e9b\u2026" rows="2"></textarea>' +
     '<div class="wa-proposal-modify-actions">' +
-    `<button class="wa-proposal-btn accept small" onclick="WA._submitModify('${proposalId}',this)">\u53d1\u9001</button>` +
-    `<button class="wa-proposal-btn reject small" onclick="WA.cancelModifyProposal('${proposalId}',this)">\u53d6\u6d88</button>` +
+    `<button type="button" class="wa-proposal-btn accept small" data-wa-review-action="submit-modify" data-proposal-id="${_escHtml(proposalId)}">\u53d1\u9001</button>` +
+    `<button type="button" class="wa-proposal-btn reject small" data-wa-review-action="cancel-modify" data-proposal-id="${_escHtml(proposalId)}">\u53d6\u6d88</button>` +
     '</div>';
   card.appendChild(inputWrap);
   const textarea = inputWrap.querySelector('textarea') as HTMLTextAreaElement;
@@ -483,7 +485,7 @@ export function _submitModify(proposalId: string, btn: HTMLElement): void {
   input.value = modifyPrompt;
 
   state.pinnedSelection = _createPinnedSelectionContext(proposal.original_text);
-  WA.sendMessage();
+  workspaceApi.sendMessage?.();
 }
 
 export function batchAcceptAll(): void {
@@ -493,7 +495,7 @@ export function batchAcceptAll(): void {
     .map((proposal: any) => String((proposal && (proposal.id || proposal.review_id)) || '').replace(/^proposal:/, '').trim())
     .filter(Boolean);
   proposalIds.reduce((chain: Promise<any>, proposalId: string) => {
-    return chain.then(() => (window as any).WA.acceptProposal(proposalId));
+    return chain.then(() => acceptProposal(proposalId));
   }, Promise.resolve()).catch((error: any) => {
     console.warn('batchAcceptAll failed:', error);
   });
@@ -509,8 +511,35 @@ export function batchRejectAll(): void {
     .map((proposal: any) => String((proposal && (proposal.id || proposal.review_id)) || '').replace(/^proposal:/, '').trim())
     .filter(Boolean);
   proposalIds.forEach((proposalId: string) => {
-    (window as any).WA.rejectProposal(proposalId);
+    rejectProposal(proposalId);
   });
+}
+
+let reviewActionDelegationInstalled = false;
+
+function _installReviewActionDelegation(): void {
+  if (reviewActionDelegationInstalled) return;
+  reviewActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const button = target?.closest<HTMLElement>('[data-wa-review-action]');
+    if (!button) return;
+    const action = String(button.dataset.waReviewAction || '').trim();
+    const proposalId = String(button.dataset.proposalId || '').trim();
+    event.preventDefault();
+    event.stopPropagation();
+    try {
+      if (action === 'accept' && proposalId) void acceptProposal(proposalId, button);
+      else if (action === 'reject' && proposalId) rejectProposal(proposalId, button);
+      else if (action === 'download') void downloadPatchedFile();
+      else if (action === 'batch-accept') batchAcceptAll();
+      else if (action === 'batch-reject') batchRejectAll();
+      else if (action === 'submit-modify' && proposalId) _submitModify(proposalId, button);
+      else if (action === 'cancel-modify' && proposalId) cancelModifyProposal(proposalId, button);
+    } catch (error) {
+      console.warn('[WA] review action failed:', error);
+    }
+  }, true);
 }
 
 export async function downloadPatchedFile(specificProposals?: ProposalData[]): Promise<void> {
@@ -644,7 +673,7 @@ function _execWriteToDoc(mode: string, snapshot: ActionBarSnapshot, bar: HTMLEle
       } else {
         editor.applyToolCall({ type: 'insert_text', value: '\n' + rawText });
       }
-      WA.scheduleAutoSave && WA.scheduleAutoSave();
+      workspaceApi.scheduleAutoSave?.();
     }
   }
   bar.remove();
@@ -670,8 +699,8 @@ export function handleInputKeydown(event: KeyboardEvent): void {
   const target = event.target as HTMLTextAreaElement | null;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    if ((window as any).WA && typeof (window as any).WA.sendMessage === 'function') {
-      (window as any).WA.sendMessage();
+    if (typeof workspaceApi.sendMessage === 'function') {
+      workspaceApi.sendMessage();
     }
     return;
   }
@@ -811,11 +840,11 @@ export function beginTaskResultFollowup(details: any): void {
         .map((item: any) => Object.assign({}, item));
     }
   }
-  const previousTaskContract = (window as any).WA && typeof (window as any).WA.compactTaskContract === 'function'
-    ? (window as any).WA.compactTaskContract(payload.task_contract)
+  const previousTaskContract = typeof workspaceApi.compactTaskContract === 'function'
+    ? workspaceApi.compactTaskContract(payload.task_contract)
     : null;
-  const previousTaskContext = (window as any).WA && typeof (window as any).WA.compactTaskContext === 'function'
-    ? (window as any).WA.compactTaskContext(payload.task_context)
+  const previousTaskContext = typeof workspaceApi.compactTaskContext === 'function'
+    ? workspaceApi.compactTaskContext(payload.task_context)
     : null;
   const followupContext: Record<string, any> = {
     kind: 'review_last_task',
@@ -908,17 +937,17 @@ export function resumeTaskArtifact(details: ArtifactResumePayload): boolean {
     input.value = actionLabel;
     autoResize(input);
   }
-  (window as any).WA.sendMessage();
+  workspaceApi.sendMessage?.();
   return true;
 }
 
 export async function resumePersistedTaskArtifact(details: ArtifactResumePayload): Promise<boolean> {
   const resolved = _resolveTaskArtifactResume(details || {});
-  if (!resolved.valid) return (window as any).WA.resumeTaskArtifact(details);
+  if (!resolved.valid) return workspaceApi.resumeTaskArtifact(details);
 
   const taskId = String(details.taskId || (resolved.taskPayload && resolved.taskPayload.task_id) || '').trim();
   if (!taskId || resolved.skipPersistedApi) {
-    return (window as any).WA.resumeTaskArtifact(details);
+    return workspaceApi.resumeTaskArtifact(details);
   }
 
   let response: Response | null = null;
@@ -938,11 +967,11 @@ export async function resumePersistedTaskArtifact(details: ArtifactResumePayload
     }
   } catch (error) {
     console.debug('[WA] persisted task resume request unavailable; falling back to local resume payload:', error);
-    return (window as any).WA.resumeTaskArtifact(details);
+    return workspaceApi.resumeTaskArtifact(details);
   }
 
-  if ((window as any).WA && typeof (window as any).WA.resumePersistedFileTask === 'function') {
-    Promise.resolve((window as any).WA.resumePersistedFileTask({
+  if (typeof workspaceApi.resumePersistedFileTask === 'function') {
+    Promise.resolve(workspaceApi.resumePersistedFileTask({
       taskId,
       loadingEl: details.loadingEl,
       replay: false,
@@ -989,7 +1018,7 @@ export function sendMessage(): void {
   const pinnedSelSource = _selectionContextSourceLabel(explicitSelection);
   state.lastPinnedSel = explicitSelection || null;
   state.pendingToolCall = null;
-  if (pinnedSelText) WA.clearSelection();
+  if (pinnedSelText) workspaceApi.clearSelection?.();
 
   function _readyAIFileContext(): any[] {
     return (state._aiFileContext || []).filter((f: any) => !f.error && !f.loading);
@@ -1038,8 +1067,8 @@ export function sendMessage(): void {
     pendingTaskPayload.task = text;
   }
 
-  if ((window as any).WA && typeof (window as any).WA._initWorkspaceAiRuntimes === 'function') {
-    (window as any).WA._initWorkspaceAiRuntimes();
+  if (typeof workspaceApi._initWorkspaceAiRuntimes === 'function') {
+    workspaceApi._initWorkspaceAiRuntimes();
   }
   const taskDispatcher = _runtimeRef('_waTaskDispatcher');
   if (!taskDispatcher || typeof taskDispatcher.dispatchMessage !== 'function') {
@@ -1105,8 +1134,7 @@ export function sendQuickAction(action: string): void {
     }
   }
   if (!hasSelection && state.fileType === 'docx') {
-    const WA_any = (window as any).WA;
-    sel = WA_any._getDocxSelectionTextForAI ? WA_any._getDocxSelectionTextForAI() : '';
+    sel = workspaceApi._getDocxSelectionTextForAI ? workspaceApi._getDocxSelectionTextForAI() : '';
     hasSelection = !!sel;
   }
 
@@ -1169,8 +1197,8 @@ export function sendQuickAction(action: string): void {
   state.lastPinnedSel = hasSelection ? state.pinnedSelection : null;
   state.pendingToolCall = null;
 
-  if ((window as any).WA && typeof (window as any).WA._initWorkspaceAiRuntimes === 'function') {
-    (window as any).WA._initWorkspaceAiRuntimes();
+  if (typeof workspaceApi._initWorkspaceAiRuntimes === 'function') {
+    workspaceApi._initWorkspaceAiRuntimes();
   }
   const taskDispatcher = _runtimeRef('_waTaskDispatcher');
   if (!taskDispatcher || typeof taskDispatcher.dispatchQuickAction !== 'function') {
@@ -1206,30 +1234,35 @@ export function sendQuickAction(action: string): void {
   });
 }
 
-// ── Backward compat ──
+_installReviewActionDelegation();
+
+publishWorkspaceApi({
+  acceptProposal,
+  rejectProposal,
+  modifyProposal,
+  cancelModifyProposal,
+  _submitModify,
+  batchAcceptAll,
+  batchRejectAll,
+  downloadPatchedFile,
+  useScenario,
+  resumeTaskArtifact,
+  resumePersistedTaskArtifact,
+  sendMessage,
+  sendCustomMessage,
+  stopStream,
+  handleInputKeydown,
+  closeReviewCenter,
+  setReviewMode,
+  sendQuickAction,
+  beginTaskResultFollowup,
+  _makeAIActionBar,
+  _hideWelcome,
+});
+
+// Kept as short-lived compatibility hooks for review extensions that are not
+// part of the Workspace API contract yet.
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.acceptProposal = acceptProposal;
-  (window as any).WA.rejectProposal = rejectProposal;
-  (window as any).WA.modifyProposal = modifyProposal;
-  (window as any).WA.cancelModifyProposal = cancelModifyProposal;
-  (window as any).WA._submitModify = _submitModify;
-  (window as any).WA.batchAcceptAll = batchAcceptAll;
-  (window as any).WA.batchRejectAll = batchRejectAll;
-  (window as any).WA.downloadPatchedFile = downloadPatchedFile;
-  (window as any).WA.useScenario = useScenario;
-  (window as any).WA.resumeTaskArtifact = resumeTaskArtifact;
-  (window as any).WA.resumePersistedTaskArtifact = resumePersistedTaskArtifact;
-  (window as any).WA.sendMessage = sendMessage;
-  (window as any).WA.sendCustomMessage = sendCustomMessage;
-  (window as any).WA.stopStream = stopStream;
-  (window as any).WA.handleInputKeydown = handleInputKeydown;
-  (window as any).WA.closeReviewCenter = closeReviewCenter;
-  (window as any).WA.setReviewMode = setReviewMode;
-  (window as any).WA.sendQuickAction = sendQuickAction;
-  (window as any).WA.beginTaskResultFollowup = beginTaskResultFollowup;
-  (window as any).WA._makeAIActionBar = _makeAIActionBar;
-  (window as any).WA._hideWelcome = _hideWelcome;
   (window as any)._sanitizeRenderedHtml = _sanitizeRenderedHtml;
   (window as any)._getPinnedSelectionSourceMeta = _getPinnedSelectionSourceMeta;
   (window as any)._selectionContextText = _selectionContextText;

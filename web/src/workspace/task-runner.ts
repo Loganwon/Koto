@@ -39,6 +39,9 @@ import {
   renderTaskUnderstandingCard,
   taskContextSummaryText,
 } from './task-interaction-summary';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 export interface TaskCardElement extends HTMLElement {
   _waRunCardBehaviorAttached?: boolean;
@@ -132,7 +135,7 @@ export interface CompactTextOptions {
 const FILE_TASK_LOG_PREFIX = '[WA fileTask]';
 const FILE_TASK_IDLE_NOTICE_MS = 25000;
 const FILE_TASK_IDLE_WARN_MS = 60000;
-const TaskStatus: Record<string, any> = (window as any).WA?.fileTaskStatus || {};
+const TaskStatus: Record<string, any> = workspaceApi.fileTaskStatus || {};
 const TASK_RUNNER_PLAN_VIOLATION_LABELS: Record<string, string> = {
   'read_request_escalated_to_write': '只读任务被错误升级为写入',
 };
@@ -694,7 +697,7 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
   if (Array.isArray(data.reason_codes)) {
     try { card.dataset.taskClassificationReasons = JSON.stringify(data.reason_codes); } catch { delete card.dataset.taskClassificationReasons; }
   }
-  const encodedTaskContract = typeof (window as any).WA.encodeTaskContract === 'function' ? (window as any).WA.encodeTaskContract(taskContract) : '';
+  const encodedTaskContract = typeof workspaceApi.encodeTaskContract === 'function' ? workspaceApi.encodeTaskContract(taskContract) : '';
   if (encodedTaskContract) card.dataset.taskContract = encodedTaskContract; else delete card.dataset.taskContract;
   const intentPlan = data.intent_plan && typeof data.intent_plan === 'object' ? data.intent_plan : {};
   const intentStrategy = String(intentPlan.recommended_strategy || '').trim();
@@ -732,7 +735,21 @@ function decodeTaskArtifactResult(card: TaskCardElement): Record<string, any> | 
 function taskArtifactItems(card: TaskCardElement): any[] {
   const artifactResult = decodeTaskArtifactResult(card);
   const artifacts = artifactResult && Array.isArray(artifactResult.artifacts) ? artifactResult.artifacts : [];
-  return artifacts.filter((item: any) => item && typeof item === 'object' && String(item.path || item.title || '').trim());
+  const unique = new Map<string, any>();
+  artifacts.forEach((item: any) => {
+    if (!item || typeof item !== 'object') return;
+    const path = String(item.path || '').replace(/\\/g, '/').replace(/^\.\//, '').trim();
+    const canonical = path.replace(/^workspace\//i, '').toLowerCase();
+    const key = canonical || ('title:' + String(item.title || '').trim().toLowerCase());
+    if (!key) return;
+    const existing = unique.get(key);
+    const prefersWorkspacePath = /^workspace\//i.test(path);
+    const existingPath = String(existing && existing.path || '').replace(/\\/g, '/');
+    if (!existing || (prefersWorkspacePath && !/^workspace\//i.test(existingPath))) {
+      unique.set(key, item);
+    }
+  });
+  return Array.from(unique.values());
 }
 
 function artifactDisplayName(item: any): string {
@@ -745,16 +762,18 @@ function artifactDisplayName(item: any): string {
 function taskArtifactsSummaryHtml(card: TaskCardElement): string {
   const artifacts = taskArtifactItems(card);
   if (!artifacts.length) return '';
-  const rows = artifacts.slice(0, 8).map((item: any) => {
+  const visibleLimit = 3;
+  const rows = artifacts.slice(0, visibleLimit).map((item: any) => {
     const name = artifactDisplayName(item);
-    const path = String(item.path || '').trim();
+    const path = String(item.path || '').replace(/\\/g, '/').trim();
     const type = String(item.type || '').trim();
-    const meta = [type, path].filter(Boolean).join(' · ');
-    return '<li><span class="wa-task-artifact-name">' + esc(name) + '</span>'
+    const isTemporary = /(^|\/)(tmp|temp)(\/|$)/i.test(path.replace(/^workspace\//i, ''));
+    const meta = [type, isTemporary ? '临时产物' : '工作区文件'].filter(Boolean).join(' · ');
+    return '<li title="' + escAttr(path) + '"><span class="wa-task-artifact-name">' + esc(name) + '</span>'
       + (meta ? '<span class="wa-task-artifact-meta">' + esc(meta) + '</span>' : '')
       + '</li>';
   }).join('');
-  const overflow = artifacts.length > 8 ? '<div class="wa-task-artifact-overflow">另有 ' + esc(String(artifacts.length - 8)) + ' 个产物</div>' : '';
+  const overflow = artifacts.length > visibleLimit ? '<div class="wa-task-artifact-overflow">另有 ' + esc(String(artifacts.length - visibleLimit)) + ' 个产物</div>' : '';
   return [
     '<div class="wa-task-artifact-summary-card" data-role="artifact-summary">',
     '  <div class="wa-task-artifact-summary-head">',
@@ -824,6 +843,12 @@ function taskCompletionBannerHtml(result: TerminalResult): string {
     + '</div>';
 }
 
+function taskResultContextDetailsHtml(card: TaskCardElement): string {
+  const understanding = renderTaskUnderstandingCard(card);
+  if (!understanding) return '';
+  return '<details class="wa-task-result-context"><summary>任务说明</summary>' + understanding + '</details>';
+}
+
 function announceTaskCompletion(card: TaskCardElement, result: TerminalResult, report: HTMLElement | null): void {
   if (!card || card.dataset.historySnapshot === 'true' || !card.isConnected) return;
   const status = String(result && result.status || 'done').trim() || 'done';
@@ -872,10 +897,6 @@ function taskResultActionsHtml(card: TaskCardElement): string {
   const actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';
   let applyActionHtml = '';
   if (incompleteBlocked) improveText = '重新发起';
-  const artifactButtonHtml = card.dataset.taskArtifactResult
-    ? '    <button type="button" class="wa-task-followup-action" data-task-artifacts-open="1">查看产物</button>'
-    : '';
-
   if (quickActionMode === 'answer') {
     if (!incompleteBlocked) improveText = '继续分析';
   } else if (quickActionMode === 'hybrid') {
@@ -895,7 +916,6 @@ function taskResultActionsHtml(card: TaskCardElement): string {
     '<div class="wa-task-actions">',
     `  <span class="wa-task-action-hint">${esc(actionHint)}</span>`,
     '  <div class="wa-task-action-buttons">',
-    artifactButtonHtml,
     applyActionHtml,
     `    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">${esc(questionText)}</button>`,
     `    <button type="button" class="wa-task-followup-action" data-task-followup-action="improve" data-task-followup-request="${escAttr(request || '')}">${esc(improveText)}</button>`,
@@ -1028,14 +1048,14 @@ function attachRunCardBehavior(card: TaskCardElement): TaskCardElement {
       const taskActionButton = target && target.closest ? target.closest('[data-task-followup-action]') : null;
       if (taskActionButton) {
         const action = taskActionButton.getAttribute('data-task-followup-action') || '';
-        if (action && (window as any).WA && typeof (window as any).WA.beginTaskResultFollowup === 'function') {
+        if (action && typeof workspaceApi.beginTaskResultFollowup === 'function') {
           const taskState = ensureTaskUiState(card);
-          const taskContract = typeof (window as any).WA.decodeTaskContract === 'function'
-            ? (window as any).WA.decodeTaskContract(card.dataset.taskContract || '')
+          const taskContract = typeof workspaceApi.decodeTaskContract === 'function'
+            ? workspaceApi.decodeTaskContract(card.dataset.taskContract || '')
             : null;
           const taskPayload = decodeTaskRequestPayload(card.dataset.taskFollowupPayload || '');
           const pendingTaskPayload = decodeTaskRequestPayload(card.dataset.taskPendingResumePayload || '');
-          (window as any).WA.beginTaskResultFollowup({
+          workspaceApi.beginTaskResultFollowup({
             action,
             task_id: card.dataset.taskId || '',
             run_id: card.dataset.taskRunId || '',
@@ -1066,8 +1086,8 @@ function attachRunCardBehavior(card: TaskCardElement): TaskCardElement {
       const artifactOpenButton = target && target.closest ? target.closest('[data-task-artifacts-open]') : null;
       if (artifactOpenButton) {
         const artifactResult = decodeTaskArtifactResult(card);
-        if (artifactResult && (window as any).WA && typeof (window as any).WA.renderArtifactResult === 'function') {
-          (window as any).WA.renderArtifactResult(artifactResult);
+        if (artifactResult && typeof workspaceApi.renderArtifactResult === 'function') {
+          workspaceApi.renderArtifactResult(artifactResult);
         }
         return;
       }
@@ -1076,19 +1096,19 @@ function attachRunCardBehavior(card: TaskCardElement): TaskCardElement {
       if (resumeButton) {
         const encodedPayload = resumeButton.getAttribute('data-task-artifact-resume') || '';
         const actionLabel = resumeButton.getAttribute('data-task-artifact-label') || resumeButton.textContent || '';
-        if (!encodedPayload || !(window as any).WA || typeof (window as any).WA.resumeTaskArtifact !== 'function') return;
+        if (!encodedPayload || typeof workspaceApi.resumeTaskArtifact !== 'function') return;
         try {
           const taskPayload = JSON.parse(decodeURIComponent(encodedPayload));
           const taskId = String(taskPayload && taskPayload.task_id || card.dataset.taskId || '').trim();
-          if (taskId && typeof (window as any).WA.resumePersistedTaskArtifact === 'function') {
-            Promise.resolve((window as any).WA.resumePersistedTaskArtifact({
+          if (taskId && typeof workspaceApi.resumePersistedTaskArtifact === 'function') {
+            Promise.resolve(workspaceApi.resumePersistedTaskArtifact({
               taskId,
               taskPayload,
               actionLabel,
               loadingEl: card,
             })).catch((error: any) => console.warn(FILE_TASK_LOG_PREFIX + ' persisted task resume failed:', error));
           } else {
-            (window as any).WA.resumeTaskArtifact({ taskPayload, actionLabel });
+            workspaceApi.resumeTaskArtifact({ taskPayload, actionLabel });
           }
         } catch (error) {
           console.warn(FILE_TASK_LOG_PREFIX + ' task artifact resume parse failed:', error);
@@ -1162,10 +1182,25 @@ function taskPlanProgress(card: TaskCardElement): { total: number; completed: nu
   return { total, completed: total ? Math.min(completed, total) : 0, running };
 }
 
+function taskCardIsVisibleInViewport(card: TaskCardElement): boolean {
+  if (!card || !card.isConnected || typeof card.getBoundingClientRect !== 'function') return false;
+  const rect = card.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0
+    && rect.bottom > 0 && rect.right > 0
+    && rect.top < window.innerHeight && rect.left < window.innerWidth;
+}
+
 function syncTaskLiveProgress(card: TaskCardElement): void {
   if (!isTaskCardElement(card)) return;
   const host = ensureTaskLiveProgressHost();
   if (!host) return;
+  // The inline task card is the primary progress surface.  Keep the compact
+  // global indicator only as an off-screen reminder, never as a duplicate.
+  if (taskCardIsVisibleInViewport(card)) {
+    host.hidden = true;
+    host.dataset.inlineOwner = 'true';
+    return;
+  }
   const state = ensureTaskUiState(card);
   const statusEl = card.querySelector('[data-role="status"]');
   const phaseEl = card.querySelector('[data-role="ui-phase"]');
@@ -1190,6 +1225,7 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
   if (!explicit && valueEl) valueEl.textContent = valueText;
   if (!explicit && fillEl) (fillEl as HTMLElement).style.width = percent + '%';
   host.hidden = false;
+  delete host.dataset.inlineOwner;
   host.dataset.status = statusRaw || 'running';
   host.dataset.basis = basis;
   const liveStatus = host.querySelector('[data-role="live-status"]');
@@ -1206,23 +1242,21 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
 
 function notifyTaskWorkbenchForCard(card: TaskCardElement, options?: { delayed?: boolean }): void {
   if (!isTaskCardElement(card)) return;
-  if ((window as any).WA && typeof (window as any).WA.notifyTaskFlowChanged === 'function') {
+  if (typeof workspaceApi.notifyTaskFlowChanged === 'function') {
     const taskId = card.dataset.taskId || '';
-    (window as any).WA.notifyTaskFlowChanged(taskId);
+    workspaceApi.notifyTaskFlowChanged(taskId);
     if (options && options.delayed) {
-      window.setTimeout(() => (window as any).WA.notifyTaskFlowChanged(taskId), 1200);
-      window.setTimeout(() => (window as any).WA.notifyTaskFlowChanged(taskId), 3000);
+      window.setTimeout(() => workspaceApi.notifyTaskFlowChanged(taskId), 1200);
+      window.setTimeout(() => workspaceApi.notifyTaskFlowChanged(taskId), 3000);
     }
   }
 }
 
 function revealTaskWorkbenchForCard(card: TaskCardElement, options?: { scroll?: boolean }): void {
   if (!isTaskCardElement(card)) return;
-  const WA = (window as any).WA;
-  if (!WA) return;
   const taskId = String(card.dataset.taskId || '').trim();
-  if (typeof WA.openTaskWorkbenchForCurrentRun === 'function') {
-    WA.openTaskWorkbenchForCurrentRun({ taskId, scroll: options && options.scroll });
+  if (typeof workspaceApi.openTaskWorkbenchForCurrentRun === 'function') {
+    workspaceApi.openTaskWorkbenchForCurrentRun({ taskId, scroll: options && options.scroll });
   }
 }
 
@@ -1345,6 +1379,16 @@ function supervisorAuditHtml(data: Record<string, any>, options: { compact?: boo
     + '</div>'
     + (meta.length ? '<div class="wa-task-meta">' + meta.map((item) => '<span class="wa-task-meta-item">' + esc(item) + '</span>').join('') + '</div>' : '')
     + (details.length ? '<ul class="wa-task-plan-violations">' + details.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>' : '');
+}
+
+function shouldShowSupervisorAuditInResult(data: Record<string, any>): boolean {
+  const audit = supervisorAuditFromPayload(data);
+  if (!audit) return false;
+  const status = String(audit.status || '').trim().toLowerCase();
+  return status === 'warning'
+    || status === 'blocked'
+    || audit.review_recommended === true
+    || audit.execution_allowed === false;
 }
 
 function modelLabel(mode: string, modelId?: string): string {
@@ -1745,15 +1789,17 @@ function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any
   if (summaryContainer) {
     const finalReport = terminalAnswerText(data, result.summary);
     const visibleSummary = finalReport || terminalStepSummary(result);
-    const auditHtml = supervisorAuditHtml(data);
+    const artifactsHtml = taskArtifactsSummaryHtml(card);
+    const auditHtml = (needsAttention || result.status === 'error' || shouldShowSupervisorAuditInResult(data))
+      ? supervisorAuditHtml(data)
+      : '';
     summaryContainer.innerHTML = taskCompletionBannerHtml(result)
-      + renderTaskUnderstandingCard(card)
-      + renderTaskMemoryCard(card)
+      + artifactsHtml
       + auditHtml
-      + taskArtifactsSummaryHtml(card)
       + taskResultActionsHtml(card)
-      + renderTaskResultSummaryBar(card, result)
-      + '<div class="wa-task-final-report" data-role="final-report" tabindex="-1"><div class="wa-task-final-report-title">任务结果</div><div class="wa-task-final-report-content">'
+      + taskResultContextDetailsHtml(card)
+      + (artifactsHtml ? '' : renderTaskResultSummaryBar(card, result))
+      + '<div class="wa-task-final-report" data-role="final-report" tabindex="-1"><div class="wa-task-final-report-content">'
       + renderTaskFinalReport(visibleSummary)
       + '</div></div>';
     summaryContainer.hidden = false;
@@ -1796,13 +1842,13 @@ function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any
     try { card._terminalSnapshotHandler(card); } catch (_) { /* noop */ }
     window.setTimeout(() => {
       if (!card || !card.dataset || card.dataset.taskTerminalPersisted === 'true' || card.dataset.historySnapshot === 'true') return;
-      const persistTerminalCard = (window as any).WA && (window as any).WA.persistTerminalTaskRunCard;
+      const persistTerminalCard = workspaceApi.persistTerminalTaskRunCard;
       if (typeof persistTerminalCard === 'function') {
         Promise.resolve(persistTerminalCard(card)).catch(() => { /* best effort */ });
       }
     }, 1000);
   } else {
-    const persistTerminalCard = (window as any).WA && (window as any).WA.persistTerminalTaskRunCard;
+    const persistTerminalCard = workspaceApi.persistTerminalTaskRunCard;
     if (typeof persistTerminalCard === 'function') {
       Promise.resolve(persistTerminalCard(card)).catch(() => { /* best effort */ });
     }
@@ -1869,11 +1915,10 @@ function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any
   const changeType = String(data.change_type || 'modified').trim();
   if (!path) return;
   if (data.prefix && !path.includes('/')) { path = data.prefix.replace(/\/+$/, '') + '/' + path; }
-  const WA = (window as any).WA || {};
-  const refreshPath = typeof WA.normalizeWorkspaceFilePath === 'function'
-    ? String(WA.normalizeWorkspaceFilePath(path) || path).trim()
+  const refreshPath = typeof workspaceApi.normalizeWorkspaceFilePath === 'function'
+    ? String(workspaceApi.normalizeWorkspaceFilePath(path) || path).trim()
     : path;
-  if (typeof WA.markExternalFileChange === 'function') WA.markExternalFileChange(refreshPath || path);
+  if (typeof workspaceApi.markExternalFileChange === 'function') workspaceApi.markExternalFileChange(refreshPath || path);
   const state = ensureTaskUiState(card);
   const key = changeType + ':' + path;
   if (state.fileChangeKeys.has(key)) return;
@@ -1884,7 +1929,7 @@ function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any
   appendRow(step, 'tool-finished', content);
   if (data.supported !== false && data.refresh_supported !== false) {
     window.setTimeout(() => {
-      const reload = WA && WA.reloadFileByPath;
+      const reload = workspaceApi.reloadFileByPath;
       if (typeof reload !== 'function') return;
       Promise.resolve(reload(refreshPath || path, true)).catch((error) => {
         console.warn('[FileTask] refresh after file.changed failed:', error);
@@ -2044,15 +2089,14 @@ function handleEvent_code_summary(card: TaskCardElement, evt: Record<string, any
 let fileRefreshControllerInstance: any = null;
 
 function fileRefreshController(): any {
-  const WA = (window as any).WA || {};
-  if (!fileRefreshControllerInstance && typeof WA.createFileTaskRefreshController === 'function') {
-    fileRefreshControllerInstance = WA.createFileTaskRefreshController({
+  if (!fileRefreshControllerInstance && typeof workspaceApi.createFileTaskRefreshController === 'function') {
+    fileRefreshControllerInstance = workspaceApi.createFileTaskRefreshController({
       ensureTaskUiState,
       basename,
       setStatus,
       normalizePath: (path: string) => (
-        WA && typeof WA.normalizeWorkspaceFilePath === 'function'
-          ? WA.normalizeWorkspaceFilePath(path)
+        typeof workspaceApi.normalizeWorkspaceFilePath === 'function'
+          ? workspaceApi.normalizeWorkspaceFilePath(path)
           : path
       ),
       logPrefix: '[WA fileTask]',
@@ -2065,11 +2109,10 @@ function handleEvent_file_refresh(card: TaskCardElement, evt: Record<string, any
   const data = normalizedTaskLifecyclePayload(payload);
   const path = String(data.path || data.file_path || '').trim();
   if (!path) return;
-  const WA = (window as any).WA || {};
-  const refreshPath = typeof WA.normalizeWorkspaceFilePath === 'function'
-    ? String(WA.normalizeWorkspaceFilePath(path) || path).trim()
+  const refreshPath = typeof workspaceApi.normalizeWorkspaceFilePath === 'function'
+    ? String(workspaceApi.normalizeWorkspaceFilePath(path) || path).trim()
     : path;
-  if (typeof WA.markExternalFileChange === 'function') WA.markExternalFileChange(refreshPath || path);
+  if (typeof workspaceApi.markExternalFileChange === 'function') workspaceApi.markExternalFileChange(refreshPath || path);
   const normalizedPath = String(refreshPath || path || '').replace(/\\/g, '/').toLowerCase();
   data.path = refreshPath || path;
   const fileRefreshHash = (data as any).file_refresh_hash || '';
@@ -2631,33 +2674,32 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
   return terminalResult;
 }
 
-const WA = (window as any).WA || {};
-WA.streamTaskFlow = streamTaskFlow;
-WA.cancelFileTaskRun = cancelFileTaskRun;
-WA.makeRunCard = makeRunCard;
-WA.compactTaskContract = compactTaskContract;
-WA.encodeTaskContract = encodeTaskContract;
-WA.decodeTaskContract = decodeTaskContract;
-WA.restoreTaskRunCard = restoreTaskRunCard;
-WA.resumePersistedFileTask = resumePersistedFileTask;
-WA.ensureTaskUiState = ensureTaskUiState;
-WA.syncTaskLiveProgress = syncTaskLiveProgress;
-WA.syncTaskInteractionSummary = syncTaskInteractionSummary;
-WA.processFileTaskStreamEvent = processFileTaskStreamEvent;
-WA.getEventHandlers = getEventHandlers;
-WA.parseSseEvents = parseSseEvents;
-WA.setTaskRunContext = setTaskRunContext;
-WA.taskTerminalResult = taskTerminalResult;
-WA.handleEvent = handleEvent;
-WA.handleEvent_run_started = handleEvent_run_started;
-WA.handleEvent_run_finished = handleEvent_run_finished;
-WA.handleEvent_tool_started = handleEvent_tool_started;
-WA.handleEvent_tool_finished = handleEvent_tool_finished;
-WA.handleEvent_file_changed = handleEvent_file_changed;
-WA.handleEvent_error = handleEvent_error;
-WA.TaskStatus = TaskStatus;
-(window as any).WA = WA;
-(window as any).WA.parseSseEvents = parseSseEvents;
+publishWorkspaceApi({
+  streamTaskFlow,
+  cancelFileTaskRun,
+  makeRunCard,
+  compactTaskContract,
+  encodeTaskContract,
+  decodeTaskContract,
+  restoreTaskRunCard,
+  resumePersistedFileTask,
+  ensureTaskUiState,
+  syncTaskLiveProgress,
+  syncTaskInteractionSummary,
+  processFileTaskStreamEvent,
+  getEventHandlers,
+  parseSseEvents,
+  setTaskRunContext,
+  taskTerminalResult,
+  handleEvent,
+  handleEvent_run_started,
+  handleEvent_run_finished,
+  handleEvent_tool_started,
+  handleEvent_tool_finished,
+  handleEvent_file_changed,
+  handleEvent_error,
+  TaskStatus,
+});
 
 export {
   streamTaskFlow,

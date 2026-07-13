@@ -18,6 +18,11 @@ def test_pdf_viewer_forces_initial_visible_page_render_passes():
     assert "setTimeout(() => this._renderVisiblePagesNow(), 500)" in src
     assert "if (!renderedAny && !this._renderedPgs.has(1))" in src
     assert "this._renderPage(1)" in src
+    assert "const workspaceApi = getWorkspaceApi();" in src
+    assert "publishWorkspaceApi({" in src
+    assert "(window as any).WA" not in src
+    assert "onclick=\"WA._pdfPageMgr" not in src
+    assert "data-wa-pdf-page-action" in src
 
 
 def test_pdfjs_loader_uses_packaged_runtime_only_and_reports_failures():

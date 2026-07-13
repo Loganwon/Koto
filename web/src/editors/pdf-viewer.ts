@@ -1,8 +1,8 @@
 // @ts-nocheck
 import type { WorkspaceEditor, PdfViewerOptions, PdfOutlineItem, PdfAnnotation, PdfSearchMatch } from './types';
 import { _updatePdfZoomUI } from './cdn-loaders';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
-declare const WA: any;
 declare const state: any;
 declare let lastSelectionText: string;
 declare function showToast(msg: string, type?: string, duration?: number): void;
@@ -16,6 +16,8 @@ declare function _setStreamBtn(isLoading: boolean): void;
 declare let _waTaskDispatcher: any;
 declare let _waConversationRuntime: any;
 declare let pdfjsLib: any;
+
+const workspaceApi = getWorkspaceApi();
 
 export class KotoPdfViewer implements WorkspaceEditor {
     constructor() {
@@ -1282,7 +1284,9 @@ export class KotoPdfViewer implements WorkspaceEditor {
 
       menu.querySelector('#wa-annt-explain').addEventListener('click', () => {
         menu.remove();
-        if (annot.text) WA.sendCustomMessage(`请解释以下内容：\n\n"${annot.text}"`);
+        if (annot.text && typeof workspaceApi.sendCustomMessage === 'function') {
+          workspaceApi.sendCustomMessage(`请解释以下内容：\n\n"${annot.text}"`);
+        }
       });
       menu.querySelector('#wa-annt-del').addEventListener('click', () => {
         menu.remove();
@@ -1317,7 +1321,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
       popup.style.top  = (iy - 20) + 'px';
 
       popup.innerHTML = `
-        <div class="wa-pdf-note-header" onmousedown="WA._pdfDragNote(event, this.parentElement)">
+        <div class="wa-pdf-note-header" data-wa-pdf-note-drag>
           <span>便笺</span>
           <button class="wa-pdf-note-close" onmousedown="event.stopPropagation()">✕</button>
         </div>
@@ -1326,6 +1330,10 @@ export class KotoPdfViewer implements WorkspaceEditor {
           <button class="wa-pdf-note-save">保存</button>
         </div>`;
 
+      popup.querySelector('[data-wa-pdf-note-drag]')?.addEventListener('mousedown', (event) => {
+        _pdfDragNote(event, popup);
+      });
+      popup.querySelector('.wa-pdf-note-close').addEventListener('mousedown', (event) => event.stopPropagation());
       popup.querySelector('.wa-pdf-note-close').addEventListener('click', () => {
         popup.remove(); annot._open = false;
       });
@@ -1770,9 +1778,6 @@ export class KotoPdfViewer implements WorkspaceEditor {
       annotBtns.forEach((el: HTMLElement) => { el.style.display = 'none'; });
     }
   }
-(window as any).KotoPdfViewer = KotoPdfViewer;
-(window as any).WA = (window as any).WA || {};
-
 function _pdfActiveEditor(): any {
   return state && state.activeEditor ? state.activeEditor : null;
 }
@@ -1850,10 +1855,17 @@ function _pdfPageMgrBuild(ed: any): void {
       <div class="wa-pmgr-rotation-badge"></div>
       <div class="wa-pmgr-label">第 ${pageNum} 页</div>
       <div class="wa-pmgr-controls">
-        <div class="wa-pmgr-ctrl-btn" title="顺时针旋转 90°" onclick="WA._pdfPageMgrRotate(this.closest('.wa-pmgr-card'), 90)">↻</div>
-        <div class="wa-pmgr-ctrl-btn" title="逆时针旋转 90°" onclick="WA._pdfPageMgrRotate(this.closest('.wa-pmgr-card'), -90)">↺</div>
-        <div class="wa-pmgr-ctrl-btn" title="删除此页" onclick="WA._pdfPageMgrDelete(this.closest('.wa-pmgr-card'))">✕</div>
+        <div class="wa-pmgr-ctrl-btn" title="顺时针旋转 90°" data-wa-pdf-page-action="rotate" data-delta="90">↻</div>
+        <div class="wa-pmgr-ctrl-btn" title="逆时针旋转 90°" data-wa-pdf-page-action="rotate" data-delta="-90">↺</div>
+        <div class="wa-pmgr-ctrl-btn" title="删除此页" data-wa-pdf-page-action="delete">✕</div>
       </div>`;
+    card.querySelectorAll<HTMLElement>('[data-wa-pdf-page-action]').forEach((control) => {
+      control.addEventListener('click', () => {
+        const action = control.dataset.waPdfPageAction;
+        if (action === 'rotate') pdfPageMgrRotate(card, Number(control.dataset.delta) || 0);
+        if (action === 'delete') pdfPageMgrDelete(card);
+      });
+    });
     const checkbox = card.querySelector('.wa-pmgr-check') as HTMLInputElement | null;
     if (checkbox) checkbox.addEventListener('change', () => card.classList.toggle('selected', checkbox.checked));
     _setupPageMgrDrag(card);
@@ -1867,87 +1879,87 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   return grid ? Array.from(grid.querySelectorAll(selector)) as HTMLElement[] : [];
 }
 
-(window as any).WA.pdfZoom = (value: string | number) => {
+const pdfZoom = (value: string | number) => {
   const ed = _pdfActiveEditor();
   const pct = parseInt(String(value), 10);
   if (ed && typeof ed.setZoom === 'function' && Number.isFinite(pct)) ed.setZoom(pct);
 };
-(window as any).WA.pdfSidebarTab = (btn: HTMLElement) => {
+const pdfSidebarTab = (btn: HTMLElement) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.sidebarTab === 'function') ed.sidebarTab(btn);
 };
-(window as any).WA.pdfToggleSidebar = () => {
+const pdfToggleSidebar = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.toggleSidebar === 'function') ed.toggleSidebar();
 };
-(window as any).WA.pdfAnnotMode = (mode: string) => {
+const pdfAnnotMode = (mode: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.setAnnotMode === 'function') ed.setAnnotMode(mode);
 };
-(window as any).WA.pdfAnnotColor = (hex: string) => {
+const pdfAnnotColor = (hex: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.setAnnotColor === 'function') ed.setAnnotColor(hex);
 };
-(window as any).WA.pdfAnnotOpen = () => {
+const pdfAnnotOpen = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.annotOpen === 'function') ed.annotOpen();
 };
-(window as any).WA.pdfAnnotClose = () => {
+const pdfAnnotClose = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.annotClose === 'function') ed.annotClose();
 };
-(window as any).WA.pdfAnnotateSelection = (type: string) => {
+const pdfAnnotateSelection = (type: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.annotateSelection === 'function') ed.annotateSelection(type);
 };
-(window as any).WA.pdfSaveAnnotations = () => {
+const pdfSaveAnnotations = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.saveAnnotations === 'function') ed.saveAnnotations();
 };
-(window as any).WA.pdfAIAnnotate = () => {
+const pdfAIAnnotate = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.aiAnnotate === 'function') ed.aiAnnotate();
 };
-(window as any).WA.pdfLineWidth = (width: string | number) => {
+const pdfLineWidth = (width: string | number) => {
   const ed = _pdfActiveEditor();
   if (ed) ed._annotLineWidth = parseFloat(String(width)) || 2;
 };
-(window as any).WA.pdfRemoveWatermark = () => {
+const pdfRemoveWatermark = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.pdfRemoveWatermark === 'function') ed.pdfRemoveWatermark();
 };
-(window as any).WA.pdfWatermarkClose = () => {
+const pdfWatermarkClose = () => {
   const overlay = document.getElementById('wa-pdf-watermark-overlay');
   if (overlay) {
     overlay.style.display = 'none';
     overlay.classList.remove('open');
   }
 };
-(window as any).WA.pdfSearchOpen = () => {
+const pdfSearchOpen = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchOpen === 'function') ed.searchOpen();
 };
-(window as any).WA.pdfSearchClose = () => {
+const pdfSearchClose = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchClose === 'function') ed.searchClose();
 };
-(window as any).WA.pdfSearchInput = (value: string) => {
+const pdfSearchInput = (value: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchInput === 'function') ed.searchInput(value);
 };
-(window as any).WA.pdfSearchKeydown = (event: KeyboardEvent) => {
+const pdfSearchKeydown = (event: KeyboardEvent) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchKeydown === 'function') ed.searchKeydown(event);
 };
-(window as any).WA.pdfSearchNext = () => {
+const pdfSearchNext = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchNext === 'function') ed.searchNext();
 };
-(window as any).WA.pdfSearchPrev = () => {
+const pdfSearchPrev = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchPrev === 'function') ed.searchPrev();
 };
-(window as any).WA.pdfPageMgrOpen = () => {
+const pdfPageMgrOpen = () => {
   const ed = _pdfActiveEditor();
   if (!ed || !_pdfDocumentForEditor(ed)) {
     showToast('请先打开一个 PDF 文件', 'warning');
@@ -1958,11 +1970,11 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   mgr.style.display = 'flex';
   _pdfPageMgrBuild(ed);
 };
-(window as any).WA.pdfPageMgrClose = () => {
+const pdfPageMgrClose = () => {
   const mgr = document.getElementById('wa-pdf-pagemgr');
   if (mgr) mgr.style.display = 'none';
 };
-(window as any).WA.pdfPageMgrApply = async () => {
+const pdfPageMgrApply = async () => {
   if (!state.fileId) return;
   const pages = _pdfPageMgrCards('.wa-pmgr-card:not(.deleted)').map((card) => ({
     orig_page: parseInt(card.dataset.origPage || '0', 10),
@@ -1980,13 +1992,13 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
       throw new Error(error.error || response.statusText);
     }
     _downloadPdfBlob(await response.blob(), state.fileName || 'modified.pdf');
-    (window as any).WA.pdfPageMgrClose();
+    pdfPageMgrClose();
     showToast('页面更改已导出', 'success');
   } catch (error: any) {
     showToast('操作失败: ' + (error && error.message ? error.message : error), 'error');
   }
 };
-(window as any).WA.pdfPageMgrExport = async () => {
+const pdfPageMgrExport = async () => {
   if (!state.fileId) return;
   const pages = _pdfPageMgrCards('.wa-pmgr-card.selected:not(.deleted)').map((card) => ({
     orig_page: parseInt(card.dataset.origPage || '0', 10),
@@ -2014,7 +2026,7 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
     showToast('导出失败: ' + (error && error.message ? error.message : error), 'error');
   }
 };
-(window as any).WA._pdfPageMgrRotate = (card: HTMLElement, delta: number) => {
+const pdfPageMgrRotate = (card: HTMLElement, delta: number) => {
   if (!card) return;
   const current = parseInt(card.dataset.rotation || '0', 10);
   const next = ((current + delta) % 360 + 360) % 360;
@@ -2027,13 +2039,13 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   const canvas = card.querySelector('canvas') as HTMLElement | null;
   if (canvas) canvas.style.transform = `rotate(${next}deg)`;
 };
-(window as any).WA._pdfPageMgrDelete = (card: HTMLElement) => {
+const pdfPageMgrDelete = (card: HTMLElement) => {
   if (!card) return;
   card.classList.toggle('deleted');
   const label = card.querySelector('.wa-pmgr-label') as HTMLElement | null;
   if (label) label.textContent = card.classList.contains('deleted') ? '已删除' : `第 ${card.dataset.origPage} 页`;
 };
-(window as any).WA.pdfConvertMenu = (btn: HTMLElement) => {
+const pdfConvertMenu = (btn: HTMLElement) => {
   const menu = document.getElementById('wa-pdf-convert-menu');
   if (!menu) return;
   const visible = menu.style.display !== 'none';
@@ -2049,7 +2061,7 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
     document.addEventListener('mousedown', close);
   }
 };
-(window as any).WA.pdfConvert = async (targetFormat: string) => {
+const pdfConvert = async (targetFormat: string) => {
   const menu = document.getElementById('wa-pdf-convert-menu');
   if (menu) menu.style.display = 'none';
   if (!state.fileId) {
@@ -2078,7 +2090,7 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   }
 };
 
-(window as any).WA._pdfDragNote = function(event, popup) {
+function _pdfDragNote(event: MouseEvent, popup: HTMLElement): void {
   const startX = event.clientX, startY = event.clientY;
   const startLeft = parseFloat(popup.style.left), startTop = parseFloat(popup.style.top);
   const onMove = (e) => {
@@ -2091,4 +2103,35 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
-};
+}
+
+publishWorkspaceApi({
+  pdfZoom,
+  pdfSidebarTab,
+  pdfToggleSidebar,
+  pdfAnnotMode,
+  pdfAnnotColor,
+  pdfAnnotOpen,
+  pdfAnnotClose,
+  pdfAnnotateSelection,
+  pdfSaveAnnotations,
+  pdfAIAnnotate,
+  pdfLineWidth,
+  pdfRemoveWatermark,
+  pdfWatermarkClose,
+  pdfSearchOpen,
+  pdfSearchClose,
+  pdfSearchInput,
+  pdfSearchKeydown,
+  pdfSearchNext,
+  pdfSearchPrev,
+  pdfPageMgrOpen,
+  pdfPageMgrClose,
+  pdfPageMgrApply,
+  pdfPageMgrExport,
+  _pdfPageMgrRotate: pdfPageMgrRotate,
+  _pdfPageMgrDelete: pdfPageMgrDelete,
+  pdfConvertMenu,
+  pdfConvert,
+  _pdfDragNote,
+});

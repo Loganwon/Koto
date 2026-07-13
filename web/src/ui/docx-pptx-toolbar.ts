@@ -3,10 +3,15 @@
  */
 
 import { _getDocxSelectionPayload, _showTableTooltipNear } from './selection-toolbar';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
+// Existing toolbar helpers retain this short local name, but it is now the
+// canonical workspace API object rather than an ambient browser global.
+const WA = workspaceApi;
 
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
-declare let WA: any;
 declare let lastSelectionText: string;
 let _docxCpEl: HTMLElement | null = null;
 let _docxHbEl: HTMLElement | null = null;
@@ -72,7 +77,7 @@ function _hideReviewSelectionLauncher(): void {
 }
 
 function _updateSubjectBar(fileName: string, fileType: string): void {
-  const update = (window as any).WA?._updateSubjectBar
+  const update = workspaceApi._updateSubjectBar
     || (window as any)._updateSubjectBar;
   if (typeof update === 'function') update(fileName, fileType);
 }
@@ -525,7 +530,7 @@ export function docxColorPicker(type: string, triggerEl?: HTMLElement): void {
   palette.dataset.cpType = type;
   grid.innerHTML = _CP_COLORS.map((c: string) =>
     `<div title="${c}" style="width:18px;height:18px;border-radius:3px;background:${c};cursor:pointer;border:1px solid rgba(255,255,255,.12);box-sizing:border-box"` +
-    ` onmousedown="event.preventDefault()" onclick="WA._docxPickColor('${c}')"></div>`
+    ` data-wa-toolbar-color="docx" data-color="${c}"></div>`
   ).join('');
   if (triggerEl) {
     const r = triggerEl.getBoundingClientRect();
@@ -572,7 +577,7 @@ export function _docxPickColor(color: string, keepOpen?: boolean): void {
 
 export function docxHoverAI(action: string): void {
   _hideDocxHoverBar();
-  const selText = (window as any).WA._getDocxSelectionTextForAI ? (window as any).WA._getDocxSelectionTextForAI() : (window.getSelection()?.toString().trim() || '');
+  const selText = workspaceApi._getDocxSelectionTextForAI ? workspaceApi._getDocxSelectionTextForAI() : (window.getSelection()?.toString().trim() || '');
   if (selText) lastSelectionText = selText;
   if (!lastSelectionText) { showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info'); return; }
   WA.sendQuickAction(action);
@@ -976,7 +981,7 @@ export function pptxColorPicker(type: string, triggerEl?: HTMLElement): void {
   palette.dataset.cpType = type;
   grid.innerHTML = _CP_COLORS.map((c: string) =>
     `<div title="${c}" style="width:18px;height:18px;border-radius:3px;background:${c};cursor:pointer;border:1px solid rgba(255,255,255,.12);box-sizing:border-box"` +
-    ` onmousedown="event.preventDefault()" onclick="WA._pptxPickColor('${c}')"></div>`
+    ` data-wa-toolbar-color="pptx" data-color="${c}"></div>`
   ).join('');
   if (triggerEl) {
     const r = triggerEl.getBoundingClientRect();
@@ -1125,7 +1130,7 @@ export function _sendImageToAI(action: string, imgSrc: string): void {
   const label = action === 'describe' ? '\u8bf7\u63cf\u8ff0\u8fd9\u5f20\u56fe\u7247\u7684\u5185\u5bb9' : '\u8bf7\u4e3a\u8fd9\u5f20\u56fe\u7247\u751f\u6210\u66ff\u6362\u65b9\u6848';
   aiInput.value = label;
   aiInput.focus();
-  (window as any).WA._pendingImageSrc = imgSrc;
+  workspaceApi._pendingImageSrc = imgSrc;
   WA.sendMessage();
 }
 
@@ -1182,65 +1187,46 @@ export function pptxDownload(): void {
   }
 }
 
-// ── Backward compat ──
+let toolbarColorDelegationInstalled = false;
+
+function _installToolbarColorDelegation(): void {
+  if (toolbarColorDelegationInstalled) return;
+  toolbarColorDelegationInstalled = true;
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('[data-wa-toolbar-color]')) event.preventDefault();
+  }, true);
+  document.addEventListener('click', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const swatch = target?.closest<HTMLElement>('[data-wa-toolbar-color]');
+    if (!swatch) return;
+    const color = String(swatch.dataset.color || '').trim();
+    if (!color) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (swatch.dataset.waToolbarColor === 'docx') _docxPickColor(color);
+    else if (swatch.dataset.waToolbarColor === 'pptx') _pptxPickColor(color);
+  }, true);
+}
+
+_installToolbarColorDelegation();
+
+publishWorkspaceApi({
+  docxHoverFmt, docxInsertLink, docxHoverFontFamily, docxHoverFontSize,
+  docxHoverAI, docxColorPicker, _docxPickColor, closeDocxHoverBar,
+  pptxShapeFill, pptxShapeBorder, pptxBorderWidth, pptxDupSlide, pptxStepFont,
+  pptxClearFormat, pptxAddSlide, pptxDelSlide, pptxInsertShape, pptxSetShapeSize,
+  pptxSetShapePos, pptxSetShapeRot, pptxHighlightColor, pptxApplyQuickLayout,
+  pptxChangeBgImage, pptxBgColor, pptxSetBgImage, pptxRemoveBg, pptxFmt,
+  pptxAlign, pptxFontSize, pptxFontName, pptxFontColor, pptxColorPicker,
+  _pptxPickColor, pptxHoverAI, pptxIndent, pptxLineSpacing, pptxToggleBullet,
+  pptxToggleNumbered, pptxVertAlign, pptxOpacity, pptxZOrder, pptxZoom, pptxNav,
+  docxZoom, pptxInsertImageClick, pptxInsertImageFile, pptxDelShape, pptxSwitchTab,
+  pptxInsertMode, pptxSave, pptxUndo, pptxRedo, pptxDownload, _sendImageToAI,
+  _getDocxSelBounds, _getDocxNativeSelectionBounds,
+});
+
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.docxHoverFmt = docxHoverFmt;
-  (window as any).WA.docxInsertLink = docxInsertLink;
-  (window as any).WA.docxHoverFontFamily = docxHoverFontFamily;
-  (window as any).WA.docxHoverFontSize = docxHoverFontSize;
-  (window as any).WA.docxHoverAI = docxHoverAI;
-  (window as any).WA.docxColorPicker = docxColorPicker;
-  (window as any).WA._docxPickColor = _docxPickColor;
-  (window as any).WA.closeDocxHoverBar = closeDocxHoverBar;
-  (window as any).WA.pptxShapeFill = pptxShapeFill;
-  (window as any).WA.pptxShapeBorder = pptxShapeBorder;
-  (window as any).WA.pptxBorderWidth = pptxBorderWidth;
-  (window as any).WA.pptxDupSlide = pptxDupSlide;
-  (window as any).WA.pptxStepFont = pptxStepFont;
-  (window as any).WA.pptxClearFormat = pptxClearFormat;
-  (window as any).WA.pptxAddSlide = pptxAddSlide;
-  (window as any).WA.pptxDelSlide = pptxDelSlide;
-  (window as any).WA.pptxInsertShape = pptxInsertShape;
-  (window as any).WA.pptxSetShapeSize = pptxSetShapeSize;
-  (window as any).WA.pptxSetShapePos = pptxSetShapePos;
-  (window as any).WA.pptxSetShapeRot = pptxSetShapeRot;
-  (window as any).WA.pptxHighlightColor = pptxHighlightColor;
-  (window as any).WA.pptxApplyQuickLayout = pptxApplyQuickLayout;
-  (window as any).WA.pptxChangeBgImage = pptxChangeBgImage;
-  (window as any).WA.pptxBgColor = pptxBgColor;
-  (window as any).WA.pptxSetBgImage = pptxSetBgImage;
-  (window as any).WA.pptxRemoveBg = pptxRemoveBg;
-  (window as any).WA.pptxFmt = pptxFmt;
-  (window as any).WA.pptxAlign = pptxAlign;
-  (window as any).WA.pptxFontSize = pptxFontSize;
-  (window as any).WA.pptxFontName = pptxFontName;
-  (window as any).WA.pptxFontColor = pptxFontColor;
-  (window as any).WA.pptxColorPicker = pptxColorPicker;
-  (window as any).WA._pptxPickColor = _pptxPickColor;
-  (window as any).WA.pptxHoverAI = pptxHoverAI;
-  (window as any).WA.pptxIndent = pptxIndent;
-  (window as any).WA.pptxLineSpacing = pptxLineSpacing;
-  (window as any).WA.pptxToggleBullet = pptxToggleBullet;
-  (window as any).WA.pptxToggleNumbered = pptxToggleNumbered;
-  (window as any).WA.pptxVertAlign = pptxVertAlign;
-  (window as any).WA.pptxOpacity = pptxOpacity;
-  (window as any).WA.pptxZOrder = pptxZOrder;
-  (window as any).WA.pptxZoom = pptxZoom;
-  (window as any).WA.pptxNav = pptxNav;
-  (window as any).WA.docxZoom = docxZoom;
-  (window as any).WA.pptxInsertImageClick = pptxInsertImageClick;
-  (window as any).WA.pptxInsertImageFile = pptxInsertImageFile;
-  (window as any).WA.pptxDelShape = pptxDelShape;
-  (window as any).WA.pptxSwitchTab = pptxSwitchTab;
-  (window as any).WA.pptxInsertMode = pptxInsertMode;
-  (window as any).WA.pptxSave = pptxSave;
-  (window as any).WA.pptxUndo = pptxUndo;
-  (window as any).WA.pptxRedo = pptxRedo;
-  (window as any).WA.pptxDownload = pptxDownload;
-  (window as any).WA._sendImageToAI = _sendImageToAI;
-  (window as any).WA._getDocxSelBounds = _getDocxSelBounds;
-  (window as any).WA._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
   (window as any)._getDocxSelBounds = _getDocxSelBounds;
   (window as any)._getDocxNativeSelectionBounds = _getDocxNativeSelectionBounds;
 (window as any)._getDocxHdrFtrSelectionInfo = _buildHdrFtrSelectionInfo;

@@ -49,6 +49,7 @@ from web.app_blueprints import register_blueprints_deferred
 from web.app_factory import create_flask_app
 from web.app_http import configure_http_wiring
 from web.app_observability import configure_observability
+from web.app_proxy import configure_proxy, extract_system_proxy_candidates
 from web.app_realtime import init_notification_socket, init_socketio
 from web.app_runtime import start_background_runtime
 from web.app_storage import resolve_app_storage_paths
@@ -131,9 +132,7 @@ else:
     SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
     PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 
-from app.core.llm import provider_compat as genai
 from app.core.llm.deepseek_config import get_deepseek_api_key, load_deepseek_config_env
-from app.core.llm.provider_compat import types
 
 _loaded_deepseek_config = load_deepseek_config_env(override=False)
 
@@ -194,122 +193,21 @@ PROXY_OPTIONS = [
 
 def _extract_system_proxy_candidates() -> list:
     """Collect proxy candidates from system settings (Windows) and env."""
-    candidates = []
-
-    # 0) User-configured manual proxy (highest priority after FORCE_PROXY)
-    try:
-        _us = settings_manager.get("proxy", "enabled")
-        _um = settings_manager.get("proxy", "manual_proxy") or ""
-        if _us is not False and _um.strip():
-            candidates.append(_normalize_proxy_url(_um.strip()))
-    except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-
-    # 1) Environment variables first (if user/system already configured)
-    env_proxy = os.environ.get("HTTPS_PROXY") or os.environ.get("https_proxy")
-    if env_proxy:
-        candidates.append(_normalize_proxy_url(env_proxy))
-
-    # 2) Windows Internet Settings proxy (for "Use a proxy server")
-    if sys.platform.startswith("win"):
-        try:
-            import winreg
-
-            key_path = r"Software\Microsoft\Windows\CurrentVersion\Internet Settings"
-            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path) as key:
-                proxy_enabled = winreg.QueryValueEx(key, "ProxyEnable")[0]
-                if proxy_enabled:
-                    proxy_server = str(
-                        winreg.QueryValueEx(key, "ProxyServer")[0]
-                    ).strip()
-                    if proxy_server:
-                        # Formats:
-                        #   127.0.0.1:7890
-                        #   http=127.0.0.1:7890;https=127.0.0.1:7890
-                        if "=" in proxy_server and ";" in proxy_server:
-                            pairs = [
-                                p.strip() for p in proxy_server.split(";") if p.strip()
-                            ]
-                            parsed_map = {}
-                            for pair in pairs:
-                                if "=" in pair:
-                                    k, v = pair.split("=", 1)
-                                    parsed_map[k.strip().lower()] = v.strip()
-                            for proto in ["https", "http", "socks", "socks5"]:
-                                if parsed_map.get(proto):
-                                    candidates.append(
-                                        _normalize_proxy_url(parsed_map.get(proto))
-                                    )
-                        else:
-                            candidates.append(_normalize_proxy_url(proxy_server))
-        except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-
-    # 3) Built-in localhost fallback options
-    candidates.extend(PROXY_OPTIONS)
-
-    # De-duplicate while preserving order
-    deduped = []
-    seen = set()
-    for item in candidates:
-        if not item:
-            continue
-        key = item.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        deduped.append(item)
-    return deduped
+    return extract_system_proxy_candidates(
+        settings_manager=settings_manager,
+        normalize_proxy_url=_normalize_proxy_url,
+        proxy_options=PROXY_OPTIONS,
+    )
 
 
 def setup_proxy():
-    # 优先使用强制代理（不需要测试）
-    if FORCE_PROXY and FORCE_PROXY.lower() not in ("auto", "system"):
-        os.environ["HTTPS_PROXY"] = FORCE_PROXY
-        os.environ["HTTP_PROXY"] = FORCE_PROXY
-        _app_logger.info(f"🔧 使用强制代理: {FORCE_PROXY}")
-        return FORCE_PROXY
-
-    # 用户明确禁用代理时，清除环境变量并退出
-    try:
-        if settings_manager.get("proxy", "enabled") is False:
-            os.environ.pop("HTTPS_PROXY", None)
-            os.environ.pop("HTTP_PROXY", None)
-            _app_logger.info("🔧 用户已禁用代理")
-            return None
-    except Exception:
-            import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-
-    # 自动匹配系统代理与本地常见端口
-    import socket
-    from urllib.parse import urlparse
-
-    proxy_candidates = _extract_system_proxy_candidates()
-
-    for proxy in proxy_candidates:
-        try:
-            # 从 URL 提取 host:port
-            parsed = urlparse(proxy)
-            host = parsed.hostname
-            port = parsed.port
-            if not host or not port:
-                continue
-
-            # 快速端口检测（0.1秒超时）
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.1)
-            result = sock.connect_ex((host, port))
-            sock.close()
-
-            if result == 0:
-                os.environ["HTTPS_PROXY"] = proxy
-                os.environ["HTTP_PROXY"] = proxy
-                _app_logger.info(f"✅ 自动匹配系统代理: {proxy}")
-                return proxy
-        except Exception:
-            continue
-
-    return None
+    return configure_proxy(
+        force_proxy=FORCE_PROXY,
+        settings_manager=settings_manager,
+        normalize_proxy_url=_normalize_proxy_url,
+        proxy_options=PROXY_OPTIONS,
+        logger=_app_logger,
+    )
 
 
 # 延迟代理检测到首次需要时（启动加速）
@@ -418,13 +316,6 @@ def _is_interactions_only(model_id: str) -> bool:
     except NameError:
         iom = _DEFAULT_INTERACTIONS_ONLY_MODELS
     return _is_interactions_only_helper(model_id, iom)
-
-
-def _is_interactions_agent(model_id: str) -> bool:
-    """True for genuine agent models that require agent=; False for model= variants.
-    deep-research-* models use agent=; gemini-3-*-preview use model=.
-    """
-    return str(model_id or "").startswith("deep-research")
 
 
 _logger_tracked = logging.getLogger(__name__)
@@ -602,340 +493,11 @@ class _ClientProxy:
 
 
 client = _ClientProxy()
+
+
 def create_research_client():
+    """Compatibility entrypoint that deliberately blocks archived research APIs."""
     raise RuntimeError("Interactions API 已归档，请使用当前配置的 DeepSeek 研究模型。")
-def _create_research_client_legacy_unreachable():
-    import httpx
-    from google.genai._api_client import HttpOptions as _HttpOptions
-
-    proxy = get_detected_proxy()
-    # ????????????????30????5??
-    timeout_config = httpx.Timeout(300.0, connect=30.0)
-
-    # ???? - ????????????? create_client?
-    if proxy:
-        os.environ["HTTP_PROXY"] = proxy
-        os.environ["HTTPS_PROXY"] = proxy
-
-    # ??? httpx ??????????????? env vars ???
-    http_client = httpx.Client(timeout=timeout_config, verify=True)
-
-    opts_kwargs = dict(
-        api_version="v1beta",
-        httpx_client=http_client,
-    )
-    if GEMINI_API_BASE:
-        opts_kwargs["base_url"] = GEMINI_API_BASE
-
-    return genai.Client(api_key=API_KEY, http_options=_HttpOptions(**opts_kwargs))
-
-
-def _poll_interaction(
-    ia_client,
-    interaction_id: str,
-    *,
-    timeout: float = 900.0,
-    initial_sleep: float = 2.0,
-    backoff_multiplier: float = 1.5,
-    max_sleep: float = 30.0,
-    label: str = "",
-) -> object:
-    """
-    ??? Interactions API ????
-
-    ?????? + ?? + ????????????
-      - every successful poll: sleep *= backoff_multiplier??? max_sleep?
-      - ?25% ?????????????
-      - ????????????? TimeoutError
-
-    ????
-      ? RUNNING   (active / running / queued / ?)  ?  ????
-      ? COMPLETED (completed)                       ?  ???? interaction ??
-      ? FAILED    (failed / cancelled / error)      ?  ?? RuntimeError
-
-    Args:
-        ia_client:          ????? Gemini client?? .interactions ???
-        interaction_id:     rc.interactions.create() ??? job ID
-        timeout:            ????????? 15 ???
-        initial_sleep:      ?????????
-        backoff_multiplier: ??????????????
-        max_sleep:          ?????????
-        label:              ???????????????
-
-    Returns:
-        status == "completed" ? interaction ??
-
-    Raises:
-        RuntimeError: interaction_id ??
-        TimeoutError: ?? timeout ???????????
-        RuntimeError: job ?? failed / cancelled / error ??
-    """
-    import random as _random
-
-    if not interaction_id:
-        raise RuntimeError(f"[{label or 'poll'}] interaction_id ???????")
-
-    _log = logging.getLogger(__name__)
-    tag = f"[Interactions{':' + label if label else ''}]"
-
-    start = time.monotonic()
-    sleep_interval = initial_sleep
-    last_status = ""
-    poll_count = 0
-
-    _log.info("%s ? job=%s  ???? (timeout=%.0fs)", tag, interaction_id, timeout)
-
-    while True:
-        elapsed = time.monotonic() - start
-
-        # ?? ???? ??????????????????????????????????????????????????????????
-        if elapsed >= timeout:
-            _log.warning(
-                "%s ? job=%s  ???? (%.0fs elapsed)", tag, interaction_id, elapsed
-            )
-            try:
-                ia_client.interactions.cancel(interaction_id)
-                _log.info("%s ?? job=%s  ?????", tag, interaction_id)
-            except Exception as _ce:
-                _log.debug("%s ??????: %s", tag, _ce)
-            raise TimeoutError(
-                f"Interactions API ?? ({timeout:.0f}s) job={interaction_id}"
-            )
-
-        # ?? ??????????????????????????????????????????
-        try:
-            interaction = ia_client.interactions.get(interaction_id)
-        except Exception as _poll_err:
-            _log.warning(
-                "%s job=%s  ?????? (#%d): %s",
-                tag,
-                interaction_id,
-                poll_count,
-                _poll_err,
-            )
-            time.sleep(min(sleep_interval, 10.0))
-            continue
-
-        status = str(getattr(interaction, "status", "") or "").lower().strip()
-        poll_count += 1
-
-        # ?? ?????????????????? ?????????????????????????????
-        if status != last_status:
-            msg = _INTERACTION_STATUS_MSGS.get(status, f"??: {status!r}")
-            _log.info(
-                "%s ?? job=%s  [poll#%d | %.0fs] %s",
-                tag,
-                interaction_id,
-                poll_count,
-                elapsed,
-                msg,
-            )
-            last_status = status
-
-        # ?? ?????? ???????????????????????????????????????????????????????
-        if status in _INTERACTION_TERMINAL_STATES:
-            if status in _INTERACTION_SUCCESS_STATES:
-                _log.info(
-                    "%s ? job=%s  ?? (total=%.1fs, polls=%d)",
-                    tag,
-                    interaction_id,
-                    elapsed,
-                    poll_count,
-                )
-                return interaction
-            # failed / cancelled / error
-            err_detail = getattr(interaction, "error", None) or status
-            _log.error(
-                "%s ? job=%s  ?? status=%s  detail=%s",
-                tag,
-                interaction_id,
-                status,
-                err_detail,
-            )
-            raise RuntimeError(
-                f"Interactions API job ?? (status={status}, detail={err_detail})"
-            )
-
-        # ?? ?????????????? + ?25% ???? ?????????????????????
-        jitter = sleep_interval * 0.25 * (_random.random() * 2 - 1)
-        actual_sleep = max(1.0, min(sleep_interval + jitter, max_sleep))
-        remaining = timeout - elapsed
-        actual_sleep = min(actual_sleep, max(0.5, remaining - 0.1))  # ???????
-
-        _log.debug(
-            "%s job=%s  ?? %.1fs ??????", tag, interaction_id, actual_sleep
-        )
-        time.sleep(actual_sleep)
-
-        # ??????????? max_sleep ??
-        sleep_interval = min(sleep_interval * backoff_multiplier, max_sleep)
-
-
-def _extract_interaction_text_global(interaction) -> str:
-    """
-    ? interaction ???????????
-    ???? SDK ?????outputs ???text ???parts?Pydantic model_dump?dict ??
-    """
-
-    def _walk(obj) -> list:
-        if obj is None:
-            return []
-        if isinstance(obj, str):
-            s = obj.strip()
-            return [s] if s else []
-        if isinstance(obj, dict):
-            results = []
-            for key in ("output_text", "text", "content"):
-                val = obj.get(key)
-                if isinstance(val, str) and val.strip():
-                    results.append(val.strip())
-                    return results  # ???????????
-            for val in obj.values():
-                results.extend(_walk(val))
-            return results
-        if isinstance(obj, (list, tuple)):
-            results = []
-            for item in obj:
-                results.extend(_walk(item))
-            return results
-        # Pydantic / SDK ?????? model_dump()
-        if hasattr(obj, "model_dump"):
-            try:
-                return _walk(obj.model_dump())
-            except Exception:
-                import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
-        if hasattr(obj, "text") and obj.text:
-            return [str(obj.text).strip()]
-        if hasattr(obj, "parts"):
-            results = []
-            for p in obj.parts or []:
-                results.extend(_walk(p))
-            return results
-        if hasattr(obj, "outputs"):
-            results = []
-            for o in obj.outputs or []:
-                results.extend(_walk(o))
-            return results
-        return []
-
-    parts = _walk(getattr(interaction, "outputs", None))
-    if not parts:
-        parts = _walk(interaction)
-
-    # ?????????
-    seen: set = set()
-    deduped = []
-    for p in parts:
-        if p not in seen:
-            deduped.append(p)
-            seen.add(p)
-    return "\n".join(deduped).strip()
-
-
-def _call_interactions_api_sync(
-    model_id: str,
-    user_prompt: str,
-    sys_instruction: str = None,
-    timeout: float = 900.0,
-) -> str:
-    """
-    ?? Interactions API ?? gemini-3-*-preview / deep-research ??????
-    ??????? client.models.generate_content()?????????
-
-    ?????
-      1. ?????? ? ??? Ollama??? Interactions API
-      2. ????     ? rc.interactions.create() ???? job??? interaction_id
-      3.              ? _poll_interaction() ?????????? timeout ??
-      4.              ? ?????????
-
-    Args:
-        model_id:        ???? ID
-        user_prompt:     ??????????
-        sys_instruction: ????????
-        timeout:         ????????? 15 ???
-
-    Returns:
-        ??????
-
-    Raises:
-        TimeoutError:   ???????????
-        RuntimeError:   job ?????????
-    """
-    _log = logging.getLogger(__name__)
-
-    # ?? ???????? Ollama ??????? Interactions API ??????????????
-    model_mode, _ = _get_local_model_config()
-    if model_mode == "local":
-        try:
-            full_prompt = user_prompt
-            if sys_instruction:
-                full_prompt = (
-                    f"[????]\n{sys_instruction}\n\n[????]\n{user_prompt}"
-                )
-            resp = get_client().models.generate_content(
-                model=model_id,
-                contents=full_prompt,
-            )
-            return getattr(resp, "text", "") or ""
-        except Exception as _e:
-            raise RuntimeError(f"???? Interactions ????: {_e}") from _e
-
-    # ?? ??????? Interactions ?? ?????????????????????????????????????
-    full_input = user_prompt
-    if sys_instruction:
-        full_input = f"[????]\n{sys_instruction}\n\n[????]\n{user_prompt}"
-
-    _rc = create_research_client()
-    # Interactions API ?????????
-    #   agent=  ? deep-research ???? Agent
-    #   model=  ? gemini-3-pro/flash-preview ??????? agent= ?? 400?
-    _create_kwargs: dict = {
-        "input": full_input[:80000],
-        "background": True,
-        "stream": False,
-    }
-    if _is_interactions_agent(model_id):
-        _create_kwargs["agent"] = model_id
-    else:
-        _create_kwargs["model"] = model_id
-
-    interaction = _rc.interactions.create(**_create_kwargs)
-
-    interaction_id = getattr(interaction, "id", None)
-    init_status = str(getattr(interaction, "status", "") or "").lower()
-
-    # ??????????? create() ???????
-    if init_status in _INTERACTION_SUCCESS_STATES:
-        _log.info(
-            "[Interactions] ? job=%s ???? (status=%s)", interaction_id, init_status
-        )
-        return _extract_interaction_text_global(interaction)
-
-    if init_status in _INTERACTION_FAIL_STATES:
-        err = getattr(interaction, "error", init_status)
-        raise RuntimeError(
-            f"Interactions API job ???? (status={init_status}): {err}"
-        )
-
-    if not interaction_id:
-        raise RuntimeError(
-            f"Interactions API ?????? interaction_id (model={model_id})"
-        )
-
-    # ???????????????????????
-    final_interaction = _poll_interaction(
-        _rc,
-        interaction_id,
-        timeout=timeout,
-        initial_sleep=2.0,
-        backoff_multiplier=1.5,
-        max_sleep=30.0,
-        label=model_id,
-    )
-
-    text = _extract_interaction_text_global(final_interaction)
-    _log.info("[Interactions] ?? ???? %d ?? (model=%s)", len(text), model_id)
-    return text
 
 
 from web.utils.threading_utils import run_with_heartbeat, run_with_timeout, stream_with_keepalive
@@ -1055,28 +617,6 @@ MODEL_MAP = {
 _INTERACTIONS_ONLY_MODELS = {
     mid for mid in _DEFAULT_INTERACTIONS_ONLY_MODELS
 }
-# ?? Interactions API ????? background=True
-_NO_BACKGROUND_MODELS: set = set()
-# ? Interactions API ???????????
-_INTERACTIONS_FALLBACK_MODEL = "deepseek-chat"
-
-# ?? Interactions API ?????? ????????????????????????????????????????????
-_INTERACTION_TERMINAL_STATES = frozenset({"completed", "failed", "cancelled", "error"})
-_INTERACTION_SUCCESS_STATES = frozenset({"completed"})
-_INTERACTION_FAIL_STATES = frozenset({"failed", "cancelled", "error"})
-
-# ???? ? ????????????????????????
-_INTERACTION_STATUS_MSGS: dict = {
-    "active": "Agent ????",
-    "running": "Agent ????",
-    "queued": "???????????",
-    "in_progress": "Agent ????",
-    "thinking": "Agent ??????",
-    "searching": "Agent ????????",
-    "reading": "Agent ???????",
-    "generating": "Agent ???????",
-}
-
 # ????????????????
 _model_manager = None
 
@@ -2045,17 +1585,22 @@ def chat_stream():
                 "location is not supported" in error_str.lower()
                 or "failed_precondition" in error_str.lower()
             ):
-                error_response = "? ????\n\n????????? Gemini API?\n\n?? ????:\n1. ? `config/gemini_config.env` ?????? `GEMINI_API_BASE`\n2. ??????????\n3. ????? Ollama ??????"
+                error_response = (
+                    "⚠️ 云端模型当前不可用\n\n"
+                    "请检查网络或当前云端模型配置。\n\n"
+                    "可尝试：\n"
+                    "1. 在设置中确认 DeepSeek API 密钥与模型配置\n"
+                    "2. 稍后重试，或切换到其他可用云端模型\n"
+                    "3. 使用本地 Ollama 模型继续任务"
+                )
             elif "API key not valid" in error_str or (
                 "INVALID_ARGUMENT" in error_str and "api key" in error_str.lower()
             ):
                 error_response = (
-                    "? **API ????**\n\n"
-                    "????? ?? API ???\n"
-                    "1. ?? [aistudio.google.com/apikey](https://aistudio.google.com/apikey) ??????\n"
-                    "2. ? Koto ?????? API ????? ? API ???\n"
-                    "3. ?????? Google ????? Generative Language API\n\n"
-                    f"????: `{error_str[:150]}`"
+                    "⚠️ **云端 API 密钥无效**\n\n"
+                    "请在 Koto 设置中检查 DeepSeek API 密钥是否正确且仍然有效。\n"
+                    "更新后重试；也可以切换到本地 Ollama 模型。\n\n"
+                    f"错误详情：`{error_str[:150]}`"
                 )
             elif (
                 "server disconnected" in error_str.lower()
@@ -2074,13 +1619,9 @@ def chat_stream():
                 except Exception:
                     import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
                 error_response = (
-                    "? **???????**\n\n"
-                    "? Gemini API ???????????????????\n\n"
-                    "?? ???\n"
-                    "1. ???????????\n"
-                    "2. ???????????\n"
-                    "3. ????????????????\n"
-                    "4. ????????????????"
+                    "⚠️ **云端连接中断**\n\n"
+                    "已暂时避开当前不可用模型。请检查网络后重试，"
+                    "或在设置中切换到其他可用模型/本地 Ollama。"
                 )
             elif (
                 "resource_exhausted" in error_str.lower()
@@ -2089,12 +1630,8 @@ def chat_stream():
                 or "429" in error_str
             ):
                 error_response = (
-                    "? **API ????**\n\n"
-                    "?? API ???????????????\n\n"
-                    "?? ???\n"
-                    "1. ?? 1-2 ?????\n"
-                    "2. ????????? API ??\n"
-                    "3. ????? Google AI Studio ??"
+                    "⚠️ **云端 API 请求过于频繁**\n\n"
+                    "请稍候 1–2 分钟后重试，或在设置中切换到其他可用模型。"
                 )
             elif (
                 "unavailable" in error_str.lower()
@@ -2102,21 +1639,17 @@ def chat_stream():
                 or "service unavailable" in error_str.lower()
             ):
                 error_response = (
-                    "? **Gemini ???????**\n\n"
-                    "Gemini API ??????????????????\n\n"
-                    "?? ?????????????? [status.google.com](https://status.google.com) ??????"
+                    "⚠️ **云端模型服务暂不可用**\n\n"
+                    "请稍后重试，或切换到其他已配置的云端模型/本地 Ollama。"
                 )
             elif (
                 "deadline_exceeded" in error_str.lower()
                 or "timed out" in error_str.lower()
             ):
                 error_response = (
-                    "? **????**\n\n"
-                    "???????????????\n\n"
-                    "?? ???\n"
-                    "1. ??????????????\n"
-                    "2. ???????????? gemini-2.5-flash?\n"
-                    "3. ????????"
+                    "⚠️ **请求超时**\n\n"
+                    "请检查网络后重试；若任务较复杂，可缩小任务范围，"
+                    "或切换到响应更快的可用模型。"
                 )
             else:
                 error_response = f"? ????: {error_str[:200]}"

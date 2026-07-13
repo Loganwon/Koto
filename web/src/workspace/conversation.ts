@@ -6,6 +6,9 @@
 import { fileTaskStatusLabel, isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
 import { taskReportStageTitle } from './task-report-layout';
 import { _escHtml as escHtml } from './infrastructure';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 interface WATurn {
   id: string;
@@ -186,9 +189,8 @@ function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): vo
   applyTaskHistoryTitle(element, taskHistoryTitle(turn));
   const memorySummary = String(turn.memory_summary || turn.model_context_text || '').trim();
   if (memorySummary) element.dataset.taskMemorySummary = memorySummary;
-  const WA = (window as any).WA;
-  if (WA && typeof WA.syncTaskInteractionSummary === 'function') {
-    try { WA.syncTaskInteractionSummary(element); } catch (_) { /* noop */ }
+  if (typeof workspaceApi.syncTaskInteractionSummary === 'function') {
+    try { workspaceApi.syncTaskInteractionSummary(element); } catch (_) { /* noop */ }
   }
 }
 
@@ -504,8 +506,8 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
     const host = msgs || getMessagesElement();
     if (!host || !turn) return null;
     const shouldRenderStructuredTaskReport = !!turn.test_structure && taskTurnIsTerminal(turn);
-    if (!shouldRenderStructuredTaskReport && turn.task_card_snapshot && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function') {
-      const restored = (window as any).WA.restoreTaskRunCard(turn.task_card_snapshot, historyTaskSnapshotOptions());
+    if (!shouldRenderStructuredTaskReport && turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function') {
+      const restored = workspaceApi.restoreTaskRunCard(turn.task_card_snapshot, historyTaskSnapshotOptions());
       if (restored) {
         restored.dataset.turnId = turn.id;
         restored.dataset.rawText = turn.content;
@@ -704,8 +706,4 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
   };
 }
 
-// Backward compat: attach to window.WA
-if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.createWorkspaceAiConversation = createWorkspaceAiConversation;
-}
+publishWorkspaceApi({ createWorkspaceAiConversation });

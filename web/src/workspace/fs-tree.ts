@@ -5,6 +5,9 @@
 
 import { _fileIcon, _escHtml, showToast, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG, _FOLDER_SVG } from './infrastructure';
 import { state, _forgetRecentPath, _trackUserOpen, loadRecentFiles, BrowserNode } from './state';
+import { getWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 
 export interface SortConfig {
@@ -55,8 +58,8 @@ function _formatSize(bytes: number): string {
 // ── CSRF Fetch ──
 
 function _csrfFetch(url: string, options: any = {}): Promise<Response> {
-  if (typeof (window as any).WA?._csrfFetch === 'function') {
-    return (window as any).WA._csrfFetch(url, options);
+  if (typeof workspaceApi._csrfFetch === 'function') {
+    return workspaceApi._csrfFetch(url, options);
   }
   return fetch(url, options);
 }
@@ -157,23 +160,22 @@ function _entrySearchCategory(entry: Partial<BrowserNode | SearchResult>): strin
 }
 
 function _fileDragAttrs(): string {
-  return 'draggable="true" onpointerdown="WA._browserFileRowPointerDown(event,this)" ondragstart="WA._browserFileDragStart(event,this)" ondragend="WA._browserFileDragEnd(event,this)"';
+  return 'draggable="true" data-wa-file-draggable="true"';
 }
 
 function _fileOpenHitDragAttrs(): string {
-  return 'draggable="true" onpointerdown="WA._browserFileRowPointerDown(event,this.closest(\'.wa-file-item\'))" ondragstart="WA._browserFileDragStart(event,this.closest(\'.wa-file-item\'))" ondragend="WA._browserFileDragEnd(event,this.closest(\'.wa-file-item\'))"';
+  return 'data-wa-file-action="open"';
 }
 
 function _fileActionButtons(supported: boolean): string {
-  const isolatedPressAttrs = 'draggable="false" onpointerdown="event.stopPropagation()" onmousedown="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()"';
-  const sendPressAttrs = 'draggable="false" onpointerdown="window.WA._sendBrowserFileButton(event,this)" onmousedown="event.stopPropagation()" ondragstart="event.preventDefault();event.stopPropagation()"';
+  const isolatedPressAttrs = 'draggable="false"';
   const sendButton = supported
-    ? `<button type="button" class="wa-file-send-ai" data-wa-file-action="send-ai" ${sendPressAttrs} onclick="window.WA._sendBrowserFileButton(event,this)" title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>`
+    ? `<button type="button" class="wa-file-send-ai" data-wa-file-action="send-ai" ${isolatedPressAttrs} title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>`
     : '';
   return (
     `<div class="wa-file-actions">` +
     sendButton +
-    `<button type="button" class="wa-file-more" ${isolatedPressAttrs} onclick="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button>` +
+    `<button type="button" class="wa-file-more" data-wa-file-action="more" ${isolatedPressAttrs} title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button>` +
     `</div>`
   );
 }
@@ -191,7 +193,7 @@ function _browserFileDragStart(event: DragEvent, el: HTMLElement): void {
 async function _attachBrowserFileToAI(path: string, source: string): Promise<void> {
   const normalized = String(path || '').trim();
   if (!normalized) return;
-  const attachFilesToTask = (window as any).WA && (window as any).WA.attachFilesToTask;
+  const attachFilesToTask = workspaceApi.attachFilesToTask;
   if (typeof attachFilesToTask !== 'function') {
     showToast('AI 助手未就绪', 'error');
     return;
@@ -240,11 +242,98 @@ let _browserFileActionDelegationInstalled = false;
 function _installBrowserFileActionDelegation(): void {
   if (_browserFileActionDelegationInstalled) return;
   _browserFileActionDelegationInstalled = true;
+  document.addEventListener('pointerdown', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item') as HTMLElement | null : null;
+    if (!row) return;
+    if (target?.closest('[data-wa-file-action], .wa-file-check')) {
+      event.stopPropagation();
+      return;
+    }
+    if (row.classList.contains('file') && typeof workspaceApi._browserFileRowPointerDown === 'function') {
+      workspaceApi._browserFileRowPointerDown(event, row);
+    }
+  }, true);
+  document.addEventListener('mousedown', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item.file') as HTMLElement | null : null;
+    if (!row || target?.closest('[data-wa-file-action], .wa-file-check')) return;
+    if (typeof workspaceApi._browserFileRowMouseDown === 'function') {
+      workspaceApi._browserFileRowMouseDown(event, row);
+    }
+  }, true);
+  document.addEventListener('dragstart', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item.file') as HTMLElement | null : null;
+    if (row) _browserFileDragStart(event, row);
+  }, true);
+  document.addEventListener('dragend', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item.file') as HTMLElement | null : null;
+    if (row) _browserFileDragEnd(event, row);
+  }, true);
+  document.addEventListener('contextmenu', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item') as HTMLElement | null : null;
+    if (!row || typeof workspaceApi._showBrowserCtx !== 'function') return;
+    event.preventDefault();
+    event.stopPropagation();
+    workspaceApi._showBrowserCtx(event, row);
+  }, true);
+  document.addEventListener('dragover', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item.folder') as HTMLElement | null : null;
+    if (!row) return;
+    event.preventDefault();
+    event.stopPropagation();
+    row.classList.add('wa-drop-target');
+  }, true);
+  document.addEventListener('dragleave', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    target?.closest('.wa-file-item.folder')?.classList.remove('wa-drop-target');
+  }, true);
+  document.addEventListener('drop', (event) => {
+    const target = event.target instanceof Element ? event.target : null;
+    const row = target ? target.closest('.wa-file-item.folder') as HTMLElement | null : null;
+    if (!row || typeof workspaceApi._dropOntoFolder !== 'function') return;
+    event.preventDefault();
+    event.stopPropagation();
+    row.classList.remove('wa-drop-target');
+    workspaceApi._dropOntoFolder(event, row.dataset.path);
+  }, true);
   document.addEventListener('click', (event) => {
     const target = event.target instanceof Element ? event.target : null;
     const sendButton = target ? target.closest('.wa-file-send-ai[data-wa-file-action="send-ai"]') as HTMLElement | null : null;
-    if (!sendButton) return;
-    _sendBrowserFileButtonToAI(event, sendButton);
+    if (sendButton) {
+      _sendBrowserFileButtonToAI(event, sendButton);
+      return;
+    }
+    const actionTarget = target ? target.closest<HTMLElement>('[data-wa-file-action]') : null;
+    if (actionTarget) {
+      const row = actionTarget.closest('.wa-file-item') as HTMLElement | null;
+      const action = actionTarget.dataset.waFileAction;
+      event.preventDefault();
+      event.stopPropagation();
+      if (action === 'more' && row && typeof workspaceApi._showBrowserCtx === 'function') workspaceApi._showBrowserCtx(event, row);
+      else if (action === 'open' && row && typeof workspaceApi.openBrowserFile === 'function') workspaceApi.openBrowserFile(row.dataset.path, true);
+      else if (action === 'clear-search' && typeof workspaceApi.clearSearch === 'function') workspaceApi.clearSearch();
+      return;
+    }
+    const checkbox = target ? target.closest<HTMLInputElement>('.wa-file-check') : null;
+    if (checkbox && typeof workspaceApi._toggleBrowserCheck === 'function') {
+      event.stopPropagation();
+      // The browser toggles a checkbox after its click handler.  Reflect the
+      // selection on the next task so the Set sees the final checked state.
+      window.setTimeout(() => workspaceApi._toggleBrowserCheck(checkbox), 0);
+      return;
+    }
+    const row = target ? target.closest('.wa-file-item') as HTMLElement | null : null;
+    if (!row) return;
+    if (row.classList.contains('folder') && typeof workspaceApi.handleBrowserFolderClick === 'function') {
+      workspaceApi.handleBrowserFolderClick(event, row);
+    } else if (row.classList.contains('file') && typeof workspaceApi._browserFileRowClick === 'function') {
+      workspaceApi._browserFileRowClick(event, row);
+    }
   }, true);
 }
 
@@ -488,7 +577,7 @@ function _renderSearchResults(results: SearchResult[], query: string): void {
   const header =
     '<div class="wa-search-header">' +
     `<span>找到 ${results.length} 个文件${query ? ' &middot; "' + _escHtml(query) + '"' : ''}</span>` +
-    '<button onclick="WA.clearSearch()">&#8592; 返回浏览</button>' +
+    '<button type="button" data-wa-file-action="clear-search">&#8592; 返回浏览</button>' +
     '</div>';
   if (!results.length) {
     list.innerHTML =
@@ -507,16 +596,14 @@ function _renderSearchResults(results: SearchResult[], query: string): void {
     const supported = _isSupportedExt(ext);
     const unsupported = supported ? '' : ' wa-unsupported';
     const checkHtml = state.selectMode
-      ? '<input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleBrowserCheck(this)">'
+      ? '<input type="checkbox" class="wa-file-check">'
       : '';
     return (
       `<div class="wa-file-item file${unsupported}" style="padding-left:8px"` +
       ` data-path="${_escHtml(path)}" data-supported="${supported}"` +
       ` ${_fileDragAttrs()}` +
-      ` onmousedown="WA._browserFileRowMouseDown(event,this)" onclick="WA._browserFileRowClick(event,this)"` +
-      ` oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)"` +
       ` title="${_escHtml(path)}">` +
-      `<button type="button" class="wa-file-open-hit" ${_fileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}" onclick="event.preventDefault();event.stopPropagation();WA.openBrowserFile(this.closest('.wa-file-item').dataset.path,true)"></button>` +
+      `<button type="button" class="wa-file-open-hit" ${_fileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}"></button>` +
       `${checkHtml}${_fileIcon(ext, cat)}` +
       `<span class="wa-file-label">${_escHtml(name)}</span>` +
       `<span class="wa-search-dir" title="${_escHtml(dir)}">${_escHtml(dir)}</span>` +
@@ -575,8 +662,8 @@ async function _loadPickedFiles(files: FileList | File[] | null | undefined): Pr
   }
   if (selected.length) {
     await loadRecentFiles();
-    if (typeof (window as any).WA?.loadFileBrowser === 'function') {
-      await (window as any).WA.loadFileBrowser();
+    if (typeof workspaceApi.loadFileBrowser === 'function') {
+      await workspaceApi.loadFileBrowser();
     }
   }
 }
@@ -868,15 +955,11 @@ function _renderBrowserEntry(entry: BrowserNode, depth: number, rows: string[]):
     rows.push(
       `<div class="wa-file-item folder" style="padding-left:${pad}px" ` +
         `data-path="${_escHtml(absPath)}" ` +
-        `onclick="WA.handleBrowserFolderClick(event,this)" ` +
-        `oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)" ` +
-        `ondragover="event.preventDefault();event.stopPropagation();this.classList.add('wa-drop-target')" ` +
-        `ondragleave="this.classList.remove('wa-drop-target')" ` +
-        `ondrop="event.preventDefault();event.stopPropagation();this.classList.remove('wa-drop-target');WA._dropOntoFolder(event,this.dataset.path)">` +
+        `data-wa-file-kind="folder">` +
         `<span class="wa-folder-arrow${isExpanded ? ' open' : ''}">›</span>` +
         `<span class="wa-file-icon">${folderSvg}</span>` +
         `<span class="wa-file-label">${_escHtml(entry.name)}</span>` +
-        `<div class="wa-file-actions"><button type="button" class="wa-file-more" onclick="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this.closest('.wa-file-item'))" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button></div>` +
+        `<div class="wa-file-actions"><button type="button" class="wa-file-more" data-wa-file-action="more" draggable="false" title="更多操作" aria-label="更多操作">${_MORE_BTN_SVG}</button></div>` +
         `</div>`
     );
     if (isExpanded) {
@@ -895,16 +978,14 @@ function _renderBrowserEntry(entry: BrowserNode, depth: number, rows: string[]):
     const unsupported = !supported ? ' wa-unsupported' : '';
     const isActive = state.activeTabPath === absPath ? ' active' : '';
     const checkHtml = state.selectMode
-      ? '<input type="checkbox" class="wa-file-check" onclick="event.stopPropagation();WA._toggleBrowserCheck(this)">'
+      ? '<input type="checkbox" class="wa-file-check">'
       : '';
     rows.push(
       `<div class="wa-file-item file${isActive}${unsupported}" style="padding-left:${pad}px" ` +
         `data-path="${_escHtml(absPath)}" data-supported="${supported}" ` +
-        `${_fileDragAttrs()} ` +
-        `onmousedown="WA._browserFileRowMouseDown(event,this)" onclick="WA._browserFileRowClick(event,this)" ` +
-        `oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)" ` +
+        `${_fileDragAttrs()} data-wa-file-kind="file" ` +
         `title="${_escHtml(entry.name)}">` +
-        `<button type="button" class="wa-file-open-hit" ${_fileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(entry.name)}" onclick="event.preventDefault();event.stopPropagation();WA.openBrowserFile(this.closest('.wa-file-item').dataset.path,true)"></button>` +
+        `<button type="button" class="wa-file-open-hit" ${_fileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(entry.name)}"></button>` +
         `${checkHtml}${_fileIcon(ext, entry.category || '')}` +
         `<span class="wa-file-label">${_escHtml(entry.name)}</span>` +
         _fileActionButtons(supported) +
@@ -1004,8 +1085,8 @@ async function _dropOntoFolder(event: DragEvent, destPath: string): Promise<void
 
 function _createFallbackWorkspaceFileLoader(): any {
   const _switchToTab = async (path: string): Promise<void> => {
-    if (typeof (window as any).WA?._tabClick === 'function') {
-      await (window as any).WA._tabClick(path);
+    if (typeof workspaceApi._tabClick === 'function') {
+      await workspaceApi._tabClick(path);
     }
   };
 
@@ -1024,8 +1105,8 @@ function _createFallbackWorkspaceFileLoader(): any {
 
   async function openParsedFile(json: any, wsPath: string | null, _fsHandle: any = null): Promise<any> {
     const resolvedPath = wsPath || json.ws_source_path || json.source_path || json.temp_path || json.file_name;
-    if (typeof (window as any).WA?._applyFileJson === 'function') {
-      await (window as any).WA._applyFileJson(json, resolvedPath, _fsHandle);
+    if (typeof workspaceApi._applyFileJson === 'function') {
+      await workspaceApi._applyFileJson(json, resolvedPath, _fsHandle);
     }
     if (resolvedPath) _trackUserOpen(resolvedPath);
     return json;
@@ -1126,8 +1207,8 @@ function _createFallbackWorkspaceFileLoader(): any {
   return { openBrowserFile, openWorkspaceFile, reloadFileByPath, openParsedFile, fromParsed: openParsedFile, load };
 }
 
-export const _waSharedFileLoader: any = (window as any).WA && typeof (window as any).WA.createWorkspaceFileLoader === 'function'
-  ? (window as any).WA.createWorkspaceFileLoader({
+export const _waSharedFileLoader: any = typeof workspaceApi.createWorkspaceFileLoader === 'function'
+  ? workspaceApi.createWorkspaceFileLoader({
       state,
       getElement: (id: string) => document.getElementById(id),
       showToast,
@@ -1151,8 +1232,7 @@ function _requireWorkspaceFileLoader(): any {
 
 // ── Backward compatibility ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = workspaceApi;
 
 wa._renderBrowserTree = _renderBrowserTree;
 wa._softRefreshBrowser = _softRefreshBrowser;

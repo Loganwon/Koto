@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import queue
 import threading
+import time
 from typing import Any, Callable
 
 
@@ -44,3 +45,33 @@ class BackgroundProgressBridge:
     def join(self, timeout: float) -> None:
         if self._thread:
             self._thread.join(timeout=timeout)
+
+    def stream_events(
+        self,
+        *,
+        is_cancelled: Callable[[], bool],
+        cancelled_event: Callable[[], dict[str, Any]],
+        on_event: Callable[[dict[str, Any]], None] | None = None,
+        heartbeat: Callable[[], dict[str, Any]] | None = None,
+        heartbeat_interval: float = 3.0,
+    ):
+        """Yield progress until completion; return ``False`` on cancellation."""
+        last_heartbeat = time.time()
+        while True:
+            if is_cancelled():
+                yield cancelled_event()
+                return False
+            try:
+                event = self.get(timeout=1.0)
+                if self.is_complete(event):
+                    return True
+                if on_event:
+                    on_event(event)
+                yield event
+                last_heartbeat = time.time()
+            except queue.Empty:
+                if not self.is_alive():
+                    return True
+                if heartbeat and time.time() - last_heartbeat >= heartbeat_interval:
+                    last_heartbeat = time.time()
+                    yield heartbeat()

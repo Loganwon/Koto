@@ -5,6 +5,7 @@
 
 import { $, _PENCIL_SVG, _PIN_SVG, _TRASH_SVG, _escHtml, showToast } from './infrastructure';
 import { _switchToTab, state } from './state';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 type ReviewItem = Record<string, any>;
 
@@ -597,7 +598,7 @@ function _scrollProposalCardIntoView(proposalId: string): void {
 }
 
 function _scheduleAutoSave(): void {
-  const fn = (window as any).WA && (window as any).WA.scheduleAutoSave;
+  const fn = getWorkspaceApi().scheduleAutoSave;
   if (typeof fn === 'function') fn();
 }
 

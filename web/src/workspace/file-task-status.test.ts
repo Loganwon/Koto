@@ -5,6 +5,8 @@ import {
   isFileTaskFailureStatus,
   isFileTaskWaitingStatus,
   isFileTaskConfirmationStatus,
+  fileTaskOutcomeCopy,
+  fileTaskTerminalUiStatus,
 } from '../workspace/file-task-status';
 
 describe('file-task-status', () => {
@@ -49,6 +51,29 @@ describe('file-task-status', () => {
       expect(isFileTaskWaitingStatus('pending')).toBe(true);
       expect(isFileTaskWaitingStatus('awaiting_confirmation')).toBe(true);
       expect(isFileTaskWaitingStatus('completed')).toBe(false);
+    });
+  });
+
+  describe('terminal outcome copy', () => {
+    it('keeps successful results concise and points to artifacts', () => {
+      expect(fileTaskTerminalUiStatus('completed', true)).toBe('done');
+      expect(fileTaskOutcomeCopy('done')).toMatchObject({
+        title: '任务完成',
+        detail: '结果与产物已整理，可直接查看或继续处理。',
+        toastType: 'success',
+      });
+    });
+
+    it('keeps cancelled and failed outcomes distinct', () => {
+      expect(fileTaskTerminalUiStatus('cancelled', false)).toBe('cancelled');
+      expect(fileTaskOutcomeCopy('cancelled').title).toBe('任务已取消');
+      expect(fileTaskTerminalUiStatus('failed', false)).toBe('error');
+      expect(fileTaskOutcomeCopy('failed').title).toBe('任务未完成');
+    });
+
+    it('keeps confirmation as a pending action rather than a completion', () => {
+      expect(fileTaskTerminalUiStatus('awaiting_confirmation', false)).toBe('pending');
+      expect(fileTaskOutcomeCopy('pending', true).title).toBe('等待确认');
     });
   });
 });

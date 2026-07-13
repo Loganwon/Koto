@@ -97,6 +97,58 @@ def test_csv_artifact_result_uses_data_type():
     assert data["artifacts"][0]["path"] == "workspace/reports/restock_plan.csv"
 
 
+def test_file_task_artifact_result_deduplicates_workspace_path_variants():
+    from app.core.artifacts import build_file_task_artifact_result
+
+    result = build_file_task_artifact_result(
+        task_id="task-path-variants",
+        task="生成临时表格",
+        status="completed",
+        file_changes=[
+            {
+                "path": "workspace/tmp/run-1/summary.xlsx",
+                "operation": "create_file",
+                "summary": "已创建表格。",
+            },
+            {
+                "path": "tmp/run-1/summary.xlsx",
+                "operation": "file_changed",
+                "summary": "已记录文件变更。",
+            },
+        ],
+    )
+
+    data = result.to_dict()
+    assert [item["path"] for item in data["artifacts"]] == [
+        "workspace/tmp/run-1/summary.xlsx"
+    ]
+
+
+def test_stream_merge_deduplicates_workspace_path_variants():
+    from web.file_task_stream import _merge_file_changes_into_artifact_result
+
+    merged = _merge_file_changes_into_artifact_result(
+        {
+            "artifacts": [
+                {"path": "workspace/tmp/run-1/summary.xlsx", "title": "summary.xlsx"},
+                {"path": "tmp/run-1/summary.xlsx", "title": "summary.xlsx"},
+            ],
+            "changes": [
+                {"file": "workspace/tmp/run-1/summary.xlsx", "summary": "已创建表格。"},
+                {"file": "tmp/run-1/summary.xlsx", "summary": "已记录文件变更。"},
+            ],
+        },
+        [],
+    )
+
+    assert [item["path"] for item in merged["artifacts"]] == [
+        "workspace/tmp/run-1/summary.xlsx"
+    ]
+    assert [item["file"] for item in merged["changes"]] == [
+        "workspace/tmp/run-1/summary.xlsx"
+    ]
+
+
 def test_file_task_stream_attaches_artifact_result_to_finished_event():
     from app.core.agent.file_task_contract import FileTaskEvent
     from web.file_task_stream import _iter_file_task_stream_events

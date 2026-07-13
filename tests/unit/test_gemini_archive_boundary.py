@@ -101,6 +101,34 @@ def test_legacy_interactions_models_fail_closed_at_the_web_compatibility_boundar
     assert "text = _call_interactions_api_sync" not in tracked_models
 
 
+def test_web_app_does_not_keep_a_google_client_construction_escape_hatch() -> None:
+    source = _read("web/app.py")
+
+    assert "_create_research_client_legacy_unreachable" not in source
+    assert "google.genai._api_client" not in source
+    assert "genai.Client(" not in source
+
+
+def test_web_app_drops_unreachable_interactions_execution_implementation() -> None:
+    source = _read("web/app.py")
+
+    assert "def _poll_interaction(" not in source
+    assert "def _extract_interaction_text_global(" not in source
+    assert "def _call_interactions_api_sync(" not in source
+    assert "_INTERACTION_TERMINAL_STATES" not in source
+
+
+def test_chat_error_guidance_does_not_send_users_to_archived_gemini_setup() -> None:
+    source = _read("web/app.py")
+    error_guidance = source[source.index('"location is not supported"'):source.index("session_manager.append_and_save", source.index('"location is not supported"'))]
+
+    assert "gemini_config.env" not in error_guidance
+    assert "aistudio.google.com" not in error_guidance
+    assert "Google AI Studio" not in error_guidance
+    assert "DeepSeek API 密钥" in error_guidance
+    assert "本地 Ollama" in error_guidance
+
+
 def test_ppt_research_does_not_keep_a_direct_interactions_api_escape_hatch() -> None:
     source = _read("web/web_searcher.py")
 

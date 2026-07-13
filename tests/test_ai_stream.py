@@ -2665,7 +2665,7 @@ class TestLocalModelMode:
             ]
         )
         toggle_start = src.find("function _setWorkspaceModelMode(mode: string): void")
-        toggle_end = src.find("(window as any).WA.refreshModelCatalog", toggle_start)
+        toggle_end = src.find("publishWorkspaceApi({", toggle_start)
         assert toggle_start != -1 and toggle_end != -1
         toggle_section = src[toggle_start:toggle_end]
         assert "function _syncEditorModelPreference(" not in src
@@ -3070,7 +3070,7 @@ class TestLocalModelMode:
         """PDF AI annotate should use the whitebox dispatcher, not the legacy quick-action path."""
         ai_annotate = _read_frontend_source("web/src/editors/pdf-viewer.ts")
         assert "/api/v1/workspace/quick-action" not in ai_annotate
-        assert "WA.sendCustomMessage" in ai_annotate
+        assert "workspaceApi.sendCustomMessage" in ai_annotate
         assert "pdfAIAnnotate" in ai_annotate
         assert "pdf_ai_annotate: true" in ai_annotate
 
@@ -3117,10 +3117,11 @@ class TestLocalModelMode:
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
         assert (
-            "(window as any).WA.setLockedModel = setLockedModel;"
+            "publishWorkspaceApi({"
             in js
         )
-        assert "(window as any).WA.getLockedModel = getLockedModel;" in js
+        assert "setLockedModel," in js
+        assert "getLockedModel," in js
         assert "body: JSON.stringify({ mode: newModel })," in js
 
     def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(
@@ -4578,7 +4579,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
         assert "export function beginTaskResultFollowup(details: any): void" in assistant
-        assert "(window as any).WA.beginTaskResultFollowup = beginTaskResultFollowup" in assistant
+        assert "publishWorkspaceApi({" in assistant
+        assert "beginTaskResultFollowup," in assistant
         assert "state._pendingTaskFollowupContext = followupContext;" in assistant
         assert (
             "options: pendingTaskFollowupContext ? { followup_context: pendingTaskFollowupContext } : {},"
@@ -4604,7 +4606,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert 'data-task-followup-action="apply"' in task_renderer
         assert 'data-task-followup-action="question"' in task_renderer
         assert 'data-task-followup-action="improve"' in task_renderer
-        assert "(window as any).WA.beginTaskResultFollowup({" in task_renderer
+        assert "workspaceApi.beginTaskResultFollowup({" in task_renderer
         assert "output_mode: card.dataset.taskOutputMode || ''," in task_renderer
         assert (
             "intent_strategy: card.dataset.taskIntentStrategy || ''," in task_renderer
@@ -4640,32 +4642,27 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         asset_scripts = _read_frontend_source("web/templates/_workspace_asset_scripts.html")
         workspace_bundle_entry = _read_frontend_source("web/src/bundles/workspace.ts")
 
-        assert "WA.streamTaskFlow = streamTaskFlow" in renderer
+        assert "publishWorkspaceApi({" in renderer
+        assert "streamTaskFlow," in renderer
         assert "csrfFetch('/api/editor/ai/task-stream'" in renderer
-        assert "WA.createWorkspaceAiTransport = createWorkspaceAiTransport" in ai_transport
+        assert "publishWorkspaceApi({ createWorkspaceAiTransport })" in ai_transport
         assert "WA.createWorkspaceAiResultsRuntime = createWorkspaceAiResultsRuntime" in ai_results
-        assert "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher" in quick_actions
-        assert "(window as any).WA.createWorkspaceAiConversation = createWorkspaceAiConversation" in conversation
+        assert "publishWorkspaceApi({" in quick_actions
+        assert "createWorkspaceQuickActionRuntime: createQuickActionDispatcher" in quick_actions
+        assert "publishWorkspaceApi({ createWorkspaceAiConversation })" in conversation
         assert "model' || value === 'ai'" in conversation
         assert "export function installWorkspaceNotebookTools" in notebook
         assert "WA.installWorkspaceNotebookTools = installWorkspaceNotebookTools" in notebook
         assert "export function installWorkspaceFindReplace" in find_replace
-        assert "WA.installWorkspaceFindReplace = installWorkspaceFindReplace" in find_replace
-        assert "WA.createTaskDispatcher = createTaskDispatcher" in dispatcher
-        assert (
-            "typeof (window as any).WA.createWorkspaceAiResultsRuntime === 'function'"
-            in runtime_init
-        )
-        assert (
-            "typeof (window as any).WA.createWorkspaceAiConversation === 'function'" in runtime_init
-        )
-        assert "(window as any).WA.hydrateAiHistory" in runtime_init
-        assert (
-            "typeof (window as any).WA.createWorkspaceQuickActionRuntime === 'function'"
-            in runtime_init
-        )
+        assert "publishWorkspaceApi({ installWorkspaceFindReplace })" in find_replace
+        assert "publishWorkspaceApi({ createTaskDispatcher })" in dispatcher
+        assert "const workspaceApi = getWorkspaceApi();" in runtime_init
+        assert "typeof workspaceApi.createWorkspaceAiResultsRuntime === 'function'" in runtime_init
+        assert "typeof workspaceApi.createWorkspaceAiConversation === 'function'" in runtime_init
+        assert "publishWorkspaceApi({" in runtime_init
+        assert "typeof workspaceApi.createWorkspaceQuickActionRuntime === 'function'" in runtime_init
         assert "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in runtime_init
-        assert "typeof (window as any).WA.createTaskDispatcher === 'function'" in runtime_init
+        assert "typeof workspaceApi.createTaskDispatcher === 'function'" in runtime_init
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
         assert "{% include '_workspace_asset_scripts.html' %}" in standalone
         assert "{% include '_workspace_asset_scripts.html' %}" in main
@@ -4701,9 +4698,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "registerMessageRoute" in dispatcher
         assert "registerQuickActionHandler" in dispatcher
         assert "registerAction(definition: QuickActionDefinition)" in quick_actions
-        assert "(window as any).WA.registerTaskQuickAction = registerTaskQuickAction" in runtime_init
-        assert "(window as any).WA.registerTaskEntryRoute = registerTaskEntryRoute" in runtime_init
-        assert "(window as any).WA.registerTaskActionHandler = registerTaskActionHandler" in runtime_init
+        assert "registerTaskQuickAction," in runtime_init
+        assert "registerTaskEntryRoute," in runtime_init
+        assert "registerTaskActionHandler," in runtime_init
+        assert "publishWorkspaceApi({" in runtime_init
 
     def test_workspace_dispatcher_records_assistant_turns_for_task_history(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
@@ -4766,11 +4764,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         runtime_init = _read_frontend_source("web/src/workspace/runtime-init.ts")
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
-        assert (
-            "turn.task_card_snapshot && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function'"
-            in conversation
-        )
-        assert "!taskTurnIsTerminal(turn) && (window as any).WA.restoreTaskRunCard" not in conversation
+        assert "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'" in conversation
+        assert "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard" not in conversation
         assert "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void" in conversation
         assert "element.dataset.taskMemorySummary = memorySummary" in conversation
         assert "task_card_snapshot:" in conversation
@@ -4794,7 +4789,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in runtime_init
         )
         assert "function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>" in task_renderer
-        assert "WA.restoreTaskRunCard = restoreTaskRunCard" in task_renderer
+        assert "restoreTaskRunCard," in task_renderer
+        assert "publishWorkspaceApi({" in task_renderer
         assert "function isTaskCardElement(value: unknown): value is TaskCardElement" in task_renderer
         assert (
             "if (!card || !isTaskCardElement(card)) return false;"
@@ -4838,7 +4834,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         assert "async function _sendViaEditorActionSSE(payload)" not in src
         assert "export function sendQuickAction(action: string): void" in src
-        assert "(window as any).WA.sendQuickAction = sendQuickAction" in src
+        assert "publishWorkspaceApi({" in src
+        assert "sendQuickAction," in src
         assert (
             "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'"
             in _read_frontend_source("web/src/workspace/runtime-init.ts")
@@ -4958,7 +4955,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         docx_review_runtime = _read_frontend_source("web/src/workspace/docx-review-runtime.ts")
         assert "(window as any).WA.applyStructuredDocToolCall" in docx_review_runtime
         assert "(window as any).WA.applyStructuredReviewChangePayload" in docx_review_runtime
-        assert "(window as any).WA.applyStructuredDocToolCall(proposal.tool_call" in assistant
+        assert "workspaceApi.applyStructuredDocToolCall?.(proposal.tool_call" in assistant
         assert "window.WA.applyStructuredDocToolCall(proposal.tool_call" in results
         assert "window.WA.applyStructuredDocToolCall(toolCall" in results
         assert "(window as any).WA.applyStructuredReviewChangePayload = (payload: any, options: any = {}) =>" in docx_review_runtime
@@ -4986,5 +4983,6 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "export function _serializeEditorForTab(_tab: TabInfo | null, editor: any): any" in file_open
         assert "(window as any)._serializeEditorForTab = _serializeEditorForTab" in file_open
         assert "function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void" in fs_context_menu
-        assert "wa._showBrowserCtx = _showBrowserCtx" in fs_context_menu
+        assert "publishWorkspaceApi({" in fs_context_menu
+        assert "_showBrowserCtx," in fs_context_menu
         assert "_serializeEditorForTab" not in fs_context_menu

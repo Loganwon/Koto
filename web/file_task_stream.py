@@ -689,23 +689,29 @@ def _should_attach_file_task_artifact_result(
 
 
 def _merge_file_changes_into_artifact_result(artifact_result: dict, file_changes: list[dict]) -> dict:
+    from app.core.artifacts import canonical_artifact_path_key
+
     result = dict(artifact_result or {})
-    existing_changes = [
-        dict(item)
-        for item in result.get("changes") or []
-        if isinstance(item, dict)
-    ]
-    seen_changes = {
-        str(item.get("file") or item.get("path") or "").strip().lower()
-        for item in existing_changes
-    }
+    existing_changes = []
+    seen_changes = set()
+    for item in result.get("changes") or []:
+        if not isinstance(item, dict):
+            continue
+        candidate = dict(item)
+        key = canonical_artifact_path_key(candidate.get("file") or candidate.get("path"))
+        if key and key in seen_changes:
+            continue
+        if key:
+            seen_changes.add(key)
+        existing_changes.append(candidate)
     for change in file_changes or []:
         if not isinstance(change, dict):
             continue
         path = _file_task_change_path(change)
-        if not path or path.lower() in seen_changes:
+        key = canonical_artifact_path_key(path)
+        if not path or key in seen_changes:
             continue
-        seen_changes.add(path.lower())
+        seen_changes.add(key)
         existing_changes.append(
             {
                 "file": path,
@@ -722,22 +728,26 @@ def _merge_file_changes_into_artifact_result(artifact_result: dict, file_changes
         )
     result["changes"] = existing_changes
 
-    existing_artifacts = [
-        dict(item)
-        for item in result.get("artifacts") or []
-        if isinstance(item, dict)
-    ]
-    seen_artifacts = {
-        str(item.get("path") or "").strip().lower()
-        for item in existing_artifacts
-    }
+    existing_artifacts = []
+    seen_artifacts = set()
+    for item in result.get("artifacts") or []:
+        if not isinstance(item, dict):
+            continue
+        candidate = dict(item)
+        key = canonical_artifact_path_key(candidate.get("path") or candidate.get("file"))
+        if key and key in seen_artifacts:
+            continue
+        if key:
+            seen_artifacts.add(key)
+        existing_artifacts.append(candidate)
     for change in file_changes or []:
         if not isinstance(change, dict):
             continue
         path = _file_task_change_path(change)
-        if not path or path.lower() in seen_artifacts:
+        key = canonical_artifact_path_key(path)
+        if not path or key in seen_artifacts:
             continue
-        seen_artifacts.add(path.lower())
+        seen_artifacts.add(key)
         existing_artifacts.append(
             {
                 "type": change.get("type") or change.get("file_type") or "data",

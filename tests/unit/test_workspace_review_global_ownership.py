@@ -22,13 +22,18 @@ def test_review_and_selection_wa_globals_have_one_source_owner() -> None:
     docx_pptx_toolbar = _read("web/src/ui/docx-pptx-toolbar.ts")
     selection_toolbar = _read("web/src/ui/selection-toolbar.ts")
 
-    assert _wa_assignment_count(ai_review, "closeReviewCenter") == 1
+    assert _wa_assignment_count(ai_review, "closeReviewCenter") == 0
     assert _wa_assignment_count(docx_review_runtime, "closeReviewCenter") == 0
-    assert _wa_assignment_count(ai_review, "setReviewMode") == 1
+    assert _wa_assignment_count(ai_review, "setReviewMode") == 0
     assert _wa_assignment_count(docx_review_runtime, "setReviewMode") == 0
+    assert "publishWorkspaceApi({" in ai_review
+    assert "closeReviewCenter," in ai_review
+    assert "setReviewMode," in ai_review
 
-    assert _wa_assignment_count(selection_toolbar, "closeSelectionToolbar") == 1
+    assert _wa_assignment_count(selection_toolbar, "closeSelectionToolbar") == 0
     assert _wa_assignment_count(docx_pptx_toolbar, "closeSelectionToolbar") == 0
+    assert "publishWorkspaceApi({" in selection_toolbar
+    assert "closeSelectionToolbar," in selection_toolbar
 
 
 def test_global_owners_keep_docx_review_and_toolbar_close_contracts() -> None:

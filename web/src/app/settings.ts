@@ -4,6 +4,7 @@
 
 import { csrfFetch } from '../shared/csrf';
 import { markSidePanelClosed, markSidePanelOpen } from '../shared/side-panels';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 interface KotoSettings {
   storage?: { workspace_dir?: string; documents_dir?: string; images_dir?: string; chats_dir?: string };
@@ -146,7 +147,7 @@ export async function onCloudProviderChange(provider: string): Promise<void> {
   await updateSetting('ai', 'cloud_provider', normalized);
   if (normalized === 'deepseek') { await updateSetting('ai', 'deepseek_model', 'deepseek-chat'); }
   csrfFetch('/api/local-model/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'cloud' }) }).catch(() => {});
-  if ((window as any).WA && typeof (window as any).WA.refreshModelCatalog === 'function') { (window as any).WA.refreshModelCatalog(true); }
+  getWorkspaceApi().refreshModelCatalog?.(true);
 }
 
 export async function saveSettingsApiKey(): Promise<void> {
@@ -677,10 +678,10 @@ export function toggleLatencyDetail(event?: Event): void {
     updateLatencyDetail((window as any)._lastCloudLatency || { deepseek: { reachable: false, error: 'checking' } });
     checkStatus();
   }
-  const leftSlot = document.getElementById('wa-left-latency-slot');
-  if (leftSlot && detail.parentElement !== leftSlot) {
-    leftSlot.appendChild(detail);
-  }
+  // The status detail belongs to the activity rail.  Moving it into the file
+  // browser made a global component participate in the workspace column's
+  // flex layout, which caused both panels to overlap in narrow windows.
+  // Keep its DOM owner stable; the activity-rail CSS positions it as a popover.
   if (detail) detail.style.display = willOpen ? 'block' : 'none';
   detail.classList.toggle('open', willOpen);
   const arrow = document.querySelector('.status-expand-arrow'); if (arrow) arrow.classList.toggle('open', willOpen);

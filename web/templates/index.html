@@ -407,7 +407,6 @@
                   </div>
                   <div class="wa-recent-hint">最近在 Koto 中打开过的文件</div>
                   <div id="wa-recent-list"></div>
-                  <div id="wa-left-latency-slot" class="wa-left-latency-slot"></div>
                   <label id="wa-left-drop" for="wa-file-input-left">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:4px;opacity:0.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><br>
                     拖拽文件至此<br><span style="font-size:10px;opacity:0.55">DOCX · XLSX · PPTX · PDF</span>
@@ -459,23 +458,21 @@
           <!-- Find/Replace bar (Ctrl+F / Ctrl+H) -->
           <div id="wa-docx-find-bar" style="display:none">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="wa-docx-find-input" placeholder="查找…" autocomplete="off"
-              oninput="WA.docxFindInput(this.value)" onkeydown="WA.docxFindKeydown(event)">
+            <input type="text" id="wa-docx-find-input" placeholder="查找…" autocomplete="off" data-wa-find-input="docx">
             <span id="wa-docx-find-count" class="wa-find-count"></span>
-            <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.docxFindPrev()" title="上一处 (Shift+Enter)">
+            <button class="wa-find-nav" data-wa-find-action="prev" data-wa-find-scope="docx" title="上一处 (Shift+Enter)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
             </button>
-            <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.docxFindNext()" title="下一处 (Enter)">
+            <button class="wa-find-nav" data-wa-find-action="next" data-wa-find-scope="docx" title="下一处 (Enter)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
-            <label class="wa-find-opt"><input type="checkbox" id="wa-docx-find-case" onchange="WA.docxFindInput(document.getElementById('wa-docx-find-input').value)"> 区分大小写</label>
-            <button class="wa-find-replace-toggle" id="wa-docx-replace-toggle" onmousedown="event.preventDefault()" onclick="WA.docxToggleReplace()" title="展开替换">替换</button>
-            <button class="wa-find-close" onmousedown="event.preventDefault()" onclick="WA.docxFindClose()" title="关闭 (Esc)">✕</button>
+            <label class="wa-find-opt"><input type="checkbox" id="wa-docx-find-case" data-wa-find-case="docx"> 区分大小写</label>
+            <button class="wa-find-replace-toggle" id="wa-docx-replace-toggle" data-wa-find-action="toggle-replace" data-wa-find-scope="docx" title="展开替换">替换</button>
+            <button class="wa-find-close" data-wa-find-action="close" data-wa-find-scope="docx" title="关闭 (Esc)">✕</button>
             <div id="wa-docx-replace-row" style="display:none">
-              <input type="text" id="wa-docx-replace-input" placeholder="替换为…" autocomplete="off"
-                onkeydown="if(event.key==='Enter')WA.docxReplaceNext()">
-              <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.docxReplaceNext()">替换</button>
-              <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.docxReplaceAll()">全部替换</button>
+              <input type="text" id="wa-docx-replace-input" placeholder="替换为…" autocomplete="off" data-wa-find-replace-input="docx">
+              <button class="wa-find-replace-btn" data-wa-find-action="replace-next" data-wa-find-scope="docx">替换</button>
+              <button class="wa-find-replace-btn" data-wa-find-action="replace-all" data-wa-find-scope="docx">全部替换</button>
             </div>
           </div>
           <div id="wa-editor-toolbar"></div>
@@ -495,23 +492,21 @@
             <!-- Find/Replace bar (Ctrl+F / Ctrl+H) — inside main column so it spans full width -->
             <div id="wa-pptx-find-bar" style="display:none">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" id="wa-pptx-find-input" placeholder="在幻灯片中查找…" autocomplete="off"
-                oninput="WA.pptxFindInput(this.value)" onkeydown="WA.pptxFindKeydown(event)">
+              <input type="text" id="wa-pptx-find-input" placeholder="在幻灯片中查找…" autocomplete="off" data-wa-find-input="pptx">
               <span id="wa-pptx-find-count" class="wa-find-count"></span>
-              <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.pptxFindPrev()" title="上一处 (Shift+Enter)">
+              <button class="wa-find-nav" data-wa-find-action="prev" data-wa-find-scope="pptx" title="上一处 (Shift+Enter)">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
               </button>
-              <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.pptxFindNext()" title="下一处 (Enter)">
+              <button class="wa-find-nav" data-wa-find-action="next" data-wa-find-scope="pptx" title="下一处 (Enter)">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
-              <label class="wa-find-opt"><input type="checkbox" id="wa-pptx-find-case" onchange="WA.pptxFindInput(document.getElementById('wa-pptx-find-input').value)"> 区分大小写</label>
-              <button class="wa-find-replace-toggle" id="wa-pptx-replace-toggle" onmousedown="event.preventDefault()" onclick="WA.pptxToggleReplace()" title="展开替换">替换</button>
-              <button class="wa-find-close" onmousedown="event.preventDefault()" onclick="WA.pptxFindClose()" title="关闭 (Esc)">✕</button>
+              <label class="wa-find-opt"><input type="checkbox" id="wa-pptx-find-case" data-wa-find-case="pptx"> 区分大小写</label>
+              <button class="wa-find-replace-toggle" id="wa-pptx-replace-toggle" data-wa-find-action="toggle-replace" data-wa-find-scope="pptx" title="展开替换">替换</button>
+              <button class="wa-find-close" data-wa-find-action="close" data-wa-find-scope="pptx" title="关闭 (Esc)">✕</button>
               <div id="wa-pptx-replace-row" style="display:none">
-                <input type="text" id="wa-pptx-replace-input" placeholder="替换为…" autocomplete="off"
-                  onkeydown="if(event.key==='Enter')WA.pptxReplaceNext()">
-                <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.pptxReplaceNext()">替换</button>
-                <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.pptxReplaceAll()">全部替换</button>
+                <input type="text" id="wa-pptx-replace-input" placeholder="替换为…" autocomplete="off" data-wa-find-replace-input="pptx">
+                <button class="wa-find-replace-btn" data-wa-find-action="replace-next" data-wa-find-scope="pptx">替换</button>
+                <button class="wa-find-replace-btn" data-wa-find-action="replace-all" data-wa-find-scope="pptx">全部替换</button>
               </div>
             </div>
 

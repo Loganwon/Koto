@@ -5,9 +5,10 @@
  */
 
 // ── External dependencies (provided by workspace-assistant IIFE scope) ──
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
-declare let WA: any;
 declare let lastSelectionText: string;
 declare let _docxMouseIsDown: boolean;
 declare let _docxMouseUpY: number;
@@ -232,7 +233,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   const tableInfo = (opts && opts.table) || '';
   const pinnedSelectionText = _selectionContextText(state.pinnedSelection);
   const pinnedSelectionSource = _selectionContextSourceLabel(state.pinnedSelection);
-  const clearSelectionButton = '<button type="button" class="ctx-bar-clear ctx-bar-clear-selection" onclick="WA.clearSelection()" title="\u53d6\u6d88\u9009\u4e2d\u6587\u672c\u4e0a\u4e0b\u6587" aria-label="\u53d6\u6d88\u9009\u62e9">\u53d6\u6d88\u9009\u62e9</button>';
+  const clearSelectionButton = '<button type="button" class="ctx-bar-clear ctx-bar-clear-selection" data-wa-selection-context-action="clear-selection" title="\u53d6\u6d88\u9009\u4e2d\u6587\u672c\u4e0a\u4e0b\u6587" aria-label="\u53d6\u6d88\u9009\u62e9">\u53d6\u6d88\u9009\u62e9</button>';
 
   const parts: string[] = [];
 
@@ -250,7 +251,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   }
 
   if (nFiles > 0) {
-    parts.push(`<span class="ctx-bar-files">\u5df2\u9644\u52a0 <b>${nFiles} \u4efd\u6587\u4ef6</b><button type="button" class="ctx-bar-clear ctx-bar-clear-files" onclick="WA.clearAIFileContext()" title="\u6e05\u9664\u5168\u90e8\u9644\u52a0\u6587\u4ef6" aria-label="\u6e05\u9664\u9644\u52a0\u6587\u4ef6">\u6e05\u9664\u6587\u4ef6</button></span>`);
+    parts.push(`<span class="ctx-bar-files">\u5df2\u9644\u52a0 <b>${nFiles} \u4efd\u6587\u4ef6</b><button type="button" class="ctx-bar-clear ctx-bar-clear-files" data-wa-selection-context-action="clear-files" title="\u6e05\u9664\u5168\u90e8\u9644\u52a0\u6587\u4ef6" aria-label="\u6e05\u9664\u9644\u52a0\u6587\u4ef6">\u6e05\u9664\u6587\u4ef6</button></span>`);
   }
 
   if (parts.length) {
@@ -287,7 +288,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
 export function _pinSelectionChip(text: any, sourceMeta?: any): void {
   const selectionContext = _createPinnedSelectionContext(text, sourceMeta);
   if (!selectionContext) {
-    (window as any).WA.clearSelection();
+    clearSelection();
     return;
   }
   state._selectionDismissed = false;
@@ -899,6 +900,19 @@ function _installSelectionToolbarEvents(): void {
   if ((window as any).__waSelectionToolbarEventsInstalled) return;
   (window as any).__waSelectionToolbarEventsInstalled = true;
 
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target && target.closest
+      ? target.closest<HTMLElement>('[data-wa-selection-context-action]')
+      : null;
+    if (!control) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = String(control.dataset.waSelectionContextAction || '');
+    if (action === 'clear-selection') clearSelection();
+    else if (action === 'clear-files') getWorkspaceApi().clearAIFileContext?.();
+  }, true);
+
   document.addEventListener('mouseup', (event: MouseEvent) => {
     const el = _evtEl(event.target);
     if (event.button === 2 || _isSelectionToolbarTarget(el)) return;
@@ -958,22 +972,23 @@ function _installSelectionToolbarEvents(): void {
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA._updateContextBar = _updateContextBar;
-  (window as any).WA._getDocxSelectionPayload = _getDocxSelectionPayload;
-  (window as any).WA._getDocxSelectionTextForAI = _getDocxSelectionTextForAI;
-  (window as any).WA._extractPptxTableText = _extractPptxTableText;
-  (window as any).WA._extractHtmlTableText = _extractHtmlTableText;
-  (window as any).WA._positionSelectionToolbar = _positionSelectionToolbar;
-  (window as any).WA._getSelectionViewportBounds = _getSelectionViewportBounds;
-  (window as any).WA._getLiveEditorSelectionForAI = _getLiveEditorSelectionForAI;
-  (window as any).WA._showSelectionToolbarForCurrentSelection = _showSelectionToolbarForCurrentSelection;
-  (window as any).WA._applyPinnedHighlight = _applyPinnedHighlight;
-  (window as any).WA._clearPinnedHighlight = _clearPinnedHighlight;
-  (window as any).WA._applyTemporaryHighlight = _applyTemporaryHighlight;
-  (window as any).WA.sendSelectionToAI = sendSelectionToAI;
-  (window as any).WA.closeSelectionToolbar = closeSelectionToolbar;
-  (window as any).WA.clearSelection = clearSelection;
+  publishWorkspaceApi({
+    _updateContextBar,
+    _getDocxSelectionPayload,
+    _getDocxSelectionTextForAI,
+    _extractPptxTableText,
+    _extractHtmlTableText,
+    _positionSelectionToolbar,
+    _getSelectionViewportBounds,
+    _getLiveEditorSelectionForAI,
+    _showSelectionToolbarForCurrentSelection,
+    _applyPinnedHighlight,
+    _clearPinnedHighlight,
+    _applyTemporaryHighlight,
+    sendSelectionToAI,
+    closeSelectionToolbar,
+    clearSelection,
+  });
   (window as any)._hideDocxHoverBar = _hideDocxHoverBar;
   (window as any)._resetDocxSelection = _resetDocxSelection;
   (window as any)._pinSelectionChip = _pinSelectionChip;

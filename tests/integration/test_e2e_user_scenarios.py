@@ -1576,7 +1576,8 @@ class TestJavaScriptSourceChecks:
 
     def test_auto_save_timer_exists(self):
         assert "_autoSaveTimer" in self.js
-        assert "(window as any).WA.scheduleAutoSave = scheduleAutoSave" in self.js
+        assert "publishWorkspaceApi({" in self.js
+        assert "scheduleAutoSave," in self.js
         assert "autoSave().catch(() => {});" in self.js
 
 

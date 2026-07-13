@@ -71,24 +71,23 @@ import '../workspace/docx-review-runtime';
 // published their WA entry points.
 function _autoInitEmbedded(): void {
   if (!document.getElementById('workspaceView')) return;
-  const WA = (window as any).WA;
-  if (!WA) return;
+  const workspaceApi = getWorkspaceApi();
 
-  if (typeof WA.installWorkspaceFindReplace === 'function') {
-    WA.installWorkspaceFindReplace({
+  if (typeof workspaceApi.installWorkspaceFindReplace === 'function') {
+    workspaceApi.installWorkspaceFindReplace({
       getActiveEditor: () => state.activeEditor,
       showToast,
       pptxNav: (delta: number) => {
-        if (typeof WA.pptxNav === 'function') WA.pptxNav(delta);
+        if (typeof workspaceApi.pptxNav === 'function') workspaceApi.pptxNav(delta);
       },
       scheduleAutoSave: () => {
-        if (typeof WA.scheduleAutoSave === 'function') WA.scheduleAutoSave();
+        if (typeof workspaceApi.scheduleAutoSave === 'function') workspaceApi.scheduleAutoSave();
       },
     });
   }
 
-  if (typeof WA.installWorkspaceNotebookTools === 'function') {
-    WA.installWorkspaceNotebookTools({
+  if (typeof workspaceApi.installWorkspaceNotebookTools === 'function') {
+    workspaceApi.installWorkspaceNotebookTools({
       $,
       getFiles: () => (state as any)._aiFileContext || [],
       getSessionId: () => {

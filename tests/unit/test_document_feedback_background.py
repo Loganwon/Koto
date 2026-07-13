@@ -17,3 +17,15 @@ def test_background_bridge_returns_progress_and_result() -> None:
     assert bridge.is_complete(terminal)
     assert bridge.result == {"success": True}
     assert bridge.error is None
+
+
+def test_background_bridge_emits_cancelled_event_without_waiting_for_worker() -> None:
+    bridge = BackgroundProgressBridge()
+    bridge.start(lambda: {"success": True})
+
+    stream = bridge.stream_events(
+        is_cancelled=lambda: True,
+        cancelled_event=lambda: {"stage": "cancelled"},
+    )
+
+    assert next(stream) == {"stage": "cancelled"}

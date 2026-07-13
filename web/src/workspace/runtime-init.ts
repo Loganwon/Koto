@@ -18,6 +18,9 @@ import {
 } from './ai-review';
 import { _applyRouteEvent, _selectedCloudModelId } from './model-settings';
 import { fileTaskTerminalUiStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 let _waAiResultsRuntime: any = (window as any)._waAiResultsRuntime || null;
 let _waQuickActionRuntime: any = (window as any)._waQuickActionRuntime || null;
@@ -210,7 +213,7 @@ export function _hydrateAiConversation(force: boolean = false): Promise<any[]> {
     sessionId: _waSession(),
   }).then((turns: any[]) => {
     if (!force || state.isLoading) return turns;
-    const restore = (window as any).WA && (window as any).WA._restoreActiveFileTasks;
+    const restore = workspaceApi._restoreActiveFileTasks;
     if (typeof restore !== 'function') return turns;
     return Promise.resolve(restore(force)).then(() => turns);
   });
@@ -229,7 +232,7 @@ async function _sendWorkspaceConversationTurn(sessionId: string, payload: Record
   if (bridge && typeof bridge.refreshSessions === 'function') {
     Promise.resolve(bridge.refreshSessions()).catch(() => {});
   }
-  const refreshAiSessions = (window as any).WA && (window as any).WA.refreshAiSessions;
+  const refreshAiSessions = workspaceApi.refreshAiSessions;
   if (typeof refreshAiSessions === 'function') {
     Promise.resolve(refreshAiSessions({ silent: true })).catch(() => {});
   }
@@ -278,9 +281,8 @@ function _applyPersistedTaskMetadata(data: any, payload: Record<string, any>): v
     if (titleEl) titleEl.textContent = taskTitle;
   }
   if (memorySummary) card.dataset.taskMemorySummary = memorySummary;
-  const WA = (window as any).WA;
-  if (WA && typeof WA.syncTaskInteractionSummary === 'function') {
-    try { WA.syncTaskInteractionSummary(card); } catch (_) { /* noop */ }
+  if (typeof workspaceApi.syncTaskInteractionSummary === 'function') {
+    try { workspaceApi.syncTaskInteractionSummary(card); } catch (_) { /* noop */ }
   }
 }
 
@@ -368,7 +370,6 @@ export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<a
   const assistantText = String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim();
   if (!userText || !assistantText) return Promise.resolve(null);
   dataset.taskTerminalPersisting = 'true';
-  const WA = (window as any).WA || {};
   const hasCompletedAttr = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted');
   const completedTask = hasCompletedAttr
     ? String(dataset.taskCompleted || '').trim().toLowerCase() === 'true'
@@ -392,9 +393,9 @@ export function _persistTerminalTaskRunCard(card: HTMLElement | null): Promise<a
       metadata.task_context = taskPayload.task_context;
     }
   }
-  if (typeof WA.taskCardTestStructure === 'function') {
+  if (typeof workspaceApi.taskCardTestStructure === 'function') {
     try {
-      const structure = WA.taskCardTestStructure(card);
+      const structure = workspaceApi.taskCardTestStructure(card);
       if (structure) metadata.test_structure = structure;
     } catch (_) { /* noop */ }
   }
@@ -503,33 +504,33 @@ export interface TaskQuickAction {
 
 // ── Lazy initialization of all AI runtimes ───────────────────────
 export function _initWorkspaceAiRuntimes(): void {
-  if (!_waAiResultsRuntime && (window as any).WA && typeof (window as any).WA.createWorkspaceAiResultsRuntime === 'function') {
-    _waAiResultsRuntime = (window as any).WA.createWorkspaceAiResultsRuntime({
+  if (!_waAiResultsRuntime && typeof workspaceApi.createWorkspaceAiResultsRuntime === 'function') {
+    _waAiResultsRuntime = workspaceApi.createWorkspaceAiResultsRuntime({
       state,
       getMessagesElement: () => $('wa-ai-messages'),
       selectionContextText: _selectionContextText,
       createPinnedSelectionContext: _createPinnedSelectionContext,
       showToast,
-      scheduleAutoSave: () => (window as any).WA.scheduleAutoSave && (window as any).WA.scheduleAutoSave(),
+      scheduleAutoSave: () => workspaceApi.scheduleAutoSave && workspaceApi.scheduleAutoSave(),
       getUserInputElement: () => $('wa-user-input'),
-      sendMessage: () => (window as any).WA.sendMessage && (window as any).WA.sendMessage(),
+      sendMessage: () => workspaceApi.sendMessage && workspaceApi.sendMessage(),
       lightbulbIcon: _LIGHTBULB_SVG,
       pencilIcon: _PENCIL_SVG,
       getProposalRationaleText: _getProposalRationaleText,
       proposalCanApply: _proposalCanApply,
       getActiveProposalBatch: () => state._activeProposalBatch,
-      acceptProposal: (...args: any[]) => (window as any).WA.acceptProposal(...args),
-      rejectProposal: (...args: any[]) => (window as any).WA.rejectProposal(...args),
-      modifyProposal: (...args: any[]) => (window as any).WA.modifyProposal(...args),
-      submitModify: (...args: any[]) => (window as any).WA._submitModify(...args),
-      batchAcceptAll: () => (window as any).WA.batchAcceptAll(),
-      batchRejectAll: () => (window as any).WA.batchRejectAll(),
+      acceptProposal: (...args: any[]) => workspaceApi.acceptProposal(...args),
+      rejectProposal: (...args: any[]) => workspaceApi.rejectProposal(...args),
+      modifyProposal: (...args: any[]) => workspaceApi.modifyProposal(...args),
+      submitModify: (...args: any[]) => workspaceApi._submitModify(...args),
+      batchAcceptAll: () => workspaceApi.batchAcceptAll(),
+      batchRejectAll: () => workspaceApi.batchRejectAll(),
       computeInlineDiff: _computeInlineDiff,
     });
   }
 
-  if (!_waConversationRuntime && (window as any).WA && typeof (window as any).WA.createWorkspaceAiConversation === 'function') {
-    _waConversationRuntime = (window as any).WA.createWorkspaceAiConversation({
+  if (!_waConversationRuntime && typeof workspaceApi.createWorkspaceAiConversation === 'function') {
+    _waConversationRuntime = workspaceApi.createWorkspaceAiConversation({
       state,
       getMessagesElement: () => $('wa-ai-messages'),
       getSessionId: _waSession,
@@ -546,8 +547,8 @@ export function _initWorkspaceAiRuntimes(): void {
     });
   }
 
-  if (!_waTaskDispatcher && (window as any).WA && typeof (window as any).WA.createTaskDispatcher === 'function') {
-    _waTaskDispatcher = (window as any).WA.createTaskDispatcher({
+  if (!_waTaskDispatcher && typeof workspaceApi.createTaskDispatcher === 'function') {
+    _waTaskDispatcher = workspaceApi.createTaskDispatcher({
       state,
       getActiveEditorContent: () => (state.activeEditor && typeof state.activeEditor.getContent === 'function')
         ? (state.activeEditor.getContent() || '')
@@ -570,13 +571,13 @@ export function _initWorkspaceAiRuntimes(): void {
         ? _waConversationRuntime.appendAssistantTurn(text, Object.assign({ render: false }, metadata || {}))
         : null,
       persistTaskTurn: _persistWorkspaceConversationTurn,
-      streamTaskFlow: (options: any) => (window as any).WA.streamTaskFlow(options),
+      streamTaskFlow: (options: any) => workspaceApi.streamTaskFlow(options),
       setStreamButton: _setStreamBtn,
     });
   }
 
-  if (!_waQuickActionRuntime && (window as any).WA && typeof (window as any).WA.createWorkspaceQuickActionRuntime === 'function') {
-    _waQuickActionRuntime = (window as any).WA.createWorkspaceQuickActionRuntime({
+  if (!_waQuickActionRuntime && typeof workspaceApi.createWorkspaceQuickActionRuntime === 'function') {
+    _waQuickActionRuntime = workspaceApi.createWorkspaceQuickActionRuntime({
       state,
       getMessagesElement: () => $('wa-ai-messages'),
       getModelMode: _waQuickActionModelMode,
@@ -617,7 +618,7 @@ export function useHostSession(sessionId: string, options?: { force?: boolean })
   _hostSessionId = String(sessionId || '').trim();
   _syncRuntimeGlobals();
   _initWorkspaceAiRuntimes();
-  const syncSelection = (window as any).WA && (window as any).WA._syncAiSessionSelection;
+  const syncSelection = workspaceApi._syncAiSessionSelection;
   if (_hostSessionId && typeof syncSelection === 'function') {
     syncSelection(_hostSessionId);
   }
@@ -642,17 +643,19 @@ export function registerTaskActionHandler(action: string, handler: (options: any
   return _waTaskDispatcher.registerQuickActionHandler(action, handler);
 }
 
-// ── Backward compat ──
+// ── Compatibility exports ──────────────────────────────────────────
+publishWorkspaceApi({
+  hydrateAiHistory,
+  useHostSession,
+  registerTaskQuickAction,
+  registerTaskEntryRoute,
+  registerTaskActionHandler,
+  _initWorkspaceAiRuntimes,
+  retryWorkspaceConversationPersistence,
+  persistTerminalTaskRunCard: _persistTerminalTaskRunCard,
+});
+
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.hydrateAiHistory = hydrateAiHistory;
-  (window as any).WA.useHostSession = useHostSession;
-  (window as any).WA.registerTaskQuickAction = registerTaskQuickAction;
-  (window as any).WA.registerTaskEntryRoute = registerTaskEntryRoute;
-  (window as any).WA.registerTaskActionHandler = registerTaskActionHandler;
-  (window as any).WA._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes;
-  (window as any).WA.retryWorkspaceConversationPersistence = retryWorkspaceConversationPersistence;
-  (window as any).WA.persistTerminalTaskRunCard = _persistTerminalTaskRunCard;
   (window as any)._initWorkspaceAiRuntimes = _initWorkspaceAiRuntimes;
   (window as any)._hydrateAiConversation = _hydrateAiConversation;
   (window as any)._waSession = _waSession;

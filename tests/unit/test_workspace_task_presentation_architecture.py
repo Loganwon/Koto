@@ -65,11 +65,11 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "function announceTaskCompletion(" in task_runner
     assert "(window as any)._waRenderMarkdown" in task_final_report
     assert "wa-task-final-report" in task_runner
-    assert "const auditHtml = supervisorAuditHtml(data);" in task_runner
-    assert 'class="wa-task-final-report-title">任务结果</div>' in task_runner
+    assert "const auditHtml = (needsAttention || result.status === 'error') ? supervisorAuditHtml(data) : '';" in task_runner
+    assert "function taskResultContextDetailsHtml(card: TaskCardElement): string" in task_runner
     assert "renderTaskFinalReport(visibleSummary)" in task_runner
     assert "fileTaskOutcomeCopy" in task_runner
-    assert "任务已完成，结果已显示在步骤下方" in file_task_status
+    assert "任务已完成，结果和产物已就绪" in file_task_status
     assert "if (normalized === 'needs_attention') return '需处理';" in file_task_status
     assert "if (normalized === 'context_summary_fallback') return '需复核';" in file_task_status
     assert "模型未返回完整答案；当前仅显示基于已读上下文的临时摘要。" in task_runner
@@ -111,6 +111,24 @@ def test_compact_task_card_keeps_process_steps_visible_before_summary() -> None:
     assert "order: 10;" in css
     assert ".wa-task-summary" in css
     assert "order: 20;" in css
+
+
+def test_visible_task_card_hides_duplicate_global_progress_indicator() -> None:
+    task_runner = _read("web/src/workspace/task-runner.ts")
+
+    assert "function taskCardIsVisibleInViewport(card: TaskCardElement): boolean" in task_runner
+    assert "if (taskCardIsVisibleInViewport(card)) {" in task_runner
+    assert "host.dataset.inlineOwner = 'true';" in task_runner
+    assert "// global indicator only as an off-screen reminder" in task_runner
+
+
+def test_task_result_summary_uses_one_canonical_artifact_list() -> None:
+    task_runner = _read("web/src/workspace/task-runner.ts")
+
+    assert "const canonical = path.replace(/^workspace\\//i, '').toLowerCase();" in task_runner
+    assert "const visibleLimit = 3;" in task_runner
+    assert "artifacts.length - visibleLimit" in task_runner
+    assert "artifactsHtml ? '' : renderTaskResultSummaryBar(card, result)" in task_runner
 
 
 def test_task_workbench_uses_shared_report_layout_helpers() -> None:
@@ -256,7 +274,8 @@ def test_task_runner_uses_shared_interaction_summary_helpers() -> None:
     assert "{ role: 'task-understanding', html: renderTaskUnderstandingCard(card) }" in runner
     assert "{ role: 'task-memory-summary', html: renderTaskMemoryCard(card) }" in runner
     assert "function syncTaskInteractionSummary(card: TaskCardElement): void" in runner
-    assert "WA.syncTaskInteractionSummary = syncTaskInteractionSummary" in runner
+    assert "publishWorkspaceApi({" in runner
+    assert "syncTaskInteractionSummary," in runner
 
 
 def test_task_runner_has_no_dead_presentation_helpers() -> None:

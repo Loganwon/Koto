@@ -53,7 +53,8 @@ def test_ai_session_history_clear_all_requires_confirmation():
     assert "runtime.reset()" in src
     assert "_sessionActionsBusy = true" in src
     assert "summary.textContent = _sessions.length" in src
-    assert "(window as any).WA.clearAiSessions = clearAiSessions" in src
+    assert "clearAiSessions," in src
+    assert "publishWorkspaceApi({" in src
 
 
 def test_completed_task_history_cards_are_readonly_and_collapsible():
@@ -68,10 +69,10 @@ def test_completed_task_history_cards_are_readonly_and_collapsible():
     )
 
     assert "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void" in conversation_src
-    assert "turn.task_card_snapshot && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function'" in conversation_src
-    assert "!taskTurnIsTerminal(turn) && (window as any).WA.restoreTaskRunCard" not in conversation_src
+    assert "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'" in conversation_src
+    assert "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard" not in conversation_src
     assert "element.dataset.taskMemorySummary = memorySummary" in conversation_src
-    assert "WA.syncTaskInteractionSummary(element)" in conversation_src
+    assert "workspaceApi.syncTaskInteractionSummary(element)" in conversation_src
     assert "function markTaskRunCardAsHistory" in task_src
     assert "card.dataset.historyStatus = historyStatus || 'history'" in task_src
     assert "process.removeAttribute('open')" in task_src

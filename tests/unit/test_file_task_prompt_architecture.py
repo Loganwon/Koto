@@ -177,3 +177,28 @@ def test_file_task_message_payload_is_extracted_from_runtime() -> None:
     assert "followup_context(request)" in helper
     assert "build_recipe_skeleton(" in helper
 
+
+def test_file_task_execution_messaging_is_extracted_from_runtime() -> None:
+    runtime = _read("app/core/agent/file_task_runtime.py")
+    helper = _read("app/core/agent/file_task_execution_messaging.py")
+    output_guidance_body = _body_between(
+        runtime,
+        "    def _output_mode_guidance(",
+        "    def _intent_plan_guidance(",
+    )
+    repair_body = _body_between(
+        runtime,
+        "    def _whitebox_plan_repair_message(",
+        "    def _build_confirmed_plan(",
+    )
+
+    assert "from app.core.agent.file_task_execution_messaging import" in runtime
+    assert "return _execution_messaging_output_mode_guidance(classification)" in output_guidance_body
+    assert "return _execution_messaging_plan_repair_message(" in repair_body
+    assert "① 核心结果" not in output_guidance_body
+    assert "白盒计划审查未通过或不完整" not in repair_body
+    assert "def output_mode_guidance(" in helper
+    assert "def intent_plan_guidance(" in helper
+    assert "def execution_brief_continue_message(" in helper
+    assert "def execution_plan_continue_message(" in helper
+    assert "def whitebox_plan_repair_message(" in helper

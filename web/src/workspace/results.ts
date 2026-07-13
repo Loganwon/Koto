@@ -4,6 +4,7 @@
 
 import { fileTaskStatusLabel } from './file-task-status';
 import { _escHtml } from './infrastructure';
+import { publishWorkspaceApi } from '../shared/workspace-api';
 
 interface Proposal {
   id?: string;
@@ -750,12 +751,8 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     return renderArtifactResult(result);
   }
 
-  // Backward compat: attach to window.WA
-  if (typeof window !== 'undefined') {
-    (window as any).WA = (window as any).WA || {};
-    (window as any).WA.renderArtifactResult = renderArtifactResult;
-    (window as any).WA.loadBackgroundArtifactResult = loadBackgroundArtifactResult;
-  }
+  // Cross-bundle compatibility boundary.
+  publishWorkspaceApi({ renderArtifactResult, loadBackgroundArtifactResult });
 
   return {
     getProposalRationaleText,
@@ -778,8 +775,5 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
   };
 }
 
-// Backward compat: attach factory to window.WA
-if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.createWorkspaceAiResultsRuntime = createWorkspaceAiResultsRuntime;
-}
+// Cross-bundle compatibility boundary.
+publishWorkspaceApi({ createWorkspaceAiResultsRuntime });

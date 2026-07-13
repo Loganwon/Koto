@@ -86,7 +86,8 @@ def test_workspace_ai_entry_opens_a_conversation_not_the_history_browser() -> No
     assert 'id="wa-ai-chat-view" class="wa-ai-chat-view">' in html
     assert "export function showAiChat(): void" in conversation_list
     assert "_showChatView();" in conversation_list
-    assert "WA.showAiChat = showAiChat" in conversation_list
+    assert "publishWorkspaceApi({" in conversation_list
+    assert "showAiChat," in conversation_list
     assert "WA?.showAiChat" in embedded_mode
     assert "WA?.showAiSessionList" not in embedded_mode
 

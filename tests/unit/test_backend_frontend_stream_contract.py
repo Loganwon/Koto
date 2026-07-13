@@ -165,7 +165,8 @@ def test_frontend_task_runner_matches_backend_stream_contract():
     assert "检测到任务进度事件缺失" not in runner
     assert "检测到任务进度事件顺序异常" not in runner
     assert "检测到重复进度事件" not in runner
-    assert "WA.parseSseEvents = parseSseEvents" in runner
+    assert "publishWorkspaceApi({" in runner
+    assert "parseSseEvents," in runner
     assert "csrfFetch('/api/editor/ai/task-stream'" in runner
     assert "'Accept': 'text/event-stream'" in runner
     # Production bundles are minified, so local identifier names and quote

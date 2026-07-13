@@ -6,6 +6,7 @@
 import { _csrfFetch, $, showToast } from './infrastructure';
 import { _fsHandleMap, _renderTabs, loadRecentFiles, state, type TabInfo } from './state';
 import { _serializeEditorForTab, _stableWorkspaceSnapshot } from './file-open';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
 const _MIME: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -37,7 +38,7 @@ function _activeTab(): TabInfo | null {
 function _normalizeWorkspaceSavePath(path: string): string {
   const raw = String(path || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (!raw) return '';
-  const sharedNormalizer = (window as any).WA && (window as any).WA.normalizeWorkspaceFilePath;
+  const sharedNormalizer = getWorkspaceApi().normalizeWorkspaceFilePath;
   if (typeof sharedNormalizer === 'function') {
     try {
       const normalized = String(sharedNormalizer(raw) || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
@@ -278,18 +279,17 @@ function _installSaveShortcuts(): void {
   }, true);
 }
 
-(window as any).WA = (window as any).WA || {};
-(window as any).WA.saveFile = saveFile;
-(window as any).WA.saveAs = saveAs;
-(window as any).WA.autoSave = autoSave;
-(window as any).WA.scheduleAutoSave = scheduleAutoSave;
-(window as any).WA._notifyPyModified = _notifyPyModified;
-(window as any).WA.markExternalFileChange = markExternalFileChange;
-(window as any).WA.clearExternalFileChange = clearExternalFileChange;
-(window as any).WA.toggleAutoSave = toggleAutoSave;
-(window as any).WA.renderAutoSaveToggle = _renderAutoSaveToggle;
-(window as any)._safeJson = (window as any)._safeJson || _safeJson;
-(window as any)._notifyPyModified = (window as any)._notifyPyModified || _notifyPyModified;
+publishWorkspaceApi({
+  saveFile,
+  saveAs,
+  autoSave,
+  scheduleAutoSave,
+  _notifyPyModified,
+  markExternalFileChange,
+  clearExternalFileChange,
+  toggleAutoSave,
+  renderAutoSaveToggle: _renderAutoSaveToggle,
+});
 
 _installSaveShortcuts();
 if (document.readyState === 'loading') {

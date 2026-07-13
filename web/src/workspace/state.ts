@@ -5,6 +5,7 @@
 
 import { _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
 import { logger } from '../shared/logger';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 // ── Interfaces ──
 
@@ -754,11 +755,11 @@ function _normalizeRecentPath(path: string): string {
 }
 
 function _recentFileDragAttrs(): string {
-  return 'draggable="true" ondragstart="WA._browserFileDragStart(event,this)" ondragend="WA._browserFileDragEnd(event,this)"';
+  return 'draggable="true" data-wa-file-draggable="true"';
 }
 
 function _recentFileOpenHitDragAttrs(): string {
-  return 'draggable="true" ondragstart="WA._browserFileDragStart(event,this.closest(\'.wa-file-item\'))" ondragend="WA._browserFileDragEnd(event,this.closest(\'.wa-file-item\'))"';
+  return 'draggable="false" data-wa-file-action="open"';
 }
 
 function _loadLocalRecentFiles(): RecentFileEntry[] {
@@ -848,10 +849,8 @@ export async function loadRecentFiles(): Promise<void> {
     return `<div class="wa-file-item file wa-recent-file" title="${_escHtml(file.path || '')}"`
       + ` data-path="${_escHtml(file.path || '')}" data-supported="${supported}"`
       + ` ${_recentFileDragAttrs()}`
-      + ` onmousedown="WA._browserFileRowMouseDown(event,this)"`
-      + ` onclick="WA.openRecentFile(${JSON.stringify(file.path || '')})"`
-      + ` oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)">`
-      + `<button type="button" class="wa-file-open-hit" ${_recentFileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}" onclick="event.preventDefault();event.stopPropagation();WA.openRecentFile(this.closest('.wa-file-item').dataset.path)"></button>`
+      + `>`
+      + `<button type="button" class="wa-file-open-hit" ${_recentFileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}"></button>`
       + `<span class="wa-recent-indent"></span>${icon}`
       + `<span class="wa-file-label">${_escHtml(name)}</span>`
       + `<span class="wa-recent-date">${date}${size}</span>`
@@ -912,12 +911,11 @@ export function _renderMyWorkspace(): void {
       const nameEsc = _escHtml(file.name);
       const icon = _fileIcon(file.ext || file.name.split('.').pop() || '');
       const active = state.activeTabPath === file.path ? ' active' : '';
-      const pathJs = file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return (
         `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"` +
-        ` onclick="WA.openBrowserFile('${pathJs}', true)" draggable="true">` +
+        ` data-wa-workspace-row-action="open" draggable="true">` +
         `${icon}<span class="wa-file-label">${nameEsc}</span>` +
-        `<button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromMyWorkspace('${pathJs}')" title="从工作区移除">×</button>` +
+        `<button type="button" class="wa-myws-remove" data-wa-workspace-row-action="remove-my" title="从工作区移除">×</button>` +
         `</div>`
       );
     })
@@ -980,12 +978,11 @@ export function _renderTempWorkspace(): void {
       const nameEsc = _escHtml(file.name);
       const icon = _fileIcon(file.ext || file.name.split('.').pop() || '');
       const active = state.activeTabPath === file.path ? ' active' : '';
-      const pathJs = file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return (
         `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"` +
-        ` onclick="WA.openBrowserFile('${pathJs}', true)" draggable="true">` +
+        ` data-wa-workspace-row-action="open" draggable="true">` +
         `${icon}<span class="wa-file-label">${nameEsc}</span>` +
-        `<button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromTempWorkspace('${pathJs}')" title="从临时工作区移除">×</button>` +
+        `<button type="button" class="wa-myws-remove" data-wa-workspace-row-action="remove-temp" title="从临时工作区移除">×</button>` +
         `</div>`
       );
     })
@@ -1009,6 +1006,34 @@ export function _renderTempWorkspace(): void {
   });
 }
 
+let _workspaceRowActionDelegationInstalled = false;
+
+function _installWorkspaceRowActionDelegation(): void {
+  if (_workspaceRowActionDelegationInstalled) return;
+  _workspaceRowActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target && target.closest ? target.closest<HTMLElement>('[data-wa-workspace-row-action]') : null;
+    if (!control) return;
+    const row = control.closest<HTMLElement>('.wa-myws-item');
+    const path = String(row?.dataset.path || '').trim();
+    const action = String(control.dataset.waWorkspaceRowAction || '');
+    if (!path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const workspaceApi = getWorkspaceApi();
+    if (action === 'open' && typeof workspaceApi.openBrowserFile === 'function') {
+      void workspaceApi.openBrowserFile(path, true);
+    } else if (action === 'remove-my' && typeof workspaceApi.removeFromMyWorkspace === 'function') {
+      workspaceApi.removeFromMyWorkspace(path);
+    } else if (action === 'remove-temp' && typeof workspaceApi.removeFromTempWorkspace === 'function') {
+      workspaceApi.removeFromTempWorkspace(path);
+    }
+  }, true);
+}
+
+_installWorkspaceRowActionDelegation();
+
 // ── Placeholder helpers (implemented in other modules) ──
 
 function _updateStatusBar(): void {
@@ -1026,8 +1051,7 @@ function _updateContextBar(_ctx?: any): void {
 
 // ── Register with window.WA ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = getWorkspaceApi();
 
 function _syncMobileFilesA11y(): void {
   const left = document.getElementById('wa-left') as HTMLElement | null;

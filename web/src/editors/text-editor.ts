@@ -4,6 +4,7 @@
 
 import type { WorkspaceEditor } from './types';
 import type { TextEditorData } from './types';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 
@@ -29,7 +30,7 @@ export class KotoTextEditor implements WorkspaceEditor {
   }
 
   _handleInput = () => {
-    const scheduleAutoSave = (window as any).WA && (window as any).WA.scheduleAutoSave;
+    const scheduleAutoSave = getWorkspaceApi().scheduleAutoSave;
     if (typeof scheduleAutoSave === 'function') scheduleAutoSave();
     this._queueSelectionToolbarUpdate();
   };
@@ -42,7 +43,7 @@ export class KotoTextEditor implements WorkspaceEditor {
     if (this._selectionNotifyTimer) window.clearTimeout(this._selectionNotifyTimer);
     this._selectionNotifyTimer = window.setTimeout(() => {
       this._selectionNotifyTimer = null;
-      const showToolbar = (window as any).WA && (window as any).WA._showSelectionToolbarForCurrentSelection;
+      const showToolbar = getWorkspaceApi()._showSelectionToolbarForCurrentSelection;
       if (typeof showToolbar === 'function') showToolbar();
     }, 0);
   }
@@ -66,7 +67,7 @@ export class KotoTextEditor implements WorkspaceEditor {
   applyToolCall(cmd: any) {
     if (cmd.type === 'set_html' || cmd.type === 'set_text') {
       if (this._ta) this._ta.value = cmd.value || '';
-      (window as any).WA.scheduleAutoSave();
+      getWorkspaceApi().scheduleAutoSave?.();
     }
   }
 

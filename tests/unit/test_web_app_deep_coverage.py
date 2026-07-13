@@ -246,15 +246,11 @@ class TestTrackedModels:
         real.generate_content.assert_called_once()
 
     def test_generate_content_error_propagates(self):
-        """When generate_content raises 'Interactions API required', code retries via
-        _call_ia; if that also fails, the original error propagates to the caller."""
-        tm, real, app = self._make()
+        """Archived Interactions errors preserve the original provider failure."""
+        tm, real, _app = self._make()
         real.generate_content.side_effect = Exception("Interactions API required")
-        with patch.object(
-            app, "_call_interactions_api_sync", side_effect=Exception("IA also failed")
-        ):
-            with pytest.raises(Exception, match="Interactions API required"):
-                tm.generate_content(model="some-model", contents="hi")
+        with pytest.raises(Exception, match="Interactions API required"):
+            tm.generate_content(model="some-model", contents="hi")
 
     def test_generate_content_non_interactions_error_raises(self):
         tm, real, app = self._make()

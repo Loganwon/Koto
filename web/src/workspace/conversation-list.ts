@@ -25,6 +25,9 @@ import {
   taskStatusLabel,
 } from './conversation-sessions';
 import { $, _CHAT_SVG, _TRASH_SVG, _escHtml, showToast } from './infrastructure';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 interface RefreshOptions {
   silent?: boolean;
@@ -54,10 +57,9 @@ function _focusComposer(): void {
 }
 
 function _closeSkillLibrary(): void {
-  const WA = (window as any).WA || {};
-  if (typeof WA.closeSkillLibrary === 'function') {
+  if (typeof workspaceApi.closeSkillLibrary === 'function') {
     try {
-      WA.closeSkillLibrary();
+      workspaceApi.closeSkillLibrary();
     } catch (_) { /* noop */ }
   }
 }
@@ -176,10 +178,9 @@ function _openLatestTaskFlowForSession(sessionId: string): void {
   const taskId = String(session && session.latest_task_id || '').trim();
   if (!taskId) return;
   _syncHistoricalTaskLiveProgress(session);
-  const WA = (window as any).WA || {};
-  if (typeof WA.openTaskWorkbenchForCurrentRun !== 'function') return;
+  if (typeof workspaceApi.openTaskWorkbenchForCurrentRun !== 'function') return;
   window.setTimeout(() => {
-    WA.openTaskWorkbenchForCurrentRun({
+    workspaceApi.openTaskWorkbenchForCurrentRun({
       taskId,
       runId: String(session && session.latest_task_run_id || '').trim(),
       scroll: false,
@@ -271,9 +272,8 @@ export async function openAiSession(sessionId: string, options: RefreshOptions &
   _showChatView();
   _renderSessions();
 
-  const WA = (window as any).WA || {};
-  if (typeof WA.useHostSession === 'function') {
-    const opened = await WA.useHostSession(normalized, { force: options.force !== false });
+  if (typeof workspaceApi.useHostSession === 'function') {
+    const opened = await workspaceApi.useHostSession(normalized, { force: options.force !== false });
     _openLatestTaskFlowForSession(normalized);
     return opened;
   }
@@ -294,9 +294,8 @@ export async function deleteAiSession(sessionId: string): Promise<boolean> {
       const next = _sessions[0];
       if (next) {
         _activeAiSessionId = next.id;
-        const WA = (window as any).WA || {};
-        if (typeof WA.useHostSession === 'function') {
-          await WA.useHostSession(next.id, { force: true });
+        if (typeof workspaceApi.useHostSession === 'function') {
+          await workspaceApi.useHostSession(next.id, { force: true });
         }
       } else {
         _activeAiSessionId = '';
@@ -382,8 +381,7 @@ export async function newAiSession(options: NewSessionOptions = {}): Promise<any
 export async function submitUnifiedAiComposer(): Promise<any> {
   const mode = workspaceAiComposerMode();
   if (mode !== 'sessionList') {
-    const WA = (window as any).WA || {};
-    if (typeof WA.sendMessage === 'function') return WA.sendMessage();
+    if (typeof workspaceApi.sendMessage === 'function') return workspaceApi.sendMessage();
     return null;
   }
 
@@ -408,9 +406,8 @@ export async function submitUnifiedAiComposer(): Promise<any> {
     const chatInput = setWorkspaceAiComposerValue('chat', text, { focus: false, dispatchInput: true });
     if (!chatInput) throw new Error('对话输入框未就绪');
 
-    const WA = (window as any).WA || {};
-    if (typeof WA.sendMessage !== 'function') throw new Error('模型发送通路未就绪');
-    WA.sendMessage();
+    if (typeof workspaceApi.sendMessage !== 'function') throw new Error('模型发送通路未就绪');
+    workspaceApi.sendMessage();
 
     return sessionId;
   } catch (error: any) {
@@ -506,22 +503,21 @@ function _initAiSessionBrowser(): void {
   refreshAiSessions({ silent: true }).catch(() => {});
 }
 
-if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.showAiSessionList = showAiSessionList;
-  (window as any).WA.showAiChat = showAiChat;
-  (window as any).WA.refreshAiSessions = refreshAiSessions;
-  (window as any).WA.openAiSession = openAiSession;
-  (window as any).WA.deleteAiSession = deleteAiSession;
-  (window as any).WA.clearAiSessions = clearAiSessions;
-  (window as any).WA.newAiSession = newAiSession;
-  (window as any).WA.submitUnifiedAiComposer = submitUnifiedAiComposer;
-  (window as any).WA.handleUnifiedComposerKeydown = handleUnifiedComposerKeydown;
-  (window as any).WA.sendSessionListComposer = sendSessionListComposer;
-  (window as any).WA.handleSessionListComposerKeydown = handleSessionListComposerKeydown;
-  (window as any).WA._syncAiSessionSelection = syncAiSessionSelection;
-  (window as any).WA._activeAiSessionMeta = _activeSessionMeta;
-}
+publishWorkspaceApi({
+  showAiSessionList,
+  showAiChat,
+  refreshAiSessions,
+  openAiSession,
+  deleteAiSession,
+  clearAiSessions,
+  newAiSession,
+  submitUnifiedAiComposer,
+  handleUnifiedComposerKeydown,
+  sendSessionListComposer,
+  handleSessionListComposerKeydown,
+  _syncAiSessionSelection: syncAiSessionSelection,
+  _activeAiSessionMeta: _activeSessionMeta,
+});
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _initAiSessionBrowser);

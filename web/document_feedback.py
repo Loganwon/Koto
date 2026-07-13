@@ -40,6 +40,10 @@ from web.document_feedback_progress import (
 )
 from web.document_feedback_background import BackgroundProgressBridge
 from web.document_feedback_preflight import prepare_analysis_preflight
+from web.document_feedback_stream_stages import (
+    build_complete_event,
+    read_document_stage,
+)
 from web.document_feedback_stream import (
     collect_annotation_result,
     iter_annotation_progress_events,
@@ -1676,42 +1680,11 @@ class DocumentFeedbackSystem:
             }
             return
 
-        yield {
-            "stage": "reading",
-            "progress": 5,
-            "message": f"📖 正在读取文档: {os.path.basename(file_path)}",
-            "detail": "解析Word文件结构",
-        }
-
-        try:
-            doc_data = self.reader.read_document(file_path)
-            if not doc_data.get("success"):
-                yield {
-                    "stage": "error",
-                    "progress": 0,
-                    "message": f'❌ 读取失败: {doc_data.get("error")}',
-                    "detail": "",
-                }
-                return
-
-            total_paras = len(doc_data.get("paragraphs", []))
-            total_chars = sum(
-                len(p.get("text", "")) for p in doc_data.get("paragraphs", [])
-            )
-
-            yield {
-                "stage": "reading_complete",
-                "progress": 10,
-                "message": "✅ 文档读取完成",
-                "detail": f"{total_paras} 段，{total_chars} 字",
-            }
-        except Exception as e:
-            yield {
-                "stage": "error",
-                "progress": 0,
-                "message": f"❌ 读取错误: {str(e)[:100]}",
-                "detail": "",
-            }
+        doc_data, total_paras, total_chars, reading_events = read_document_stage(
+            self.reader, file_path
+        )
+        yield from reading_events
+        if doc_data is None:
             return
 
         # ===== Stage 2: 分析生成修订建议 =====
@@ -1741,7 +1714,6 @@ class DocumentFeedbackSystem:
         yield from preflight.events
 
         # ===== 使用线程 + Queue 实现真正实时进度推送 =====
-        import queue as queue_module
         analysis_bridge = BackgroundProgressBridge()
         last_yield_time = [0.0]
 
@@ -1770,8 +1742,6 @@ class DocumentFeedbackSystem:
         analysis_bridge.start(run_analysis)
 
         # 主线程：实时从 Queue 取出进度事件并 yield（SSE 推送给浏览器）
-        heartbeat_interval = 3.0  # 每3秒发一次心跳防止 SSE 超时
-        last_heartbeat = time.time()
         current_progress = [15]  # 跟踪当前进度，防止心跳数字回退
         current_detail = [
             (
@@ -1782,41 +1752,27 @@ class DocumentFeedbackSystem:
         ]
 
         try:
-            while True:
-                if _is_cancelled():
-                    yield {
-                        "stage": "cancelled",
-                        "progress": 0,
-                        "message": "⏸️ 任务已被取消",
-                        "detail": "分析过程中中断",
-                    }
-                    return
-                try:
-                    evt = analysis_bridge.get(timeout=1.0)
-                    if analysis_bridge.is_complete(evt):
-                        break
-                    current_progress[0] = max(
-                        current_progress[0], evt.get("progress", 15)
-                    )
-                    evt_detail = str(evt.get("detail") or evt.get("message") or "").strip()
-                    if evt_detail:
-                        current_detail[0] = evt_detail
-                    yield evt
-                    last_heartbeat = time.time()
-                except queue_module.Empty:
-                    if not analysis_bridge.is_alive():
-                        break
-                    # 发送心跳防止浏览器 SSE 超时断连
-                    now = time.time()
-                    if now - last_heartbeat >= heartbeat_interval:
-                        last_heartbeat = now
-                        yield {
-                            "stage": "analyzing",
-                            "progress": current_progress[0],
-                            "message": "🤖 正在分析文档...",
-                            "detail": f"{current_detail[0]}；等待 AI 响应中..." if current_detail[0] else "等待 AI 响应中...",
-                        }
+            def _update_analysis_progress(event: Dict[str, Any]) -> None:
+                current_progress[0] = max(current_progress[0], event.get("progress", 15))
+                detail = str(event.get("detail") or event.get("message") or "").strip()
+                if detail:
+                    current_detail[0] = detail
 
+            analysis_complete = yield from analysis_bridge.stream_events(
+                is_cancelled=_is_cancelled,
+                cancelled_event=lambda: {
+                    "stage": "cancelled", "progress": 0,
+                    "message": "⏸️ 任务已被取消", "detail": "分析过程中中断",
+                },
+                on_event=_update_analysis_progress,
+                heartbeat=lambda: {
+                    "stage": "analyzing", "progress": current_progress[0],
+                    "message": "🤖 正在分析文档...",
+                    "detail": f"{current_detail[0]}；等待 AI 响应中..." if current_detail[0] else "等待 AI 响应中...",
+                },
+            )
+            if not analysis_complete:
+                return
             analysis_bridge.join(timeout=10)
 
             # 检查线程执行结果
@@ -1966,23 +1922,15 @@ class DocumentFeedbackSystem:
 
             apply_bridge.start(run_apply)
 
-            while True:
-                if _is_cancelled():
-                    yield {
-                        "stage": "cancelled",
-                        "progress": 0,
-                        "message": "⏸️ 任务已被取消",
-                        "detail": "应用修改过程中中断",
-                    }
-                    return
-                try:
-                    evt = apply_bridge.get(timeout=1.0)
-                    if apply_bridge.is_complete(evt):
-                        break
-                    yield evt
-                except queue_module.Empty:
-                    if not apply_bridge.is_alive():
-                        break
+            apply_complete = yield from apply_bridge.stream_events(
+                is_cancelled=_is_cancelled,
+                cancelled_event=lambda: {
+                    "stage": "cancelled", "progress": 0,
+                    "message": "⏸️ 任务已被取消", "detail": "应用修改过程中中断",
+                },
+            )
+            if not apply_complete:
+                return
 
             apply_bridge.join(timeout=10)
 
@@ -2035,29 +1983,11 @@ class DocumentFeedbackSystem:
         except Exception as e:
             logger.info(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
 
-        yield {
-            "stage": "complete",
-            "progress": 100,
-            "message": "✅ 文档修改完成！",
-            "detail": f"修改位置: {applied}，定位失败: {failed}",
-            "result": {
-                "success": edit_result.get("success", False),
-                "original_file": file_path,
-                "revised_file": revised_file,
-                "updated_in_place": True,
-                "applied": applied,
-                "failed": failed,
-                "total": len(annotations),
-                "analysis_summary": analysis_result.get("summary"),
-                # 兜底状态，供 app.py 展示警告
-                "fallback_used": analysis_result.get("fallback_used", False),
-                "partial_fallback": analysis_result.get("partial_fallback", False),
-                "last_api_error": analysis_result.get("last_api_error", ""),
-                "fallback_chunk_count": analysis_result.get("fallback_chunk_count", 0),
-                "ai_chunk_count": analysis_result.get("ai_chunk_count", 0),
-                "empty_result_fallback_chunk_count": analysis_result.get("empty_result_fallback_chunk_count", 0),
-            },
-        }
+        yield build_complete_event(
+            file_path=file_path, revised_file=revised_file, annotations=annotations,
+            applied=applied, failed=failed, edit_result=edit_result,
+            analysis_result=analysis_result,
+        )
 
     def full_annotation_loop(
         self,

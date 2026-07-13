@@ -5,7 +5,9 @@
 
 import { _fileIcon, _escHtml, showToast, _PIN_SVG } from './infrastructure';
 import { state, _trackUserOpen, AiFileContext } from './state';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 // ── Interfaces ──
 
@@ -498,9 +500,9 @@ export function _renderAIFileChips(): void {
         `<span class="ctx-row-size">${sizeLabel}</span>` +
         (isLoading || hasError
           ? ''
-          : `<button class="ctx-row-pin${isTarget ? ' active' : ''}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) +
-        (hasError ? `<button type="button" class="ctx-row-retry" onclick="event.stopPropagation(); WA.retryAIFileContext(${i})" title="重试">重试</button>` : '') +
-        (isLoading ? '' : `<button type="button" class="ctx-row-remove" onclick="event.stopPropagation(); WA.removeAIFileContext(${i})" title="移除附加文件" aria-label="移除 ${_escHtml(f.name)}">×</button>`) +
+          : `<button type="button" class="ctx-row-pin${isTarget ? ' active' : ''}" data-wa-context-action="target" data-context-index="${i}" title="${pinTitle}">${_PIN_SVG}</button>`) +
+        (hasError ? `<button type="button" class="ctx-row-retry" data-wa-context-action="retry" data-context-index="${i}" title="重试">重试</button>` : '') +
+        (isLoading ? '' : `<button type="button" class="ctx-row-remove" data-wa-context-action="remove" data-context-index="${i}" title="移除附加文件" aria-label="移除 ${_escHtml(f.name)}">×</button>`) +
         `</div>`
       );
     })
@@ -515,9 +517,9 @@ export function _renderAIFileChips(): void {
         `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>` +
         `<span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div>` +
         `<div class="wa-multidoc-actions">` +
-        `<button type="button" onclick="WA.openNotebookGuide()" title="根据附加文档生成摘要、要点、问答和词汇表">学习包</button>` +
-        `<button type="button" onclick="WA.openAudioOverview()" title="根据附加文档生成双人有声概览">有声概览</button>` +
-        `<button type="button" onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button>` +
+        `<button type="button" data-wa-context-action="notebook" title="根据附加文档生成摘要、要点、问答和词汇表">学习包</button>` +
+        `<button type="button" data-wa-context-action="audio" title="根据附加文档生成双人有声概览">有声概览</button>` +
+        `<button type="button" data-wa-context-action="clear" title="清除全部附加文件">全部移除</button>` +
         `</div>`;
     }
     wrap.style.display = '';
@@ -536,8 +538,6 @@ export function _renderAIFileChips(): void {
 }
 
 // ── Backward compatibility ──
-
-const wa = getWorkspaceApi();
 
 export function removeAIFileContext(idx: number): boolean {
   const index = Number(idx);
@@ -562,10 +562,7 @@ export function clearAIFileContext(): void {
   if (hadFiles) showToast('已清除全部附加文件', 'info');
 }
 
-wa.removeAIFileContext = removeAIFileContext;
-wa.clearAIFileContext = clearAIFileContext;
-
-wa.retryAIFileContext = (idx: number) => {
+export function retryAIFileContext(idx: number): void {
   const file = state._aiFileContext[idx];
   if (!file || file.loading) return;
   const path = file.path || (file as any).name;
@@ -574,22 +571,52 @@ wa.retryAIFileContext = (idx: number) => {
   else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
   _renderAIFileChips();
   _attachFilesToTask([path], { source: 'retry', expandPanel: false, focusInput: false });
-};
+}
 
-wa.setAITargetFile = (idx: number) => {
+export function setAITargetFile(idx: number): void {
   state._aiTargetFileIdx = state._aiTargetFileIdx === idx ? -1 : idx;
   _renderAIFileChips();
   const f = state._aiTargetFileIdx >= 0 ? state._aiFileContext[state._aiTargetFileIdx] : null;
   if (f) showToast(`"${(f as AIContextFile).name}" 已设为修改目标文件`, 'success');
   else showToast('已取消目标文件设置', 'info');
-};
+}
 
-wa.attachFilesToTask = _attachFilesToTask;
-wa.pickAIContextFiles = _pickAIContextFiles;
-wa.addLocalFilesToAIContext = _addLocalFilesToAIContext;
+let _aiContextActionDelegationInstalled = false;
 
-const pendingBrowserFilesToAI = Array.isArray(wa._pendingSendBrowserFilesToAI)
-  ? wa._pendingSendBrowserFilesToAI.splice(0)
+function _installAIContextActionDelegation(): void {
+  if (_aiContextActionDelegationInstalled) return;
+  _aiContextActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target && target.closest ? target.closest<HTMLElement>('[data-wa-context-action]') : null;
+    if (!control) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = String(control.dataset.waContextAction || '');
+    const index = Number(control.dataset.contextIndex);
+    if (action === 'target') setAITargetFile(index);
+    else if (action === 'retry') retryAIFileContext(index);
+    else if (action === 'remove') removeAIFileContext(index);
+    else if (action === 'clear') clearAIFileContext();
+    else if (action === 'notebook' && typeof workspaceApi.openNotebookGuide === 'function') workspaceApi.openNotebookGuide();
+    else if (action === 'audio' && typeof workspaceApi.openAudioOverview === 'function') workspaceApi.openAudioOverview();
+  });
+}
+
+publishWorkspaceApi({
+  removeAIFileContext,
+  clearAIFileContext,
+  retryAIFileContext,
+  setAITargetFile,
+  attachFilesToTask: _attachFilesToTask,
+  pickAIContextFiles: _pickAIContextFiles,
+  addLocalFilesToAIContext: _addLocalFilesToAIContext,
+});
+
+_installAIContextActionDelegation();
+
+const pendingBrowserFilesToAI = Array.isArray(workspaceApi._pendingSendBrowserFilesToAI)
+  ? workspaceApi._pendingSendBrowserFilesToAI.splice(0)
   : [];
 if (pendingBrowserFilesToAI.length) {
   setTimeout(() => {

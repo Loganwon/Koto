@@ -16,6 +16,11 @@ import json
 import logging
 from typing import Any, List, Optional
 
+from app.core.agent.task_tools_xlsx_sheet_selection import (
+    select_workbook_sheet as _select_workbook_sheet,
+    sheet_matches_statement as _sheet_matches_statement,
+)
+
 
 def _task_tools_helper(name: str):
     """Resolve legacy shared helpers only after the module graph is ready.
@@ -53,8 +58,6 @@ _resolve_path = _task_tools_helper("_resolve_path")
 _result_path = _task_tools_helper("_result_path")
 _safe_resolve = _task_tools_helper("_safe_resolve")
 _save_workbook_via_temp_file = _task_tools_helper("_save_workbook_via_temp_file")
-_select_workbook_sheet = _task_tools_helper("_select_workbook_sheet")
-_sheet_matches_statement = _task_tools_helper("_sheet_matches_statement")
 _success_result = _task_tools_helper("_success_result")
 
 _logger = logging.getLogger(__name__)
