@@ -39,6 +39,16 @@ def test_evaluation_reports_do_not_log_model_derived_error_payloads():
     assert "adjudicator result received" in source
 
 
+def test_ci_and_release_workflows_enforce_the_same_locked_dependency_audit():
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
+    release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    audit_command = "pip-audit --requirement config/requirements.lock --desc"
+
+    assert audit_command in ci
+    assert audit_command in release
+    assert "pip-audit --desc || true" not in ci
+
+
 def test_release_build_includes_file_task_chart_dependencies():
     requirements = Path("config/requirements.txt").read_text(encoding="utf-8")
     lock = Path("config/requirements.lock").read_text(encoding="utf-8")

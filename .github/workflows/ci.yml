@@ -70,7 +70,7 @@ jobs:
       - name: CVE scan (pip-audit)
         run: |
           pip install pip-audit
-          pip-audit --desc || true
+          pip-audit --requirement config/requirements.lock --desc
 
       - name: Run tests
         env:
