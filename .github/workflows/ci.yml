@@ -75,6 +75,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: .
+          KOTO_PYTEST_HARD_EXIT: "0"
         run: |
           pytest \
             tests/unit/ \

@@ -585,6 +585,17 @@ def context_files(
         if not match_keys:
             continue
         existing = next((seen[key] for key in match_keys if key in seen), None)
+        if existing is None and not _is_weak_context_path(file_info):
+            basename_key = _context_file_basename_key(file_info)
+            existing = next(
+                (
+                    item
+                    for item in result
+                    if _is_weak_context_path(item)
+                    and _context_file_basename_key(item) == basename_key
+                ),
+                None,
+            )
         if existing is not None:
             if file_info.target:
                 existing.target = True
