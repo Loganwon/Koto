@@ -39,6 +39,7 @@ DOCUMENT_FEEDBACK_RULES = ROOT / "web" / "document_feedback_rules.py"
 DOCUMENT_FEEDBACK_RESULT = ROOT / "web" / "document_feedback_result.py"
 DOCUMENT_FEEDBACK_PROGRESS = ROOT / "web" / "document_feedback_progress.py"
 DOCUMENT_FEEDBACK_BACKGROUND = ROOT / "web" / "document_feedback_background.py"
+DOCUMENT_FEEDBACK_PREFLIGHT = ROOT / "web" / "document_feedback_preflight.py"
 
 
 def _source(path: Path) -> str:
@@ -50,7 +51,7 @@ def test_god_file_line_budgets_only_ratchet_down() -> None:
     assert len(_source(TASK_TOOLS).splitlines()) <= 5395
     assert len(_source(TASK_RUNTIME).splitlines()) <= 3421
     assert len(_source(DOCX_PARSER).splitlines()) <= 762
-    assert len(_source(DOCUMENT_FEEDBACK).splitlines()) <= 2350
+    assert len(_source(DOCUMENT_FEEDBACK).splitlines()) <= 2320
 
 
 def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
@@ -85,6 +86,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     document_feedback_result = _source(DOCUMENT_FEEDBACK_RESULT)
     document_feedback_progress = _source(DOCUMENT_FEEDBACK_PROGRESS)
     document_feedback_background = _source(DOCUMENT_FEEDBACK_BACKGROUND)
+    document_feedback_preflight = _source(DOCUMENT_FEEDBACK_PREFLIGHT)
 
     assert "from app.core.agent.task_tools_office_create import" in task_tools
     assert "from app.core.agent.task_tools_conversion import (" in task_tools
@@ -130,6 +132,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "from web.document_feedback_result import collect_annotation_loop_result" in document_feedback
     assert "from web.document_feedback_progress import (" in document_feedback
     assert "from web.document_feedback_background import BackgroundProgressBridge" in document_feedback
+    assert "from web.document_feedback_preflight import prepare_analysis_preflight" in document_feedback
     assert "def parse_annotation_response(" in document_feedback_annotations
     assert "def stream_annotation_events(" in document_feedback_stream
     assert "def probe_working_model(" in document_feedback_models
@@ -141,6 +144,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "def collect_annotation_loop_result(" in document_feedback_result
     assert "def build_analysis_progress_event(" in document_feedback_progress
     assert "class BackgroundProgressBridge:" in document_feedback_background
+    assert "def prepare_analysis_preflight(" in document_feedback_preflight
     stream_tree = ast.parse(document_feedback_stream)
     assert not any(
         isinstance(node, ast.ImportFrom) and node.module == "web.document_feedback"
