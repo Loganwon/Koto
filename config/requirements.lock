@@ -269,6 +269,8 @@ pydantic-core==2.41.5
     # via pydantic
 pydantic-settings==2.13.1
     # via langchain-community
+pymupdf==1.28.0
+    # via -r config/requirements.txt
 pyjwt==2.12.1
     # via -r config/requirements.txt
 pyparsing==3.2.5

@@ -41,6 +41,7 @@ if _PROJECT_ROOT not in sys.path:
 os.environ.setdefault("KOTO_AUTH_ENABLED", "false")
 os.environ.setdefault("KOTO_DEPLOY_MODE", "local")
 os.environ.setdefault("GEMINI_API_KEY", "test-key-for-unit-tests")
+os.environ.setdefault("DEEPSEEK_API_KEY", "test-key-for-unit-tests")
 
 
 # =====================================================================

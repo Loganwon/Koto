@@ -17,7 +17,10 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
-_MAX_TIMER_DELAY_SECONDS = float(getattr(threading, "TIMEOUT_MAX", 4_294_967))
+_MAX_TIMER_DELAY_SECONDS = min(
+    float(getattr(threading, "TIMEOUT_MAX", 2_147_483_647)),
+    2_147_483_647,
+)
 
 try:
     from web.windows_notifier import show_toast
