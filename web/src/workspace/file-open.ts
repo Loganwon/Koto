@@ -21,6 +21,7 @@ import {
 import { _escHtml } from './infrastructure';
 import { _ensurePdfJS, _ensureTipTap, _ensureUniverSheets, _ensureWorkbookDefaults } from '../editors/cdn-loaders';
 import { KotoTextEditor, _setupDocOutline, loadPptxEditor, loadPdfViewer, loadXlsxEditor, loadImageViewer } from '../editors/lazy-loaders';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 function _fileExt(fileName: string): string {
   return (String(fileName || '').split('.').pop() || '').toLowerCase();
@@ -183,8 +184,9 @@ function _applyTabState(tab: TabInfo): void {
   _syncPrimarySaveButtons(tab);
   _syncZoomControls(tab.fileType);
   toggleWorkspace(true);
-  if (typeof (window as any).WA?.closeMobileFiles === 'function') {
-    (window as any).WA.closeMobileFiles();
+  const closeMobileFiles = getWorkspaceApi().closeMobileFiles;
+  if (typeof closeMobileFiles === 'function') {
+    closeMobileFiles();
   }
 }
 
@@ -253,14 +255,16 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
   _applyTabState(tabEntry);
   await _mountEditor(tabEntry, json.data);
   _rememberSavedSnapshotForTab(tabEntry, state.activeEditor);
-  if (typeof (window as any).WA?.clearExternalFileChange === 'function') {
-    (window as any).WA.clearExternalFileChange(resolvedPath);
+  const clearExternalFileChange = getWorkspaceApi().clearExternalFileChange;
+  if (typeof clearExternalFileChange === 'function') {
+    clearExternalFileChange(resolvedPath);
   }
   _renderTabs();
   _highlightActiveFile(resolvedPath);
   setTimeout(() => {
-    if (typeof (window as any).WA?._softRefreshBrowser === 'function') {
-      (window as any).WA._softRefreshBrowser().catch(() => {});
+    const refreshBrowser = getWorkspaceApi()._softRefreshBrowser;
+    if (typeof refreshBrowser === 'function') {
+      refreshBrowser().catch(() => {});
     } else {
       loadWorkspaceFiles().catch(() => {});
     }
@@ -270,8 +274,7 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
 
 _registerSwitchToTab(_switchToTabImpl);
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = getWorkspaceApi();
 (window as any)._serializeEditorForTab = _serializeEditorForTab;
 wa._applyFileJson = _applyFileJson;
 wa._syncPrimarySaveButtons = _syncPrimarySaveButtons;

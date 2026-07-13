@@ -5,6 +5,9 @@
 
 import { _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG, _DEFAULT_FILE_SVG } from './infrastructure';
 import { state } from './state';
+import { getWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 // ── Interfaces ──
 
@@ -22,8 +25,8 @@ function _isAbsolutePath(rawPath: string): boolean {
 // ── CSRF Fetch ──
 
 function _csrfFetch(url: string, options: any = {}): Promise<Response> {
-  if (typeof (window as any).WA?._csrfFetch === 'function') {
-    return (window as any).WA._csrfFetch(url, options);
+  if (typeof workspaceApi._csrfFetch === 'function') {
+    return workspaceApi._csrfFetch(url, options);
   }
   return fetch(url, options);
 }
@@ -38,7 +41,7 @@ function _fileRowClick(event: MouseEvent, path: string, supported: boolean = tru
     cb.checked = checked;
     _toggleFileCheck(cb, path);
   } else if (supported) {
-    (window as any).WA.openWorkspaceFile(path);
+    workspaceApi.openWorkspaceFile(path);
   } else {
     showToast('此格式暂不支持在线编辑：' + (path || '').split(/[\\/]/).pop(), 'info');
   }
@@ -90,12 +93,12 @@ function toggleSelectMode(): void {
     .forEach((el) => el.classList.remove('selected'));
   _updateSelectBar();
   if (state._searchActive && state.searchQuery) {
-    if (typeof (window as any).WA._doSearch === 'function') {
-      (window as any).WA._doSearch();
+    if (typeof workspaceApi._doSearch === 'function') {
+      workspaceApi._doSearch();
     }
   } else {
-    if (typeof (window as any).WA._renderBrowserTree === 'function') {
-      (window as any).WA._renderBrowserTree();
+    if (typeof workspaceApi._renderBrowserTree === 'function') {
+      workspaceApi._renderBrowserTree();
     }
   }
 }
@@ -133,8 +136,8 @@ async function deleteSelected(): Promise<void> {
       const res = await _csrfFetch('/api/v1/workspace/file?path=' + encodeURIComponent(p), { method: 'DELETE' });
       if (!res.ok) failed++;
       else {
-        if (typeof (window as any).WA?._removeOpenTabAfterFileDeleted === 'function') {
-          await (window as any).WA._removeOpenTabAfterFileDeleted(p);
+        if (typeof workspaceApi._removeOpenTabAfterFileDeleted === 'function') {
+          await workspaceApi._removeOpenTabAfterFileDeleted(p);
         }
       }
     } catch (_) {
@@ -150,15 +153,15 @@ async function deleteSelected(): Promise<void> {
     failed ? 'error' : 'success'
   );
   toggleSelectMode();
-  if (typeof (window as any).WA?.refreshFiles === 'function') {
-    await (window as any).WA.refreshFiles();
+  if (typeof workspaceApi.refreshFiles === 'function') {
+    await workspaceApi.refreshFiles();
   }
 }
 
 async function sendSelectedToAI(): Promise<void> {
   const paths = [...state.selectedFiles];
   if (!paths.length) return;
-  const attachFn = (window as any).WA.attachFilesToTask;
+  const attachFn = workspaceApi.attachFilesToTask;
   if (typeof attachFn !== 'function') {
     showToast('AI 助手未就绪', 'error');
     return;
@@ -263,12 +266,12 @@ function _insertNewItemInput(parentPath: string, kind: 'file' | 'folder'): void 
     if (parentPath && _isAbsolutePath(parentPath)) {
       delete state._browserCache[parentPath];
       state._browserExpanded.add(parentPath);
-      if (typeof (window as any).WA._softRefreshBrowser === 'function') {
-        await (window as any).WA._softRefreshBrowser();
+      if (typeof workspaceApi._softRefreshBrowser === 'function') {
+        await workspaceApi._softRefreshBrowser();
       }
     } else {
-      if (typeof (window as any).WA?.refreshFiles === 'function') {
-        await (window as any).WA.refreshFiles();
+      if (typeof workspaceApi.refreshFiles === 'function') {
+        await workspaceApi.refreshFiles();
       }
     }
   };
@@ -329,8 +332,8 @@ async function confirmOpenFolder(): Promise<void> {
     if (!res.ok) throw new Error(json.error || '切换失败');
     showToast(`工作区已切换到 "${json.name}"`, 'success');
     closeFolderOverlay();
-    if (typeof (window as any).WA?.refreshFiles === 'function') {
-      await (window as any).WA.refreshFiles();
+    if (typeof workspaceApi.refreshFiles === 'function') {
+      await workspaceApi.refreshFiles();
     }
   } catch (e: any) {
     showToast(e.message, 'error');
@@ -400,8 +403,8 @@ document.addEventListener(
       if (!wsVisible) return;
       e.preventDefault();
       e.stopPropagation();
-      if (typeof (window as any).WA.saveFile === 'function') {
-        (window as any).WA.saveFile();
+      if (typeof workspaceApi.saveFile === 'function') {
+        workspaceApi.saveFile();
       }
       return;
     }
@@ -429,8 +432,8 @@ document.addEventListener(
       if (!wsVisible || !state.activeTabPath) return;
       e.preventDefault();
       e.stopPropagation();
-      if (typeof (window as any).WA._closeTab === 'function') {
-        (window as any).WA._closeTab(state.activeTabPath);
+      if (typeof workspaceApi._closeTab === 'function') {
+        workspaceApi._closeTab(state.activeTabPath);
       }
       return;
     }
@@ -443,8 +446,8 @@ document.addEventListener(
       const cur = state.openTabs.findIndex((t) => t.path === state.activeTabPath);
       const n = state.openTabs.length;
       const next = e.shiftKey ? (cur - 1 + n) % n : (cur + 1) % n;
-      if (typeof (window as any).WA._tabClick === 'function') {
-        (window as any).WA._tabClick(state.openTabs[next].path);
+      if (typeof workspaceApi._tabClick === 'function') {
+        workspaceApi._tabClick(state.openTabs[next].path);
       }
       return;
     }
@@ -460,8 +463,8 @@ document.addEventListener(
         typeof (state.activeEditor as any)._printPdf === 'function'
       ) {
         (state.activeEditor as any)._printPdf();
-      } else if (typeof (window as any).WA.saveFile === 'function') {
-        (window as any).WA.saveFile();
+      } else if (typeof workspaceApi.saveFile === 'function') {
+        workspaceApi.saveFile();
       }
       return;
     }
@@ -472,15 +475,15 @@ document.addEventListener(
       const pptxBar = document.getElementById('wa-pptx-find-bar');
       if (docxBar && docxBar.style.display !== 'none') {
         e.stopPropagation();
-        if (typeof (window as any).WA?.docxFindClose === 'function') {
-          (window as any).WA.docxFindClose();
+        if (typeof workspaceApi.docxFindClose === 'function') {
+          workspaceApi.docxFindClose();
         }
         return;
       }
       if (pptxBar && pptxBar.style.display !== 'none') {
         e.stopPropagation();
-        if (typeof (window as any).WA?.pptxFindClose === 'function') {
-          (window as any).WA.pptxFindClose();
+        if (typeof workspaceApi.pptxFindClose === 'function') {
+          workspaceApi.pptxFindClose();
         }
       }
     }
@@ -496,8 +499,8 @@ function _openFindBar(replaceMode: boolean): void {
     const bar = document.getElementById('wa-docx-find-bar');
     if (bar) {
       bar.style.display = '';
-      if (replaceMode && typeof (window as any).WA?.docxToggleReplace === 'function') {
-        (window as any).WA.docxToggleReplace(true);
+      if (replaceMode && typeof workspaceApi.docxToggleReplace === 'function') {
+        workspaceApi.docxToggleReplace(true);
       }
       const inp = document.getElementById('wa-docx-find-input') as HTMLInputElement | null;
       if (inp) {
@@ -509,8 +512,8 @@ function _openFindBar(replaceMode: boolean): void {
     const bar = document.getElementById('wa-pptx-find-bar');
     if (bar) {
       bar.style.display = '';
-      if (replaceMode && typeof (window as any).WA?.pptxToggleReplace === 'function') {
-        (window as any).WA.pptxToggleReplace(true);
+      if (replaceMode && typeof workspaceApi.pptxToggleReplace === 'function') {
+        workspaceApi.pptxToggleReplace(true);
       }
       const inp = document.getElementById('wa-pptx-find-input') as HTMLInputElement | null;
       if (inp) {
@@ -519,8 +522,8 @@ function _openFindBar(replaceMode: boolean): void {
       }
     }
   } else if (ft === 'pdf') {
-    if (typeof (window as any).WA?.pdfSearchOpen === 'function') {
-      (window as any).WA.pdfSearchOpen();
+    if (typeof workspaceApi.pdfSearchOpen === 'function') {
+      workspaceApi.pdfSearchOpen();
     }
     if (replaceMode) showToast('PDF 不支持替换', 'info');
   } else if (ft === 'xlsx') {
@@ -538,8 +541,7 @@ function _openFindBar(replaceMode: boolean): void {
 
 // ── Backward compatibility ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = workspaceApi;
 
 wa._fileRowClick = _fileRowClick;
 wa._toggleFileCheck = _toggleFileCheck;

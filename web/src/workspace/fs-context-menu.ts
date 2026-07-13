@@ -5,6 +5,9 @@
 
 import { _escHtml, showToast, _FOLDER_SVG, _DEFAULT_FILE_SVG } from './infrastructure';
 import { state } from './state';
+import { getWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 // ── Interfaces ──
 
@@ -47,8 +50,8 @@ function _cloneSerializable(value: any, fallback: any = null): any {
 // ── CSRF Fetch ──
 
 function _csrfFetch(url: string, options: any = {}): Promise<Response> {
-  if (typeof (window as any).WA?._csrfFetch === 'function') {
-    return (window as any).WA._csrfFetch(url, options);
+  if (typeof workspaceApi._csrfFetch === 'function') {
+    return workspaceApi._csrfFetch(url, options);
   }
   return fetch(url, options);
 }
@@ -276,24 +279,24 @@ function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void {
 function _fsBrowserOpen(): void {
   const { path, supported } = _fsBrowserCtxTarget;
   if (!path) return;
-  (window as any).WA.openBrowserFile(path, supported);
+  workspaceApi.openBrowserFile(path, supported);
 }
 
 function _fsBrowserAddToWorkspace(): void {
   const { path } = _fsBrowserCtxTarget;
-  if (path) (window as any).WA.addToMyWorkspace(path);
+  if (path) workspaceApi.addToMyWorkspace(path);
 }
 
 function _fsBrowserAddToTempWorkspace(): void {
   const { path } = _fsBrowserCtxTarget;
-  if (path) (window as any).WA.addToTempWorkspace(path);
+  if (path) workspaceApi.addToTempWorkspace(path);
 }
 
 async function _fsBrowserSendToAI(): Promise<void> {
   const { path } = _fsBrowserCtxTarget;
   if (!path) return;
-  if (typeof (window as any).WA.attachFilesToTask === 'function') {
-    await (window as any).WA.attachFilesToTask([path], { source: 'browser_context_menu' });
+  if (typeof workspaceApi.attachFilesToTask === 'function') {
+    await workspaceApi.attachFilesToTask([path], { source: 'browser_context_menu' });
   }
 }
 
@@ -330,8 +333,8 @@ async function _fsBrowserPaste(): Promise<void> {
     showToast('已粘贴 "' + clip.name + '"', 'success');
     delete state._browserCache[dstDir];
     state._browserExpanded.add(dstDir);
-    if (typeof (window as any).WA._softRefreshBrowser === 'function') {
-      await (window as any).WA._softRefreshBrowser();
+    if (typeof workspaceApi._softRefreshBrowser === 'function') {
+      await workspaceApi._softRefreshBrowser();
     }
   } catch (e: any) {
     showToast(e.message, 'error');
@@ -364,7 +367,7 @@ async function _fsBrowserRename(): Promise<void> {
   const commit = async () => {
     const newName = input.value.trim();
     if (!newName || newName === stem) {
-      const softRefresh = (window as any).WA._softRefreshBrowser;
+      const softRefresh = workspaceApi._softRefreshBrowser;
       if (typeof softRefresh === 'function') await softRefresh();
       return;
     }
@@ -382,7 +385,7 @@ async function _fsBrowserRename(): Promise<void> {
     }
     const parent = path.replace(/[\\/][^\\/]+$/, '');
     delete state._browserCache[parent];
-    const softRefresh = (window as any).WA._softRefreshBrowser;
+    const softRefresh = workspaceApi._softRefreshBrowser;
     if (typeof softRefresh === 'function') await softRefresh();
   };
   input.addEventListener('keydown', (e) => {
@@ -391,7 +394,7 @@ async function _fsBrowserRename(): Promise<void> {
       commit();
     }
     if (e.key === 'Escape') {
-      const softRefresh = (window as any).WA._softRefreshBrowser;
+      const softRefresh = workspaceApi._softRefreshBrowser;
       if (typeof softRefresh === 'function') softRefresh();
     }
   });
@@ -410,14 +413,14 @@ async function _fsBrowserDelete(): Promise<void> {
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || '删除失败');
     showToast('已删除 "' + name + '"', 'success');
-    const removeTabFn = (window as any).WA?._removeOpenTabAfterFileDeleted;
+    const removeTabFn = workspaceApi._removeOpenTabAfterFileDeleted;
     if (typeof removeTabFn === 'function') {
       await removeTabFn(path);
     }
     const parent = path.replace(/[\\/][^\\/]+$/, '');
     delete state._browserCache[parent];
     if (state._browserExpanded.has(path)) state._browserExpanded.delete(path);
-    const softRefresh = (window as any).WA._softRefreshBrowser;
+    const softRefresh = workspaceApi._softRefreshBrowser;
     if (typeof softRefresh === 'function') await softRefresh();
   } catch (e: any) {
     showToast(e.message, 'error');
@@ -426,22 +429,22 @@ async function _fsBrowserDelete(): Promise<void> {
 
 function _fsBrowserNewFile(): void {
   const { path } = _fsBrowserCtxTarget;
-  if (path && typeof (window as any).WA.startNewFile === 'function') {
-    (window as any).WA.startNewFile(path);
+  if (path && typeof workspaceApi.startNewFile === 'function') {
+    workspaceApi.startNewFile(path);
   }
 }
 
 function _fsBrowserNewFolder(): void {
   const { path } = _fsBrowserCtxTarget;
-  if (path && typeof (window as any).WA.startNewFolder === 'function') {
-    (window as any).WA.startNewFolder(path);
+  if (path && typeof workspaceApi.startNewFolder === 'function') {
+    workspaceApi.startNewFolder(path);
   }
 }
 
 async function _fsBrowserAISummary(): Promise<void> {
   const { path, supported } = _fsBrowserCtxTarget;
   if (!path || !supported) return;
-  const openFile = (window as any).WA.openBrowserFile;
+  const openFile = workspaceApi.openBrowserFile;
   if (typeof openFile === 'function') {
     await openFile(path, true);
   }
@@ -449,7 +452,7 @@ async function _fsBrowserAISummary(): Promise<void> {
     const input = document.getElementById('wa-user-input') as HTMLInputElement | null;
     if (input) {
       input.value = '请帮我概括这份文件的主要内容，列出核心要点。';
-      const sendMsg = (window as any).WA.sendMessage;
+      const sendMsg = workspaceApi.sendMessage;
       if (typeof sendMsg === 'function') sendMsg();
     }
   }, 600);
@@ -474,7 +477,7 @@ async function renameWorkspaceFile(path: string, currentName: string): Promise<v
   const commit = async () => {
     const newName = input.value.trim();
     if (!newName || newName === stem) {
-      const loadWs = (window as any).WA?.refreshFiles;
+      const loadWs = workspaceApi.refreshFiles;
       if (typeof loadWs === 'function') await loadWs();
       return;
     }
@@ -490,7 +493,7 @@ async function renameWorkspaceFile(path: string, currentName: string): Promise<v
     } catch (e: any) {
       showToast(e.message, 'error');
     }
-    const loadWs = (window as any).WA?.refreshFiles;
+    const loadWs = workspaceApi.refreshFiles;
     if (typeof loadWs === 'function') await loadWs();
   };
 
@@ -500,7 +503,7 @@ async function renameWorkspaceFile(path: string, currentName: string): Promise<v
       commit();
     }
     if (e.key === 'Escape') {
-      const loadWs = (window as any).WA?.refreshFiles;
+      const loadWs = workspaceApi.refreshFiles;
       if (typeof loadWs === 'function') loadWs();
     }
   });
@@ -514,7 +517,7 @@ async function deleteWorkspaceFile(filepath: string): Promise<void> {
     const json = await res.json();
     if (!res.ok) {
       if (res.status === 404) {
-        const loadWs = (window as any).WA?.refreshFiles;
+        const loadWs = workspaceApi.refreshFiles;
         if (typeof loadWs === 'function') loadWs();
         showToast('文件已不存在，已从列表移除', 'info');
       } else {
@@ -522,12 +525,12 @@ async function deleteWorkspaceFile(filepath: string): Promise<void> {
       }
       return;
     }
-    const removeFn = (window as any).WA?._removeOpenTabAfterFileDeleted;
+    const removeFn = workspaceApi._removeOpenTabAfterFileDeleted;
     if (typeof removeFn === 'function') {
       await removeFn(filepath);
     }
     showToast('已移入回收站：' + filepath.split('/').pop(), 'success');
-    const loadWs = (window as any).WA?.refreshFiles;
+    const loadWs = workspaceApi.refreshFiles;
     if (typeof loadWs === 'function') loadWs();
   } catch (e: any) {
     showToast(e.message, 'error');
@@ -542,7 +545,7 @@ async function deleteFolderWorkspace(folderPath: string, folderName?: string): P
     const json = await res.json();
     if (!res.ok) throw new Error(json.error || '删除失败');
     showToast(`已将文件夹 "${name}" 移入回收站`, 'success');
-    const loadWs = (window as any).WA?.refreshFiles;
+    const loadWs = workspaceApi.refreshFiles;
     if (typeof loadWs === 'function') await loadWs();
   } catch (e: any) {
     showToast(e.message, 'error');
@@ -565,7 +568,7 @@ async function renameFolderWorkspace(path: string, currentName: string): Promise
   const commit = async () => {
     const newName = input.value.trim();
     if (!newName || newName === currentName) {
-      const loadWs = (window as any).WA?.refreshFiles;
+      const loadWs = workspaceApi.refreshFiles;
       if (typeof loadWs === 'function') await loadWs();
       return;
     }
@@ -581,7 +584,7 @@ async function renameFolderWorkspace(path: string, currentName: string): Promise
     } catch (e: any) {
       showToast(e.message, 'error');
     }
-    const loadWs = (window as any).WA?.refreshFiles;
+    const loadWs = workspaceApi.refreshFiles;
     if (typeof loadWs === 'function') await loadWs();
   };
 
@@ -591,7 +594,7 @@ async function renameFolderWorkspace(path: string, currentName: string): Promise
       commit();
     }
     if (e.key === 'Escape') {
-      const loadWs = (window as any).WA?.refreshFiles;
+      const loadWs = workspaceApi.refreshFiles;
       if (typeof loadWs === 'function') loadWs();
     }
   });
@@ -658,8 +661,8 @@ function _showFolderCtxMenu(event: MouseEvent, path: string, name: string): void
 
 function _ctxOpen(): void {
   _closeCtxMenu();
-  if (_ctxTarget.path && typeof (window as any).WA.openWorkspaceFile === 'function') {
-    (window as any).WA.openWorkspaceFile(_ctxTarget.path);
+  if (_ctxTarget.path && typeof workspaceApi.openWorkspaceFile === 'function') {
+    workspaceApi.openWorkspaceFile(_ctxTarget.path);
   }
 }
 
@@ -714,8 +717,7 @@ document.addEventListener('keydown', (e) => {
 
 // ── Backward compatibility ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = workspaceApi;
 
 wa._showBrowserCtx = _showBrowserCtx;
 wa._closeCtxMenu = _closeCtxMenu;

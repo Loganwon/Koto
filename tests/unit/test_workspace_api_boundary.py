@@ -26,3 +26,19 @@ def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods
         assert "publishWorkspaceApi" in source
         assert public_method in source
         assert "publishWorkspaceApi({" in source
+
+
+def test_workspace_file_and_context_modules_read_the_compatibility_boundary_only():
+    root = _repo_root()
+    consumers = (
+        "web/src/workspace/ai-context.ts",
+        "web/src/workspace/file-open.ts",
+        "web/src/workspace/file-utils.ts",
+        "web/src/workspace/fs-actions.ts",
+        "web/src/workspace/fs-context-menu.ts",
+    )
+    for relative_path in consumers:
+        source = (root / relative_path).read_text(encoding="utf-8")
+        assert "getWorkspaceApi" in source
+        assert "(window as any).WA" not in source
+        assert "window.WA" not in source

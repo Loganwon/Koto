@@ -5,6 +5,7 @@
 
 import { _fileIcon, _escHtml, showToast, _PIN_SVG } from './infrastructure';
 import { state, _trackUserOpen, AiFileContext } from './state';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 // ── Interfaces ──
 
@@ -90,8 +91,9 @@ function _waInferFileType(path: string): string {
 // ── CSRF Fetch from infrastructure ──
 
 function _csrfFetch(url: string, options: any = {}): Promise<Response> {
-  if (typeof (window as any).WA?._csrfFetch === 'function') {
-    return (window as any).WA._csrfFetch(url, options);
+  const csrfFetch = getWorkspaceApi()._csrfFetch;
+  if (typeof csrfFetch === 'function') {
+    return csrfFetch(url, options);
   }
   return fetch(url, options);
 }
@@ -239,7 +241,7 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
   if (existingIdx >= 0) {
     const existing = state._aiFileContext[existingIdx];
     if (existing && existing.error && !existing.loading) {
-      (window as any).WA?.retryAIFileContext(existingIdx);
+      getWorkspaceApi().retryAIFileContext?.(existingIdx);
       return;
     }
     showToast(`"${name}" 已在分析列表中`, 'info');
@@ -295,7 +297,7 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
 // ── Placeholder helpers ──
 
 function _expandWAPanel(): void {
-  const WA = (window as any).WA || {};
+  const WA = getWorkspaceApi();
   if (typeof WA.openInMainView === 'function') {
     try { WA.openInMainView(); } catch (_) { /* noop */ }
   }
@@ -314,17 +316,18 @@ function _hideWelcome(): void {
 }
 
 function _updateContextBar(ctx?: any): void {
-  const update = (window as any).WA && (window as any).WA._updateContextBar;
+  const update = getWorkspaceApi()._updateContextBar;
   if (typeof update === 'function') update(ctx);
 }
 function _updateSubjectBar(_name?: string | null, _type?: string | null): void {
-  const update = (window as any).WA && (window as any).WA._updateSubjectBar;
+  const update = getWorkspaceApi()._updateSubjectBar;
   if (typeof update === 'function') update(_name, _type);
 }
 
 function _softRefreshBrowser(): Promise<void> {
-  if (typeof (window as any).WA?._softRefreshBrowser === 'function') {
-    return (window as any).WA._softRefreshBrowser();
+  const refreshBrowser = getWorkspaceApi()._softRefreshBrowser;
+  if (typeof refreshBrowser === 'function') {
+    return refreshBrowser();
   }
   return Promise.resolve();
 }
@@ -534,8 +537,7 @@ export function _renderAIFileChips(): void {
 
 // ── Backward compatibility ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = getWorkspaceApi();
 
 export function removeAIFileContext(idx: number): boolean {
   const index = Number(idx);

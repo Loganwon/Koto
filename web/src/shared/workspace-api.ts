@@ -7,7 +7,7 @@
  * as a deliberate compatibility surface rather than an implicit module bus.
  */
 
-export type WorkspaceApi = Record<string, unknown>;
+export type WorkspaceApi = Record<string, any>;
 
 export function getWorkspaceApi(): WorkspaceApi {
   const root = window as any;

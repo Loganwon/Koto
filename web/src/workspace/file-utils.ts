@@ -11,6 +11,7 @@ import {
   normalizeFileTaskTerminalStatus,
 } from './file-task-status';
 import { _renderTabs } from './state';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
 declare function $(id: string): HTMLElement | null;
 declare let state: any;
@@ -65,7 +66,7 @@ export async function _safeJson(res: Response): Promise<any> {
 
 // ── Before unload warning ──────────────────────────────────────────
 function _snapshot(value: any): string {
-  const helper = (window as any).WA && (window as any).WA._stableWorkspaceSnapshot;
+  const helper = getWorkspaceApi()._stableWorkspaceSnapshot;
   if (typeof helper === 'function') return helper(value);
   if (typeof _stableWorkspaceSnapshot === 'function') return _stableWorkspaceSnapshot(value);
   if (value === undefined) return 'undefined';
@@ -89,7 +90,7 @@ function _currentSnapshotForTab(tab: any): string {
 }
 
 function _notifyDesktopModified(tab: any, modified: boolean): void {
-  const waNotify = (window as any).WA && (window as any).WA._notifyPyModified;
+  const waNotify = getWorkspaceApi()._notifyPyModified;
   if (typeof waNotify === 'function') {
     try { waNotify(tab, modified); return; } catch (e) { console.warn("[Koto]", e) }
   }
@@ -313,7 +314,8 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
   _initWorkspaceAiRuntimes();
   if (!_waConversationRuntime || typeof _waConversationRuntime.beginAssistantTaskTurn !== 'function') return [];
   if (typeof _waConversationRuntime.syncAssistantTaskTurn !== 'function') return [];
-  if (!(window as any).WA || typeof (window as any).WA.resumePersistedFileTask !== 'function') return [];
+  const resumePersistedFileTask = getWorkspaceApi().resumePersistedFileTask;
+  if (typeof resumePersistedFileTask !== 'function') return [];
 
   const msgs = $('wa-ai-messages');
   if (!msgs) return [];
@@ -365,7 +367,7 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
     if (!turnId) continue;
 
     const renderedCard = _findRenderedTaskCard(taskId);
-    const reconnector = (window as any).WA.resumePersistedFileTask({
+    const reconnector = resumePersistedFileTask({
       taskId,
       runId: String(metadata.run_id || '').trim(),
       initialStatus: terminalStatus || taskStatus,
@@ -562,12 +564,13 @@ export function _handleCodeResult(result: any): void {
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.getUnsavedTabs = getUnsavedTabs;
-  (window as any).WA.isTabActuallyUnsaved = isTabActuallyUnsaved;
-  (window as any).WA.showCloseWarning = showCloseWarning;
-  (window as any).WA._closeWarnCancel = _closeWarnCancel;
-  (window as any).WA._closeWarnDiscard = _closeWarnDiscard;
-  (window as any).WA._closeWarnSaveAll = _closeWarnSaveAll;
-  (window as any).WA.makeChartImageWrap = _makeWAChartImageWrap;
+  publishWorkspaceApi({
+    getUnsavedTabs,
+    isTabActuallyUnsaved,
+    showCloseWarning,
+    _closeWarnCancel,
+    _closeWarnDiscard,
+    _closeWarnSaveAll,
+    makeChartImageWrap: _makeWAChartImageWrap,
+  });
 }
