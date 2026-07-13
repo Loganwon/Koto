@@ -25,42 +25,42 @@ def get_filegen_brief_instruction() -> str:
 
 class ClientProxy:
     def __getattr__(self, name: str) -> Any:
-        from web.runtime_context import get_client_proxy
+        from web.runtime_context import service_registry
 
-        return getattr(get_client_proxy(), name)
+        return getattr(service_registry.client, name)
 
 
 class SettingsManagerProxy:
     def __getattr__(self, name: str) -> Any:
-        from web.runtime_context import get_settings_manager
+        from web.runtime_context import service_registry
 
-        return getattr(get_settings_manager(), name)
+        return getattr(service_registry.settings_manager, name)
 
     def get(self, *args: Any, **kwargs: Any) -> Any:
-        from web.runtime_context import get_settings_manager
+        from web.runtime_context import service_registry
 
-        return get_settings_manager().get(*args, **kwargs)
+        return service_registry.settings_manager.get(*args, **kwargs)
 
 
 class ModelMapProxy:
     def get(self, key: str, default: Any = None) -> Any:
-        from web.runtime_context import get_model_map
+        from web.runtime_context import service_registry
 
-        return get_model_map().get(key, default)
+        return service_registry.model_map.get(key, default)
 
 
 class SmartDispatcherProxy:
     def __getattr__(self, name: str) -> Any:
-        from web.runtime_context import get_smart_dispatcher
+        from web.runtime_context import service_registry
 
-        return getattr(get_smart_dispatcher(), name)
+        return getattr(service_registry.smart_dispatcher, name)
 
 
 class WorkspaceDirProxy:
     def __fspath__(self) -> str:
-        from web.runtime_context import get_workspace_dir
+        from web.runtime_context import service_registry
 
-        return get_workspace_dir()
+        return service_registry.workspace_dir
 
     def __str__(self) -> str:
         return self.__fspath__()

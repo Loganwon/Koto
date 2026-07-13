@@ -17,9 +17,9 @@ from typing import Any
 
 from web.runtime_context import (
     get_client_proxy,
-    get_settings_manager,
     get_types,
     get_workspace_dir,
+    service_registry,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def _client() -> Any:
 
 
 def _settings_manager() -> Any:
-    manager = get_settings_manager()
+    manager = service_registry.settings_manager
     if manager is None:
         raise RuntimeError("runtime settings manager is unavailable")
     return manager

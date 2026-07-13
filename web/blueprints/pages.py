@@ -23,6 +23,7 @@ Routes:
 import os
 
 from flask import Blueprint, Response, make_response, redirect, render_template, request, send_from_directory, url_for
+from web.runtime_context import service_registry
 
 pages_bp = Blueprint("pages", __name__)
 
@@ -30,9 +31,7 @@ pages_bp = Blueprint("pages", __name__)
 def _get_initial_theme() -> str:
     """从已保存的用户设置读取初始主题，默认 light。"""
     try:
-        from web.runtime_context import get_settings_manager
-
-        settings_manager = get_settings_manager()
+        settings_manager = service_registry.settings_manager
         if settings_manager is None:
             return "light"
         theme = settings_manager.get("appearance", "theme")

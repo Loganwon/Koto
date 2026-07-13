@@ -40,6 +40,7 @@ from web.runtime_services import (
     get_file_editor,
     get_file_indexer,
 )
+from web.runtime_context import service_registry
 
 _logger = logging.getLogger("koto.routes.file_editor")
 
@@ -62,9 +63,7 @@ def _get_concept_extractor():
 
 
 def _get_settings_manager():
-    from web.runtime_context import get_settings_manager
-
-    return get_settings_manager()
+    return service_registry.settings_manager
 
 
 def _active_cloud_provider():

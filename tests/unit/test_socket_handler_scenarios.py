@@ -229,7 +229,10 @@ class TestGetLocalProvider:
         mock_opener = MagicMock()
         mock_opener.open.return_value = FakeResponse()
 
-        with patch.dict(
+        with patch(
+            "app.core.llm.local_model_runtime.get_configured_local_model_tag",
+            return_value="",
+        ), patch.dict(
             sys.modules,
             {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
         ):
@@ -258,7 +261,10 @@ class TestGetLocalProvider:
 
     def test_falls_back_to_none_on_network_error(self):
         mock_cls = MagicMock()
-        with patch.dict(
+        with patch(
+            "app.core.llm.local_model_runtime.get_configured_local_model_tag",
+            return_value="",
+        ), patch.dict(
             sys.modules,
             {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
         ):

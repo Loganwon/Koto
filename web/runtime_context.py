@@ -122,6 +122,18 @@ class ServiceRegistry:
         return self._get("_interrupt_manager", required=False)
 
     @property
+    def smart_dispatcher(self) -> Any:
+        return self._get("SmartDispatcher")
+
+    @property
+    def web_searcher(self) -> Any:
+        return self._get("WebSearcher")
+
+    @property
+    def local_executor(self) -> Any:
+        return self._get("LocalExecutor")
+
+    @property
     def workspace_dir(self) -> str:
         return str(getattr(self.module, "WORKSPACE_DIR", "") or "")
 
@@ -202,13 +214,13 @@ def get_model_id(task_type: str = "CHAT", default: str = "") -> str:
         return fallback or "deepseek-chat"
 
 def get_smart_dispatcher() -> Any:
-    return service_registry._get("SmartDispatcher")
+    return service_registry.smart_dispatcher
 
 def get_web_searcher() -> Any:
-    return service_registry._get("WebSearcher")
+    return service_registry.web_searcher
 
 def get_local_executor() -> Any:
-    return service_registry._get("LocalExecutor")
+    return service_registry.local_executor
 
 def get_interrupt_flags() -> dict:
     return getattr(service_registry.module, "_interrupt_flags", {})
