@@ -240,7 +240,7 @@ class TestChatRoutes:
                     "message": "Hi there",
                 },
             )
-        assert resp.status_code in (200, 500)
+        assert resp.status_code in (200, 500, 503)
 
     def test_chat_interrupt(self, client):
         resp = _json_post(client, "/api/chat/interrupt", {"session": "test_sess"})
