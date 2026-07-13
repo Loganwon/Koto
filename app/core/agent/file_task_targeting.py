@@ -662,8 +662,6 @@ def files_explicitly_mentioned_in_task(
     workspace_root: Optional[Path],
     task: str,
 ) -> List[FileTaskFile]:
-    if workspace_root is None:
-        return []
     task_text = str(task or "").strip()
     if not task_text:
         return []
@@ -672,6 +670,18 @@ def files_explicitly_mentioned_in_task(
     exact_matches: Dict[str, Path] = {}
     basename_matches: Dict[str, List[Path]] = {}
     output_reference_names = _strong_output_reference_file_names(task_text)
+
+    # A workspace root can be unavailable temporarily (or refer to a client
+    # path that this host cannot resolve).  Explicit file references must still
+    # reach routing as weak context; otherwise source formats disappear and a
+    # compatible task recipe cannot be selected.
+    if workspace_root is None:
+        return _weak_files_explicitly_mentioned_in_task(
+            task_text,
+            output_reference_names=output_reference_names,
+            workspace_reference_names=set(),
+            existing_keys=set(),
+        )
 
     try:
         workspace_files = workspace_root.rglob("*")
@@ -699,7 +709,12 @@ def files_explicitly_mentioned_in_task(
                 basename_matches.setdefault(name_folded, []).append(path)
     except OSError as exc:
         logger.debug("[FileTaskRuntime] workspace task-file scan skipped: %s", exc)
-        return []
+        return _weak_files_explicitly_mentioned_in_task(
+            task_text,
+            output_reference_names=output_reference_names,
+            workspace_reference_names=set(),
+            existing_keys=set(),
+        )
 
     for matches in basename_matches.values():
         unique_paths = {str(item.resolve()).casefold(): item for item in matches}

@@ -9,6 +9,7 @@ their existing API contracts and user-facing error messages.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,7 +48,19 @@ class FilePathPolicy:
 
     def resolve_under_root(self, root: str | Path, rel_path: str | Path) -> Path:
         root_path = self.root(root)
-        target = root_path.joinpath(rel_path).resolve()
+        # Workspace paths arrive over HTTP and may use Windows separators even
+        # when the server runs on Linux.  Normalize before resolving so a
+        # payload such as ``..\\secret.txt`` cannot become an ordinary
+        # filename on POSIX hosts.
+        normalized = str(rel_path).replace("\\", "/")
+        if (
+            normalized.startswith("/")
+            or re.match(r"^[A-Za-z]:/", normalized)
+            or any(part == ".." for part in normalized.split("/"))
+        ):
+            raise PathPolicyError("Path escapes workspace root")
+
+        target = root_path.joinpath(*normalized.split("/")).resolve()
         try:
             target.relative_to(root_path)
         except ValueError as exc:

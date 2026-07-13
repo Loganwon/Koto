@@ -964,6 +964,24 @@ class TestReminderManager:
     @patch("web.reminder_manager.show_toast")
     @patch("web.reminder_manager.os.makedirs")
     @patch("web.reminder_manager.os.path.exists", return_value=False)
+    @patch("web.reminder_manager.threading.Timer")
+    def test_far_future_reminder_defers_timer_registration(
+        self, mock_timer, mock_exists, mock_makedirs, mock_toast
+    ):
+        from web.reminder_manager import ReminderManager
+
+        mgr = ReminderManager()
+        with patch.object(mgr, "_save"):
+            reminder_id = mgr.add_reminder(
+                "Future", "Message", datetime.now() + timedelta(days=365 * 100)
+            )
+
+        assert reminder_id in mgr.reminders
+        mock_timer.assert_not_called()
+
+    @patch("web.reminder_manager.show_toast")
+    @patch("web.reminder_manager.os.makedirs")
+    @patch("web.reminder_manager.os.path.exists", return_value=False)
     def test_cancel_reminder(self, mock_exists, mock_makedirs, mock_toast):
         from web.reminder_manager import ReminderManager
 

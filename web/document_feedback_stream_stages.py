@@ -10,11 +10,12 @@ def read_document_stage(
     reader: Any,
     file_path: str,
 ) -> Tuple[Dict[str, Any] | None, int, int, List[Dict[str, Any]]]:
+    display_name = os.path.basename(file_path.replace("\\", "/"))
     events: List[Dict[str, Any]] = [
         {
             "stage": "reading",
             "progress": 5,
-            "message": f"📖 正在读取文档: {os.path.basename(file_path)}",
+            "message": f"📖 正在读取文档: {display_name}",
             "detail": "解析Word文件结构",
         }
     ]

@@ -1,37 +1,3 @@
-# =============================================================================
-# Koto Task Tools — Public API Index
-# =============================================================================
-# Lines: 5395 (guarded) | Public: 33 | Private helpers: 100+
-#
-# QUICK NAVIGATION:
-#   XLSX Tools ........... read_sheet_data → write_sheet_data
-#   DOCX Read ............ read_docx_content
-#   File Parse ........... parse_file_to_text
-#   Workspace Files ...... list_workspace_files, open_file_in_editor
-#   LLM Tools ............ llm_extract, llm_transform
-#   File Compare ......... compare_files
-#   DOCX Annotate ........ compare_docx_and_annotate → write_docx_comments
-#   File Create .......... create_file, extract_to_file
-#   DOCX Edit ............ write_docx_content, fill_docx_template
-#   PDF Convert .......... convert_docx_to_pdf, convert_file
-#   PPTX Tools ........... write_pptx_slides → add_pptx_slides
-#   TaskToolsPlugin ...... Agent plugin class
-#
-# PRIVATE HELPERS (internal, called by public functions):
-#   General I/O .... _resolve_path, _result_path, _success_result, _blocked_write_result
-#   XLSX helpers ... _select_workbook_sheet, _build_workbook_structure_payload, ...
-#   DOCX helpers ... _docx_nonempty_paragraph_texts, _build_docx_compare_annotations, ...
-#   Sandbox ........ _stage_task_files_for_sandbox, _sync_staged_files_to_source, ...
-#   PDF helpers .... _read_pdf_excerpt, _read_pdf_letter_window, ...
-# =============================================================================
-# ══════════════════════════════════════════════════════════════
-# task_tools.py — Composable file-operation tools for FileTaskRuntime
-#
-# These tools are the building blocks the AI orchestrates freely
-# to accomplish user tasks on workspace files.  Each tool is
-# self-contained: read → process → write, with no hardcoded
-# workflow assumptions.
-# ══════════════════════════════════════════════════════════════
 from __future__ import annotations
 
 import base64
@@ -910,11 +876,6 @@ def _blocked_write_result(
         payload["suggested_next_step"] = suggested_next_step
     payload.update(extra)
     return json.dumps(payload, ensure_ascii=False, default=str)
-
-
-# ══════════════════════════════════════════════════════════════
-# Tool implementations
-# ══════════════════════════════════════════════════════════════
 
 
 def read_docx_content(path: str, max_chars: int = _TEXT_LIMIT_DOCX_DEFAULT) -> str:
@@ -2285,11 +2246,6 @@ def llm_transform(text: str, instruction: str) -> str:
         return call_llm(prompt, call_timeout=_TASK_TOOL_LLM_CALL_TIMEOUT)
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-
-# ══════════════════════════════════════════════════════════════
-# New tools for DocAgent - Multi-file operations
-# ══════════════════════════════════════════════════════════════
 
 
 def compare_files(file_paths: str, aspect: str = "content") -> str:
@@ -4530,11 +4486,6 @@ def add_pptx_slides(path: str, slides: str = "[]") -> str:
         )
     except Exception as e:
         return json.dumps({"error": str(e)}, ensure_ascii=False)
-
-
-# ══════════════════════════════════════════════════════════════
-# TaskToolsPlugin — registers all tools above into ToolRegistry
-# ══════════════════════════════════════════════════════════════
 
 
 class TaskToolsPlugin(AgentPlugin):
