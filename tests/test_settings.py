@@ -14,6 +14,7 @@ class TestSettingsManager:
     def test_development_settings_file_uses_project_config_directory(self):
         """Settings must share config/user_settings.json with launcher and UI."""
         from pathlib import Path
+
         import app.core.config.user_settings as settings_module
 
         expected = Path(__file__).resolve().parents[1] / "config" / "user_settings.json"
@@ -28,6 +29,7 @@ class TestSettingsManager:
     @pytest.fixture
     def settings_mgr(self, monkeypatch, settings_file):
         import importlib
+
         import app.core.config.user_settings as _settings_mod
 
         importlib.reload(_settings_mod)
@@ -77,6 +79,7 @@ class TestSettingsValidation:
         sf = tmp_path / "user_settings.json"
         sf.write_text("{}")
         import importlib
+
         import app.core.config.user_settings as _settings_mod
 
         importlib.reload(_settings_mod)

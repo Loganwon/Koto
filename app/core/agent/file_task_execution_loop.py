@@ -10,21 +10,39 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskEvent, FileTaskToolStreamResult
-from app.core.agent.file_task_guard_emission import build_tool_guard_emission
 from app.core.agent.file_task_evidence_guard import sanitize_unverified_readonly_quotes
+from app.core.agent.file_task_guard_emission import build_tool_guard_emission
 from app.core.agent.file_task_readonly_loop_guard import (
     READONLY_ANSWER_GUARD_PENDING_SUMMARY,
     READONLY_DUPLICATE_GUARD_SUMMARY,
     WRITE_DUPLICATE_STOP_SUMMARY,
     WRITE_DUPLICATE_SUPERVISOR_SUMMARY,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     answer_only_round as _readonly_answer_only_round,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     discard_answer_only_tool_calls as _readonly_discard_answer_only_tool_calls,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     duplicate_guard_tool_payload as _readonly_duplicate_guard_tool_payload,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     readonly_duplicate_final_summary as _readonly_duplicate_final_summary,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     readonly_duplicate_guard_reminder as _readonly_duplicate_guard_reminder,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     should_retry_readonly_answer_guard as _readonly_should_retry_answer_guard,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     should_retry_readonly_duplicate_guard as _readonly_should_retry_duplicate_guard,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     should_retry_write_duplicate_guard as _readonly_should_retry_write_duplicate_guard,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
     supervisor_guard_tool_payload as _readonly_supervisor_guard_tool_payload,
 )
 from app.core.agent.file_task_runtime_utils import _is_error_result, _preview

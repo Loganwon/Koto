@@ -673,6 +673,7 @@ def test_workspace_main_view_inerts_legacy_chat_entrypoint():
 
 def test_unified_session_api_includes_workspace_and_editor_sessions(monkeypatch):
     from flask import Flask
+
     from web.blueprints import sessions as sessions_mod
 
     class FakeSessionManager:
@@ -724,6 +725,7 @@ def test_unified_session_api_includes_workspace_and_editor_sessions(monkeypatch)
 
 def test_unified_session_preview_filters_mock_browser_task_sessions(monkeypatch):
     from flask import Flask
+
     from web.blueprints import sessions as sessions_mod
 
     class FakeSessionManager:
@@ -778,6 +780,7 @@ def test_unified_session_preview_filters_mock_browser_task_sessions(monkeypatch)
 
 def test_workspace_turn_persistence_upserts_by_turn_id(monkeypatch):
     from flask import Flask
+
     from web.blueprints import sessions as sessions_mod
 
     class FakeSessionManager:

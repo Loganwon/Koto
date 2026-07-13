@@ -13,9 +13,10 @@ import re
 from typing import Any
 
 from app.core.file.image_utils import compress_image_bytes as _compress_image_bytes
-from app.core.file.parsers.docx_rich_renderer import _docx_to_rich_html
 from app.core.file.parsers.docx_parser_fallback import (
     extract_fallback_docx_metadata as _extract_fallback_docx_metadata,
+)
+from app.core.file.parsers.docx_parser_fallback import (
     normalize_mammoth_heading_contract as _normalize_mammoth_heading_contract,
 )
 from app.core.file.parsers.docx_parser_postprocess import (
@@ -27,6 +28,7 @@ from app.core.file.parsers.docx_parser_review import (
     _extract_docx_revisions,
     count_docx_visible_chars,
 )
+from app.core.file.parsers.docx_rich_renderer import _docx_to_rich_html
 
 logger = logging.getLogger(__name__)
 

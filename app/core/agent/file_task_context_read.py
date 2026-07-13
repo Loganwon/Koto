@@ -11,9 +11,17 @@ from typing import Any, Dict, Iterable, List
 
 from app.core.agent._file_task_stepwise_helpers import (
     file_task_suffix as _file_task_suffix,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     looks_like_windowed_pdf_task as _looks_like_windowed_pdf_task,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     pdf_context_read_args as _pdf_context_read_args,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     pdf_text_quality as _pdf_text_quality,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     should_force_pdf_tool_read as _should_force_pdf_tool_read,
 )
 from app.core.agent.file_task_contract import FileTaskEvent

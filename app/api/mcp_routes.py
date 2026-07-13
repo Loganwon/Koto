@@ -23,21 +23,6 @@ from urllib.parse import urlparse
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from app.core.agent.koto_supervision import (
-    agent_tool_inventory,
-    recent_tasks,
-    read_file_snippet,
-    recent_events,
-    recent_file_changes,
-    route_map,
-    run_tests,
-    search_code,
-    task_progress_history,
-    task_status,
-    test_status,
-    project_root,
-    resolve_project_path,
-)
 from app.core.agent.frontend_observability import (
     complete_frontend_action,
     enqueue_frontend_action,
@@ -47,6 +32,21 @@ from app.core.agent.frontend_observability import (
     frontend_surface_inventory,
     next_frontend_action,
     record_frontend_event,
+)
+from app.core.agent.koto_supervision import (
+    agent_tool_inventory,
+    project_root,
+    read_file_snippet,
+    recent_events,
+    recent_file_changes,
+    recent_tasks,
+    resolve_project_path,
+    route_map,
+    run_tests,
+    search_code,
+    task_progress_history,
+    task_status,
+    test_status,
 )
 from app.core.agent.mcp_manager import get_mcp_status, reload_mcp_runtime
 

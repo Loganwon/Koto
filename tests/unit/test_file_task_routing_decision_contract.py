@@ -48,13 +48,13 @@ def test_file_task_request_parses_workspace_route_intent_as_routing_decision():
 
 
 def test_trusted_file_task_route_skips_default_adjudicator(monkeypatch):
+    import app.core.agent.file_task_intent_adjudicator as adjudicator_module
+    import app.core.agent.file_task_runtime as runtime_module
     from app.core.agent.file_task_contract import (
         FileTaskClassification,
         FileTaskFile,
         FileTaskRequest,
     )
-    import app.core.agent.file_task_intent_adjudicator as adjudicator_module
-    import app.core.agent.file_task_runtime as runtime_module
     from app.core.agent.file_task_runtime import FileTaskRuntime
 
     original_adjudicator = runtime_module._intent_adjudicator_adjudicate_if_needed

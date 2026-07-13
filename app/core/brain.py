@@ -71,6 +71,8 @@ _GEMINI_ARCHIVED = True
 # Chat-system helpers retained behind their compatibility module during migration.
 from web.chat_system_instruction import (
     get_chat_system_instruction as _get_chat_system_instruction,
+)
+from web.chat_system_instruction import (
     get_default_chat_system_instruction as _get_DEFAULT_CHAT_SYSTEM_INSTRUCTION,
 )
 
@@ -996,9 +998,7 @@ class KotoBrain:
                     from app.core.llm.model_fallback import (
                         _is_model_unavailable_error as _mue_chk,
                     )
-                    from app.core.llm.model_fallback import (
-                        get_fallback_executor,
-                    )
+                    from app.core.llm.model_fallback import get_fallback_executor
 
                     if _mue_chk(e) and model_id not in (
                         None,

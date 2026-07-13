@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import logging
 import html
+import logging
 import re
 from collections.abc import Iterator
 from typing import Any, Optional

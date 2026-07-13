@@ -19,10 +19,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
-from app.core.agent.file_task_contract import (
-    FileTaskFile,
-    FileTaskRequest,
-)
+from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_model import FileTaskModelClient
 from app.core.agent.file_task_runtime import FileTaskRuntime
 

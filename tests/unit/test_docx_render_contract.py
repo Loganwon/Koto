@@ -15,6 +15,7 @@ def test_mammoth_fallback_keeps_page_layout_and_navigation_contract(
     docx = pytest.importorskip("docx", reason="python-docx is required")
     pytest.importorskip("mammoth", reason="mammoth is required")
     from docx.shared import Inches
+
     from app.core.file.parsers import docx_parser
 
     document = docx.Document()

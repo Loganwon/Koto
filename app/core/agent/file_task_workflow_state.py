@@ -14,12 +14,12 @@ from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_step_index,
     stepwise_pdf_window_pages,
 )
-from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import (
     FileTaskClassification,
     FileTaskFile,
     FileTaskRequest,
 )
+from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_tool_catalog import is_write_tool
 
 

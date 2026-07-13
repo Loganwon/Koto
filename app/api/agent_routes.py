@@ -975,7 +975,7 @@ def agent_resume():
 
         state = _json.loads(resume_token)
         # Reconstruct the pipeline from executed + remaining steps
-        from app.core.skills.skill_pipeline import SkillPipeline, PipelineStep
+        from app.core.skills.skill_pipeline import PipelineStep, SkillPipeline
 
         # The token is self-contained — we re-run from resume_idx
         # For now, return success acknowledgement; full re-execution

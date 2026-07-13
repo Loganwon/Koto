@@ -11,6 +11,8 @@ from app.core.agent.file_task_contract import (
 from app.core.agent.file_task_docx_guidance import build_docx_prompt_guidance
 from app.core.agent.file_task_prompt_sections import (
     financial_chart_docx_guidance as _prompt_financial_chart_docx_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
     followup_guidance as _prompt_followup_guidance,
 )
 

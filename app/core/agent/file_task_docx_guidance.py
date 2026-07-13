@@ -12,7 +12,11 @@ from app.core.agent.file_task_contract import (
 from app.core.agent.file_task_doc_annotate_request import is_docx_clear_review_request
 from app.core.agent.file_task_prompt_sections import (
     clear_docx_review_guidance as _prompt_clear_docx_review_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
     docx_compare_annotate_guidance as _prompt_docx_compare_annotate_guidance,
+)
+from app.core.agent.file_task_prompt_sections import (
     single_docx_annotate_guidance as _prompt_single_docx_annotate_guidance,
 )
 

@@ -6,8 +6,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from app.core.agent.file_task_classification import build_decision_context_payload
 from app.core.agent.file_task_classification import (
-    build_decision_context_payload,
     routing_decision_payload as _decision_context_routing_decision_payload,
 )
 from app.core.agent.file_task_completion_contract import build_completion_contract

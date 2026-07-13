@@ -7,9 +7,9 @@ from typing import Optional
 
 from app.core.routing.routing_config import (
     TASK_CORPUS,
+    TRIVIAL_EXCLUDE,
     TRIVIAL_GREETINGS,
     TRIVIAL_IDENTITY,
-    TRIVIAL_EXCLUDE,
 )
 
 logger = logging.getLogger(__name__)
@@ -706,13 +706,13 @@ class SmartDispatcher:
 
         # PPT direct
         from app.core.routing.routing_config import (
-            PPT_DIRECT_KEYWORDS,
-            PPT_ACTION_WORDS,
-            PPT_QUESTION_GUARDS,
-            DOC_GEN_OUTPUT_KEYWORDS,
             DOC_GEN_ACTION_KEYWORDS,
+            DOC_GEN_OUTPUT_KEYWORDS,
             DOC_GEN_QUESTION_GUARDS,
             FILE_SEARCH_PATTERNS,
+            PPT_ACTION_WORDS,
+            PPT_DIRECT_KEYWORDS,
+            PPT_QUESTION_GUARDS,
         )
 
         if _kw_result is None and (

@@ -15,7 +15,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any
-from urllib.request import build_opener, ProxyHandler, Request
+from urllib.request import ProxyHandler, Request, build_opener
 
 _CRITICAL_FILES = (
     "web/app.py",

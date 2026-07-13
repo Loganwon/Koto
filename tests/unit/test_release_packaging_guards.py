@@ -1,7 +1,7 @@
 import ast
+import configparser
 import importlib.util
 from pathlib import Path
-import configparser
 
 from build_config import PROTECTED_DIRS
 

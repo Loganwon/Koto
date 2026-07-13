@@ -382,9 +382,7 @@ def test_doc_annotate_bridge_does_not_route_docx_clear_comment_requests(task_tex
 
 def test_doc_annotate_bridge_does_not_route_plain_docx_polish_request():
     import app.core.agent.file_task_doc_annotate_bridge as bridge
-    from app.core.agent.file_task_doc_annotate_request import (
-        is_docx_annotation_request,
-    )
+    from app.core.agent.file_task_doc_annotate_request import is_docx_annotation_request
     from app.core.agent.file_task_recipes import select_task_recipe
 
     request = FileTaskRequest(
@@ -613,9 +611,7 @@ def test_doc_annotate_bridge_does_not_route_two_docx_compare_annotation_request(
 def test_file_task_runtime_classifies_docx_clear_comment_request_as_write_not_annotation(
     task_text,
 ):
-    from app.core.agent.file_task_doc_annotate_request import (
-        is_docx_annotation_request,
-    )
+    from app.core.agent.file_task_doc_annotate_request import is_docx_annotation_request
 
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",

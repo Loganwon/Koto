@@ -11,11 +11,11 @@ from app.core.agent.file_task_contract import (
     FileTaskIntentPlan,
     FileTaskRequest,
 )
+from app.core.agent.file_task_evidence_guard import source_grounding_policy
 from app.core.agent.file_task_prompt_sections import followup_prompt_prefix
 from app.core.agent.file_task_runtime_utils import _preview
 from app.core.agent.file_task_whitebox import whitebox_execution_plan_schema
 from app.core.agent.tool_design_protocol import TOOL_DESIGN_PROTOCOL
-from app.core.agent.file_task_evidence_guard import source_grounding_policy
 
 
 def build_file_task_messages(

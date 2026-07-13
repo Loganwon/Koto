@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.agent.file_task_runtime_utils import (
-    _followup_has_prior_excel_docx_insert,
-)
+from app.core.agent.file_task_runtime_utils import _followup_has_prior_excel_docx_insert
 
 
 def financial_chart_docx_guidance(enabled: bool) -> str:

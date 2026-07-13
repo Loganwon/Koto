@@ -1,7 +1,7 @@
 """Keep Koto's DOCX editor on one supported TipTap/ProseMirror boundary."""
 
-from pathlib import Path
 import json
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 

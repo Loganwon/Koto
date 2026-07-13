@@ -33,46 +33,71 @@ import uuid
 from pathlib import Path
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from app.core.agent.file_task_contract import (
-    FileTaskClassification,
-    FileTaskExecutionContext,
-    FileTaskExecutionBrief,
-    FileTaskEvent,
-    FileTaskFile,
-    FileTaskIntentPlan,
-    FileTaskLedger,
-    FileTaskRequirementSet,
-    FileTaskRequest,
-    FileTaskToolStreamChunk,
-    FileTaskToolStreamResult,
-)
-from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
 from app.core.agent._file_task_stepwise_helpers import (
     file_task_suffix as _file_task_suffix,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     looks_like_windowed_pdf_task as _looks_like_windowed_pdf_task,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     native_stepwise_pdf_text_quality_guard_payload as _native_stepwise_pdf_text_quality_guard_payload,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     normalized_pdf_body as _normalized_pdf_body,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     pdf_context_read_args as _pdf_context_read_args,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     pdf_text_quality as _pdf_text_quality,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     should_force_pdf_tool_read as _should_force_pdf_tool_read,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_docx_content_quality_block_message as _stepwise_docx_content_quality_block_message,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_docx_target_path as _stepwise_docx_target_path,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_docx_wait_artifact as _stepwise_docx_wait_artifact,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_docx_write_block_message as _stepwise_docx_write_block_message,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_fallback_insights as _stepwise_pdf_fallback_insights,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_fallback_paragraphs as _stepwise_pdf_fallback_paragraphs,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_step_index as _stepwise_pdf_step_index,
+)
+from app.core.agent._file_task_stepwise_helpers import (
     stepwise_pdf_window_pages as _stepwise_pdf_window_pages,
 )
+from app.core.agent.file_task_builtin_tool_runner import (
+    run_builtin_tool as _builtin_tool_runner_run_builtin_tool,
+)
+from app.core.agent.file_task_cancel import is_cancel_requested as _is_cancel_requested
+from app.core.agent.file_task_cancel import request_cancel as _request_cancel
 from app.core.agent.file_task_capability import (
     build_request_capability_profiles,
     native_tool_gap_for_request,
 )
 from app.core.agent.file_task_classification import (
     adjudicate_intent_if_needed as _intent_adjudicator_adjudicate_if_needed,
+)
+from app.core.agent.file_task_classification import (
     apply_classification_intent_overrides,
     apply_followup_annotation_overrides,
+)
+from app.core.agent.file_task_classification import (
     apply_intent_adjudication as _classification_contract_apply_intent_adjudication,
+)
+from app.core.agent.file_task_classification import (
     apply_recipe_classification,
     apply_write_intent_reason_codes,
     build_classification_pipeline_state,
@@ -81,31 +106,239 @@ from app.core.agent.file_task_classification import (
     build_final_classification,
     build_intent_adjudication_contract_context,
     build_mainline_contract_context,
+)
+from app.core.agent.file_task_classification import (
     classification_task_text as _intent_adjudication_classification_task_text,
+)
+from app.core.agent.file_task_classification import (
     demote_classification_to_read as _classification_contract_demote_to_read,
+)
+from app.core.agent.file_task_classification import (
     infer_task_family_operation as _classification_semantics_infer_task_family_operation,
+)
+from app.core.agent.file_task_classification import (
     intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
+)
+from app.core.agent.file_task_classification import (
     normalize_mainline_contract as _classification_contract_normalize_mainline,
+)
+from app.core.agent.file_task_classification import (
     request_with_task as _intent_adjudication_request_with_task,
+)
+from app.core.agent.file_task_classification import (
     routing_decision_payload as _decision_context_routing_decision_payload,
+)
+from app.core.agent.file_task_classification import (
     should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
 )
 from app.core.agent.file_task_completion_contract import build_completion_contract
+from app.core.agent.file_task_context_read import FileTaskContextReadPhase
+from app.core.agent.file_task_contract import (
+    FileTaskClassification,
+    FileTaskEvent,
+    FileTaskExecutionBrief,
+    FileTaskExecutionContext,
+    FileTaskFile,
+    FileTaskIntentPlan,
+    FileTaskLedger,
+    FileTaskRequest,
+    FileTaskRequirementSet,
+    FileTaskToolStreamChunk,
+    FileTaskToolStreamResult,
+)
 from app.core.agent.file_task_doc_annotate_request import (
     docx_annotation_contract_for_request as _doc_annotate_contract_for_request,
+)
+from app.core.agent.file_task_doc_annotate_request import (
     docx_annotation_has_request_contract as _doc_annotate_has_request_contract,
+)
+from app.core.agent.file_task_doc_annotate_request import (
     is_docx_annotation_request as _doc_annotate_is_annotation_request,
+)
+from app.core.agent.file_task_doc_annotate_request import (
     is_docx_clear_review_request as _doc_annotate_is_clear_review_request,
 )
 from app.core.agent.file_task_docx_edit_guard import (
     local_docx_edit_block_message as _docx_edit_local_block_message,
+)
+from app.core.agent.file_task_docx_edit_guard import (
     tool_args_docx_paragraph_count as _docx_edit_paragraph_count,
 )
-from app.core.agent.file_task_guard_emission import build_tool_guard_emission
-from app.core.agent.file_task_model import FileTaskModelClient
-from app.core.agent.file_task_review_intent import (
-    request_has_file_type,
+from app.core.agent.file_task_execution_brief import (
+    execution_brief_schema as _brief_execution_brief_schema,
 )
+from app.core.agent.file_task_execution_brief import (
+    extract_execution_brief as _brief_extract_execution_brief,
+)
+from app.core.agent.file_task_execution_brief import (
+    looks_like_brief_only_content as _brief_looks_like_brief_only_content,
+)
+from app.core.agent.file_task_execution_brief import (
+    normalize_execution_brief as _brief_normalize_execution_brief,
+)
+from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop
+from app.core.agent.file_task_execution_messaging import (
+    execution_brief_continue_message as _execution_messaging_brief_continue_message,
+)
+from app.core.agent.file_task_execution_messaging import (
+    execution_plan_continue_message as _execution_messaging_plan_continue_message,
+)
+from app.core.agent.file_task_execution_messaging import (
+    intent_plan_guidance as _execution_messaging_intent_plan_guidance,
+)
+from app.core.agent.file_task_execution_messaging import (
+    output_mode_guidance as _execution_messaging_output_mode_guidance,
+)
+from app.core.agent.file_task_execution_messaging import (
+    output_mode_label as _execution_messaging_output_mode_label,
+)
+from app.core.agent.file_task_execution_messaging import (
+    whitebox_plan_repair_message as _execution_messaging_plan_repair_message,
+)
+from app.core.agent.file_task_finalization import FileTaskFinalizationPhase
+from app.core.agent.file_task_followup_context import (
+    followup_context as _build_followup_context,
+)
+from app.core.agent.file_task_guard_emission import build_tool_guard_emission
+from app.core.agent.file_task_intent_planner import FileTaskIntentPlanner
+from app.core.agent.file_task_intent_predicates import (
+    explicit_output_mode as _intent_explicit_output_mode,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_artifact_creation_intent as _intent_has_artifact_creation_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_explicit_write_intent as _intent_has_explicit_write_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_global_readonly_write_negation as _intent_has_global_readonly_write_negation,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_readonly_write_negation as _intent_has_readonly_write_negation,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_source_scoped_write_negation as _intent_has_source_scoped_write_negation,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_strong_write_intent as _intent_has_strong_write_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_target_context as _intent_has_target_context,
+)
+from app.core.agent.file_task_intent_predicates import (
+    has_write_intent as _intent_has_write_intent,
+)
+from app.core.agent.file_task_intent_predicates import (
+    infer_output_mode as _intent_infer_output_mode,
+)
+from app.core.agent.file_task_intent_predicates import (
+    is_advisory_analysis_request as _intent_is_advisory_analysis_request,
+)
+from app.core.agent.file_task_intent_predicates import (
+    is_diagnostic_request as _intent_is_diagnostic_request,
+)
+from app.core.agent.file_task_intent_predicates import (
+    quick_action_mode as _intent_quick_action_mode,
+)
+from app.core.agent.file_task_message_payload import build_file_task_runtime_messages
+from app.core.agent.file_task_model import FileTaskModelClient
+from app.core.agent.file_task_model_response import (
+    coerce_tool_calls as _model_response_coerce_tool_calls,
+)
+from app.core.agent.file_task_model_response import (
+    normalize_model_response as _model_response_normalize_model_response,
+)
+from app.core.agent.file_task_model_response import (
+    tool_batch_signature as _model_response_tool_batch_signature,
+)
+from app.core.agent.file_task_plan_presentation import (
+    tool_plan_description as _plan_presentation_description,
+)
+from app.core.agent.file_task_plan_presentation import (
+    tool_plan_title as _plan_presentation_title,
+)
+from app.core.agent.file_task_planning import FileTaskPlanningPhase
+from app.core.agent.file_task_quality_gate import (
+    change_operations as _quality_change_operations,
+)
+from app.core.agent.file_task_quality_gate import (
+    change_sum_int as _quality_change_sum_int,
+)
+from app.core.agent.file_task_quality_gate import (
+    evaluate_task_quality_gate as _quality_evaluate_task_quality_gate,
+)
+from app.core.agent.file_task_quality_gate import (
+    quality_gate_result as _quality_gate_result,
+)
+from app.core.agent.file_task_quality_gate import (
+    repair_retry_message as _quality_repair_retry_message,
+)
+from app.core.agent.file_task_quality_gate import (
+    should_attempt_repair as _quality_should_attempt_repair,
+)
+from app.core.agent.file_task_quality_gate import (
+    success_criteria as _quality_success_criteria,
+)
+from app.core.agent.file_task_quality_gate import (
+    target_or_request_type as _quality_target_or_request_type,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    READONLY_ANSWER_GUARD_PENDING_SUMMARY,
+    READONLY_DUPLICATE_GUARD_SUMMARY,
+    WRITE_DUPLICATE_STOP_SUMMARY,
+    WRITE_DUPLICATE_SUPERVISOR_SUMMARY,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    answer_only_round as _readonly_answer_only_round,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    discard_answer_only_tool_calls as _readonly_discard_answer_only_tool_calls,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    duplicate_guard_tool_payload as _readonly_duplicate_guard_tool_payload,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    readonly_duplicate_final_summary as _readonly_duplicate_final_summary,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    readonly_duplicate_guard_reminder as _readonly_duplicate_guard_reminder,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    should_retry_readonly_answer_guard as _readonly_should_retry_answer_guard,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    should_retry_readonly_duplicate_guard as _readonly_should_retry_duplicate_guard,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    should_retry_write_duplicate_guard as _readonly_should_retry_write_duplicate_guard,
+)
+from app.core.agent.file_task_readonly_loop_guard import (
+    supervisor_guard_tool_payload as _readonly_supervisor_guard_tool_payload,
+)
+from app.core.agent.file_task_readonly_summary import (
+    fallback_readonly_summary as _readonly_fallback_summary,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_answer_required_message as _readonly_answer_required_message,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_context_source_lines as _readonly_context_source_lines,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_context_summary as _readonly_context_summary,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_tool_points as _readonly_tool_points,
+)
+from app.core.agent.file_task_readonly_summary import (
+    readonly_tool_source_label as _readonly_tool_source_label,
+)
+from app.core.agent.file_task_recipes import select_task_recipe
+from app.core.agent.file_task_result_markers import (
+    KOTO_CREATED_RESULT_MARKER,
+    KOTO_MODIFIED_RESULT_MARKER,
+)
+from app.core.agent.file_task_review_intent import request_has_file_type
 from app.core.agent.file_task_runtime_patterns import (
     _DOCX_ANNOTATE_INTENT_WORDS,
     _MAX_MODEL_ROUNDS,
@@ -113,205 +346,171 @@ from app.core.agent.file_task_runtime_patterns import (
     _RUN_PYTHON_ARTIFACT_WRITE_PATTERNS,
     _RUN_PYTHON_STRONG_WRITE_PATTERNS,
 )
-from app.core.agent.file_task_recipes import (
-    select_task_recipe,
-)
-from app.core.agent.file_task_validation import (
-    build_file_task_requirements,
-    validate_file_task_plan,
-)
-from app.core.agent.file_task_whitebox import (
-    WhiteboxExecutionPlan,
-    build_decision_audit,
-    build_recipe_skeleton,
-    extract_whitebox_execution_plan,
-    validate_whitebox_plan,
-)
-from app.core.agent.file_task_cancel import (
-    is_cancel_requested as _is_cancel_requested,
-    request_cancel as _request_cancel,
-)
 from app.core.agent.file_task_runtime_utils import (
     _compact_line,
     _is_error_result,
     _json_payload,
     _preview,
 )
-from app.core.agent.file_task_plan_presentation import (
-    tool_plan_description as _plan_presentation_description,
-    tool_plan_title as _plan_presentation_title,
+from app.core.agent.file_task_step_payload import (
+    build_runtime_metadata as _step_payload_build_runtime_metadata,
 )
-from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop
-from app.core.agent.file_task_finalization import FileTaskFinalizationPhase
-from app.core.agent.file_task_context_read import FileTaskContextReadPhase
-from app.core.agent.file_task_planning import FileTaskPlanningPhase
-from app.core.agent.file_task_targeting import (
-    context_files as _targeting_context_files,
-    explicit_output_path_from_task as _targeting_explicit_output_path_from_task,
-    explicit_write_target_path_from_task as _targeting_explicit_write_target_path_from_task,
-    files_explicitly_mentioned_in_task as _targeting_files_explicitly_mentioned_in_task,
-    protected_source_write_block_message as _targeting_protected_source_write_block_message,
-    request_target_points_to_source as _targeting_request_target_points_to_source,
-    request_with_target_path as _targeting_request_with_target_path,
-    resolved_workspace_root as _targeting_resolved_workspace_root,
-    same_task_path as _targeting_same_task_path,
-    should_skip_uncreated_target_context as _targeting_should_skip_uncreated_target_context,
-    target_path_with_file_alias as _targeting_target_path_with_file_alias,
-    task_text_mentions_path as _targeting_task_text_mentions_path,
+from app.core.agent.file_task_step_payload import (
+    build_step_result_payload as _step_payload_build_step_result_payload,
 )
-from app.core.agent.file_task_intent_predicates import (
-    explicit_output_mode as _intent_explicit_output_mode,
-    has_artifact_creation_intent as _intent_has_artifact_creation_intent,
-    has_explicit_write_intent as _intent_has_explicit_write_intent,
-    has_global_readonly_write_negation as _intent_has_global_readonly_write_negation,
-    has_readonly_write_negation as _intent_has_readonly_write_negation,
-    has_source_scoped_write_negation as _intent_has_source_scoped_write_negation,
-    has_strong_write_intent as _intent_has_strong_write_intent,
-    has_target_context as _intent_has_target_context,
-    has_write_intent as _intent_has_write_intent,
-    infer_output_mode as _intent_infer_output_mode,
-    is_advisory_analysis_request as _intent_is_advisory_analysis_request,
-    is_diagnostic_request as _intent_is_diagnostic_request,
-    quick_action_mode as _intent_quick_action_mode,
+from app.core.agent.file_task_step_payload import (
+    check_step_result_status as _step_payload_check_step_result_status,
 )
-from app.core.agent.file_task_readonly_summary import (
-    fallback_readonly_summary as _readonly_fallback_summary,
-    readonly_answer_required_message as _readonly_answer_required_message,
-    readonly_context_source_lines as _readonly_context_source_lines,
-    readonly_context_summary as _readonly_context_summary,
-    readonly_tool_points as _readonly_tool_points,
-    readonly_tool_source_label as _readonly_tool_source_label,
+from app.core.agent.file_task_step_payload import (
+    execute_step_result_status as _step_payload_execute_step_result_status,
 )
-from app.core.agent.file_task_readonly_loop_guard import (
-    READONLY_ANSWER_GUARD_PENDING_SUMMARY,
-    READONLY_DUPLICATE_GUARD_SUMMARY,
-    WRITE_DUPLICATE_STOP_SUMMARY,
-    WRITE_DUPLICATE_SUPERVISOR_SUMMARY,
-    answer_only_round as _readonly_answer_only_round,
-    discard_answer_only_tool_calls as _readonly_discard_answer_only_tool_calls,
-    duplicate_guard_tool_payload as _readonly_duplicate_guard_tool_payload,
-    readonly_duplicate_final_summary as _readonly_duplicate_final_summary,
-    readonly_duplicate_guard_reminder as _readonly_duplicate_guard_reminder,
-    should_retry_readonly_answer_guard as _readonly_should_retry_answer_guard,
-    should_retry_readonly_duplicate_guard as _readonly_should_retry_duplicate_guard,
-    should_retry_write_duplicate_guard as _readonly_should_retry_write_duplicate_guard,
-    supervisor_guard_tool_payload as _readonly_supervisor_guard_tool_payload,
+from app.core.agent.file_task_step_payload import (
+    execute_step_summary as _step_payload_execute_step_summary,
 )
-from app.core.agent.file_task_quality_gate import (
-    change_operations as _quality_change_operations,
-    change_sum_int as _quality_change_sum_int,
-    evaluate_task_quality_gate as _quality_evaluate_task_quality_gate,
-    quality_gate_result as _quality_gate_result,
-    repair_retry_message as _quality_repair_retry_message,
-    should_attempt_repair as _quality_should_attempt_repair,
-    success_criteria as _quality_success_criteria,
-    target_or_request_type as _quality_target_or_request_type,
+from app.core.agent.file_task_step_payload import (
+    public_context_snippets as _step_payload_public_context_snippets,
 )
-from app.core.agent.file_task_verification import (
-    verification_precheck as _verification_precheck,
+from app.core.agent.file_task_step_payload import (
+    step_result_file_changes as _step_payload_step_result_file_changes,
 )
-from app.core.agent.task_supervisor import TaskSupervisor, SupervisionResult
+from app.core.agent.file_task_step_payload import (
+    with_runtime_context as _step_payload_with_runtime_context,
+)
+from app.core.agent.file_task_step_verification import (
+    build_supervisor_step_verification_payload as _build_supervisor_step_verification_payload,
+)
+from app.core.agent.file_task_supervisor_audit import build_supervisor_audit
 from app.core.agent.file_task_supervisor_prompts import (
     blocked_run_python_message as _supervisor_blocked_run_python_message,
-    duplicate_supervisor_retry_message as _supervisor_duplicate_retry_message,
-    file_types as _supervisor_file_types,
-    looks_like_chart_request as _supervisor_looks_like_chart_request,
-    looks_like_docx_report_request as _supervisor_looks_like_docx_report_request,
-    looks_like_financial_request as _supervisor_looks_like_financial_request,
-    looks_like_financial_xlsx_docx_chart_report_task as _supervisor_looks_like_financial_report_task,
-    looks_like_pdf_python_text_read as _supervisor_looks_like_pdf_python_text_read,
-    looks_like_polish_request as _supervisor_looks_like_polish_request,
-    looks_like_ppt_request as _supervisor_looks_like_ppt_request,
-    looks_like_ppt_slide_write_request as _supervisor_looks_like_ppt_slide_write_request,
-    looks_like_problem_analysis_request as _supervisor_looks_like_problem_analysis_request,
-    looks_like_summary_request as _supervisor_looks_like_summary_request,
-    looks_like_table_request as _supervisor_looks_like_table_request,
-    looks_like_translation_request as _supervisor_looks_like_translation_request,
-    should_prompt_for_write_after_tool_round as _supervisor_should_prompt_for_write_after_tool_round,
-    write_retry_message as _supervisor_write_retry_message,
 )
-from app.core.agent.file_task_message_payload import build_file_task_runtime_messages
-from app.core.agent.file_task_followup_context import (
-    followup_context as _build_followup_context,
+from app.core.agent.file_task_supervisor_prompts import (
+    duplicate_supervisor_retry_message as _supervisor_duplicate_retry_message,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    file_types as _supervisor_file_types,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_chart_request as _supervisor_looks_like_chart_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_docx_report_request as _supervisor_looks_like_docx_report_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_financial_request as _supervisor_looks_like_financial_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_financial_xlsx_docx_chart_report_task as _supervisor_looks_like_financial_report_task,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_pdf_python_text_read as _supervisor_looks_like_pdf_python_text_read,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_polish_request as _supervisor_looks_like_polish_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_ppt_request as _supervisor_looks_like_ppt_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_ppt_slide_write_request as _supervisor_looks_like_ppt_slide_write_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_problem_analysis_request as _supervisor_looks_like_problem_analysis_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_summary_request as _supervisor_looks_like_summary_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_table_request as _supervisor_looks_like_table_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    looks_like_translation_request as _supervisor_looks_like_translation_request,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    should_prompt_for_write_after_tool_round as _supervisor_should_prompt_for_write_after_tool_round,
+)
+from app.core.agent.file_task_supervisor_prompts import (
+    write_retry_message as _supervisor_write_retry_message,
 )
 from app.core.agent.file_task_system_prompt_builder import (
     build_file_task_runtime_system_prompt,
+)
+from app.core.agent.file_task_targeting import context_files as _targeting_context_files
+from app.core.agent.file_task_targeting import (
+    explicit_output_path_from_task as _targeting_explicit_output_path_from_task,
+)
+from app.core.agent.file_task_targeting import (
+    explicit_write_target_path_from_task as _targeting_explicit_write_target_path_from_task,
+)
+from app.core.agent.file_task_targeting import (
+    files_explicitly_mentioned_in_task as _targeting_files_explicitly_mentioned_in_task,
+)
+from app.core.agent.file_task_targeting import (
+    protected_source_write_block_message as _targeting_protected_source_write_block_message,
+)
+from app.core.agent.file_task_targeting import (
+    request_target_points_to_source as _targeting_request_target_points_to_source,
+)
+from app.core.agent.file_task_targeting import (
+    request_with_target_path as _targeting_request_with_target_path,
+)
+from app.core.agent.file_task_targeting import (
+    resolved_workspace_root as _targeting_resolved_workspace_root,
+)
+from app.core.agent.file_task_targeting import (
+    same_task_path as _targeting_same_task_path,
+)
+from app.core.agent.file_task_targeting import (
+    should_skip_uncreated_target_context as _targeting_should_skip_uncreated_target_context,
+)
+from app.core.agent.file_task_targeting import (
+    target_path_with_file_alias as _targeting_target_path_with_file_alias,
+)
+from app.core.agent.file_task_targeting import (
+    task_text_mentions_path as _targeting_task_text_mentions_path,
 )
 from app.core.agent.file_task_terminal_report import (
     apply_terminal_check_overrides,
     build_terminal_run_summary,
     terminal_completed_task,
 )
-from app.core.agent.file_task_execution_brief import (
-    execution_brief_schema as _brief_execution_brief_schema,
-    extract_execution_brief as _brief_extract_execution_brief,
-    looks_like_brief_only_content as _brief_looks_like_brief_only_content,
-    normalize_execution_brief as _brief_normalize_execution_brief,
-)
-from app.core.agent.file_task_execution_messaging import (
-    execution_brief_continue_message as _execution_messaging_brief_continue_message,
-    execution_plan_continue_message as _execution_messaging_plan_continue_message,
-    intent_plan_guidance as _execution_messaging_intent_plan_guidance,
-    output_mode_guidance as _execution_messaging_output_mode_guidance,
-    output_mode_label as _execution_messaging_output_mode_label,
-    whitebox_plan_repair_message as _execution_messaging_plan_repair_message,
-)
-from app.core.agent.file_task_model_response import (
-    coerce_tool_calls as _model_response_coerce_tool_calls,
-    normalize_model_response as _model_response_normalize_model_response,
-    tool_batch_signature as _model_response_tool_batch_signature,
-)
-from app.core.agent.file_task_step_payload import (
-    build_runtime_metadata as _step_payload_build_runtime_metadata,
-    build_step_result_payload as _step_payload_build_step_result_payload,
-    check_step_result_status as _step_payload_check_step_result_status,
-    execute_step_result_status as _step_payload_execute_step_result_status,
-    execute_step_summary as _step_payload_execute_step_summary,
-    public_context_snippets as _step_payload_public_context_snippets,
-    step_result_file_changes as _step_payload_step_result_file_changes,
-    with_runtime_context as _step_payload_with_runtime_context,
-)
-from app.core.agent.file_task_step_verification import (
-    build_supervisor_step_verification_payload as _build_supervisor_step_verification_payload,
-)
-from app.core.agent.file_task_builtin_tool_runner import (
-    run_builtin_tool as _builtin_tool_runner_run_builtin_tool,
-)
-from app.core.agent.file_task_workflow_state import (
-    attach_workflow_checkpoint,
-    build_workflow_state,
-    request_with_workflow_checkpoint,
-    supervisor_status_payload,
-    workflow_resume_control,
-    window_read_args_for_file,
-)
-from app.core.agent.file_task_supervisor_audit import (
-    build_supervisor_audit,
-)
-from app.core.agent.file_task_result_markers import (
-    KOTO_CREATED_RESULT_MARKER,
-    KOTO_MODIFIED_RESULT_MARKER,
-)
 from app.core.agent.file_task_tool_catalog import (
     extract_koto_paths,
     file_states_for_changes,
     is_file_task_tool,
     is_write_tool,
+    stringify_result,
     supported_file_workflows,
     tool_result_preview,
-    stringify_result,
     write_target_for_tool,
 )
 from app.core.agent.file_task_tool_feedback import (
     code_output_preview as _feedback_code_output_preview,
+)
+from app.core.agent.file_task_tool_feedback import (
     extract_file_changes as _feedback_extract_file_changes,
+)
+from app.core.agent.file_task_tool_feedback import (
     extract_tool_runtime_outcome as _feedback_extract_tool_runtime_outcome,
+)
+from app.core.agent.file_task_tool_feedback import (
     readonly_run_python_write_block_message as _feedback_readonly_run_python_write_block_message,
+)
+from app.core.agent.file_task_tool_feedback import (
     readonly_write_tool_block_message as _feedback_readonly_write_tool_block_message,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_artifacts as _feedback_tool_artifacts,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_feedback_for_model as _feedback_tool_feedback_for_model,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_result_for_model as _feedback_tool_result_for_model,
+)
+from app.core.agent.file_task_tool_feedback import (
     tool_runtime_status as _feedback_tool_runtime_status,
+)
+from app.core.agent.file_task_tool_feedback import (
     truncate_tool_feedback_value as _feedback_truncate_tool_feedback_value,
 )
 from app.core.agent.file_task_tool_gateway import (
@@ -320,6 +519,29 @@ from app.core.agent.file_task_tool_gateway import (
     FileTaskToolProvider,
     ToolExecutor,
 )
+from app.core.agent.file_task_validation import (
+    build_file_task_requirements,
+    validate_file_task_plan,
+)
+from app.core.agent.file_task_verification import (
+    verification_precheck as _verification_precheck,
+)
+from app.core.agent.file_task_whitebox import (
+    WhiteboxExecutionPlan,
+    build_decision_audit,
+    build_recipe_skeleton,
+    extract_whitebox_execution_plan,
+    validate_whitebox_plan,
+)
+from app.core.agent.file_task_workflow_state import (
+    attach_workflow_checkpoint,
+    build_workflow_state,
+    request_with_workflow_checkpoint,
+    supervisor_status_payload,
+    window_read_args_for_file,
+    workflow_resume_control,
+)
+from app.core.agent.task_supervisor import SupervisionResult, TaskSupervisor
 from app.core.agent.tool_design_protocol import (
     TOOL_DESIGN_PROTOCOL,
     build_next_action_artifact,

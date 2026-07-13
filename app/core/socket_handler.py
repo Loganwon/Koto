@@ -356,8 +356,8 @@ def _pick_online_model() -> str:
 
 def _get_provider():
     """Return the configured online LLMProvider."""
-    from app.core.llm.provider_factory import get_llm_provider
     from app.core.llm.model_selection import get_provider_for_model_mode
+    from app.core.llm.provider_factory import get_llm_provider
 
     model = _pick_online_model()
     return get_llm_provider(
@@ -607,7 +607,7 @@ def _run_doc_agent(socketio, sid, data: dict) -> None:
     - File change tracking for frontend highlighting
     - Task completion verification
     """
-    from app.core.agent.doc_agent import DocAgent, DocTask, FileHandle, DocEventType
+    from app.core.agent.doc_agent import DocAgent, DocEventType, DocTask, FileHandle
     from app.core.agent.doc_event_emitter import DocEventEmitter
 
     # Build FileHandle objects from data

@@ -1,5 +1,5 @@
-import json
 import base64
+import json
 from pathlib import Path
 
 import pytest
@@ -13,8 +13,8 @@ from app.core.agent.file_task_contract import (
     FileTaskToolStreamResult,
     event_to_sse,
 )
-from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_model import FileTaskModelClient
+from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_tool_catalog import (
     file_task_tool_specs,
     supported_file_workflows,
@@ -6910,9 +6910,9 @@ def test_file_task_model_client_routes_local_and_cloud():
 
 
 def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
-    from app.core.agent import file_task_model as file_task_model_module
     import app.core.llm.model_fallback as fallback_module
     import app.core.llm.provider_factory as provider_factory
+    from app.core.agent import file_task_model as file_task_model_module
 
     captured = {}
 
@@ -6958,8 +6958,8 @@ def test_file_task_model_client_routes_deepseek_cloud_provider(monkeypatch):
 
 
 def test_file_task_model_client_passes_file_task_timeout_to_local_provider(monkeypatch):
-    from app.core.agent import file_task_model as file_task_model_module
     import app.core.llm.ollama_llm_provider as ollama_module
+    from app.core.agent import file_task_model as file_task_model_module
 
     captured = {}
 

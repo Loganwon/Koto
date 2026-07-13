@@ -1,9 +1,9 @@
+from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_evidence_guard import (
     requests_verbatim_quote,
     sanitize_unverified_readonly_quotes,
     source_grounding_policy,
 )
-from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_runtime import FileTaskRuntime
 
 

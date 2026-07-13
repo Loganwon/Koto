@@ -35,18 +35,18 @@
 from __future__ import annotations
 
 import base64
+import filecmp
+import hashlib
 import importlib
 import io
 import json
 import logging
 import os
-import filecmp
-import hashlib
 import re
 import shutil
+import stat
 import sys
 import tempfile
-import stat
 import time
 import types
 import zipfile
@@ -54,8 +54,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
-from app.core.agent.file_task_contract import FileTaskToolStreamResult
 from app.core.agent.file_task_completion_verifier import verify_task_completion
+from app.core.agent.file_task_contract import FileTaskToolStreamResult
 from app.core.agent.file_task_result_markers import (
     KOTO_CREATED_FALLBACK_KEY,
     KOTO_CREATED_RESULT_KEY,
@@ -70,26 +70,95 @@ from app.core.agent.path_utils import (
     is_within_roots,
     resolve_existing_path,
 )
-from app.core.agent.task_tools_docx_minimal import (
-    _coerce_docx_paragraphs_for_write,
-    _minimal_docx_package_bytes,
-    _normalize_docx_paragraphs,
-    _plain_text_to_docx_paragraphs,
+from app.core.agent.task_tool_operation_bindings import build_task_tool_operations
+from app.core.agent.task_tools_conversion import (
+    convert_docx_to_pdf as _conversion_convert_docx_to_pdf,
 )
-from app.core.agent.task_tools_docx_style import apply_docx_style as _apply_docx_style
+from app.core.agent.task_tools_conversion import (
+    convert_docx_to_pdf_with_docx2pdf as _conversion_docx2pdf,
+)
+from app.core.agent.task_tools_conversion import (
+    convert_docx_to_pdf_with_libreoffice as _conversion_libreoffice,
+)
+from app.core.agent.task_tools_conversion import (
+    convert_docx_to_pdf_with_word as _conversion_word,
+)
+from app.core.agent.task_tools_conversion import (
+    convert_file as _conversion_convert_file,
+)
+from app.core.agent.task_tools_conversion import (
+    list_conversions as _conversion_list_conversions,
+)
+from app.core.agent.task_tools_conversion import (
+    normalize_conversion_extension as _conversion_normalize_extension,
+)
 from app.core.agent.task_tools_docx_compare import (
-    _contract_risk_summary_from_annotations,
     _build_docx_compare_annotations,
+    _contract_risk_summary_from_annotations,
     _docx_compare_annotation_candidates,
     _docx_diff_comment,
     _docx_diff_key,
     _docx_nonempty_paragraph_texts,
     _short_docx_diff_text,
 )
-from app.core.agent.task_tools_pptx_theme import (
-    _hex_to_rgb_color,
-    _pptx_density_settings,
-    _select_pptx_theme,
+from app.core.agent.task_tools_docx_minimal import (
+    _coerce_docx_paragraphs_for_write,
+    _minimal_docx_package_bytes,
+    _normalize_docx_paragraphs,
+    _plain_text_to_docx_paragraphs,
+)
+from app.core.agent.task_tools_docx_review_cleanup import (
+    DOCX_COMMENT_MARKUP_TAGS as _DOCX_COMMENT_MARKUP_TAGS,
+)
+from app.core.agent.task_tools_docx_review_cleanup import DOCX_W_NS as _DOCX_W_NS
+from app.core.agent.task_tools_docx_review_cleanup import _serialize_xml_root
+from app.core.agent.task_tools_docx_review_cleanup import (
+    accept_docx_revision_markup as _accept_docx_revision_markup,
+)
+from app.core.agent.task_tools_docx_review_cleanup import (
+    build_docx_review_clear_summary as _build_docx_review_clear_summary,
+)
+from app.core.agent.task_tools_docx_review_cleanup import (
+    normalize_docx_review_clear_scope as _review_normalize_docx_review_clear_scope,
+)
+from app.core.agent.task_tools_docx_review_cleanup import (
+    remove_comments_content_type_override as _remove_comments_content_type_override,
+)
+from app.core.agent.task_tools_docx_review_cleanup import (
+    remove_comments_relationships_xml as _remove_comments_relationships_xml,
+)
+from app.core.agent.task_tools_docx_review_cleanup import (
+    remove_docx_comment_markup as _remove_docx_comment_markup,
+)
+from app.core.agent.task_tools_docx_style import apply_docx_style as _apply_docx_style
+from app.core.agent.task_tools_docx_template import (
+    replace_docx_placeholders_in_paragraph as _replace_docx_placeholders_in_paragraph,
+)
+from app.core.agent.task_tools_office_create import (
+    create_docx_file as _office_create_docx_file,
+)
+from app.core.agent.task_tools_office_create import (
+    create_pptx_file as _office_create_pptx_file,
+)
+from app.core.agent.task_tools_office_create import (
+    create_xlsx_file as _office_create_xlsx_file,
+)
+from app.core.agent.task_tools_office_create import (
+    plain_text_to_pptx_slides as _office_plain_text_to_pptx_slides,
+)
+from app.core.agent.task_tools_pdf_window import (
+    int_to_chinese_letter_number as _int_to_chinese_letter_number,
+)
+from app.core.agent.task_tools_pdf_window import int_to_pdf_roman as _int_to_pdf_roman
+from app.core.agent.task_tools_pdf_window import (
+    pdf_letter_heading_terms as _pdf_letter_heading_terms,
+)
+from app.core.agent.task_tools_pdf_window import (
+    pdf_page_has_letter_heading as _pdf_page_has_letter_heading,
+)
+from app.core.agent.task_tools_pdf_window import read_pdf_excerpt as _pdf_read_excerpt
+from app.core.agent.task_tools_pdf_window import (
+    read_pdf_letter_window as _pdf_read_letter_window,
 )
 from app.core.agent.task_tools_pptx_layout import (
     _add_theme_accent_shapes,
@@ -103,58 +172,39 @@ from app.core.agent.task_tools_pptx_layout import (
     _remove_koto_theme_shapes,
     _set_slide_background,
 )
-from app.core.agent.task_tools_office_create import (
-    create_docx_file as _office_create_docx_file,
-    create_pptx_file as _office_create_pptx_file,
-    create_xlsx_file as _office_create_xlsx_file,
-    plain_text_to_pptx_slides as _office_plain_text_to_pptx_slides,
+from app.core.agent.task_tools_pptx_theme import (
+    _hex_to_rgb_color,
+    _pptx_density_settings,
+    _select_pptx_theme,
 )
-from app.core.agent.task_tools_conversion import (
-    convert_docx_to_pdf as _conversion_convert_docx_to_pdf,
-    convert_docx_to_pdf_with_docx2pdf as _conversion_docx2pdf,
-    convert_docx_to_pdf_with_libreoffice as _conversion_libreoffice,
-    convert_docx_to_pdf_with_word as _conversion_word,
-    convert_file as _conversion_convert_file,
-    list_conversions as _conversion_list_conversions,
-    normalize_conversion_extension as _conversion_normalize_extension,
-)
-from app.core.agent.task_tools_docx_template import (
-    replace_docx_placeholders_in_paragraph as _replace_docx_placeholders_in_paragraph,
-)
-from app.core.agent.task_tools_docx_review_cleanup import (
-    DOCX_COMMENT_MARKUP_TAGS as _DOCX_COMMENT_MARKUP_TAGS,
-    DOCX_W_NS as _DOCX_W_NS,
-    accept_docx_revision_markup as _accept_docx_revision_markup,
-    build_docx_review_clear_summary as _build_docx_review_clear_summary,
-    normalize_docx_review_clear_scope as _review_normalize_docx_review_clear_scope,
-    remove_comments_content_type_override as _remove_comments_content_type_override,
-    remove_comments_relationships_xml as _remove_comments_relationships_xml,
-    remove_docx_comment_markup as _remove_docx_comment_markup,
-    _serialize_xml_root,
-)
-from app.core.agent.task_tools_pdf_window import (
-    int_to_chinese_letter_number as _int_to_chinese_letter_number,
-    int_to_pdf_roman as _int_to_pdf_roman,
-    pdf_letter_heading_terms as _pdf_letter_heading_terms,
-    pdf_page_has_letter_heading as _pdf_page_has_letter_heading,
-    read_pdf_excerpt as _pdf_read_excerpt,
-    read_pdf_letter_window as _pdf_read_letter_window,
-)
+from app.core.agent.task_tools_registry import build_task_tool_definitions
 from app.core.agent.task_tools_xlsx_sheet_selection import (
     select_workbook_sheet as _select_workbook_sheet,
+)
+from app.core.agent.task_tools_xlsx_sheet_selection import (
     sheet_matches_statement as _sheet_matches_statement,
 )
 from app.core.agent.task_tools_xlsx_structure import (
     collect_formula_examples as _collect_formula_examples,
+)
+from app.core.agent.task_tools_xlsx_structure import (
     detect_year_header as _detect_year_header,
-    extract_external_link_targets as _extract_external_link_targets,
-    sample_sheet_rows as _sample_sheet_rows,
-    row_label_for_year_series as _row_label_for_year_series,
+)
+from app.core.agent.task_tools_xlsx_structure import (
     display_series_value as _display_series_value,
+)
+from app.core.agent.task_tools_xlsx_structure import (
+    extract_external_link_targets as _extract_external_link_targets,
+)
+from app.core.agent.task_tools_xlsx_structure import (
+    row_label_for_year_series as _row_label_for_year_series,
+)
+from app.core.agent.task_tools_xlsx_structure import (
+    sample_sheet_rows as _sample_sheet_rows,
+)
+from app.core.agent.task_tools_xlsx_structure import (
     severity_for_financial_label as _xlsx_severity_for_financial_label,
 )
-from app.core.agent.task_tool_operation_bindings import build_task_tool_operations
-from app.core.agent.task_tools_registry import build_task_tool_definitions
 from app.core.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
@@ -2252,8 +2302,9 @@ def compare_files(file_paths: str, aspect: str = "content") -> str:
     Returns: JSON with similarity scores and differences.
     """
     import asyncio
-    from app.core.file.multi_file_coordinator import get_file_coordinator
+
     from app.core.agent.doc_agent import FileHandle
+    from app.core.file.multi_file_coordinator import get_file_coordinator
 
     paths = [p.strip() for p in file_paths.split(",") if p.strip()]
     if len(paths) < 2:
@@ -2604,8 +2655,9 @@ def extract_to_file(
     Returns: JSON with operation result and change details.
     """
     import asyncio
-    from app.core.file.multi_file_coordinator import get_file_coordinator
+
     from app.core.agent.doc_agent import FileHandle
+    from app.core.file.multi_file_coordinator import get_file_coordinator
 
     src = _resolve_path(source_path)
     if not src:
@@ -2805,6 +2857,7 @@ def annotate_file(
     Returns: JSON with annotation results.
     """
     import asyncio
+
     from app.core.file.multi_file_coordinator import get_file_coordinator
 
     resolved = _resolve_path(path)
@@ -4653,8 +4706,8 @@ class TaskToolsPlugin(AgentPlugin):
 
 # XLSX functions extracted to task_tools_xlsx.py
 from .task_tools_xlsx import (  # noqa: E402, F401
-    read_sheet_data,
-    inspect_workbook_structure,
     audit_financial_workbook,
+    inspect_workbook_structure,
+    read_sheet_data,
     write_sheet_data,
 )

@@ -4,8 +4,8 @@ from app.core.agent.file_task_review_intent import (
     should_route_docx_file_edit,
     should_use_docx_review_system,
 )
-from app.core.routing.rule_router import RuleRouter
 from app.core.routing.routing_rule_chain import RuleChain, RuleContext
+from app.core.routing.rule_router import RuleRouter
 
 
 class _DummyDispatcher:

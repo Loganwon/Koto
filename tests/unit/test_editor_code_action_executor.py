@@ -9,8 +9,8 @@ def _events_for(request: AgentRequest):
 
 
 def test_editor_code_action_executor_generates_and_runs_python(monkeypatch):
-    from app.core.agent import llm_provider_helpers
     from app.core import sandbox
+    from app.core.agent import llm_provider_helpers
 
     captured = {}
 
@@ -49,8 +49,8 @@ def test_editor_code_action_executor_generates_and_runs_python(monkeypatch):
 
 
 def test_editor_code_action_executor_honors_local_only_generation(monkeypatch):
-    from app.core.agent import llm_provider_helpers
     from app.core import sandbox
+    from app.core.agent import llm_provider_helpers
 
     captured = {}
 

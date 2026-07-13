@@ -11,8 +11,8 @@ Validates:
 """
 
 import importlib
-import json
 import io
+import json
 import re
 import shutil
 import subprocess
@@ -95,12 +95,12 @@ def app_client():
             from app.core.agent.editor_quick_action_executor import (
                 EditorQuickActionExecutor,
             )
-            from app.core.security.output_validator import OutputValidator
             from app.core.agent.lifecycle import (
                 evt_error,
                 evt_stream_chunk,
                 evt_task_complete,
             )
+            from app.core.security.output_validator import OutputValidator
             from web.app import app
 
             app.config["TESTING"] = True
@@ -368,8 +368,8 @@ class TestEditorAIStream:
         tmp_path,
         monkeypatch,
     ):
-        from app.core.agent.file_task_runtime import FileTaskRuntime
         import app.core.agent.task_tools as task_tools
+        from app.core.agent.file_task_runtime import FileTaskRuntime
 
         monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
         monkeypatch.setattr(
@@ -789,9 +789,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -915,9 +915,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_routes_single_docx_annotation_to_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         docx_path = tmp_path / "interview.docx"
         docx_path.write_bytes(b"PK\x03\x04")
@@ -1027,9 +1027,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_routes_pdf_docx_translation_review_to_doc_annotate_bridge_in_local_mode(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1112,9 +1112,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_followup_feedback_bypasses_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1190,9 +1190,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_followup_improve_routes_back_to_doc_annotate_bridge(
         self, app_client, monkeypatch, tmp_path
     ):
+        import app.core.agent.file_task_doc_annotate_bridge as bridge
         from app.core.agent.file_task_contract import FileTaskLedger
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import app.core.agent.file_task_doc_annotate_bridge as bridge
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1297,9 +1297,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_forwards_review_and_write_progress(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1420,9 +1420,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_handles_single_docx_annotation_requests(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         docx_path = tmp_path / "interview.docx"
         docx_path.write_bytes(b"PK\x03\x04")
@@ -1520,9 +1520,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_merges_followup_improve_requirement(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest, FileTaskFile
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 
         pdf_path = tmp_path / "source.pdf"
         pdf_path.write_bytes(b"%PDF-1.4\n")
@@ -1602,9 +1602,9 @@ class TestEditorAIStream:
     def test_doc_annotate_bridge_emits_confirmed_batch_plan_for_large_files(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", "6")
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", "4000")
@@ -1696,9 +1696,9 @@ class TestEditorAIStream:
     def test_large_translation_review_uses_finer_batches_in_local_mode(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         monkeypatch.setenv("KOTO_DOC_REVIEW_LOCAL_BATCH_TARGET_MINUTES", "5")
         monkeypatch.setenv("KOTO_DOC_REVIEW_LOCAL_BATCH_CHARS_PER_MINUTE", "2400")
@@ -1790,9 +1790,9 @@ class TestEditorAIStream:
     def test_local_docx_review_bridge_uses_local_model_identity(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         docx_path = tmp_path / "humanise!.docx"
         docx_path.write_bytes(b"PK\x03\x04")
@@ -1859,9 +1859,9 @@ class TestEditorAIStream:
     def test_large_translation_review_cloud_mode_batches_by_char_budget(
         self, monkeypatch, tmp_path
     ):
-        from app.core.agent.file_task_contract import FileTaskRequest
         import app.core.agent.file_task_doc_annotate_bridge as bridge
         import web.document_feedback as feedback_module
+        from app.core.agent.file_task_contract import FileTaskRequest
 
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_TARGET_MINUTES", "6")
         monkeypatch.setenv("KOTO_DOC_REVIEW_CLOUD_BATCH_CHARS_PER_MINUTE", "4000")
@@ -2021,9 +2021,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_keeps_finished_run_runtime_only(
         self, app_client, monkeypatch
     ):
+        import web.app as web_app_module
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import web.app as web_app_module
 
         calls = {"save": 0, "extract": 0}
 
@@ -2073,9 +2073,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_uses_request_history_only(
         self, app_client, monkeypatch
     ):
+        import web.app as web_app_module
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import web.app as web_app_module
 
         captured = {"loaded": []}
 
@@ -2124,9 +2124,9 @@ class TestEditorAIStream:
     def test_whitebox_task_stream_does_not_inject_memory_router_context(
         self, app_client, monkeypatch
     ):
+        import web.app as web_app_module
         from app.core.agent.file_task_contract import FileTaskEvent
         from app.core.agent.file_task_runtime import FileTaskRuntime
-        import web.app as web_app_module
 
         captured = {}
 
@@ -3267,6 +3267,7 @@ class TestLegacyDocumentCompatRoutes:
     @staticmethod
     def _make_document_client(monkeypatch, workspace_root):
         from flask import Flask
+
         import web.blueprints.document as document_routes
 
         app = Flask(__name__)

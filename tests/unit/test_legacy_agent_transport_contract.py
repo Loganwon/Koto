@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from app.core.agent.lifecycle import (
+    RunState,
     evt_code_result,
     evt_error,
     evt_lifecycle_end,
@@ -19,7 +20,6 @@ from app.core.agent.lifecycle import (
     evt_task_complete,
     evt_tool_call,
     evt_tool_result,
-    RunState,
 )
 
 

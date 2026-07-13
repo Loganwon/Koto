@@ -2,8 +2,8 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 from __future__ import annotations
 
-from pathlib import Path
 from html.parser import HTMLParser
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 

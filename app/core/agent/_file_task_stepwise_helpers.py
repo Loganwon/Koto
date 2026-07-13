@@ -13,10 +13,12 @@ import re
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from app.core.agent.file_task_runtime_utils import _compact_line
-from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_recipes import request_file_types
+from app.core.agent.file_task_runtime_utils import (
+    _compact_line,
+    workflow_checkpoint_from_options,
+)
 
 
 def _workflow_resume_control(request: FileTaskRequest) -> Dict[str, Any]:

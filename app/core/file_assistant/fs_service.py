@@ -3,10 +3,10 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-from dataclasses import dataclass
 import logging
-from pathlib import Path
 import re
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 from app.core.file.path_policy import (

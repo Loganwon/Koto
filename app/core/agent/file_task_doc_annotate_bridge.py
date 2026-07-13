@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, List, Optional, Sequence
 
-from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import (
     FileTaskEvent,
     FileTaskFile,
@@ -37,6 +36,7 @@ from app.core.agent.file_task_doc_annotate_intent import (
     should_route_request,
     should_use_doc_annotate_bridge_execution,
 )
+from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.llm.model_mode import normalize_model_mode
 
 logger = logging.getLogger(__name__)

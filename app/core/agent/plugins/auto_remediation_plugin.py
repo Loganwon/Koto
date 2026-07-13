@@ -10,9 +10,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
-from app.core.remediation.remediation_manager import (
-    get_remediation_manager,
-)
+from app.core.remediation.remediation_manager import get_remediation_manager
 
 logger = logging.getLogger(__name__)
 

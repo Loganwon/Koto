@@ -1,7 +1,7 @@
+import base64
 import json
 import os
 import stat
-import base64
 from pathlib import Path
 
 

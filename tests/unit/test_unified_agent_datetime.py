@@ -15,8 +15,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.core.agent.types import AgentStep, AgentStepType
 import app.core.agent.unified_agent as unified_agent_module
+from app.core.agent.types import AgentStep, AgentStepType
 from app.core.agent.unified_agent import UnifiedAgent
 
 # ---------------------------------------------------------------------------

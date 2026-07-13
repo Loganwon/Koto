@@ -200,6 +200,7 @@ class TestUpdateSettings:
 
     def test_local_model_change_clears_router_response_cache(self, client):
         from unittest.mock import patch
+
         from app.core.config.user_settings import SettingsManager
 
         original = SettingsManager().get_all()

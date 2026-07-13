@@ -69,13 +69,13 @@ class TestLifecycle:
     def test_event_constructors(self):
         from app.core.agent.lifecycle import (
             EventType,
+            evt_error,
             evt_lifecycle_start,
             evt_plan,
             evt_step_done,
             evt_step_start,
             evt_stream_chunk,
             evt_task_complete,
-            evt_error,
         )
 
         e = evt_lifecycle_start("run1", "sess1")

@@ -6,8 +6,8 @@ Verifies that pagination is calculated from the current rendered state,
 not from a stale document-only cache.
 """
 
-from pathlib import Path
 import re
+from pathlib import Path
 
 
 def _repo_root():

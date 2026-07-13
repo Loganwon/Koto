@@ -34,10 +34,7 @@ try:
         is_ollama_alive,
         is_online_failure,
     )
-    from app.core.socket_handler import (  # noqa: E402
-        _get_provider,
-        _stream_llm,
-    )
+    from app.core.socket_handler import _get_provider, _stream_llm  # noqa: E402
 
     _IMPORT_OK = True
 except Exception as _exc:
@@ -386,6 +383,7 @@ class TestGetLocalProvider:
     ):
         """应从 /api/tags 列表中选取模型（优先大参数）。"""
         import json
+
         from app.core.llm import local_model_runtime
 
         monkeypatch.setattr(

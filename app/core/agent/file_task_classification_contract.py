@@ -11,13 +11,13 @@ from app.core.agent.file_task_contract import (
     FileTaskFile,
     FileTaskRequest,
 )
-from app.core.agent.file_task_recipes import recipe_matches
 from app.core.agent.file_task_intent_predicates import (
     has_artifact_creation_intent,
     has_global_readonly_write_negation,
     has_readonly_write_negation,
     has_strong_write_intent,
 )
+from app.core.agent.file_task_recipes import recipe_matches
 from app.core.agent.file_task_runtime_utils import _preview
 
 

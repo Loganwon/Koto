@@ -9,17 +9,13 @@ from __future__ import annotations
 
 from app.core.agent.file_task_classification_contract import (
     apply_intent_adjudication,
+    build_intent_adjudication_contract_context,
+    build_mainline_contract_context,
     demote_classification_to_read,
     normalize_mainline_contract,
     refresh_classification_recipe,
 )
-from app.core.agent.file_task_classification_contract import (
-    build_intent_adjudication_contract_context,
-    build_mainline_contract_context,
-)
-from app.core.agent.file_task_classification_finalizer import (
-    build_final_classification,
-)
+from app.core.agent.file_task_classification_finalizer import build_final_classification
 from app.core.agent.file_task_classification_flags import (
     apply_classification_intent_overrides,
 )
@@ -29,9 +25,7 @@ from app.core.agent.file_task_classification_followup import (
 from app.core.agent.file_task_classification_reasons import (
     build_classification_reason_codes,
 )
-from app.core.agent.file_task_classification_recipes import (
-    apply_recipe_classification,
-)
+from app.core.agent.file_task_classification_recipes import apply_recipe_classification
 from app.core.agent.file_task_classification_semantics import (
     infer_task_family_operation,
 )
@@ -53,9 +47,7 @@ from app.core.agent.file_task_intent_adjudication import (
     request_with_task,
     should_adjudicate_intent,
 )
-from app.core.agent.file_task_intent_adjudicator import (
-    adjudicate_intent_if_needed,
-)
+from app.core.agent.file_task_intent_adjudicator import adjudicate_intent_if_needed
 
 __all__ = [
     "adjudicate_intent_if_needed",

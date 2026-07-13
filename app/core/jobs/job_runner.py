@@ -510,7 +510,6 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         llm_fn = None
         try:
             from app.core.llm.provider_compat import types as _types
-
             from web.runtime_context import get_client_proxy
 
             client = get_client_proxy()

@@ -84,8 +84,8 @@ def test_doc_websocket_agent_executor_delegates_python_requests_to_code_executor
 
 
 def test_doc_websocket_agent_executor_runs_python_code_request(monkeypatch):
-    from app.core.agent import llm_provider_helpers
     from app.core import sandbox
+    from app.core.agent import llm_provider_helpers
 
     captured = {}
 
