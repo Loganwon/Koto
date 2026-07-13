@@ -2,8 +2,8 @@ import ast
 import configparser
 import importlib.util
 import json
-from pathlib import Path
 import re
+from pathlib import Path
 
 from build_config import PROTECTED_DIRS
 
