@@ -211,6 +211,251 @@ def test_file_task_runtime_repairs_docx_image_path_from_generated_artifact(tmp_p
     assert args["image_path"] == str(image_path)
 
 
+def test_file_task_runtime_requires_all_generated_chart_images_inserted(tmp_path):
+    image_payload = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
+    image1 = tmp_path / "chart1_revenue_profit_trend.png"
+    image2 = tmp_path / "chart2_product_mix.png"
+    image1.write_bytes(base64.b64decode(image_payload))
+    image2.write_bytes(base64.b64decode(image_payload))
+
+    seen_messages = []
+    responses = iter(
+        [
+            {
+                "content": "生成图表并先写入报告。",
+                "tool_calls": [
+                    {
+                        "name": "run_python_code",
+                        "args": {"code": "create two charts"},
+                    },
+                    {
+                        "name": "write_docx_content",
+                        "args": {
+                            "path": "report.docx",
+                            "paragraphs": json.dumps(
+                                [{"text": f"问题分析 {index}"} for index in range(10)],
+                                ensure_ascii=False,
+                            ),
+                        },
+                    },
+                    {
+                        "name": "insert_image_into_docx",
+                        "args": {
+                            "path": "report.docx",
+                            "image_path": str(image1),
+                            "caption": "收入和利润趋势",
+                        },
+                    },
+                ],
+            },
+            {
+                "content": "继续补齐剩余图表。",
+                "tool_calls": [
+                    {
+                        "name": "insert_image_into_docx",
+                        "args": {
+                            "path": "report.docx",
+                            "image_path": str(image2),
+                            "caption": "产品结构",
+                        },
+                    }
+                ],
+            },
+        ]
+    )
+
+    def fake_model(**kwargs):
+        seen_messages.append(str(kwargs["messages"][-1]["content"]))
+        return next(responses, {"content": "完成", "tool_calls": []})
+
+    def fake_executor(tool_name, args):
+        if tool_name == "parse_file_to_text":
+            return "财务预测上下文"
+        if tool_name == "run_python_code":
+            return {
+                "summary": "已生成 2 张图表",
+                "files": {
+                    image1.name: image_payload,
+                    image2.name: image_payload,
+                },
+                "generated_file_paths": {
+                    image1.name: str(image1),
+                    image2.name: str(image2),
+                },
+            }
+        if tool_name == "write_docx_content":
+            return {
+                "path": "report.docx",
+                "file_type": "docx",
+                "operation": "write_docx_content",
+                "summary": "已写入分析段落",
+                "paragraphs_written": 10,
+            }
+        if tool_name == "insert_image_into_docx":
+            image_path = str(args.get("image_path") or "")
+            return {
+                "path": "report.docx",
+                "file_type": "docx",
+                "operation": "insert_image_into_docx",
+                "summary": f"已插入 {Path(image_path).name}",
+                "image_path": image_path,
+                "image_name": Path(image_path).name,
+                "images_inserted": 1,
+            }
+        if tool_name == "verify_task_completion":
+            return json.dumps(
+                {"completed": True, "summary": "DOCX 已更新。"}, ensure_ascii=False
+            )
+        return ""
+
+    request = FileTaskRequest(
+        task="分析这个xlsx财务数据的问题，并将数据做成图，然后把问题和图加入docx",
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
+        ],
+    )
+
+    events = list(
+        FileTaskRuntime(
+            tool_executor=fake_executor,
+            model_client=fake_model,
+            max_rounds=3,
+        ).run(request)
+    )
+
+    image_guard = next(
+        event
+        for event in events
+        if event.type == "tool.finished"
+        and event.payload.get("tool_name") == "image_insert_guard"
+    )
+    insert_changes = [
+        event
+        for event in events
+        if event.type == "file.changed"
+        and event.payload.get("operation") == "insert_image_into_docx"
+    ]
+    check_finished = [event for event in events if event.type == "check.finished"][-1]
+    run_finished = events[-1]
+
+    assert image_guard.payload["pending_image_count"] == 1
+    assert "chart2_product_mix.png" in image_guard.payload["result_preview"]
+    assert any("chart2_product_mix.png" in message for message in seen_messages)
+    assert [item.payload["image_name"] for item in insert_changes] == [
+        "chart1_revenue_profit_trend.png",
+        "chart2_product_mix.png",
+    ]
+    assert check_finished.payload["passed"] is True
+    assert run_finished.payload["completed_task"] is True
+
+
+def test_file_task_runtime_fails_when_generated_chart_images_remain_uninserted(
+    tmp_path,
+):
+    image_payload = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
+    image1 = tmp_path / "chart1_revenue_profit_trend.png"
+    image2 = tmp_path / "chart2_product_mix.png"
+    image1.write_bytes(base64.b64decode(image_payload))
+    image2.write_bytes(base64.b64decode(image_payload))
+
+    def fake_model(**kwargs):
+        return {
+            "content": "生成图表并写入报告。",
+            "tool_calls": [
+                {"name": "run_python_code", "args": {"code": "create two charts"}},
+                {
+                    "name": "write_docx_content",
+                    "args": {
+                        "path": "report.docx",
+                        "paragraphs": json.dumps(
+                            [{"text": f"问题分析 {index}"} for index in range(10)],
+                            ensure_ascii=False,
+                        ),
+                    },
+                },
+                {
+                    "name": "insert_image_into_docx",
+                    "args": {
+                        "path": "report.docx",
+                        "image_path": str(image1),
+                        "caption": "收入和利润趋势",
+                    },
+                },
+            ],
+        }
+
+    def fake_executor(tool_name, args):
+        if tool_name == "parse_file_to_text":
+            return "财务预测上下文"
+        if tool_name == "run_python_code":
+            return {
+                "summary": "已生成 2 张图表",
+                "files": {
+                    image1.name: image_payload,
+                    image2.name: image_payload,
+                },
+                "generated_file_paths": {
+                    image1.name: str(image1),
+                    image2.name: str(image2),
+                },
+            }
+        if tool_name == "write_docx_content":
+            return {
+                "path": "report.docx",
+                "file_type": "docx",
+                "operation": "write_docx_content",
+                "summary": "已写入分析段落",
+                "paragraphs_written": 10,
+            }
+        if tool_name == "insert_image_into_docx":
+            image_path = str(args.get("image_path") or "")
+            return {
+                "path": "report.docx",
+                "file_type": "docx",
+                "operation": "insert_image_into_docx",
+                "summary": f"已插入 {Path(image_path).name}",
+                "image_path": image_path,
+                "image_name": Path(image_path).name,
+                "images_inserted": 1,
+            }
+        if tool_name == "verify_task_completion":
+            return json.dumps(
+                {"completed": True, "summary": "DOCX 已更新。"}, ensure_ascii=False
+            )
+        return ""
+
+    request = FileTaskRequest(
+        task="分析这个xlsx财务数据的问题，并将数据做成图，然后把问题和图加入docx",
+        target_path="report.docx",
+        files=[
+            FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
+        ],
+    )
+
+    events = list(
+        FileTaskRuntime(
+            tool_executor=fake_executor,
+            model_client=fake_model,
+            max_rounds=1,
+        ).run(request)
+    )
+
+    check_finished = [event for event in events if event.type == "check.finished"][-1]
+    run_finished = events[-1]
+
+    assert check_finished.payload["passed"] is False
+    assert check_finished.payload["status"] == "quality_gate_failed"
+    assert "chart2_product_mix.png" in check_finished.payload["remaining"][0]
+    assert run_finished.payload["completed_task"] is False
+
+
 def test_file_task_runtime_routes_financial_xlsx_chart_report_to_docx_via_native_mainline(
     tmp_path,
 ):

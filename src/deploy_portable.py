@@ -42,7 +42,7 @@ PORTABLE_README = """Koto Windows 便携版
 使用步骤：
 1. 双击 Install_Local_Model.bat，按提示安装 Ollama 和推荐本地模型。
 2. 本地模型安装完成后，双击 Start_Koto.bat 或 Koto.exe。
-3. 首次启动时按向导填写 Gemini API Key。
+3. 首次启动时按向导填写 DeepSeek API Key。
 4. 后续直接双击 Start_Koto.bat 即可使用。
 
 目录说明：

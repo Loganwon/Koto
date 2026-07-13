@@ -1,4 +1,4 @@
-﻿# -*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 """GitHub Skills Hub — browse and install community skills from GitHub repositories.
 
@@ -2141,9 +2141,9 @@ def community_ai_recommend():
     results = []
     if candidates:
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            llm = GeminiProvider()
+            llm = get_llm_provider(provider="deepseek", allow_local_fallback=False)
             catalog_lines = []
             for i, p in enumerate(candidates[:40]):
                 catalog_lines.append(f"[{i}] {p['name']}")
@@ -2156,7 +2156,6 @@ def community_ai_recommend():
             )
             res = llm.generate_content(
                 prompt=rank_prompt,
-                model="gemini-2.5-flash",
                 system_instruction="Return ONLY a JSON array of integers.",
                 temperature=0.1,
                 max_tokens=200,

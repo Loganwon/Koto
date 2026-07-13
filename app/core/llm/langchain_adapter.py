@@ -4,13 +4,13 @@
 """
 Koto LangChain Adapter
 ======================
-将 Koto 现有的 GeminiProvider 包装为标准 LangChain BaseChatModel，
+将 Koto 当前云端 provider 包装为标准 LangChain BaseChatModel，
 使其可直接接入 LangGraph / LangChain 生态（Chains、Agents、VectorStores…）
 
 用法示例:
     from app.core.llm.langchain_adapter import KotoLangChainLLM
 
-    llm = KotoLangChainLLM(model_id="gemini-2.5-flash")
+    llm = KotoLangChainLLM(model_id="deepseek-chat")
     response = llm.invoke("你好")
 
     # 配合 LangGraph ReAct 使用
@@ -76,8 +76,7 @@ def _lc_messages_to_koto(
         elif isinstance(msg, AIMessage):
             history.append({"role": "model", "content": msg.content})
         elif isinstance(msg, ToolMessage):
-            # Gemini uses role="function" (remapped to user+function_response in _format_prompt).
-            # tool_call_id typically equals the function name for Gemini-backed calls.
+            # Preserve tool call names when adapting provider-neutral messages.
             history.append(
                 {
                     "role": "function",
@@ -119,30 +118,30 @@ if _LANGCHAIN_AVAILABLE:
 
     class KotoLangChainLLM(BaseChatModel):
         """
-        LangChain-compatible ChatModel backed by Koto's GeminiProvider.
+        LangChain-compatible ChatModel backed by Koto's active provider.
 
         优势：
         - 复用 Koto 现有的 retry / stream / token-counting 逻辑
         - 100% 兼容 LangGraph create_react_agent / StateGraph
-        - 支持 bind_tools() → 自动透传 Gemini Function Calling
+        - 支持 bind_tools() → 自动透传 provider tool calling
         - 支持 stream() → yield AIMessageChunk
 
         参数:
-            model_id    : Gemini 模型 ID（默认: gemini-2.5-flash）
+            model_id    : 模型 ID（默认: deepseek-chat）
             temperature : 生成温度（默认 0.7）
             max_tokens  : 最大输出 token 数（默认 8192）
         """
 
         model_config = {"arbitrary_types_allowed": True}
 
-        model_id: str = "gemini-2.5-flash"
+        model_id: str = "deepseek-chat"
         temperature: float = 0.7
         max_tokens: int = 8192
-        _koto_provider: Any = None  # GeminiProvider 实例（私有，不序列化）
+        _koto_provider: Any = None  # Provider 实例（私有，不序列化）
 
         def __init__(
             self,
-            model_id: str = "gemini-2.5-flash",
+            model_id: str = "deepseek-chat",
             temperature: float = 0.7,
             max_tokens: int = 8192,
             **kwargs,
@@ -154,14 +153,17 @@ if _LANGCHAIN_AVAILABLE:
                 max_tokens=max_tokens,
                 **kwargs,
             )
-            # 延迟初始化 GeminiProvider
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            object.__setattr__(self, "_koto_provider", GeminiProvider())
+            object.__setattr__(
+                self,
+                "_koto_provider",
+                get_llm_provider(provider="deepseek", allow_local_fallback=False),
+            )
 
         @property
         def _llm_type(self) -> str:
-            return "koto-gemini"
+            return "koto-provider"
 
         # ── 核心调用 ──────────────────────────────────────────────────────────
 

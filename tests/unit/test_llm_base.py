@@ -171,7 +171,9 @@ class TestLLMProviderUsageTracking:
     def test_track_usage_calls_record_usage_with_skill(self):
         provider = _make_provider()
 
-        with patch("web.token_tracker.record_usage_with_skill") as mock_record:
+        with patch(
+            "app.core.analytics.token_tracker.record_usage_with_skill"
+        ) as mock_record:
             provider._track_usage(
                 "gemini-2.5-flash",
                 {"prompt_tokens": 5, "completion_tokens": 7},

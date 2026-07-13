@@ -1785,7 +1785,7 @@ class SkillAutoMatcher:
             return None
 
     @classmethod
-    def _match_with_gemini(
+    def _match_with_cloud_provider(
         cls,
         user_input: str,
         task_type: str,
@@ -1793,16 +1793,14 @@ class SkillAutoMatcher:
         candidate_ids: set,
     ) -> Optional[List[str]]:
         """
-        使用 GeminiProvider 做语义 Skill 匹配，作为 Ollama 不可用时的云端语义层。
+        使用当前云端 provider 做语义 Skill 匹配，作为 Ollama 不可用时的语义层。
         比 n-gram/关键词更准确，且无需本地 Ollama 进程。
-        Returns None 如果 Gemini 不可用或调用失败。
+        Returns None 如果云端 provider 不可用或调用失败。
         """
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            provider = GeminiProvider()
-            if not provider.client:
-                return None
+            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
 
             prompt = (
                 f"你是 Koto Skill 匹配引擎。根据任务类型和用户消息，"
@@ -1818,7 +1816,6 @@ class SkillAutoMatcher:
             start = time.time()
             resp = provider.generate_content(
                 prompt=prompt,
-                model="gemini-2.5-flash",  # 快模型，够用
                 stream=False,
                 max_tokens=80,
             )
@@ -1841,7 +1838,7 @@ class SkillAutoMatcher:
             try:
                 parsed = json.loads(text)
             except json.JSONDecodeError:
-                logger.debug(f"[AutoMatcher] Gemini JSON 解析失败: {text!r}")
+                logger.debug(f"[AutoMatcher] 云端 JSON 解析失败: {text!r}")
                 return None
 
             if not isinstance(parsed, list):
@@ -1852,13 +1849,12 @@ class SkillAutoMatcher:
             ][:_MAX_AUTO_SKILLS]
 
             logger.info(
-                f"[AutoMatcher] ☁️ Gemini 匹配 ({latency:.2f}s): "
-                f"{task_type} → {valid}"
+                f"[AutoMatcher] ☁️ 云端匹配 ({latency:.2f}s): " f"{task_type} → {valid}"
             )
             return valid
 
         except Exception as e:
-            logger.debug(f"[AutoMatcher] Gemini 调用异常: {e}")
+            logger.debug(f"[AutoMatcher] 云端调用异常: {e}")
             return None
 
     @classmethod
@@ -1873,7 +1869,7 @@ class SkillAutoMatcher:
 
         匹配优先级（由高到低）：
         1. 本地模型（Ollama Qwen3）— 快、私密
-        2. Gemini 云端语义分类 — Ollama 不可用时顶替
+        2. 当前云端 provider 语义分类 — Ollama 不可用时顶替
         3. n-gram 字符相似度 — 无网络时的语义层
         4. 关键词规则兜底
 
@@ -1934,12 +1930,12 @@ class SkillAutoMatcher:
             expanded = cls._expand_with_synergy(ranked, user_input, candidate_ids)
             return cls._detect_conflicts(expanded)
 
-        # ── 2. Gemini 云端语义匹配（Ollama 不可用时顶替）────────────────────
-        gemini_result = cls._match_with_gemini(
+        # ── 2. 云端语义匹配（Ollama 不可用时顶替）─────────────────────────
+        cloud_result = cls._match_with_cloud_provider(
             user_input, task_type, catalog_text, candidate_ids
         )
-        if gemini_result is not None:
-            return cls._expand_with_synergy(gemini_result, user_input, candidate_ids)
+        if cloud_result is not None:
+            return cls._expand_with_synergy(cloud_result, user_input, candidate_ids)
 
         # ── 3. n-gram 语义相似度中间层（离线降级）───────────────────────────
         ngram_result = cls._match_with_intent_ngram(user_input, candidates)

@@ -25,6 +25,8 @@ import socket
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from web.shared import ollama_available as _ollama_available
+
 # ── Ollama ───────────────────────────────────────────────────────────────────
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
@@ -39,13 +41,7 @@ _QA_SYSTEM = """\
 """
 
 
-def _ollama_available() -> bool:
-    try:
-        s = socket.create_connection((_OLLAMA_HOST, _OLLAMA_PORT), timeout=1)
-        s.close()
-        return True
-    except OSError:
-        return False
+
 
 
 def _extract_content_local(file_path: str) -> str:

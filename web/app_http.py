@@ -69,9 +69,9 @@ def configure_http_wiring(app: Flask, logger: Logger):
         @app.errorhandler(_CSRFError)
         def _handle_csrf_error(exc):
             return error_response(
-                exc.description or "CSRF validation failed",
+                exc.description or "CSRF validation failed. For API clients: GET /api/csrf-token to obtain a token, then include it in the X-CSRFToken header along with your session cookie. For programmatic access, use /api/chat endpoints which are CSRF-exempt.",
                 400,
-                {"code": "CSRF_FAILED"},
+                {"code": "CSRF_FAILED", "help": "GET /api/csrf-token -> include X-CSRFToken header", "note": "/api/chat endpoints are CSRF-exempt"},
             )
     except Exception:  # pragma: no cover
         pass

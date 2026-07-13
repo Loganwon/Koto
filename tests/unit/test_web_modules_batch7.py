@@ -41,10 +41,10 @@ def run_async(coro):
 
 @pytest.mark.unit
 class TestPPTQualityChecker:
-    """Tests for web.ppt_quality.PPTQualityChecker."""
+    """Tests for app.core.services.ppt_quality.PPTQualityChecker."""
 
     def _make_checker(self):
-        from web.ppt_quality import PPTQualityChecker
+        from app.core.services.ppt_quality import PPTQualityChecker
 
         return PPTQualityChecker()
 
@@ -59,7 +59,7 @@ class TestPPTQualityChecker:
         assert result["score"] == 0
         assert "not found" in result["error"].lower()
 
-    @patch("web.ppt_quality.os.path.exists", return_value=True)
+    @patch("app.core.services.ppt_quality.os.path.exists", return_value=True)
     def test_evaluate_missing_pptx_lib(self, mock_exists):
         checker = self._make_checker()
         with patch.dict("sys.modules", {"pptx": None}):
@@ -161,19 +161,23 @@ class TestPPTMasterDataclasses:
     """Tests for SlideBlueprint, PPTBlueprint, and enums."""
 
     def test_slide_type_enum(self):
-        from web.ppt_master import SlideType
+        from app.core.services.ppt_master import SlideType
 
         assert SlideType.TITLE.value == "title"
         assert SlideType.CONTENT_IMAGE.value == "content_image"
 
     def test_content_density_enum(self):
-        from web.ppt_master import ContentDensity
+        from app.core.services.ppt_master import ContentDensity
 
         assert ContentDensity.LIGHT.value == "light"
         assert ContentDensity.DENSE.value == "dense"
 
     def test_slide_blueprint_to_dict(self):
-        from web.ppt_master import ContentDensity, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            ContentDensity,
+            SlideBlueprint,
+            SlideType,
+        )
 
         sb = SlideBlueprint(
             slide_index=0,
@@ -189,7 +193,7 @@ class TestPPTMasterDataclasses:
         assert d["density"] == "medium"
 
     def test_ppt_blueprint_to_dict(self):
-        from web.ppt_master import PPTBlueprint
+        from app.core.services.ppt_master import PPTBlueprint
 
         bp = PPTBlueprint(title="My PPT", subtitle="sub")
         d = bp.to_dict()
@@ -198,7 +202,7 @@ class TestPPTMasterDataclasses:
         assert d["slides"] == []
 
     def test_ppt_blueprint_add_log(self):
-        from web.ppt_master import PPTBlueprint
+        from app.core.services.ppt_master import PPTBlueprint
 
         bp = PPTBlueprint(title="T", subtitle="S")
         bp.add_log("test message")
@@ -213,10 +217,10 @@ class TestPPTMasterDataclasses:
 
 @pytest.mark.unit
 class TestPPTResourceManager:
-    """Tests for web.ppt_master.PPTResourceManager."""
+    """Tests for app.core.services.ppt_master.PPTResourceManager."""
 
     def _make_rm(self):
-        from web.ppt_master import PPTResourceManager
+        from app.core.services.ppt_master import PPTResourceManager
 
         return PPTResourceManager()
 
@@ -263,10 +267,10 @@ class TestPPTResourceManager:
 
 @pytest.mark.unit
 class TestPPTLayoutPlanner:
-    """Tests for web.ppt_master.PPTLayoutPlanner."""
+    """Tests for app.core.services.ppt_master.PPTLayoutPlanner."""
 
     def _make_planner(self):
-        from web.ppt_master import PPTLayoutPlanner
+        from app.core.services.ppt_master import PPTLayoutPlanner
 
         return PPTLayoutPlanner()
 
@@ -276,7 +280,11 @@ class TestPPTLayoutPlanner:
         assert "balanced" in planner.layout_rules
 
     def test_plan_layout_title(self):
-        from web.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTLayoutPlanner,
+            SlideBlueprint,
+            SlideType,
+        )
 
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(slide_index=0, slide_type=SlideType.TITLE, title="T")
@@ -284,7 +292,11 @@ class TestPPTLayoutPlanner:
         assert config["title_size"] == 54
 
     def test_plan_layout_comparison(self):
-        from web.ppt_master import PPTLayoutPlanner, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTLayoutPlanner,
+            SlideBlueprint,
+            SlideType,
+        )
 
         planner = PPTLayoutPlanner()
         sb = SlideBlueprint(slide_index=1, slide_type=SlideType.COMPARISON, title="C")
@@ -292,7 +304,7 @@ class TestPPTLayoutPlanner:
         assert "left_width" in config
 
     def test_plan_layout_dense_content(self):
-        from web.ppt_master import (
+        from app.core.services.ppt_master import (
             ContentDensity,
             PPTLayoutPlanner,
             SlideBlueprint,
@@ -316,7 +328,7 @@ class TestPPTLayoutPlanner:
         assert planner.optimize_slide_count(10) == 10
 
     def test_choose_bullet_style(self):
-        from web.ppt_master import PPTLayoutPlanner, SlideType
+        from app.core.services.ppt_master import PPTLayoutPlanner, SlideType
 
         planner = PPTLayoutPlanner()
         assert planner._choose_bullet_style(SlideType.TITLE) == "none"
@@ -331,17 +343,17 @@ class TestPPTLayoutPlanner:
 
 @pytest.mark.unit
 class TestPPTContentPlanner:
-    """Tests for web.ppt_master.PPTContentPlanner default plan generation."""
+    """Tests for app.core.services.ppt_master.PPTContentPlanner default plan generation."""
 
     def _make_planner(self):
-        from web.ppt_master import PPTContentPlanner
+        from app.core.services.ppt_master import PPTContentPlanner
 
         return PPTContentPlanner(ai_client=None)
 
     def test_init_no_client(self):
         planner = self._make_planner()
         assert planner.ai_client is None
-        assert planner.model_name == "gemini-2.5-flash"
+        assert planner.model_name == "deepseek-chat"
 
     def test_generate_default_plan(self):
         planner = self._make_planner()
@@ -375,16 +387,20 @@ class TestPPTContentPlanner:
 
 @pytest.mark.unit
 class TestPPTImageMatcher:
-    """Tests for web.ppt_master.PPTImageMatcher."""
+    """Tests for app.core.services.ppt_master.PPTImageMatcher."""
 
     def test_init(self):
-        from web.ppt_master import PPTImageMatcher
+        from app.core.services.ppt_master import PPTImageMatcher
 
         m = PPTImageMatcher(ai_client=None)
         assert m.image_cache == {}
 
     def test_generate_prompts_for_content_image(self):
-        from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
@@ -397,7 +413,11 @@ class TestPPTImageMatcher:
         assert "AI Tech" in prompts[0]
 
     def test_generate_prompts_for_comparison(self):
-        from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
@@ -409,7 +429,11 @@ class TestPPTImageMatcher:
         assert len(prompts) == 2
 
     def test_generate_prompts_for_content_returns_empty(self):
-        from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         prompts = m._generate_image_prompts_for_slide(
@@ -421,7 +445,11 @@ class TestPPTImageMatcher:
         assert prompts == []
 
     def test_generate_image_prompts_updates_slides(self):
-        from web.ppt_master import PPTImageMatcher, SlideBlueprint, SlideType
+        from app.core.services.ppt_master import (
+            PPTImageMatcher,
+            SlideBlueprint,
+            SlideType,
+        )
 
         m = PPTImageMatcher()
         slides = [
@@ -442,41 +470,41 @@ class TestPPTImageMatcher:
 
 @pytest.mark.unit
 class TestPPTGenerationPipeline:
-    """Tests for web.ppt_pipeline.PPTGenerationPipeline."""
+    """Tests for app.core.services.ppt_pipeline.PPTGenerationPipeline."""
 
-    @patch("web.ppt_pipeline.PPTSynthesizer")
-    @patch("web.ppt_pipeline.PPTMasterOrchestrator")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_init(self, mock_orch, mock_synth):
-        from web.ppt_pipeline import PPTGenerationPipeline
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline(ai_client=None, workspace_dir="/tmp")
         assert pipeline.workspace_dir == "/tmp"
         assert pipeline.log == []
 
-    @patch("web.ppt_pipeline.PPTSynthesizer")
-    @patch("web.ppt_pipeline.PPTMasterOrchestrator")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_log(self, mock_orch, mock_synth):
-        from web.ppt_pipeline import PPTGenerationPipeline
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         pipeline._log("test")
         assert "test" in pipeline.log
 
-    @patch("web.ppt_pipeline.PPTSynthesizer")
-    @patch("web.ppt_pipeline.PPTMasterOrchestrator")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_get_logs(self, mock_orch, mock_synth):
-        from web.ppt_pipeline import PPTGenerationPipeline
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         pipeline._log("a")
         pipeline._log("b")
         assert len(pipeline.get_logs()) == 2
 
-    @patch("web.ppt_pipeline.PPTSynthesizer")
-    @patch("web.ppt_pipeline.PPTMasterOrchestrator")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_prepare_image_map_empty(self, mock_orch, mock_synth):
-        from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
-        from web.ppt_pipeline import PPTGenerationPipeline
+        from app.core.services.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
@@ -486,11 +514,11 @@ class TestPPTGenerationPipeline:
         result = pipeline._prepare_image_map(bp)
         assert result == {}
 
-    @patch("web.ppt_pipeline.PPTSynthesizer")
-    @patch("web.ppt_pipeline.PPTMasterOrchestrator")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_prepare_image_map_with_images(self, mock_orch, mock_synth):
-        from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
-        from web.ppt_pipeline import PPTGenerationPipeline
+        from app.core.services.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
@@ -500,11 +528,11 @@ class TestPPTGenerationPipeline:
         result = pipeline._prepare_image_map(bp)
         assert 0 in result
 
-    @patch("web.ppt_pipeline.PPTSynthesizer")
-    @patch("web.ppt_pipeline.PPTMasterOrchestrator")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_finalize_result(self, mock_orch, mock_synth):
-        from web.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
-        from web.ppt_pipeline import PPTGenerationPipeline
+        from app.core.services.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
 
         pipeline = PPTGenerationPipeline()
         bp = PPTBlueprint(title="T", subtitle="S")
@@ -749,10 +777,10 @@ class TestTaskDispatcher:
 
 @pytest.mark.unit
 class TestWorkflowManager:
-    """Tests for web.workflow_manager (Workflow, WorkflowManager, WorkflowExecutor)."""
+    """Tests for app.core.services.workflow_manager (Workflow, WorkflowManager, WorkflowExecutor)."""
 
     def test_workflow_init(self):
-        from web.workflow_manager import Workflow
+        from app.core.services.workflow_manager import Workflow
 
         wf = Workflow("Test Flow", "A test workflow")
         assert wf.name == "Test Flow"
@@ -761,7 +789,7 @@ class TestWorkflowManager:
         assert wf.execution_count == 0
 
     def test_workflow_add_step(self):
-        from web.workflow_manager import Workflow
+        from app.core.services.workflow_manager import Workflow
 
         wf = Workflow("WF")
         step = wf.add_step("step1", "agent", {"request": "do something"})
@@ -770,7 +798,7 @@ class TestWorkflowManager:
         assert len(wf.steps) == 1
 
     def test_workflow_set_variable(self):
-        from web.workflow_manager import Workflow
+        from app.core.services.workflow_manager import Workflow
 
         wf = Workflow("WF")
         wf.set_variable("topic", default_value="AI", description="The topic")
@@ -779,7 +807,7 @@ class TestWorkflowManager:
         assert wf.variables["topic"]["required"] is False
 
     def test_workflow_to_dict_from_dict(self):
-        from web.workflow_manager import Workflow
+        from app.core.services.workflow_manager import Workflow
 
         wf = Workflow("WF", "desc")
         wf.add_step("s1", "tool")
@@ -790,60 +818,63 @@ class TestWorkflowManager:
         assert len(wf2.steps) == 1
         assert wf2.tags == ["test"]
 
-    @patch("web.workflow_manager.os.makedirs")
-    @patch("web.workflow_manager.Path.glob", return_value=[])
+    @patch("app.core.services.workflow_manager.os.makedirs")
+    @patch("app.core.services.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_init(self, mock_glob, mock_makedirs):
-        from web.workflow_manager import WorkflowManager
+        from app.core.services.workflow_manager import WorkflowManager
 
         mgr = WorkflowManager(storage_dir="/tmp/wf")
         assert mgr.workflows == {}
 
-    @patch("web.workflow_manager.os.makedirs")
-    @patch("web.workflow_manager.Path.glob", return_value=[])
+    @patch("app.core.services.workflow_manager.os.makedirs")
+    @patch("app.core.services.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_create_and_list(self, mock_glob, mock_makedirs):
-        from web.workflow_manager import WorkflowManager
+        from app.core.services.workflow_manager import WorkflowManager
 
         with patch("builtins.open", mock_open()):
-            with patch("web.workflow_manager.json.dump"):
+            with patch("app.core.services.workflow_manager.json.dump"):
                 mgr = WorkflowManager(storage_dir="/tmp/wf")
                 wf = mgr.create_workflow("NewWF", "desc")
                 assert "NewWF" in wf.name
                 workflows = mgr.list_workflows()
                 assert len(workflows) == 1
 
-    @patch("web.workflow_manager.os.makedirs")
-    @patch("web.workflow_manager.Path.glob", return_value=[])
+    @patch("app.core.services.workflow_manager.os.makedirs")
+    @patch("app.core.services.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_delete(self, mock_glob, mock_makedirs):
-        from web.workflow_manager import WorkflowManager
+        from app.core.services.workflow_manager import WorkflowManager
 
         with patch("builtins.open", mock_open()):
-            with patch("web.workflow_manager.json.dump"):
-                with patch("web.workflow_manager.os.path.exists", return_value=False):
+            with patch("app.core.services.workflow_manager.json.dump"):
+                with patch(
+                    "app.core.services.workflow_manager.os.path.exists",
+                    return_value=False,
+                ):
                     mgr = WorkflowManager(storage_dir="/tmp/wf")
                     wf = mgr.create_workflow("ToDelete")
                     assert mgr.delete_workflow(wf.id) is True
                     assert wf.id not in mgr.workflows
 
-    @patch("web.workflow_manager.os.makedirs")
-    @patch("web.workflow_manager.Path.glob", return_value=[])
+    @patch("app.core.services.workflow_manager.os.makedirs")
+    @patch("app.core.services.workflow_manager.Path.glob", return_value=[])
     def test_workflow_manager_get_statistics(self, mock_glob, mock_makedirs):
-        from web.workflow_manager import WorkflowManager
+        from app.core.services.workflow_manager import WorkflowManager
 
         with patch("builtins.open", mock_open()):
-            with patch("web.workflow_manager.json.dump"):
+            with patch("app.core.services.workflow_manager.json.dump"):
                 mgr = WorkflowManager(storage_dir="/tmp/wf")
                 mgr.create_workflow("WF1")
                 stats = mgr.get_statistics()
                 assert stats["total_workflows"] == 1
 
     def test_workflow_executor_init(self):
-        from web.workflow_manager import WorkflowExecutor
+        from app.core.services.workflow_manager import WorkflowExecutor
 
         ex = WorkflowExecutor()
         assert ex.execution_history == []
 
     def test_workflow_executor_execute_tool_step(self):
-        from web.workflow_manager import Workflow, WorkflowExecutor
+        from app.core.services.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -853,7 +884,7 @@ class TestWorkflowManager:
         assert result["steps_completed"] == 1
 
     def test_workflow_executor_execute_unknown_step(self):
-        from web.workflow_manager import Workflow, WorkflowExecutor
+        from app.core.services.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -862,7 +893,7 @@ class TestWorkflowManager:
         assert result["steps_failed"] == 1
 
     def test_workflow_executor_get_execution_history(self):
-        from web.workflow_manager import Workflow, WorkflowExecutor
+        from app.core.services.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -872,7 +903,7 @@ class TestWorkflowManager:
         assert len(hist) == 1
 
     def test_workflow_executor_callbacks(self):
-        from web.workflow_manager import Workflow, WorkflowExecutor
+        from app.core.services.workflow_manager import Workflow, WorkflowExecutor
 
         ex = WorkflowExecutor()
         wf = Workflow("WF")
@@ -929,6 +960,24 @@ class TestReminderManager:
         with patch.object(mgr, "_save"):
             rid = mgr.add_reminder_in("Test", "Msg", 3600)
             assert rid in mgr.reminders
+
+    @patch("web.reminder_manager.show_toast")
+    @patch("web.reminder_manager.os.makedirs")
+    @patch("web.reminder_manager.os.path.exists", return_value=False)
+    @patch("web.reminder_manager.threading.Timer")
+    def test_far_future_reminder_defers_timer_registration(
+        self, mock_timer, mock_exists, mock_makedirs, mock_toast
+    ):
+        from web.reminder_manager import ReminderManager
+
+        mgr = ReminderManager()
+        with patch.object(mgr, "_save"):
+            reminder_id = mgr.add_reminder(
+                "Future", "Message", datetime.now() + timedelta(days=365 * 100)
+            )
+
+        assert reminder_id in mgr.reminders
+        mock_timer.assert_not_called()
 
     @patch("web.reminder_manager.show_toast")
     @patch("web.reminder_manager.os.makedirs")
@@ -1429,3 +1478,37 @@ class TestTemplateLibrary:
         )
         assert len(outline) == 6
         assert outline[0]["title"] == "产品概览"
+
+    @patch("web.template_library.PPTGenerationService")
+    @patch("web.template_library.os.makedirs")
+    def test_generate_ppt_template_uses_generation_service(
+        self, mock_makedirs, mock_service_cls
+    ):
+        from web.template_library import TemplateLibrary
+
+        mock_service = mock_service_cls.return_value
+        mock_service.generate_outline_result.return_value = {
+            "success": True,
+            "output_path": "/tmp/out/Widget.pptx",
+            "slide_count": 6,
+        }
+        lib = TemplateLibrary(workspace_dir="/tmp/ws")
+
+        result = lib._generate_pptx_from_template(
+            "product_intro_ppt",
+            {"name": "产品介绍"},
+            {
+                "product_name": "Widget",
+                "tagline": "Better widgets",
+                "speaker": "Tester",
+            },
+            "/tmp/out",
+        )
+
+        call_kwargs = mock_service.generate_outline_result.call_args.kwargs
+        assert call_kwargs["title"] == "Widget"
+        assert call_kwargs["theme"] == "business"
+        assert call_kwargs["subtitle"] == "Better widgets"
+        assert call_kwargs["author"] == "Tester"
+        assert result["success"] is True
+        assert result["slide_count"] == 6

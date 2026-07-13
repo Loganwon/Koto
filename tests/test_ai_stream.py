@@ -91,7 +91,10 @@ def app_client():
     with patch.dict("sys.modules", {}):
         # We need to patch the client object in web.app
         try:
-            import app.core.agent.agent_loop as agent_loop_module
+            from app.core.agent import llm_provider_helpers
+            from app.core.agent.editor_quick_action_executor import (
+                EditorQuickActionExecutor,
+            )
             from app.core.agent.lifecycle import (
                 evt_error,
                 evt_stream_chunk,
@@ -109,7 +112,7 @@ def app_client():
             original_api_key = getattr(web_app_module, "API_KEY", None)
             original_types = getattr(web_app_module, "types", None)
             original_llm_judge = getattr(OutputValidator, "_llm_judge")
-            original_loop_run = agent_loop_module.KotoAgentLoop.run
+            original_quick_iter_events = EditorQuickActionExecutor.iter_events
             mock_types = MagicMock()
             mock_types.GenerateContentConfig.return_value = MagicMock()
 
@@ -125,14 +128,14 @@ def app_client():
                 "custom_instruction": "已按要求处理当前内容。",
             }
 
-            def fake_loop_run(self, request):
+            def fake_quick_iter_events(self, request):
                 model_mode = (getattr(request, "model_mode", "") or "").strip().lower()
                 action_name = (
                     (getattr(request, "action_type", "") or "").strip().lower()
                 )
 
                 if model_mode == "local":
-                    if not agent_loop_module._is_ollama_alive():
+                    if not llm_provider_helpers.is_ollama_alive():
                         yield evt_error("Ollama not running")
                         return
                     result_text = "本地Ollama响应"
@@ -152,14 +155,14 @@ def app_client():
             OutputValidator._llm_judge = classmethod(
                 lambda cls, text, original_prompt: None
             )
-            agent_loop_module.KotoAgentLoop.run = fake_loop_run
+            EditorQuickActionExecutor.iter_events = fake_quick_iter_events
             yield app.test_client()
             # Restore
             web_app_module.client = original_client
             web_app_module.API_KEY = original_api_key
             web_app_module.types = original_types
             OutputValidator._llm_judge = original_llm_judge
-            agent_loop_module.KotoAgentLoop.run = original_loop_run
+            EditorQuickActionExecutor.iter_events = original_quick_iter_events
         except ImportError as e:
             pytest.skip(f"Cannot import web.app: {e}")
 
@@ -689,9 +692,12 @@ class TestEditorAIStream:
         )
         events = parse_sse_events(resp.get_data())
         event_types = [event.get("type") for event in events]
+        lifecycle_event_types = [
+            event_type for event_type in event_types if event_type != "progress"
+        ]
 
         assert resp.status_code == 200
-        assert event_types[:6] == [
+        assert lifecycle_event_types[:6] == [
             "run.started",
             "supervisor.status",
             "task.classified",
@@ -703,7 +709,10 @@ class TestEditorAIStream:
         assert "check.finished" in event_types
         assert event_types[-1] == "run.finished"
         assert [event.get("seq") for event in events] == list(range(1, len(events) + 1))
-        assert events[0]["payload"]["mode"] == "whitebox_v1"
+        run_started = next(
+            event for event in events if event.get("type") == "run.started"
+        )
+        assert run_started["payload"]["mode"] == "whitebox_v1"
 
     def test_whitebox_task_stream_preserves_runtime_metadata_and_followup_context(
         self, app_client, monkeypatch, tmp_path
@@ -1989,13 +1998,17 @@ class TestEditorAIStream:
 
         monkeypatch.setattr(FileTaskRuntime, "run", fake_run)
 
-        with patch("web.app._get_configured_local_model_id", return_value="qwen3.5:9b"):
+        with patch(
+            "web.runtime_context.get_configured_local_model_id",
+            return_value="qwen3.5:9b",
+        ):
             resp = app_client.post(
                 "/api/editor/ai/task-stream",
                 json={
                     "task": "总结当前文件",
                     "model_mode": "local",
                     "model_id": "gemini-3-flash-preview",
+                    "options": {"local_model": "stale-model:old"},
                 },
             )
 
@@ -2200,7 +2213,7 @@ class TestEditorAIStream:
         assert data["temp_path"].endswith(".txt")
 
     def test_main_stream_forwards_plan_and_step_events(self, app_client):
-        """主 editor_ai_stream 应转发 KotoAgentLoop 的 plan/step 事件。"""
+        """主 editor_ai_stream 应转发 editor executor 的 plan/step 事件。"""
         from app.core.agent.lifecycle import (
             evt_plan,
             evt_step_done,
@@ -2216,7 +2229,10 @@ class TestEditorAIStream:
             yield evt_step_done("understand", "理解需求完成")
             yield evt_task_complete(result="处理完成")
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run):
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_run,
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2254,7 +2270,10 @@ class TestEditorAIStream:
             web_app_module.session_manager, "append_and_save", fake_append
         )
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run):
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_run,
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2278,7 +2297,7 @@ class TestEditorAIStream:
     def test_non_task_stream_passes_preferred_and_local_model_into_agent_request(
         self, app_client
     ):
-        """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 AgentLoop。"""
+        """普通 editor SSE 请求应把显式云端模型和配置的本地模型一起传入 editor executor。"""
         captured = {}
         from app.core.agent.lifecycle import evt_task_complete
 
@@ -2286,8 +2305,12 @@ class TestEditorAIStream:
             captured["request"] = request
             yield evt_task_complete(result="ok")
 
-        with patch("app.core.agent.agent_loop.KotoAgentLoop.run", fake_run), patch(
-            "web.app._get_configured_local_model_id", return_value="qwen3.5:9b"
+        with patch(
+            "app.core.agent.editor_loop_executor.EditorLoopExecutor.iter_events",
+            fake_run,
+        ), patch(
+            "web.blueprints.editor_ai.get_configured_local_model_id",
+            return_value="qwen3.5:9b",
         ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -2295,7 +2318,7 @@ class TestEditorAIStream:
                     "action": "polish",
                     "selection": "这段文字需要润色。",
                     "model_mode": "cloud",
-                    "model_id": "gemini-2.5-pro",
+                    "model_id": "deepseek-chat",
                 },
             )
             _ = resp.get_data()
@@ -2303,52 +2326,51 @@ class TestEditorAIStream:
         assert resp.status_code == 200
         req = captured["request"]
         assert req.model_mode == "cloud"
-        assert req.extra["preferred_model"] == "gemini-2.5-pro"
+        assert req.extra["preferred_model"] == "deepseek-chat"
         assert req.extra["local_model"] == "qwen3.5:9b"
 
+    def test_main_stream_code_mode_uses_editor_code_executor_not_quick_executor(
+        self, app_client
+    ):
+        fake_result = {
+            "stdout": "chart",
+            "stderr": "",
+            "files": {"chart.png": "ZmFrZQ=="},
+            "error": "",
+        }
 
-class TestEditorAIAgent:
-    """Tests for POST /api/editor/ai/agent structured progress events."""
+        def fail_quick_executor(self, request):
+            raise AssertionError(
+                "editor code mode should not use EditorQuickActionExecutor"
+            )
 
-    def test_agent_route_emits_structured_step_events(self, app_client):
-        from app.core.agent.types import AgentAction, AgentStep, AgentStepType
-
-        class FakeAgent:
-            def run(self, input_text, session_id=None, system_context=None):
-                yield AgentStep(
-                    step_type=AgentStepType.THOUGHT, content="先理解文档问题"
-                )
-                yield AgentStep(
-                    step_type=AgentStepType.ACTION,
-                    content="执行搜索",
-                    action=AgentAction(
-                        tool_name="web_search", tool_args={"query": "AI"}
-                    ),
-                )
-                yield AgentStep(
-                    step_type=AgentStepType.OBSERVATION,
-                    content="找到结果",
-                    observation="找到 3 条相关结果",
-                )
-                yield AgentStep(step_type=AgentStepType.ANSWER, content="最终答案")
-
-        with patch("app.api.agent_routes.get_agent", return_value=FakeAgent()):
+        with patch(
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fail_quick_executor,
+        ), patch(
+            "app.core.agent.llm_provider_helpers.call_llm_sync",
+            return_value="print('chart')",
+        ), patch(
+            "app.core.sandbox.run_python", return_value=fake_result
+        ):
             resp = app_client.post(
-                "/api/editor/ai/agent",
-                json={"query": "帮我分析这份文档", "full_text": "文档内容"},
+                "/api/editor/ai/stream",
+                json={
+                    "action": "chart",
+                    "instruction": "生成图表",
+                    "data_context": "类别,值\nA,10",
+                    "lang": "python",
+                },
             )
             payload = resp.get_data()
 
         assert resp.status_code == 200
         events = parse_sse_events(payload)
-        types = [e.get("type") for e in events]
-        assert "thought" in types
-        assert "step_start" in types
-        assert "tool_call" in types
-        assert "tool_result" in types
-        assert "step_done" in types
-        assert "token" in types
-        assert "done" in types
+        assert any(event.get("type") == "code_result" for event in events)
+        code_result = [event for event in events if event.get("type") == "code_result"][
+            -1
+        ]
+        assert code_result["files"] == {"chart.png": "ZmFrZQ=="}
 
 
 class TestChartStream:
@@ -2381,58 +2403,6 @@ class TestChartStream:
         assert "code" in types
         assert "image" in types
         assert "done" in types
-
-
-class TestChartRerun:
-    """Tests for POST /api/editor/ai/chart-rerun"""
-
-    def test_empty_code_returns_error(self, app_client):
-        """空代码应返回错误"""
-        resp = app_client.post(
-            "/api/editor/ai/chart-rerun",
-            json={
-                "code": "",
-                "lang": "python",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["error"]
-
-    def test_simple_python_code(self, app_client):
-        """简单 Python 代码应成功执行"""
-        resp = app_client.post(
-            "/api/editor/ai/chart-rerun",
-            json={
-                "code": "print('hello')",
-                "lang": "python",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert "hello" in (data.get("stdout") or "")
-
-    def test_chart_generation_code(self, app_client):
-        """图表生成代码应产出图片文件"""
-        code = (
-            "import matplotlib\n"
-            "matplotlib.use('Agg')\n"
-            "import matplotlib.pyplot as plt\n"
-            "plt.plot([1, 2, 3], [1, 4, 9])\n"
-            "plt.savefig('chart.png', dpi=72)\n"
-            "plt.close()\n"
-        )
-        resp = app_client.post(
-            "/api/editor/ai/chart-rerun",
-            json={
-                "code": code,
-                "lang": "python",
-            },
-        )
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data.get("error") is None or data["error"] == ""
-        assert "chart.png" in (data.get("files") or {})
 
 
 class TestBuildEditorPrompt:
@@ -2525,26 +2495,16 @@ class TestLocalModelMode:
 
     def test_local_mode_uses_ollama_when_alive(self, app_client):
         """model_mode=local + Ollama alive → response comes from Ollama, not cloud."""
-        from unittest.mock import MagicMock, patch
+        from app.core.agent.lifecycle import evt_stream_chunk, evt_task_complete
 
-        # Mock Ollama provider to return a known response
-        mock_provider = MagicMock()
-        mock_provider.generate_content.return_value = iter(
-            [
-                {"content": "本地", "tool_calls": [], "usage": {}},
-                {"content": "Ollama", "tool_calls": [], "usage": {}},
-                {"content": "响应", "tool_calls": [], "usage": {}},
-            ]
-        )
+        def fake_iter_events(self, request):
+            assert request.model_mode == "local"
+            yield evt_stream_chunk("本地Ollama响应")
+            yield evt_task_complete(result="本地Ollama响应")
 
         with patch(
-            "app.core.socket_handler._is_ollama_alive", return_value=True
-        ), patch(
-            "app.core.socket_handler._get_local_provider", return_value=mock_provider
-        ), patch(
-            "app.core.agent.agent_loop._is_ollama_alive", return_value=True
-        ), patch(
-            "app.core.agent.agent_loop._get_local_provider", return_value=mock_provider
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_iter_events,
         ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -2566,11 +2526,16 @@ class TestLocalModelMode:
 
     def test_local_mode_ollama_not_running_returns_error(self, app_client):
         """model_mode=local + Ollama not running → returns error event."""
-        from unittest.mock import patch
+        from app.core.agent.lifecycle import evt_error
+
+        def fake_iter_events(self, request):
+            assert request.model_mode == "local"
+            yield evt_error("Ollama not running")
 
         with patch(
-            "app.core.socket_handler._is_ollama_alive", return_value=False
-        ), patch("app.core.agent.agent_loop._is_ollama_alive", return_value=False):
+            "app.core.agent.editor_quick_action_executor.EditorQuickActionExecutor.iter_events",
+            fake_iter_events,
+        ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
                 json={
@@ -2628,13 +2593,16 @@ class TestLocalModelMode:
                     ]
                 )
 
-        with patch("web.settings.SettingsManager.get", return_value=True), patch(
-            "app.core.agent.agent_loop._get_provider", return_value=FakeCloudProvider()
+        with patch(
+            "app.core.config.user_settings.SettingsManager.get", return_value=True
         ), patch(
-            "app.core.agent.agent_loop._get_local_provider",
+            "app.core.agent.llm_provider_helpers.get_provider",
+            return_value=FakeCloudProvider(),
+        ), patch(
+            "app.core.agent.llm_provider_helpers.get_local_provider",
             return_value=FakeLocalProvider(),
         ), patch(
-            "app.core.agent.agent_loop._is_ollama_alive", return_value=True
+            "app.core.agent.llm_provider_helpers.is_ollama_alive", return_value=True
         ):
             resp = app_client.post(
                 "/api/editor/ai/stream",
@@ -2720,8 +2688,8 @@ class TestLocalModelMode:
         assert "options.handleProposals({" in quick_actions
         assert "sendEditorAction" not in quick_actions
 
-    def test_workspace_model_state_uses_wa_keys_only(self):
-        """Workspace assistant should use wa_* model state only and not write legacy editor_* keys."""
+    def test_workspace_model_state_uses_server_settings_only(self):
+        """Workspace assistant must not retain a competing browser model preference."""
         src = "\n".join(
             [
                 _read_frontend_source("web/src/workspace/model-settings.ts"),
@@ -2729,16 +2697,15 @@ class TestLocalModelMode:
             ]
         )
         toggle_start = src.find("function _setWorkspaceModelMode(mode: string): void")
-        toggle_end = src.find("(window as any).WA.refreshModelCatalog", toggle_start)
+        toggle_end = src.find("publishWorkspaceApi({", toggle_start)
         assert toggle_start != -1 and toggle_end != -1
         toggle_section = src[toggle_start:toggle_end]
         assert "function _syncEditorModelPreference(" not in src
         assert "editor_model_mode" not in src
         assert "editor_locked_model" not in src
-        assert "localStorage.setItem('wa_locked_model', newModel);" in toggle_section
-        assert (
-            "localStorage.setItem('wa_model_choice_explicit', '1');" in toggle_section
-        )
+        assert "localStorage.setItem('wa_locked_model'" not in src
+        assert "localStorage.setItem('wa_model_choice_explicit'" not in src
+        assert "body: JSON.stringify({ mode: newModel })," in toggle_section
 
     def test_workspace_chart_requests_delegate_to_whitebox_dispatcher(self):
         """Python chart requests should route through the whitebox dispatcher instead of the legacy chart SSE helper."""
@@ -2809,11 +2776,18 @@ class TestLocalModelMode:
     def test_workspace_task_renderer_keeps_write_tool_milestones_visible(self):
         """Successful file-writing tool events should remain visible instead of being fully suppressed."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
+        labels = _read_frontend_source("web/src/workspace/task-step-labels.ts")
 
-        assert "return isInternalTool(name) || isReadTool(name);" in renderer
-        assert "ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name)" in renderer
-        assert "'repair_guard'" in renderer
-        assert "'readonly_answer_guard'" in renderer
+        assert "return isInternalTaskTool(name) || isReadTaskTool(name);" in renderer
+        assert "shouldAlwaysSuppressTaskToolFinished(name)" in renderer
+        assert "export function isInternalTaskTool(name: string): boolean" in labels
+        assert "export function isReadTaskTool(name: string): boolean" in labels
+        assert (
+            "export function shouldAlwaysSuppressTaskToolFinished(name: string): boolean"
+            in labels
+        )
+        assert "'repair_guard'" in labels
+        assert "'readonly_answer_guard'" in labels
         assert "return false;" in renderer
         assert (
             "function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void"
@@ -2905,7 +2879,7 @@ class TestLocalModelMode:
             in renderer
         )
         assert (
-            "const terminalStatus = String(runtime.terminal_status || '').trim();"
+            "const terminalStatus = normalizeFileTaskTerminalStatus(runtime.terminal_status || '');"
             in renderer
         )
         assert "terminal_status: terminalStatus" in renderer
@@ -2924,7 +2898,11 @@ class TestLocalModelMode:
             in renderer
         )
         assert (
-            "const classification = data.classification && typeof data.classification === 'object'"
+            "const classification = decisionContext && decisionContext.classification && typeof decisionContext.classification === 'object'"
+            in renderer
+        )
+        assert (
+            "(data.classification && typeof data.classification === 'object' ? data.classification : null)"
             in renderer
         )
         assert "'task.classified': handleEvent_task_classified" in renderer
@@ -3189,7 +3167,7 @@ class TestLocalModelMode:
         """PDF AI annotate should use the whitebox dispatcher, not the legacy quick-action path."""
         ai_annotate = _read_frontend_source("web/src/editors/pdf-viewer.ts")
         assert "/api/v1/workspace/quick-action" not in ai_annotate
-        assert "WA.sendCustomMessage" in ai_annotate
+        assert "workspaceApi.sendCustomMessage" in ai_annotate
         assert "pdfAIAnnotate" in ai_annotate
         assert "pdf_ai_annotate: true" in ai_annotate
 
@@ -3208,9 +3186,12 @@ class TestLocalModelMode:
         )
         assert "{% include '_workspace_model_controls.html' %}" in standalone_html
         assert "{% include '_workspace_model_controls.html' %}" in index_html
+        assert index_html.count("{% include '_workspace_model_controls.html' %}") == 1
         assert 'id="wa-model-mode-toggle"' in partial_html
         assert 'id="wa-model-mode-deepseek-btn"' in partial_html
         assert 'id="wa-model-mode-local-btn"' in partial_html
+        assert "KotoSetModelMode" not in partial_html
+        assert "onclick=" not in partial_html
         assert 'id="wa-model-select"' not in partial_html
         assert 'id="wa-model-mode-deepseek-btn"' not in standalone_html
         assert 'id="wa-model-mode-local-btn"' not in standalone_html
@@ -3226,19 +3207,16 @@ class TestLocalModelMode:
         )
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         assert "const _WA_MODEL_MODES = new Set(['cloud', 'deepseek', 'local']);" in js
-        assert (
-            "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek')"
-            in js
-        )
-        assert (
-            "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
-        )
+        assert "lockedModel: 'deepseek'" in js
+        assert "localStorage.getItem('wa_locked_model')" not in js
         assert (
             "const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');" in js
         )
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
-        assert "(window as any).WA.setLockedModel = setLockedModel;" in js
+        assert "publishWorkspaceApi({" in js
+        assert "setLockedModel," in js
+        assert "getLockedModel," in js
         assert "body: JSON.stringify({ mode: newModel })," in js
 
     def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(
@@ -3251,15 +3229,15 @@ class TestLocalModelMode:
 
 
 class TestMainChatProgressRegression:
-    """Regression checks for canonical step-event support in the main chat UI."""
+    """Regression checks for canonical step-event support in the active SSE renderer."""
 
     def test_main_chat_normalizes_canonical_step_events(self):
-        src = _read_frontend_source("web/src/app/main.ts")
-        assert "evt.type === 'plan'" in src
-        assert "evt.type === 'phase'" in src
-        assert "evt.type === 'step_start'" in src
-        assert "evt.type === 'tool_call'" in src
-        assert "const canonicalProgressPercent =" in src
+        src = _read_frontend_source("web/src/shared/sse-pipeline.ts")
+        assert "e.type === 'plan'" in src
+        assert "e.type === 'phase'" in src
+        assert "e.type === 'step_start'" in src
+        assert "e.type === 'tool_call'" in src
+        assert "private _progressPercent(" in src
 
 
 class TestRemovedLegacyTaskRoutes:
@@ -3345,42 +3323,10 @@ class TestLegacyDocumentCompatRoutes:
         assert body["revised_file"] == str(revised_path)
         assert body["applied"] == 3
 
-    def test_document_analyze_annotations_route_uses_chunked_feedback_path(
-        self, monkeypatch, tmp_path
-    ):
-        import web.document_feedback as feedback_module
-
-        docx_path = tmp_path / "legacy-analyze.docx"
-        docx_path.write_bytes(b"PK\x03\x04")
+    def test_document_analyze_annotations_route_is_removed(self, monkeypatch, tmp_path):
         client = self._make_document_client(monkeypatch, tmp_path)
-
-        class FakeFeedback:
-            def __init__(self, gemini_client=None, default_model_id="gemini-2.5-pro"):
-                self.gemini_client = gemini_client
-                self.default_model_id = default_model_id
-
-            def analyze_for_annotation_chunked(self, *args, **kwargs):
-                return {
-                    "success": True,
-                    "annotations": [{"原文片段": "foo", "修改建议": "bar"}],
-                    "annotation_count": 1,
-                }
-
-        monkeypatch.setattr(feedback_module, "DocumentFeedbackSystem", FakeFeedback)
-
-        resp = client.post(
-            "/api/document/analyze-annotations",
-            json={
-                "file_path": str(docx_path),
-                "requirement": "请只分析并标出问题",
-            },
-        )
-
-        body = resp.get_json()
-        assert resp.status_code == 200
-        assert body["success"] is True
-        assert body["annotation_count"] == 1
-        assert body["annotations"][0]["原文片段"] == "foo"
+        resp = client.post("/api/document/analyze-annotations", json={})
+        assert resp.status_code == 404
 
     def test_document_batch_annotate_stream_route_uses_feedback_streaming_path(
         self, monkeypatch, tmp_path
@@ -3488,9 +3434,10 @@ class TestLegacyEditorRemovalRegression:
         assert not Path("web/univer-editor/index.html").exists()
         assert not Path("web/static/univer-dist/index.html").exists()
 
-    def test_legacy_univer_source_tree_is_removed(self):
+    def test_legacy_univer_entrypoint_is_removed_but_build_source_is_retained(self):
         assert not Path("web/univer-editor/main.js").exists()
-        assert not Path("web/univer-editor/src").exists()
+        assert Path("web/univer-editor/src").is_dir()
+        assert Path("web/univer-editor/sheets-main.js").is_file()
 
     def test_workspace_assistant_still_loads_sheets_runtime(self):
         src = _read_frontend_source("web/src/editors/cdn-loaders.ts")
@@ -4112,17 +4059,13 @@ class TestTaskAgentDocumentEdits:
             for e in events
         )
 
-    def test_resolve_requested_model_id_falls_back_when_unavailable(self, monkeypatch):
+    def test_resolve_requested_model_id_normalizes_archived_cloud_model(
+        self, monkeypatch
+    ):
         import web.app as webapp
 
         class _DummyManager:
             _cached_caps = {}
-
-            def get_available_models(self):
-                return [{"id": "gemini-2.5-flash"}]
-
-            def get_model_for_task(self, task):
-                return "gemini-2.5-flash"
 
         monkeypatch.setattr(webapp, "_model_manager", _DummyManager())
 
@@ -4131,75 +4074,7 @@ class TestTaskAgentDocumentEdits:
                 "gemini-2.5-pro",
                 fallback_model="gemini-3.1-pro-preview",
             )
-            == "gemini-2.5-flash"
-        )
-
-    def test_resolve_requested_model_id_rejects_image_model_for_chat(self, monkeypatch):
-        import web.app as webapp
-
-        class _DummyManager:
-            _cached_caps = {
-                "gemini-3.1-flash-image-preview": {
-                    "image_gen": True,
-                    "multimodal": True,
-                    "grounding": False,
-                    "function_calling": False,
-                    "tier": 7,
-                }
-            }
-
-            def get_available_models(self):
-                return [
-                    {"id": "gemini-3.1-flash-image-preview"},
-                    {"id": "gemini-2.5-flash"},
-                ]
-
-        monkeypatch.setattr(webapp, "_model_manager", _DummyManager())
-
-        assert (
-            webapp._resolve_requested_model_id(
-                "gemini-3.1-flash-image-preview",
-                fallback_model="gemini-2.5-flash",
-                task_type="CHAT",
-            )
-            == "gemini-2.5-flash"
-        )
-
-    def test_resolve_requested_model_id_rejects_model_without_required_task_capability(
-        self, monkeypatch
-    ):
-        import web.app as webapp
-
-        class _DummyManager:
-            _cached_caps = {
-                "gemini-2.5-flash": {
-                    "speed": 10,
-                    "quality": 8,
-                    "reasoning": 8,
-                    "context": 8,
-                    "multimodal": True,
-                    "grounding": False,
-                    "function_calling": True,
-                    "image_gen": False,
-                    "tier": 8,
-                }
-            }
-
-            def get_available_models(self):
-                return [
-                    {"id": "gemini-2.5-flash"},
-                    {"id": "gemini-2.5-pro"},
-                ]
-
-        monkeypatch.setattr(webapp, "_model_manager", _DummyManager())
-
-        assert (
-            webapp._resolve_requested_model_id(
-                "gemini-2.5-flash",
-                fallback_model="gemini-2.5-pro",
-                task_type="WEB_SEARCH",
-            )
-            == "gemini-2.5-pro"
+            == "deepseek-chat"
         )
 
     def test_parse_file_to_text_accepts_larger_custom_windows(self, tmp_path):
@@ -4388,6 +4263,35 @@ class TestTaskAgentDocumentEdits:
         assert "unsupported operand type" not in result
         assert result.get("error") == ""
         assert result.get("stdout", "").strip() == "ok"
+
+    def test_run_python_in_sandbox_syncs_target_basename_without_marker(
+        self, tmp_path, monkeypatch
+    ):
+        from app.core.agent import task_tools
+
+        workspace = tmp_path / "workspace"
+        workspace.mkdir()
+        source_path = workspace / "sales_sample.xlsx"
+        source_path.write_bytes(b"source")
+
+        monkeypatch.setattr(task_tools, "_get_workspace_root", lambda: str(workspace))
+
+        result = task_tools.run_python_in_sandbox(
+            (
+                "from pathlib import Path\n"
+                "Path('sales_profit_report.xlsx').write_bytes(b'report')\n"
+                "print('saved report')\n"
+            ),
+            timeout=10,
+            task_files=[{"path": str(source_path), "name": source_path.name}],
+            target_path="codex_real_task_20260701/sales_profit_report.xlsx",
+        )
+
+        target = workspace / "codex_real_task_20260701" / "sales_profit_report.xlsx"
+        assert result.get("error") == ""
+        assert target.read_bytes() == b"report"
+        assert str(target) in result.get("__koto_created__", [])
+        assert "KOTO_CREATED" in result.as_text()
 
     def test_task_agent_run_python_code_syncs_modified_attached_file_and_emits_file_change(
         self, tmp_path, monkeypatch
@@ -4757,10 +4661,16 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "function explicitWriteTargetPathFromText(text: string): string"
             in dispatcher
         )
+        assert (
+            "function joinSplitDirectoryTargetPath(source: string, rawPath: string, start: number, end: number): string"
+            in dispatcher
+        )
+        assert "splitOutputDirectoryAfterFile(after)" in dispatcher
         assert "function hasReadOnlyHint(text: string): boolean" in dispatcher
         assert "const readSourcePattern" in dispatcher
         assert "const explicitOutputBeforePattern" in dispatcher
-        assert "overrideOptions.enable_ai_intent_adjudicator = true;" in dispatcher
+        assert "overrideOptions.enable_ai_intent_adjudicator = true;" not in dispatcher
+        assert "delete overrideOptions.enable_ai_intent_adjudicator;" in dispatcher
         assert (
             "overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';"
             in dispatcher
@@ -4801,10 +4711,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert (
             "export function beginTaskResultFollowup(details: any): void" in assistant
         )
-        assert (
-            "(window as any).WA.beginTaskResultFollowup = beginTaskResultFollowup"
-            in assistant
-        )
+        assert "publishWorkspaceApi({" in assistant
+        assert "beginTaskResultFollowup," in assistant
         assert "state._pendingTaskFollowupContext = followupContext;" in assistant
         assert (
             "options: pendingTaskFollowupContext ? { followup_context: pendingTaskFollowupContext } : {},"
@@ -4833,7 +4741,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert 'data-task-followup-action="apply"' in task_renderer
         assert 'data-task-followup-action="question"' in task_renderer
         assert 'data-task-followup-action="improve"' in task_renderer
-        assert "(window as any).WA.beginTaskResultFollowup({" in task_renderer
+        assert "workspaceApi.beginTaskResultFollowup({" in task_renderer
         assert "output_mode: card.dataset.taskOutputMode || ''," in task_renderer
         assert (
             "intent_strategy: card.dataset.taskIntentStrategy || ''," in task_renderer
@@ -4871,23 +4779,20 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         )
         workspace_bundle_entry = _read_frontend_source("web/src/bundles/workspace.ts")
 
-        assert "WA.streamTaskFlow = streamTaskFlow" in renderer
+        assert "publishWorkspaceApi({" in renderer
+        assert "streamTaskFlow," in renderer
         assert "csrfFetch('/api/editor/ai/task-stream'" in renderer
-        assert (
-            "WA.createWorkspaceAiTransport = createWorkspaceAiTransport" in ai_transport
-        )
+        assert "publishWorkspaceApi({ createWorkspaceAiTransport })" in ai_transport
         assert (
             "WA.createWorkspaceAiResultsRuntime = createWorkspaceAiResultsRuntime"
             in ai_results
         )
+        assert "publishWorkspaceApi({" in quick_actions
         assert (
-            "WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher"
+            "createWorkspaceQuickActionRuntime: createQuickActionDispatcher"
             in quick_actions
         )
-        assert (
-            "(window as any).WA.createWorkspaceAiConversation = createWorkspaceAiConversation"
-            in conversation
-        )
+        assert "publishWorkspaceApi({ createWorkspaceAiConversation })" in conversation
         assert "model' || value === 'ai'" in conversation
         assert "export function installWorkspaceNotebookTools" in notebook
         assert (
@@ -4895,31 +4800,26 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in notebook
         )
         assert "export function installWorkspaceFindReplace" in find_replace
+        assert "publishWorkspaceApi({ installWorkspaceFindReplace })" in find_replace
+        assert "publishWorkspaceApi({ createTaskDispatcher })" in dispatcher
+        assert "const workspaceApi = getWorkspaceApi();" in runtime_init
         assert (
-            "WA.installWorkspaceFindReplace = installWorkspaceFindReplace"
-            in find_replace
-        )
-        assert "WA.createTaskDispatcher = createTaskDispatcher" in dispatcher
-        assert (
-            "typeof (window as any).WA.createWorkspaceAiResultsRuntime === 'function'"
+            "typeof workspaceApi.createWorkspaceAiResultsRuntime === 'function'"
             in runtime_init
         )
         assert (
-            "typeof (window as any).WA.createWorkspaceAiConversation === 'function'"
+            "typeof workspaceApi.createWorkspaceAiConversation === 'function'"
             in runtime_init
         )
-        assert "(window as any).WA.hydrateAiHistory" in runtime_init
+        assert "publishWorkspaceApi({" in runtime_init
         assert (
-            "typeof (window as any).WA.createWorkspaceQuickActionRuntime === 'function'"
+            "typeof workspaceApi.createWorkspaceQuickActionRuntime === 'function'"
             in runtime_init
         )
         assert (
             "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in runtime_init
         )
-        assert (
-            "typeof (window as any).WA.createTaskDispatcher === 'function'"
-            in runtime_init
-        )
+        assert "typeof workspaceApi.createTaskDispatcher === 'function'" in runtime_init
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
         assert "{% include '_workspace_asset_scripts.html' %}" in standalone
         assert "{% include '_workspace_asset_scripts.html' %}" in main
@@ -4957,18 +4857,10 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "registerMessageRoute" in dispatcher
         assert "registerQuickActionHandler" in dispatcher
         assert "registerAction(definition: QuickActionDefinition)" in quick_actions
-        assert (
-            "(window as any).WA.registerTaskQuickAction = registerTaskQuickAction"
-            in runtime_init
-        )
-        assert (
-            "(window as any).WA.registerTaskEntryRoute = registerTaskEntryRoute"
-            in runtime_init
-        )
-        assert (
-            "(window as any).WA.registerTaskActionHandler = registerTaskActionHandler"
-            in runtime_init
-        )
+        assert "registerTaskQuickAction," in runtime_init
+        assert "registerTaskEntryRoute," in runtime_init
+        assert "registerTaskActionHandler," in runtime_init
+        assert "publishWorkspaceApi({" in runtime_init
 
     def test_workspace_dispatcher_records_assistant_turns_for_task_history(self):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
@@ -5047,9 +4939,18 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
 
         assert (
-            "turn.task_card_snapshot && !taskTurnIsTerminal(turn) && (window as any).WA && typeof (window as any).WA.restoreTaskRunCard === 'function'"
+            "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'"
             in conversation
         )
+        assert (
+            "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard"
+            not in conversation
+        )
+        assert (
+            "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void"
+            in conversation
+        )
+        assert "element.dataset.taskMemorySummary = memorySummary" in conversation
         assert "task_card_snapshot:" in conversation
         assert (
             "function beginAssistantTaskTurn(metadata?: Record<string, any>): WATurn | null"
@@ -5080,7 +4981,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>"
             in task_renderer
         )
-        assert "WA.restoreTaskRunCard = restoreTaskRunCard" in task_renderer
+        assert "restoreTaskRunCard," in task_renderer
+        assert "publishWorkspaceApi({" in task_renderer
         assert (
             "function isTaskCardElement(value: unknown): value is TaskCardElement"
             in task_renderer
@@ -5129,7 +5031,8 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         assert "async function _sendViaEditorActionSSE(payload)" not in src
         assert "export function sendQuickAction(action: string): void" in src
-        assert "(window as any).WA.sendQuickAction = sendQuickAction" in src
+        assert "publishWorkspaceApi({" in src
+        assert "sendQuickAction," in src
         assert (
             "getConversationHistory: () => _waConversationRuntime && typeof _waConversationRuntime.getHistoryForModel === 'function'"
             in _read_frontend_source("web/src/workspace/runtime-init.ts")
@@ -5260,8 +5163,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in docx_review_runtime
         )
         assert (
-            "(window as any).WA.applyStructuredDocToolCall(proposal.tool_call"
-            in assistant
+            "workspaceApi.applyStructuredDocToolCall?.(proposal.tool_call" in assistant
         )
         assert "window.WA.applyStructuredDocToolCall(proposal.tool_call" in results
         assert "window.WA.applyStructuredDocToolCall(toolCall" in results
@@ -5278,9 +5180,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "white-space: nowrap;" in css
         assert "min-height: 34px;" in css
 
-    def test_agent_loop_sends_sanitized_proposal_summary(self):
+    def test_doc_executor_sends_sanitized_proposal_summary(self):
         """Structured proposal summary should reuse the sanitized note, not raw clean_text."""
-        src = _read_frontend_source("app/core/agent/agent_loop.py")
+        src = _read_frontend_source("app/core/agent/doc_websocket_agent_executor.py")
         assert 'proposal_summary = proposals[0].get("rationale", "")' in src
         assert "yield evt_proposal(proposals, proposal_summary)" in src
 
@@ -5305,5 +5207,6 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "function _showBrowserCtx(event: MouseEvent, el: HTMLElement): void"
             in fs_context_menu
         )
-        assert "wa._showBrowserCtx = _showBrowserCtx" in fs_context_menu
+        assert "publishWorkspaceApi({" in fs_context_menu
+        assert "_showBrowserCtx," in fs_context_menu
         assert "_serializeEditorForTab" not in fs_context_menu

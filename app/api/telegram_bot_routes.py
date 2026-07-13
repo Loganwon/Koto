@@ -37,7 +37,7 @@ telegram_bp = Blueprint("telegram", __name__)
 @telegram_bp.get("/status")
 def bot_status():
     try:
-        from web.telegram_bot import get_telegram_bot
+        from app.core.services.telegram_bot import get_telegram_bot
 
         bot = get_telegram_bot()
         if bot is None:
@@ -112,7 +112,7 @@ def send_test():
     Body: {"chat_id": 123456789, "text": "测试消息（可选）"}
     """
     try:
-        from web.telegram_bot import get_telegram_bot
+        from app.core.services.telegram_bot import get_telegram_bot
 
         data = request.get_json(force=True) or {}
         chat_id = data.get("chat_id")
@@ -137,7 +137,7 @@ def send_test():
 def restart_bot():
     """停止旧 Bot 实例，用最新环境变量重新创建并启动。"""
     try:
-        import web.telegram_bot as _tb
+        import app.core.services.telegram_bot as _tb
 
         old_bot = _tb._bot_instance
         if old_bot:

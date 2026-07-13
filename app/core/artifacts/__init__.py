@@ -13,6 +13,7 @@ from app.core.artifacts.models import (
     SourceRef,
     build_background_artifact_result,
     build_file_task_artifact_result,
+    canonical_artifact_path_key,
 )
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     "SourceRef",
     "build_background_artifact_result",
     "build_file_task_artifact_result",
+    "canonical_artifact_path_key",
 ]

@@ -550,7 +550,7 @@ a{color:var(--accent);}
         <span>默认模型</span>
         <select id="spModel" onchange="saveSp('ai','default_model',this.value)">
           <option value="auto">🤖 Auto</option>
-          <option value="deepseek-v4-pro">DeepSeek V4 Pro</option>
+          <option value="deepseek-chat">DeepSeek Chat</option>
           <option value="local">本地模型</option>
         </select>
       </div>
@@ -1209,7 +1209,7 @@ function toast(msg, ms=2500) {
 /* ────────────────── Model badge ── */
 function setBadge(m) {
   if (!m) return;
-  const short = m.replace('gemini-','G').replace('-preview','').replace('flash','F').replace('pro','Pro').replace('--','-');
+  const short = m.replace('deepseek-','DS-').replace('-preview','').replace('--','-');
   document.getElementById('hdrBadge').textContent = short;
 }
 

@@ -51,9 +51,9 @@ def handle_tree_of_thought(
         return
 
     if task_type == "FILE_GEN":
-        _tot_model = MODEL_MAP.get("FILE_GEN", "gemini-2.5-flash")
+        _tot_model = MODEL_MAP.get("FILE_GEN", "deepseek-chat")
     else:
-        _tot_model = model_id or MODEL_MAP.get(task_type, "gemini-2.5-flash")
+        _tot_model = model_id or MODEL_MAP.get(task_type, "deepseek-chat")
     _tot_n = 2 if task_type == "FILE_GEN" else 3
     _tot_label = "📄 文档生成" if task_type == "FILE_GEN" else "🔬 深度研究"
     yield f"data: {json.dumps({'type': 'classification', 'task_type': task_type, 'route_method': 'TreeOfThought', 'message': f'🌳 Tree of Thought 启动：{_tot_n} 条并行推理分支 ({_tot_label})'}, ensure_ascii=False)}\n\n"

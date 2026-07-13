@@ -22,7 +22,7 @@ def get_insight_reporter():
 def get_notification_manager():
     if "notification_manager" not in _lazy_cache:
         try:
-            from web.notification_manager import get_notification_manager as _get_mgr
+            from app.core.services.notification_manager import get_notification_manager as _get_mgr
         except ImportError:
             from notification_manager import get_notification_manager as _get_mgr
         _lazy_cache["notification_manager"] = _get_mgr()

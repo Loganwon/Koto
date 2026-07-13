@@ -167,21 +167,11 @@ class MemoryToolsPlugin(AgentPlugin):
 
     @staticmethod
     def _get_memory_manager():
-        """Lazily load MemoryManager without circular imports."""
+        """Use the one application-owned memory manager."""
         try:
-            import sys
+            from web.memory_runtime import get_memory_manager
 
-            # Try web.app.get_memory_manager (runtime context)
-            if "web.app" in sys.modules:
-                fn = getattr(sys.modules["web.app"], "get_memory_manager", None)
-                if fn:
-                    return fn()
-            # Fallback: direct instantiation
-            try:
-                from web.enhanced_memory_manager import EnhancedMemoryManager
-            except ImportError:
-                from enhanced_memory_manager import EnhancedMemoryManager
-            return EnhancedMemoryManager()
+            return get_memory_manager()
         except Exception as e:
             logger.debug(f"[MemoryTools] _get_memory_manager error: {e}")
             return None

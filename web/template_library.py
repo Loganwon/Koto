@@ -11,6 +11,8 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.services.ppt_generation_service import PPTGenerationService
+
 logger = logging.getLogger(__name__)
 
 
@@ -233,8 +235,6 @@ class TemplateLibrary:
         output_dir: str,
     ) -> Dict[str, Any]:
         """生成PPT"""
-        from web.ppt_generator import PPTGenerator
-
         if template_id == "product_intro_ppt":
             outline = self._build_product_ppt_outline(variables)
         elif template_id == "tech_presentation":
@@ -246,11 +246,11 @@ class TemplateLibrary:
         filename = f"{title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pptx"
         output_path = os.path.join(output_dir, filename)
 
-        ppt = PPTGenerator(theme="business")
-        result = ppt.generate_from_outline(
+        result = PPTGenerationService().generate_outline_result(
             title=title,
             outline=outline,
             output_path=output_path,
+            theme="business",
             subtitle=variables.get("tagline", ""),
             author=variables.get("speaker", "Koto"),
         )

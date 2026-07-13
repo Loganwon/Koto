@@ -2,6 +2,24 @@ from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_runtime import FileTaskRuntime
 
 
+def test_file_task_runtime_keeps_explicit_readonly_request_out_of_write_loop():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "", workspace_root=".")
+    request = FileTaskRequest(
+        task="读取并简要说明 VERSION 文件的内容；只读取，不要修改或创建任何文件。",
+        target_path="VERSION",
+        files=[FileTaskFile(path="VERSION", name="VERSION", type="txt", target=True)],
+    )
+
+    classification = runtime._classify_request(request, request.files)
+    details = classification.public_dict()
+
+    assert runtime._has_readonly_write_negation(request.task) is True
+    assert runtime._has_write_intent(request.task) is False
+    assert classification.write_intent is False, details
+    assert classification.output_mode != "write", details
+    assert "readonly_write_negation" in classification.reason_codes, details
+
+
 def test_file_task_runtime_followup_existing_docx_write_allows_source_file_protection():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "",
@@ -58,6 +76,200 @@ def test_file_task_runtime_followup_existing_docx_write_allows_source_file_prote
         and file_info.path == "workspace/koto_frontend_fulltest_report_20260614.docx"
         for file_info in context_files
     )
+
+
+def test_file_task_runtime_target_repair_allows_generic_source_file_protection():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
+    target_path = "workspace/koto_complex_task_test/service_agreement_full_test.docx"
+    task = (
+        "核验不通过：请直接修复这个目标文件，保留已有正确分析并补全全文，"
+        "创建三个真实 Word 表格。不要修改另外三个源文件，写入后核验目标文件。"
+    )
+    request = FileTaskRequest(
+        task=task,
+        target_path=target_path,
+        files=[
+            FileTaskFile(
+                path="service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="service_agreement_v2.docx",
+                name="service_agreement_v2.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"
+            ),
+            FileTaskFile(
+                path=target_path,
+                name="service_agreement_full_test.docx",
+                type="docx",
+                target=True,
+            ),
+        ],
+    )
+
+    classification = runtime._classify_request(request, request.files)
+    details = classification.public_dict()
+
+    assert runtime._has_readonly_write_negation(task) is False
+    assert runtime._has_write_intent(task) is True
+    assert classification.write_intent is True, details
+    assert classification.output_mode == "write", details
+    assert "readonly_write_negation" not in classification.reason_codes, details
+
+
+def test_file_task_runtime_frontend_target_repair_ignores_confirmation_negation():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
+    target_name = "service_agreement_full_test_20260628.docx"
+    task = (
+        "核验不通过：当前目标文件 service_agreement_full_test_20260628.docx 只有 44 个段落、0 个 Word 表格，"
+        "内容在“预算表原始数据”处中断，缺少完整预算分析、风险矩阵、谈判建议和最终核验结论。"
+        "请直接修复这个目标文件，保留已有正确分析并补全全文；必须创建至少 3 个真实 Word 表格。"
+        "不要修改另外三个源文件，不要中途询问确认；写入后请核验目标文件的段落数、表格数和章节完整性。"
+    )
+    source_dir = "C:/Users/12524/Desktop/Koto/workspace/koto_complex_task_test"
+    request = FileTaskRequest(
+        task=task,
+        target_path=target_name,
+        files=[
+            FileTaskFile(
+                path=f"{source_dir}/service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path=f"{source_dir}/service_agreement_v2.docx",
+                name="service_agreement_v2.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path=f"{source_dir}/renewal_budget.xlsx",
+                name="renewal_budget.xlsx",
+                type="xlsx",
+            ),
+            FileTaskFile(
+                path=f"{source_dir}/{target_name}", name=target_name, type="docx"
+            ),
+            FileTaskFile(path=target_name, name=target_name, type="docx", target=True),
+        ],
+    )
+
+    classification = runtime._classify_request(request, request.files)
+    details = classification.public_dict()
+
+    assert runtime._has_readonly_write_negation(task) is False
+    assert runtime._has_write_intent(task) is True
+    assert classification.write_intent is True, details
+    assert classification.output_mode == "write", details
+    assert classification.selected_recipe != "multi_file_compare_readonly", details
+    assert "readonly_write_negation" not in classification.reason_codes, details
+
+
+def test_file_task_runtime_frontend_basename_target_resolves_to_attached_path():
+    runtime = FileTaskRuntime(tool_executor=lambda name, args: "")
+    target_name = "service_agreement_full_test_20260628.docx"
+    target_path = (
+        "C:/Users/12524/Desktop/Koto/workspace/koto_complex_task_test/"
+        "service_agreement_full_test_20260628.docx"
+    )
+    request = FileTaskRequest(
+        task=(
+            "请继续在目标文件 service_agreement_full_test_20260628.docx 末尾追加"
+            "“二次前端完整任务核验”章节，写入后核验完成状态。"
+        ),
+        target_path=target_name,
+        files=[
+            FileTaskFile(
+                path="C:/Users/12524/Desktop/Koto/workspace/koto_complex_task_test/service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path=target_path,
+                name=target_name,
+                type="docx",
+            ),
+            FileTaskFile(path=target_name, name=target_name, type="docx", target=True),
+        ],
+    )
+
+    normalized = runtime._request_with_inferred_target_path(request)
+    context_files = runtime._context_files(normalized)
+    target_files = [file_info for file_info in context_files if file_info.target]
+
+    assert normalized.target_path == target_path
+    assert len(target_files) == 1
+    assert target_files[0].path == target_path
+
+
+def test_file_task_runtime_frontend_docx_table_append_stays_write_mode():
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        workspace_root="C:/Users/12524/Desktop/Koto",
+    )
+    task = (
+        "文件任务测试：请读取 workspace/koto_complex_task_test/renewal_budget.xlsx，"
+        "并在 workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx "
+        "末尾追加“质量门修复闭环 20260629-0004”小节。"
+        "必须调用真实表格写入能力，新增一个 Word 表格，表格两列为“核验项目”和“核验结论”，至少三行数据；"
+        "不要只写文字段落。不要修改源 xlsx，不要中途询问确认；"
+        "写入后核验目标 DOCX 表格总数至少为 5，并在前端输出完成状态。"
+    )
+    request = FileTaskRequest(task=task)
+
+    normalized = runtime._request_with_inferred_target_path(request)
+    context_files = runtime._context_files(normalized)
+    classification = runtime._classify_request(normalized, context_files)
+    details = classification.public_dict()
+
+    assert runtime._has_write_intent(task) is True
+    assert runtime._has_readonly_write_negation(task) is False
+    assert normalized.target_path.endswith(
+        "workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx"
+    )
+    assert classification.write_intent is True, details
+    assert classification.output_mode == "write", details
+    assert classification.selected_recipe in {
+        "xlsx_table_to_docx",
+        "docx_report_table_write",
+    }, details
+    assert "readonly_write_negation" not in classification.reason_codes, details
+
+
+def test_file_task_runtime_frontend_xlsx_sheet_to_docx_table_does_not_target_source():
+    runtime = FileTaskRuntime(
+        tool_executor=lambda name, args: "",
+        workspace_root="C:/Users/12524/Desktop/Koto",
+    )
+    task = (
+        "文件任务测试：请读取 workspace/koto_complex_task_test/renewal_budget.xlsx，"
+        "并在 workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx "
+        "末尾追加“最终闭环表格核验 20260629-0011”小节。"
+        "必须新增一个真实 Word 表格；请把 renewal_budget.xlsx 的 Budget 工作表写入目标 DOCX 表格。"
+        "不要修改源 xlsx，不要中途询问确认；"
+        "写入后核验目标 DOCX 表格总数至少为 5，并在前端输出完成状态。"
+    )
+    request = FileTaskRequest(task=task)
+
+    normalized = runtime._request_with_inferred_target_path(request)
+    context_files = runtime._context_files(normalized)
+    classification = runtime._classify_request(normalized, context_files)
+    details = classification.public_dict()
+
+    assert normalized.target_path.endswith(
+        "workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx"
+    )
+    assert runtime._has_write_intent(task) is True
+    assert classification.write_intent is True, details
+    assert classification.output_mode == "write", details
+    assert classification.target_file_type == "docx", details
+    assert classification.selected_recipe == "xlsx_table_to_docx", details
+    assert classification.operation_kind == "write_table", details
+    assert classification.selected_recipe != "spreadsheet_cell_write", details
+    assert "readonly_write_negation" not in classification.reason_codes, details
 
 
 def test_file_task_runtime_keeps_generated_artifact_followup_readonly():

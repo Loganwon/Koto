@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-import sys
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskRequest
@@ -14,47 +13,33 @@ from app.core.llm.model_selection import (
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_FILE_TASK_MODEL = "deepseek-v4-pro"
+_DEFAULT_FILE_TASK_MODEL = "deepseek-chat"
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
+# A local model has to load weights and execute on the user's hardware.  It
+# therefore needs a separate budget from cloud requests; keeping this setting
+# explicit makes slow hardware configurable without slowing cloud failures.
+_LOCAL_FILE_TASK_LLM_CALL_TIMEOUT = float(
+    os.getenv("KOTO_LOCAL_FILE_TASK_LLM_TIMEOUT", "180")
+)
+# File-task execution is iterative: it needs concise decisions and tool
+# arguments, not a 4k-token essay on every turn.  Bounding one turn prevents a
+# stalled local generation from monopolising Ollama and blocking the next task.
+_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS = max(
+    128, int(os.getenv("KOTO_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS", "1536"))
+)
 
 
 def _runtime_model_map() -> Dict[str, Any]:
-    candidates = []
-    web_pkg = sys.modules.get("web")
-    package_runtime = (
-        getattr(web_pkg, "runtime_context", None) if web_pkg is not None else None
-    )
-    if package_runtime is not None:
-        candidates.append(package_runtime)
-    runtime_module = sys.modules.get("web.runtime_context")
-    if runtime_module is not None and runtime_module is not package_runtime:
-        candidates.append(runtime_module)
     try:
-        from web import runtime_context as imported_runtime
-
-        if imported_runtime not in candidates:
-            candidates.append(imported_runtime)
+        from web import runtime_context
     except Exception:
-        pass
+        return {}
     try:
-        from web import app as web_app_module
-
-        if web_app_module not in candidates:
-            candidates.append(web_app_module)
+        model_map = runtime_context.get_model_map()
     except Exception:
-        pass
-    for module in candidates:
-        getter = getattr(module, "get_model_map", None)
-        if callable(getter):
-            try:
-                model_map = getter()
-            except Exception:
-                continue
-            if isinstance(model_map, dict) and model_map:
-                return model_map
-        model_map = getattr(module, "MODEL_MAP", None)
-        if isinstance(model_map, dict) and model_map:
-            return model_map
+        return {}
+    if isinstance(model_map, dict) and model_map:
+        return model_map
     return {}
 
 
@@ -147,12 +132,7 @@ class FileTaskModelClient:
         model_id = self._cloud_model_id(request)
         provider_name = get_provider_for_model_mode(request.model_mode)
         provider_kwargs = {"provider": provider_name, "model": model_id}
-        if provider_name == "gemini" and self._api_key:
-            from app.core.llm.gemini import GeminiProvider
-
-            provider = GeminiProvider(api_key=self._api_key)
-        else:
-            provider = get_llm_provider(**provider_kwargs)
+        provider = get_llm_provider(**provider_kwargs)
         try:
             from app.core.llm.model_fallback import get_fallback_executor
 
@@ -192,12 +172,13 @@ class FileTaskModelClient:
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
         model_id = self._local_model_id(request)
+        self._ensure_local_tool_support(model_id, tools)
         logger.info(
             "[FileTaskModelClient] local file-task call model=%s messages=%d tools=%d timeout=%.1fs",
             model_id or "<auto>",
             len(messages),
             len(tools or []),
-            _FILE_TASK_LLM_CALL_TIMEOUT,
+            _LOCAL_FILE_TASK_LLM_CALL_TIMEOUT,
         )
         provider = OllamaLLMProvider(model=model_id or None)
         return provider.generate_content(
@@ -206,24 +187,46 @@ class FileTaskModelClient:
             system_instruction=system,
             tools=tools if tools else None,
             stream=False,
-            call_timeout=_FILE_TASK_LLM_CALL_TIMEOUT,
+            call_timeout=_LOCAL_FILE_TASK_LLM_CALL_TIMEOUT,
             temperature=0.2,
+            think=False,
+            num_predict=_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS,
         )
+
+    @staticmethod
+    def _ensure_local_tool_support(model_id: str, tools: List[Dict[str, Any]]) -> None:
+        """Fail before the task stream starts when Ollama says tools are unsupported."""
+        if not tools:
+            return
+        resolved_model = str(model_id or "").strip()
+        if not resolved_model:
+            try:
+                from app.core.llm.local_model_runtime import (
+                    get_configured_local_model_tag,
+                )
+
+                resolved_model = str(get_configured_local_model_tag() or "").strip()
+            except Exception:
+                return
+        if not resolved_model:
+            return
+        try:
+            from app.core.llm.local_model_capabilities import local_model_supports_tools
+
+            supports_tools = local_model_supports_tools(resolved_model)
+        except Exception:
+            return
+        if supports_tools is False:
+            raise RuntimeError(
+                f"本地模型 {resolved_model} 不支持工具调用，无法执行文件任务。"
+                "请在设置中选择支持 tools 的模型（例如 qwen3.5:9b）。"
+            )
 
     def _cloud_model_id(self, request: FileTaskRequest) -> str:
         requested = str(request.model_id or "").strip()
         mode = normalize_model_mode(request.model_mode, default="deepseek")
         provider = get_provider_for_model_mode(mode)
-        ignored = {
-            "auto",
-            "cloud",
-            "local",
-            "gemini",
-            "deepseek",
-            "openai",
-            "anthropic",
-            "ollama",
-        }
+        ignored = {"auto", "cloud", "local", "deepseek", "ollama"}
         if requested and requested.lower() not in ignored:
             return requested
         model_map = _runtime_model_map()
@@ -231,27 +234,17 @@ class FileTaskModelClient:
             model_from_app = str(model_map.get(task_key) or "").strip()
             if model_from_app:
                 return model_from_app
-        if provider != "gemini":
-            return get_configured_cloud_model(
-                task_type="FILE_TASK",
-                fallback_model=self._default_model,
-                provider=provider,
-            )
-        return self._default_model
+        return get_configured_cloud_model(
+            task_type="FILE_TASK",
+            fallback_model=self._default_model,
+            provider=provider,
+        )
 
     def _local_model_id(self, request: FileTaskRequest) -> str:
         configured = str(
             request.options.get("local_model") or request.model_id or ""
         ).strip()
-        if configured.lower().startswith("gemini") or configured.lower() in {
-            "auto",
-            "cloud",
-            "local",
-            "deepseek",
-            "openai",
-            "anthropic",
-            "ollama",
-        }:
+        if configured.lower() in {"auto", "cloud", "local", "deepseek", "ollama"}:
             return ""
         return configured
 

@@ -282,7 +282,7 @@ def get_enhanced_memory_manager():
         return EnhancedMemoryManager()
     except ImportError:
         try:
-            from web.enhanced_memory_manager import EnhancedMemoryManager
+            from app.core.services.memory_manager import EnhancedMemoryManager
 
             return EnhancedMemoryManager()
         except ImportError:

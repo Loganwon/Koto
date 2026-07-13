@@ -79,6 +79,24 @@ class TestGetSettings:
 
 @pytest.mark.integration
 class TestUpdateSettings:
+    def test_rejects_invalid_json_body(self, client):
+        response = _post(
+            client, "/api/settings", data="not json", content_type="application/json"
+        )
+        data = response.get_json()
+        assert response.status_code == 200
+        assert data["success"] is False
+
+    def test_rejects_out_of_range_ui_zoom(self, client):
+        response = _post(
+            client,
+            "/api/settings",
+            json={"category": "appearance", "key": "ui_zoom", "value": 2},
+        )
+        data = response.get_json()
+        assert response.status_code == 400
+        assert data["success"] is False
+
     def test_update_valid_setting(self, client):
         resp = _post(
             client,
@@ -142,6 +160,75 @@ class TestUpdateSettings:
         assert workspace_dir is not None
         assert workspace_dir != ""
         assert "workspace" in workspace_dir
+
+    def test_local_model_tag_update_preserves_mode_and_mirrors_runtime_config(
+        self, client
+    ):
+        """Selecting a model must not silently change the local/cloud mode."""
+        # The public settings payload deliberately presents the active cloud
+        # provider as the UI-friendly "cloud" value.  Read the persisted
+        # value here so the assertion covers the actual runtime mode.
+        from app.core.config.user_settings import SettingsManager
+
+        original = SettingsManager().get_all()
+        original_mode = str(original.get("model_mode") or "cloud")
+        original_model = str(
+            original.get("local_model")
+            or (original.get("ai") or {}).get("local_model")
+            or ""
+        )
+        try:
+            response = _post(
+                client, "/api/local-model/switch", json={"model_tag": "qwen3:8b"}
+            )
+            data = _check(response)
+            assert data["success"] is True
+            assert data["mode"] == original_mode
+            assert data["model"] == "qwen3:8b"
+
+            settings = SettingsManager().get_all()
+            assert settings["model_mode"] == original_mode
+            assert settings["local_model"] == "qwen3:8b"
+            assert settings["ai"]["local_model"] == "qwen3:8b"
+            assert settings["ai"]["use_local_only"] is (original_mode == "local")
+        finally:
+            _post(
+                client,
+                "/api/local-model/switch",
+                json={"mode": original_mode, "model_tag": original_model},
+            )
+
+    def test_local_model_change_clears_router_response_cache(self, client):
+        from unittest.mock import patch
+
+        from app.core.config.user_settings import SettingsManager
+
+        original = SettingsManager().get_all()
+        original_mode = str(original.get("model_mode") or "cloud")
+        original_model = str(
+            original.get("local_model")
+            or (original.get("ai") or {}).get("local_model")
+            or ""
+        )
+
+        try:
+            with patch(
+                "app.core.routing.local_model_router.LocalModelRouter.reset_response_model"
+            ) as reset_response_model:
+                response = _post(
+                    client,
+                    "/api/local-model/switch",
+                    json={"model_tag": "qwen3:8b"},
+                )
+            data = _check(response)
+            assert data["success"] is True
+            reset_response_model.assert_called_once_with()
+        finally:
+            _post(
+                client,
+                "/api/local-model/switch",
+                json={"mode": original_mode, "model_tag": original_model},
+            )
 
 
 # ── POST /api/settings/reset ────────────────────────────────────────────────

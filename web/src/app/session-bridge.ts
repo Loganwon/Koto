@@ -24,7 +24,7 @@ const _DEFAULT_PROJECT_OPTIONS: Array<{ key: string; label: string }> = [
 // ── Session state management ──
 const sessionStates = new Map<string, { isGenerating: boolean; abortController: AbortController | null; taskId?: string | null }>();
 const sessionDomCache = new Map<string, DocumentFragment>();
-let isScrollLocked = false;
+const isScrollLocked = false;
 
 export { currentSession, sessionStates, sessionDomCache, isScrollLocked };
 (window as any).currentSession = currentSession;
@@ -114,6 +114,11 @@ export function getSessionTaskId(sessionName: string): string | null {
   return state.taskId || null;
 }
 
+function isSessionLoadInterruption(error: unknown): boolean {
+  const text = String(error instanceof Error ? error.message : error || '').trim();
+  return /failed to fetch|networkerror|aborted|load failed/i.test(text);
+}
+
 // ── Session list / rendering ──
 export async function loadSessions(): Promise<void> {
   try {
@@ -134,6 +139,10 @@ export async function loadSessions(): Promise<void> {
       ? (window as any)._projectSessions.filter((s: string) => toSessionDisplayName(s).toLowerCase().includes(query.toLowerCase()))
       : (window as any)._projectSessions);
   } catch (error) {
+    if (isSessionLoadInterruption(error)) {
+      console.debug('Session list refresh interrupted:', error);
+      return;
+    }
     console.error('Failed to load sessions:', error);
   }
 }

@@ -100,7 +100,7 @@ $requiredPaths = @(
     (Join-Path $internalDir "app"),
     (Join-Path $internalDir "web"),
     (Join-Path $configRoot ".builtin_key"),
-    (Join-Path $configRoot "gemini_config.env.example"),
+    (Join-Path $configRoot "deepseek_config.env.example"),
     (Join-Path $configRoot "macro_suggestions.json"),
     (Join-Path $configRoot "personality_matrix.json"),
     (Join-Path $configRoot "skill_affinity.json"),
@@ -115,7 +115,6 @@ $requiredPaths = @(
     (Join-Path $configRoot "workflows"),
     (Join-Path $staticRoot "js\build\workspace-bundle.js"),
     (Join-Path $staticRoot "jszip.min.js"),
-    (Join-Path $staticRoot "docx-preview.min.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
     (Join-Path $ExtractDir "Start_Koto.bat")
@@ -156,7 +155,8 @@ Write-Host "`n[Step 3] Seeding config and launching..."
 & (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $ExtractDir
 
 $env:KOTO_PORT = $Port
-if ($env:KOTO_SERVER_ONLY) { Write-Host "  KOTO_SERVER_ONLY=$env:KOTO_SERVER_ONLY (server-only mode)" }
+$env:KOTO_SERVER_ONLY = "1"
+Write-Host "  KOTO_SERVER_ONLY=1 (server-only mode)"
 $kotoProc = Start-Process -FilePath $exePath `
     -WorkingDirectory $ExtractDir `
     -PassThru

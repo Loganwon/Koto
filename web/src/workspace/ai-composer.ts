@@ -21,7 +21,7 @@ const COMPOSERS: Record<WorkspaceAiComposerKind, ComposerConfig> = {
     hostId: 'wa-chat-composer-host',
     placeholder: '输入问题，或让 Koto 处理当前文件',
     sendTitle: '发送',
-    fallbackMaxHeight: 180,
+    fallbackMaxHeight: 360,
   },
   sessionList: {
     inputId: 'wa-user-input',
@@ -29,12 +29,26 @@ const COMPOSERS: Record<WorkspaceAiComposerKind, ComposerConfig> = {
     hostId: 'wa-session-list-composer-host',
     placeholder: '输入问题，新建对话',
     sendTitle: '发送并新建对话',
-    fallbackMaxHeight: 180,
+    fallbackMaxHeight: 360,
   },
 };
 
+const pendingComposerResizeFrames = new WeakMap<HTMLTextAreaElement, number>();
+
 function configFor(kind: WorkspaceAiComposerKind): ComposerConfig {
   return COMPOSERS[kind] || COMPOSERS.chat;
+}
+
+function applyWorkspaceAiComposerResize(input: HTMLTextAreaElement): void {
+  pendingComposerResizeFrames.delete(input);
+  const cssMaxHeight = parseFloat(window.getComputedStyle(input).maxHeight || '');
+  const maxHeight = Number.isFinite(cssMaxHeight) && cssMaxHeight > 0
+    ? cssMaxHeight
+    : configFor(workspaceAiComposerMode()).fallbackMaxHeight;
+  input.style.height = 'auto';
+  const scrollHeight = input.scrollHeight;
+  input.style.height = Math.min(scrollHeight, maxHeight) + 'px';
+  input.style.overflowY = scrollHeight > maxHeight ? 'auto' : 'hidden';
 }
 
 export function getWorkspaceAiComposerInput(kind: WorkspaceAiComposerKind = 'chat'): HTMLTextAreaElement | null {
@@ -90,13 +104,18 @@ export function resizeWorkspaceAiComposer(
     ? getWorkspaceAiComposerInput(inputOrKind)
     : inputOrKind;
   if (!input) return;
-  const cssMaxHeight = parseFloat(window.getComputedStyle(input).maxHeight || '');
-  const maxHeight = Number.isFinite(cssMaxHeight) && cssMaxHeight > 0
-    ? cssMaxHeight
-    : configFor(workspaceAiComposerMode()).fallbackMaxHeight;
-  input.style.height = 'auto';
-  input.style.height = Math.min(input.scrollHeight, maxHeight) + 'px';
-  input.style.overflowY = input.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  const pendingFrame = pendingComposerResizeFrames.get(input);
+  if (pendingFrame) {
+    window.cancelAnimationFrame(pendingFrame);
+  }
+  const resizeFrame = window.requestAnimationFrame
+    ? window.requestAnimationFrame(() => applyWorkspaceAiComposerResize(input))
+    : 0;
+  if (resizeFrame) {
+    pendingComposerResizeFrames.set(input, resizeFrame);
+  } else {
+    applyWorkspaceAiComposerResize(input);
+  }
 }
 
 export function setWorkspaceAiComposerValue(
@@ -135,5 +154,5 @@ export function syncWorkspaceAiComposerSendState(kind: WorkspaceAiComposerKind):
   const input = getWorkspaceAiComposerInput();
   const button = getWorkspaceAiComposerSendButton();
   if (!button) return;
-  button.disabled = !input || input.disabled || (kind === 'sessionList' && !input.value.trim());
+  button.disabled = !input || input.disabled || !input.value.trim();
 }

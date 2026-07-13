@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
 """
-Unit tests for socket_handler.py — end-to-end scenario coverage.
+Unit tests for shared doc/socket helper behavior.
 
 Scenarios covered:
-  1. _parse_tool_calls — all formats and edge cases
+  1. parse_tool_calls — all formats and edge cases
      a. canonical <TOOL>...</TOOL>
      b. space-in-closing-tag  </ TOOL>  (model bug, fixed)
      c. lowercase </tool>
@@ -16,14 +16,14 @@ Scenarios covered:
      j. multiple tool calls in one response
      k. clean_text has no leftover JSON / tag noise
 
-  2. _is_online_failure — classifies exceptions correctly
+  2. is_online_failure — classifies exceptions correctly
      a. API key expired (400 INVALID_ARGUMENT)
      b. 503 / unavailable
      c. timeout / timed out
      d. resource exhausted / 429
      e. unrelated error → False
 
-  3. _get_local_provider — model selection heuristic
+  3. get_local_provider — model selection heuristic
      a. picks the 7b/8b model when multiple models available
      b. falls back to first model when none match size heuristic
      c. falls back to OllamaLLMProvider(model=None) on network error
@@ -42,76 +42,19 @@ Scenarios covered:
 
 from __future__ import annotations
 
-import importlib
 import json
 import sys
-import types
 from unittest.mock import MagicMock, patch
 
-# ─── helpers ──────────────────────────────────────────────────────────────────
-
-
-def _import_parse_tool_calls():
-    """Import _parse_tool_calls without requiring the full Flask/SocketIO stack."""
-    # Stub heavy deps so the module can be imported in a bare test environment
-    stub_names = (
-        "flask_socketio",
-        "flask",
-        "flask.request",
-        "app.core.llm.provider_factory",
-        "app.core.llm.ollama_llm_provider",
-        "app.core.sandbox",
-        "web.settings",
-        "web.app",
-    )
-    missing = object()
-    originals = {name: sys.modules.get(name, missing) for name in stub_names}
-
-    try:
-        for mod_name in stub_names:
-            if mod_name not in sys.modules:
-                sys.modules[mod_name] = MagicMock()
-
-        # flask_socketio.SocketIO must be importable
-        fsi = sys.modules.setdefault("flask_socketio", MagicMock())
-        fsi.SocketIO = MagicMock
-
-        import importlib as _il
-
-        spec = _il.util.spec_from_file_location(
-            "socket_handler_test",
-            "app/core/socket_handler.py",
-        )
-        mod = _il.util.module_from_spec(spec)
-        # Provide a dummy socketio attribute so module-level code doesn't crash
-        mod.socketio = MagicMock()
-        spec.loader.exec_module(mod)
-        return mod
-    finally:
-        for name, original in originals.items():
-            if original is missing:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = original
-
-
-_sh = None
-
-
-def _get_sh():
-    global _sh
-    if _sh is None:
-        _sh = _import_parse_tool_calls()
-    return _sh
-
-
-# ─── 1. _parse_tool_calls ─────────────────────────────────────────────────────
+# ─── 1. parse_tool_calls ──────────────────────────────────────────────────────
 
 
 class TestParseToolCalls:
 
     def _parse(self, text):
-        return _get_sh()._parse_tool_calls(text)
+        from app.core.shared.tool_parser import parse_tool_calls
+
+        return parse_tool_calls(text)
 
     # 1a — canonical format
     def test_canonical_tool_tag(self):
@@ -207,13 +150,15 @@ class TestParseToolCalls:
         assert "如有需要请告知" in clean
 
 
-# ─── 2. _is_online_failure ────────────────────────────────────────────────────
+# ─── 2. is_online_failure ─────────────────────────────────────────────────────
 
 
 class TestIsOnlineFailure:
 
     def _check(self, msg):
-        return _get_sh()._is_online_failure(Exception(msg))
+        from app.core.shared.llm_helpers import is_online_failure
+
+        return is_online_failure(Exception(msg))
 
     def test_api_key_expired(self):
         assert self._check("400 INVALID_ARGUMENT. API key expired.")
@@ -255,14 +200,13 @@ class TestIsOnlineFailure:
         assert not self._check("No module named 'mammoth'")
 
 
-# ─── 3. _get_local_provider ───────────────────────────────────────────────────
+# ─── 3. get_local_provider ────────────────────────────────────────────────────
 
 
 class TestGetLocalProvider:
 
     def _run(self, models_list):
-        """Call _get_local_provider with a faked /api/tags response."""
-        sh = _get_sh()
+        """Call get_local_provider with a faked /api/tags response."""
         fake_response_body = json.dumps(
             {"models": [{"name": m} for m in models_list]}
         ).encode()
@@ -285,12 +229,17 @@ class TestGetLocalProvider:
         mock_opener = MagicMock()
         mock_opener.open.return_value = FakeResponse()
 
-        with patch.dict(
+        with patch(
+            "app.core.llm.local_model_runtime.get_configured_local_model_tag",
+            return_value="",
+        ), patch.dict(
             sys.modules,
             {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
         ):
             with patch("urllib.request.build_opener", return_value=mock_opener):
-                result = sh._get_local_provider()
+                from app.core.shared.llm_helpers import get_local_provider
+
+                result = get_local_provider()
 
         return result, mock_cls
 
@@ -311,16 +260,20 @@ class TestGetLocalProvider:
         assert args.get("model") == "phi3:mini"
 
     def test_falls_back_to_none_on_network_error(self):
-        sh = _get_sh()
         mock_cls = MagicMock()
-        with patch.dict(
+        with patch(
+            "app.core.llm.local_model_runtime.get_configured_local_model_tag",
+            return_value="",
+        ), patch.dict(
             sys.modules,
             {"app.core.llm.ollama_llm_provider": MagicMock(OllamaLLMProvider=mock_cls)},
         ):
             mock_opener = MagicMock()
             mock_opener.open.side_effect = OSError("connection refused")
             with patch("urllib.request.build_opener", return_value=mock_opener):
-                sh._get_local_provider()
+                from app.core.shared.llm_helpers import get_local_provider
+
+                get_local_provider()
         mock_cls.assert_called_once_with(model=None)
 
 
@@ -329,51 +282,18 @@ class TestGetLocalProvider:
 
 class TestInsertAtCursorFallback:
     """
-    Tests the synthesise-set_html-from-history logic in _task().
-    We isolate it by calling the logic directly (extracted helper).
+    Tests the synthesise-set_html-from-history logic in DocWebSocketAgentExecutor.
     """
 
     def _run_fallback(self, prompt, file_type, tool_calls, history):
-        """
-        Reproduce the fallback block from socket_handler._task() in isolation.
-        Returns (tool_calls_after_fallback, synthesised).
-        """
-        import html as _html
-        import re
-
-        _INSERT_TRIGGERS = (
-            "在光标处插入",
-            "插入文档",
-            "插入到文档",
-            "请插入",
-            "插入内容",
+        from app.core.agent.doc_websocket_agent_executor import (
+            DocWebSocketAgentExecutor,
         )
-        synthesised = False
+        from app.core.agent.lifecycle import AgentRequest
 
-        if (
-            not tool_calls
-            and file_type in ("docx", "pptx")
-            and any(t in prompt for t in _INSERT_TRIGGERS)
-        ):
-            last_ai_content = ""
-            for turn in reversed(history or []):
-                if turn.get("role") == "assistant":
-                    c = turn.get("content", "").strip()
-                    c_clean = re.sub(
-                        r"<TOOL>.*?</TOOL>", "", c, flags=re.DOTALL
-                    ).strip()
-                    if len(c_clean) > 10:
-                        last_ai_content = c_clean
-                        break
-            if last_ai_content:
-                paragraphs = [
-                    p.strip() for p in last_ai_content.split("\n") if p.strip()
-                ]
-                html_val = "".join(f"<p>{_html.escape(p)}</p>" for p in paragraphs)
-                tool_calls = [{"type": "set_html", "value": html_val}]
-                synthesised = True
-
-        return tool_calls, synthesised
+        request = AgentRequest(prompt=prompt, file_type=file_type, history=history)
+        result = DocWebSocketAgentExecutor()._insert_fallback(request, tool_calls, "")
+        return result, result != tool_calls
 
     # 4a — synthesises tool call from last assistant turn
     def test_synthesises_from_last_assistant_turn(self):
@@ -454,33 +374,16 @@ class TestInsertAtCursorFallback:
 class TestSelectionContext:
     """
     Tests that pinned selection text is correctly prepended to the LLM prompt.
-    Mirrors the logic in _task() around the `selection` variable.
     """
 
     def _build_prompt(self, selection: str, user_prompt: str, history=None):
-        """Reproduce the prompt-building block from _task()."""
-        MAX_HISTORY_TURNS = 10
-        recent_history = (history or [])[-MAX_HISTORY_TURNS * 2 :]
-        history_text = ""
-        if recent_history:
-            parts = []
-            for turn in recent_history:
-                role = turn.get("role", "")
-                content = turn.get("content", "")
-                if role == "user":
-                    parts.append(f"用户：{content}")
-                elif role == "assistant":
-                    parts.append(f"Koto AI：{content}")
-            history_text = "\n".join(parts) + "\n\n"
+        from app.core.agent.lifecycle import AgentRequest
+        from app.core.agent.request_validator import RequestValidator
 
-        if selection:
-            full_prompt = (
-                f'[用户选中的文字]\n"{selection}"\n\n'
-                f"{history_text}用户：{user_prompt}"
-            )
-        else:
-            full_prompt = f"{history_text}用户：{user_prompt}"
-        return full_prompt
+        request = AgentRequest(
+            prompt=user_prompt, selection=selection, history=history or []
+        )
+        return RequestValidator.assemble_prompt(request, user_prompt)
 
     def test_selection_prepended(self):
         prompt = self._build_prompt("Hello world", "翻译成中文")

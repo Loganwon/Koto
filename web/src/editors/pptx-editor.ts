@@ -6,7 +6,7 @@ declare const state: any;
 declare const _PENCIL_SVG: string;
 declare const _TRASH_SVG: string;
 declare const _CLIPBOARD_SVG: string;
-declare var lastSelectionText: string;
+declare let lastSelectionText: string;
 declare function showToast(msg: string, type?: string, duration?: number): void;
 declare function $(id: string): any;
 declare function _hexLuma(hex: string): number;
@@ -41,18 +41,17 @@ export class KotoPptxEditor implements WorkspaceEditor {
     }
 
     render(richData) {
-      if (Array.isArray(richData)) {
-        this.data = this._legacyToRich(richData);
-      } else {
-        // Normalize snake_case keys returned by Python backend to camelCase used internally
-        this.data = {
-          slideWidthEmu:  richData.slideWidthEmu  || richData.slide_width_emu  || 9144000,
-          slideHeightEmu: richData.slideHeightEmu || richData.slide_height_emu || 6858000,
-          defaultFontSizePt: richData.defaultFontSizePt || richData.default_font_size_pt || 18,
-          defaultTitleFontSizePt: richData.defaultTitleFontSizePt || richData.default_title_font_size_pt || 36,
-          slides: richData.slides || [],
-        };
+      if (!richData || typeof richData !== 'object' || Array.isArray(richData)) {
+        throw new TypeError('PPTX 编辑器需要结构化幻灯片数据');
       }
+      // Normalize snake_case keys returned by Python backend to camelCase used internally.
+      this.data = {
+        slideWidthEmu:  richData.slideWidthEmu  || richData.slide_width_emu  || 9144000,
+        slideHeightEmu: richData.slideHeightEmu || richData.slide_height_emu || 6858000,
+        defaultFontSizePt: richData.defaultFontSizePt || richData.default_font_size_pt || 18,
+        defaultTitleFontSizePt: richData.defaultTitleFontSizePt || richData.default_title_font_size_pt || 36,
+        slides: richData.slides || [],
+      };
       // Ensure every slide has .index (backend uses slide_index; AI tool calls match on .index)
       this.data.slides.forEach((s, i) => { if (s.index === undefined) s.index = s.slide_index ?? i; });
       this._curIdx = 0;
@@ -1493,7 +1492,7 @@ export class KotoPptxEditor implements WorkspaceEditor {
 
     _clearTableSelection({ restoreWholeTableSummary = true } = {}) {
       if (this._tableSelectionCleanup) {
-        try { this._tableSelectionCleanup(); } catch (_) {}
+        try { this._tableSelectionCleanup(); } catch (_) { /* allowed to fail */ }
         this._tableSelectionCleanup = null;
       }
 
@@ -1770,7 +1769,7 @@ export class KotoPptxEditor implements WorkspaceEditor {
           r.collapse(false);   // collapse to end
           const sel = window.getSelection();
           if (sel) { sel.removeAllRanges(); sel.addRange(r); }
-        } catch (_) {}
+        } catch (e) { console.warn("[Koto]", e) }
       }
     }
 
@@ -2187,21 +2186,5 @@ export class KotoPptxEditor implements WorkspaceEditor {
       if (r) r.disabled = !this._redoStack.length;
     }
 
-    _legacyToRich(arr) {
-      return {
-        slideWidthEmu: 9144000, slideHeightEmu: 6858000,
-        slides: arr.map(s => ({
-          index: s.slide_index,
-          background: '#ffffff',
-          shapes: s.texts.map(t => ({
-            id: t.shape_id, name: t.shape_name, type: 'AUTO_SHAPE',
-            left: 0, top: t.is_title ? 0 : 1500000,
-            width: 8000000, height: 1200000,
-            z_order: 0, has_text: true, fill: null,
-            paragraphs: [{ align: 'LEFT', runs: [{ text: t.text }] }]
-          }))
-        }))
-      };
-    }
   }
 (window as any).KotoPptxEditor = KotoPptxEditor;

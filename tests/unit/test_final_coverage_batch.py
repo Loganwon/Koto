@@ -297,8 +297,8 @@ class TestPptGeneratorDeep:
     generate_from_text, and EnhancedPPTGenerator."""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import PPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import PPTGenerator
 
             return PPTGenerator(theme=theme)
 
@@ -329,42 +329,42 @@ class TestPptGeneratorDeep:
 
     # -- _clean_markdown static method --------------------------------------
     def test_clean_markdown_removes_code_blocks(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "Before\n```python\ncode here\n```\nAfter"
         result = PPTGenerator._clean_markdown(text)
         assert "```" not in result
 
     def test_clean_markdown_removes_strikethrough(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "~~deleted~~ kept"
         result = PPTGenerator._clean_markdown(text)
         assert "~~" not in result
 
     def test_clean_markdown_removes_link_markup(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "[Click here](https://example.com)"
         result = PPTGenerator._clean_markdown(text)
         assert "](http" not in result
 
     def test_clean_markdown_strips_h1_headers(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "# H1 Title"
         result = PPTGenerator._clean_markdown(text)
         assert result.strip() == "H1 Title"
 
     def test_clean_markdown_ai_dialogue_patterns(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "当然可以！这里是内容。好的，以下是数据。"
         result = PPTGenerator._clean_markdown(text)
         assert isinstance(result, str)
 
     def test_clean_markdown_strip_bold_mode(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         text = "This is **bold** text"
         result = PPTGenerator._clean_markdown(text, strip_bold=True)
@@ -374,7 +374,9 @@ class TestPptGeneratorDeep:
     def test_generate_from_text_creates_pptx(self):
         gen = self._make_gen()
         mock_prs = MagicMock()
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_text(
@@ -390,7 +392,9 @@ class TestPptGeneratorDeep:
         outline = [
             {"title": "Intro", "points": ["Point 1"], "slide_type": "detail"},
         ]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 gen.generate_from_outline("Title", outline, out, progress_callback=cb)
@@ -401,7 +405,9 @@ class TestPptGeneratorDeep:
         mock_prs = MagicMock()
         mock_prs.save.side_effect = PermissionError("locked")
         outline = [{"title": "T", "points": ["P"], "slide_type": "detail"}]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with pytest.raises(PermissionError):
                 gen.generate_from_outline("T", outline, "/locked/out.pptx")
 
@@ -416,7 +422,9 @@ class TestPptGeneratorDeep:
                 "slide_type": "image_full",
             }
         ]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_outline(
@@ -434,7 +442,9 @@ class TestPptGeneratorDeep:
                 "slide_type": "content_image",
             }
         ]
-        with patch("web.ppt_generator.Presentation", return_value=mock_prs):
+        with patch(
+            "app.core.services.ppt_generator.Presentation", return_value=mock_prs
+        ):
             with tempfile.TemporaryDirectory() as td:
                 out = os.path.join(td, "out.pptx")
                 result = gen.generate_from_outline(
@@ -467,16 +477,16 @@ class TestPptGeneratorDeep:
 
     # -- EnhancedPPTGenerator -----------------------------------------------
     def test_enhanced_extract_subtitle_with_year(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator(theme="tech")
             subtitle = epg._extract_subtitle("2024年度市场分析报告")
         assert "2024" in subtitle or subtitle == ""
 
     def test_enhanced_generate_fallback_outline(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             outline = epg._generate_fallback_outline("Market Report", "Analyze trends")
@@ -484,8 +494,8 @@ class TestPptGeneratorDeep:
         assert len(outline) > 0
 
     def test_enhanced_parse_enhanced_outline(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             md = "## Section 1\n- Point A\n- Point B\n\n## Section 2\n- Point C"
@@ -494,16 +504,16 @@ class TestPptGeneratorDeep:
         assert len(parsed) >= 2
 
     def test_enhanced_parse_enhanced_outline_empty(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             parsed = epg._parse_enhanced_outline("")
         assert isinstance(parsed, list)
 
     def test_enhanced_match_images_to_slides(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             outline = [{"title": "A", "points": []}, {"title": "B", "points": []}]
@@ -511,8 +521,8 @@ class TestPptGeneratorDeep:
         assert isinstance(result, list)
 
     def test_enhanced_build_outline_prompt(self):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import EnhancedPPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import EnhancedPPTGenerator
 
             epg = EnhancedPPTGenerator()
             prompt = epg._build_outline_prompt("Title", "Request", None, None)
@@ -952,34 +962,34 @@ class TestKotoSetupDeep:
     """Cover config writing edge cases, API validation errors,
     _run_setup_if_needed branches, _prompt_local_model_if_needed."""
 
-    # -- _write_gemini_config -----------------------------------------------
+    # -- _write_deepseek_config ---------------------------------------------
     def test_write_config_creates_file(self):
-        from src.koto_setup import _write_gemini_config
+        from src.koto_setup import _write_deepseek_config
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             with patch("src.koto_setup.APP_ROOT", td_path):
-                _write_gemini_config(
-                    "AIzaTestKey123456789012345678", "https://custom.api.com"
+                _write_deepseek_config(
+                    "sk-test-key-123456789", "https://custom.api.com"
                 )
-            config_file = td_path / "config" / "gemini_config.env"
+            config_file = td_path / "config" / "deepseek_config.env"
             assert config_file.exists()
             content = config_file.read_text(encoding="utf-8")
-            assert "AIzaTestKey123456789012345678" in content
+            assert "sk-test-key-123456789" in content
             assert "https://custom.api.com" in content
 
     def test_write_config_default_base(self):
-        from src.koto_setup import _write_gemini_config
+        from src.koto_setup import _write_deepseek_config
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
             with patch("src.koto_setup.APP_ROOT", td_path):
-                _write_gemini_config("AIzaKey999", "")
-            content = (td_path / "config" / "gemini_config.env").read_text(
+                _write_deepseek_config("sk-test-key-999", "")
+            content = (td_path / "config" / "deepseek_config.env").read_text(
                 encoding="utf-8"
             )
-            assert "AIzaKey999" in content
-            assert "GEMINI_API_BASE=" in content
+            assert "sk-test-key-999" in content
+            assert "DEEPSEEK_BASE_URL=https://api.deepseek.com" in content
 
     # -- _api_key_configured ------------------------------------------------
     def test_api_key_configured_false_for_your_api_key_here(self):
@@ -987,9 +997,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=your_api_key_here\n")
+            cfg.write_text("DEEPSEEK_API_KEY=your_api_key_here\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is False
@@ -999,9 +1009,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=\n")
+            cfg.write_text("DEEPSEEK_API_KEY=\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is False
@@ -1011,9 +1021,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=None\n")
+            cfg.write_text("DEEPSEEK_API_KEY=None\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is False
@@ -1023,9 +1033,9 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
-            cfg.write_text("GEMINI_API_KEY=AIzaRealKeyValue12345678901234\n")
+            cfg.write_text("DEEPSEEK_API_KEY=sk-real-key-value-123456789\n")
             with patch("src.koto_setup.APP_ROOT", td_path):
                 result = _api_key_configured()
         assert result is True
@@ -1044,14 +1054,14 @@ class TestKotoSetupDeep:
 
         with tempfile.TemporaryDirectory() as td:
             td_path = Path(td)
-            cfg = td_path / "config" / "gemini_config.env"
+            cfg = td_path / "config" / "deepseek_config.env"
             cfg.parent.mkdir(parents=True)
             cfg.write_text(
-                "GEMINI_API_KEY=AIzaKey123\nGEMINI_API_BASE=https://api.example.com\n"
+                "DEEPSEEK_API_KEY=sk-key-123\nDEEPSEEK_BASE_URL=https://api.example.com\n"
             )
             with patch("src.koto_setup.APP_ROOT", td_path):
                 key, base = _read_config_values()
-        assert key == "AIzaKey123"
+        assert key == "sk-key-123"
         assert base == "https://api.example.com"
 
     def test_read_config_values_missing_file(self):
@@ -1072,7 +1082,7 @@ class TestKotoSetupDeep:
         mock_response.__enter__ = lambda s: mock_response
         mock_response.__exit__ = MagicMock(return_value=False)
         with patch("urllib.request.urlopen", return_value=mock_response):
-            ok, msg = _validate_api_key("AIzaTestKey123456789012345678")
+            ok, msg = _validate_api_key("sk-test-key-123456789")
         assert ok is True
 
     def test_validate_api_key_http_400(self):
@@ -1086,7 +1096,7 @@ class TestKotoSetupDeep:
                 "http://example.com", 400, "Bad Request", {}, None
             ),
         ):
-            ok, msg = _validate_api_key("AIzaBadKey")
+            ok, msg = _validate_api_key("sk-bad-key")
         assert ok is False
         assert "❌" in msg
 
@@ -1101,7 +1111,7 @@ class TestKotoSetupDeep:
                 "http://example.com", 403, "Forbidden", {}, None
             ),
         ):
-            ok, msg = _validate_api_key("AIzaForbidden")
+            ok, msg = _validate_api_key("sk-forbidden")
         assert ok is False
         assert "403" in msg or "❌" in msg
 
@@ -1116,7 +1126,7 @@ class TestKotoSetupDeep:
                 "http://example.com", 500, "Server Error", {}, None
             ),
         ):
-            ok, msg = _validate_api_key("AIzaTestKey123456789012345678")
+            ok, msg = _validate_api_key("sk-test-key-123456789")
         assert ok is False
         assert "500" in msg
 
@@ -1124,7 +1134,7 @@ class TestKotoSetupDeep:
         from src.koto_setup import _validate_api_key
 
         with patch("urllib.request.urlopen", side_effect=ConnectionError("no network")):
-            ok, msg = _validate_api_key("AIzaTestKey123456789012345678")
+            ok, msg = _validate_api_key("sk-test-key-123456789")
         assert ok is False
         assert "⚠" in msg
 
@@ -1138,7 +1148,7 @@ class TestKotoSetupDeep:
         with patch(
             "urllib.request.urlopen", return_value=mock_response
         ) as mock_urlopen:
-            ok, msg = _validate_api_key("AIzaKey", base="https://custom.api.com")
+            ok, msg = _validate_api_key("sk-key", base="https://custom.api.com")
         assert ok is True
         # Verify the custom base was used in the URL
         call_args = mock_urlopen.call_args
@@ -1151,8 +1161,8 @@ class TestKotoSetupDeep:
 
         with patch("sys.argv", ["koto_setup.py", "--setup"]), patch(
             "src.koto_setup._show_api_setup_wizard",
-            return_value={"key": "AIzaKey12345678901234567890", "base": ""},
-        ) as mock_wizard, patch("src.koto_setup._write_gemini_config"), patch(
+            return_value={"key": "sk-key-12345678901234567890", "base": ""},
+        ) as mock_wizard, patch("src.koto_setup._write_cloud_config"), patch(
             "src.koto_setup.APP_ROOT", Path(tempfile.mkdtemp())
         ):
             try:
@@ -1176,7 +1186,7 @@ class TestKotoSetupDeep:
         with patch("sys.argv", ["koto_setup.py"]), patch(
             "src.koto_setup._api_key_configured", return_value=True
         ), patch(
-            "src.koto_setup._read_config_values", return_value=("AIzaKey", "")
+            "src.koto_setup._read_config_values", return_value=("sk-key", "")
         ), patch(
             "src.koto_setup._validate_api_key", return_value=(True, "")
         ), patch(
@@ -1191,7 +1201,7 @@ class TestKotoSetupDeep:
         with patch("sys.argv", ["koto_setup.py"]), patch(
             "src.koto_setup._api_key_configured", return_value=True
         ), patch(
-            "src.koto_setup._read_config_values", return_value=("AIzaKey", "")
+            "src.koto_setup._read_config_values", return_value=("sk-key", "")
         ), patch(
             "src.koto_setup._validate_api_key", return_value=(False, "⚠️ 网络异常")
         ), patch(

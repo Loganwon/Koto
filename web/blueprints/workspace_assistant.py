@@ -492,6 +492,64 @@ def serve_workspace_file(filepath: str):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# GET /api/file/raw?path=<workspace-path>
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@workspace_assistant_bp.route("/api/file/raw")
+def serve_task_artifact_raw_file():
+    """Serve a task-result artifact for inline browser previews.
+
+    The workspace task card historically uses this query-string route for image
+    thumbnails.  Keep the compatibility surface, but resolve every path through
+    the same workspace-only download guard used by the file-tree endpoint.
+    """
+    from web.shared import WORKSPACE_DIR
+
+    raw_path = str(request.args.get("path") or "").strip()
+    if not raw_path:
+        return jsonify({"error": "缺少 path 参数"}), 400
+
+    workspace_root = Path(WORKSPACE_DIR).resolve()
+    normalized = raw_path.replace("\\", "/")
+    if normalized.startswith("workspace/"):
+        normalized = normalized[len("workspace/") :]
+
+    candidate = Path(normalized)
+    if candidate.is_absolute():
+        try:
+            filepath = str(candidate.resolve().relative_to(workspace_root)).replace(
+                "\\", "/"
+            )
+        except ValueError:
+            return jsonify({"error": "路径不合法"}), 403
+    else:
+        filepath = normalized
+
+    try:
+        served = _WORKSPACE_FILE_DOWNLOAD.serve_file(
+            workspace_dir=workspace_root,
+            filepath=filepath,
+            allowed_extensions=_ALLOWED_EXT,
+        )
+    except WorkspaceFilePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+    except WorkspaceFileNotFoundError:
+        return jsonify({"error": "文件不存在"}), 404
+    except WorkspaceFileUnsupportedTypeError:
+        return jsonify({"error": "不支持的文件类型"}), 400
+
+    response = send_file(
+        str(served.path),
+        mimetype=served.mime_type,
+        as_attachment=False,
+        download_name=served.download_name,
+    )
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # POST /api/v1/workspace/open_file_by_path
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -2160,21 +2218,21 @@ def audio_overview():
         import json as _json
 
         try:
+            from app.core.llm.provider_factory import get_llm_provider
             from web.audio_overview import AudioOverviewGenerator
-            from web.runtime_context import get_client, get_model_map
 
-            client = get_client()
-
-            # Pick a suitable model
-            _model = get_model_map().get("CHAT") or "gemini-2.5-flash-lite"
-            if _model.startswith("deep-research"):
-                _model = "gemini-2.5-flash-lite"
+            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
 
             # Build a simple wrapper that AudioOverviewGenerator expects
             class _ModelAdapter:
                 def generate_content(self, prompt):
-                    resp = client.models.generate_content(model=_model, contents=prompt)
-                    return resp
+                    resp = provider.generate_content(prompt=prompt, model="deepseek-chat")
+                    text = (
+                        str(resp.get("content") or resp.get("text") or "")
+                        if isinstance(resp, dict)
+                        else str(getattr(resp, "text", resp) or "")
+                    )
+                    return type("ProviderResponse", (), {"text": text})()
 
             gen = AudioOverviewGenerator(
                 output_dir=os.path.join(
@@ -2279,12 +2337,9 @@ def notebook_guide():
         import json as _json
 
         try:
-            from web.runtime_context import get_client, get_model_map
+            from app.core.llm.provider_factory import get_llm_provider
 
-            client = get_client()
-            _model = get_model_map().get("CHAT") or "gemini-2.5-flash-lite"
-            if _model.startswith("deep-research"):
-                _model = "gemini-2.5-flash-lite"
+            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
 
             for sec_key, sec_label, sec_prompt in SECTIONS:
                 full_prompt = (
@@ -2292,10 +2347,15 @@ def notebook_guide():
                     f"资料内容（共 {len(files)} 个文件）:\n{combined_text}"
                 )
                 try:
-                    resp = client.models.generate_content(
-                        model=_model, contents=full_prompt
+                    resp = provider.generate_content(
+                        prompt=full_prompt,
+                        model="deepseek-chat",
                     )
-                    content = (getattr(resp, "text", None) or "").strip()
+                    content = (
+                        str(resp.get("content") or resp.get("text") or "")
+                        if isinstance(resp, dict)
+                        else str(getattr(resp, "text", resp) or "")
+                    ).strip()
                     if not content:
                         content = "（AI 暂无回复）"
                 except Exception as sec_err:
@@ -2583,11 +2643,10 @@ def pdf_remove_watermark():
 
     pdf_path = str(matches[0])
 
+    # Cloud vision cleanup was tied to the archived provider. Keep the
+    # deterministic local cleanup path until a provider-neutral vision backend exists.
     api_key = None
-    if use_ai:
-        import os
-
-        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
+    use_ai = False
 
     try:
         from web.pdf_annotator import remove_watermark

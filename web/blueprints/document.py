@@ -3,13 +3,12 @@
 """
 Document processing blueprint.
 
-Routes (10 total):
+Routes (9 total):
   POST /api/document/smart-process        — Smart routing to annotation or analysis
   POST /api/document/feedback             — Full AI feedback loop on a document
   POST /api/document/analyze              — Analyze a document without applying changes
   POST /api/document/apply                — Apply modification suggestions
   POST /api/document/annotate             — Full annotation loop (AI → annotate → copy)
-  POST /api/document/analyze-annotations  — Analyze and return annotations (non-streaming)
   POST /api/document/batch-annotate-stream — Batch annotate via SSE stream
   POST /api/document/apply-annotations    — Apply annotation suggestions
   POST /api/document/suggest-stream       — Generate modification suggestions via SSE stream
@@ -24,7 +23,6 @@ import re
 from flask import Blueprint, Response, jsonify, request
 
 from web.document_feedback import (
-    analyze_annotations_only,
     collect_annotation_result,
     stream_annotation_events,
 )
@@ -136,7 +134,7 @@ def _call_document_annotate(file_path: str, requirement: str):
             file_path=file_path,
             user_requirement=requirement,
             gemini_client=_get_client(),
-            model_id="gemini-2.5-pro",
+            model_id="deepseek-chat",
         )
 
         # 添加处理模式标记
@@ -421,7 +419,7 @@ def document_annotate() -> Response:
         data = request.json
         file_path = data.get("file_path")
         user_requirement = data.get("requirement", "")
-        model_id = data.get("model_id", "gemini-2.5-pro")
+        model_id = data.get("model_id", "deepseek-chat")
 
         if not file_path:
             return jsonify({"success": False, "error": "缺少file_path参数"}), 400
@@ -445,36 +443,6 @@ def document_annotate() -> Response:
         import traceback
 
         traceback.print_exc()
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@document_bp.route("/api/document/analyze-annotations", methods=["POST"])
-def document_analyze_annotations() -> Response:
-    """仅分析文档并生成标注建议（不应用）- 已弃用，请使用 /api/document/batch-annotate-stream"""
-    try:
-        data = request.json
-        file_path = data.get("file_path")
-        user_requirement = data.get("requirement", "")
-
-        if not file_path:
-            return jsonify({"success": False, "error": "缺少file_path参数"}), 400
-
-        workspace_dir = _get_workspace_dir()
-        file_path = _resolve_document_path(file_path, workspace_dir)
-
-        if not os.path.exists(file_path):
-            return jsonify({"success": False, "error": f"文件不存在: {file_path}"}), 404
-
-        result = analyze_annotations_only(
-            file_path=file_path,
-            user_requirement=user_requirement,
-            gemini_client=_get_client(),
-            model_id="gemini-2.5-pro",
-        )
-
-        return jsonify(result)
-
-    except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
 
@@ -515,7 +483,7 @@ def document_batch_annotate_stream() -> Response:
                 file_path=file_path,
                 user_requirement=user_requirement,
                 gemini_client=_get_client(),
-                model_id="gemini-2.5-pro",
+                model_id="deepseek-chat",
             ),
             mimetype="text/event-stream",
             headers={

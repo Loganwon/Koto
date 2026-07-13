@@ -9,7 +9,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Iterable, List, Optional, Sequence
 
-from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import (
     FileTaskEvent,
     FileTaskFile,
@@ -37,6 +36,7 @@ from app.core.agent.file_task_doc_annotate_intent import (
     should_route_request,
     should_use_doc_annotate_bridge_execution,
 )
+from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.llm.model_mode import normalize_model_mode
 
 logger = logging.getLogger(__name__)
@@ -131,7 +131,7 @@ def _resolve_review_model_id(
             )
 
             provider_name = get_provider_for_model_mode(normalized_mode)
-            fallback_model = "gemini-3.1-pro-preview"
+            fallback_model = "deepseek-chat"
             if provider_name == "deepseek":
                 from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL
 

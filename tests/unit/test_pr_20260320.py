@@ -26,7 +26,7 @@ class TestSplitMessage:
     """_split_message chunking logic."""
 
     def _split(self, text, max_len=None):
-        from web.telegram_bot import _split_message
+        from app.core.services.telegram_bot import _split_message
 
         if max_len:
             return _split_message(text, max_len)
@@ -67,7 +67,7 @@ class TestAllowedIds:
     """_allowed_ids reads TELEGRAM_ALLOWED_CHAT_IDS from env."""
 
     def test_returns_none_when_env_not_set(self):
-        from web.telegram_bot import _allowed_ids
+        from app.core.services.telegram_bot import _allowed_ids
 
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("TELEGRAM_ALLOWED_CHAT_IDS", None)
@@ -75,14 +75,14 @@ class TestAllowedIds:
         assert result is None
 
     def test_parses_comma_separated_ids(self):
-        from web.telegram_bot import _allowed_ids
+        from app.core.services.telegram_bot import _allowed_ids
 
         with patch.dict(os.environ, {"TELEGRAM_ALLOWED_CHAT_IDS": "111,222,333"}):
             result = _allowed_ids()
         assert result == [111, 222, 333]
 
     def test_ignores_empty_segments(self):
-        from web.telegram_bot import _allowed_ids
+        from app.core.services.telegram_bot import _allowed_ids
 
         with patch.dict(os.environ, {"TELEGRAM_ALLOWED_CHAT_IDS": "111,,222"}):
             result = _allowed_ids()
@@ -95,7 +95,7 @@ class TestGetTelegramBot:
     """get_telegram_bot() singleton behaviour."""
 
     def test_returns_none_without_token(self):
-        from web import telegram_bot as tb
+        from app.core.services import telegram_bot as tb
 
         # Reset singleton so the factory runs fresh
         orig = tb._bot_instance
@@ -109,7 +109,7 @@ class TestGetTelegramBot:
             tb._bot_instance = orig
 
     def test_creates_instance_with_token(self):
-        from web import telegram_bot as tb
+        from app.core.services import telegram_bot as tb
 
         orig = tb._bot_instance
         tb._bot_instance = None
@@ -127,7 +127,7 @@ class TestTelegramBotHelpers:
     """TelegramBot instance helpers without real HTTP."""
 
     def setup_method(self):
-        from web.telegram_bot import TelegramBot
+        from app.core.services.telegram_bot import TelegramBot
 
         self.bot = TelegramBot(token="999:FAKE_TOKEN")
 
@@ -175,7 +175,7 @@ def _make_memory_app():
     """Create a minimal Flask app with memory routes registered."""
     from flask import Flask
 
-    from web.memory_api_routes import register_memory_routes
+    from web.blueprints.memory_api import register_memory_routes
 
     app = Flask(__name__)
     app.config["TESTING"] = True
@@ -223,7 +223,7 @@ class TestMemoryApiRoutes:
 
     def setup_method(self):
         self._sw_patcher = patch(
-            "web.memory_api_routes._get_shadow_watcher", return_value=None
+            "web.blueprints.memory_api._get_shadow_watcher", return_value=None
         )
         self._sw_patcher.start()
         self.client, self.mgr = _make_memory_app()
@@ -257,7 +257,7 @@ class TestMemoryApiRoutes:
         assert r.status_code == 400
 
     def test_delete_memory_returns_200(self):
-        with patch("web.memory_api_routes._get_shadow_watcher", return_value=None):
+        with patch("web.blueprints.memory_api._get_shadow_watcher", return_value=None):
             r = self.client.delete("/api/memories/1")
         assert r.status_code == 200
         data = r.get_json()
@@ -282,7 +282,7 @@ class TestMemoryApiRoutes:
 
     def test_manager_exception_returns_500(self):
         self.mgr.get_all_memories.side_effect = RuntimeError("db error")
-        with patch("web.memory_api_routes._get_shadow_watcher", return_value=None):
+        with patch("web.blueprints.memory_api._get_shadow_watcher", return_value=None):
             r = self.client.get("/api/memories")
         assert r.status_code == 500
 

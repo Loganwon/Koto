@@ -1,7 +1,7 @@
 <!-- Split.js served locally so a CDN failure cannot crash the workspace runtime -->
-<script src="/static/vendor/split.min.js"></script>
+<script src="{{ asset_url('vendor/split.min.js') }}"></script>
 <script>
-  var $, WA, state, Router, showToast, autoResize, lastSelectionText;
+  var $, WA = window.WA = window.WA || {}, state, Router, showToast, autoResize, lastSelectionText;
   var _csrfFetch, _escHtml, _fileIcon, _normalizeWorkspaceModelMode;
   var _DEFAULT_FILE_SVG, _DOC_SVG, _FOLDER_SVG, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG;
   var _PIN_SVG, _PENCIL_SVG, _SEARCH_SVG, _CLIPBOARD_SVG, _CHART_SVG, _LIGHTBULB_SVG;
@@ -11,8 +11,18 @@
   var _waAiResultsRuntime, _waQuickActionRuntime, _waConversationRuntime, _waTaskDispatcher, _waQuickActionDispatcherAttached;
   var _hostSessionId, _WA_RUNTIME_SESSION_ID, _initWorkspaceAiRuntimes, _hydrateAiConversation, _waSession, _waRenderMarkdown, _waQuickActionModelMode, _waSampleTaskContext, _persistWorkspaceConversationTurn;
   var _sanitizeRenderedHtml, _getPinnedSelectionSourceMeta, _selectionContextText, _selectionContextSourceLabel, _createPinnedSelectionContext, _setStreamBtn;
+  WA._pendingSendBrowserFilesToAI = WA._pendingSendBrowserFilesToAI || [];
+  WA.sendBrowserFileToAI = WA.sendBrowserFileToAI || function(path) {
+    path = String(path || '').trim();
+    if (!path) return Promise.resolve();
+    if (typeof WA.attachFilesToTask === 'function') {
+      return WA.attachFilesToTask([path], { source: 'file_tree_inline_action', focusInput: true });
+    }
+    WA._pendingSendBrowserFilesToAI.push(path);
+    return Promise.resolve();
+  };
 </script>
 <!-- Bundled TS → IIFE: workspace + editors + ui -->
-<script src="{{ url_for('static', filename='js/build/workspace-bundle.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ asset_url('js/build/workspace-bundle.js') }}"></script>
 <!-- Bundled TS → IIFE: docx review modules -->
-<script src="{{ url_for('static', filename='js/build/review-bundle.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ asset_url('js/build/review-bundle.js') }}"></script>

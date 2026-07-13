@@ -15,6 +15,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+import app.core.agent.unified_agent as unified_agent_module
 from app.core.agent.types import AgentStep, AgentStepType
 from app.core.agent.unified_agent import UnifiedAgent
 
@@ -73,6 +74,27 @@ def _run_and_capture_user_message(agent: UnifiedAgent, message: str = "hello") -
 
 # Keep the old name as an alias so test methods below read clearly.
 _run_and_capture_instruction = _run_and_capture_user_message
+
+
+def test_unified_agent_record_task_false_skips_agent_ledger(monkeypatch):
+    agent = _make_agent()
+    progress_bus = MagicMock()
+
+    def fail_if_ledger_requested():
+        raise AssertionError("record_task=False must not create an agent ledger task")
+
+    monkeypatch.setattr(
+        unified_agent_module, "_get_task_ledger", fail_if_ledger_requested
+    )
+    monkeypatch.setattr(
+        unified_agent_module,
+        "_get_progress_bus",
+        lambda: (progress_bus, object),
+    )
+
+    steps = list(agent.run(input_text="health check", record_task=False))
+
+    assert any(step.step_type == AgentStepType.ANSWER for step in steps)
 
 
 # ---------------------------------------------------------------------------

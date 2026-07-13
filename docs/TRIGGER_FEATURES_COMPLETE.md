@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for active guides.
+
 # ✅ Koto v2.0 触发器参数编辑功能 - 完成总结
 
 ## 🎉 功能已完成！
@@ -27,7 +29,7 @@
 |------|------|------|
 | `web/proactive_trigger.py` | +150 行 | 参数管理系统 |
 | `web/app.py` | +70 行 | API 端点 |
-| `web/static/js/app.js` | +100 行 | UI 交互 |
+| `web/src/app/ (已迁移至模块化主应用)` | +100 行 | UI 交互 |
 | `web/static/css/style.css` | +50 行 | 样式美化 |
 
 ### 文档

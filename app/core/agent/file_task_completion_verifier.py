@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List
+
+from app.core.agent.file_task_targeting import explicit_output_paths_from_task
 
 
 def _parse_json_list(value: Any) -> List[Dict[str, Any]]:
@@ -80,105 +83,209 @@ def _path_matches_expected_target(path: Any, expected_target: str) -> bool:
     normalized_path = _normalize_compare_path(path)
     if normalized_path and normalized_path == normalized_expected:
         return True
-    if not _is_bare_filename(expected):
-        return False
     expected_basename = os.path.basename(expected).lower()
     actual_basename = os.path.basename(str(path or "")).lower()
+    if _is_bare_filename(path):
+        return bool(expected_basename and actual_basename == expected_basename)
+    if not _is_bare_filename(expected):
+        return False
     return bool(expected_basename and actual_basename == expected_basename)
+
+
+def _has_verifier_artifact_creation_intent(task_text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:创建|生成|输出|导出|产出|保存|写入|制作|create|generate|export|save|write|produce)",
+            str(task_text or ""),
+            re.IGNORECASE,
+        )
+    )
+
+
+def _explicit_output_file_paths(task_description: str) -> List[str]:
+    return explicit_output_paths_from_task(
+        task_description,
+        has_artifact_creation_intent=_has_verifier_artifact_creation_intent,
+    )
+
+
+def _missing_explicit_outputs(
+    expected_outputs: List[str],
+    states: List[Dict[str, Any]],
+    changes: List[Dict[str, Any]],
+) -> List[str]:
+    available_paths = [
+        *(str(state.get("path") or "") for state in states if isinstance(state, dict)),
+        *(
+            str(change.get("path") or "")
+            for change in changes
+            if isinstance(change, dict)
+        ),
+    ]
+    missing: List[str] = []
+    for expected in expected_outputs:
+        if any(
+            _path_matches_expected_target(path, expected) for path in available_paths
+        ):
+            continue
+        missing.append(expected)
+    return missing
 
 
 def _verification_summary_from_changes(
     changes: List[Dict[str, Any]], target_path: str = ""
 ) -> str:
     primary = changes[0] if changes else {}
-    primary_path = str(primary.get("path") or target_path or "").strip()
+    fallback_copy = bool(primary.get("fallback_copy"))
+    primary_change_path = str(primary.get("path") or "").strip()
+    primary_path = (
+        primary_change_path
+        if fallback_copy
+        else str(target_path or primary_change_path or "").strip()
+    )
     file_name = os.path.basename(primary_path) or primary_path or "目标文件"
     details: List[str] = []
-    operation = str(primary.get("operation") or "").strip()
-    fallback_copy = bool(primary.get("fallback_copy"))
+    target_changes = [
+        change
+        for change in changes
+        if isinstance(change, dict)
+        and (
+            not primary_path
+            or _path_matches_expected_target(change.get("path"), primary_path)
+        )
+    ] or ([primary] if primary else [])
     original_target_path = str(
         primary.get("original_target_path") or target_path or ""
     ).strip()
     original_target_name = (
         os.path.basename(original_target_path) or original_target_path
     )
+    image_changes = [
+        change
+        for change in target_changes
+        if str(change.get("operation") or "").strip() == "insert_image_into_docx"
+    ]
+    aggregate_images = len(image_changes) > 1
+    image_summary_added = False
+    reported_docx_paragraphs = 0
 
-    if operation == "insert_excel_as_docx_table":
-        sheet = str(primary.get("sheet") or "").strip()
-        rows = int(primary.get("rows_written") or 0)
-        cols = int(primary.get("columns_written") or 0)
-        if sheet:
-            details.append(f"已写入工作表“{sheet}”")
-        if rows and cols:
-            details.append(f"{rows} 行 × {cols} 列")
-        elif rows:
-            details.append(f"已写入 {rows} 行")
-        if fallback_copy and original_target_name:
-            details.append(
-                f"原目标文件 {original_target_name} 当前不可写，已输出更新副本"
+    def image_display_name(change: Dict[str, Any]) -> str:
+        name = str(change.get("image_name") or "").strip()
+        if name:
+            return name
+        path = str(change.get("image_path") or "").strip()
+        return os.path.basename(path) if path else ""
+
+    def append_aggregate_image_summary() -> None:
+        total_images = 0
+        image_names: List[str] = []
+        captions: List[str] = []
+        for item in image_changes:
+            total_images += int(item.get("images_inserted") or 0)
+            name = image_display_name(item)
+            if name and name not in image_names:
+                image_names.append(name)
+            caption = str(item.get("caption") or "").strip()
+            if caption and caption not in captions:
+                captions.append(caption)
+        if not total_images:
+            total_images = len(image_changes)
+        details.append(f"已插入 {total_images} 张图片")
+        if image_names:
+            details.append(f"图片：{'、'.join(image_names)}")
+        if captions:
+            details.append(f"说明：{'；'.join(captions)}")
+
+    for change in target_changes:
+        operation = str(change.get("operation") or "").strip()
+        if operation == "insert_excel_as_docx_table":
+            sheet = str(change.get("sheet") or "").strip()
+            rows = int(change.get("rows_written") or 0)
+            cols = int(change.get("columns_written") or 0)
+            if sheet:
+                details.append(f"已写入工作表“{sheet}”")
+            if rows and cols:
+                details.append(f"{rows} 行 × {cols} 列")
+            elif rows:
+                details.append(f"已写入 {rows} 行")
+            if fallback_copy and original_target_name:
+                details.append(
+                    f"原目标文件 {original_target_name} 当前不可写，已输出更新副本"
+                )
+        elif operation == "design_pptx_theme_layout":
+            slides = int(
+                change.get("slides_designed") or change.get("total_slides") or 0
             )
-    elif operation == "design_pptx_theme_layout":
-        slides = int(primary.get("slides_designed") or primary.get("total_slides") or 0)
-        theme_name = str(primary.get("theme_name") or "").strip()
-        if slides:
-            details.append(f"已应用 {slides} 页统一主题版式")
-        if theme_name:
-            details.append(f"主题：{theme_name}")
-    elif operation == "write_pptx_slides":
-        updated = int(primary.get("slides_updated") or 0)
-        if updated:
-            details.append(f"已更新 {updated} 页幻灯片")
-    elif operation == "add_pptx_slides":
-        added = int(primary.get("slides_added") or 0)
-        if added:
-            details.append(f"已新增 {added} 页幻灯片")
-    elif operation == "write_sheet_data":
-        cells = int(primary.get("cells_written") or 0)
-        if cells:
-            details.append(f"已写入 {cells} 个单元格")
-    elif operation == "replace_file_selection":
-        replacements = int(primary.get("replacements_made") or 0)
-        if replacements:
-            details.append(f"已替换 {replacements} 处选区")
-    elif operation == "write_docx_content":
-        paragraphs = int(primary.get("paragraphs_written") or 0)
-        if paragraphs:
-            details.append(f"已写入 {paragraphs} 个段落")
-    elif operation == "insert_image_into_docx":
-        images_inserted = int(primary.get("images_inserted") or 0)
-        image_name = str(primary.get("image_name") or "").strip()
-        caption = str(primary.get("caption") or "").strip()
-        if images_inserted:
-            details.append(f"已插入 {images_inserted} 张图片")
-        if image_name:
-            details.append(f"图片：{image_name}")
-        if caption:
-            details.append(f"说明：{caption}")
-    elif operation == "annotate_file":
-        annotations = int(primary.get("annotations_added") or 0)
-        if annotations:
-            details.append(f"已添加 {annotations} 条批注")
-    elif operation in {"compare_docx_and_annotate", "write_docx_comments"}:
-        differences = int(primary.get("differences_detected") or 0)
-        annotations = int(primary.get("annotations_added") or 0)
-        if differences:
-            details.append(f"已发现 {differences} 处差异")
-        if annotations:
-            details.append(f"已标注 {annotations} 条差异批注")
-    elif operation == "clear_docx_review_marks":
-        comments_removed = int(primary.get("comments_removed") or 0)
-        revisions_accepted = int(primary.get("revisions_accepted") or 0)
-        if comments_removed:
-            details.append(f"已清除 {comments_removed} 条批注")
-        if revisions_accepted:
-            details.append(f"已接受 {revisions_accepted} 处修订")
+            theme_name = str(change.get("theme_name") or "").strip()
+            if slides:
+                details.append(f"已应用 {slides} 页统一主题版式")
+            if theme_name:
+                details.append(f"主题：{theme_name}")
+        elif operation == "write_pptx_slides":
+            updated = int(change.get("slides_updated") or 0)
+            if updated:
+                details.append(f"已更新 {updated} 页幻灯片")
+        elif operation == "add_pptx_slides":
+            added = int(change.get("slides_added") or 0)
+            if added:
+                details.append(f"已新增 {added} 页幻灯片")
+        elif operation == "write_sheet_data":
+            cells = int(change.get("cells_written") or 0)
+            if cells:
+                details.append(f"已写入 {cells} 个单元格")
+        elif operation == "replace_file_selection":
+            replacements = int(change.get("replacements_made") or 0)
+            if replacements:
+                details.append(f"已替换 {replacements} 处选区")
+        elif operation == "write_docx_content":
+            reported_docx_paragraphs += int(change.get("paragraphs_written") or 0)
+        elif operation == "insert_image_into_docx":
+            if aggregate_images:
+                if not image_summary_added:
+                    append_aggregate_image_summary()
+                    image_summary_added = True
+                continue
+            images_inserted = int(change.get("images_inserted") or 0)
+            image_name = str(change.get("image_name") or "").strip()
+            caption = str(change.get("caption") or "").strip()
+            if images_inserted:
+                details.append(f"已插入 {images_inserted} 张图片")
+            if image_name:
+                details.append(f"图片：{image_name}")
+            if caption:
+                details.append(f"说明：{caption}")
+        elif operation == "annotate_file":
+            annotations = int(change.get("annotations_added") or 0)
+            if annotations:
+                details.append(f"已添加 {annotations} 条批注")
+        elif operation in {"compare_docx_and_annotate", "write_docx_comments"}:
+            differences = int(change.get("differences_detected") or 0)
+            annotations = int(change.get("annotations_added") or 0)
+            if differences:
+                details.append(f"已发现 {differences} 处差异")
+            if annotations:
+                details.append(f"已标注 {annotations} 条差异批注")
+        elif operation == "clear_docx_review_marks":
+            comments_removed = int(change.get("comments_removed") or 0)
+            revisions_accepted = int(change.get("revisions_accepted") or 0)
+            if comments_removed:
+                details.append(f"已清除 {comments_removed} 条批注")
+            if revisions_accepted:
+                details.append(f"已接受 {revisions_accepted} 处修订")
+
+    if reported_docx_paragraphs:
+        details.append(f"本次工具调用写入 {reported_docx_paragraphs} 个段落")
+    verified_docx_paragraphs = _verified_docx_nonempty_paragraph_count(primary_path)
+    if verified_docx_paragraphs is not None:
+        details.append(f"核验：文档现有 {verified_docx_paragraphs} 个非空段落")
 
     warning = str(primary.get("warning") or "").strip()
     if warning:
         details.append(f"提示：{warning}")
 
-    if len(changes) > 1:
-        details.append(f"另有 {len(changes) - 1} 个相关文件变更")
+    other_change_count = max(0, len(changes) - len(target_changes))
+    if other_change_count:
+        details.append(f"另有 {other_change_count} 个其他文件变更")
 
     summary = (
         f"已生成更新副本：{file_name}"
@@ -188,6 +295,23 @@ def _verification_summary_from_changes(
     if details:
         summary += "；" + "，".join(details)
     return summary
+
+
+def _verified_docx_nonempty_paragraph_count(path: str) -> int | None:
+    """Read the delivered DOCX so completion copy never presents a guess as fact."""
+    raw_path = str(path or "").strip()
+    if not raw_path or Path(raw_path).suffix.lower() != ".docx":
+        return None
+    resolved = _safe_resolve_for_compare(raw_path)
+    if not resolved or not os.path.isfile(resolved):
+        return None
+    try:
+        from docx import Document
+
+        document = Document(resolved)
+        return sum(1 for paragraph in document.paragraphs if paragraph.text.strip())
+    except Exception:
+        return None
 
 
 def _task_requires_docx_summary_with_excel_table(
@@ -285,6 +409,47 @@ def verify_task_completion(
                         "criterion": "file_state_available",
                         "passed": False,
                         "detail": "无文件状态信息",
+                        "priority": "critical",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+    expected_outputs = _explicit_output_file_paths(task_description)
+    missing_outputs = _missing_explicit_outputs(expected_outputs, states, changes)
+    if missing_outputs:
+        missing_names = [
+            os.path.basename(path) or path for path in missing_outputs if path
+        ]
+        produced_names = [
+            os.path.basename(str(item.get("path") or ""))
+            for item in [*states, *changes]
+            if isinstance(item, dict) and str(item.get("path") or "").strip()
+        ]
+        return json.dumps(
+            {
+                "completed": False,
+                "confidence": 0.45,
+                "summary": "显式要求的输出文件尚未全部生成："
+                + "、".join(missing_names),
+                "remaining_steps": [f"生成 {name}" for name in missing_names if name],
+                "criteria_results": [
+                    {
+                        "criterion": "explicit_output_files_present",
+                        "passed": False,
+                        "detail": (
+                            "用户显式要求输出这些文件："
+                            + "、".join(
+                                os.path.basename(path) or path
+                                for path in expected_outputs
+                            )
+                            + "；当前已检测到："
+                            + (
+                                "、".join(name for name in produced_names if name)
+                                or "无"
+                            )
+                        ),
                         "priority": "critical",
                     }
                 ],

@@ -5,6 +5,7 @@
 
 import { $, _PENCIL_SVG, _PIN_SVG, _TRASH_SVG, _escHtml, showToast } from './infrastructure';
 import { _switchToTab, state } from './state';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 type ReviewItem = Record<string, any>;
 
@@ -225,11 +226,19 @@ function _isReviewCommentModeEnabled(): boolean {
 
 function _getReviewCommentSelectionState(): any {
   const snapshot = state._reviewSelectionSnapshot || null;
-  if (snapshot && _clean(snapshot.rawText || snapshot.text)) return snapshot;
   const selection = window.getSelection();
+  if (snapshot && _clean(snapshot.rawText || snapshot.text)) {
+    return { ...snapshot, supported: true, selection };
+  }
   const rawText = selection ? _clean(selection.toString()) : '';
-  if (!rawText) return { valid: false, message: '请先选中文档正文' };
-  return { valid: true, rawText, previewText: _previewReviewText(rawText, 80) };
+  if (!rawText) return { valid: false, supported: false, selection: null, message: '请先选中文档正文' };
+  return {
+    valid: true,
+    supported: true,
+    selection,
+    rawText,
+    previewText: _previewReviewText(rawText, 80),
+  };
 }
 
 function _getReviewLayout(): any {
@@ -267,12 +276,12 @@ function _scheduleReviewLayout(): void {
 function _setStoredReviewMode(mode: string): void {
   const normalized = ['all', 'comments', 'proposals'].includes(mode) ? mode : 'all';
   state._reviewMode = normalized;
-  try { localStorage.setItem('wa_review_mode', normalized); } catch (_) {}
+  try { localStorage.setItem('wa_review_mode', normalized); } catch (_) { /* allowed to fail */ }
 }
 
 function _setReviewCenterOpen(open: boolean): void {
   state._reviewCenterOpen = !!open;
-  try { localStorage.setItem('wa_review_center_open', open ? '1' : '0'); } catch (_) {}
+  try { localStorage.setItem('wa_review_center_open', open ? '1' : '0'); } catch (_) { /* allowed to fail */ }
 }
 
 function _reviewCounts(reviewState = _ensureTabReviewState()): { comments: number; proposals: number; total: number } {
@@ -441,7 +450,7 @@ function _normalizeWorkspaceFilePath(path: any): string {
     const markerIndex = normalizedPath.toLowerCase().lastIndexOf(marker);
     if (markerIndex >= 0) return normalizedPath.slice(markerIndex + marker.length).replace(/^\//, '');
   }
-  return normalizedPath.replace(/^\//, '');
+  return normalizedPath.replace(/^\//, '').replace(/^workspace\//i, '');
 }
 
 function _reviewPathsMatch(lhs: any, rhs: any): boolean {
@@ -467,9 +476,9 @@ function _resolveStructuredReviewTargetTab(payload: any): any {
 }
 
 function _activeDocxPlainText(): string {
-  const doc = state.activeEditor?.editor?.state?.doc;
+  const doc = (state.activeEditor as any)?.editor?.state?.doc;
   if (doc && typeof doc.textBetween === 'function') {
-    try { return _clean(doc.textBetween(0, doc.content.size, '\n', '\n')).replace(/\u00a0/g, ' '); } catch (_) {}
+    try { return _clean(doc.textBetween(0, doc.content.size, '\n', '\n')).replace(/\u00a0/g, ' '); } catch (e) { console.warn("[Koto]", e) }
   }
   const root = document.querySelector('#wa-docx-editor .ProseMirror');
   return _clean(root?.textContent || '').replace(/\u00a0/g, ' ');
@@ -589,7 +598,7 @@ function _scrollProposalCardIntoView(proposalId: string): void {
 }
 
 function _scheduleAutoSave(): void {
-  const fn = (window as any).WA && (window as any).WA.scheduleAutoSave;
+  const fn = getWorkspaceApi().scheduleAutoSave;
   if (typeof fn === 'function') fn();
 }
 
@@ -870,6 +879,7 @@ document.addEventListener('selectionchange', () => {
 (window as any)._syncReviewSelectionSnapshot = _captureReviewSelection;
 (window as any)._renderReviewSelectionLauncher = () => _getReviewLayout()?.renderReviewSelectionLauncher?.();
 (window as any)._hideReviewSelectionLauncher = () => _getReviewLayout()?.hideReviewSelectionLauncher?.();
+(window as any)._isReviewCommentModeEnabled = _isReviewCommentModeEnabled;
 (window as any)._isReviewEditorFocused = _isReviewEditorFocused;
 (window as any)._isReviewShellFocused = () => !!document.activeElement?.closest?.('#wa-review-shell');
 
@@ -878,8 +888,6 @@ document.addEventListener('selectionchange', () => {
 (window as any).WA.createReviewComment = _createReviewComment;
 (window as any).WA.createReviewRevision = _createReviewRevision;
 (window as any).WA.openReviewCenter = () => { _setReviewCenterOpen(true); _renderReviewShell(); };
-(window as any).WA.closeReviewCenter = () => { _setReviewCenterOpen(false); _renderReviewShell(); };
-(window as any).WA.setReviewMode = (mode: string) => { _setStoredReviewMode(mode); _setReviewCenterOpen(true); _renderReviewShell(); };
 (window as any).WA.toggleReviewCommentMode = (forceOpen?: boolean) => {
   if (state.fileType !== 'docx') {
     showToast('当前仅 DOCX 文档支持批注模式', 'info');

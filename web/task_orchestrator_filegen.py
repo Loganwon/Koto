@@ -8,8 +8,14 @@ import os
 import re
 from datetime import datetime
 
+from app.core.services.ppt_generation_service import (
+    PPTGenerationService,
+    choose_ppt_theme,
+    parse_ppt_outline_markdown,
+)
+
 try:
-    from google.genai import types
+    from app.core.llm.provider_compat import types
 except Exception:  # pragma: no cover - optional SDK in some test envs
     types = None
 
@@ -73,7 +79,7 @@ async def execute_file_gen(
                 from web.doc_planner import DocumentPlanner
 
                 _planner = DocumentPlanner(
-                    ai_client=client, model_name="gemini-2.5-flash"
+                    ai_client=client, model_name="deepseek-chat"
                 )
                 _report("📋 规划文档结构...", "分析需求/分配章节")
                 _doc_plan = await _planner.plan(
@@ -274,96 +280,6 @@ async def execute_file_gen(
                     return [headers] + rows
             return None
 
-        # 解析PPT大纲结构（支持智能规划标签）
-        def _parse_ppt_outline(md_text: str) -> dict:
-            """解析带 [类型] 标签的 PPT 大纲"""
-            lines = md_text.split("\n")
-            outline = {"title": "", "slides": []}
-            _tmap = {
-                "过渡页": "divider",
-                "过渡": "divider",
-                "详细": "detail",
-                "重点": "detail",
-                "亮点": "highlight",
-                "数据": "highlight",
-                "概览": "overview",
-                "速览": "overview",
-                "简要": "overview",
-                "对比": "comparison",
-                "比较": "comparison",
-            }
-            cur_type = "detail"
-            cur_slide = None
-            cur_sub = None
-
-            for line in lines:
-                line = line.rstrip()
-                if line.strip() in ("```", "```markdown"):
-                    continue
-                tm = re.match(r"^\s*\[(.+?)\]\s*$", line)
-                if tm:
-                    cur_type = _tmap.get(tm.group(1).strip(), "detail")
-                    continue
-                if line.startswith("# ") and not line.startswith("## "):
-                    outline["title"] = line[2:].strip()
-                elif line.startswith("## "):
-                    if (
-                        cur_sub
-                        and cur_slide
-                        and cur_slide.get("type") in ("overview", "comparison")
-                    ):
-                        cur_slide.setdefault("subsections", []).append(cur_sub)
-                        cur_sub = None
-                    if cur_slide:
-                        outline["slides"].append(cur_slide)
-                    cur_slide = {
-                        "type": cur_type,
-                        "title": line[3:].strip(),
-                        "points": [],
-                        "content": [],
-                    }
-                    if cur_type == "divider":
-                        cur_slide["description"] = ""
-                    cur_type = "detail"
-                    cur_sub = None
-                elif line.startswith("### ") and cur_slide:
-                    if cur_sub:
-                        cur_slide.setdefault("subsections", []).append(cur_sub)
-                    cur_sub = {
-                        "subtitle": line[4:].strip(),
-                        "label": line[4:].strip(),
-                        "points": [],
-                    }
-                elif re.match(r"^[\s]*[-•*]\s", line) and cur_slide is not None:
-                    pt = re.sub(r"^[\s]*[-•*]\s+", "", line).strip()
-                    if cur_sub is not None:
-                        cur_sub["points"].append(pt)
-                    else:
-                        cur_slide["points"].append(pt)
-                        cur_slide["content"].append(pt)
-                elif (
-                    cur_slide
-                    and cur_slide.get("type") == "divider"
-                    and line.strip()
-                ):
-                    cur_slide["description"] = line.strip()
-
-            if (
-                cur_sub
-                and cur_slide
-                and cur_slide.get("type") in ("overview", "comparison")
-            ):
-                cur_slide.setdefault("subsections", []).append(cur_sub)
-            if cur_slide:
-                outline["slides"].append(cur_slide)
-            for sl in outline["slides"]:
-                if sl.get("type") == "comparison" and "subsections" in sl:
-                    subs = sl["subsections"]
-                    if len(subs) >= 2:
-                        sl["left"] = subs[0]
-                        sl["right"] = subs[1]
-            return outline
-
         title = "生成文档"
         if "价格" in user_input or "表格" in user_input:
             title = "价格波动表格"
@@ -377,9 +293,7 @@ async def execute_file_gen(
         # 生成PPT
         if prefer_ppt:
             try:
-                from web.ppt_generator import PPTGenerator
-
-                ppt_outline = _parse_ppt_outline(text_out)
+                ppt_outline = parse_ppt_outline_markdown(text_out)
 
                 # ── 质量门控 ──
                 try:
@@ -394,31 +308,10 @@ async def execute_file_gen(
                 except Exception as _qge:
                     _app_logger.warning(f"[FILE_GEN] ⚠️ PPT 质量门控异常: {_qge}")
 
-                # 确定主题（通过关键词检测）
-                theme = "business"  # 默认商务主题
-                user_input_lower = user_input.lower()
-                if (
-                    "tech" in user_input_lower
-                    or "技术" in user_input_lower
-                    or "科技" in user_input_lower
-                ):
-                    theme = "tech"
-                elif (
-                    "creative" in user_input_lower
-                    or "创意" in user_input_lower
-                    or "艺术" in user_input_lower
-                ):
-                    theme = "creative"
-                elif (
-                    "simple" in user_input_lower
-                    or "minimal" in user_input_lower
-                    or "极简" in user_input_lower
-                ):
-                    theme = "minimal"
+                theme = choose_ppt_theme(user_input)
 
                 _report("正在生成PPT...", f"主题: {theme} (自动配图)")
 
-                ppt_gen = PPTGenerator(theme=theme)
                 timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                 filename = (
                     f"{ppt_outline.get('title', 'Presentation')}_{timestamp}.pptx"
@@ -438,10 +331,11 @@ async def execute_file_gen(
                     except Exception:
                         import logging; logging.getLogger(__name__).warning("Silenced exception caught", exc_info=True)
 
-                ppt_gen.generate_from_outline(
+                PPTGenerationService().generate_from_outline(
                     title=ppt_outline.get("title", "演示"),
                     outline=ppt_outline.get("slides", []),
                     output_path=ppt_path,
+                    theme=theme,
                     enable_ai_images=True,
                     progress_callback=_ppt_progress_wrapper,
                 )

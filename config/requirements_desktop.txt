@@ -1,0 +1,16 @@
+﻿# ===== Koto - Desktop Mode Extras =====
+# Install AFTER core dependencies:
+#   pip install -r config/requirements_core.txt
+#   pip install -r config/requirements_desktop.txt
+#
+# These packages are only needed for the standalone desktop window mode.
+# Server/cloud deployments do NOT need these.
+
+# ── Desktop Window (Windows) ──
+pywebview>=5.0.0
+
+# ── System Tray ──
+pystray>=0.19.0
+
+# ── Clipboard ──
+pyperclip>=1.8.2

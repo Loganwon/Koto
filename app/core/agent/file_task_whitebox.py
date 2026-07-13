@@ -33,33 +33,9 @@ def _tool_name(definition: Dict[str, Any]) -> str:
 
 
 def _target_type(request: FileTaskRequest, files: Sequence[FileTaskFile]) -> str:
-    candidate = Path(str(request.target_path or "")).suffix.lstrip(".").lower().strip()
-    if candidate:
-        return candidate
-    for file_info in files:
-        if file_info.target:
-            candidate = (
-                str(
-                    file_info.type
-                    or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
-                )
-                .lower()
-                .strip()
-            )
-            if candidate:
-                return candidate
-    for file_info in files:
-        candidate = (
-            str(
-                file_info.type
-                or Path(str(file_info.path or file_info.name)).suffix.lstrip(".")
-            )
-            .lower()
-            .strip()
-        )
-        if candidate:
-            return candidate
-    return ""
+    from app.core.agent.file_task_recipes import request_target_file_type
+
+    return request_target_file_type(request, files)
 
 
 @dataclass

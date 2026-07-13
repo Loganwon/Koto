@@ -12,6 +12,10 @@ from pathlib import Path
 
 block_cipher = None
 ROOT = os.path.abspath('.')
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from build_config import protected_dir_paths
 
 # ═══════════════════════════════════════════════
 # 数据文件（资源 + Python 源码）
@@ -22,16 +26,10 @@ datas = []
 # ── Protected 模式：检测是否存在 Cython 编译产物 ──────────────────────────────
 # 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
 # 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
-_PROTECTED_DIRS = {
-    os.path.join(ROOT, 'app', 'core', 'agent'),
-    os.path.join(ROOT, 'app', 'core', 'llm'),
-    os.path.join(ROOT, 'app', 'core', 'memory'),
-    os.path.join(ROOT, 'app', 'core', 'workflow'),
-    os.path.join(ROOT, 'app', 'core', 'skills'),
-    os.path.join(ROOT, 'app', 'core', 'learning'),
-    os.path.join(ROOT, 'app', 'core', 'routing'),
-    os.path.join(ROOT, 'app', 'core', 'goal'),
-    os.path.join(ROOT, 'app', 'core', 'tasks'),
+_PROTECTED_DIRS = protected_dir_paths(ROOT)
+_ARCHIVED_RUNTIME_FILES = {
+    os.path.normcase(os.path.abspath(os.path.join(ROOT, 'app', 'core', 'llm', name)))
+    for name in ('gemini.py', 'gemini_config.py')
 }
 
 def _protected_pyd_exists(py_path):
@@ -67,6 +65,8 @@ def _add_dir_filtered(src_dir, dst_dir):
             # 递归子目录
             _add_dir_filtered(fpath, os.path.join(dst_dir, fname))
         else:
+            if os.path.normcase(os.path.abspath(fpath)) in _ARCHIVED_RUNTIME_FILES:
+                continue
             if is_protected and fname.endswith('.py') and fname != '__init__.py':
                 if _protected_pyd_exists(fpath):
                     continue  # 有 .pyd，跳过 .py
@@ -105,7 +105,7 @@ _CONFIG_EXCLUDED_FILES = {
     'DS_KEY.txt',
     'deepseek_config.env',
     'email_accounts.json',
-    'gemini_config.env',
+    'gemini_config.env.example',
     'jwt_secret.txt',
     'memory.json',
     'memory_summaries.json',
@@ -183,6 +183,10 @@ _add(os.path.join(ROOT, 'README.md'), '.')
 # ═══════════════════════════════════════════════
 # 隐式导入
 # ═══════════════════════════════════════════════
+# NOTE: 此列表与下方 _discover_hidden_imports() 自动发现存在大量重叠。
+# 后续清理时可删除已被 auto-discovery 覆盖的条目（预计可缩减 200+ 行）。
+# 标准库模块（subprocess, socket, threading 等）通常无需手动列举。
+# 保留期：2026-Q3 — 待通过完整构建验证后安全移除。
 
 hiddenimports = [
     # ── 标准库 tkinter（模型下载器 GUI）──
@@ -201,7 +205,6 @@ hiddenimports = [
     'socketio',
 
     # ── Google GenAI / API core ──
-    'google', 'google.genai', 'google.genai.types',
     'google.api_core', 'google.api_core.gapic_v1',
     'google.auth', 'google.auth.transport', 'google.auth.transport.requests',
     'google.protobuf',
@@ -217,7 +220,7 @@ hiddenimports = [
     'lxml', 'lxml.etree', 'lxml._elementpath', 'lxml.html',
     'openpyxl', 'openpyxl.styles', 'openpyxl.utils',
     'pptx', 'pptx.util', 'pptx.enum', 'pptx.dml', 'pptx.chart',
-    'PyPDF2', 'pdfplumber', 'pypdf',
+    'pdfplumber', 'pypdf', 'pymupdf',
     'bs4', 'bs4.builder', 'bs4.builder._lxml',
     'jieba', 'jieba.posseg', 'jieba.analyse',
     'docx2txt', 'striprtf',
@@ -248,7 +251,7 @@ hiddenimports = [
     'win32api', 'win32con', 'win32gui', 'win32process', 'win32event',
     'pywintypes', 'pythoncom',
 
-    # ── 上传音频 STT（Whisper / Gemini）──
+    # ── 上传音频 STT（Whisper）──
     'edge_tts',
     'wave', 'audioop',
     'win32com', 'win32com.client',
@@ -295,7 +298,6 @@ hiddenimports = [
     'app.core.agent.plugins.system_info_plugin',
     'app.core.agent.plugins.annotation_plugin',
     'app.core.agent.plugins.chart_vision_plugin',
-    'app.core.agent.plugins.doc_gen_plugin',
     'app.core.agent.plugins.file_converter_plugin',
     'app.core.agent.plugins.memory_tools_plugin',
     'app.core.agent.plugins.ppt_plugin',
@@ -309,7 +311,7 @@ hiddenimports = [
     'app.core.learning.shadow_tracer',
     'app.core.learning.training_data_builder',
     'app.core.llm', 'app.core.llm.base',
-    'app.core.llm.gemini', 'app.core.llm.langchain_adapter',
+    'app.core.llm.langchain_adapter',
     'app.core.llm.openai_provider',
     'app.core.llm.deepseek_config',
     'app.core.llm.deepseek_provider',
@@ -333,7 +335,6 @@ hiddenimports = [
     'app.core.skills.skill_recorder',
     'app.core.skills.skill_schema',
     'app.core.workflow',
-    'app.core.workflow.interactive_planner',
     'app.core.workflow.langgraph_workflow',
     'app.core.workflows',
     'app.core.workflows.action_item_extractor',
@@ -375,6 +376,8 @@ hiddenimports = [
     'web.blueprints.dev',
     'web.blueprints.editor_ai',
     'web.blueprints.pptx_editor',
+    'web.blueprints.parallel_api',
+    'web.blueprints.memory_api',
     'web.blueprints.workflow_api',
     'web.blueprints.workspace_assistant',
 
@@ -387,39 +390,38 @@ hiddenimports = [
 
         # ── web/ 全部模块 ──
     'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
-    'web.auth', 'web.auth_manager', 'web.auto_catalog_scheduler',
+    'web.auth_manager', 'web.auto_catalog_scheduler',
     'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
     'web.behavior_monitor', 'web.calendar_manager',
-    'web.clipboard_manager', 'web.clipboard_ocr_assistant', 'web.code_generator',
+    'web.clipboard_ocr_assistant', 'web.code_generator',
     'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
     'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_planner', 'web.document_annotator', 'web.document_batch_annotator',
+    'web.doc_annotation', 'web.doc_planner', 'web.document_batch_annotator',
     'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
     'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator',
-    'web.docx_translator_module', 'web.enhanced_memory_manager',
-    'web.feedback_loop', 'web.file_analyzer', 'web.file_converter',
+    'web.enhanced_memory_manager',
+    'web.file_analyzer', 'web.file_converter',
     'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
     'web.file_organizer', 'web.file_parser', 'web.file_processor',
     'web.file_qa', 'web.file_quality_checker', 'web.file_scanner',
     'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
-    'web.image_manager', 'web.insight_reporter', 'web.intelligent_document_analyzer',
-    'web.knowledge_base', 'web.knowledge_graph', 'web.local_executor',
-    'web.local_stt', 'web.memory_api_routes', 'web.memory_integration',
-    'web.memory_manager', 'web.model_manager', 'web.note_manager',
-    'web.notification_manager', 'web.operation_history', 'web.organize_cleanup',
-    'web.parallel_api', 'web.parallel_executor', 'web.ppt_api_routes',
-    'web.ppt_generator', 'web.ppt_master', 'web.ppt_pipeline',
-    'web.ppt_quality', 'web.ppt_session_manager', 'web.ppt_synthesizer',
-    'web.ppt_themes', 'web.proactive_dialogue', 'web.proactive_trigger',
-    'web.processed_file_network', 'web.prompt_adapter', 'web.quality_evaluator',
-    'web.reminder_manager', 'web.search_engine', 'web.settings',
+    'web.image_manager', 'web.insight_reporter', 
+    'web.knowledge_graph', 'web.local_executor',
+    'web.memory_integration', 'web.memory_manager', 'web.note_manager',
+    'web.operation_history', 'web.organize_cleanup',
+    'web.parallel_executor', 'web.ppt_api_routes',
+    
+    'web.ppt_session_manager', 
+    'web.proactive_dialogue', 'web.proactive_trigger',
+    'web.processed_file_network', 'web.prompt_adapter', 
+    'web.reminder_manager', 'web.settings',
     'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
     'web.suggestion_engine', 'web.system_info',
-    'web.task_dispatcher', 'web.task_scheduler', 'web.telegram_bot',
-    'web.template_library', 'web.token_tracker', 'web.track_changes_editor',
+    'web.task_dispatcher', 'web.task_scheduler', 'web.template_library',
+    'web.track_changes_editor',
     'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
-    'web.workflow_manager',
+    
     'web.pdf_annotator',
 ]
 
@@ -437,9 +439,8 @@ def _safe_collect(pkg):
 
 _collect_pkgs = [
     'flask', 'flask_cors', 'jinja2', 'werkzeug',
-    'google.genai', 'google.api_core', 'google.auth',
     'httpx', 'httpcore', 'anyio', 'certifi',
-    'PIL', 'lxml', 'bs4',
+    'PIL', 'lxml', 'bs4', 'pymupdf',
     'pandas', 'numpy', 'matplotlib',
     'webview',
     'pystray',
@@ -523,8 +524,20 @@ def _discover_hidden_imports(base_dir, base_pkg):
                 imports.append(pkg)
     return imports
 
+def _dedupe_hiddenimports(imports):
+    """Deduplicate hidden imports while preserving first-seen order."""
+    seen = set()
+    deduped = []
+    for name in imports:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        deduped.append(name)
+    return deduped
+
 hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'app'), 'app'))
 hiddenimports.extend(_discover_hidden_imports(os.path.join(ROOT, 'web'), 'web'))
+hiddenimports = _dedupe_hiddenimports(hiddenimports)
 
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）

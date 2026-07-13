@@ -4,7 +4,7 @@
 
 from flask import Blueprint, Response, jsonify, request
 
-from web.runtime_context import get_knowledge_graph
+from web.runtime_services import get_knowledge_graph
 
 knowledge_bp = Blueprint("knowledge", __name__)
 
@@ -15,7 +15,7 @@ knowledge_bp = Blueprint("knowledge", __name__)
 
 
 def _get_kb():
-    from web.knowledge_base import KnowledgeBase
+    from app.core.services.knowledge_base import KnowledgeBase
 
     return KnowledgeBase()
 

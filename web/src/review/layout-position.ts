@@ -267,11 +267,11 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         pagePaddingRight:   0,
       };
     }
-    const zoomWrapper = pageEl.closest('.koto-zoom-wrapper') || pageEl;
+    const zoomWrapper = pageEl!.closest('.koto-zoom-wrapper') || pageEl;
     const transformScale = _parseScaleFromTransform(
       zoomWrapper ? window.getComputedStyle(zoomWrapper as HTMLElement).transform : ''
     ) || { x: 1, y: 1 };
-    const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl).paddingRight) || 0);
+    const pagePaddingRight = Math.max(0, parseFloat(window.getComputedStyle(pageEl!).paddingRight) || 0);
     const pageContentLeft  = Math.max(0, Math.round(viewportScrollLeft + ((pageRect.left - viewportRect.left) / layoutScale.x)));
     const pageContentTop   = Math.max(0, Math.round(viewportScrollTop  + ((pageRect.top  - viewportRect.top) / layoutScale.y)));
     const pageContentRight = Math.round(viewportScrollLeft + ((pageRect.right - viewportRect.left) / layoutScale.x));
@@ -335,12 +335,16 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     const viewport = $('wa-editor-content');
     const listEl = $('wa-review-list');
     if (!shell || !host || !viewport || !listEl || shell.style.display === 'none') {
-      if (host) host.classList.remove('has-review-shell');
+      if (host) {
+        host.classList.remove('has-review-shell');
+        host.style.removeProperty('--wa-review-canvas-width');
+      }
       return;
     }
     const cards = Array.from(listEl.querySelectorAll('.koto-docx-comment-card, .wa-proposal-card'));
     if (!cards.length) {
       host.classList.remove('has-review-shell');
+      host.style.removeProperty('--wa-review-canvas-width');
       return;
     }
     host.classList.add('has-review-shell');
@@ -355,8 +359,8 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
         ? railMetrics.viewportWidth
         : ((viewportRect.width || viewport.clientWidth || 0) / layoutScale.x)
     );
-    const viewportScrollTop = Math.max(0, Math.round(viewport.scrollTop || 0));
-    const viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
+    let viewportScrollTop = Math.max(0, Math.round(viewport.scrollTop || 0));
+    let viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || 0));
     const shellTop = railMetrics && Number.isFinite(railMetrics.shellTop)
       ? Math.round(railMetrics.shellTop)
       : Math.round(((viewportRect.top - hostRect.top) / layoutScale.y));
@@ -375,7 +379,13 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     shell.style.top = shellTop + 'px';
     shell.style.bottom = 'auto';
     shell.style.height = viewportHeight + 'px';
-    listEl.style.transform = `translate(${-viewportScrollLeft}px, ${-viewportScrollTop}px)`;
+    // The list is wider than the visible editor whenever the review rail sits
+    // beside a full-size Word page. Keeping both inset edges at zero makes an
+    // over-constrained absolutely positioned flex child drift left in Chromium.
+    // Pin a single horizontal edge so content coordinates map 1:1 to the list.
+    listEl.style.left = '0px';
+    listEl.style.right = 'auto';
+    listEl.style.transform = 'none';
     listEl.style.width = Math.max(160, Math.round(railMetrics && (railMetrics as any).contentWidth || viewport.scrollWidth || viewportRect.width || 0)) + 'px';
     const contentRoot = railMetrics && railMetrics.pageEl
       ? railMetrics.pageEl
@@ -430,6 +440,32 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     shell.style.width = Math.max(0, viewportWidth) + 'px';
     shell.style.overflow = 'hidden';
     listEl.style.width = Math.max(160, Math.round(shellCoverWidth)) + 'px';
+    host.style.setProperty('--wa-review-canvas-width', `${Math.round(shellCoverWidth)}px`);
+    // Make the rail part of the horizontal document canvas. Narrow editors
+    // reveal it by scrolling the page left, keeping cards out of both the text
+    // column and the adjacent AI panel.
+    const revealScrollLeft = Math.max(
+      viewportScrollLeft,
+      Math.round(cardColLeft + cardColWidth + 12 - viewportWidth),
+    );
+    const maxScrollLeft = Math.max(0, Math.round(viewport.scrollWidth - viewport.clientWidth));
+    const nextScrollLeft = Math.min(revealScrollLeft, maxScrollLeft);
+    if (nextScrollLeft > viewportScrollLeft) {
+      viewport.scrollLeft = nextScrollLeft;
+      viewportScrollLeft = Math.max(0, Math.round(viewport.scrollLeft || nextScrollLeft));
+    }
+    // Anchor content coordinate (0, 0) to the scroll viewport. Chromium can
+    // paint an oversized absolutely-positioned flex child at a different
+    // origin than offsetLeft reports, so derive the correction from the live
+    // rectangle after its final width has been applied.
+    const listRectWithoutScroll = listEl.getBoundingClientRect();
+    const listTranslateX = Math.round(
+      viewportRect.left - (viewportScrollLeft * layoutScale.x) - listRectWithoutScroll.left
+    );
+    const listTranslateY = Math.round(
+      viewportRect.top - (viewportScrollTop * layoutScale.y) - listRectWithoutScroll.top
+    );
+    listEl.style.transform = `translate(${listTranslateX}px, ${listTranslateY}px)`;
     if (connectorLayer) {
       connectorLayer.setAttribute('width', String(Math.max(160, Math.round(shellCoverWidth))));
     }

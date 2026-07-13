@@ -85,7 +85,7 @@ class TraceRecord:
         ai_response  : 脱敏后的 AI 响应（云端最终返回）
         feedback     : "thumbs_up" | "adopted" | "workflow_complete"
         steps        : 多步任务流步骤（Workflow 场景使用）
-        model_used   : 使用的模型名称（e.g. gemini-2.5-pro）
+        model_used   : 使用的模型名称（e.g. deepseek-chat）
         latency_ms   : 响应延迟（毫秒）
         timestamp    : ISO8601 UTC 时间戳
         metadata     : 额外元数据（工具调用记录等）
@@ -324,11 +324,22 @@ class ShadowTracer:
 
         # 分配 trace_id
         trace_id = str(uuid.uuid4())
+        skill_id = kwargs.get("skill_id")
+        # Resolve storage paths before starting the worker. This prevents a
+        # hot-reload or test fixture from redirecting an already queued write
+        # into a different trace directory.
+        trace_file = cls._trace_file(skill_id)
+        manifest_file = cls._manifest_file()
 
         # 后台线程执行（不阻塞调用方）
         t = threading.Thread(
             target=cls._write_record,
-            kwargs={"trace_id": trace_id, **kwargs},
+            kwargs={
+                "trace_id": trace_id,
+                "trace_file": trace_file,
+                "manifest_file": manifest_file,
+                **kwargs,
+            },
             daemon=True,
             name=f"shadow-tracer-{trace_id[:8]}",
         )
@@ -349,6 +360,8 @@ class ShadowTracer:
         latency_ms: Optional[int] = None,
         steps: Optional[List[Dict]] = None,
         metadata: Optional[Dict] = None,
+        trace_file: Optional[Path] = None,
+        manifest_file: Optional[Path] = None,
     ):
         """在后台线程中脱敏 + 写入 JSONL"""
         try:
@@ -370,13 +383,16 @@ class ShadowTracer:
                 metadata=metadata or {},
             )
 
-            trace_file = cls._trace_file(skill_id)
+            trace_file = trace_file or cls._trace_file(skill_id)
             with cls._write_lock:
                 with open(trace_file, "a", encoding="utf-8") as f:
                     f.write(record.to_jsonl_line() + "\n")
 
             # 更新 manifest 统计
-            count = cls._increment_manifest(skill_id or "_general")
+            count = cls._increment_manifest(
+                skill_id or "_general",
+                manifest_file=manifest_file,
+            )
 
             logger.debug(
                 f"[ShadowTracer] 📝 记录 [{feedback}] skill={skill_id or '_general'} "
@@ -391,10 +407,14 @@ class ShadowTracer:
             logger.error(f"[ShadowTracer] 写入记录失败: {e}", exc_info=True)
 
     @classmethod
-    def _increment_manifest(cls, key: str) -> int:
+    def _increment_manifest(
+        cls,
+        key: str,
+        manifest_file: Optional[Path] = None,
+    ) -> int:
         """线程安全地递增 manifest 中的计数，返回新值"""
         try:
-            mf = cls._manifest_file()
+            mf = manifest_file or cls._manifest_file()
             with cls._write_lock:
                 data = {}
                 if mf.exists():

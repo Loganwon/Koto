@@ -11,25 +11,17 @@ def build_runtime_metadata(
     readonly_fallback_used: bool,
     model_failed: bool,
     planner_payload: dict[str, Any] | None = None,
-    planner_fallback_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     planner_payload = planner_payload if isinstance(planner_payload, dict) else {}
-    planner_fallback_payload = (
-        planner_fallback_payload if isinstance(planner_fallback_payload, dict) else {}
-    )
 
     backend = str(planner_payload.get("backend") or "")
     source = str(planner_payload.get("source") or "")
     policy = str(planner_payload.get("policy") or "")
     transport = str(planner_payload.get("transport") or "")
     reason = str(planner_payload.get("reason") or "")
-    fallback_from = str(planner_fallback_payload.get("from") or "")
-
     execution_path = "native"
     if readonly_fallback_used:
         execution_path = "readonly_fallback"
-    elif fallback_from:
-        execution_path = "planner_fallback"
     elif backend and backend != "native":
         execution_path = "planner"
     elif source and source != "native":
@@ -45,9 +37,6 @@ def build_runtime_metadata(
     round_index = planner_payload.get("round")
     if round_index:
         planner_runtime["round"] = round_index
-    if fallback_from:
-        planner_runtime["fallback_from"] = fallback_from
-
     return {
         "execution_path": execution_path,
         "terminal_status": str(terminal_status or ""),
@@ -180,10 +169,26 @@ def execute_step_summary(
     if isinstance(tool_gap, dict) and tool_gap:
         return str(tool_gap.get("summary") or "当前任务缺少对应的 Koto 原生工具。")
     if file_changes:
-        return f"已完成第 {round_index} 轮工具执行，累计记录 {len(file_changes)} 次文件变更。"
+        parts = []
+        for fc in file_changes[:6]:
+            fpath = str(fc.get("path") or fc.get("file_path") or "").strip()
+            path_parts = fpath.replace(chr(92), "/").split("/") if fpath else []
+            fname = path_parts[len(path_parts) - 1] if path_parts else ""
+            preview = str(fc.get("preview") or fc.get("summary") or "").strip()
+            if fname:
+                parts.append(fname + (": " + preview if preview else ""))
+            elif preview:
+                parts.append(preview)
+        if parts:
+            detail = "；".join(parts[:4])
+            more = f" 等{len(file_changes)}项" if len(file_changes) > 4 else ""
+            return f"第{round_index}轮完成{len(file_changes)}项变更：{detail}{more}"
+        return (
+            f"已完成第{round_index}轮工具执行，累计记录{len(file_changes)}次文件变更。"
+        )
     if round_index > 0:
-        return f"已完成第 {round_index} 轮工具执行。"
-    return "模型未再请求工具调用。"
+        return f"第{round_index}轮处理完毕，继续执行。"
+    return "本轮无新增文件变更，继续执行。"
 
 
 def execute_step_result_status(

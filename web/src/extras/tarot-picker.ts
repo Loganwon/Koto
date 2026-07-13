@@ -2,6 +2,11 @@
  * tarot-picker.ts — Koto 塔罗牌交互式 UI
  */
 
+import {
+  getActiveKotoMessageContainer,
+  submitActiveKotoComposerText,
+} from '../shared/active-composer';
+
 export interface TarotCard {
   id: number;
   zh: string;
@@ -232,7 +237,7 @@ function setInner(html: string): void {
   w.innerHTML = html;
   w.querySelector('#tp-close-btn')?.addEventListener('click', onCancel);
   requestAnimationFrame(() => {
-    const container = document.getElementById('chatMessages');
+    const container = getActiveKotoMessageContainer();
     if (container) container.scrollTop = container.scrollHeight;
   });
 }
@@ -285,7 +290,7 @@ function showSpreadScreen(): void {
       const opt = (e.target as HTMLElement).closest('[data-spread-id]') as HTMLElement | null;
       if (opt) onSpreadChosen(opt.dataset['spreadId']!);
     });
-    grid.addEventListener('keydown', (e: KeyboardEvent) => {
+    (grid as HTMLElement).addEventListener('keydown', (e: KeyboardEvent) => {
       if (e.key === 'Enter' || e.key === ' ') {
         const opt = (e.target as HTMLElement).closest('[data-spread-id]') as HTMLElement | null;
         if (opt) onSpreadChosen(opt.dataset['spreadId']!);
@@ -531,14 +536,10 @@ function onConfirm(): void {
 
   enterTransmitState(sp, _selectedCards.slice());
 
-  const input = document.getElementById('messageInput') as HTMLInputElement | null;
-  if (input) input.value = final;
-
   _active = false;
   try {
-    const btn = document.getElementById('sendBtn');
-    if (btn) { (window as any)._kotoTarotPending = true; btn.click(); }
-    else if (typeof (window as any).sendMessage === 'function') (window as any).sendMessage({ preventDefault: () => {} });
+    (window as any)._kotoTarotPending = true;
+    submitActiveKotoComposerText(final);
   } finally {
     _active = true;
   }
@@ -607,7 +608,7 @@ function enterTransmitState(sp: TarotSpread, cards: TarotSelectedCard[]): void {
     }, 900);
   };
 
-  const container = document.getElementById('chatMessages');
+  const container = getActiveKotoMessageContainer();
   if (!container) {
     setTimeout(() => { renderPostReadingScreen(sp, cards); }, 900);
     return;
@@ -615,7 +616,8 @@ function enterTransmitState(sp: TarotSpread, cards: TarotSelectedCard[]): void {
 
   const observer = new MutationObserver(() => {
     const lastMsg = container.lastElementChild;
-    if (lastMsg && lastMsg.classList.contains('assistant')) {
+    if (lastMsg && (lastMsg.classList.contains('assistant') ||
+      (lastMsg.classList.contains('wa-msg') && lastMsg.classList.contains('ai')))) {
       dismiss();
     }
   });
@@ -663,7 +665,7 @@ function _createWidgetEl(): HTMLElement | null {
   el.className = 'tarot-picker-widget';
   el.setAttribute('role', 'dialog');
   el.setAttribute('aria-label', '塔罗牌选择');
-  const container = document.getElementById('chatMessages');
+  const container = getActiveKotoMessageContainer();
   if (!container) return null;
   container.querySelector('.welcome-screen')?.remove();
   container.appendChild(el);

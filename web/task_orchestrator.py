@@ -186,31 +186,9 @@ class TaskOrchestrator:
 
     @classmethod
     def _merge_results(cls, subtasks: list, context: dict) -> dict:
-        """合并所有子任务的结果"""
-        merged = {"summary": "任务执行完成", "steps": [], "final_output": ""}
+        from web.task_orchestrator_results import merge_task_results
 
-        for i, subtask in enumerate(subtasks):
-            step_info = {
-                "step": i + 1,
-                "task": subtask["task_type"],
-                "status": subtask["status"],
-                "description": subtask["description"],
-            }
-
-            if subtask["result"]:
-                step_info["output"] = subtask["result"].get("output", "")
-            if subtask["error"]:
-                step_info["error"] = subtask["error"]
-
-            merged["steps"].append(step_info)
-
-        # 最后一个完成的任务的输出作为最终输出
-        for subtask in reversed(subtasks):
-            if subtask["status"] == "completed" and subtask["result"]:
-                merged["final_output"] = subtask["result"].get("output", "")
-                break
-
-        return merged
+        return merge_task_results(subtasks, context)
 
     @classmethod
     async def _validate_quality(

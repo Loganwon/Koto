@@ -9,12 +9,13 @@ PPT 编辑 API - 支持后生成编辑功能
 
 import json
 
-# google.genai 延迟到路由函数内部加载，避免启动时加载 (~4.7s)
+# Provider compatibility imports remain lazy to keep startup light.
 import os
 import re
 
 from flask import Blueprint, jsonify, request, send_file
 
+from app.core.services.ppt_generation_service import PPTGenerationService
 from web.ppt_session_manager import get_ppt_session_manager
 
 ppt_api_bp = Blueprint("ppt_api", __name__, url_prefix="/api/ppt")
@@ -206,8 +207,8 @@ def regenerate_slide(session_id, slide_index):
     }
     """
     try:
-        from google import genai
-        from google.genai import types as genai_types
+        from app.core.llm import provider_compat as genai
+        from app.core.llm.provider_compat import types as genai_types
 
         # 获取会话数据
         mgr = get_ppt_session_manager()
@@ -275,10 +276,10 @@ def regenerate_slide(session_id, slide_index):
             if research_context:
                 regenerate_prompt += f"【研究分析】\n{research_context[:5000]}\n"
 
-        # 调用 Gemini 生成
-        client = genai.Client(api_key=os.getenv("GEMINI_API_KEY"))
+        # 通过活动 DeepSeek provider 生成
+        client = genai.Client(api_key=os.getenv("DEEPSEEK_API_KEY"))
         response = client.models.generate_content(
-            model="gemini-2.5-flash",
+            model="deepseek-chat",
             contents=regenerate_prompt,
             config=genai_types.GenerateContentConfig(
                 temperature=0.5, max_output_tokens=4096
@@ -360,12 +361,7 @@ def render_pptx(session_id):
         request_data = request.get_json() or {}
         theme = request_data.get("theme", session.get("theme", "business"))
 
-        # 生成新的 PPTX 文件
-        from web.ppt_generator import PPTGenerator
-
         ppt_title = ppt_data.get("title", "演示文稿")
-
-        ppt_gen = PPTGenerator(theme=theme)
 
         # 使用原来的路径或生成新路径
         original_path = session.get("ppt_file_path", "")
@@ -384,12 +380,10 @@ def render_pptx(session_id):
             os.makedirs(docs_dir, exist_ok=True)
             output_path = os.path.join(docs_dir, filename)
 
-        # 渲染
-        ppt_gen.generate_from_outline(
-            title=ppt_title,
-            outline=ppt_data.get("slides", []),
+        PPTGenerationService().render_editor_pptx(
+            ppt_data=ppt_data,
             output_path=output_path,
-            subtitle=ppt_data.get("subtitle", ""),
+            theme=theme,
             author="Koto AI",
         )
 

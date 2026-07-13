@@ -63,16 +63,6 @@ def configure_process_environment(
     return roots
 
 
-def load_optional_gemini_env() -> None:
-    """Load local .env-style Gemini config when the runtime support is available."""
-    try:
-        from app.core.llm.gemini_config import load_gemini_config_env
-    except ImportError:
-        return
-
-    load_gemini_config_env(override=False)
-
-
 def validate_startup_config_or_raise() -> None:
     """Run shared startup validation from either source or frozen entrypoints."""
     try:

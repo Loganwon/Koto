@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Refer to [ARCHITECTURE.md](ARCHITECTURE.md) and [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md).
+
 # 触发器阈值可编辑功能文档
 
 ## 概述
@@ -387,7 +389,7 @@ python test_trigger_params.py
 |------|------|
 | `web/proactive_trigger.py` | 触发器核心逻辑（参数管理） |
 | `web/app.py` | API 端点（参数更新接口） |
-| `web/static/js/app.js` | 前端 JavaScript（参数编辑UI） |
+| `web/src/app/ (已迁移至模块化主应用)` | 前端 JavaScript（参数编辑UI） |
 | `web/static/css/style.css` | 参数编辑区域样式 |
 | `web/templates/index.html` | 触发器面板 HTML |
 | `test_trigger_params.py` | 参数功能测试脚本 |

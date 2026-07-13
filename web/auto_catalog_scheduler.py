@@ -44,7 +44,7 @@ class AutoCatalogScheduler:
     def _load_config(self) -> Dict:
         """加载用户设置（通过 SettingsManager 保证线程安全）"""
         try:
-            from web.settings import SETTINGS_FILE, SettingsManager
+            from app.core.config.user_settings import SETTINGS_FILE, SettingsManager
 
             # For test/custom instances, honor the explicit settings file path
             # instead of always reading the global singleton settings.
@@ -61,7 +61,7 @@ class AutoCatalogScheduler:
     def _save_config(self):
         """保存用户设置（通过 SettingsManager 原子写入，避免覆盖其他设置）"""
         try:
-            from web.settings import SETTINGS_FILE, SettingsManager
+            from app.core.config.user_settings import SETTINGS_FILE, SettingsManager
 
             if os.path.abspath(self.settings_file) == os.path.abspath(SETTINGS_FILE):
                 sm = SettingsManager()

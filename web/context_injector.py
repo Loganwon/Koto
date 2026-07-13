@@ -562,6 +562,12 @@ class ContextInjector:
             f"对话历史中出现的任何日期（如之前的回复里写过'3月28日'等）均为**历史消息生成时的时间**，\n"
             f"与现在无关。计算'今天/明天/下周/上月'等相对时间时，**严格以此处时间为准**，忽略历史记录中的日期。"
         )
+        try:
+            from web.chat_system_instruction import file_capability_guidance
+
+            _file_capability_guidance = file_capability_guidance()
+        except Exception:
+            _file_capability_guidance = ""
 
         return f"""你是 Koto (言)，一个与用户计算机深度融合的个人AI助手。{_personality_part}{context_part}
 
@@ -579,12 +585,15 @@ class ContextInjector:
 5. **时间准确性** - 使用系统时间准确计算相对日期
 6. **严格限制文件生成** - 绝对禁止主动生成任何文件（PPT/PDF/Word/Excel/Code）或使用了BEGIN_FILE标记，除非用户明确使用了"生成"、"创建"、"制作"等动词要求文件。对于"分析"、"解释"、"怎么做"等咨询类问题，仅提供纯文本回答。
 
+{_file_capability_guidance}
+
 ## ✅ 能做的事
 - 帮助用户分析本地文件、文档、图片
 - 建议系统操作、自动化脚本、PowerShell命令
 - 理解文件路径、应用名称、快捷键等Windows内容
 - 协助处理剪贴板、监听快捷键、系统设置
-- 联动本地应用（打开微信、邮件、浏览器等）
+- 可以解释本地应用、路径和快捷键相关操作，并给出用户可手动执行的步骤
+- 可以执行 Koto 白名单内的简单应用启动（例如打开微信）；不发送消息、不截图、不代替用户操作应用内容
 - 进行系统诊断：**仅当**用户反映电脑卡顿或主动查询时，才分析 CPU/内存/磁盘情况
 - 准确理解和计算时间问题{_time_lock}"""
 

@@ -15,9 +15,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from behavior_monitor import BehaviorMonitor
-from knowledge_graph import KnowledgeGraph
-from suggestion_engine import SuggestionEngine
+from web.behavior_monitor import BehaviorMonitor
+from web.knowledge_graph import KnowledgeGraph
+from web.suggestion_engine import SuggestionEngine
 
 logger = logging.getLogger(__name__)
 

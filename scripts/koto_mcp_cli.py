@@ -7,15 +7,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import threading
 from typing import Any
 
 
 class StdioMCPBridge:
-    def __init__(self, url: str, timeout: float = 30.0) -> None:
+    def __init__(self, url: str, timeout: float = 30.0, api_key: str = "") -> None:
         self.url = url
         self.timeout = timeout
+        self.api_key = api_key
         self._ws: Any = None
         self._pending: dict[Any, threading.Event] = {}
         self._responses: dict[Any, str] = {}
@@ -28,7 +30,10 @@ class StdioMCPBridge:
             import websocket
         except Exception as exc:  # pragma: no cover - environment dependent
             raise RuntimeError("websocket-client is required for koto_mcp_cli") from exc
-        self._ws = websocket.create_connection(self.url, timeout=self.timeout)
+        headers = []
+        if self.api_key:
+            headers.append(f"X-Koto-MCP-Key: {self.api_key}")
+        self._ws = websocket.create_connection(self.url, timeout=self.timeout, header=headers)
 
     def _request(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._connect()
@@ -70,7 +75,7 @@ class StdioMCPBridge:
 
     def _read_stdin(self) -> None:
         for line in sys.stdin:
-            line = line.strip()
+            line = line.strip().lstrip("\ufeff")
             if not line:
                 continue
             try:
@@ -99,8 +104,9 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="ws://127.0.0.1:5000/ws/mcp")
     parser.add_argument("--timeout", type=float, default=30.0)
+    parser.add_argument("--api-key", default=os.environ.get("KOTO_MCP_API_KEY", ""))
     args = parser.parse_args()
-    StdioMCPBridge(args.url, timeout=args.timeout).run()
+    StdioMCPBridge(args.url, timeout=args.timeout, api_key=args.api_key).run()
     return 0
 
 

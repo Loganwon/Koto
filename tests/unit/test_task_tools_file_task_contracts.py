@@ -60,6 +60,60 @@ def test_parse_file_to_text_reads_office_windows(tmp_path):
     assert "Slide 4" not in pptx_text
 
 
+def test_parse_file_to_text_pdf_letter_window_skips_table_of_contents(
+    tmp_path, monkeypatch
+):
+    from app.core.agent import task_tools
+
+    pdf_path = tmp_path / "schiller.pdf"
+    pdf_path.write_bytes(b"%PDF-1.4\n% fake test pdf\n")
+
+    def fake_pdf_excerpt(
+        path,
+        *,
+        max_chars,
+        start_page=1,
+        end_page=0,
+        allow_full_fallback=True,
+    ):
+        if start_page == 6 and end_page == 6:
+            return (
+                "[Page 6]\n\u76ee \u5f55\n"
+                "\u7b2c\u5341\u4e00\u5c01\u4fe1\n"
+                "\u7b2c\u5341\u4e8c\u5c01\u4fe1\n"
+                "\u7b2c\u5341\u4e09\u5c01\u4fe1\n"
+                "\u7b2c\u5341\u56db\u5c01\u4fe1\n"
+                "\u7b2c\u5341\u4e94\u5c01\u4fe1\n"
+                "\u7b2c\u5341\u516d\u5c01\u4fe1"
+            )
+        if start_page == 63 and end_page == 63:
+            return "[Page 63]\n\u7b2c\u5341\u4e00\u5c01\u4fe1\n\u4eba\u683c\u4e0e\u72b6\u6001\u3002"
+        if start_page == 87 and end_page == 87:
+            return "[Page 87]\n\u7b2c\u5341\u516d\u5c01\u4fe1\n\u540e\u7eed\u7ae0\u8282\u3002"
+        if start_page == 63 and end_page == 86:
+            return (
+                "[Page 63]\n\u7b2c\u5341\u4e00\u5c01\u4fe1\n\u4eba\u683c\u4e0e\u72b6\u6001\u3002\n"
+                "[Page 81]\n\u7b2c\u5341\u4e94\u5c01\u4fe1\n"
+                "\u6e38\u620f\u51b2\u52a8\u7684\u5bf9\u8c61\u662f\u6d3b\u7684\u5f62\u8c61\u3002"
+            )
+        return ""
+
+    monkeypatch.setattr(task_tools, "_read_pdf_excerpt", fake_pdf_excerpt)
+
+    text = task_tools.parse_file_to_text(
+        str(pdf_path),
+        window_unit="pdf_letter",
+        start=11,
+        end=15,
+        max_chars=4000,
+    )
+
+    assert "[PDF letter window: 11-15; resolved pages 63-86]" in text
+    assert "\u7b2c\u5341\u4e00\u5c01\u4fe1" in text
+    assert "\u7b2c\u5341\u4e94\u5c01\u4fe1" in text
+    assert "\u6e38\u620f\u51b2\u52a8" in text
+
+
 def test_file_task_event_schema_exposes_diff_contract():
     from app.core.agent.file_task_contract import file_task_event_schema
 
@@ -91,6 +145,109 @@ def test_extract_koto_paths_reads_primary_structured_marker_keys():
 
     assert extract_koto_paths(result, KOTO_CREATED_RESULT_MARKER) == ["created.docx"]
     assert extract_koto_paths(result, KOTO_MODIFIED_RESULT_MARKER) == ["modified.xlsx"]
+
+
+def test_extract_file_changes_reads_run_python_spreadsheet_metrics():
+    from app.core.agent.file_task_result_markers import (
+        KOTO_CREATED_RESULT_MARKER,
+        KOTO_MODIFIED_RESULT_MARKER,
+    )
+    from app.core.agent.file_task_tool_feedback import extract_file_changes
+
+    result = {
+        "stdout": (
+            "Data rows written: 4 rows\n"
+            "Total cells written: 20\n"
+            "KOTO_CREATED:C:\\workspace\\sales_profit_report.xlsx"
+        ),
+        "__koto_created__": ["C:\\workspace\\sales_profit_report.xlsx"],
+    }
+
+    changes = extract_file_changes(
+        "run_python_code",
+        {"code": "write report"},
+        result,
+        created_marker=KOTO_CREATED_RESULT_MARKER,
+        modified_marker=KOTO_MODIFIED_RESULT_MARKER,
+    )
+
+    assert changes[0]["operation"] == "run_python_code"
+    assert changes[0]["rows_written"] == 4
+    assert changes[0]["cells_written"] == 20
+
+
+def test_task_tools_create_file_uses_context_directory_for_bare_output(
+    tmp_path, monkeypatch
+):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source_dir = tmp_path / "codex_context_dir"
+    source_dir.mkdir()
+    (source_dir / "orders.csv").write_text("sku,units\nA100,1\n", encoding="utf-8")
+
+    provider = task_tools.TaskToolsPlugin(
+        workspace_root=str(tmp_path),
+        request_context={
+            "task": "请从 codex_context_dir 读取 orders.csv 并创建 restock_plan.csv",
+        },
+    )
+    create_tool = next(
+        tool for tool in provider.get_tools() if tool["name"] == "create_file"
+    )
+
+    payload = json.loads(
+        create_tool["func"](
+            "restock_plan.csv",
+            "sku,restock_quantity\nA100,30\n",
+        )
+    )
+
+    assert payload["success"] is True
+    assert payload["path"] == "codex_context_dir/restock_plan.csv"
+    assert (source_dir / "restock_plan.csv").exists()
+    assert not (tmp_path / "restock_plan.csv").exists()
+
+
+def test_run_python_relocates_root_created_files_to_context_directory(
+    tmp_path, monkeypatch
+):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source_dir = tmp_path / "codex_context_dir"
+    source_dir.mkdir()
+    root_output = tmp_path / "restock_plan.csv"
+    root_output.write_text("sku,restock_quantity\nA100,30\n", encoding="utf-8")
+
+    result = task_tools._relocate_root_created_files_to_output_dir(
+        {"stdout": f"KOTO_CREATED:{root_output}"},
+        output_dir="codex_context_dir",
+    )
+
+    relocated = source_dir / "restock_plan.csv"
+    assert relocated.exists()
+    assert not root_output.exists()
+    assert str(relocated) in result["stdout"]
+    assert str(root_output) not in result["stdout"]
+
+
+def test_task_tools_context_directory_uses_resolved_workspace_root(
+    tmp_path, monkeypatch
+):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source_dir = tmp_path / "codex_context_dir"
+    source_dir.mkdir()
+    plugin = task_tools.TaskToolsPlugin(
+        workspace_root=str(tmp_path),
+        request_context={
+            "task": "读取 codex_context_dir/orders.csv 和 codex_context_dir/rules.md，生成 restock_plan.csv",
+        },
+    )
+
+    assert plugin._contextual_output_directory() == "codex_context_dir"
 
 
 def test_create_file_docx_emits_docx_write_metrics_and_valid_package(
@@ -510,6 +667,89 @@ def test_verify_task_completion_uses_structured_docx_table_metadata():
     )
 
 
+def test_verify_task_completion_rejects_missing_explicit_output_file():
+    from app.core.agent.task_tools import verify_task_completion
+
+    result = json.loads(
+        verify_task_completion(
+            task_description=(
+                "读取 codex_context_dir/orders.csv，生成 optimized_restock_plan.csv "
+                "和 optimized_operations_report.md。"
+            ),
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "optimized_restock_plan.csv",
+                        "exists": True,
+                        "modified": True,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "optimized_restock_plan.csv",
+                        "operation": "run_python_code",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+        )
+    )
+
+    assert result["completed"] is False
+    assert result["criteria_results"][0]["criterion"] == "explicit_output_files_present"
+    assert "optimized_operations_report.md" in result["summary"]
+
+
+def test_verify_task_completion_summarizes_multiple_docx_changes_on_target():
+    from app.core.agent.task_tools import verify_task_completion
+
+    result = json.loads(
+        verify_task_completion(
+            task_description="把 xlsx 表格加入 docx，并追加核验说明",
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "operation": "write_docx_content",
+                        "paragraphs_written": 2,
+                    },
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_excel_as_docx_table",
+                        "sheet": "Budget",
+                        "rows_written": 4,
+                        "columns_written": 5,
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            target_path="report.docx",
+        )
+    )
+
+    assert result["completed"] is True
+    assert "文件已成功修改：report.docx" in result["summary"]
+    assert "本次工具调用写入 2 个段落" in result["summary"]
+    assert "工作表“Budget”" in result["summary"]
+    assert "4 行 × 5 列" in result["summary"]
+    assert "相关文件变更" not in result["summary"]
+    assert "其他文件变更" not in result["summary"]
+
+
 def test_verify_task_completion_uses_structured_docx_image_metadata():
     from app.core.agent.task_tools import verify_task_completion
 
@@ -547,6 +787,62 @@ def test_verify_task_completion_uses_structured_docx_image_metadata():
     assert "文件已成功修改：report.docx" in result["summary"]
     assert "已插入 1 张图片" in result["summary"]
     assert "chart.png" in result["summary"]
+
+
+def test_verify_task_completion_summarizes_multiple_docx_images_once():
+    from app.core.agent.task_tools import verify_task_completion
+
+    result = json.loads(
+        verify_task_completion(
+            task_description="把多张图表加入 docx",
+            file_states=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "exists": True,
+                        "modified": True,
+                        "preview": "...",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_image_into_docx",
+                        "image_name": "chart1_revenue_profit_trend.png",
+                        "images_inserted": 1,
+                        "caption": "收入和利润趋势",
+                    },
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_image_into_docx",
+                        "image_name": "chart2_product_mix.png",
+                        "images_inserted": 1,
+                        "caption": "产品结构",
+                    },
+                    {
+                        "path": "report.docx",
+                        "operation": "insert_image_into_docx",
+                        "image_name": "chart3_margin_analysis.png",
+                        "images_inserted": 1,
+                    },
+                ],
+                ensure_ascii=False,
+            ),
+            target_path="report.docx",
+        )
+    )
+
+    assert result["completed"] is True
+    assert "文件已成功修改：report.docx" in result["summary"]
+    assert "已插入 3 张图片" in result["summary"]
+    assert (
+        "chart1_revenue_profit_trend.png、chart2_product_mix.png、chart3_margin_analysis.png"
+        in result["summary"]
+    )
+    assert result["summary"].count("已插入") == 1
 
 
 def test_verify_task_completion_ignores_intermediate_chart_artifacts_for_docx_target():
@@ -690,6 +986,47 @@ def test_verify_task_completion_detects_target_mismatch_from_structured_changes(
             "priority": "critical",
         }
     ]
+
+
+def test_verify_task_completion_accepts_display_name_for_absolute_target(tmp_path):
+    from app.core.agent.task_tools import verify_task_completion
+
+    target = tmp_path / "report.docx"
+
+    result = json.loads(
+        verify_task_completion(
+            task_description="创建 docx 总结",
+            file_states=json.dumps(
+                [
+                    {
+                        "path": target.name,
+                        "exists": True,
+                        "modified": True,
+                        "preview": "已写入摘要",
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            file_changes=json.dumps(
+                [
+                    {
+                        "path": target.name,
+                        "operation": "write_docx_content",
+                        "paragraphs_written": 3,
+                    }
+                ],
+                ensure_ascii=False,
+            ),
+            target_path=str(target),
+        )
+    )
+
+    assert result["completed"] is True
+    assert "文件已成功修改：report.docx" in result["summary"]
+    assert any(
+        item["criterion"] == "target_file_hit" and item["passed"] is True
+        for item in result["criteria_results"]
+    )
 
 
 def test_verify_task_completion_rejects_locked_target_fallback_copy_as_original_write():
@@ -852,6 +1189,57 @@ def test_task_file_sandbox_staging_sanitizes_invalid_display_names(tmp_path):
     assert (sandbox / "____-financial model.xlsx").exists()
     assert '"????-financial model.xlsx"' in preamble
     assert "____-financial model.xlsx" in preamble
+
+
+def test_copy_file_delegates_to_canonical_file_service(tmp_path, monkeypatch):
+    import app.core.agent.task_tools as task_tools
+
+    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    source = tmp_path / "source.txt"
+    source.write_text("hello", encoding="utf-8")
+    calls = []
+
+    class FakeFileService:
+        def __init__(self, *, workspace_dir, backup_enabled):
+            calls.append(
+                {
+                    "workspace_dir": workspace_dir,
+                    "backup_enabled": backup_enabled,
+                }
+            )
+
+        def copy_file(self, source_path, destination_path, overwrite=False):
+            calls.append(
+                {
+                    "source": source_path,
+                    "destination": destination_path,
+                    "overwrite": overwrite,
+                }
+            )
+            return {
+                "success": True,
+                "destination": destination_path,
+            }
+
+    monkeypatch.setattr(task_tools, "FileService", FakeFileService)
+
+    payload = json.loads(task_tools.copy_file("source.txt", "copied.txt"))
+
+    assert calls == [
+        {
+            "workspace_dir": str(tmp_path),
+            "backup_enabled": False,
+        },
+        {
+            "source": str(source),
+            "destination": str(tmp_path / "copied.txt"),
+            "overwrite": True,
+        },
+    ]
+    assert payload["success"] is True
+    assert payload["path"] == "copied.txt"
+    assert payload["operation"] == "copy_file"
+    assert payload["change_type"] == "create"
 
 
 def test_annotate_file_returns_standard_file_change_payload(tmp_path, monkeypatch):

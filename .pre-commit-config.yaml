@@ -34,3 +34,20 @@ repos:
       - id: bandit
         args: ["-c", "setup.cfg", "--quiet"]
         exclude: tests/
+
+  - repo: local
+    hooks:
+      - id: frontend-lint
+        name: Frontend ESLint
+        entry: node web/node_modules/.bin/eslint web/src/ --ext .ts,.tsx
+        language: system
+        files: '^web/src/.*\.tsx?$'
+        pass_filenames: false
+
+      - id: python-tests
+        name: Python Tests (pre-push)
+        entry: python -m pytest tests/ -x --tb=short -q
+        language: system
+        files: '^(tests/|web/(?!src/)).*\.py$'
+        pass_filenames: false
+        stages: [pre-push]

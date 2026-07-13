@@ -400,11 +400,11 @@ class BatchFileOpsManager:
                 return {"source": str(path), "success": True, "output": str(dest)}
 
             if source_ext == ".pdf" and target_ext == ".txt":
-                import PyPDF2
+                import pypdf
 
                 text = ""
                 with open(path, "rb") as f:
-                    reader = PyPDF2.PdfReader(f)
+                    reader = pypdf.PdfReader(f)
                     for page in reader.pages:
                         text += page.extract_text() or ""
                 dest.write_text(text, encoding="utf-8")

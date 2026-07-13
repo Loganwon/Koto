@@ -5,15 +5,16 @@
  */
 
 // ── External dependencies (provided by workspace-assistant IIFE scope) ──
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
-declare var lastSelectionText: string;
-declare var _docxMouseIsDown: boolean;
-declare var _docxMouseUpY: number;
-declare var _docxHbEl: HTMLElement | null;
-declare var _docxCpEl: HTMLElement | null;
-declare var _docxSelTimer: any;
+declare let state: any;
+declare let lastSelectionText: string;
+declare let _docxMouseIsDown: boolean;
+declare let _docxMouseUpY: number;
+declare let _docxHbEl: HTMLElement | null;
+declare let _docxCpEl: HTMLElement | null;
+declare let _docxSelTimer: any;
 declare function _cloneSerializable(val: any, fallback: any): any;
 declare function _escHtml(s: any): string;
 declare function _getPinnedSelectionSourceMeta(): { sourcePath: string; sourceName: string; sourceType: string };
@@ -66,6 +67,12 @@ export interface PinnedSelectionContext {
   sourcePath: string;
   sourceName: string;
   sourceType: string;
+  kind?: string;
+  rawText?: string;
+  sheetName?: string;
+  rangeA1?: string;
+  rows?: number;
+  cols?: number;
 }
 
 export interface DocxSelectionPayload {
@@ -192,6 +199,12 @@ export function _createPinnedSelectionContext(text: any, sourceMeta?: any): Pinn
       sourcePath,
       sourceName: sourceName || (sourcePath ? sourcePath.split(/[\\/]/).pop() || sourcePath : ''),
       sourceType,
+      kind: String(text.kind || text.selectionKind || '').trim(),
+      rawText: String(text.rawText || text.raw_text || '').trim(),
+      sheetName: String(text.sheetName || text.sheet_name || '').trim(),
+      rangeA1: String(text.rangeA1 || text.range_a1 || '').trim(),
+      rows: Number(text.rows || 0) || 0,
+      cols: Number(text.cols || 0) || 0,
     };
   }
 
@@ -220,7 +233,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   const tableInfo = (opts && opts.table) || '';
   const pinnedSelectionText = _selectionContextText(state.pinnedSelection);
   const pinnedSelectionSource = _selectionContextSourceLabel(state.pinnedSelection);
-  const clearSelectionButton = '<button class="ctx-bar-clear" onclick="WA.clearSelection()" title="\u53d6\u6d88\u6587\u672c\u6ce8\u5165" aria-label="\u53d6\u6d88\u6587\u672c\u6ce8\u5165">&times;</button>';
+  const clearSelectionButton = '<button type="button" class="ctx-bar-clear ctx-bar-clear-selection" data-wa-selection-context-action="clear-selection" title="\u53d6\u6d88\u9009\u4e2d\u6587\u672c\u4e0a\u4e0b\u6587" aria-label="\u53d6\u6d88\u9009\u62e9">\u53d6\u6d88\u9009\u62e9</button>';
 
   const parts: string[] = [];
 
@@ -238,7 +251,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   }
 
   if (nFiles > 0) {
-    parts.push(`<span class="ctx-bar-files">\u5df2\u9644\u52a0 <b>${nFiles} \u4efd\u6587\u4ef6</b><button class="ctx-bar-clear" onclick="WA.clearAIFileContext()" title="\u6e05\u9664\u6587\u4ef6">&times;</button></span>`);
+    parts.push(`<span class="ctx-bar-files">\u5df2\u9644\u52a0 <b>${nFiles} \u4efd\u6587\u4ef6</b><button type="button" class="ctx-bar-clear ctx-bar-clear-files" data-wa-selection-context-action="clear-files" title="\u6e05\u9664\u5168\u90e8\u9644\u52a0\u6587\u4ef6" aria-label="\u6e05\u9664\u9644\u52a0\u6587\u4ef6">\u6e05\u9664\u6587\u4ef6</button></span>`);
   }
 
   if (parts.length) {
@@ -275,7 +288,7 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
 export function _pinSelectionChip(text: any, sourceMeta?: any): void {
   const selectionContext = _createPinnedSelectionContext(text, sourceMeta);
   if (!selectionContext) {
-    (window as any).WA.clearSelection();
+    clearSelection();
     return;
   }
   state._selectionDismissed = false;
@@ -505,8 +518,22 @@ export function _getLiveEditorSelectionForAI(options?: { allowStaleFallback?: bo
   if (state.fileType === 'docx') {
     const docxSelection = _getDocxSelectionPayload({ allowStaleFallback });
     return docxSelection
-      ? { text: docxSelection.aiText, previewText: docxSelection.previewText }
+      ? Object.assign({}, docxSelection, {
+          text: docxSelection.aiText,
+          sourceType: 'docx',
+          selectionKind: docxSelection.kind,
+        })
       : null;
+  }
+  if (state.fileType === 'xlsx' && state.activeEditor && typeof state.activeEditor.getSelectionPayload === 'function') {
+    const payload = state.activeEditor.getSelectionPayload();
+    if (payload && String(payload.aiText || payload.text || '').trim()) {
+      return Object.assign({}, payload, {
+        text: String(payload.aiText || payload.text || '').trim(),
+        sourceType: 'xlsx',
+        selectionKind: payload.kind || 'xlsx-range',
+      });
+    }
   }
   let sel: string = _getActiveTextEditorSelectionForAI();
   if (!sel && allowStaleFallback) sel = lastSelectionText;
@@ -801,12 +828,26 @@ export function sendSelectionToAI(): void {
   if (input) input.focus();
 }
 
+export function closeSelectionToolbar(): void {
+  state._selectionDismissed = true;
+  if (state.fileType === 'docx') {
+    // This is the sole WA.closeSelectionToolbar implementation.  Preserve the
+    // DOCX hover-bar dismissal contract here instead of relying on the DOCX
+    // toolbar module to overwrite the global entry point later in the bundle.
+    (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
+    _resetDocxSelection();
+  }
+  const tt = $('wa-pdf-tooltip');
+  if (tt) tt.style.display = 'none';
+  try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
+}
+
 export function clearSelection(): void {
   state.pinnedSelection = null;
   state.lastPinnedSel = null;
   state._selectionDismissed = true;
   lastSelectionText = '';
-  try { window.getSelection()?.removeAllRanges(); } catch (_) {}
+  try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
   try {
     if (state.activeEditor) {
       state.activeEditor._savedSel = null;
@@ -815,7 +856,7 @@ export function clearSelection(): void {
       state.activeEditor._lastTableRows = 0;
       state.activeEditor._lastTableCols = 0;
     }
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
   const tt = $('wa-pdf-tooltip');
   if (tt) tt.style.display = 'none';
   _updateContextBar();
@@ -858,6 +899,19 @@ export function _resetDocxSelection(): void {
 function _installSelectionToolbarEvents(): void {
   if ((window as any).__waSelectionToolbarEventsInstalled) return;
   (window as any).__waSelectionToolbarEventsInstalled = true;
+
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target && target.closest
+      ? target.closest<HTMLElement>('[data-wa-selection-context-action]')
+      : null;
+    if (!control) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = String(control.dataset.waSelectionContextAction || '');
+    if (action === 'clear-selection') clearSelection();
+    else if (action === 'clear-files') getWorkspaceApi().clearAIFileContext?.();
+  }, true);
 
   document.addEventListener('mouseup', (event: MouseEvent) => {
     const el = _evtEl(event.target);
@@ -918,21 +972,23 @@ function _installSelectionToolbarEvents(): void {
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA._updateContextBar = _updateContextBar;
-  (window as any).WA._getDocxSelectionPayload = _getDocxSelectionPayload;
-  (window as any).WA._getDocxSelectionTextForAI = _getDocxSelectionTextForAI;
-  (window as any).WA._extractPptxTableText = _extractPptxTableText;
-  (window as any).WA._extractHtmlTableText = _extractHtmlTableText;
-  (window as any).WA._positionSelectionToolbar = _positionSelectionToolbar;
-  (window as any).WA._getSelectionViewportBounds = _getSelectionViewportBounds;
-  (window as any).WA._getLiveEditorSelectionForAI = _getLiveEditorSelectionForAI;
-  (window as any).WA._showSelectionToolbarForCurrentSelection = _showSelectionToolbarForCurrentSelection;
-  (window as any).WA._applyPinnedHighlight = _applyPinnedHighlight;
-  (window as any).WA._clearPinnedHighlight = _clearPinnedHighlight;
-  (window as any).WA._applyTemporaryHighlight = _applyTemporaryHighlight;
-  (window as any).WA.sendSelectionToAI = sendSelectionToAI;
-  (window as any).WA.clearSelection = clearSelection;
+  publishWorkspaceApi({
+    _updateContextBar,
+    _getDocxSelectionPayload,
+    _getDocxSelectionTextForAI,
+    _extractPptxTableText,
+    _extractHtmlTableText,
+    _positionSelectionToolbar,
+    _getSelectionViewportBounds,
+    _getLiveEditorSelectionForAI,
+    _showSelectionToolbarForCurrentSelection,
+    _applyPinnedHighlight,
+    _clearPinnedHighlight,
+    _applyTemporaryHighlight,
+    sendSelectionToAI,
+    closeSelectionToolbar,
+    clearSelection,
+  });
   (window as any)._hideDocxHoverBar = _hideDocxHoverBar;
   (window as any)._resetDocxSelection = _resetDocxSelection;
   (window as any)._pinSelectionChip = _pinSelectionChip;

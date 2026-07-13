@@ -27,6 +27,22 @@ def test_parse_editor_file_reads_text_payload(tmp_path: Path):
     assert parsed.data["extension"] == ".md"
 
 
+def test_parse_editor_file_reads_csv_as_text_payload(tmp_path: Path):
+    target = tmp_path / "anomalies.csv"
+    target.write_text("product,rate\nBoreal,9.92\n", encoding="utf-8")
+
+    parsed = FileAssistantService().parse_editor_file(
+        target,
+        file_id="abc123",
+        display_name="anomalies.csv",
+    )
+
+    assert parsed.file_type == "text"
+    assert parsed.data["content"] == "product,rate\nBoreal,9.92\n"
+    assert parsed.data["language"] == "csv"
+    assert parsed.data["extension"] == ".csv"
+
+
 def test_export_editor_file_writes_text_bytes():
     exported = FileAssistantService().export_editor_file(
         file_type="code",

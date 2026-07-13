@@ -73,6 +73,8 @@ def _frontend_api_refs() -> set[tuple[str, str]]:
     for path in paths:
         if "node_modules" in path.parts:
             continue
+        if path.name == "workflow_dag.html":
+            continue  # Served only by the debug-only dev blueprint.
         if not path.is_file():
             continue
         try:
@@ -198,6 +200,8 @@ def _workspace_wa_method_names() -> set[str]:
         r"(?:\bWA|\bwa|window\.WA|\(window as any\)\.WA)\.([A-Za-z_$][\w$]*)\s*="
     )
     export_pattern = re.compile(r"export function ([A-Za-z_$][\w$]*)\s*\(")
+    publish_pattern = re.compile(r"publishWorkspaceApi\(\s*\{(.*?)\}\s*\)", re.S)
+    published_name_pattern = re.compile(r"^\s*([A-Za-z_$][\w$]*)\s*(?=[:,}]|$)", re.M)
     names: set[str] = set()
     for path in Path("web/src").rglob("*.ts"):
         if not path.is_file():
@@ -205,6 +209,8 @@ def _workspace_wa_method_names() -> set[str]:
         text = path.read_text(encoding="utf-8")
         names.update(assign_pattern.findall(text))
         names.update(export_pattern.findall(text))
+        for entries in publish_pattern.findall(text):
+            names.update(published_name_pattern.findall(entries))
     return names
 
 
@@ -301,6 +307,42 @@ def _frontend_global_function_names() -> set[str]:
     return names
 
 
+def _reachable_frontend_sources() -> set[Path]:
+    source_root = Path("web/src").resolve()
+    entrypoints = [
+        "shared/auth.ts",
+        "bundles/app.ts",
+        "bundles/skills-ui.ts",
+        "skills/skills-panel.ts",
+        "bundles/workspace.ts",
+        "bundles/review.ts",
+        "skills/skill-marketplace.ts",
+        "skills/skill-community.ts",
+    ]
+    import_pattern = re.compile(
+        r"(?:import|export)\s*(?:\(|(?:[^'\"]*?\s+from\s+)?)['\"]([^'\"]+)['\"]"
+    )
+    reachable: set[Path] = set()
+    pending = [source_root / entrypoint for entrypoint in entrypoints]
+
+    while pending:
+        path = pending.pop().resolve()
+        if path in reachable or not path.is_file():
+            continue
+        reachable.add(path)
+        source = path.read_text(encoding="utf-8")
+        for specifier in import_pattern.findall(source):
+            if not specifier.startswith("."):
+                continue
+            candidate = (path.parent / specifier).resolve()
+            choices = [candidate, candidate.with_suffix(".ts"), candidate / "index.ts"]
+            resolved = next((choice for choice in choices if choice.is_file()), None)
+            if resolved is not None:
+                pending.append(resolved)
+
+    return reachable
+
+
 @pytest.mark.unit
 @pytest.mark.parametrize(
     "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
@@ -365,7 +407,6 @@ def test_frontend_exposed_button_routes_are_registered(app_factory):
         ("GET", "/api/auth/me"),
         ("POST", "/api/auth/logout"),
         ("GET", "/api/csrf-token"),
-        ("GET", "/api/dev/checkpoint-info"),
         ("GET", "/api/v1/workspace/pdf/load_annotations/"),
     ]
 
@@ -461,6 +502,37 @@ def test_frontend_static_asset_references_exist():
 
 
 @pytest.mark.unit
+def test_all_typescript_sources_are_reachable_from_a_bundle_entrypoint():
+    source_root = Path("web/src").resolve()
+    all_sources = {
+        path.resolve()
+        for path in source_root.rglob("*.ts")
+        if not path.name.endswith(".test.ts")
+    }
+    unreachable = sorted(
+        path.relative_to(source_root).as_posix()
+        for path in all_sources - _reachable_frontend_sources()
+    )
+
+    assert unreachable == []
+
+
+@pytest.mark.unit
+def test_retired_frontend_artifacts_stay_removed():
+    retired = [
+        "web/static/css/inline-extracted.css",
+        "web/static/css/workspace-assistant.css",
+        "web/static/test-sheets.html",
+        "web/static/koto-minimal-tech-preview.html",
+        "web/templates/_workspace_model_controls_compact.html",
+        "web/src/editors/docx-readview.ts",
+        "web/src/workspace/tiptap-types.ts",
+    ]
+
+    assert [path for path in retired if Path(path).exists()] == []
+
+
+@pytest.mark.unit
 def test_frontend_button_sources_keep_matching_backend_clusters():
     frontend_sources = "\n".join(
         Path(path).read_text(encoding="utf-8")
@@ -485,7 +557,7 @@ def test_frontend_button_sources_keep_matching_backend_clusters():
     assert '@job_bp.post("/triggers/bootstrap")' in job_routes
     assert '# @job_bp.get("/triggers")' not in job_routes
     assert "register_memory_routes" in app_blueprints
-    assert "from web.auth import register_auth_routes" in app_blueprints
+    assert "from web.blueprints.auth import register_auth_routes" in app_blueprints
     assert "from web.app_http import configure_http_wiring" in app_blueprints
     assert "from app.api.response_routes import response_bp" in app_blueprints
     assert "register_blueprints_deferred" in blueprint_loader

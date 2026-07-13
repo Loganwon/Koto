@@ -8,7 +8,7 @@ export function goToWelcome(): void {
   if (currentSession && typeof (window as any).isSessionGenerating === 'function' && (window as any).isSessionGenerating(currentSession)) {
     const controller = (window as any).getSessionAbortController?.(currentSession);
     if (controller) {
-      console.log(`[CLEANUP] Aborting previous session ${currentSession}`);
+      // Aborting previous session
       controller.abort();
     }
     if (typeof (window as any).setSessionGenerating === 'function') {

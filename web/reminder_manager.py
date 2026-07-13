@@ -17,6 +17,10 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+_MAX_TIMER_DELAY_SECONDS = min(
+    float(getattr(threading, "TIMEOUT_MAX", 2_147_483_647)),
+    2_147_483_647,
+)
 
 try:
     from web.windows_notifier import show_toast
@@ -57,6 +61,13 @@ class ReminderManager:
     def _schedule_timer(self, reminder_id: str, delay: float):
         if delay <= 0:
             delay = 0.5
+        if delay > _MAX_TIMER_DELAY_SECONDS:
+            logger.info(
+                "[提醒] 延后注册过远的提醒计时器: %s (%.0f seconds)",
+                reminder_id,
+                delay,
+            )
+            return
 
         def _fire():
             reminder = self.reminders.get(reminder_id)

@@ -5,9 +5,18 @@
  */
 
 import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core';
-import { NodeSelection, Plugin, PluginKey } from 'prosemirror-state';
-import { Decoration, DecorationSet } from 'prosemirror-view';
-import { TableMap } from '@tiptap/pm/tables';
+import { NodeSelection, Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import {
+  ResizeState,
+  TableMap,
+  cellAround,
+  columnResizingPluginKey,
+  pointsAtCell,
+  tableEditing,
+  tableNodeTypes,
+  updateColumnsOnResize,
+} from '@tiptap/pm/tables';
 import { Table, TableView } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -16,15 +25,7 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import Image from '@tiptap/extension-image';
 import Heading from '@tiptap/extension-heading';
 import { resolveDocxBreakChrome } from './docx-pagination-runtime.js';
-import {
-  ResizeState,
-  cellAround,
-  columnResizingPluginKey,
-  pointsAtCell,
-  tableEditing,
-  tableNodeTypes,
-  updateColumnsOnResize,
-} from 'prosemirror-tables';
+import { createDocxPaginationScheduler } from './docx-pagination-scheduler.js';
 
 export const DOCX_ROW_RESIZE_SKIP_AUTOSAVE_META = 'kotoDocxRowResizeSkipAutoSave';
 export const DOCX_TABLE_RESIZE_TRANSACTION_META = 'kotoDocxTableResizeTransaction';
@@ -1008,7 +1009,7 @@ function _docxImageLayoutFromElement(el) {
   const left = _docxImageStyleRaw(container, 'left');
   const top = _docxImageStyleRaw(container, 'top');
 
-  // docx-preview encodes wrapNone/anchored drawings as a zero-sized relative
+  // Imported DOCX encodes wrapNone/anchored drawings as a zero-sized relative
   // wrapper with left/top offsets. Treat those as unsupported floating imports
   // instead of misclassifying them as top/bottom-wrapped images.
   const looksAnchored = !!container
@@ -1280,14 +1281,19 @@ export const DocxImage = Image.extend({
       _applyWrapperStyle(node.attrs);
 
       const img = document.createElement('img');
+      img.className = 'koto-docx-img';
       img.style.display = 'block';
       img.draggable = false;
       const _syncImg = (attrs) => {
         img.src = attrs.src || '';
         img.alt = attrs.alt || '';
         img.style.width = attrs.width || 'auto';
-        img.style.height = 'auto';
-        img.style.maxWidth = '100%';
+        img.style.height = attrs.height || 'auto';
+        img.style.maxWidth = attrs.maxWidth || '100%';
+        img.style.maxHeight = attrs.maxHeight || '';
+        img.style.objectFit = attrs.objectFit || 'contain';
+        img.style.borderRadius = attrs.borderRadius || '';
+        img.style.verticalAlign = attrs.verticalAlign || '';
       };
       _syncImg(node.attrs);
       dom.appendChild(img);
@@ -1760,6 +1766,10 @@ function _notifyHdrFtrSelectionChanged() {
   if (typeof window._kotoDocxSelectionChanged === 'function') {
     window._kotoDocxSelectionChanged();
   }
+  // Notify pagination plugin that header/footer content may have changed.
+  // The plugin listens for this event and schedules a re-measurement to
+  // keep page break chrome in sync with the latest header/footer values.
+  try { window.dispatchEvent(new CustomEvent('koto-hdrftr-changed')); } catch (_) {}
 }
 
 function _initialHdrFtrOverlayHtml(html) {
@@ -1799,20 +1809,15 @@ function _setHdrFtrSlotState(slotEl, html, slotType) {
 // gap: bottom-margin zone → gray gap → top-margin zone, each occupying
 // actual height in the document so content is never hidden behind them.
 //
-// Header / footer HTML is supplied via extension storage after the editor
-// is created:
-//   editor.storage.docxPageBreak.headerHtml = '<p>…</p>';
-//   editor.storage.docxPageBreak.footerHtml = '<p>…</p>';
+// Explicit and automatic page boundaries share the AutoPageBreak storage and
+// the same page-break widget builder below.  Keeping one source of page chrome
+// prevents header/footer or sheet geometry from drifting between break types.
 // ─────────────────────────────────────────────────────────────────────────────
 export const DocxPageBreak = Node.create({
   name: 'docxPageBreak',
   group: 'block',
   atom: true,
   selectable: false,
-
-  addStorage() {
-    return { headerHtml: '', footerHtml: '' };
-  },
 
   addAttributes() {
     return {
@@ -1855,108 +1860,27 @@ export const DocxPageBreak = Node.create({
 
   addNodeView() {
     return ({ node, editor }) => {
-      // ── Root wrapper ─────────────────────────────────────────────────
-      const dom = document.createElement('div');
-      dom.setAttribute('data-page-break', '');
+      // Use the same page-break chrome as automatic, inline and table breaks.
+      // Only the placement differs; the sheet surface must not.
+      const { dom, fillEl, endZone, startZone, footerEl, headerEl } = _buildDocxPageBreakWidget({
+        breakAttribute: 'data-page-break',
+        pageNum: Math.max(1, Number.parseInt(node.attrs.page, 10) || 1),
+        headerHtml: '',
+        footerHtml: '',
+        marginTopPx: 96,
+        marginBottomPx: 80,
+        marginLeftPx: 96,
+        marginRightPx: 96,
+        extStorage: editor.storage?.autoPageBreak,
+        contentFillPx: 0,
+      });
       dom.setAttribute('data-page-num', String(Math.max(1, Number.parseInt(node.attrs.page, 10) || 1)));
       dom.setAttribute('data-section-idx', String(Math.max(0, Number.parseInt(node.attrs.sectionIdx, 10) || 0)));
       dom.setAttribute('data-current-section-idx', String(Math.max(0, Number.parseInt(node.attrs.currentSectionIdx, 10) || 0)));
       dom.setAttribute('data-next-section-idx', String(Math.max(0, Number.parseInt(node.attrs.nextSectionIdx, 10) || Number.parseInt(node.attrs.sectionIdx, 10) || 0)));
-      dom.setAttribute('data-content-fill-px', '0');
-      dom.className = 'koto-page-break';
-      dom.setAttribute('contenteditable', 'false');
-
-      const fillEl = document.createElement('div');
-      fillEl.className = 'koto-pb-fill';
-      dom.appendChild(fillEl);
-
-      // ── Bottom zone of the upper page (white, with footer) ───────────
-      const endZone = document.createElement('div');
-      endZone.className = 'koto-pb-end';
-
-      // Footer content
-      const footerEl = document.createElement('div');
-      footerEl.className = 'koto-pb-footer';
-      _setHdrFtrSlotState(footerEl, '', 'footer');
-      endZone.appendChild(footerEl);
-
-      dom.appendChild(endZone);
-
-      // ── Gap between pages (canvas-colored separator) ─────────────────
-      const gapZone = document.createElement('div');
-      gapZone.className = 'koto-pb-gap';
-      dom.appendChild(gapZone);
-
-      // ── Top zone of the next page (white, with header) ───────────────
-      const startZone = document.createElement('div');
-      startZone.className = 'koto-pb-start';
-
-      // Header content
-      const headerEl = document.createElement('div');
-      headerEl.className = 'koto-pb-header';
-      _setHdrFtrSlotState(headerEl, '', 'header');
-      startZone.appendChild(headerEl);
-
-      dom.appendChild(startZone);
-
-      // ── Click-to-edit overlay for header/footer ───────────────────────
-      const _openOverlay = (targetEl, type) => {
-        if (targetEl.querySelector('.koto-hdrftr-overlay')) return;
-        targetEl.classList.add('is-editing');
-        const overlay = document.createElement('div');
-        overlay.className = 'koto-hdrftr-overlay';
-        overlay.setAttribute('contenteditable', 'true');
-        overlay.dataset.slotType = type;
-        overlay.innerHTML = _normalizeHdrFtrHtml(targetEl.innerHTML) ? targetEl.innerHTML : '<p></p>';
-        const overlayOutline = type === 'header'
-          ? 'outline:none;outline-offset:0;'
-          : 'outline:1px dashed rgba(79,126,255,.5);outline-offset:-1px;';
-        overlay.style.cssText = `position:absolute;top:0;left:0;right:0;bottom:0;z-index:10;background:#fff;padding:inherit;box-sizing:border-box;${overlayOutline}`;
-
-        const _finish = () => {
-          const newHtml = _normalizeHdrFtrHtml(overlay.innerHTML) ? overlay.innerHTML : '';
-          overlay.remove();
-          targetEl.classList.remove('is-editing');
-          _setHdrFtrSlotState(targetEl, newHtml, type);
-          if (editor.storage?.docxPageBreak) editor.storage.docxPageBreak[type === 'header' ? 'headerHtml' : 'footerHtml'] = newHtml;
-          if (editor.storage?.autoPageBreak) {
-            const storageKey = type === 'header' ? 'headerHtml' : 'footerHtml';
-            editor.storage.autoPageBreak[storageKey] = newHtml;
-            if (Array.isArray(editor.storage.autoPageBreak.sections)) {
-              editor.storage.autoPageBreak.sections.forEach((section) => {
-                if (section && typeof section === 'object') {
-                  section[type === 'header' ? 'header_html' : 'footer_html'] = newHtml;
-                }
-              });
-            }
-          }
-          const root = dom.closest('#wa-docx-editor');
-          if (!root) return;
-          root.querySelectorAll(type === 'header' ? '.koto-pb-header' : '.koto-pb-footer').forEach((sib) => {
-            if (sib !== targetEl) _setHdrFtrSlotState(sib, newHtml, type);
-          });
-          const flEl = root.querySelector(type === 'header' ? '.koto-page-header-first' : '.koto-page-footer-last');
-          if (flEl && flEl.dataset.variant !== 'first') {
-            _setHdrFtrSlotState(flEl, newHtml, type);
-          }
-        };
-
-        overlay.addEventListener('blur', _finish);
-        overlay.addEventListener('keydown', (e) => {
-          if (e.key === 'Escape') { overlay.blur(); }
-          if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); }
-        });
-        targetEl.appendChild(overlay);
-        overlay.focus();
-      };
-
-      headerEl.addEventListener('dblclick', (e) => { e.stopPropagation(); _openOverlay(headerEl, 'header'); });
-      footerEl.addEventListener('dblclick', (e) => { e.stopPropagation(); _openOverlay(footerEl, 'footer'); });
-
       // ── Deferred header/footer injection ─────────────────────────────
-      // storage.docxPageBreak is set by render() AFTER new Editor() returns,
-      // so NodeViews created during parsing read empty defaults.  Retry on
-      // rAF and again at 200ms to guarantee content is filled.
+      // AutoPageBreak storage is populated after new Editor() returns. Retry
+      // on rAF and again at 200ms to guarantee content is filled.
       const _injectHdrFtr = () => {
         const breakChrome = resolveDocxBreakChrome(
           editor.storage?.autoPageBreak || {},
@@ -1970,8 +1894,18 @@ export const DocxPageBreak = Node.create({
         const mRight = breakChrome.marginRightPx || 96;
         const contentFillPx = _normalizeDocxBreakFillPx(dom.getAttribute('data-content-fill-px'));
 
-        dom.style.marginLeft = `-${mLeft}px`;
-        dom.style.marginRight = `-${mRight}px`;
+        // This node lives in the ProseMirror content box, while the visible
+        // sheet is its border box.  Escaping both document margins made an
+        // explicit DOCX page break wider than the sheet whenever its stored
+        // section margins differed from the editor padding (for example 120px
+        // margins on an 816px sheet produced an 864px break).  Use the actual
+        // rendered editor surface just like auto-generated soft breaks do.
+        const pageGeometry = _resolveRenderedDocxPageGeometry(
+          editor.view?.dom,
+          breakChrome.pageWidthPx || 816,
+          mLeft,
+        );
+        _alignSoftBreakWidgetToRenderedPage(dom, pageGeometry.contentLeftPx, pageGeometry.pageWidthPx);
         fillEl.style.height = `${contentFillPx}px`;
         endZone.style.height = `${mBot}px`;
         startZone.style.height = `${mTop}px`;
@@ -2266,10 +2200,40 @@ const _AUTO_PB_KEY = new PluginKey('autoPageBreak');
 const _AUTO_PB_INITIAL_DELAY_MS = 80;
 const _AUTO_PB_UPDATE_DELAY_MS = 120;
 const _AUTO_PB_MIN_LINES_PER_FRAGMENT = 2;
+const _DOCX_SOFT_PAGE_BREAK_SELECTOR = '[data-soft-page-break]';
+const _DOCX_PAGE_BOUNDARY_SELECTOR = '[data-soft-page-break],[data-page-break]';
 
 function _normalizeDocxBreakFillPx(value) {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
+}
+
+function _resolveRenderedDocxPageGeometry(pmDom, fallbackPageWidthPx, fallbackContentLeftPx) {
+  const fallbackWidth = Math.max(0, Number(fallbackPageWidthPx) || 0);
+  const fallbackLeft = Math.max(0, Number(fallbackContentLeftPx) || 0);
+  let contentLeftPx = fallbackLeft;
+  try {
+    const pmStyle = pmDom && typeof window !== 'undefined'
+      ? window.getComputedStyle(pmDom)
+      : null;
+    contentLeftPx = Number.parseFloat(pmStyle?.paddingLeft || '') || fallbackLeft;
+  } catch (_) {}
+  return {
+    pageWidthPx: pmDom?.offsetWidth || fallbackWidth,
+    contentLeftPx,
+  };
+}
+
+function _alignSoftBreakWidgetToRenderedPage(widget, pageLeftOffsetPx, pageWidthPx) {
+  if (!widget?.style) return;
+  const pageOffset = Math.max(0, Number(pageLeftOffsetPx) || 0);
+  const renderedWidth = Math.max(0, Number(pageWidthPx) || 0);
+  widget.style.marginLeft = `${-pageOffset}px`;
+  widget.style.marginRight = '0';
+  if (renderedWidth > 0) {
+    widget.style.width = renderedWidth + 'px';
+    widget.style.maxWidth = renderedWidth + 'px';
+  }
 }
 
 function _applyMeasuredExplicitBreakState(dom, pageNum, currentSectionIdx, nextSectionIdx, contentFillPx) {
@@ -2283,10 +2247,24 @@ function _applyMeasuredExplicitBreakState(dom, pageNum, currentSectionIdx, nextS
   if (fillEl) fillEl.style.height = `${_normalizeDocxBreakFillPx(contentFillPx)}px`;
 }
 
-/** Build the DOM element rendered for each soft page break widget. */
-function _buildSoftBreakWidget(pageNum, headerHtml, footerHtml, marginTopPx, marginBottomPx, marginLeftPx, marginRightPx, pageWidthPx, extStorage, contentFillPx = 0) {
+/**
+ * Build the one shared page-break surface used by explicit, automatic, inline
+ * and table pagination.  Callers only decide where the surface is anchored.
+ */
+function _buildDocxPageBreakWidget({
+  breakAttribute = 'data-soft-page-break',
+  pageNum,
+  headerHtml,
+  footerHtml,
+  marginTopPx,
+  marginBottomPx,
+  marginLeftPx,
+  marginRightPx,
+  extStorage,
+  contentFillPx = 0,
+}) {
   const dom = document.createElement('div');
-  dom.setAttribute('data-soft-page-break', String(pageNum));
+  dom.setAttribute(breakAttribute, String(pageNum));
   dom.setAttribute('data-content-fill-px', String(Math.round(_normalizeDocxBreakFillPx(contentFillPx))));
   dom.className = 'koto-page-break';
   dom.setAttribute('contenteditable', 'false');
@@ -2409,10 +2387,10 @@ function _buildSoftBreakWidget(pageNum, headerHtml, footerHtml, marginTopPx, mar
   headerEl.addEventListener('dblclick', (e) => { e.stopPropagation(); _openOverlay(headerEl, 'header'); });
   footerEl.addEventListener('dblclick', (e) => { e.stopPropagation(); _openOverlay(footerEl, 'footer'); });
 
-  return dom;
+  return { dom, fillEl, endZone, startZone, footerEl, headerEl };
 }
 
-function _buildInlineSoftBreakWidget(pageNum, headerHtml, footerHtml, marginTopPx, marginBottomPx, marginLeftPx, marginRightPx, pageWidthPx, extStorage, contentFillPx = 0) {
+function _buildInlineSoftBreakWidget(pageNum, headerHtml, footerHtml, marginTopPx, marginBottomPx, marginLeftPx, marginRightPx, pageWidthPx, extStorage, pageLeftOffsetPx, contentFillPx = 0) {
   const anchor = document.createElement('span');
   anchor.className = 'koto-inline-page-break-anchor';
   anchor.setAttribute('contenteditable', 'false');
@@ -2421,7 +2399,7 @@ function _buildInlineSoftBreakWidget(pageNum, headerHtml, footerHtml, marginTopP
   anchor.style.lineHeight = '0';
   anchor.style.fontSize = '0';
 
-  const widget = _buildSoftBreakWidget(
+  const { dom: widget } = _buildDocxPageBreakWidget({
     pageNum,
     headerHtml,
     footerHtml,
@@ -2429,10 +2407,16 @@ function _buildInlineSoftBreakWidget(pageNum, headerHtml, footerHtml, marginTopP
     marginBottomPx,
     marginLeftPx,
     marginRightPx,
-    pageWidthPx,
     extStorage,
     contentFillPx,
-  );
+  });
+  // Inline decorations live inside the paragraph that is being split.  Its
+  // own left/right or hanging indent changes the widget's containing block,
+  // so escaping by the document margins alone does not reach the page edges.
+  // Anchor the chrome to the measured page origin and give it the exact page
+  // width instead; this keeps every sheet aligned regardless of paragraph
+  // indentation.
+  _alignSoftBreakWidgetToRenderedPage(widget, pageLeftOffsetPx, pageWidthPx);
   anchor.appendChild(widget);
   return anchor;
 }
@@ -2462,6 +2446,69 @@ function _measureVerticalMarginsPx(element) {
     };
   } catch (_) {
     return { top: 0, bottom: 0 };
+  }
+}
+
+function _measureDocxBlockContentHeightPx(element) {
+  if (!element || typeof element.getBoundingClientRect !== 'function') {
+    return element?.offsetHeight || 0;
+  }
+
+  const baseHeight = element.offsetHeight || 0;
+  let contentHeight = baseHeight;
+
+  try {
+    const rootRect = element.getBoundingClientRect();
+    const scaleY = baseHeight > 0 && rootRect.height > 0
+      ? Math.max(0.01, rootRect.height / baseHeight)
+      : 1;
+    const visualChildren = element.querySelectorAll?.(
+      'img,svg,canvas,video,.koto-img-wrapper'
+    ) || [];
+
+    visualChildren.forEach((child) => {
+      if (!child || typeof child.getBoundingClientRect !== 'function') return;
+      const rect = child.getBoundingClientRect();
+      if (!rect || rect.width <= 0.5 || rect.height <= 0.5) return;
+      const childBottom = (rect.bottom - rootRect.top) / scaleY;
+      if (Number.isFinite(childBottom)) {
+        contentHeight = Math.max(contentHeight, childBottom);
+      }
+    });
+  } catch (_) {}
+
+  // Subtract inline page-break anchor heights from the measured content
+  // height.  When soft breaks are kept visible during measurement the
+  // anchors occupy vertical space inside the block that does not represent
+  // text content.  Excluding them yields the true text-only content height.
+  try {
+    const anchors = element.querySelectorAll?.('.koto-inline-page-break-anchor') || [];
+    for (let ai = 0; ai < anchors.length; ai++) {
+      const anchor = anchors[ai];
+      if (anchor && anchor.offsetHeight) {
+        contentHeight = Math.max(0, contentHeight - anchor.offsetHeight);
+      }
+    }
+  } catch (_) {}
+
+  return Math.max(0, contentHeight);
+}
+
+function _measureDocxBlockOuterHeightPx(element) {
+  const margins = _measureVerticalMarginsPx(element);
+  return _measureDocxBlockContentHeightPx(element) + margins.top + margins.bottom;
+}
+
+function _docxBlockAvoidsAutoSplit(node, element) {
+  if (node?.type?.name === 'image') return true;
+  if (!element) return false;
+  try {
+    return !!(
+      element.matches?.('img,.koto-img-wrapper')
+      || element.querySelector?.('img,.koto-img-wrapper')
+    );
+  } catch (_) {
+    return false;
   }
 }
 
@@ -2562,11 +2609,46 @@ function _resolveDocxLineStartPos(view, line, nodeStart, nodeEnd) {
 function _collectDocxTextBlockLines(view, domEl, nodeStart, nodeEnd) {
   if (!domEl || !domEl.ownerDocument?.createRange || nodeEnd <= nodeStart) return [];
 
+  // Collect client rects from text nodes only, skipping break anchor
+  // elements.  When soft breaks are kept visible the anchors produce
+  // full-width block rects that would be misidentified as text lines.
+  const allRects = [];
+  const walker = domEl.ownerDocument.createTreeWalker(
+    domEl,
+    NodeFilter.SHOW_TEXT,
+    null,
+    false
+  );
   const range = domEl.ownerDocument.createRange();
-  range.selectNodeContents(domEl);
+  let textNode;
+  while ((textNode = walker.nextNode())) {
+    // Skip text nodes inside break chrome (page numbers, headers, etc.)
+    if (textNode.parentElement?.closest?.(
+      '.koto-inline-page-break-anchor, [data-soft-page-break], .koto-pb-header, .koto-pb-footer'
+    )) {
+      continue;
+    }
+    range.selectNodeContents(textNode);
+    const rects = range.getClientRects();
+    for (let ri = 0; ri < rects.length; ri++) {
+      allRects.push(rects[ri]);
+    }
+  }
+
+  // Compute text-only content height for line-height normalization.
+  // The full element height includes break anchors which are not text.
+  let textContentHeight = domEl.offsetHeight || 0;
+  try {
+    const anchors = domEl.querySelectorAll?.('.koto-inline-page-break-anchor') || [];
+    for (let ai = 0; ai < anchors.length; ai++) {
+      textContentHeight -= anchors[ai]?.offsetHeight || 0;
+    }
+    textContentHeight = Math.max(1, textContentHeight);
+  } catch (_) {}
+
   const lines = _normalizeDocxLineHeights(
-    _groupDocxLineRects(Array.from(range.getClientRects() || [])),
-    domEl.offsetHeight || 0,
+    _groupDocxLineRects(allRects),
+    textContentHeight,
   );
   if (lines.length < 2) return [];
 
@@ -2603,8 +2685,10 @@ function _advanceDocxPageUsage(usedH, addedH, contentH, pageNum) {
       nextPage += 1 + extra;
       nextUsed = overflow % contentH;
     } else {
-      nextPage += 1;
-      nextUsed = 0;
+      // Keep an exactly-full page pending. The following block will see zero
+      // remaining space and insert the real boundary before it. Advancing the
+      // counter here created a phantom page with no DOM separator.
+      nextUsed = contentH;
     }
   }
   return { usedH: nextUsed, pageNum: nextPage };
@@ -2693,12 +2777,12 @@ function _planDocxTextBlockBreaks(view, node, start, domEl, usedH, contentH, pag
   };
 }
 
-function _isDocxPaginationBoundaryEl(element) {
+function _isTopLevelDocxPaginationBoundaryEl(element) {
   return !!(
     element
     && element.nodeType === 1
     && (
-      element.hasAttribute('data-soft-page-break')
+      element.matches?.(_DOCX_PAGE_BOUNDARY_SELECTOR)
       || element.hasAttribute('data-page-break')
       || element.classList?.contains('koto-table-page-break-row')
     )
@@ -2716,7 +2800,7 @@ function _buildSoftBreakTableRow(pageNum, columnCount, headerHtml, footerHtml, m
   cell.colSpan = Math.max(1, columnCount || 1);
   cell.setAttribute('contenteditable', 'false');
 
-  const widget = _buildSoftBreakWidget(
+  const { dom: widget } = _buildDocxPageBreakWidget({
     pageNum,
     headerHtml,
     footerHtml,
@@ -2724,20 +2808,13 @@ function _buildSoftBreakTableRow(pageNum, columnCount, headerHtml, footerHtml, m
     marginBottomPx,
     marginLeftPx,
     marginRightPx,
-    pageWidthPx,
     extStorage,
     contentFillPx,
-  );
-  widget.style.marginLeft = `${-Math.round(tableLeftOffsetPx || 0)}px`;
-  widget.style.marginRight = '0';
+  });
+  _alignSoftBreakWidgetToRenderedPage(widget, tableLeftOffsetPx, pageWidthPx);
   widget.style.position = 'relative';
   widget.style.left = '0';
   widget.style.transform = 'none';
-  if (pageWidthPx) {
-    widget.style.width = pageWidthPx + 'px';
-    widget.style.maxWidth = pageWidthPx + 'px';
-  }
-
   cell.appendChild(widget);
   row.appendChild(cell);
   return row;
@@ -2848,49 +2925,22 @@ export const AutoPageBreakPlugin = Extension.create({
 
       // ── View plugin: triggers measurement after DOM settles ────────────
       view(editorView) {
-        let _timer = null;
         let _measuring = false;  // guard against re-entrant measurement
-
-        const _schedule = (delayMs = _AUTO_PB_UPDATE_DELAY_MS) => {
-          clearTimeout(_timer);
-          _timer = setTimeout(() => {
-            requestAnimationFrame(() => _measure(editorView));
-          }, delayMs);
-        };
+        // A document's node tree is not a layout cache key. Fonts, images,
+        // style commands and the available editor width can all change the
+        // rendered heights without changing node text or nodeSize. Reusing
+        // old break positions here was the reason a stale blank page could
+        // remain visible after the document had reflowed.
+        let _lastLayoutSignature = null;
 
         const _measure = (view) => {
           if (_measuring) return;
           _measuring = true;
           try {
-            _measureInner(view);
+            _measureClean(view);
           } finally {
             _measuring = false;
           }
-        };
-
-        const _measureInner = (view) => {
-          const doc    = view.state.doc;
-          const pmDom  = view.dom;  // the .ProseMirror editable div
-
-          // ── Read config from extension storage ──────────────────────────
-          const pageW      = extStorage.pageWidthPx    || 816;
-          const pageH      = extStorage.pageHeightPx   || 1056;
-          const mTop       = extStorage.marginTopPx    || 96;
-          const mBot       = extStorage.marginBottomPx || 80;
-          const mLeft      = extStorage.marginLeftPx   || 96;
-          const mRight     = extStorage.marginRightPx  || 96;
-          const hdrHtml    = extStorage.headerHtml     || '';
-          const ftrHtml    = extStorage.footerHtml     || '';
-          const sectionsAr = extStorage.sections       || [];
-
-          // ── Content height per page ────────────────────────────────────
-          // In Word, headers/footers are positioned within the margin areas
-          // (between page edge and margin boundary).  They do NOT reduce the
-          // usable content area unless they overflow the margin, which is
-          // rare.  Content area = page_height - top_margin - bottom_margin.
-          const contentH   = pageH - mTop - mBot;
-
-          _measureClean(view);
         };
 
         const _measureClean = (view) => {
@@ -2907,6 +2957,12 @@ export const AutoPageBreakPlugin = Extension.create({
           const ftrHtml    = extStorage.footerHtml     || '';
           const sectionsAr = extStorage.sections       || [];
           const contentH   = pageH - mTop - mBot;
+          // The editor surface has one concrete page box. Section-specific
+          // margins may change header/footer placement, but must not resize
+          // the page-break chrome beyond that rendered sheet.
+          const pageGeometry = _resolveRenderedDocxPageGeometry(pmDom, pageW, mLeft);
+          const renderedPageWidthPx = pageGeometry.pageWidthPx;
+          const renderedContentLeftPx = pageGeometry.contentLeftPx;
 
           pmDom.style.paddingBottom = `${mBot}px`;
 
@@ -2937,7 +2993,7 @@ export const AutoPageBreakPlugin = Extension.create({
             } else {
               while (
                 pmIdx < pmChildren.length &&
-                _isDocxPaginationBoundaryEl(pmChildren[pmIdx])
+                _isTopLevelDocxPaginationBoundaryEl(pmChildren[pmIdx])
               ) {
                 pmIdx++;
               }
@@ -2967,7 +3023,7 @@ export const AutoPageBreakPlugin = Extension.create({
                 ? domEl
                 : domEl?.querySelector?.('table');
               const domRows = tableEl
-                ? Array.from(tableEl.rows || []).filter((rowEl) => !_isDocxPaginationBoundaryEl(rowEl))
+                ? Array.from(tableEl.rows || []).filter((rowEl) => !_isTopLevelDocxPaginationBoundaryEl(rowEl))
                 : [];
               const pmRows = [];
 
@@ -3012,12 +3068,13 @@ export const AutoPageBreakPlugin = Extension.create({
                   if (usedH >= contentH) {
                     const overflow = usedH - contentH;
                     if (overflow > 0) {
-                      const extra = Math.floor(overflow / contentH);
-                      pageNum += 1 + extra;
-                      usedH = overflow % contentH;
+                      // An unsplittable row/rowspan group may be taller than
+                      // the content box. Do not invent invisible pages; keep
+                      // this page full so the next row group creates a real
+                      // row-level boundary.
+                      usedH = contentH;
                     } else {
-                      pageNum++;
-                      usedH = 0;
+                      usedH = contentH;
                     }
                   }
                 }
@@ -3025,29 +3082,38 @@ export const AutoPageBreakPlugin = Extension.create({
               }
             }
 
-            let blockH = domEl.offsetHeight;
-            const margins = _measureVerticalMarginsPx(domEl);
-            blockH += margins.top + margins.bottom;
+            let blockH = _measureDocxBlockOuterHeightPx(domEl);
 
             if (blockH <= 0) continue;
 
             const remaining = contentH - usedH;
-            if (usedH > 0 && blockH > remaining) {
-              const textPlan = _planDocxTextBlockBreaks(
-                view,
-                node,
-                start,
-                domEl,
-                usedH,
-                contentH,
-                pageNum,
-                curSection,
-              );
-              if (textPlan && Array.isArray(textPlan.breaks) && textPlan.breaks.length) {
-                breaks.push(...textPlan.breaks);
-                pageNum = textPlan.pageNum;
-                usedH = textPlan.usedH;
-                continue;
+            // A paragraph taller than a full content page must be fragmented
+            // even when it starts at the top of a fresh page (usedH === 0).
+            // The old guard only entered this branch when prior content had
+            // consumed space, producing a multi-page count with no visible
+            // boundaries for page-starting long paragraphs.
+            if (blockH > remaining && (usedH > 0 || blockH > contentH)) {
+              if (!_docxBlockAvoidsAutoSplit(node, domEl)) {
+                const textPlan = _planDocxTextBlockBreaks(
+                  view,
+                  node,
+                  start,
+                  domEl,
+                  usedH,
+                  contentH,
+                  pageNum,
+                  curSection,
+                );
+                if (textPlan && Array.isArray(textPlan.breaks) && textPlan.breaks.length) {
+                  const pageLeftOffsetPx = _measureRelativeLeftPx(domEl, pmDom);
+                  breaks.push(...textPlan.breaks.map((plannedBreak) => ({
+                    ...plannedBreak,
+                    pageLeftOffsetPx,
+                  })));
+                  pageNum = textPlan.pageNum;
+                  usedH = textPlan.usedH;
+                  continue;
+                }
               }
 
               breaks.push({
@@ -3060,10 +3126,10 @@ export const AutoPageBreakPlugin = Extension.create({
               pageNum++;
 
               if (blockH > contentH) {
-                const extra = Math.floor(blockH / contentH);
-                pageNum += extra;
-                usedH = blockH % contentH;
-                if (usedH === 0) usedH = contentH;
+                // This block has no safe internal split position. It occupies
+                // one visual page even if it overflows the ideal content box;
+                // never advance through pages that have no rendered boundary.
+                usedH = contentH;
               } else {
                 usedH = blockH;
               }
@@ -3072,12 +3138,12 @@ export const AutoPageBreakPlugin = Extension.create({
               if (usedH >= contentH) {
                 const overflow = usedH - contentH;
                 if (overflow > 0) {
-                  const extra = Math.floor(overflow / contentH);
-                  pageNum += 1 + extra;
-                  usedH = overflow % contentH;
+                  // Non-text blocks that cannot be fragmented stay on one
+                  // visual page. Leave it full; the next block will create a
+                  // concrete boundary instead of skipping page numbers.
+                  usedH = contentH;
                 } else {
-                  pageNum++;
-                  usedH = 0;
+                  usedH = contentH;
                 }
               }
             }
@@ -3095,7 +3161,7 @@ export const AutoPageBreakPlugin = Extension.create({
           if (breaks.length === 0) {
             decoSet = DecorationSet.empty;
           } else {
-            const decos = breaks.map(({ pos, pageNum: pn, currentSectionIdx: csi, nextSectionIdx: nsi, contentFillPx, tableCols, tableLeftOffsetPx, inline }) => {
+            const decos = breaks.map(({ pos, pageNum: pn, currentSectionIdx: csi, nextSectionIdx: nsi, contentFillPx, tableCols, tableLeftOffsetPx, pageLeftOffsetPx, inline }) => {
               const breakChrome = resolveDocxBreakChrome(extStorage, pn, csi, nsi);
               return Decoration.widget(
                 pos,
@@ -3110,7 +3176,7 @@ export const AutoPageBreakPlugin = Extension.create({
                       breakChrome.marginBottomPx,
                       breakChrome.marginLeftPx,
                       breakChrome.marginRightPx,
-                      breakChrome.pageWidthPx,
+                      renderedPageWidthPx,
                       extStorage,
                       tableLeftOffsetPx,
                       contentFillPx,
@@ -3124,25 +3190,32 @@ export const AutoPageBreakPlugin = Extension.create({
                         breakChrome.marginBottomPx,
                         breakChrome.marginLeftPx,
                         breakChrome.marginRightPx,
-                        breakChrome.pageWidthPx,
+                        renderedPageWidthPx,
                         extStorage,
+                        pageLeftOffsetPx,
                         contentFillPx,
                       )
-                      : _buildSoftBreakWidget(
-                        pn,
-                        breakChrome.nextPage.headerHtml,
-                        breakChrome.currentPage.footerHtml,
-                        breakChrome.marginTopPx,
-                        breakChrome.marginBottomPx,
-                        breakChrome.marginLeftPx,
-                        breakChrome.marginRightPx,
-                        breakChrome.pageWidthPx,
+                      : _buildDocxPageBreakWidget({
+                        pageNum: pn,
+                        headerHtml: breakChrome.nextPage.headerHtml,
+                        footerHtml: breakChrome.currentPage.footerHtml,
+                        marginTopPx: breakChrome.marginTopPx,
+                        marginBottomPx: breakChrome.marginBottomPx,
+                        marginLeftPx: breakChrome.marginLeftPx,
+                        marginRightPx: breakChrome.marginRightPx,
                         extStorage,
                         contentFillPx,
-                      );
-                  const breakRoot = breakDom.matches?.('[data-soft-page-break]')
+                      }).dom;
+                  if (!tableCols && !inline) {
+                    _alignSoftBreakWidgetToRenderedPage(
+                      breakDom,
+                      renderedContentLeftPx,
+                      renderedPageWidthPx,
+                    );
+                  }
+                  const breakRoot = breakDom.matches?.(_DOCX_SOFT_PAGE_BREAK_SELECTOR)
                     ? breakDom
-                    : breakDom.querySelector?.('[data-soft-page-break]');
+                    : breakDom.querySelector?.(_DOCX_SOFT_PAGE_BREAK_SELECTOR);
                   if (breakRoot) {
                     breakRoot.setAttribute('data-section-idx', String(Math.max(0, Number.parseInt(nsi, 10) || 0)));
                     breakRoot.setAttribute('data-current-section-idx', String(Math.max(0, Number.parseInt(csi, 10) || 0)));
@@ -3177,20 +3250,58 @@ export const AutoPageBreakPlugin = Extension.create({
             decoSet = DecorationSet.create(doc, decos);
           }
 
-          view.dispatch(view.state.tr.setMeta(_AUTO_PB_KEY, decoSet));
+          // Dispatch only when the *rendered* pagination changes.  The
+          // signature deliberately includes fill height and page chrome, not
+          // only positions: a different remaining height with the same break
+          // position otherwise leaves a large stale white region in place.
+          const layoutSignature = JSON.stringify({
+            pageW: Math.round(renderedPageWidthPx * 100) / 100,
+            contentLeft: Math.round(renderedContentLeftPx * 100) / 100,
+            pageH,
+            mTop,
+            mBot,
+            mLeft,
+            mRight,
+            hdrHtml,
+            ftrHtml,
+            sectionsAr,
+            finalContentFillPx: Math.round(finalContentFillPx * 100) / 100,
+            breaks: breaks.map((entry) => [
+              entry.pos,
+              entry.pageNum,
+              entry.currentSectionIdx,
+              entry.nextSectionIdx,
+              Math.round(_normalizeDocxBreakFillPx(entry.contentFillPx) * 100) / 100,
+              entry.tableCols || 0,
+              Math.round((entry.tableLeftOffsetPx || 0) * 100) / 100,
+              Math.round((entry.pageLeftOffsetPx || 0) * 100) / 100,
+              entry.inline ? 1 : 0,
+            ]),
+          });
+          if (layoutSignature !== _lastLayoutSignature) {
+            _lastLayoutSignature = layoutSignature;
+            view.dispatch(view.state.tr.setMeta(_AUTO_PB_KEY, decoSet));
+          }
         };
 
-        _schedule(_AUTO_PB_INITIAL_DELAY_MS);
+        const _scheduler = createDocxPaginationScheduler({
+          view: editorView,
+          measure: () => _measure(editorView),
+          initialDelayMs: _AUTO_PB_INITIAL_DELAY_MS,
+          updateDelayMs: _AUTO_PB_UPDATE_DELAY_MS,
+        });
+        _scheduler.start();
 
         return {
           update(view, prevState) {
             // Only re-measure when doc content changed (not on meta dispatches)
             if (view.state.doc !== prevState.doc) {
-              _schedule();
+              _scheduler.onDocumentChanged(view);
             }
           },
           destroy() {
-            clearTimeout(_timer);
+            _scheduler.destroy();
+            _lastLayoutSignature = null;
           },
         };
       },

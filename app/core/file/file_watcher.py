@@ -84,7 +84,7 @@ class FileWatcher:
         try:
             cfg_path = Path(self._settings_path)
             if cfg_path.exists():
-                raw = json.loads(cfg_path.read_text(encoding="utf-8"))
+                raw = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
                 self._cfg = raw.get("file_watcher", {})
         except Exception as e:
             logger.warning(f"[FileWatcher] 读取配置失败: {e}")

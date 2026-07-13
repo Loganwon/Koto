@@ -4,8 +4,8 @@
 """
 app/core/agent/plugins/ppt_plugin.py
 =====================================
-PPT 生成 Agent 插件 — 将 web/ppt_master.py 和 web/ppt_generator.py 封装为
-Agent 可调用的工具。
+PPT 生成 Agent 插件 — 通过 app.core.services.ppt_generation_service 提供
+Agent 可调用的规划与生成工具。
 
 注册以下工具：
 
@@ -30,6 +30,11 @@ from pathlib import Path
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
+from app.core.services.ppt_generation_service import (
+    PPTGenerationService,
+    fallback_outline,
+    normalize_slide,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -182,19 +187,12 @@ class PPTPlugin(AgentPlugin):
         extra = params.get("extra_context", "")
 
         try:
-            from web.ppt_master import PPTContentPlanner
-
-            planner = PPTContentPlanner()
-            outline_dict = planner._generate_default_plan(
-                user_request=(
-                    f"主题：{topic}\n"
-                    f"目标受众：{audience}\n"
-                    f"幻灯片数量：约 {slide_count} 页\n"
-                    + (f"背景信息：{extra}" if extra else "")
-                )
+            outline = PPTGenerationService().plan_outline(
+                topic=topic,
+                slide_count=slide_count,
+                audience=audience,
+                extra_context=extra,
             )
-            slides_raw = outline_dict.get("slides", outline_dict.get("outline", []))
-            outline = [self._normalize_slide(s) for s in slides_raw]
             return json.dumps(
                 {
                     "topic": topic,
@@ -209,7 +207,7 @@ class PPTPlugin(AgentPlugin):
                 "[PPTPlugin] generate_ppt_outline 失败: %s", exc, exc_info=True
             )
             # 降级：返回固定结构大纲
-            outline = self._fallback_outline(topic, slide_count)
+            outline = fallback_outline(topic, slide_count)
             return json.dumps(
                 {"topic": topic, "slide_count": len(outline), "outline": outline},
                 ensure_ascii=False,
@@ -238,7 +236,7 @@ class PPTPlugin(AgentPlugin):
             _plan = json.loads(_raw)
             outline = _plan.get("outline", [])
 
-        outline = [self._normalize_slide(s) for s in outline]
+        outline = [normalize_slide(s) for s in outline]
         theme = params.get("theme", "business")
         author = params.get("author", "Koto AI")
         fname = params.get("output_filename") or f"ppt_{uuid.uuid4().hex[:8]}"
@@ -248,17 +246,13 @@ class PPTPlugin(AgentPlugin):
         output_path = str(_ensure_output_dir() / fname)
 
         try:
-            from web.ppt_generator import PPTGenerator
-
-            generator = PPTGenerator(theme=theme)
-            result = generator.generate_from_outline(
+            saved_path = PPTGenerationService().generate_from_outline(
                 title=topic,
                 outline=outline,
                 output_path=output_path,
+                theme=theme,
                 author=author,
-                enable_ai_images=False,  # 工具链中不做 AI 配图，避免超时
             )
-            saved_path = result.get("output_path") or output_path
             return json.dumps(
                 {
                     "status": "success",
@@ -296,39 +290,6 @@ class PPTPlugin(AgentPlugin):
         raise TypeError(f"参数类型不支持: {type(raw)}")
 
     @staticmethod
-    def _normalize_slide(slide: Any) -> Dict:
-        """将各种形式的幻灯片描述统一为 {title, type, points} 格式。"""
-        if not isinstance(slide, dict):
-            return {"title": str(slide), "type": "detail", "points": []}
-        return {
-            "title": slide.get("title", slide.get("heading", "幻灯片")),
-            "type": slide.get("type", slide.get("slide_type", "detail")),
-            "points": slide.get(
-                "points", slide.get("content", slide.get("bullets", []))
-            ),
-        }
-
-    @staticmethod
     def _fallback_outline(topic: str, slide_count: int) -> List[Dict]:
         """当规划器不可用时生成通用大纲结构。"""
-        slides = [
-            {"title": topic, "type": "highlight", "points": ["副标题", "Koto AI 生成"]},
-            {
-                "title": "议程",
-                "type": "overview",
-                "points": ["背景介绍", "核心内容", "总结展望"],
-            },
-        ]
-        section_count = max(1, slide_count - 3)
-        for i in range(1, section_count + 1):
-            slides.append(
-                {
-                    "title": f"第 {i} 部分",
-                    "type": "detail",
-                    "points": [f"要点 {i}.1", f"要点 {i}.2", f"要点 {i}.3"],
-                }
-            )
-        slides.append(
-            {"title": "总结", "type": "highlight", "points": ["感谢观看", "欢迎提问"]}
-        )
-        return slides
+        return fallback_outline(topic, slide_count)

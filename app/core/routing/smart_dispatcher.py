@@ -14,7 +14,7 @@ from app.core.routing.routing_config import (
 
 logger = logging.getLogger(__name__)
 
-# 延迟导入 - 这些模块仅在运行时方法调用时加载，避免启动时加载 google.genai (~4.7s) 和 requests (~0.5s)
+# 延迟导入 - 这些模块仅在运行时方法调用时加载，减少启动耗时。
 # from app.core.routing.local_model_router import LocalModelRouter
 
 
@@ -280,11 +280,12 @@ class SmartDispatcher:
         *,
         threshold: float = 0.72,
     ):
-        """ML Model Primary Route — model first, threshold 0.72"""
+        """ML model route for inputs not handled by deterministic rules."""
         early_model_result = None
 
         # --- Cloud AI Router (primary, fastest cloud model) ---
-        if cls._dependencies and cls._dependencies.get("client"):
+        _use_airouter = True
+        if cls._dependencies and cls._dependencies.get("client") and _use_airouter:
             from app.core.routing.ai_router import AIRouter
 
             try:
@@ -504,26 +505,6 @@ class SmartDispatcher:
             )
             return "CHAT", "💬 Capability/HowTo-Query", context_info
 
-        # ── 3. ML Model Primary Route ───────────────────────────────────────
-        _early_model_result = None
-        if not file_context:
-            primary_model_route, _early_model_result = cls._model_primary_route(
-                user_input,
-                user_lower,
-                file_context,
-                LocalExecutor,
-                WebSearcher,
-                similarity_scores,
-            )
-            if primary_model_route:
-                if cache is not None and lock is not None:
-                    with lock:
-                        cache[cache_key] = primary_model_route
-                        cache.move_to_end(cache_key)
-                        while len(cache) > cls._route_cache_max:
-                            cache.popitem(last=False)
-                return primary_model_route
-
         # ── 3. Composable Rule Chain ───────────────────────────────────────
         from app.core.routing.routing_rule_chain import RuleContext, build_rule_chain
 
@@ -551,7 +532,27 @@ class SmartDispatcher:
                         cache.popitem(last=False)
             return task, label, info
 
-        # ── 4. Model Second-Chance (threshold 0.62) ─────────────────────────
+        # ── 4. ML Model Primary Route ───────────────────────────────────────
+        _early_model_result = None
+        if not file_context:
+            primary_model_route, _early_model_result = cls._model_primary_route(
+                user_input,
+                user_lower,
+                file_context,
+                LocalExecutor,
+                WebSearcher,
+                similarity_scores,
+            )
+            if primary_model_route:
+                if cache is not None and lock is not None:
+                    with lock:
+                        cache[cache_key] = primary_model_route
+                        cache.move_to_end(cache_key)
+                        while len(cache) > cls._route_cache_max:
+                            cache.popitem(last=False)
+                return primary_model_route
+
+        # ── 5. Model Second-Chance (threshold 0.62) ─────────────────────────
         _SEC_THRESH = 0.62
         try:
             _TC2 = _get_task_classifier()
@@ -874,7 +875,7 @@ class SmartDispatcher:
         """根据任务类型获取最优模型（自动跳过当前不可用的模型）"""
         MODEL_MAP = cls._get_dep("MODEL_MAP")
         if not MODEL_MAP:
-            MODEL_MAP = {"CHAT": "gemini-2.5-flash"}
+            MODEL_MAP = {"CHAT": "deepseek-chat"}
 
         # ── 咨询 ModelFallbackExecutor：若首选模型当前不可用，直接返回备选 ──
         try:
@@ -902,68 +903,40 @@ class SmartDispatcher:
 
         if task_type == "FILE_GEN":
             if complexity == "complex":
-                return MODEL_MAP.get(
-                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-2.5-pro")
-                )
-            return MODEL_MAP.get("FILE_GEN", "gemini-2.5-flash")
+                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "deepseek-chat"))
+            return MODEL_MAP.get("FILE_GEN", "deepseek-chat")
 
         if task_type == "DOC_ANNOTATE":
             if complexity == "complex":
-                return MODEL_MAP.get(
-                    "COMPLEX", MODEL_MAP.get("CODER", "gemini-2.5-pro")
-                )
-            return MODEL_MAP.get("DOC_ANNOTATE", "gemini-2.5-flash")
+                return MODEL_MAP.get("COMPLEX", MODEL_MAP.get("CODER", "deepseek-chat"))
+            return MODEL_MAP.get("DOC_ANNOTATE", "deepseek-chat")
 
         if task_type == "RESEARCH":
-            return MODEL_MAP.get("RESEARCH", "gemini-2.5-pro")
+            return MODEL_MAP.get("RESEARCH", "deepseek-chat")
 
         if task_type == "CODER":
-            return MODEL_MAP.get("CODER", "gemini-2.5-pro")
+            return MODEL_MAP.get("CODER", "deepseek-chat")
 
         # 多步复杂任务 → Pro 模型确保执行质量
         if task_type == "MULTI_STEP":
-            return MODEL_MAP.get("MULTI_STEP", MODEL_MAP.get("CODER", "gemini-2.5-pro"))
+            return MODEL_MAP.get("MULTI_STEP", MODEL_MAP.get("CODER", "deepseek-chat"))
 
-        # CHAT 任务始终使用 Flash，不因复杂度升级到 Pro
+        # CHAT 任务使用当前配置的 CHAT 模型；可用性由 _avail 统一处理。
         if task_type == "CHAT":
-            _chat_candidate = MODEL_MAP.get("CHAT", "gemini-2.5-flash")
-            # 安全网：如果 ModelManager 将 CHAT 路由到 Pro 模型（tier>7），强制回退到 Flash
-            _FLASH_FALLBACK = "gemini-2.5-flash"
-            try:
-                from web.model_manager import KNOWN_MODEL_REGISTRY
-
-                _candidate_tier = KNOWN_MODEL_REGISTRY.get(_chat_candidate, {}).get(
-                    "tier", 5
-                )
-                if _candidate_tier > 7:
-                    import logging as _lg
-
-                    _lg.getLogger(__name__).warning(
-                        "[Dispatcher] CHAT MODEL_MAP 指向 tier-%d 模型 %s，强制回退到 %s",
-                        _candidate_tier,
-                        _chat_candidate,
-                        _FLASH_FALLBACK,
-                    )
-                    _chat_candidate = _FLASH_FALLBACK
-            except Exception:
-                logger.warning(
-                    "[SmartDispatcher] CHAT tier check failed", exc_info=True
-                )
+            _chat_candidate = MODEL_MAP.get("CHAT", "deepseek-chat")
             return _avail(_chat_candidate)
 
         # 通用复杂度升级：非 CHAT 任务标记为 complex 时使用较强模型
         if complexity == "complex":
-            return MODEL_MAP.get("COMPLEX", "gemini-2.5-pro")
+            return MODEL_MAP.get("COMPLEX", "deepseek-chat")
 
         if has_image and task_type != "PAINTER":
             return _avail(
-                MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "gemini-2.5-flash")),
+                MODEL_MAP.get("VISION", MODEL_MAP.get("CHAT", "deepseek-chat")),
                 "VISION",
             )
 
-        return _avail(
-            MODEL_MAP.get(task_type, MODEL_MAP.get("CHAT", "gemini-2.5-flash"))
-        )
+        return _avail(MODEL_MAP.get(task_type, MODEL_MAP.get("CHAT", "deepseek-chat")))
 
     # ── LangGraph 工作流集成 ────────────────────────────────────────────────
     @staticmethod

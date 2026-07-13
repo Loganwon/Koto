@@ -51,6 +51,68 @@ DOCX_ANNOTATION_HINT_WORDS = (
 
 # ── Backward-compat markers for keyword fallback ──
 
+DOCX_REVIEW_ROUTE_KEYWORDS = (
+    "标注",
+    "批注",
+    "润色",
+    "改写",
+    "校对",
+    "审校",
+    "修订",
+    "纠错",
+    "改善",
+    "优化",
+    "修改",
+)
+
+DOCX_FILE_EDIT_ROUTE_KEYWORDS = (
+    *DOCX_REVIEW_ROUTE_KEYWORDS,
+    "更改",
+    "调整",
+    "精炼",
+    "通畅",
+    "通顺",
+    "流畅",
+    "精简",
+    "凝练",
+    "简洁",
+    "整理",
+    "梳理",
+    "提炼",
+    "整体修改",
+    "修一下",
+    "帮我改",
+    "改一改",
+    "改得",
+    "写得",
+    "polish",
+    "refine",
+    "revise",
+    "edit",
+    "improve",
+)
+
+DOCX_REVIEW_QUALITY_WORDS = (
+    "不合适",
+    "生硬",
+    "翻译腔",
+    "语序",
+    "用词",
+    "逻辑",
+    "问题",
+)
+
+DOCX_REVIEW_TARGET_WORDS = (
+    "翻译",
+    "文章",
+    "文档",
+    "内容",
+    "文本",
+    "段落",
+    "句子",
+    "字词",
+)
+
 TRANSLATION_MARKERS = (
     "翻译",
     "译稿",
@@ -105,6 +167,29 @@ def has_any_marker(text: Any, markers: Iterable[str]) -> bool:
     if not lowered:
         return False
     return any(str(marker).lower() in lowered for marker in markers)
+
+
+def should_use_docx_review_system(user_input: Any, *, has_file: bool = False) -> bool:
+    """Return True when routing should engage the DOCX review/annotation path."""
+    if not has_file:
+        return False
+    text = str(user_input or "")
+    if not text.strip():
+        return False
+    has_keyword = has_any_marker(text, DOCX_REVIEW_ROUTE_KEYWORDS)
+    has_quality = has_any_marker(text, DOCX_REVIEW_QUALITY_WORDS)
+    has_target = has_any_marker(text, DOCX_REVIEW_TARGET_WORDS)
+    return has_keyword or (has_quality and has_target)
+
+
+def should_route_docx_file_edit(user_input: Any, *, has_file: bool = False) -> bool:
+    """Return True for deterministic DOCX file-edit routing with attached context."""
+    if not has_file:
+        return False
+    text = str(user_input or "")
+    if not text.strip():
+        return False
+    return has_any_marker(text, DOCX_FILE_EDIT_ROUTE_KEYWORDS)
 
 
 def has_explicit_docx_review_intent(*texts: Any) -> bool:

@@ -4,12 +4,12 @@
 Batch 8 – Unit tests for 12 web modules at 0% coverage.
 
 Modules covered:
-  1. web.feedback_loop
+  1. app.core.services.feedback_loop
   2. web.proactive_dialogue
   3. web.context_awareness
   4. web.context_injector
   5. web.concept_extractor
-  6. web.clipboard_manager
+  6. app.core.services.clipboard_manager
   7. web.insight_reporter
   8. web.prompt_adapter
   9. web.memory_integration
@@ -36,10 +36,10 @@ import pytest
 
 @pytest.mark.unit
 class TestFeedbackLoopManager:
-    """Tests for web.feedback_loop.FeedbackLoopManager"""
+    """Tests for app.core.services.feedback_loop.FeedbackLoopManager"""
 
     def _make_manager(self):
-        from web.feedback_loop import FeedbackLoopManager
+        from app.core.services.feedback_loop import FeedbackLoopManager
 
         client = MagicMock()
         mgr = FeedbackLoopManager(get_client_func=lambda: client)
@@ -147,10 +147,10 @@ class TestFeedbackLoopManager:
         assert "Title" in prompt
 
     def test_create_feedback_manager_factory(self):
-        from web.feedback_loop import create_feedback_manager
+        from app.core.services.feedback_loop import create_feedback_manager
 
         mgr = create_feedback_manager(lambda: MagicMock())
-        from web.feedback_loop import FeedbackLoopManager
+        from app.core.services.feedback_loop import FeedbackLoopManager
 
         assert isinstance(mgr, FeedbackLoopManager)
 
@@ -463,7 +463,7 @@ class TestConceptExtractor:
 
 @pytest.mark.unit
 class TestClipboardManager:
-    """Tests for web.clipboard_manager.ClipboardManager"""
+    """Tests for app.core.services.clipboard_manager.ClipboardManager"""
 
     def _make_manager(self, tmp_path):
         # pyperclip is imported at module top-level; mock it in sys.modules
@@ -472,7 +472,7 @@ class TestClipboardManager:
             # Force re-import so the module picks up the mock
             import importlib
 
-            import web.clipboard_manager as cm_mod
+            import app.core.services.clipboard_manager as cm_mod
 
             importlib.reload(cm_mod)
             history_file = str(tmp_path / "clipboard_history.json")
@@ -775,6 +775,35 @@ class TestMemoryIntegration:
             "Base instruction.", "", ""
         )
         assert "Base instruction." in result
+
+    def test_enhanced_memory_manager_coerces_dict_memories_before_append(
+        self, tmp_path
+    ):
+        from web.enhanced_memory_manager import EnhancedMemoryManager
+
+        memory_path = tmp_path / "memory.json"
+        profile_path = tmp_path / "profile.json"
+        summary_path = tmp_path / "summaries.json"
+        vector_path = tmp_path / "vectors.json"
+        memory_path.write_text(
+            '{"old": {"id": 1, "content": "旧记忆", "category": "fact"}}',
+            encoding="utf-8",
+        )
+
+        manager = EnhancedMemoryManager(
+            memory_path=str(memory_path),
+            profile_path=str(profile_path),
+            summary_path=str(summary_path),
+            vector_path=str(vector_path),
+        )
+        manager._memory_rag = False
+        item = manager.add_memory(
+            "用户偏好真实前端验证", category="user_preference", source="extraction"
+        )
+
+        assert item is not None
+        assert isinstance(manager.memories, list)
+        assert any(mem["content"] == "用户偏好真实前端验证" for mem in manager.memories)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

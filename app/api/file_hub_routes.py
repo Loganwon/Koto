@@ -61,7 +61,7 @@ from pathlib import Path
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
-from web.settings import settings as user_settings
+from app.core.config.user_settings import settings as user_settings
 
 logger = logging.getLogger(__name__)
 
@@ -494,14 +494,6 @@ def archive_files():
             "errors": errors[:20],
             "report": report[:200],
         }
-    )
-
-
-@file_hub_bp.route("/open", methods=["POST"])
-def removed_native_open_file():
-    return (
-        jsonify({"error": "该文件原生打开接口已移除，请使用工作区文件助手打开文件"}),
-        404,
     )
 
 
@@ -1065,7 +1057,7 @@ _WATCH_SETTINGS_PATH = str(
 def _read_user_settings() -> dict:
     """Read settings via SettingsManager (thread-safe)."""
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
 
         return SettingsManager().get_all()
     except Exception:
@@ -1084,7 +1076,7 @@ def _write_user_settings(data: dict) -> None:
     Only the 'file_watcher' sub-key is updated to avoid clobbering other
     settings that may have been changed concurrently.
     """
-    from web.settings import SettingsManager
+    from app.core.config.user_settings import SettingsManager
 
     sm = SettingsManager()
     fw = data.get("file_watcher", {})
@@ -1181,12 +1173,12 @@ def batch_ai():
         yield f"data: {_json.dumps({'type': 'start', 'total': len(paths)}, ensure_ascii=False)}\n\n"
         try:
             from app.core.file.file_registry import _extract_text_preview
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
         except Exception as e:
             yield f"data: {_json.dumps({'type': 'error', 'message': f'模块加载失败: {e}'}, ensure_ascii=False)}\n\n"
             return
 
-        llm = GeminiProvider()
+        llm = get_llm_provider(provider="deepseek", allow_local_fallback=False)
         for i, path in enumerate(paths):
             name = Path(path).name
             yield f"data: {_json.dumps({'type': 'file', 'index': i, 'name': name}, ensure_ascii=False)}\n\n"
@@ -1217,7 +1209,6 @@ def batch_ai():
                 )
                 resp = llm.generate_content(
                     prompt=prompt,
-                    model="gemini-2.5-flash",
                     system_instruction="你是一个专业的文件分析助手，用中文输出简洁精准的分析结果。",
                 )
                 text = ""

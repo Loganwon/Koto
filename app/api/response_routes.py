@@ -1,83 +1,36 @@
-# -*- coding: utf-8 -*-
-# Copyright (C) 2024-2026 Koto AI. All rights reserved.
-# SPDX-License-Identifier: LicenseRef-Koto-Proprietary
-"""
-AI response feedback API.
-
-Mounted routes:
-  POST /api/response/rate  User star-rating for an AI response
-"""
+"""Read-only response-quality API backed by the canonical rating store."""
 
 from __future__ import annotations
 
-import logging
+from flask import Blueprint, jsonify
 
-from flask import Blueprint, jsonify, request
-
-from web.auth import require_auth
-
-logger = logging.getLogger(__name__)
-
-response_bp = Blueprint("response", __name__, url_prefix="/api/response")
+response_bp = Blueprint("response", __name__)
 
 
-@response_bp.route("/rate", methods=["POST"])
-@require_auth
-def response_rate():
-    """Persist a user star rating and optionally record strong positive samples."""
-    data = request.json or {}
-    msg_id = data.get("msg_id", "")
-    stars = int(data.get("stars", 0))
-    comment = (data.get("comment") or "").strip()
-    session_name = data.get("session_name", "default")
-    user_input = data.get("user_input", "")
-    ai_response = data.get("ai_response", "")
-    task_type = data.get("task_type", "CHAT")
-
-    if not (1 <= stars <= 5):
-        return jsonify({"success": False, "error": "stars 必须在 1~5 之间"}), 400
-
+@response_bp.route("/api/response/stats", methods=["GET"])
+def response_stats():
+    """Return aggregate user ratings and model self-evaluations."""
     try:
-        from app.core.learning.rating_store import RatingStore
+        from app.core.learning.rating_store import get_rating_store
 
-        rs = RatingStore()
-        rs.save_user_rating(
-            msg_id=msg_id,
-            stars=stars,
-            comment=comment,
-            session_name=session_name,
-            user_input=user_input,
-            ai_response=ai_response,
+        return jsonify(get_rating_store().get_stats())
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+@response_bp.route("/api/response/<msg_id>", methods=["GET"])
+def response_detail(msg_id: str):
+    """Return the user rating, model evaluation, and combined score for one reply."""
+    try:
+        from app.core.learning.rating_store import get_rating_store
+
+        store = get_rating_store()
+        return jsonify(
+            {
+                "user_rating": store.user_rating_for(msg_id),
+                "model_eval": store.model_eval_for(msg_id),
+                "combined": store.combined_score(msg_id),
+            }
         )
     except Exception as exc:
-        logger.warning("[ResponseRate] RatingStore 保存失败: %s", exc)
-
-    trace_id = None
-    if stars >= 4 and user_input and ai_response:
-        try:
-            from app.core.learning.shadow_tracer import ShadowTracer
-
-            trace_id = ShadowTracer.record_approved(
-                session_id=session_name,
-                user_input=user_input,
-                ai_response=ai_response,
-                skill_id=None,
-                task_type=task_type,
-                model_used="",
-                metadata={"stars": stars, "comment": comment, "source": "user_rating"},
-            )
-            logger.debug(
-                "[ResponseRate] %s stars recorded as trace_id=%s", stars, trace_id
-            )
-        except Exception as exc:
-            logger.warning("[ResponseRate] ShadowTracer 记录失败: %s", exc)
-
-    return jsonify(
-        {
-            "success": True,
-            "msg_id": msg_id,
-            "stars": stars,
-            "trace_id": trace_id,
-            "flywheel": trace_id is not None,
-        }
-    )
+        return jsonify({"error": str(exc)}), 500

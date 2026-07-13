@@ -68,7 +68,7 @@ logger = logging.getLogger(__name__)
 class UnifiedAgent(Agent):
     """
     Unified Agent that supports ReAct loop and tool execution.
-    Replaces web/agent_loop.py and web/adaptive_agent.py
+    Owns the general-purpose tool-agent execution path.
 
     v2 新增
     ───────
@@ -89,16 +89,14 @@ class UnifiedAgent(Agent):
 
     # 升级链：按强度升序排列，优先尝试同系列快速模型，再升到 Pro
     _ESCALATION_CHAIN = [
-        "gemini-2.5-flash",
-        "gemini-2.5-flash-lite",
-        "gemini-2.5-pro",
+        "deepseek-chat",
     ]
 
     def __init__(
         self,
         llm_provider: LLMProvider,
         tool_registry: Optional[ToolRegistry] = None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         system_instruction: Optional[str] = None,
         # ── v2 参数 ──────────────────────────────────────────────
         skill_id: Optional[str] = None,
@@ -247,6 +245,7 @@ class UnifiedAgent(Agent):
         task_type: Optional[str] = None,
         # v4: 多轮对话语义上下文注入（来自 ConversationTracker / CWM）
         system_context: Optional[str] = None,
+        record_task: bool = True,
     ) -> Generator[AgentStep, None, None]:
         """
         Executes the agent loop. Yields AgentStep objects to track progress.
@@ -270,19 +269,20 @@ class UnifiedAgent(Agent):
         # ── 任务台账集成 ──────────────────────────────────────────────────────
         _task_id: str = str(uuid.uuid4())
         _ledger = None
-        try:
-            _ledger = _get_task_ledger()
-            _task_rec = _ledger.create(
-                session_id=_session_id,
-                user_input=input_text[:500],
-                task_type=_task_type or "agent",
-                skill_id=_skill_id,
-                source="agent",
-            )
-            _task_id = _task_rec.task_id
-            _ledger.mark_running(_task_id)
-        except Exception as _ledger_err:
-            logger.debug(f"[UnifiedAgent] TaskLedger 初始化跳过: {_ledger_err}")
+        if record_task:
+            try:
+                _ledger = _get_task_ledger()
+                _task_rec = _ledger.create(
+                    session_id=_session_id,
+                    user_input=input_text[:500],
+                    task_type=_task_type or "agent",
+                    skill_id=_skill_id,
+                    source="agent",
+                )
+                _task_id = _task_rec.task_id
+                _ledger.mark_running(_task_id)
+            except Exception as _ledger_err:
+                logger.debug(f"[UnifiedAgent] TaskLedger 初始化跳过: {_ledger_err}")
 
         def _pub(
             step_type: str,

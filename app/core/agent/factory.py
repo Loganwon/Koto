@@ -4,7 +4,7 @@ import logging
 import os
 from typing import Optional
 
-# 所有重型导入延迟到工厂函数内部，避免启动时加载 google.genai (~4.7s)
+# 所有重型导入延迟到工厂函数内部，避免增加启动耗时。
 
 logger = logging.getLogger(__name__)
 
@@ -12,10 +12,7 @@ logger = logging.getLogger(__name__)
 def _resolve_api_key(api_key: Optional[str] = None) -> Optional[str]:
     """统一读取 API Key，兼容项目内所有环境变量命名。"""
     return (
-        api_key
-        or os.environ.get("GEMINI_API_KEY")
-        or os.environ.get("API_KEY")
-        or os.environ.get("GOOGLE_API_KEY")
+        api_key or os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("DEEPSEEK_KEY")
     )
 
 
@@ -24,7 +21,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     构建共用的 ToolRegistry 并注册插件。
 
     Args:
-        api_key: Gemini API Key（已解析）。
+        api_key: DeepSeek API Key（已解析）。
         full:    True → 注册全量插件（UnifiedAgent 用）；
                  False → 仅注册核心插件（LangGraphAgent 轻量模式）。
 
@@ -145,7 +142,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
     except Exception as _e:
         logger.debug(f"[_build_registry] FileConverterPlugin 跳过: {_e}")
 
-    # ── PPT 生成工具（web/ppt_master + web/ppt_generator）────────────────
+    # ── PPT 生成工具（core PPT generation service facade）────────────────
     try:
         from app.core.agent.plugins.ppt_plugin import PPTPlugin
 
@@ -202,7 +199,7 @@ def _build_registry(api_key: Optional[str] = None, full: bool = True) -> "ToolRe
 
 def create_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3.1-pro-preview",
+    model_id: str = "deepseek-chat",
     use_langgraph: Optional[bool] = None,
 ):
     """
@@ -212,8 +209,8 @@ def create_agent(
     ``use_langgraph=False`` 时回退到 UnifiedAgent（while 循环实现）。
 
     参数:
-        api_key       : Gemini API Key（默认读取环境变量）
-        model_id      : 使用的 Gemini 模型
+        api_key       : DeepSeek API Key（默认读取环境变量）
+        model_id      : 使用的 DeepSeek 模型
         use_langgraph : True → 强制 LangGraph；False → 强制 UnifiedAgent；
                         None（默认）→ 优先 LangGraph，不可用时自动回退
     """
@@ -230,17 +227,14 @@ def create_agent(
         fallback_model=model_id,
         provider=provider_name,
     )
-    if provider_name == "gemini" and not usage_api_key:
+    if provider_name == "deepseek" and not usage_api_key:
         logger.warning("No API Key provided for Agent. Agent will fail at generation.")
 
     registry = _build_registry(api_key=usage_api_key, full=True)
 
     # ── 尝试 LangGraph 路径 ──────────────────────────────────────────────────
-    # LangGraph adapter is currently Gemini-oriented. OpenAI-compatible cloud
-    # providers use UnifiedAgent so the shared provider_factory path is honored.
-    _want_lg = (
-        use_langgraph if use_langgraph is not None else (provider_name == "gemini")
-    )
+    # Both agent implementations resolve generation through provider_factory.
+    _want_lg = use_langgraph if use_langgraph is not None else True
     if _want_lg:
         try:
             from app.core.agent.langgraph_agent import _LG_AVAILABLE, LangGraphAgent
@@ -281,7 +275,7 @@ def create_agent(
             client=llm_provider,
             model_id=get_configured_cloud_model(
                 task_type="CHAT",
-                fallback_model="gemini-2.5-flash",
+                fallback_model="deepseek-chat",
                 provider=provider_name,
             ),
             timeout=15.0,
@@ -315,21 +309,14 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
     """
     from app.core.agent.unified_agent import UnifiedAgent
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
-    from app.core.routing.local_model_router import LocalModelRouter
 
     if not model:
         try:
-            LocalModelRouter.init_model()
-            model = (
-                getattr(LocalModelRouter, "_model_name", None)
-                or LocalModelRouter.pick_best_chat_model()
-            )
-        except Exception:
-            import logging
+            from app.core.llm.local_model_runtime import get_configured_local_model_tag
 
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
-            )  # model 保持 None → OllamaLLMProvider 在调用时自动解析
+            model = get_configured_local_model_tag() or None
+        except Exception:
+            model = None  # OllamaLLMProvider applies the onboarding fallback.
 
     llm_kwargs = {}
     if base_url:
@@ -349,7 +336,7 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
 
 def create_langgraph_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3.1-pro-preview",
+    model_id: str = "deepseek-chat",
     enable_pii_filter: bool = True,
     enable_output_validation: bool = True,
 ) -> "LangGraphAgent":
@@ -387,7 +374,7 @@ def create_langgraph_agent(
 
 def create_multi_agent(
     api_key: Optional[str] = None,
-    model_id: str = "gemini-3.1-pro-preview",
+    model_id: str = "deepseek-chat",
     max_revisions: int = 1,
 ) -> "MultiAgentOrchestrator":
     """
@@ -412,7 +399,7 @@ def create_multi_agent(
 
     _key = _resolve_api_key(api_key)
     if _key:
-        os.environ.setdefault("GEMINI_API_KEY", _key)
+        os.environ.setdefault("DEEPSEEK_API_KEY", _key)
 
     return MultiAgentOrchestrator(
         roles=[ROLES.RESEARCHER, ROLES.WRITER, ROLES.CRITIC, ROLES.REVISE],

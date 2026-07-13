@@ -4,7 +4,10 @@
  */
 
 import { _fileIcon, _escHtml, showToast, _PIN_SVG } from './infrastructure';
-import { state, _trackUserOpen } from './state';
+import { state, _trackUserOpen, AiFileContext } from './state';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 // ── Interfaces ──
 
@@ -24,6 +27,7 @@ export interface FileChipConfig {
   expandPanel?: boolean;
   focusInput?: boolean;
   duplicateToast?: boolean;
+  replaceExisting?: boolean;
   source?: string;
 }
 
@@ -57,7 +61,7 @@ function _findAIContextFileIndex(path: string): number {
   const normalizedPath = _normalizeAIContextPath(path);
   if (!normalizedPath) return -1;
   return (state._aiFileContext || []).findIndex(
-    (file: AIContextFile) => _normalizeAIContextPath(file.path || (file as any).name || '') === normalizedPath
+    (file: AiFileContext) => _normalizeAIContextPath(file.path || file.name || '') === normalizedPath
   );
 }
 
@@ -89,8 +93,9 @@ function _waInferFileType(path: string): string {
 // ── CSRF Fetch from infrastructure ──
 
 function _csrfFetch(url: string, options: any = {}): Promise<Response> {
-  if (typeof (window as any).WA?._csrfFetch === 'function') {
-    return (window as any).WA._csrfFetch(url, options);
+  const csrfFetch = getWorkspaceApi()._csrfFetch;
+  if (typeof csrfFetch === 'function') {
+    return csrfFetch(url, options);
   }
   return fetch(url, options);
 }
@@ -168,7 +173,7 @@ function _readFileAsBase64(file: File, timeoutMs: number = _WA_AI_LOCAL_SAVE_TIM
 // ── Save Local File to Workspace for AI ──
 
 async function _saveLocalFileToWorkspaceForAI(file: File): Promise<string> {
-  const ext = (file?.name ? file.name.split('.').pop() : '').toLowerCase();
+  const ext = (file?.name ? (file.name.split('.').pop() || '') : '').toLowerCase();
   if (!_isSupportedExt(ext)) {
     throw new Error('不支持的文件格式');
   }
@@ -209,7 +214,7 @@ function _normalizeTaskFilePaths(paths: string | string[]): string[] {
 // ── Mark AI Context File Failed ──
 
 function _markAIContextFileFailed(path: string, requestId: string, message: string): boolean {
-  const file = (state._aiFileContext || []).find((item: AIContextFile) => item.path === path);
+  const file = (state._aiFileContext || []).find((item: AiFileContext) => item.path === path);
   if (!file || (file as any).requestId !== requestId || !file.loading) return false;
   file.loading = false;
   file.error = message || '读取失败';
@@ -234,18 +239,18 @@ function _startAIContextWatchdog(path: string, requestId: string, timeoutMs: num
 
 async function _addFileToAIContext(absPath: string): Promise<void> {
   const name = absPath.split(/[\\/]/).pop() || absPath;
-  const existingIdx = state._aiFileContext.findIndex((f: AIContextFile) => f.path === absPath);
+  const existingIdx = state._aiFileContext.findIndex((f: AiFileContext) => f.path === absPath);
   if (existingIdx >= 0) {
     const existing = state._aiFileContext[existingIdx];
     if (existing && existing.error && !existing.loading) {
-      (window as any).WA?.retryAIFileContext(existingIdx);
+      getWorkspaceApi().retryAIFileContext?.(existingIdx);
       return;
     }
     showToast(`"${name}" 已在分析列表中`, 'info');
     return;
   }
   const requestId = `ai_ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  state._aiFileContext.push({ path: absPath, name, content: null, loading: true, requestId } as AIContextFile);
+  state._aiFileContext.push({ ext: _waInferFileType(absPath), path: absPath, name, content: null, loading: true, requestId } as unknown as AiFileContext);
   _renderAIFileChips();
   const watchdog = _startAIContextWatchdog(absPath, requestId, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS);
   try {
@@ -261,11 +266,11 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
     );
     if (!previewRes.ok) throw new Error(data.error || `HTTP ${previewRes.status}`);
 
-    let content = _waSampleTaskContext(String(data.content_preview || ''));
+    const content = _waSampleTaskContext(String(data.content_preview || ''));
     const originalChars = Number.isFinite(Number(data.original_chars))
       ? Number(data.original_chars)
       : content.replace(/\s/g, '').length;
-    const placeholder = state._aiFileContext.find((f: AIContextFile) => f.path === absPath);
+    const placeholder = state._aiFileContext.find((f: AiFileContext) => f.path === absPath);
     if (placeholder && (placeholder as any).requestId === requestId) {
       placeholder.content = content;
       placeholder.originalChars = originalChars;
@@ -294,7 +299,7 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
 // ── Placeholder helpers ──
 
 function _expandWAPanel(): void {
-  const WA = (window as any).WA || {};
+  const WA = getWorkspaceApi();
   if (typeof WA.openInMainView === 'function') {
     try { WA.openInMainView(); } catch (_) { /* noop */ }
   }
@@ -313,17 +318,18 @@ function _hideWelcome(): void {
 }
 
 function _updateContextBar(ctx?: any): void {
-  const update = (window as any).WA && (window as any).WA._updateContextBar;
+  const update = getWorkspaceApi()._updateContextBar;
   if (typeof update === 'function') update(ctx);
 }
 function _updateSubjectBar(_name?: string | null, _type?: string | null): void {
-  const update = (window as any).WA && (window as any).WA._updateSubjectBar;
+  const update = getWorkspaceApi()._updateSubjectBar;
   if (typeof update === 'function') update(_name, _type);
 }
 
 function _softRefreshBrowser(): Promise<void> {
-  if (typeof (window as any).WA?._softRefreshBrowser === 'function') {
-    return (window as any).WA._softRefreshBrowser();
+  const refreshBrowser = getWorkspaceApi()._softRefreshBrowser;
+  if (typeof refreshBrowser === 'function') {
+    return refreshBrowser();
   }
   return Promise.resolve();
 }
@@ -338,6 +344,11 @@ export async function _attachFilesToTask(paths: string | string[], options: File
 }> {
   const filePaths = _normalizeTaskFilePaths(paths);
   const duplicateToast = options.duplicateToast !== false && filePaths.length === 1;
+  if (options.replaceExisting && state._aiFileContext.length) {
+    state._aiFileContext = [];
+    state._aiTargetFileIdx = -1;
+    _renderAIFileChips();
+  }
   let added = 0;
   let skipped = 0;
   for (const path of filePaths) {
@@ -347,14 +358,14 @@ export async function _attachFilesToTask(paths: string | string[], options: File
       skipped++;
       continue;
     }
-    const existing = state._aiFileContext.find((file: AIContextFile) => file.path === path);
+    const existing = state._aiFileContext.find((file: AiFileContext) => file.path === path);
     if (existing && !existing.error && !existing.loading) {
       skipped++;
       if (duplicateToast) showToast(`"${name}" 已在分析列表中`, 'info');
       continue;
     }
     await _addFileToAIContext(path);
-    const attached = state._aiFileContext.find((file: AIContextFile) => file.path === path);
+    const attached = state._aiFileContext.find((file: AiFileContext) => file.path === path);
     if (attached && !attached.error) added++;
     else skipped++;
   }
@@ -370,7 +381,7 @@ export async function _attachFilesToTask(paths: string | string[], options: File
 
 export async function _addLocalFilesToAIContext(files: FileList | File[]): Promise<void> {
   const candidates = Array.from(files || []).filter((file) => {
-    const ext = (file?.name ? file.name.split('.').pop() : '').toLowerCase();
+    const ext = (file?.name ? (file.name.split('.').pop() || '') : '').toLowerCase();
     return _isSupportedExt(ext);
   });
   if (!candidates.length) {
@@ -464,7 +475,7 @@ export function _renderAIFileChips(): void {
   _hideWelcome();
 
   const rowsHtml = state._aiFileContext
-    .map((f: AIContextFile, i: number) => {
+    .map((f: AiFileContext, i: number) => {
       const isTarget = i === tIdx;
       const isLoading = !!f.loading;
       const hasError = !!f.error;
@@ -489,9 +500,9 @@ export function _renderAIFileChips(): void {
         `<span class="ctx-row-size">${sizeLabel}</span>` +
         (isLoading || hasError
           ? ''
-          : `<button class="ctx-row-pin${isTarget ? ' active' : ''}" onclick="WA.setAITargetFile(${i})" title="${pinTitle}">${_PIN_SVG}</button>`) +
-        (hasError ? `<button class="ctx-row-retry" onclick="WA.retryAIFileContext(${i})" title="重试">重试</button>` : '') +
-        (isLoading ? '' : `<span class="ctx-row-remove" onclick="WA.removeAIFileContext(${i})" title="移除">×</span>`) +
+          : `<button type="button" class="ctx-row-pin${isTarget ? ' active' : ''}" data-wa-context-action="target" data-context-index="${i}" title="${pinTitle}">${_PIN_SVG}</button>`) +
+        (hasError ? `<button type="button" class="ctx-row-retry" data-wa-context-action="retry" data-context-index="${i}" title="重试">重试</button>` : '') +
+        (isLoading ? '' : `<button type="button" class="ctx-row-remove" data-wa-context-action="remove" data-context-index="${i}" title="移除附加文件" aria-label="移除 ${_escHtml(f.name)}">×</button>`) +
         `</div>`
       );
     })
@@ -506,7 +517,9 @@ export function _renderAIFileChips(): void {
         `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>` +
         `<span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div>` +
         `<div class="wa-multidoc-actions">` +
-        `<button onclick="WA.clearAIFileContext()" title="清除全部附加文件">全部移除</button>` +
+        `<button type="button" data-wa-context-action="notebook" title="根据附加文档生成摘要、要点、问答和词汇表">学习包</button>` +
+        `<button type="button" data-wa-context-action="audio" title="根据附加文档生成双人有声概览">有声概览</button>` +
+        `<button type="button" data-wa-context-action="clear" title="清除全部附加文件">全部移除</button>` +
         `</div>`;
     }
     wrap.style.display = '';
@@ -516,7 +529,7 @@ export function _renderAIFileChips(): void {
   _updateContextBar({ files: n });
 
   document.querySelectorAll('.wa-file-item.ai-queued').forEach((el) => el.classList.remove('ai-queued'));
-  state._aiFileContext.forEach((f: AIContextFile) => {
+  state._aiFileContext.forEach((f: AiFileContext) => {
     const el = document.querySelector(`.wa-file-item[data-path="${CSS.escape(f.path)}"]`);
     if (el) el.classList.add('ai-queued');
   });
@@ -526,23 +539,30 @@ export function _renderAIFileChips(): void {
 
 // ── Backward compatibility ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
-
-wa.removeAIFileContext = (idx: number) => {
-  state._aiFileContext.splice(idx, 1);
-  if (state._aiTargetFileIdx === idx) state._aiTargetFileIdx = -1;
-  else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
+export function removeAIFileContext(idx: number): boolean {
+  const index = Number(idx);
+  if (!Number.isInteger(index) || index < 0 || index >= state._aiFileContext.length) {
+    showToast('未找到要移除的附加文件', 'warning');
+    _renderAIFileChips();
+    return false;
+  }
+  const removed = state._aiFileContext.splice(index, 1)[0];
+  if (state._aiTargetFileIdx === index) state._aiTargetFileIdx = -1;
+  else if (state._aiTargetFileIdx > index) state._aiTargetFileIdx--;
   _renderAIFileChips();
-};
+  if (removed && removed.name) showToast(`已移除附加文件：${removed.name}`, 'info');
+  return true;
+}
 
-wa.clearAIFileContext = () => {
+export function clearAIFileContext(): void {
+  const hadFiles = !!(state._aiFileContext && state._aiFileContext.length);
   state._aiFileContext = [];
   state._aiTargetFileIdx = -1;
   _renderAIFileChips();
-};
+  if (hadFiles) showToast('已清除全部附加文件', 'info');
+}
 
-wa.retryAIFileContext = (idx: number) => {
+export function retryAIFileContext(idx: number): void {
   const file = state._aiFileContext[idx];
   if (!file || file.loading) return;
   const path = file.path || (file as any).name;
@@ -551,19 +571,64 @@ wa.retryAIFileContext = (idx: number) => {
   else if (state._aiTargetFileIdx > idx) state._aiTargetFileIdx--;
   _renderAIFileChips();
   _attachFilesToTask([path], { source: 'retry', expandPanel: false, focusInput: false });
-};
+}
 
-wa.setAITargetFile = (idx: number) => {
+export function setAITargetFile(idx: number): void {
   state._aiTargetFileIdx = state._aiTargetFileIdx === idx ? -1 : idx;
   _renderAIFileChips();
   const f = state._aiTargetFileIdx >= 0 ? state._aiFileContext[state._aiTargetFileIdx] : null;
   if (f) showToast(`"${(f as AIContextFile).name}" 已设为修改目标文件`, 'success');
   else showToast('已取消目标文件设置', 'info');
-};
+}
 
-wa.attachFilesToTask = _attachFilesToTask;
-wa.pickAIContextFiles = _pickAIContextFiles;
-wa.addLocalFilesToAIContext = _addLocalFilesToAIContext;
+let _aiContextActionDelegationInstalled = false;
+
+function _installAIContextActionDelegation(): void {
+  if (_aiContextActionDelegationInstalled) return;
+  _aiContextActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target && target.closest ? target.closest<HTMLElement>('[data-wa-context-action]') : null;
+    if (!control) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const action = String(control.dataset.waContextAction || '');
+    const index = Number(control.dataset.contextIndex);
+    if (action === 'target') setAITargetFile(index);
+    else if (action === 'retry') retryAIFileContext(index);
+    else if (action === 'remove') removeAIFileContext(index);
+    else if (action === 'clear') clearAIFileContext();
+    else if (action === 'notebook' && typeof workspaceApi.openNotebookGuide === 'function') workspaceApi.openNotebookGuide();
+    else if (action === 'audio' && typeof workspaceApi.openAudioOverview === 'function') workspaceApi.openAudioOverview();
+  });
+}
+
+publishWorkspaceApi({
+  removeAIFileContext,
+  clearAIFileContext,
+  retryAIFileContext,
+  setAITargetFile,
+  attachFilesToTask: _attachFilesToTask,
+  pickAIContextFiles: _pickAIContextFiles,
+  addLocalFilesToAIContext: _addLocalFilesToAIContext,
+});
+
+_installAIContextActionDelegation();
+
+const pendingBrowserFilesToAI = Array.isArray(workspaceApi._pendingSendBrowserFilesToAI)
+  ? workspaceApi._pendingSendBrowserFilesToAI.splice(0)
+  : [];
+if (pendingBrowserFilesToAI.length) {
+  setTimeout(() => {
+    _attachFilesToTask(pendingBrowserFilesToAI, {
+      source: 'file_tree_inline_action',
+      focusInput: true,
+      duplicateToast: false,
+    }).catch((error: any) => {
+      console.warn('[WA] drain pending browser files to AI failed:', error);
+    });
+  }, 0);
+}
 
 const aiContextFileInput = document.getElementById('wa-ai-context-file-input') as HTMLInputElement | null;
 if (aiContextFileInput) {

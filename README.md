@@ -1,167 +1,57 @@
-# Koto — AI Assistant
+# Koto
 
-[![CI](https://github.com/Loganwon/Koto/actions/workflows/ci.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/ci.yml)
-[![Build](https://github.com/Loganwon/Koto/actions/workflows/build.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/build.yml)
-[![Docker Build](https://github.com/Loganwon/Koto/actions/workflows/docker.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/docker.yml)
-[![Release](https://github.com/Loganwon/Koto/actions/workflows/release.yml/badge.svg)](https://github.com/Loganwon/Koto/actions/workflows/release.yml)
+Koto is a local AI workspace for chat, file tasks, document editing, and task
+automation. The Flask application serves one unified browser/desktop shell;
+the current workspace frontend is authored in TypeScript under `web/src/` and
+published as the generated `web/static/js/build/workspace-bundle.js` asset.
 
-> 🌐 **Marketing site** — [https://loganwon.github.io/Koto/](https://loganwon.github.io/Koto/)
-> Source in [`docs/index.html`](docs/index.html) — fully self-contained, no build step.
+## Start here
 
-Koto 是一个基于多模型 AI 的桌面 / 云端智能助手，支持多轮对话、长期记忆、知识库、文件分析、语音交互和工作流自动化。
+Use the [current documentation index](docs/DOCUMENTATION_INDEX.md). It is the
+only entrypoint for the supported startup, test, architecture, and release
+guides:
 
-## 快速开始（本地运行）
+- [Quick start](docs/QUICKSTART.md)
+- [Python and frontend test environment](docs/PYTHON_TEST_ENV.md)
+- [Architecture and active ownership](docs/ARCHITECTURE.md)
+- [Architecture debt and cleanup roadmap](docs/KOTO_CODE_DEBT_REPORT.md)
+- [AI assistant test lanes](docs/ai-assistant-testing.md)
+- [Release gate](docs/RELEASE_GATE.md)
 
-### 环境要求
-- Python 3.11+
-- （可选）本地语音：见 `config/requirements_voice.txt`
+## Local development
 
-### 1. 克隆仓库并安装依赖
+Requirements: Python 3.11+, Node.js for frontend checks/builds, and Windows for
+the desktop packaging workflow.
 
-```bash
-git clone https://github.com/<your-username>/Koto.git
-cd Koto
+```powershell
 python -m venv .venv
-# Windows
-.venv\Scripts\pip install -r config/requirements.txt
-# macOS / Linux
-.venv/bin/pip install -r config/requirements.txt
+.\.venv\Scripts\pip install -r config\requirements.txt
+Copy-Item config\deepseek_config.env.example config\deepseek_config.env
+# Edit config\deepseek_config.env and set DEEPSEEK_API_KEY.
 ```
 
-### 2. 配置 API Key
+Start the web server with the repository virtual environment:
 
-```bash
-# 复制模板
-copy config\gemini_config.env.example config\gemini_config.env
-# 用文本编辑器打开，填入你的 Gemini API Key
+```powershell
+.\start_koto.bat
+# Equivalent: .\.venv\Scripts\python.exe -m web.app
 ```
 
-在 `config/gemini_config.env` 中填入：
+For the desktop launcher use `Koto_Start.vbs` or `Koto_Start.ps1`; the launcher
+owns desktop/server mode selection and logs startup failures under `logs/`.
 
-```
-GEMINI_API_KEY=your_api_key_here
-```
+## Repository layout
 
-> 免费申请 Gemini API Key：https://aistudio.google.com/app/apikey
-
-### 3. 启动
-
-```bash
-# 浏览器访问模式（推荐首次体验）
-python server.py
-
-# 桌面应用模式（独立窗口，需安装 pywebview）
-python koto_app.py
+```text
+launcher/                 Bootstrap and frozen-app entry support
+web/app.py                Flask app factory and compatibility assembly
+web/blueprints/           HTTP route modules
+web/services/             Web-facing orchestration
+app/core/                 Domain logic, agents, LLMs, skills, and file services
+web/src/                  TypeScript source for the unified frontend
+src/                      Desktop and release packaging support
+tests/                    Unit, integration, E2E, installer, and release tests
 ```
 
-打开浏览器访问 `http://localhost:5000`
-
-### Docker Compose (local dev)
-
-```bash
-# Copy env template and fill in API keys
-cp config/gemini_config.env.example .env
-docker compose up
-```
-
----
-
-## Developer Setup
-
-After cloning, install dev tools and set up pre-commit hooks:
-
-```bash
-pip install -r config/requirements.txt
-pip install pre-commit
-pre-commit install
-```
-
-### Common commands (Makefile)
-
-```bash
-make dev          # Start local server
-make test         # Run tests with coverage
-make lint         # flake8 + bandit
-make format       # isort + black
-make build        # PyInstaller build
-make audit        # CVE scan with pip-audit
-```
-
----
-
-## 云端部署（让他人通过网址使用）
-
-项目已内置 Docker 支持，可一键部署到 Railway / Render / Fly.io 等平台。
-
-### Railway（推荐，免费额度够用）
-
-1. Fork 本仓库到你的 GitHub 账号
-2. 登录 [railway.app](https://railway.app) → New Project → Deploy from GitHub
-3. 选择 Dockerfile：`deploy/Dockerfile`
-4. 在 Railway 环境变量中添加：
-   - `GEMINI_API_KEY` = 你的 API Key
-   - `KOTO_AUTH_ENABLED` = `true`（开启访问保护）
-5. 部署完成后 Railway 会提供一个公网 URL，分享给需要使用的人即可
-
-### Docker 本地部署
-
-```bash
-cd deploy
-docker build -f Dockerfile -t koto ..
-docker run -p 5000:5000 \
-  -e GEMINI_API_KEY=your_key_here \
-  -e KOTO_AUTH_ENABLED=true \
-  koto
-```
-
----
-
-## 主要功能
-
-| 功能 | 说明 |
-|------|------|
-| 多轮对话 | 支持 Gemini / 本地模型 |
-| 长期记忆 | 跨会话记忆，自动注入上下文 |
-| 知识库 RAG | 上传 TXT / MD / PDF / DOCX，语义检索 |
-| Excel 分析 | 上传表格，自然语言提问 |
-| 语音交互 | 语音输入 / TTS 朗读 |
-| 工作流 | 可视化任务编排 |
-| 代码执行 | 沙箱内安全执行 Python |
-
-完整文档见 [docs/README.md](docs/README.md)
-
----
-
-## 项目结构
-
-```
-Koto/
-├── server.py           # Flask 后端入口
-├── koto_app.py         # 桌面应用入口（pywebview）
-├── koto.spec           # PyInstaller 打包配置
-├── app/                # 核心业务逻辑
-├── web/                # 功能模块（记忆、知识库、工具等）
-├── src/                # 辅助模块
-├── config/             # 配置文件（gitignored 的敏感文件已排除）
-├── deploy/             # Docker / Railway 部署文件
-└── docs/               # 详细文档
-```
-
-## Intellectual Property
-
-Koto is proprietary software. All rights reserved © 2024-2026 Koto AI.
-
-This software and its source code are protected by copyright law. Unauthorized reproduction, distribution, or modification is strictly prohibited.
-
-### DMCA & Takedown Requests
-
-If you believe your copyrighted material has been used in violation of your rights, please contact us:
-
-- **Email:** [DMCA contact email — user should fill in]
-- **Subject line:** DMCA Takedown Request — Koto
-
-Include: (1) description of the copyrighted work, (2) URL of the infringing material, (3) your contact information, and (4) a statement of good faith belief.
-
-### License
-
-This project is licensed under a proprietary license. See [LICENSE](LICENSE) for details.
+Historical reports remain in `docs/` for traceability, but they are not current
+implementation guides and are not part of the entrypoint above.

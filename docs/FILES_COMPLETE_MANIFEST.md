@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** File paths and ownership in this report may be obsolete. Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) instead.
+
 # 📁 完整文件清单与位置导航
 
 **项目**: Koto v2.0 触发器参数编辑功能  
@@ -187,7 +189,7 @@ _archive/ 或 docs/
 | **部署应用** | DEPLOYMENT_CHECKLIST.py | / | 5分 |
 | **查看代码** | web/proactive_trigger.py | web/ | 20分 |
 | **查看 API** | web/app.py | web/ | 10分 |
-| **查看前端代码** | web/static/js/app.js | web/static/js/ | 15分 |
+| **查看前端代码** | web/src/app/ (已迁移至模块化主应用) | web/static/js/ | 15分 |
 
 ---
 
@@ -309,7 +311,7 @@ code web/proactive_trigger.py
 code web/app.py
 
 # 查看前端代码
-code web/static/js/app.js
+code web/src/app/ (已迁移至模块化主应用)
 code web/static/css/style.css
 ```
 
@@ -322,7 +324,7 @@ code web/static/css/style.css
 ### 代码文件
 - [ ] `web/proactive_trigger.py` - 核心逻辑
 - [ ] `web/app.py` - API 端点
-- [ ] `web/static/js/app.js` - 前端脚本
+- [ ] `web/src/app/ (已迁移至模块化主应用)` - 前端脚本
 - [ ] `web/static/css/style.css` - 样式表
 
 ### 用户文档

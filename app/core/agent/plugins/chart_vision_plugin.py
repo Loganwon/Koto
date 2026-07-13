@@ -34,7 +34,6 @@ _EXT_MIME_MAP: dict = {
     ".bmp": "image/bmp",
 }
 # Use a fast vision-capable model; fallback order handled in _call_vision
-_VISION_MODEL = "gemini-2.5-flash"
 
 
 class ChartVisionPlugin(AgentPlugin):
@@ -152,7 +151,11 @@ class ChartVisionPlugin(AgentPlugin):
 
     @staticmethod
     def _call_vision(filepath: str, prompt: str) -> str:
-        """Core: load image file → call Gemini Vision → return text result."""
+        """Vision is unavailable until an active multimodal provider is configured."""
+        return "Error: 当前云端模型不支持图像分析，该能力已与封存供应商隔离。"
+
+        # The code below is intentionally unreachable and will be removed once
+        # an active multimodal provider implements the same contract.
         # ── validate file ──────────────────────────────────────────────
         resolved, err = resolve_existing_path(filepath)
         if not resolved:
@@ -185,8 +188,8 @@ class ChartVisionPlugin(AgentPlugin):
             return "Error: 未配置 Gemini API Key，无法进行图像分析。"
 
         try:
-            from google import genai
-            from google.genai import types
+            from app.core.llm import provider_compat as genai
+            from app.core.llm.provider_compat import types
         except ImportError:
             return "Error: 缺少 google-genai 包，请运行：pip install google-genai"
 

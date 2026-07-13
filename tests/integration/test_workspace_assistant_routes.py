@@ -81,6 +81,24 @@ def _fake_pdf_bytes() -> bytes:
     return b"%PDF-1.4\n1 0 obj\n<</Type /Catalog>>\nendobj\n%%EOF"
 
 
+def _watermarked_pdf_bytes() -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    for _ in range(3):
+        page = doc.new_page()
+        page.insert_text(
+            (180, 400),
+            "CONFIDENTIAL",
+            fontsize=24,
+            color=(0.8, 0.8, 0.8),
+        )
+        page.insert_text((72, 72), "Keep this content", fontsize=12)
+    content = doc.tobytes()
+    doc.close()
+    return content
+
+
 def _fake_docx_bytes() -> bytes:
     try:
         from io import BytesIO
@@ -154,6 +172,31 @@ class TestRawFile:
         resp = client.get(f"/api/v1/workspace/raw/{file_id}")
         assert resp.status_code == 200
         assert "wordprocessingml" in resp.content_type
+
+
+class TestPdfRemoveWatermark:
+    def test_removes_repeated_watermark_and_returns_pdf(self, wa_client):
+        import pymupdf
+
+        client, tmp_dir, _ = wa_client
+        file_id = uuid.uuid4().hex
+        (tmp_dir / f"{file_id}.pdf").write_bytes(_watermarked_pdf_bytes())
+
+        resp = client.post(
+            "/api/v1/workspace/pdf/remove_watermark",
+            json={"file_id": file_id, "use_ai": False},
+        )
+
+        assert resp.status_code == 200
+        assert resp.content_type == "application/pdf"
+        assert resp.headers["X-Koto-Removed-Count"] == "3"
+        assert resp.headers["X-Koto-Method"] == "structural"
+
+        cleaned = pymupdf.open(stream=resp.data, filetype="pdf")
+        cleaned_text = "\n".join(page.get_text() for page in cleaned)
+        cleaned.close()
+        assert "CONFIDENTIAL" not in cleaned_text
+        assert cleaned_text.count("Keep this content") == 3
 
 
 # ── 2. POST /api/v1/workspace/open_file ──────────────────────────────────────
@@ -496,6 +539,29 @@ class TestServeWorkspaceFile:
         client, _, _ = wa_client
         resp = client.get("/api/v1/workspace/file/../../../etc/passwd")
         assert resp.status_code in (403, 404)
+
+
+class TestTaskArtifactRawFile:
+    def test_serves_workspace_image_by_relative_or_absolute_path(self, wa_client):
+        client, _, workspace_dir = wa_client
+        image = workspace_dir / "task-preview.png"
+        image.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+        relative = client.get("/api/file/raw", query_string={"path": image.name})
+        absolute = client.get("/api/file/raw", query_string={"path": str(image)})
+
+        assert relative.status_code == 200
+        assert absolute.status_code == 200
+        assert relative.content_type == "image/png"
+        assert relative.headers["Cache-Control"] == "no-store"
+
+    def test_rejects_task_artifact_path_traversal(self, wa_client):
+        client, _, _ = wa_client
+        response = client.get(
+            "/api/file/raw", query_string={"path": "../outside/secret.png"}
+        )
+
+        assert response.status_code == 403
 
 
 class TestLegacyRoutesRemoved:
@@ -1758,20 +1824,21 @@ class TestEmbeddedModeRenderGuards:
         ), "_mountEditor must prime the editor shell before waiting for layout"
 
     def test_router_load_guard_before_pptx_editor(self):
-        """The guard await must appear before new KotoPptxEditor() in _applyFileJson."""
+        """The layout guard must run before the lazy-loaded PPTX editor is created."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
-        fn_end = src.find("new KotoPptxEditor()", fn_start)
+        constructor = "new (await loadPptxEditor()).KotoPptxEditor()"
+        fn_end = src.find(constructor, fn_start)
         body = (
             src[fn_start : fn_end + 100]
             if fn_end != -1
             else src[fn_start : fn_start + 3000]
         )
         guard_pos = body.find("await _waitForEditorLayout")
-        pptx_pos = body.find("new KotoPptxEditor()")
+        pptx_pos = body.find(constructor)
         assert (
             guard_pos != -1 and pptx_pos != -1 and guard_pos < pptx_pos
-        ), "_waitForEditorLayout await must precede new KotoPptxEditor()"
+        ), "_waitForEditorLayout await must precede the lazy PPTX editor constructor"
 
     # ── _switchToTab guard ───────────────────────────────────────────────
 

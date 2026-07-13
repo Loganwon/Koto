@@ -46,7 +46,7 @@ class AnnotationPlugin(AgentPlugin):
                 "description": (
                     "对本地 Word (.docx) 文档执行批量标注/修改，直接写回原始 DOCX。"
                     "适用于翻译润色、学术批注、商务文稿规范化等场景。"
-                    "file_path: 文档路径（支持绝对路径/工作目录相对路径）；"
+                    "file_path: 文档绝对路径；"
                     "requirement: 用户标注需求描述。"
                 ),
                 "parameters": {
@@ -54,7 +54,7 @@ class AnnotationPlugin(AgentPlugin):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Word 文档路径（.docx，支持绝对或相对路径）",
+                            "description": "Word 文档绝对路径（.docx）",
                         },
                         "requirement": {
                             "type": "string",
@@ -77,7 +77,7 @@ class AnnotationPlugin(AgentPlugin):
                     "properties": {
                         "file_path": {
                             "type": "string",
-                            "description": "Word 文档路径（.docx，支持绝对或相对路径）",
+                            "description": "Word 文档绝对路径（.docx）",
                         },
                         "max_paragraphs": {
                             "type": "integer",
@@ -110,18 +110,28 @@ class AnnotationPlugin(AgentPlugin):
         raw = (file_path or "").strip().strip('"').strip("'")
         if not raw:
             return None, "文件路径不能为空"
-        if not os.path.isabs(raw):
-            return None, f"文件路径必须为绝对路径: {file_path}"
-
-        candidate = os.path.abspath(os.path.expandvars(os.path.expanduser(raw)))
         roots = cls._allowed_roots()
-        if roots and not is_within_roots(candidate, roots):
+        expanded = os.path.expandvars(os.path.expanduser(raw))
+
+        if not os.path.isabs(expanded):
+            return None, f"文件路径必须是绝对路径: {file_path}"
+        candidates = [os.path.abspath(expanded)]
+
+        allowed_candidates = [
+            candidate
+            for candidate in candidates
+            if not roots or is_within_roots(candidate, roots)
+        ]
+        if not allowed_candidates:
             return None, f"不在允许的目录范围内: {file_path}"
-        if not os.path.exists(candidate):
-            return None, f"文件不存在: {candidate}"
-        if not candidate.lower().endswith(".docx"):
-            return None, f"当前只支持 .docx 格式，收到: {file_path}"
-        return candidate, None
+
+        for candidate in allowed_candidates:
+            if not os.path.exists(candidate):
+                continue
+            if not candidate.lower().endswith(".docx"):
+                return None, f"当前只支持 .docx 格式，收到: {file_path}"
+            return candidate, None
+        return None, f"文件不存在: {allowed_candidates[0]}"
 
     def annotate_document(
         self,
@@ -141,8 +151,11 @@ class AnnotationPlugin(AgentPlugin):
         try:
             try:
                 from web.document_batch_annotator import annotate_large_document
-            except Exception:
-                from web.document_batch_annotator_v2 import annotate_large_document
+            except ImportError as exc:
+                # The v2 fallback was retired.  Preserve the actionable
+                # original import error instead of masking it with a second
+                # ModuleNotFoundError from the removed module.
+                return f"标注模块不可用: {exc}"
 
             events = []
             output_file = None

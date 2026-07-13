@@ -518,12 +518,12 @@ def run_downloader_gui(on_complete=None):
             ).pack(anchor="w")
             _radio_buttons.append(rb)
 
-        # 仅使用云端 Gemini API
+        # 仅使用云端 DeepSeek API
         sep = tk.Frame(model_list_frame, bg=CARD, pady=4, padx=8)
         sep.pack(fill="x", pady=3)
         rb_skip = tk.Radiobutton(
             sep,
-            text="☁️  仅使用 Gemini 云端 API（不下载本地模型）",
+            text="☁️  仅使用 DeepSeek 云端 API（不下载本地模型）",
             variable=selected_model,
             value="__cloud__",
             bg=CARD,
@@ -536,7 +536,7 @@ def run_downloader_gui(on_complete=None):
         rb_skip.pack(anchor="w")
         tk.Label(
             sep,
-            text="  需要网络 + Gemini API Key，功能完整无限制",
+            text="  需要网络 + DeepSeek API Key，支持文字、代码与文件任务",
             bg=CARD,
             fg="#aaa",
             font=("Segoe UI", 8),
@@ -691,7 +691,7 @@ def run_downloader_gui(on_complete=None):
             return
 
         if tag == "__cloud__":
-            log("☁️  已选择仅使用云端 Gemini API 模式")
+            log("☁️  已选择仅使用云端 DeepSeek API 模式")
             set_prog(100, "云端模式无需下载")
             save_setup_result("__cloud__", mode="cloud")
             _completed[0] = True

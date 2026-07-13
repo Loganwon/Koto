@@ -1,32 +1,36 @@
 import { _csrfFetch } from './infrastructure';
+import { isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import { publishWorkspaceApi } from '../shared/workspace-api';
 
 export interface TaskDispatcherDeps {
   state?: Record<string, any>;
   getSessionId?: () => string;
+  ensureSessionId?: () => Promise<string>;
   getConversationHistory?: () => any[];
   getModelMode?: () => string;
   getSelectedCloudModelId?: () => string;
-  setStreamButton?: (loading: boolean) => void;
-  streamTaskFlow?: (opts: any) => Promise<any>;
-  beginAssistantTaskTurn?: (metadata?: any) => any;
-  syncAssistantTaskTurn?: (turnId: string, metadata?: any) => any;
-  appendAssistantTurn?: (content: string, metadata?: any) => any;
-  persistTaskTurn?: (record?: any) => Promise<any>;
+  setStreamButton?: (_loading: boolean) => void;
+  streamTaskFlow?: (_opts: any) => Promise<any>;
+  beginAssistantTaskTurn?: (_metadata?: any) => any;
+  syncAssistantTaskTurn?: (_turnId: string, _metadata?: any) => any;
+  appendAssistantTurn?: (_content: string, _metadata?: any) => any;
+  persistTaskTurn?: (_record?: any) => Promise<any>;
   getActiveEditorContent?: () => string;
-  sampleTaskContext?: (content: string) => string;
+  sampleTaskContext?: (_content: string) => string;
 }
 
 export interface MessageRoute {
   id?: string;
   priority?: number;
-  match: (context: any) => boolean;
-  run: (context: any) => any;
+  match: (_context: any) => boolean;
+  run: (_context: any) => any;
 }
 
 export interface TaskContext {
   text: string;
   pinnedSelText?: string;
   pinnedSelSource?: string;
+  selectionContext?: Record<string, any> | null;
   model_mode?: string;
   model_id?: string;
   msgs?: HTMLElement;
@@ -45,17 +49,49 @@ export interface TaskFileInfo {
   loading?: boolean;
 }
 
+function terminalTaskTextValue(value: any, depth = 0): string {
+  if (typeof value === 'string') return value.trim();
+  if (!value || depth > 3) return '';
+  if (Array.isArray(value)) {
+    return value.map((item) => terminalTaskTextValue(item, depth + 1)).filter(Boolean).join('\n').trim();
+  }
+  if (typeof value !== 'object') return '';
+  for (const key of ['final_answer', 'finalAnswer', 'answer', 'summary', 'text', 'content', 'output_text', 'output', 'result', 'message', 'error']) {
+    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
+    const text = terminalTaskTextValue(value[key], depth + 1);
+    if (text) return text;
+  }
+  return '';
+}
+
+function terminalTaskAnswer(payload: any, fallback = ''): string {
+  const data = payload && typeof payload === 'object' ? payload : {};
+  for (const candidate of [
+    data.final_answer, data.finalAnswer, data.answer, data.output_text, data.output,
+    data.result, data.summary, data.text, data.content, data.message, data.error,
+    data.data, data.payload, fallback,
+  ]) {
+    const text = terminalTaskTextValue(candidate);
+    if (text) return text;
+  }
+  return '';
+}
+
 export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   const options = deps || {};
   const state = options.state || {};
   const messageRoutes: MessageRoute[] = [];
   const quickActionHandlers = new Map<string, Function>();
   let defaultQuickActionHandler: Function | null = null;
-  const WORKSPACE_ROUTE_NAMES = new Set(['light_chat', 'web_search', 'file_task', 'open_file']);
-  const WORKSPACE_DIRECT_ROUTES = new Set(['light_chat', 'web_search']);
+  const WORKSPACE_ROUTE_NAMES = new Set(['light_chat', 'web_search', 'file_task', 'open_file', 'system_action']);
+  const WORKSPACE_DIRECT_ROUTES = new Set(['light_chat', 'web_search', 'system_action']);
   const WORKSPACE_FILE_TASK_ROUTE = 'file_task';
   const WORKSPACE_FILE_TASK_KIND = 'complex_task';
   const WORKSPACE_DIRECT_KIND = 'direct_response';
+  const FILE_TASK_CONTEXT_CUE_RE = /(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|已打开|附件|选区|读取|阅读|查看|总结|概括|归纳|分析|检查|提取|改写|润色|翻译|批注|修订|写入|写回|修改|更新|处理|基于|文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv)/i;
+  const EXPLICIT_FILE_REFERENCE_RE = /[\w\u4e00-\u9fff ._()[\]{}~@#$%^&+=,;!-]{1,180}\.(?:pdf|docx?|xlsx?|xlsm|pptx?|txt|md|csv)\b/i;
+  const SYSTEM_ACTION_CUE_RE = /^(?:现在)?(?:几点|时间|日期|几号|星期几|系统状态|电脑状态|系统信息|电脑信息|配置|内存|cpu|硬盘|time|date)$/i;
+  const WHITELISTED_APP_LAUNCH_RE = /^(?:请|帮我|麻烦)?\s*(?:打开|启动|开启|open|launch)\s*(?:微信|wechat|weixin)\s*(?:应用|app)?$/i;
 
   function registerMessageRoute(route: MessageRoute): MessageRoute {
     if (!route || typeof route.match !== 'function' || typeof route.run !== 'function') {
@@ -331,17 +367,53 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     };
   }
 
+  function buildWorkspaceChatFileContext(context: TaskContext): Record<string, any> | null {
+    const currentFile = currentOpenTaskFile();
+    const selectionText = String(context && context.pinnedSelText || '').trim();
+    const selectionContext = context && context.selectionContext && typeof context.selectionContext === 'object'
+      ? context.selectionContext
+      : null;
+    const readyFiles = workspaceRouteFiles();
+    if (!currentFile && !selectionText && !readyFiles.length) return null;
+
+    const openTabs = Array.isArray(state.openTabs)
+      ? state.openTabs.slice(0, 10).map((tab: any) => tab && (tab.path || tab.name)).filter(Boolean)
+      : [];
+    const selectionMeta: Record<string, any> = {};
+    if (selectionContext) {
+      ['kind', 'sourceType', 'sheetName', 'rangeA1', 'rows', 'cols', 'rawText'].forEach((key) => {
+        const value = (selectionContext as any)[key];
+        if (value !== undefined && value !== null && String(value).trim() !== '') selectionMeta[key] = value;
+      });
+    }
+
+    return {
+      file_path: currentFile ? currentFile.path || '' : '',
+      file_name: currentFile ? currentFile.name || '' : '',
+      file_type: currentFile ? currentFile.type || currentFile.file_type || '' : '',
+      open_tabs: openTabs,
+      attached_files: readyFiles.map((file: any) => ({
+        path: file.path || '',
+        name: file.name || '',
+        type: file.type || file.file_type || '',
+      })),
+      selection: selectionText,
+      selection_source: String(context && context.pinnedSelSource || '').trim(),
+      selection_preview: previewText(selectionContext && selectionContext.previewText ? selectionContext.previewText : selectionText, 800),
+      selection_kind: String(selectionMeta.kind || selectionMeta.sourceType || '').trim(),
+      selection_meta: selectionMeta,
+    };
+  }
+
   function mentionsAttachedFileContext(text: string): boolean {
     const source = String(text || '').trim();
     if (!source) return false;
     return /(?:附件|附加|已添加|添加的|分析文档|拖入|上传|attached|uploaded)/i.test(source);
   }
 
-  function sameTaskFile(left: TaskFileInfo | null | undefined, right: TaskFileInfo | null | undefined): boolean {
-    if (!left || !right) return false;
-    const leftKey = normalizeTaskPath(left.path || left.name || '');
-    const rightKey = normalizeTaskPath(right.path || right.name || '');
-    return !!leftKey && !!rightKey && leftKey === rightKey;
+  function mentionsExplicitTaskFile(text: string): boolean {
+    const source = String(text || '').trim();
+    return !!source && EXPLICIT_FILE_REFERENCE_RE.test(source);
   }
 
   function shouldForceFileTaskForWorkspaceContext(context: TaskContext, routeDecision: Record<string, any> | null): boolean {
@@ -351,11 +423,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (!text) return false;
     const hasFileContext = workspaceRouteFiles().length > 0 || !!String(context.pinnedSelText || '').trim();
     if (!hasFileContext) return false;
-    return /(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|已打开|附件|选区|读取|阅读|查看|总结|概括|归纳|分析|检查|提取|改写|润色|翻译|批注|修订|写入|写回|修改|更新|处理|基于|文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv)/i.test(text);
+    return FILE_TASK_CONTEXT_CUE_RE.test(text);
   }
 
   function fileTaskRouteDecision(routeSource: string, base?: Record<string, any> | null): Record<string, any> {
-    return Object.assign({}, base || {}, {
+    const decision = Object.assign({}, base || {}, {
       route_kind: WORKSPACE_FILE_TASK_KIND,
       base_task_type: 'COMPLEX_TASK',
       route: WORKSPACE_FILE_TASK_ROUTE,
@@ -363,6 +435,39 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       route_source: routeSource,
       keyword_policy: 'hint_only',
     });
+    if (
+      routeSource === 'frontend_deterministic_file_context'
+      || routeSource === 'frontend_deterministic_explicit_file_reference'
+      || routeSource === 'frontend_file_context_guard'
+    ) {
+      decision.skip_ai_intent_adjudicator = true;
+    }
+    return decision;
+  }
+
+  function deterministicWorkspaceRouteDecision(context: TaskContext): Record<string, any> | null {
+    const text = String(context && context.text || '').trim();
+    if (!text) return null;
+    if (text.length <= 30 && (SYSTEM_ACTION_CUE_RE.test(text) || WHITELISTED_APP_LAUNCH_RE.test(text))) {
+      return normalizeWorkspaceRouteDecision({
+        route_kind: WORKSPACE_DIRECT_KIND,
+        route: 'system_action',
+        task_type: 'SYSTEM',
+        confidence: 0.99,
+        reason: '前端确定性系统动作短路。',
+        route_source: 'frontend_deterministic_system',
+      });
+    }
+    const hasFileContext = workspaceRouteFiles().length > 0
+      || !!currentOpenTaskFile()
+      || !!String(context.pinnedSelText || '').trim();
+    if (hasFileContext && FILE_TASK_CONTEXT_CUE_RE.test(text)) {
+      return fileTaskRouteDecision('frontend_deterministic_file_context');
+    }
+    if (mentionsExplicitTaskFile(text) && FILE_TASK_CONTEXT_CUE_RE.test(text)) {
+      return fileTaskRouteDecision('frontend_deterministic_explicit_file_reference');
+    }
+    return null;
   }
 
   function isDirectWorkspaceResponse(routeDecision: Record<string, any> | null): boolean {
@@ -376,9 +481,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const payload = data && typeof data === 'object' ? data : {};
     const route = String(payload.route || '').trim().toLowerCase();
     const legacyRoute = WORKSPACE_ROUTE_NAMES.has(route) ? route : WORKSPACE_FILE_TASK_ROUTE;
-    const normalizedRoute = legacyRoute === 'open_file' ? WORKSPACE_FILE_TASK_ROUTE : legacyRoute;
-    const routeKind = canonicalWorkspaceRouteKind(normalizedRoute, payload.route_kind);
     const rawTaskType = String(payload.task_type || '').trim().toUpperCase();
+    const normalizedRoute = rawTaskType === 'SYSTEM' && legacyRoute === WORKSPACE_FILE_TASK_ROUTE
+      ? 'system_action'
+      : (legacyRoute === 'open_file' ? WORKSPACE_FILE_TASK_ROUTE : legacyRoute);
+    const routeKind = canonicalWorkspaceRouteKind(normalizedRoute, payload.route_kind);
     const canonicalTaskType = canonicalWorkspaceTaskType(normalizedRoute, rawTaskType);
     const explicitSourceTaskType = String(payload.source_task_type || '').trim().toUpperCase();
     const sourceTaskType = explicitSourceTaskType || (rawTaskType && rawTaskType !== canonicalTaskType ? rawTaskType : '');
@@ -395,7 +502,68 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       hint: previewText(payload.hint || '', 180),
       route_source: previewText(payload.route_source || '', 160),
       keyword_policy: String(payload.keyword_policy || '').trim() || 'hint_only',
+      performance: payload.performance && typeof payload.performance === 'object'
+        ? compactJsonValue(payload.performance, 0, 800)
+        : undefined,
     };
+  }
+
+  function normalizeFileTaskRoutingDecision(value: any): Record<string, any> | null {
+    const source = value && typeof value === 'object' ? value : null;
+    if (!source) return null;
+    const route = String(source.route || '').trim().toLowerCase();
+    if (!route) return null;
+    const routeKind = canonicalWorkspaceRouteKind(route, source.route_kind);
+    const taskType = canonicalWorkspaceTaskType(route, source.task_type);
+    const normalized: Record<string, any> = {
+      route_kind: routeKind,
+      route,
+      task_type: taskType,
+      source_task_type: String(source.source_task_type || '').trim().toUpperCase(),
+      confidence: Math.max(0, Math.min(1, Number(source.confidence || 0) || 0)),
+      reason: previewText(source.reason || '', 500),
+      route_source: previewText(source.route_source || '', 160),
+      router_policy: previewText(source.router_policy || source.route_policy || '', 120),
+      keyword_policy: previewText(source.keyword_policy || '', 120),
+      target_path: previewText(source.target_path || '', 260),
+    };
+    if (source.performance && typeof source.performance === 'object') {
+      normalized.performance = compactJsonValue(source.performance, 0, 800);
+    }
+    if (source.skip_ai_intent_adjudicator === true) {
+      normalized.skip_ai_intent_adjudicator = true;
+    }
+    const candidateWorkflows = Array.isArray(source.candidate_workflows || source.workflow_candidates)
+      ? (source.candidate_workflows || source.workflow_candidates)
+          .slice(0, 8)
+          .map((item: any) => previewText(item || '', 160))
+          .filter(Boolean)
+      : [];
+    if (candidateWorkflows.length) normalized.candidate_workflows = candidateWorkflows;
+    if (Object.prototype.hasOwnProperty.call(source, 'requires_adjudication')) {
+      normalized.requires_adjudication = !!source.requires_adjudication;
+    }
+    const finalToolPath = previewText(source.final_tool_path || source.tool_path || '', 240);
+    if (finalToolPath) normalized.final_tool_path = finalToolPath;
+    const frontendLabel = previewText(source.frontend_label || source.display_label || '', 160);
+    if (frontendLabel) normalized.frontend_label = frontendLabel;
+    const planSteps = Array.isArray(source.plan_steps || source.steps)
+      ? (source.plan_steps || source.steps).slice(0, 8).map((item: any, index: number) => {
+          const step = item && typeof item === 'object' ? item : { label: item };
+          const normalizedStep: Record<string, any> = {
+            id: previewText(step.id || `route_step_${index + 1}`, 64),
+            label: previewText(step.label || step.title || step.step || '', 160),
+            description: previewText(step.description || step.detail || '', 320),
+            tool: previewText(step.tool || step.tool_name || '', 120),
+          };
+          Object.keys(normalizedStep).forEach((key) => {
+            if (!normalizedStep[key]) delete normalizedStep[key];
+          });
+          return normalizedStep;
+        }).filter((item: Record<string, any>) => item.label || item.description || item.tool)
+      : [];
+    if (planSteps.length) normalized.plan_steps = planSteps;
+    return normalized;
   }
 
   function canonicalWorkspaceRouteKind(route: string, routeKind?: string): string {
@@ -413,6 +581,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const normalizedRoute = String(route || '').trim().toLowerCase();
     const normalizedTask = String(taskType || '').trim().toUpperCase();
     if (normalizedRoute === 'web_search') return 'WEB_SEARCH';
+    if (normalizedRoute === 'system_action') return 'SYSTEM';
     if (normalizedRoute === 'light_chat') return 'CHAT';
     if (normalizedRoute === WORKSPACE_FILE_TASK_ROUTE) return 'FILE_TASK';
     if (normalizedTask === 'CHAT' || normalizedTask === 'WEB_SEARCH') return normalizedTask;
@@ -493,7 +662,8 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   async function streamWorkspaceChatRoute(context: TaskContext, routeDecision: Record<string, any>): Promise<any> {
     const loadingEl = context.loadingEl;
     const route = String(routeDecision.route || '').trim();
-    const lockedTask = route === 'web_search' ? 'WEB_SEARCH' : 'CHAT';
+    const lockedTask = route === 'web_search' ? 'WEB_SEARCH' : (route === 'system_action' ? 'SYSTEM' : 'CHAT');
+    const directTaskKind = route === 'web_search' ? 'web_search' : (route === 'system_action' ? 'system_action' : 'message');
     const ctrl = new AbortController();
     let assistantText = '';
     state._streamAbortCtrl = ctrl;
@@ -501,21 +671,25 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (typeof options.setStreamButton === 'function') options.setStreamButton(true);
     if (loadingEl) {
       loadingEl.classList.add('streaming');
-      loadingEl.textContent = route === 'web_search' ? '正在检索…' : '正在思考…';
+      loadingEl.textContent = route === 'web_search' ? '正在检索…' : (route === 'system_action' ? '正在执行…' : '正在思考…');
       loadingEl.dataset!.workspaceRoute = route;
       loadingEl.dataset!.workspaceRouteSource = String(routeDecision.route_source || '');
     }
     try {
+      const sessionId = typeof options.ensureSessionId === 'function'
+        ? await options.ensureSessionId()
+        : (typeof options.getSessionId === 'function' ? options.getSessionId() : 'workspace_default');
       const response = await _csrfFetch('/api/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          session: typeof options.getSessionId === 'function' ? options.getSessionId() : 'workspace_default',
+          session: sessionId || 'workspace_default',
           message: context.text,
           locked_task: lockedTask,
           locked_model: chatStreamLockedModel(),
           skills_enabled: false,
           workspace_route_intent: routeDecision,
+          file_context: buildWorkspaceChatFileContext(context),
         }),
         signal: ctrl.signal,
       });
@@ -556,7 +730,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       }
       appendAssistantConversationTurn(assistantText, {
         loadingEl,
-        task_kind: route === 'web_search' ? 'web_search' : 'message',
+        task_kind: directTaskKind,
         status: 'done',
         route_intent: routeDecision,
         skip_model_context: false,
@@ -571,7 +745,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       }
       appendAssistantConversationTurn(assistantText, {
         loadingEl,
-        task_kind: route === 'web_search' ? 'web_search' : 'message',
+        task_kind: directTaskKind,
         status: aborted ? 'cancelled' : 'error',
         route_intent: routeDecision,
       });
@@ -597,7 +771,9 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const taskTurn = typeof options.beginAssistantTaskTurn === 'function'
       ? options.beginAssistantTaskTurn({ content: '文件任务已启动，正在建立执行流…', task_kind: 'file_task', status: 'streaming', skip_model_context: true, render: false })
       : null;
-    const taskTurnId = taskTurn && taskTurn.id ? taskTurn.id : '';
+    const taskTurnId = taskTurn && taskTurn.id
+      ? taskTurn.id
+      : `task_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
     state._streamAbortCtrl = ctrl;
     state.isLoading = true;
     if (typeof options.setStreamButton === 'function') options.setStreamButton(true);
@@ -614,17 +790,88 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       setTaskFollowupPayload(loadingEl, payload);
       setPendingTaskResumePayload(loadingEl, payload);
     }
+    let terminalTaskPersisted = false;
+    let activeTaskCard: HTMLElement | undefined = loadingEl || undefined;
+    let terminalPersistTimer: number | null = null;
+    let terminalPersistDelayTimer: number | null = null;
+    const basePersistMetadata = (card?: HTMLElement, extra?: Record<string, any>) => Object.assign({
+      turn_id: taskTurnId,
+      task_kind: 'file_task',
+      status: 'streaming',
+      task_terminal_status: 'running',
+      partial: true,
+      skip_model_context: true,
+    }, extra || {}, taskTurnMetadataFromLoadingEl(card));
+    const taskCardHasTerminalResult = (card?: HTMLElement): boolean => {
+      if (!card || !card.dataset) return false;
+      const dataset = card.dataset;
+      const status = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
+      const hasFinalText = !!String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim();
+      if (card.classList.contains('done') || card.classList.contains('failed') || card.classList.contains('cancelled')) return hasFinalText || status !== '';
+      if (isFileTaskTerminalStatus(status)) return true;
+      return String(dataset.taskCompleted || '').trim().toLowerCase() === 'true' && hasFinalText;
+    };
+    const persistTerminalTaskCard = (card?: HTMLElement, streamResult?: any, fallbackStatus = 'done'): string => {
+      const targetCard = card || loadingEl;
+      const assistantText = finalizeWhiteboxTaskTurn(taskTurnId, targetCard, streamResult || {
+        summary: String(targetCard && targetCard.dataset && (targetCard.dataset.taskFinalAnswer || targetCard.dataset.taskSummary) || '').trim(),
+        status: fallbackStatus,
+      }, fallbackStatus, false);
+      if (!terminalTaskPersisted) {
+        terminalTaskPersisted = true;
+        persistTaskTurn(context.text, assistantText, Object.assign({
+          turn_id: taskTurnId,
+          task_kind: 'file_task',
+          task_title: '文件任务结果',
+          partial: false,
+          skip_model_context: false,
+        }, taskTurnMetadataFromLoadingEl(targetCard)), payload.files || [], undefined);
+      }
+      return assistantText;
+    };
+    const stopTerminalPersistWatch = () => {
+      if (terminalPersistTimer !== null) {
+        window.clearInterval(terminalPersistTimer);
+        terminalPersistTimer = null;
+      }
+      if (terminalPersistDelayTimer !== null) {
+        window.clearTimeout(terminalPersistDelayTimer);
+        terminalPersistDelayTimer = null;
+      }
+    };
+    const startTerminalPersistWatch = () => {
+      stopTerminalPersistWatch();
+      terminalPersistTimer = window.setInterval(() => {
+        if (terminalTaskPersisted) {
+          stopTerminalPersistWatch();
+          return;
+        }
+        if (activeTaskCard && taskCardHasTerminalResult(activeTaskCard)) {
+          persistTerminalTaskCard(activeTaskCard);
+          stopTerminalPersistWatch();
+        }
+      }, 150);
+      window.setTimeout(stopTerminalPersistWatch, 30000);
+    };
+    persistTaskTurn(context.text, '文件任务已启动，正在执行…', basePersistMetadata(loadingEl), payload.files || [], loadingEl);
+    startTerminalPersistWatch();
     return Promise.resolve(streamTaskFlow!({
       payload, msgs: context.msgs, loadingEl, signal: ctrl.signal, abortController: ctrl,
       onTaskCardSnapshot: (card: HTMLElement) => {
+        activeTaskCard = card;
         setTaskFollowupPayload(card, payload);
         setPendingTaskResumePayload(card, payload);
+        if (!terminalTaskPersisted && taskCardHasTerminalResult(card) && terminalPersistDelayTimer === null) {
+          terminalPersistDelayTimer = window.setTimeout(() => {
+            terminalPersistDelayTimer = null;
+            if (!terminalTaskPersisted) persistTerminalTaskCard(activeTaskCard || card);
+          }, 600);
+        }
         if (!taskTurnId || typeof options.syncAssistantTaskTurn !== 'function') return;
         options.syncAssistantTaskTurn(taskTurnId, Object.assign({ loadingEl: card, task_kind: 'file_task', status: 'streaming', skip_model_context: true }, taskTurnMetadataFromLoadingEl(card)));
       },
     })).then((streamResult: any) => {
-      const assistantText = finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, streamResult, 'done', false);
-      persistTaskTurn(context.text, assistantText, taskTurnMetadataFromLoadingEl(loadingEl), payload.files || [], loadingEl);
+      const assistantText = persistTerminalTaskCard(activeTaskCard || loadingEl, streamResult, 'done');
       return { routeId: 'task-flow', assistantText, payload, result: streamResult, routeDecision };
     }).catch((error: any) => {
       const aborted = error && error.name === 'AbortError';
@@ -632,10 +879,15 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       if (loadingEl) { loadingEl.classList.remove('streaming'); loadingEl.textContent = assistantText; loadingEl.dataset!.rawText = assistantText; }
       finalizeWhiteboxTaskTurn(taskTurnId, loadingEl, { summary: assistantText, status: aborted ? 'cancelled' : 'error' }, aborted ? 'cancelled' : 'error', true);
       persistTaskTurn(context.text, assistantText, Object.assign({
+        turn_id: taskTurnId,
+        task_kind: 'file_task',
+        partial: false,
         status: aborted ? 'cancelled' : 'error',
+        skip_model_context: aborted,
       }, taskTurnMetadataFromLoadingEl(loadingEl)), [], loadingEl);
       return { routeId: 'task-flow', assistantText, error, routeDecision };
     }).finally(() => {
+      stopTerminalPersistWatch();
       if (state._streamAbortCtrl === ctrl) state._streamAbortCtrl = null;
       state.isLoading = false;
       if (typeof options.setStreamButton === 'function') options.setStreamButton(false);
@@ -645,6 +897,13 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   async function runWorkspaceModelRoutedTask(context: TaskContext): Promise<any> {
     if (shouldBypassWorkspaceRoute(context)) {
       return runTaskFlowRoute(context, fileTaskRouteDecision('explicit_task_payload'));
+    }
+    const deterministicRoute = deterministicWorkspaceRouteDecision(context);
+    if (deterministicRoute) {
+      if (isDirectWorkspaceResponse(deterministicRoute)) {
+        return streamWorkspaceChatRoute(context, deterministicRoute);
+      }
+      return runTaskFlowRoute(context, deterministicRoute);
     }
     if (context.loadingEl) context.loadingEl.textContent = '正在判断…';
     let routeDecision: Record<string, any> | null = null;
@@ -657,7 +916,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       routeDecision = fileTaskRouteDecision('frontend_file_context_guard', routeDecision);
     }
     if (isDirectWorkspaceResponse(routeDecision)) {
-      return streamWorkspaceChatRoute(context, routeDecision);
+      return streamWorkspaceChatRoute(context, routeDecision!);
     }
     return runTaskFlowRoute(context, routeDecision || undefined);
   }
@@ -714,6 +973,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (!dataset) return {};
     const metadata: Record<string, any> = {};
     const taskUiState = loadingEl && (loadingEl as any)._taskUiState && typeof (loadingEl as any)._taskUiState === 'object' ? (loadingEl as any)._taskUiState : null;
+    if (dataset.taskTitle) metadata.task_title = String(dataset.taskTitle || '').trim();
     if (dataset.taskId) metadata.task_id = String(dataset.taskId || '').trim();
     if (dataset.taskRunId) metadata.run_id = String(dataset.taskRunId || '').trim();
     if (dataset.taskRequest) metadata.task_request = String(dataset.taskRequest || '').trim();
@@ -724,6 +984,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (dataset.taskExecutionMode) metadata.task_execution_mode = String(dataset.taskExecutionMode || '').trim();
     if (dataset.taskSelectedRecipe) metadata.task_selected_recipe = String(dataset.taskSelectedRecipe || '').trim();
     if (dataset.taskOutputMode) metadata.task_output_mode = String(dataset.taskOutputMode || '').trim();
+    if (dataset.taskRoute) metadata.task_route = String(dataset.taskRoute || '').trim();
+    if (dataset.taskRouteSource) metadata.task_route_source = String(dataset.taskRouteSource || '').trim();
+    if (dataset.taskRoutingDecision) {
+      try { metadata.route_intent = JSON.parse(decodeURIComponent(String(dataset.taskRoutingDecision || '').trim())); } catch { /* noop */ }
+    }
     if (dataset.taskIntentStrategy) metadata.task_intent_strategy = String(dataset.taskIntentStrategy || '').trim();
     if (Object.prototype.hasOwnProperty.call(dataset, 'taskIntentCanApply')) {
       metadata.task_intent_can_apply = String(dataset.taskIntentCanApply || '').trim().toLowerCase() === 'true';
@@ -771,7 +1036,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   function taskCardCheckLine(value: unknown): string {
     let text = String(value || '').replace(/\s+/g, ' ').trim();
     if (!text) return '';
-    if (/完整结果见对话汇报|结果见对话汇报|任务已完成，?完整结果/u.test(text)) return '';
+    if (/详细内容见任务结果|较长内容.*任务结果/u.test(text)) return '';
     text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
     if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
     if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
@@ -803,14 +1068,14 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
         checks,
       };
     }).filter((step: any) => step.id || step.title || step.checks.length);
-    const terminal = String(dataset.taskTerminalStatus || '').trim();
+    const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
     const completed = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted')
       ? String(dataset.taskCompleted || '').trim().toLowerCase() === 'true'
-      : terminal === 'completed' || terminal === 'verified';
+      : ['completed', 'done', 'verified'].includes(terminal);
     const summaryEl = loadingEl.querySelector('[data-role="summary"]') as HTMLElement | null;
     const finalSummary = previewText(
       String(dataset.taskSummary || (summaryEl && (summaryEl.innerText || summaryEl.textContent)) || '').replace(/\s+/g, ' ').trim(),
-      900,
+      220,
     );
     return {
       schema: 'koto_ai_task_chain_test_v1',
@@ -837,6 +1102,10 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     };
   }
 
+  const runtimeWa = (window as any).WA || {};
+  runtimeWa.taskCardTestStructure = taskCardTestStructure;
+  (window as any).WA = runtimeWa;
+
   function taskCardVisibleTrace(loadingEl?: HTMLElement): string {
     if (!loadingEl || !loadingEl.querySelector) return '';
     const parts: string[] = [];
@@ -860,13 +1129,20 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
 
   function finalizeWhiteboxTaskTurn(taskTurnId: string, loadingEl: HTMLElement | undefined, result: any, fallbackStatus: string, skipModelContext: boolean): string {
     const payload = result && typeof result === 'object' ? result : { summary: result };
-    const assistantText = String(payload.summary || '').trim() || '文件任务流已完成。';
+    const dataset = loadingEl && loadingEl.dataset ? loadingEl.dataset : {};
+    const assistantText = terminalTaskAnswer(
+      payload,
+      String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim(),
+    ) || '文件任务流已结束。';
     if (loadingEl && loadingEl.dataset) loadingEl.dataset.rawText = assistantText;
     const turnMetadata = Object.assign({
       content: assistantText, loadingEl, task_kind: 'file_task',
       status: String(payload.status || fallbackStatus || 'done').trim() || 'done',
+    }, taskTurnMetadataFromLoadingEl(loadingEl), {
+      // Streaming snapshots stay out of model context, but a terminal task
+      // result must be available to an immediate follow-up after a file switch.
       skip_model_context: !!skipModelContext,
-    }, taskTurnMetadataFromLoadingEl(loadingEl));
+    });
     if (taskTurnId && typeof options.syncAssistantTaskTurn === 'function') {
       options.syncAssistantTaskTurn(taskTurnId, turnMetadata);
     } else {
@@ -880,18 +1156,28 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const explicitTaskPayload = cloneTaskPayload(requestOverrides.taskPayload);
     const overrideOptions: Record<string, any> = requestOverrides.options && typeof requestOverrides.options === 'object'
       ? Object.assign({}, requestOverrides.options) : {};
-    if (!Object.prototype.hasOwnProperty.call(overrideOptions, 'enable_ai_intent_adjudicator')) {
-      overrideOptions.enable_ai_intent_adjudicator = true;
+    const routingDecision = normalizeFileTaskRoutingDecision(
+      requestOverrides.routing_decision || requestOverrides.workspace_route_intent || overrideOptions.workspace_route_intent,
+    );
+    if (routingDecision && routingDecision.skip_ai_intent_adjudicator === true) {
+      overrideOptions.disable_ai_intent_adjudicator = true;
+      delete overrideOptions.enable_ai_intent_adjudicator;
     }
     overrideOptions.router_policy = overrideOptions.router_policy || 'model_primary_intent';
+    if (!overrideOptions.selection_context && requestOverrides.selectionContext && typeof requestOverrides.selectionContext === 'object') {
+      overrideOptions.selection_context = compactJsonValue(requestOverrides.selectionContext, 0, 1200);
+    }
+    if (routingDecision && !routingDecision.router_policy) {
+      routingDecision.router_policy = String(overrideOptions.router_policy || '').trim();
+    }
 
     if (explicitTaskPayload) {
-      return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides);
+      return finalizeExplicitTaskPayload(explicitTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision)!;
     }
 
     const resumedTaskPayload = implicitResumeTaskPayload(text);
     if (resumedTaskPayload) {
-      return finalizeExplicitTaskPayload(resumedTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides);
+      return finalizeExplicitTaskPayload(resumedTaskPayload, text, pinnedSelText, pinnedSelSource, overrideOptions, requestOverrides, routingDecision)!;
     }
 
     const rawFiles: TaskFileInfo[] = Array.isArray(state._aiFileContext)
@@ -942,6 +1228,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       selection: pinnedSelText || '', selection_source: pinnedSelSource || '', files: rawFiles,
       target_path: inferredTargetPath, file_name: inferredFileName, file_type: inferredFileType,
       current_file: currentFile,
+      routing_decision: routingDecision,
       task_context: taskContext, model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',
       model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : '',
       options: overrideOptions,
@@ -956,7 +1243,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     return payload;
   }
 
-  function finalizeExplicitTaskPayload(taskPayload: any, text: string, pinnedSelText?: string, pinnedSelSource?: string, overrideOptions?: Record<string, any>, requestOverrides?: any): Record<string, any> | null {
+  function finalizeExplicitTaskPayload(taskPayload: any, text: string, pinnedSelText?: string, pinnedSelSource?: string, overrideOptions?: Record<string, any>, requestOverrides?: any, routingDecision?: Record<string, any> | null): Record<string, any> | null {
     const explicitTaskPayload = cloneTaskPayload(taskPayload);
     if (!explicitTaskPayload) return null;
     const explicitOptions = explicitTaskPayload.options && typeof explicitTaskPayload.options === 'object' ? Object.assign({}, explicitTaskPayload.options) : {};
@@ -967,6 +1254,12 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     explicitTaskPayload.file_type = explicitTaskPayload.file_type || state.fileType || '';
     explicitTaskPayload.session_id = explicitTaskPayload.session_id || (typeof options.getSessionId === 'function' ? options.getSessionId() : '');
     explicitTaskPayload.options = Object.assign({}, explicitOptions, overrideOptions);
+    const explicitRoutingDecision = normalizeFileTaskRoutingDecision(
+      explicitTaskPayload.routing_decision
+        || routingDecision
+        || explicitTaskPayload.options.workspace_route_intent,
+    );
+    if (explicitRoutingDecision) explicitTaskPayload.routing_decision = explicitRoutingDecision;
     if (!Array.isArray(explicitTaskPayload.history)) {
       explicitTaskPayload.history = typeof options.getConversationHistory === 'function' ? options.getConversationHistory() : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []);
     }
@@ -1303,13 +1596,27 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   function explicitWriteTargetPathFromText(text: string): string {
     const source = String(text || '').trim();
     if (!source) return '';
+    const namedOutputPattern = /(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*(?:[《「“"'])?([^\s"'<>|:：,，。；;、!?！？()[\]【】《》「」“”]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
     const filePattern = /((?:[A-Za-z]:[\\/])?[^\s"'<>|:：,，。；;、!?！？()[\]【】]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
     const writePattern = /(继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|continue|improve|modify|edit|update|save|write|append|insert)/i;
     const protectPattern = /(不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without).{0,24}(修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)/i;
     const readSourcePattern = /(读取|阅读|查看|分析|基于|来自|原文|原文件|源文件|输入文件|已添加|source|input|read)/i;
-    const explicitOutputBeforePattern = /(保存为|另存为|输出到|写入到|导出到|save as|export to|write to).{0,80}$/i;
+    const explicitOutputBeforePattern = /(保存为|另存为|保存在|保存到|保存至|输出到|输出至|写入到|导出到|save as|export to|write to).{0,80}$/i;
     const sourceBeforePattern = /(读取|阅读|查看|分析|基于|来自|当前打开|当前文件|原文|原文件|源文件|输入文件|已添加|source|input|read).{0,36}$/i;
+    const filenameLabelBeforePattern = /(文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*$/i;
     const candidates: Array<{ path: string; score: number; index: number }> = [];
+    let namedMatch: RegExpExecArray | null;
+    while ((namedMatch = namedOutputPattern.exec(source)) !== null) {
+      const rawPath = String(namedMatch[1] || '').trim();
+      if (!rawPath) continue;
+      const start = namedMatch.index + namedMatch[0].lastIndexOf(rawPath);
+      const end = start + rawPath.length;
+      candidates.push({
+        path: joinSplitDirectoryTargetPath(source, rawPath, start, end),
+        score: 100,
+        index: start,
+      });
+    }
     let match: RegExpExecArray | null;
     while ((match = filePattern.exec(source)) !== null) {
       const rawPath = String(match[1] || '').replace(/[ \t\r\n,，。；;、!?！？()[\]【】"']+$/g, '');
@@ -1317,6 +1624,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       const end = start + rawPath.length;
       const before = source.slice(Math.max(0, start - 80), start);
       const near = source.slice(Math.max(0, start - 80), Math.min(source.length, end + 80));
+      const targetPath = joinSplitDirectoryTargetPath(source, rawPath, start, end);
       if (
         hasReadOnlyHint(source)
         && mentionsAttachedFileContext(near)
@@ -1332,10 +1640,39 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       if (/(同一个|当前|目标).{0,16}(docx|word|xlsx|excel|pptx|ppt|pdf|文档|表格|幻灯片|文件)/i.test(near)) score += 5;
       if (readSourcePattern.test(near)) score -= 2;
       if (protectPattern.test(before)) score -= 8;
-      if (score > 0) candidates.push({ path: rawPath, score, index: start });
+      if (targetPath !== rawPath) score += 8;
+      if (filenameLabelBeforePattern.test(before)) score += 6;
+      if (score > 0) candidates.push({ path: targetPath, score, index: start });
     }
     candidates.sort((a, b) => (b.score - a.score) || (a.index - b.index));
     return candidates.length ? candidates[0].path : '';
+  }
+
+  function joinSplitDirectoryTargetPath(source: string, rawPath: string, start: number, end: number): string {
+    const normalizedPath = String(rawPath || '').trim().replace(/\\/g, '/');
+    if (!normalizedPath || normalizedPath.replace(/^\/+|\/+$/g, '').includes('/')) return rawPath;
+    const before = String(source || '').slice(Math.max(0, start - 140), start);
+    const after = String(source || '').slice(end, Math.min(String(source || '').length, end + 140));
+    const directory = splitOutputDirectoryAfterFile(after) || splitOutputDirectoryBeforeFile(before);
+    const fileName = baseNameFromPath(rawPath);
+    if (!directory || !fileName) return rawPath;
+    return `${directory.replace(/\\/g, '/').replace(/\/+$/g, '')}/${fileName}`;
+  }
+
+  function splitOutputDirectoryAfterFile(after: string): string {
+    const match = /^[\s,，。；;、]*(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)\s*((?:[A-Za-z]:[\\/])?[^\s"'<>|,，。；;、!?！？()[\]【】]+)\s*(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory)/i.exec(String(after || ''));
+    return cleanSplitOutputDirectory(match ? match[1] : '');
+  }
+
+  function splitOutputDirectoryBeforeFile(before: string): string {
+    const match = /(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)\s*((?:[A-Za-z]:[\\/])?[^\s"'<>|,，。；;、!?！？()[\]【】]+)\s*(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory).{0,80}(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)?\s*$/i.exec(String(before || ''));
+    return cleanSplitOutputDirectory(match ? match[1] : '');
+  }
+
+  function cleanSplitOutputDirectory(value: string): string {
+    const clean = String(value || '').trim().replace(/^[\s,，。；;、!?！？()[\]【】"']+|[\s,，。；;、!?！？()[\]【】"']+$/g, '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+    if (!clean || /\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?)$/i.test(clean)) return '';
+    return clean;
   }
 
   function normalizeTaskPath(value: string): string {
@@ -1365,6 +1702,4 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   };
 }
 
-const WA = (window as any).WA || {};
-WA.createTaskDispatcher = createTaskDispatcher;
-(window as any).WA = WA;
+publishWorkspaceApi({ createTaskDispatcher });

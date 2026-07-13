@@ -399,71 +399,7 @@ class TestIsInteractionsOnly:
 
 
 # =====================================================================
-# 9. FileOperator
-# =====================================================================
-@pytest.mark.unit
-class TestFileOperator:
-    def setup_method(self):
-        from web.file_operator import FileOperator
-
-        self.cls = FileOperator
-
-    # -- is_file_operation --
-    def test_is_file_operation_chinese_keyword(self):
-        assert self.cls.is_file_operation("请帮我读取文件") is True
-
-    def test_is_file_operation_english_keyword(self):
-        assert self.cls.is_file_operation("please open file") is True
-
-    def test_is_file_operation_negative(self):
-        assert self.cls.is_file_operation("what is the weather?") is False
-
-    def test_is_file_operation_case_insensitive(self):
-        assert self.cls.is_file_operation("LIST FILES in dir") is True
-
-    # -- _is_folder_organize_intent --
-    def test_folder_organize_both(self):
-        assert self.cls._is_folder_organize_intent("归纳文件夹") is True
-
-    def test_folder_organize_keywords_only(self):
-        assert self.cls._is_folder_organize_intent("自动归纳") is True
-
-    def test_folder_organize_negative(self):
-        assert self.cls._is_folder_organize_intent("hello world") is False
-
-    # -- _extract_path_from_text --
-    def test_extract_quoted_path(self):
-        result = self.cls._extract_path_from_text('整理 "C:\\Users\\test"')
-        assert result == "C:\\Users\\test"
-
-    def test_extract_windows_path(self):
-        result = self.cls._extract_path_from_text("看看 D:\\Docs\\report.pdf 这个文件")
-        assert "D:\\Docs" in result
-
-    def test_extract_unix_path(self):
-        result = self.cls._extract_path_from_text("read ./my-folder/data.csv")
-        assert "my-folder/data.csv" in result
-
-    def test_extract_no_path(self):
-        result = self.cls._extract_path_from_text("hello world nothing here")
-        assert result == ""
-
-    # -- execute (folder organize — missing path) --
-    def test_execute_organize_no_path(self):
-        with patch("web.file_operator._default_wechat_files_dir", return_value=""):
-            result = self.cls.execute("自动归纳文件夹")
-        assert result["success"] is False
-        assert "路径" in result["message"]
-
-    # -- execute (organize with nonexistent dir) --
-    def test_execute_organize_nonexistent_dir(self, tmp_path):
-        bogus = str(tmp_path / "no_such_dir")
-        result = self.cls.execute(f'整理文件夹 "{bogus}"')
-        assert result["success"] is False
-
-
-# =====================================================================
-# 10. WebSearcher
+# 9. WebSearcher
 # =====================================================================
 @pytest.mark.unit
 class TestWebSearcher:

@@ -5,6 +5,15 @@
 """
 文件管理服务 - 提供完整的本地文件操作能力
 包含: 读写、编辑、复制/移动/删除、目录管理、元数据查询、智能文件查找
+
+Role: Canonical file CRUD service for agent plugins (file_editor_plugin, etc.)
+Returns Dict[str, Any] — consumed by ToolRegistry → LLM tool responses.
+Backup mechanism: .bak files in workspace/_backups/
+
+Siblings (not duplicates — different interfaces for different consumers):
+  - app/core/file/file_tools.py   → Returns str (LLM-formatted), adds batch ops, tags, favorites
+  - app/core/file_assistant/fs_service.py → Workspace UI operations, returns WorkspaceFsPathResult
+Path safety: shared via app/core/file/path_policy.py
 """
 
 import fnmatch
@@ -16,6 +25,12 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.file.path_policy import (
+    DEFAULT_FILE_PATH_POLICY,
+    WINDOWS_PROTECTED_DIR_NAMES,
+    FilePathPolicy,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -23,16 +38,14 @@ class FileService:
     """本地文件管理服务"""
 
     # 不允许写入/删除的系统保护路径（Windows）
-    _PROTECTED_DIRS = {
-        "windows",
-        "system32",
-        "syswow64",
-        "program files",
-        "program files (x86)",
-        "system volume information",
-    }
+    _PROTECTED_DIRS = set(WINDOWS_PROTECTED_DIR_NAMES)
 
-    def __init__(self, workspace_dir: str = None, backup_enabled: bool = True):
+    def __init__(
+        self,
+        workspace_dir: str = None,
+        backup_enabled: bool = True,
+        path_policy: FilePathPolicy = DEFAULT_FILE_PATH_POLICY,
+    ):
         """
         Args:
             workspace_dir: 工作目录（默认为 workspace/）
@@ -46,6 +59,7 @@ class FileService:
 
         self.workspace_dir = Path(workspace_dir)
         self.backup_enabled = backup_enabled
+        self.path_policy = path_policy
         self.backup_dir = self.workspace_dir / "_backups"
 
         if backup_enabled:
@@ -56,12 +70,7 @@ class FileService:
 
     def is_safe_path(self, file_path: str) -> bool:
         """路径安全检查：拒绝系统保护目录下的写操作目标"""
-        try:
-            parts = Path(file_path).resolve().parts
-            lower_parts = {p.lower() for p in parts}
-            return not (lower_parts & self._PROTECTED_DIRS)
-        except Exception:
-            return False
+        return self.path_policy.is_outside_protected_dirs(file_path)
 
     # ────────────────────────────────────────────────────────────
     # 基础读写
@@ -309,6 +318,51 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"删除失败: {str(e)}"}
 
+    def delete_path(self, path: str, use_trash: bool = False) -> Dict[str, Any]:
+        """删除文件或目录。文件沿用 delete_file 的备份语义；目录递归删除。"""
+        try:
+            if not self.is_safe_path(path):
+                return {"success": False, "error": "拒绝删除系统保护目录中的路径"}
+            target = Path(path)
+            if not target.exists():
+                return {"success": False, "error": f"路径不存在: {path}"}
+            if use_trash:
+                try:
+                    from send2trash import send2trash
+
+                    send2trash(str(target))
+                    return {
+                        "success": True,
+                        "deleted": str(target.resolve()),
+                        "trash": True,
+                        "message": f"已送入回收站: {target.name}",
+                    }
+                except ImportError:
+                    use_trash = False
+                except Exception as exc:
+                    if not target.exists():
+                        return {
+                            "success": True,
+                            "deleted": str(target.resolve()),
+                            "trash": True,
+                            "message": f"已送入回收站: {target.name}",
+                        }
+                    return {"success": False, "error": f"删除失败: {str(exc)}"}
+            if target.is_file():
+                return self.delete_file(str(target))
+            if not target.is_dir():
+                return {"success": False, "error": "路径不是文件或目录"}
+            shutil.rmtree(target)
+            return {
+                "success": True,
+                "deleted": str(target.resolve()),
+                "type": "directory",
+                "trash": use_trash,
+                "message": f"已删除目录: {target.name}",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"删除失败: {str(e)}"}
+
     def copy_file(
         self, source: str, destination: str, overwrite: bool = False
     ) -> Dict[str, Any]:
@@ -341,6 +395,42 @@ class FileService:
         except Exception as e:
             return {"success": False, "error": f"复制失败: {str(e)}"}
 
+    def copy_path(
+        self, source: str, destination: str, overwrite: bool = False
+    ) -> Dict[str, Any]:
+        """复制文件或目录。"""
+        try:
+            if not self.is_safe_path(destination):
+                return {"success": False, "error": "目标路径在系统保护目录中"}
+            src = Path(source)
+            dst = Path(destination)
+            if not src.exists():
+                return {"success": False, "error": f"源路径不存在: {source}"}
+            if src.is_file():
+                return self.copy_file(str(src), str(dst), overwrite=overwrite)
+            if not src.is_dir():
+                return {"success": False, "error": "源路径不是文件或目录"}
+            if dst.exists():
+                if not overwrite:
+                    return {
+                        "success": False,
+                        "error": f"目标路径已存在: {dst}（使用 overwrite=true 强制覆盖）",
+                    }
+                remove_result = self.delete_path(str(dst))
+                if not remove_result.get("success"):
+                    return remove_result
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src, dst)
+            return {
+                "success": True,
+                "source": str(src.resolve()),
+                "destination": str(dst.resolve()),
+                "type": "directory",
+                "message": f"已复制目录: {src.name} → {dst}",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"复制失败: {str(e)}"}
+
     def move_file(
         self, source: str, destination: str, overwrite: bool = False
     ) -> Dict[str, Any]:
@@ -365,6 +455,41 @@ class FileService:
                 "source": str(src),
                 "destination": str(dst.resolve()),
                 "message": f"已移动: {src.name} → {dst}",
+            }
+        except Exception as e:
+            return {"success": False, "error": f"移动失败: {str(e)}"}
+
+    def move_path(
+        self, source: str, destination: str, overwrite: bool = False
+    ) -> Dict[str, Any]:
+        """移动文件或目录。"""
+        try:
+            if not self.is_safe_path(source):
+                return {"success": False, "error": "源路径在系统保护目录中"}
+            if not self.is_safe_path(destination):
+                return {"success": False, "error": "目标路径在系统保护目录中"}
+            src = Path(source)
+            dst = Path(destination)
+            if not src.exists():
+                return {"success": False, "error": f"源路径不存在: {source}"}
+            if src.is_file():
+                return self.move_file(str(src), str(dst), overwrite=overwrite)
+            if not src.is_dir():
+                return {"success": False, "error": "源路径不是文件或目录"}
+            if dst.exists():
+                if not overwrite:
+                    return {"success": False, "error": f"目标路径已存在: {dst}"}
+                remove_result = self.delete_path(str(dst))
+                if not remove_result.get("success"):
+                    return remove_result
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(src), str(dst))
+            return {
+                "success": True,
+                "source": str(src),
+                "destination": str(dst.resolve()),
+                "type": "directory",
+                "message": f"已移动目录: {src.name} → {dst}",
             }
         except Exception as e:
             return {"success": False, "error": f"移动失败: {str(e)}"}

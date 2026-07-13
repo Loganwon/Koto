@@ -12,17 +12,10 @@
 
 import logging
 
+from app.core.agent import llm_provider_helpers
 from app.core.llm.model_mode import is_explicit_model_mode, normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
-from app.core.shared.llm_helpers import get_local_provider as _get_local_provider_shared
-from app.core.shared.llm_helpers import is_ollama_alive as _is_ollama_alive_shared
-from app.core.shared.llm_helpers import (  # noqa: F401
-    is_online_failure as _is_online_failure_shared,
-)
-from app.core.shared.tool_parser import (  # noqa: F401
-    parse_tool_calls,
-    stringify_tool_result,
-)
+from app.core.shared import llm_helpers
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +126,7 @@ def register_socket_events(socketio):
         _use_agent_loop = data.get("_use_agent_loop", True)
         if not _use_agent_loop:
             try:
-                from web.settings import SettingsManager as _SM
+                from app.core.config.user_settings import SettingsManager as _SM
 
                 _use_agent_loop = bool(_SM().get("ai", "use_agent_loop"))
             except Exception:
@@ -143,7 +136,7 @@ def register_socket_events(socketio):
         _use_doc_agent = data.get("_use_doc_agent", False)
         if not _use_doc_agent:
             try:
-                from web.settings import SettingsManager as _SM
+                from app.core.config.user_settings import SettingsManager as _SM
 
                 _use_doc_agent = bool(_SM().get("ai", "use_doc_agent"))
             except Exception:
@@ -274,13 +267,15 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
         if data_context:
             gen_prompt += f"\n\n数据上下文：\n{data_context}"
 
-        code = _call_llm_sync(gen_prompt, use_local_only=use_local_only)
+        code = llm_provider_helpers.call_llm_sync(
+            gen_prompt, use_local_only=use_local_only
+        )
         if code is None:
             emit(
                 "agent_execute_command",
                 {
                     "action": "show_message",
-                    "text": "❌ LLM 代码生成失败，请检查 GEMINI_API_KEY 配置。",
+                    "text": "❌ LLM 代码生成失败，请检查 DEEPSEEK_API_KEY 配置。",
                     "is_error": True,
                 },
                 namespace="/doc",
@@ -341,23 +336,17 @@ def _handle_code_exec(emit, payload, use_local_only: bool = False):
 # ── LLM helpers — 使用 Koto 统一 LLM Provider 体系 ────────────
 
 
-# Delegate to the shared implementation
-_parse_tool_calls = parse_tool_calls
-
-
-_ONLINE_DOC_MODELS = [
-    "gemini-3-flash-preview",  # 首选：当前主聊天模型
-    "gemini-2.5-flash",  # 稳定快速回退
-    "gemini-2.5-flash-lite",  # 轻量兜底
-]
+_ONLINE_DOC_MODELS = ["deepseek-chat"]
 
 
 def _pick_online_model() -> str:
     """Use the current CHAT model when available; otherwise use the preferred fallback."""
     try:
-        from web.runtime_context import get_model_id
+        from app.core.llm.model_selection import get_configured_cloud_model
 
-        m = get_model_id("CHAT")
+        m = get_configured_cloud_model(
+            task_type="CHAT", fallback_model=_ONLINE_DOC_MODELS[0]
+        )
         if m:
             return m
     except Exception:
@@ -378,14 +367,6 @@ def _get_provider():
     )
 
 
-# Delegate to shared implementations – kept as module-level aliases so any
-# existing code inside this file (and monkeypatch-based tests) can still
-# reference the bare names.
-_is_ollama_alive = _is_ollama_alive_shared
-_get_local_provider = _get_local_provider_shared
-_is_online_failure = _is_online_failure_shared
-
-
 def _stream_llm(emit, prompt, text, use_local_only: bool = False):
     """
     Stream LLM output with dual-mode fallback:
@@ -398,7 +379,7 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
 
     # ── Local-only mode: skip cloud entirely ─────────────────────────────────
     if use_local_only:
-        if not _is_ollama_alive():
+        if not llm_helpers.is_ollama_alive():
             emit(
                 "agent_execute_command",
                 {
@@ -415,7 +396,7 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
             )
             return None
         try:
-            local = _get_local_provider()
+            local = llm_helpers.get_local_provider()
             gen = local.generate_content(prompt=full_prompt, stream=True)
             full = []
             for chunk in gen:
@@ -457,7 +438,7 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
                 emit("agent_stream_chunk", {"chunk": part}, namespace="/doc")
         return "".join(full) if full else ""
     except Exception as exc:
-        if not _is_online_failure(exc):
+        if not llm_helpers.is_online_failure(exc):
             logger.error(
                 "[DocAssistant] LLM streaming failed (non-recoverable): %s", exc
             )
@@ -487,7 +468,7 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         logger.warning("[DocAssistant] Online AI unavailable (%s), trying local…", exc)
 
     # ── Attempt 2: Local (Ollama) fallback ───────────────────────────────────
-    if not _is_ollama_alive():
+    if not llm_helpers.is_ollama_alive():
         emit(
             "agent_execute_command",
             {
@@ -505,7 +486,7 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         return None
 
     try:
-        local = _get_local_provider()
+        local = llm_helpers.get_local_provider()
         # Notify user the system is falling back to local model
         emit(
             "agent_execute_command",
@@ -549,51 +530,6 @@ def _stream_llm(emit, prompt, text, use_local_only: bool = False):
         return None
 
 
-def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
-    """Non-streaming LLM call (e.g. code generation). Falls back to Ollama on failure."""
-    online_model = _pick_online_model()
-    # ── Local-only mode ───────────────────────────────────────────────────────
-    if use_local_only:
-        if not _is_ollama_alive():
-            logger.error("[DocAssistant] Local-only sync: Ollama not running")
-            return None
-        try:
-            local = _get_local_provider()
-            result = local.generate_content(prompt=prompt, stream=False)
-            return (
-                result.get("content", "") if isinstance(result, dict) else str(result)
-            )
-        except Exception as exc_lo:
-            logger.error("[DocAssistant] Local-only sync failed: %s", exc_lo)
-            return None
-    # ── Attempt 1: Online ────────────────────────────────────────────────────
-    try:
-        provider = _get_provider()
-        result = provider.generate_content(
-            prompt=prompt,
-            model=online_model,
-            stream=False,
-        )
-        return result.get("content", "")
-    except Exception as exc:
-        if not _is_online_failure(exc):
-            logger.error("[DocAssistant] LLM sync call failed: %s", exc)
-            return None
-        logger.warning("[DocAssistant] Online sync AI failed (%s), trying local…", exc)
-
-    # ── Attempt 2: Local fallback ─────────────────────────────────────────────
-    if not _is_ollama_alive():
-        logger.error("[DocAssistant] No online model and Ollama unavailable")
-        return None
-    try:
-        local = _get_local_provider()
-        result = local.generate_content(prompt=prompt, stream=False)
-        return result.get("content", "") if isinstance(result, dict) else str(result)
-    except Exception as exc2:
-        logger.error("[DocAssistant] Local sync fallback failed: %s", exc2)
-        return None
-
-
 # ══════════════════════════════════════════════════════════════
 # Agent Loop Bridge — maps AgentEvent → WebSocket emit()
 # ══════════════════════════════════════════════════════════════
@@ -601,301 +537,46 @@ def _call_llm_sync(prompt: str, use_local_only: bool = False) -> str | None:
 
 def _run_agent_loop(socketio, sid, data: dict) -> None:
     """
-    Run a doc_ai_request through the unified KotoAgentLoop.
+    Run a doc_ai_request through the DocWebSocketLoopExecutor.
     Maps AgentEvent objects to existing WebSocket events for
     backward-compatible frontend consumption.
     """
-    from app.core.agent.agent_loop import KotoAgentLoop
-    from app.core.agent.hooks import HookRegistry
-    from app.core.agent.lifecycle import AgentRequest, EventType
-    from app.core.agent.pipeline_hooks import register_pipeline_hooks
-    from app.core.agent.session_queue import SessionQueue
+    from app.core.agent.doc_websocket_loop_executor import DocWebSocketLoopExecutor
 
-    # Build AgentRequest from raw WS data
-    request = AgentRequest(
-        prompt=data.get("prompt", ""),
+    request = _build_doc_agent_request(sid, data)
+    for event in DocWebSocketLoopExecutor().iter_events(request, _get_session_queue()):
+        _emit_agent_event(socketio, sid, event)
+
+
+def _build_doc_agent_request(sid: str, data: dict) -> "AgentRequest":
+    """Build an AgentRequest from raw WebSocket data."""
+    from app.core.agent.lifecycle import AgentRequest
+
+    return AgentRequest(
+        prompt=str(data.get("prompt") or ""),
         session_id=sid or "",
-        file_type=data.get("file_type", "unknown"),
-        file_name=data.get("file_name", ""),
-        context=data.get("context", ""),
-        selection=data.get("selection", ""),
-        has_selection=data.get("has_selection", False),
-        history=data.get("history", []),
-        output_mode=data.get("output_mode", "inline"),
+        file_type=str(data.get("file_type") or "unknown"),
+        file_name=str(data.get("file_name") or ""),
+        context=str(data.get("context") or ""),
+        selection=str(data.get("selection") or ""),
+        has_selection=bool(data.get("has_selection", False)),
+        history=data.get("history") if isinstance(data.get("history"), list) else [],
+        output_mode=str(data.get("output_mode") or "inline"),
         model_mode=normalize_model_mode(data.get("model_mode"), default="auto"),
-        language=data.get("language", ""),
-        csv_data=data.get("csv_data", ""),
-        action_type=data.get("_action_type", ""),
-        action_system_prompt=data.get("_action_system_prompt", ""),
-        live_doc=data.get("live_doc", False),
-        live_mode=data.get("live_mode", "replace"),
+        language=str(data.get("language") or ""),
+        csv_data=str(data.get("csv_data") or ""),
+        action_type=str(data.get("_action_type") or ""),
+        action_system_prompt=str(data.get("_action_system_prompt") or ""),
+        live_doc=bool(data.get("live_doc", False)),
+        live_mode=str(data.get("live_mode") or "replace"),
     )
-
-    # Set up hooks
-    registry = HookRegistry()
-    register_pipeline_hooks(registry)
-
-    # Create loop
-    loop = KotoAgentLoop(hook_registry=registry)
-
-    # Per-session serialization
-    _sq = _get_session_queue()
-    with _sq.acquire(request.session_id):
-        for event in loop.run(request):
-            _emit_agent_event(socketio, sid, event)
 
 
 def _emit_agent_event(socketio, sid, event) -> None:
     """Map a single AgentEvent to one or more WebSocket emit calls."""
-    from app.core.agent.lifecycle import EventType
+    from app.core.agent.doc_websocket_event_mapper import emit_agent_event
 
-    etype = event.type
-    d = event.data
-    ns = "/doc"
-
-    if etype == EventType.STREAM_CHUNK:
-        chunk = d.get("chunk", "")
-        socketio.emit("agent_stream_chunk", {"chunk": chunk}, namespace=ns, to=sid)
-        # Parallel live-doc channel: only when caller opted in
-        if d.get("live_doc"):
-            socketio.emit(
-                "doc_live_chunk",
-                {
-                    "chunk": chunk,
-                    "mode": d.get("live_mode", "replace"),
-                    "request_id": d.get("request_id", ""),
-                },
-                namespace=ns,
-                to=sid,
-            )
-
-    elif etype == EventType.LIVE_DOC_COMMIT:
-        socketio.emit(
-            "doc_live_commit",
-            {
-                "full_text": d.get("full_text", ""),
-                "mode": d.get("live_mode", "replace"),
-                "original_selection": d.get("original_selection", ""),
-                "request_id": d.get("request_id", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.TASK_COMPLETE:
-        socketio.emit(
-            "agent_task_complete",
-            {
-                "result": d.get("result", ""),
-                "has_proposals": d.get("has_proposals", False),
-                "error": d.get("error", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.PHASE:
-        socketio.emit(
-            "agent_phase",
-            {
-                "phases": d.get("phases", []),
-                "current": d.get("current", ""),
-                "status": d.get("status", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.THOUGHT:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "thought",
-                "text": d.get("text", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.PLAN:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "plan",
-                "steps": d.get("steps", []),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.STEP_START:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "step_start",
-                "step_id": d.get("step_id", ""),
-                "text": d.get("text", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.STEP_PROGRESS:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "step_progress",
-                "step_id": d.get("step_id", ""),
-                "detail": d.get("detail", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.STEP_DONE:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "step_done",
-                "step_id": d.get("step_id", ""),
-                "text": d.get("text", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.STEP_ERROR:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "step_error",
-                "step_id": d.get("step_id", ""),
-                "error": _safe_user_error_text(
-                    d.get("error", ""),
-                    "处理失败，请稍后重试。",
-                ),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.TOOL_CALL:
-        tool_call = d.get("tool_call", {}) or {}
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "tool_call",
-                "tool_name": tool_call.get("name", ""),
-                "tool_args": tool_call.get("args", {}),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.TOOL_RESULT:
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "tool_result",
-                "tool_name": d.get("tool_name", ""),
-                "result_preview": _safe_user_preview_text(
-                    d.get("result_preview", ""),
-                    "工具已执行。",
-                ),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.STATUS_MESSAGE:
-        text = d.get("text", "")
-        is_error = d.get("is_error", False)
-        if is_error:
-            socketio.emit(
-                "agent_execute_command",
-                {
-                    "action": "show_message",
-                    "text": _safe_user_error_text(text, "AI 调用失败，请稍后重试。"),
-                    "is_error": True,
-                },
-                namespace=ns,
-                to=sid,
-            )
-        else:
-            socketio.emit(
-                "agent_progress",
-                {
-                    "step": "status",
-                    "detail": _safe_user_preview_text(text, "处理中…"),
-                },
-                namespace=ns,
-                to=sid,
-            )
-
-    elif etype == EventType.PROPOSAL:
-        socketio.emit(
-            "agent_proposals",
-            {
-                "proposals": d.get("proposals", []),
-                "summary": d.get("summary", ""),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.DOC_TOOL_CALL:
-        socketio.emit("doc_tool_call", d, namespace=ns, to=sid)
-
-    elif etype == EventType.SKILL_SUGGESTIONS:
-        socketio.emit(
-            "skill_suggestions",
-            {
-                "suggestions": d.get("suggestions", []),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.RAG_INFO:
-        socketio.emit("rag_info", d, namespace=ns, to=sid)
-        socketio.emit(
-            "agent_event",
-            {
-                "type": "rag_info",
-                **d,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype == EventType.CODE_RESULT:
-        socketio.emit("code_result", d, namespace=ns, to=sid)
-
-    elif etype == EventType.ERROR:
-        socketio.emit(
-            "agent_task_complete",
-            {
-                "full_text": "",
-                "error": d.get("text", "未知错误"),
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    elif etype in (EventType.LIFECYCLE_START, EventType.LIFECYCLE_END):
-        # New lifecycle events — emit for frontend observability
-        socketio.emit(
-            "agent_lifecycle",
-            {
-                "type": etype.value,
-                **d,
-            },
-            namespace=ns,
-            to=sid,
-        )
-
-    # Other event types (THOUGHT, PLAN, etc.) are logged but not emitted yet
-    # to maintain backward compatibility with the existing frontend.
+    emit_agent_event(socketio, sid, event)
 
 
 # Singleton session queue

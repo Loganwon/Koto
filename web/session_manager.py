@@ -9,24 +9,49 @@ from __future__ import annotations
 import json
 import logging
 import os
+import tempfile
+import threading
 import time
+from collections.abc import Callable
 from datetime import datetime
-
-from web.runtime_context import get_app_module
 
 logger = logging.getLogger(__name__)
 
 
-def _chat_dir() -> str:
-    return str(getattr(get_app_module(), "CHAT_DIR", "") or "")
+_chat_dir_provider: Callable[[], str] | None = None
+_default_session_manager: "SessionManager | None" = None
 
+
+def configure_session_storage(chat_dir_provider: Callable[[], str]) -> None:
+    """Bind session storage to the application-owned chat directory."""
+    global _chat_dir_provider
+    _chat_dir_provider = chat_dir_provider
+
+
+def _chat_dir() -> str:
+    if _chat_dir_provider is None:
+        raise RuntimeError("Session storage is not configured")
+    return str(_chat_dir_provider() or "")
+
+
+# Per-session file lock to prevent concurrent read-modify-write cycles
+_session_locks: dict[str, threading.Lock] = {}
+_session_locks_lock = threading.Lock()
+
+
+def _get_session_lock(filename: str) -> threading.Lock:
+    """Get or create a per-file lock for thread-safe session I/O."""
+    with _session_locks_lock:
+        if filename not in _session_locks:
+            _session_locks[filename] = threading.Lock()
+        return _session_locks[filename]
 
 
 class SessionManager:
-    def __init__(self):
+    def __init__(self) -> None:
         self.sessions = {}
 
-    def list_sessions(self):
+    def list_sessions(self) -> list[str]:
         """列出所有会话，按修改时间排序（最新在前）"""
         files = [f for f in os.listdir(_chat_dir()) if f.endswith(".json")]
         # 按修改时间排序，最新的在前
@@ -38,7 +63,7 @@ class SessionManager:
         files_with_time.sort(key=lambda x: x[1], reverse=True)
         return [f[0] for f in files_with_time]
 
-    def load(self, filename):
+    def load(self, filename: str) -> list[dict]:
         """加载会话历史 - 返回用于模型上下文的截断版本"""
         path = os.path.join(_chat_dir(), filename)
         if os.path.exists(path):
@@ -52,7 +77,7 @@ class SessionManager:
                 return []
         return []
 
-    def load_full(self, filename):
+    def load_full(self, filename: str) -> list[dict]:
         """加载完整会话历史 - 用于追加保存，不做截断"""
         path = os.path.join(_chat_dir(), filename)
         if os.path.exists(path):
@@ -64,18 +89,31 @@ class SessionManager:
                 return []
         return []
 
-    def _trim_history(self, history, max_turns=20):
+    def _trim_history(self, history: list[dict], max_turns: int = 20) -> list[dict]:
         """保留最多 20 轮对话（约 12000+ tokens），确保上下文足够但不过长"""
-        if len(history) <= max_turns:
-            return history
+        model_history = [
+            turn
+            for turn in history
+            if not (
+                isinstance(turn, dict)
+                and (
+                    turn.get("skip_model_context") is True
+                    or str(turn.get("skip_model_context") or "").strip().lower() in {"1", "true", "yes"}
+                    or turn.get("partial") is True
+                    or str(turn.get("partial") or "").strip().lower() in {"1", "true", "yes"}
+                )
+            )
+        ]
+        if len(model_history) <= max_turns:
+            return model_history
         # 只保留最后 N 轮对话
-        trimmed = history[-max_turns:]
+        trimmed = model_history[-max_turns:]
         logger.debug(
-            f"[HISTORY] Trimmed to last {max_turns} turns (was {len(history)})"
+            f"[HISTORY] Trimmed to last {max_turns} turns (was {len(model_history)})"
         )
         return trimmed
 
-    def create(self, name):
+    def create(self, name: str) -> str:
         safe = "".join([c if c.isalnum() else "_" for c in name])
         filename = f"{safe}.json"
         path = os.path.join(_chat_dir(), filename)
@@ -87,79 +125,106 @@ class SessionManager:
             json.dump([], f)
         return filename
 
-    def save(self, filename, history):
+    def save(self, filename: str, history: list[dict]) -> None:
         path = os.path.join(_chat_dir(), filename)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(history, f, indent=2, ensure_ascii=False)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        tmp_path = ""
+        try:
+            with tempfile.NamedTemporaryFile(
+                "w",
+                encoding="utf-8",
+                dir=os.path.dirname(path),
+                delete=False,
+                suffix=".tmp",
+            ) as f:
+                tmp_path = f.name
+                json.dump(history, f, indent=2, ensure_ascii=False)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp_path, path)
+        finally:
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.remove(tmp_path)
+                except OSError:
+                    pass
 
-    def append_and_save(self, filename, user_msg, model_msg, **extra_fields):
+    def append_and_save(self, filename: str, user_msg: str, model_msg: str, **extra_fields: object) -> list[dict]:
         """追加消息并保存 - 基于磁盘完整历史，避免截断导致数据丢失"""
-        full_history = self.load_full(filename)
-        user_timestamp = extra_fields.pop("user_timestamp", datetime.now().isoformat())
-        model_timestamp = extra_fields.pop(
-            "model_timestamp", datetime.now().isoformat()
-        )
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            user_timestamp = extra_fields.pop("user_timestamp", datetime.now().isoformat())
+            model_timestamp = extra_fields.pop(
+                "model_timestamp", datetime.now().isoformat()
+            )
 
-        full_history.append(
-            {"role": "user", "parts": [user_msg], "timestamp": user_timestamp}
-        )
-        model_entry = {"role": "model", "parts": [model_msg]}
-        if "timestamp" not in extra_fields:
-            model_entry["timestamp"] = model_timestamp
-        model_entry.update(extra_fields)
-        full_history.append(model_entry)
-        self.save(filename, full_history)
-        return full_history
-
-    def append_user_early(self, filename, user_msg):
-        """在请求到达时立即保存用户消息，防止断连导致丢失
-        返回history长度，后续用update_last_model_response更新模型回复"""
-        full_history = self.load_full(filename)
-        now_iso = datetime.now().isoformat()
-        full_history.append({"role": "user", "parts": [user_msg], "timestamp": now_iso})
-        full_history.append(
-            {"role": "model", "parts": ["⏳ 处理中..."], "timestamp": now_iso}
-        )
-        self.save(filename, full_history)
-        return len(full_history)
-
-    def update_last_model_response(self, filename, model_msg, **extra_fields):
-        """更新最后一条模型回复（配合append_user_early使用）"""
-        full_history = self.load_full(filename)
-        if full_history and full_history[-1].get("role") == "model":
+            full_history.append(
+                {"role": "user", "parts": [user_msg], "timestamp": user_timestamp}
+            )
             model_entry = {"role": "model", "parts": [model_msg]}
             if "timestamp" not in extra_fields:
-                model_entry["timestamp"] = datetime.now().isoformat()
-            model_entry.update(extra_fields)
-            full_history[-1] = model_entry
-            self.save(filename, full_history)
-        else:
-            # fallback: 直接追加
-            model_entry = {"role": "model", "parts": [model_msg]}
-            if "timestamp" not in extra_fields:
-                model_entry["timestamp"] = datetime.now().isoformat()
+                model_entry["timestamp"] = model_timestamp
             model_entry.update(extra_fields)
             full_history.append(model_entry)
             self.save(filename, full_history)
+            return full_history
+
+    def append_user_early(self, filename: str, user_msg: str) -> int:
+        """在请求到达时立即保存用户消息，防止断连导致丢失
+        返回history长度，后续用update_last_model_response更新模型回复"""
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            now_iso = datetime.now().isoformat()
+            full_history.append({"role": "user", "parts": [user_msg], "timestamp": now_iso})
+            full_history.append(
+                {"role": "model", "parts": ["⏳ 处理中..."], "timestamp": now_iso}
+            )
+            self.save(filename, full_history)
+            return len(full_history)
+
+    def update_last_model_response(self, filename: str, model_msg: str, **extra_fields: object) -> None:
+        """更新最后一条模型回复（配合append_user_early使用）"""
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            if full_history and full_history[-1].get("role") == "model":
+                model_entry = {"role": "model", "parts": [model_msg]}
+                if "timestamp" not in extra_fields:
+                    model_entry["timestamp"] = datetime.now().isoformat()
+                model_entry.update(extra_fields)
+                full_history[-1] = model_entry
+                self.save(filename, full_history)
+            else:
+                # fallback: 直接追加
+                model_entry = {"role": "model", "parts": [model_msg]}
+                if "timestamp" not in extra_fields:
+                    model_entry["timestamp"] = datetime.now().isoformat()
+                model_entry.update(extra_fields)
+                full_history.append(model_entry)
+                self.save(filename, full_history)
 
     def add_message(
         self, filename, role, content, task="CHAT", model_name="Auto", **extra_fields
     ):
         """追加单条消息（兼容旧调用），默认附带时间戳"""
-        full_history = self.load_full(filename)
-        entry = {
-            "role": role,
-            "parts": [content],
-            "task": task,
-            "model_name": model_name,
-            "timestamp": extra_fields.pop("timestamp", datetime.now().isoformat()),
-        }
-        entry.update(extra_fields)
-        full_history.append(entry)
-        self.save(filename, full_history)
-        return entry
+        lock = _get_session_lock(filename)
+        with lock:
+            full_history = self.load_full(filename)
+            entry = {
+                "role": role,
+                "parts": [content],
+                "task": task,
+                "model_name": model_name,
+                "timestamp": extra_fields.pop("timestamp", datetime.now().isoformat()),
+            }
+            entry.update(extra_fields)
+            full_history.append(entry)
+            self.save(filename, full_history)
+            return entry
 
-    def delete(self, filename):
+    def delete(self, filename: str) -> bool:
         path = os.path.join(_chat_dir(), filename)
         if os.path.exists(path):
             try:
@@ -170,7 +235,7 @@ class SessionManager:
                 return False
         return False
 
-    def rename(self, filename, new_name):
+    def rename(self, filename: str, new_name: str) -> dict[str, object]:
         """将会话文件重命名。new_name 为用户输入的显示名称（非文件名）。"""
         old_path = os.path.join(_chat_dir(), filename)
         if not os.path.exists(old_path):
@@ -195,3 +260,11 @@ class SessionManager:
                 "Failed to rename session %s -> %s: %s", filename, new_filename, e
             )
             return {"success": False, "error": str(e)}
+
+
+def get_session_manager() -> SessionManager:
+    """Return the single application session manager."""
+    global _default_session_manager
+    if _default_session_manager is None:
+        _default_session_manager = SessionManager()
+    return _default_session_manager

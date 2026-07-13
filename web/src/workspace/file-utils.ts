@@ -4,19 +4,27 @@
  * Workspace file utilities and task recovery helpers.
  */
 
+import {
+  fileTaskTerminalUiStatus,
+  isFileTaskAttentionStatus,
+  isFileTaskConfirmationStatus,
+  normalizeFileTaskTerminalStatus,
+} from './file-task-status';
+import { _renderTabs } from './state';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var _DOWNLOAD_SVG: string;
-declare var _EXT_ICON: Record<string, string>;
-declare var _DEFAULT_FILE_SVG: string;
-declare var _FOLDER_PICK_SVG: string;
-declare var _waConversationRuntime: any;
-declare var _waTaskDispatcher: any;
+declare let state: any;
+declare let _DOWNLOAD_SVG: string;
+declare let _EXT_ICON: Record<string, string>;
+declare let _DEFAULT_FILE_SVG: string;
+declare let _FOLDER_PICK_SVG: string;
+declare let _waConversationRuntime: any;
+declare let _waTaskDispatcher: any;
 
 declare function _escHtml(s: any): string;
 declare function showToast(message: string, kind?: string, duration?: number): void;
 declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-declare function _renderTabs(): void;
 declare function _renderMyWorkspace(): void;
 declare function _notifyPyModified(tab: any, modified: boolean): void;
 declare function _initWorkspaceAiRuntimes(): void;
@@ -26,6 +34,7 @@ declare function _conversationTaskTurn(taskId: string): any;
 declare function _findRenderedTaskCard(taskId: string): HTMLElement | null;
 declare function _replaceActiveTaskReconnector(taskId: string, reconnector: any): void;
 declare function _serializeEditorForTab(tab: any, editor: any): any;
+declare function _stableWorkspaceSnapshot(value: any): string;
 declare function _switchToTab(path: string): Promise<void>;
 
 export interface RecoveryTask {
@@ -56,8 +65,63 @@ export async function _safeJson(res: Response): Promise<any> {
 }
 
 // ── Before unload warning ──────────────────────────────────────────
+function _snapshot(value: any): string {
+  const helper = getWorkspaceApi()._stableWorkspaceSnapshot;
+  if (typeof helper === 'function') return helper(value);
+  if (typeof _stableWorkspaceSnapshot === 'function') return _stableWorkspaceSnapshot(value);
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  try { return JSON.stringify(value); } catch (_) { return String(value); }
+}
+
+function _isWritableUnsavedCandidate(tab: any): boolean {
+  if (!tab || !tab.modified) return false;
+  const type = String(tab.fileType || '').toLowerCase();
+  if (!tab.fileId || type === 'pdf' || type === 'image') return false;
+  return true;
+}
+
+function _currentSnapshotForTab(tab: any): string {
+  const isActive = tab && tab.path === state.activeTabPath && !!state.activeEditor;
+  if (isActive) return _snapshot(_serializeEditorForTab(tab, state.activeEditor));
+  if (tab && tab.cache !== undefined && tab.cache !== null) return _snapshot(tab.cache);
+  return _snapshot(tab ? tab.serverData : null);
+}
+
+function _notifyDesktopModified(tab: any, modified: boolean): void {
+  const waNotify = getWorkspaceApi()._notifyPyModified;
+  if (typeof waNotify === 'function') {
+    try { waNotify(tab, modified); return; } catch (e) { console.warn("[Koto]", e) }
+  }
+  if (typeof _notifyPyModified === 'function') {
+    try { _notifyPyModified(tab, modified); } catch (e) { console.warn("[Koto]", e) }
+  }
+}
+
+export function isTabActuallyUnsaved(tab: any): boolean {
+  if (!_isWritableUnsavedCandidate(tab)) return false;
+  const currentSnapshot = _currentSnapshotForTab(tab);
+  const savedSnapshot = tab.savedSnapshot !== undefined && tab.savedSnapshot !== null
+    ? String(tab.savedSnapshot)
+    : _snapshot(tab.serverData);
+  return currentSnapshot !== savedSnapshot;
+}
+
+function _syncFalsePositiveDirtyTabs(): void {
+  let changed = false;
+  state.openTabs.forEach((tab: any) => {
+    if (tab && tab.modified && !isTabActuallyUnsaved(tab)) {
+      tab.modified = false;
+      _notifyDesktopModified(tab, false);
+      changed = true;
+    }
+  });
+  if (changed) _renderTabs();
+}
+
 window.addEventListener('beforeunload', (e) => {
-  if (state.openTabs.some((t: any) => t.modified)) {
+  if (getUnsavedTabs().length > 0) {
     e.preventDefault();
     (e as any).returnValue = '';
   }
@@ -66,16 +130,27 @@ window.addEventListener('beforeunload', (e) => {
 // ── Close-warning API ─────────────────────────────────────────────
 
 export function getUnsavedTabs(): UnsavedTab[] {
-  return state.openTabs.filter((t: any) => t.modified).map((t: any) => ({ path: t.path, name: t.name }));
+  _syncFalsePositiveDirtyTabs();
+  return state.openTabs.filter(isTabActuallyUnsaved).map((t: any) => ({ path: t.path, name: t.name }));
 }
 
 export function showCloseWarning(unsavedTabs: UnsavedTab[]): Promise<string> {
   return new Promise((resolve) => {
+    const actualUnsavedTabs = getUnsavedTabs();
+    if (actualUnsavedTabs.length === 0) {
+      resolve('discard');
+      return;
+    }
     const overlay = $('wa-close-warn-overlay');
     const dialogEl = $('wa-close-warn-dialog');
     const listEl = $('wa-close-warn-list');
     const countEl = $('wa-close-warn-count');
-    if (!overlay || !dialogEl || !listEl) { resolve('discard'); return; }
+    if (!overlay || !dialogEl || !listEl) {
+      console.warn('[CloseWarn] Missing close-warning dialog DOM; cancelling close to protect unsaved edits.');
+      showToast('关闭确认窗口未准备好，已取消关闭以保护未保存修改。', 'warning');
+      resolve('cancel');
+      return;
+    }
     if (overlay.parentElement !== document.body) {
       document.body.appendChild(overlay);
     }
@@ -85,16 +160,40 @@ export function showCloseWarning(unsavedTabs: UnsavedTab[]): Promise<string> {
         if (event.key === 'Escape') {
           event.preventDefault();
           _closeWarnCancel();
+          return;
+        }
+        if (event.key === 'Tab') {
+          _trapCloseWarnFocus(event);
         }
       });
     }
-    if (countEl) countEl.textContent = `${unsavedTabs.length} \u4e2a\u672a\u4fdd\u5b58\u6587\u4ef6`;
-    listEl.innerHTML = unsavedTabs.map(_renderCloseWarnItem).join('');
+    if (countEl) countEl.textContent = `${actualUnsavedTabs.length} \u4e2a\u672a\u4fdd\u5b58\u6587\u4ef6`;
+    listEl.innerHTML = actualUnsavedTabs.map(_renderCloseWarnItem).join('');
     (overlay as any)._lastFocus = document.activeElement || null;
     overlay.style.display = 'flex';
+    overlay.setAttribute('aria-hidden', 'false');
     (overlay as any)._resolve = resolve;
     requestAnimationFrame(() => dialogEl.focus());
   });
+}
+
+function _trapCloseWarnFocus(event: KeyboardEvent): void {
+  const dialogEl = $('wa-close-warn-dialog') as HTMLElement | null;
+  if (!dialogEl) return;
+  const focusable = Array.from(
+    dialogEl.querySelectorAll<HTMLElement>('button:not([disabled]), [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+  ).filter((el) => !el.hasAttribute('disabled') && el.offsetParent !== null);
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const active = document.activeElement as HTMLElement | null;
+  if (event.shiftKey && active === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && active === last) {
+    event.preventDefault();
+    first.focus();
+  }
 }
 
 function _renderCloseWarnItem(tab: UnsavedTab): string {
@@ -114,13 +213,16 @@ function _renderCloseWarnItem(tab: UnsavedTab): string {
 
 function _settleCloseWarn(decision: string): void {
   const overlay = $('wa-close-warn-overlay') as any;
-  if (overlay) overlay.style.display = 'none';
+  if (overlay) {
+    overlay.style.display = 'none';
+    overlay.setAttribute('aria-hidden', 'true');
+  }
   const resolver = overlay ? overlay._resolve : null;
   if (overlay) overlay._resolve = null;
   const lastFocus = overlay ? overlay._lastFocus : null;
   if (overlay) overlay._lastFocus = null;
   if (lastFocus && typeof lastFocus.focus === 'function') {
-    try { lastFocus.focus(); } catch (_) {}
+    try { lastFocus.focus(); } catch (_) { /* allowed to fail */ }
   }
   if (resolver) resolver(decision);
 }
@@ -129,6 +231,7 @@ function _setCloseWarnBusy(busy: boolean): void {
   const overlay = $('wa-close-warn-overlay') as HTMLElement;
   if (!overlay) return;
   overlay.dataset.busy = busy ? 'true' : 'false';
+  overlay.setAttribute('aria-busy', busy ? 'true' : 'false');
   overlay.querySelectorAll('button').forEach((button: HTMLButtonElement) => {
     button.disabled = !!busy;
   });
@@ -144,7 +247,7 @@ export function _closeWarnDiscard(): void { _settleCloseWarn('discard'); }
 
 export async function _closeWarnSaveAll(): Promise<void> {
   _setCloseWarnBusy(true);
-  const modifiedTabs = state.openTabs.filter((t: any) => t.modified);
+  const modifiedTabs = state.openTabs.filter(isTabActuallyUnsaved);
   try {
     for (const tab of modifiedTabs) {
       await _switchToTab(tab.path);
@@ -164,7 +267,9 @@ export async function _closeWarnSaveAll(): Promise<void> {
         const json = await _safeJson(res);
         if (!res.ok) throw new Error(json.error || `${tab.name || tab.path || '\u6587\u4ef6'} \u4fdd\u5b58\u5931\u8d25`);
         tab.modified = false;
-        _notifyPyModified(tab, false);
+        tab.savedSnapshot = _snapshot(data);
+        if (tab.fileType !== 'docx') tab.cache = data;
+        _notifyDesktopModified(tab, false);
       }
     }
     _renderTabs();
@@ -209,14 +314,15 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
   _initWorkspaceAiRuntimes();
   if (!_waConversationRuntime || typeof _waConversationRuntime.beginAssistantTaskTurn !== 'function') return [];
   if (typeof _waConversationRuntime.syncAssistantTaskTurn !== 'function') return [];
-  if (!(window as any).WA || typeof (window as any).WA.resumePersistedFileTask !== 'function') return [];
+  const resumePersistedFileTask = getWorkspaceApi().resumePersistedFileTask;
+  if (typeof resumePersistedFileTask !== 'function') return [];
 
   const msgs = $('wa-ai-messages');
   if (!msgs) return [];
 
   const taskGroups = await Promise.all([
-    _listRecoverableFileTasks('running').catch(() => []),
-    _listRecoverableFileTasks('waiting').catch(() => []),
+    _listRecoverableFileTasks('running').catch((): any[] => []),
+    _listRecoverableFileTasks('waiting').catch((): any[] => []),
   ]);
   const candidates: any[] = [];
   const seen = new Set<string>();
@@ -228,10 +334,10 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
   });
 
   const activeIds = new Set(candidates.map((task: any) => String(task && task.task_id || '').trim()).filter(Boolean));
-  Array.from(state._activeTaskReconnectors.entries()).forEach(([taskId, reconnector]: [string, any]) => {
+  (Array.from(state._activeTaskReconnectors.entries()) as [string, any][]).forEach(([taskId, reconnector]) => {
     if (activeIds.has(taskId)) return;
     if (reconnector && typeof reconnector.close === 'function') {
-      try { reconnector.close(); } catch (_) {}
+      try { reconnector.close(); } catch (e) { console.warn("[Koto]", e) }
     }
     state._activeTaskReconnectors.delete(taskId);
   });
@@ -243,11 +349,15 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
     if (!force && state._activeTaskReconnectors.has(taskId)) continue;
 
     const metadata = _parseTaskMetadata(task.metadata);
+    const taskStatus = normalizeFileTaskTerminalStatus(task.status || '');
+    const terminalStatus = normalizeFileTaskTerminalStatus(metadata.task_terminal_status || metadata.terminal_status || metadata.status || taskStatus);
+    const awaitingConfirmation = isFileTaskConfirmationStatus(terminalStatus);
+    const needsAttention = isFileTaskAttentionStatus(terminalStatus);
     const existingTurn = _conversationTaskTurn(taskId);
     const turn = existingTurn || _waConversationRuntime.beginAssistantTaskTurn({
-      content: task.status === 'waiting' ? '\u5df2\u6062\u590d\u7b49\u5f85\u786e\u8ba4\u7684\u540e\u53f0\u4efb\u52a1\u3002' : '\u5df2\u6062\u590d\u540e\u53f0\u4efb\u52a1\u3002',
+      content: awaitingConfirmation ? '\u5df2\u6062\u590d\u7b49\u5f85\u786e\u8ba4\u7684\u540e\u53f0\u4efb\u52a1\u3002' : (needsAttention || taskStatus === 'waiting' ? '\u5df2\u6062\u590d\u5f85\u5904\u7406\u7684\u540e\u53f0\u4efb\u52a1\u3002' : '\u5df2\u6062\u590d\u540e\u53f0\u4efb\u52a1\u3002'),
       task_kind: 'file_task',
-      status: task.status === 'waiting' ? 'pending' : 'streaming',
+      status: needsAttention || awaitingConfirmation || taskStatus === 'waiting' ? 'pending' : 'streaming',
       skip_model_context: true,
       render: false,
       task_id: taskId,
@@ -257,19 +367,21 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
     if (!turnId) continue;
 
     const renderedCard = _findRenderedTaskCard(taskId);
-    const reconnector = (window as any).WA.resumePersistedFileTask({
+    const reconnector = resumePersistedFileTask({
       taskId,
       runId: String(metadata.run_id || '').trim(),
-      initialStatus: String(task.status || '').trim().toLowerCase(),
+      initialStatus: terminalStatus || taskStatus,
       msgs,
       loadingEl: renderedCard,
       replay: true,
       onTaskCardSnapshot: (card: any) => {
-        const terminalStatus = String(card && card.dataset && card.dataset.taskTerminalStatus || '').trim().toLowerCase();
+        const terminalStatus = normalizeFileTaskTerminalStatus(card && card.dataset && card.dataset.taskTerminalStatus || '');
+        const completedTask = String(card && card.dataset && card.dataset.taskCompleted || '').trim().toLowerCase() === 'true';
+        const uiStatus = fileTaskTerminalUiStatus(terminalStatus, completedTask);
         _waConversationRuntime.syncAssistantTaskTurn(turnId, {
           loadingEl: card,
           task_kind: 'file_task',
-          status: terminalStatus === 'awaiting_confirmation' ? 'pending' : 'streaming',
+          status: uiStatus === 'done' ? 'done' : (uiStatus === 'error' ? 'failed' : (uiStatus === 'cancelled' ? 'cancelled' : 'pending')),
           skip_model_context: true,
           task_id: taskId,
           run_id: String(card && card.dataset && card.dataset.taskRunId || metadata.run_id || '').trim(),
@@ -283,7 +395,7 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
         state._activeTaskReconnectors.delete(taskId);
       }
       _waConversationRuntime.syncAssistantTaskTurn(turnId, {
-        content: String(result && result.summary || '\u6587\u4ef6\u4efb\u52a1\u6d41\u5df2\u5b8c\u6210\u3002').trim() || '\u6587\u4ef6\u4efb\u52a1\u6d41\u5df2\u5b8c\u6210\u3002',
+        content: String(result && result.summary || '\u6587\u4ef6\u4efb\u52a1\u6d41\u5df2\u7ed3\u675f\u3002').trim() || '\u6587\u4ef6\u4efb\u52a1\u6d41\u5df2\u7ed3\u675f\u3002',
         loadingEl: result && result.loadingEl ? result.loadingEl : _findRenderedTaskCard(taskId),
         task_kind: 'file_task',
         status: String(result && result.status || 'done').trim() || 'done',
@@ -452,11 +564,13 @@ export function _handleCodeResult(result: any): void {
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.getUnsavedTabs = getUnsavedTabs;
-  (window as any).WA.showCloseWarning = showCloseWarning;
-  (window as any).WA._closeWarnCancel = _closeWarnCancel;
-  (window as any).WA._closeWarnDiscard = _closeWarnDiscard;
-  (window as any).WA._closeWarnSaveAll = _closeWarnSaveAll;
-  (window as any).WA.makeChartImageWrap = _makeWAChartImageWrap;
+  publishWorkspaceApi({
+    getUnsavedTabs,
+    isTabActuallyUnsaved,
+    showCloseWarning,
+    _closeWarnCancel,
+    _closeWarnDiscard,
+    _closeWarnSaveAll,
+    makeChartImageWrap: _makeWAChartImageWrap,
+  });
 }

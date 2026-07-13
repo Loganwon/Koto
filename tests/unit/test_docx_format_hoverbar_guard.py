@@ -215,7 +215,7 @@ def test_docx_workspace_shell_uses_shared_tiptap_mount_and_no_slate_selection_fa
     assert (
         "async function _mountDocx(tab: TabInfo, data: any): Promise<void>" in shell_js
     )
-    assert "new (window as any).KotoDocxEditorLib.KotoTipTapEditor();" in shell_js
+    assert "new (window as any).KotoDocxEditorLib.KotoTipTapEditor()" in shell_js
     assert "await _mountDocx(tab, data);" in shell_js
     assert "state.activeEditor.editor.selection" not in shell_js
     assert "Legacy Slate fallback (unused — kept for safety)" not in shell_js
@@ -321,10 +321,10 @@ def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
         "const nextValue = cmd === 'setFontFamily' ? _resolveDocxFontFamily(value)"
         in shell_js
     )
-    assert (
-        "declare function _getDocxBlockTextStyleValue(ed: any, prop: string): string;"
-        in shell_js
-    )
+    assert "function _ensureDocxHoverBar(): HTMLElement | null" in shell_js
+    assert "function _isReviewCommentModeEnabled(): boolean" in shell_js
+    assert "declare function _ensureDocxHoverBar" not in shell_js
+    assert "declare function _isReviewCommentModeEnabled" not in shell_js
     assert "_getDocxFontDisplayName(fontNameValue)" in shell_js
     assert '<option value="SimSun">' in index_html
     assert '<option value="STKaiti">' in index_html
@@ -333,6 +333,17 @@ def test_docx_font_family_toolbars_normalize_aliases_and_heading_styles():
 def test_docx_hoverbar_reuses_ribbon_for_header_footer_overlay():
     js = _workspace_runtime_sources()
     assert "_safeGetDocxHdrFtrSelectionInfo" in js
+
+
+def test_docx_review_mode_keeps_native_selection_for_comment_launcher():
+    js = _workspace_runtime_sources()
+    show_start = js.index("export function _showDocxHoverBar(): void")
+    show_end = js.index("export function _kotoDocxSelectionChanged", show_start)
+    show_fn = js[show_start:show_end]
+
+    assert show_fn.index("if (_isReviewCommentModeEnabled())") < show_fn.index(
+        "_getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false })"
+    )
     assert "_syncDocxHoverBarFromRibbon" in js
     assert "_dispatchDocxRibbonClick" in js
     assert "(window as any)._ttPickColor" in js
@@ -357,9 +368,8 @@ def test_docx_ai_selection_prefers_editor_table_payloads_over_native_last_cell_t
     assert "editorHost.getCellSelectionInfo" in js
     assert "editorHost.getSelectionTextForAI" in js
     assert "aiText: `[" in js and "${wholeTableText}\\n`," in js
-    assert (
-        "? { text: docxSelection.aiText, previewText: docxSelection.previewText }" in js
-    )
+    assert "Object.assign({}, docxSelection" in js
+    assert "selectionKind: docxSelection.kind" in js
     assert "_updateContextBar({ table: docxSelection.previewText });" in js
 
 
@@ -629,3 +639,19 @@ def test_docx_tables_paginate_with_row_level_soft_break_widgets():
     assert "_collectTableRowPaginationGroups" in ext_js
     assert "TableMap.get(node).width" in ext_js
     assert "tableCols" in ext_js
+
+
+def test_docx_pagination_remeasures_after_media_load_and_visual_overflow():
+    ext_js = (_repo_root() / "web" / "tiptap-editor" / "docx-extensions.js").read_text(
+        encoding="utf-8"
+    )
+    scheduler_js = (
+        _repo_root() / "web" / "tiptap-editor" / "docx-pagination-scheduler.js"
+    ).read_text(encoding="utf-8")
+
+    assert "function _measureDocxBlockContentHeightPx(element)" in ext_js
+    assert "_measureDocxBlockOuterHeightPx(domEl)" in ext_js
+    assert "'img,svg,canvas,video,.koto-img-wrapper'" in scheduler_js
+    assert "new ResizeObserver" in scheduler_js
+    assert "node.addEventListener('load', onSettled" in scheduler_js
+    assert "scheduleAfterMediaSettles" in scheduler_js

@@ -139,14 +139,14 @@ class TestDocumentFeedback:
         obj = self._make()
         obj._model_cache = []
         name, models = obj._select_best_model("gemini-2.5-flash")
-        assert name == "gemini-2.5-flash"
+        assert name == "deepseek-chat"
         assert models == []
 
     def test_select_best_model_interactions_only_replaced(self):
         obj = self._make()
-        obj._model_cache = [{"name": "gemini-2.5-flash", "display_name": "Flash"}]
-        name, _ = obj._select_best_model("gemini-3-flash-preview")
-        assert name == "gemini-2.5-flash"
+        obj._model_cache = [{"name": "deepseek-chat", "display_name": "DeepSeek"}]
+        name, _ = obj._select_best_model("deep-research-pro-preview-12-2025")
+        assert name == "deepseek-chat"
 
     def test_select_best_model_preferred_available(self):
         obj = self._make()

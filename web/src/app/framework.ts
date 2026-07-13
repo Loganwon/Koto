@@ -89,7 +89,7 @@ export class AppFramework {
     if (!config.hidden) {
       this.createTaskbarIcon(id, config);
     }
-    console.log(`[App Framework] Registered app: ${config.name}`);
+    // App registered: ${config.name}
   }
 
   createTaskbarIcon(appId: string, config: AppFrameworkConfig): void {
@@ -873,5 +873,5 @@ document.addEventListener('DOMContentLoaded', () => {
     (window as any).appFramework.openApp('schedule');
   };
 
-  console.log('[App Framework] 应用框架已初始化');
+  // App Framework initialized
 });

@@ -4,6 +4,8 @@
  */
 
 import { _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
+import { logger } from '../shared/logger';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 // ── Interfaces ──
 
@@ -14,12 +16,13 @@ export interface TabInfo {
   fileType: string;
   fileId?: string | null;
   filePath?: string | null;
-  serverData: any;
-  cache?: any;
+  serverData: ServerFileData;
+  cache?: Record<string, unknown>;
+  savedSnapshot?: string | null;
   modified?: boolean;
-  capabilityProfile?: any;
-  reviewState?: any;
-  fsHandle?: any;
+  capabilityProfile?: CapabilityProfile | null;
+  reviewState?: Record<string, unknown>;
+  fsHandle?: FileSystemHandle;
 }
 
 export interface CapabilityProfile {
@@ -46,9 +49,22 @@ export interface FsClipboardEntry {
   mode: 'copy' | 'cut';
 }
 
+
+export interface BrowserNode {
+  path: string;
+  name: string;
+  type: 'folder' | 'file' | 'drive' | 'quick';
+  ext?: string;
+  category?: string;
+  mtime?: number;
+  size_bytes?: number;
+  supported?: boolean;
+  children?: BrowserNode[];
+}
+
 export interface BrowserRoots {
-  drives: any[];
-  quick_access: any[];
+  drives: BrowserNode[];
+  quick_access: BrowserNode[];
 }
 
 export interface RecentFileEntry {
@@ -66,6 +82,62 @@ export interface MyWorkspaceFile {
   addedAt: number;
 }
 
+// ?? Domain type interfaces ??
+
+export interface ServerFileData {
+  file_id?: string;
+  file_name?: string;
+  file_type?: string;
+  file_path?: string;
+  content?: unknown;
+  text?: string;
+  html?: string;
+  pages?: unknown[];
+  preview?: string;
+  error?: string;
+  capability?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  provider: string;
+  [key: string]: unknown;
+}
+
+export interface AiFileContext {
+  path: string;
+  name: string;
+  ext?: string;
+  content?: string | null;
+  loading?: boolean;
+  error?: string;
+  warning?: string;
+  requestId?: string;
+  originalChars?: number;
+  type?: string;
+  [key: string]: unknown;
+}
+
+export interface TaskPayload {
+  prompt?: string;
+  files?: string[];
+  task_type?: string;
+  model?: string;
+  feedback?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+export interface EditorInstance {
+  destroy?: () => void;
+  getContent?: () => unknown;
+  setContent?: (data: unknown) => void;
+  render: (...args: unknown[]) => unknown;
+  editor?: unknown;
+  [key: string]: unknown;
+}
+
 export interface WorkspaceState {
   fileId: string | null;
   fileType: string | null;
@@ -73,36 +145,35 @@ export interface WorkspaceState {
   filePath: string | null;
   wsSourcePath: string | null;
   capabilityProfile: CapabilityProfile | null;
-  activeEditor: any;
+  activeEditor: EditorInstance | null;
   socket: WebSocket | null;
   isLoading: boolean;
   conversation: Array<{ role: string; content: string }>;
   sortBy: string;
   sectionOpen: Record<string, boolean>;
   searchQuery: string;
-  _allFiles: any[];
-  pinnedSelection: any;
-  lastPinnedSel: any;
+  _allFiles: Record<string, unknown>[];
+  pinnedSelection: Record<string, unknown> | null;
+  lastPinnedSel: Record<string, unknown> | null;
   selectMode: boolean;
   selectedFiles: Set<string>;
   openTabs: TabInfo[];
   activeTabPath: string | null;
-  aiOutputMode: string;
   lockedModel: string;
   _reviewCenterOpen: boolean;
   _reviewMode: string;
   _editingReviewCommentId: string;
   _editingReviewProposalId: string;
-  _reviewSelectionSnapshot: any;
-  _reviewToolbarSelectionSnapshot: any;
+  _reviewSelectionSnapshot: Record<string, unknown> | null;
+  _reviewToolbarSelectionSnapshot: Record<string, unknown> | null;
   _reviewToolbarSelectionCapturedAt: number;
   _reviewNavQuery: string;
   _reviewLauncherVisible: boolean;
-  _activeProposalBatch: any[];
+  _activeProposalBatch: Record<string, unknown>[];
   _streamAbortCtrl: AbortController | null;
-  _pendingTaskPayload: any;
+  _pendingTaskPayload: TaskPayload | null;
   _pendingTaskPayloadUsesFeedback: boolean;
-  _pendingTaskFollowupContext: any;
+  _pendingTaskFollowupContext: Record<string, unknown> | null;
   _pendingTaskFollowupPrompt: string | null;
   _recentOpen: boolean;
   _workspacePath: string;
@@ -116,21 +187,20 @@ export interface WorkspaceState {
   _searchActive: boolean;
   _browserSort: string;
   _livePollTimer: ReturnType<typeof setInterval> | null;
-  _availableModels: any[];
-  _modelMap: Record<string, any>;
+  _availableModels: ModelInfo[];
+  _modelMap: Record<string, unknown>;
   _modelsReady: boolean;
   _cloudProvider: string;
   _modelCatalogPromise: Promise<any> | null;
-  _activeRoute: any;
+  _activeRoute: Record<string, unknown> | null;
   _activeTaskReconnectors: Map<string, any>;
   _localRuntimeModel: string;
-  _hasExplicitModelChoice: boolean;
   _modelChoicePendingMode?: string;
   _modelChoiceUpdatedAt?: number;
   useAgentMode: boolean;
-  _aiFileContext: any[];
+  _aiFileContext: AiFileContext[];
   _aiTargetFileIdx: number;
-  _tempWorkspace: any[];
+  _tempWorkspace: Record<string, unknown>[];
   _reviewEntryLookup?: Map<string, any>;
   _activeProposals?: any[];
 }
@@ -172,8 +242,9 @@ export const state: WorkspaceState = {
   selectedFiles: new Set(),
   openTabs: [..._WA_EMPTY_WORKSPACE_LAYOUT.open_tabs],
   activeTabPath: _WA_EMPTY_WORKSPACE_LAYOUT.active_tab_path,
-  aiOutputMode: 'inline',
-  lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek'),
+  // Runtime settings are server-authoritative.  The old localStorage value
+  // could outlive a settings change and briefly route chat to the wrong mode.
+  lockedModel: 'deepseek',
   _reviewCenterOpen: localStorage.getItem('wa_review_center_open') !== '0',
   _reviewMode: ['all', 'comments', 'proposals'].includes(localStorage.getItem('wa_review_mode') || '')
     ? localStorage.getItem('wa_review_mode') || 'all'
@@ -210,9 +281,6 @@ export const state: WorkspaceState = {
   _activeRoute: null,
   _activeTaskReconnectors: new Map(),
   _localRuntimeModel: '',
-  _hasExplicitModelChoice:
-    localStorage.getItem('wa_model_choice_explicit') === '1' ||
-    _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', '') === 'local',
   useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',
   _aiFileContext: [],
   _aiTargetFileIdx: -1,
@@ -380,9 +448,9 @@ export function _syncCurrentFileChrome(): void {
 export function _destroyActiveEditorForClosedFile(): void {
   if (state.activeEditor) {
     try {
-      state.activeEditor.destroy();
+      state.activeEditor.destroy?.();
     } catch (error) {
-      console.error('Editor destroy failed:', error);
+      logger.error('state', 'Editor destroy failed', error);
     }
   }
   state.activeEditor = null;
@@ -395,6 +463,7 @@ function _deactivateWorkspaceEditors(): void {
     'wa-docx-editor',
     'wa-xlsx-editor',
     'wa-pptx-editor',
+    'wa-pdf-editor',
     'wa-pdf-viewer',
     'wa-image-viewer',
     'wa-text-editor',
@@ -490,7 +559,13 @@ export async function _switchToTab(path: string): Promise<void> {
 // ── Editor Layout Helpers ──
 
 function _editorLayoutContainerId(fileType: string): string | null {
-  return fileType === 'xlsx' ? 'wa-xlsx-editor' : fileType === 'pptx' ? 'wa-pptx-editor' : null;
+  return fileType === 'xlsx'
+    ? 'wa-xlsx-editor'
+    : fileType === 'pptx'
+      ? 'wa-pptx-editor'
+      : fileType === 'pdf'
+        ? 'wa-pdf-editor'
+        : null;
 }
 
 const _WORKSPACE_SURFACE_IDS = [
@@ -498,6 +573,7 @@ const _WORKSPACE_SURFACE_IDS = [
   'wa-docx-editor',
   'wa-xlsx-editor',
   'wa-pptx-editor',
+  'wa-pdf-editor',
   'wa-pdf-viewer',
   'wa-image-viewer',
   'wa-text-editor',
@@ -524,6 +600,9 @@ export function _primeEditorLayout(fileType: string): void {
   if (!containerId) return;
   const el = document.getElementById(containerId);
   if (el) el.classList.add('active');
+  if (fileType === 'pdf') {
+    document.getElementById('wa-pdf-viewer')?.classList.add('active');
+  }
   _syncWorkspaceSurfaces();
 }
 
@@ -538,7 +617,7 @@ export function _waitForEditorLayout(fileType: string, timeoutMs: number = 800):
   return new Promise((resolve) => {
     const deadline = Date.now() + timeoutMs;
     function check() {
-      const el = document.getElementById(containerId);
+      const el = document.getElementById(containerId!);
       if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
         resolve();
         return;
@@ -676,11 +755,11 @@ function _normalizeRecentPath(path: string): string {
 }
 
 function _recentFileDragAttrs(): string {
-  return 'draggable="true" ondragstart="WA._browserFileDragStart(event,this)" ondragend="WA._browserFileDragEnd(event,this)"';
+  return 'draggable="true" data-wa-file-draggable="true"';
 }
 
 function _recentFileOpenHitDragAttrs(): string {
-  return 'draggable="true" ondragstart="WA._browserFileDragStart(event,this.closest(\'.wa-file-item\'))" ondragend="WA._browserFileDragEnd(event,this.closest(\'.wa-file-item\'))"';
+  return 'draggable="false" data-wa-file-action="open"';
 }
 
 function _loadLocalRecentFiles(): RecentFileEntry[] {
@@ -762,7 +841,7 @@ export async function loadRecentFiles(): Promise<void> {
 
   list.innerHTML = userRecent.slice(0, 20).map((file) => {
     const name = file.name || (file.path || '').split(/[\\/]/).pop() || '';
-    const ext = (name.includes('.') ? name.split('.').pop() : '').toLowerCase();
+    const ext = (name.includes('.') ? (name.split('.').pop() || '') : '').toLowerCase();
     const icon = _fileIcon(ext, file.category || '');
     const date = file.ts ? new Date(file.ts).toLocaleDateString('zh-CN') : '';
     const size = file.size_bytes ? ' · ' + _formatRecentSize(file.size_bytes) : '';
@@ -770,10 +849,8 @@ export async function loadRecentFiles(): Promise<void> {
     return `<div class="wa-file-item file wa-recent-file" title="${_escHtml(file.path || '')}"`
       + ` data-path="${_escHtml(file.path || '')}" data-supported="${supported}"`
       + ` ${_recentFileDragAttrs()}`
-      + ` onmousedown="WA._browserFileRowMouseDown(event,this)"`
-      + ` onclick="WA.openRecentFile(${JSON.stringify(file.path || '')})"`
-      + ` oncontextmenu="event.preventDefault();event.stopPropagation();WA._showBrowserCtx(event,this)">`
-      + `<button type="button" class="wa-file-open-hit" ${_recentFileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}" onclick="event.preventDefault();event.stopPropagation();WA.openRecentFile(this.closest('.wa-file-item').dataset.path)"></button>`
+      + `>`
+      + `<button type="button" class="wa-file-open-hit" ${_recentFileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}"></button>`
       + `<span class="wa-recent-indent"></span>${icon}`
       + `<span class="wa-file-label">${_escHtml(name)}</span>`
       + `<span class="wa-recent-date">${date}${size}</span>`
@@ -834,18 +911,17 @@ export function _renderMyWorkspace(): void {
       const nameEsc = _escHtml(file.name);
       const icon = _fileIcon(file.ext || file.name.split('.').pop() || '');
       const active = state.activeTabPath === file.path ? ' active' : '';
-      const pathJs = file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return (
         `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"` +
-        ` onclick="WA.openBrowserFile('${pathJs}', true)" draggable="true">` +
+        ` data-wa-workspace-row-action="open" draggable="true">` +
         `${icon}<span class="wa-file-label">${nameEsc}</span>` +
-        `<button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromMyWorkspace('${pathJs}')" title="从工作区移除">×</button>` +
+        `<button type="button" class="wa-myws-remove" data-wa-workspace-row-action="remove-my" title="从工作区移除">×</button>` +
         `</div>`
       );
     })
     .join('');
   list.querySelectorAll('.wa-myws-item[draggable]').forEach((element) => {
-    element.addEventListener('dragstart', (event: DragEvent) => {
+    (element as HTMLElement).addEventListener('dragstart', (event: DragEvent) => {
       const el = element as HTMLElement;
       const path = el.dataset.path;
       if (event.dataTransfer) {
@@ -856,7 +932,7 @@ export function _renderMyWorkspace(): void {
       el.classList.add('dragging');
       document.body.classList.add('wa-file-dragging');
     });
-    element.addEventListener('dragend', () => {
+    (element as HTMLElement).addEventListener('dragend', () => {
       element.classList.remove('dragging');
       document.body.classList.remove('wa-file-dragging');
     });
@@ -902,18 +978,17 @@ export function _renderTempWorkspace(): void {
       const nameEsc = _escHtml(file.name);
       const icon = _fileIcon(file.ext || file.name.split('.').pop() || '');
       const active = state.activeTabPath === file.path ? ' active' : '';
-      const pathJs = file.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       return (
         `<div class="wa-myws-item${active}" data-path="${pathEsc}" title="${pathEsc}"` +
-        ` onclick="WA.openBrowserFile('${pathJs}', true)" draggable="true">` +
+        ` data-wa-workspace-row-action="open" draggable="true">` +
         `${icon}<span class="wa-file-label">${nameEsc}</span>` +
-        `<button class="wa-myws-remove" onclick="event.stopPropagation();WA.removeFromTempWorkspace('${pathJs}')" title="从临时工作区移除">×</button>` +
+        `<button type="button" class="wa-myws-remove" data-wa-workspace-row-action="remove-temp" title="从临时工作区移除">×</button>` +
         `</div>`
       );
     })
     .join('');
   list.querySelectorAll('.wa-myws-item[draggable]').forEach((element) => {
-    element.addEventListener('dragstart', (event: DragEvent) => {
+    (element as HTMLElement).addEventListener('dragstart', (event: DragEvent) => {
       const el = element as HTMLElement;
       const path = el.dataset.path;
       if (event.dataTransfer) {
@@ -924,12 +999,40 @@ export function _renderTempWorkspace(): void {
       el.classList.add('dragging');
       document.body.classList.add('wa-file-dragging');
     });
-    element.addEventListener('dragend', () => {
+    (element as HTMLElement).addEventListener('dragend', () => {
       element.classList.remove('dragging');
       document.body.classList.remove('wa-file-dragging');
     });
   });
 }
+
+let _workspaceRowActionDelegationInstalled = false;
+
+function _installWorkspaceRowActionDelegation(): void {
+  if (_workspaceRowActionDelegationInstalled) return;
+  _workspaceRowActionDelegationInstalled = true;
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target && target.closest ? target.closest<HTMLElement>('[data-wa-workspace-row-action]') : null;
+    if (!control) return;
+    const row = control.closest<HTMLElement>('.wa-myws-item');
+    const path = String(row?.dataset.path || '').trim();
+    const action = String(control.dataset.waWorkspaceRowAction || '');
+    if (!path) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const workspaceApi = getWorkspaceApi();
+    if (action === 'open' && typeof workspaceApi.openBrowserFile === 'function') {
+      void workspaceApi.openBrowserFile(path, true);
+    } else if (action === 'remove-my' && typeof workspaceApi.removeFromMyWorkspace === 'function') {
+      workspaceApi.removeFromMyWorkspace(path);
+    } else if (action === 'remove-temp' && typeof workspaceApi.removeFromTempWorkspace === 'function') {
+      workspaceApi.removeFromTempWorkspace(path);
+    }
+  }, true);
+}
+
+_installWorkspaceRowActionDelegation();
 
 // ── Placeholder helpers (implemented in other modules) ──
 
@@ -948,8 +1051,7 @@ function _updateContextBar(_ctx?: any): void {
 
 // ── Register with window.WA ──
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = getWorkspaceApi();
 
 function _syncMobileFilesA11y(): void {
   const left = document.getElementById('wa-left') as HTMLElement | null;
@@ -992,6 +1094,7 @@ window.addEventListener('resize', _syncMobileFilesA11y);
 (window as any)._cloneSerializable = _cloneSerializable;
 
 wa._renderTabs = _renderTabs;
+wa._removeOpenTabAfterFileDeleted = _removeOpenTabAfterFileDeleted;
 wa._tabClick = async (path: string) => {
   await _switchToTab(path);
 };
@@ -1000,8 +1103,17 @@ wa._closeTab = async (path: string) => {
   if (idx < 0) return;
   const tab = state.openTabs[idx];
 
-  if (tab.modified) {
+  const wa = (window as any).WA || {};
+  const isUnsaved = typeof wa.isTabActuallyUnsaved === 'function'
+    ? wa.isTabActuallyUnsaved(tab)
+    : !!tab.modified;
+  if (isUnsaved) {
     if (!confirm(`"${tab.name}" 有未保存的修改，关闭后将丢失。\n是否继续关闭？`)) return;
+  } else if (tab.modified) {
+    tab.modified = false;
+    if (typeof wa._notifyPyModified === 'function') {
+      try { wa._notifyPyModified(tab, false); } catch (e) { console.warn("[Koto]", e) }
+    }
   }
 
   const isActive = tab.path === state.activeTabPath;
@@ -1067,8 +1179,14 @@ wa.clearSearch = () => {
   if (typeof (window as any).WA !== 'undefined' && (window as any).WA.filterFiles) (window as any).WA.filterFiles('');
 };
 
+function _syncSectionToggleState(id: string, open: boolean): void {
+  const control = document.querySelector(`[data-wa-section-toggle="${CSS.escape(id)}"]`);
+  if (control) control.setAttribute('aria-expanded', String(open));
+}
+
 wa.toggleSection = (id: string) => {
   state.sectionOpen[id] = !state.sectionOpen[id];
+  _syncSectionToggleState(id, state.sectionOpen[id] !== false);
   localStorage.setItem('wa_sections', JSON.stringify(state.sectionOpen));
   if (id === 'myworkspace') {
     _toggleMyWorkspaceSection();
@@ -1090,6 +1208,7 @@ wa.refreshRecent = () => loadRecentFiles();
 
 wa.toggleRecentSection = () => {
   state._recentOpen = !state._recentOpen;
+  _syncSectionToggleState('recent', state._recentOpen);
   const list = document.getElementById('wa-recent-list');
   const arrow = document.getElementById('wa-recent-arrow');
   if (list) list.style.display = state._recentOpen ? '' : 'none';
@@ -1100,7 +1219,7 @@ wa.toggleRecentSection = () => {
 
 wa.addToMyWorkspace = (path: string) => {
   let targetPath = path;
-  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath;
+  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath || '';
   if (!targetPath) {
     showToast('请先打开一个文件', 'info');
     return;
@@ -1126,7 +1245,7 @@ wa.removeFromMyWorkspace = (path: string) => {
 
 wa.addToTempWorkspace = (path: string) => {
   let targetPath = path;
-  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath;
+  if (!targetPath) targetPath = state.activeTabPath || state.wsSourcePath || '';
   if (!targetPath) {
     showToast('请先打开一个文件', 'info');
     return;

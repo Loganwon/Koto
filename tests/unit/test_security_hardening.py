@@ -24,7 +24,7 @@ if _ROOT not in sys.path:
 
 def _get_auth_module():
     """Import the auth module."""
-    import web.auth as auth_mod
+    import web.blueprints.auth as auth_mod
 
     return auth_mod
 
@@ -247,13 +247,13 @@ class TestSecurityLogging:
 
     def test_unauthorized_access_logged(self, caplog):
         """401 responses should produce a [Security] WARNING log."""
-        with caplog.at_level(logging.WARNING, logger="web.auth"):
+        with caplog.at_level(logging.WARNING, logger="web.blueprints.auth"):
             self.client.post("/api/chat", json={"message": "test"})
         assert any("[Security]" in r.message for r in caplog.records)
 
     def test_log_contains_path(self, caplog):
         """Security log should include the request path."""
-        with caplog.at_level(logging.WARNING, logger="web.auth"):
+        with caplog.at_level(logging.WARNING, logger="web.blueprints.auth"):
             self.client.post("/api/chat/stream", json={"message": "test"})
         sec_records = [r for r in caplog.records if "[Security]" in r.message]
         assert any("/api/chat/stream" in r.message for r in sec_records)

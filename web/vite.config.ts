@@ -1,5 +1,6 @@
 import { defineConfig } from 'vite';
 import { resolve } from 'path';
+import { createAliases } from './build-aliases.mjs';
 
 export default defineConfig({
   root: '.',
@@ -9,7 +10,7 @@ export default defineConfig({
     sourcemap: true,
     emptyOutDir: true,
     target: 'es2020',
-    minify: false,
+    minify: 'esbuild',
     rollupOptions: {
       input: resolve(__dirname, 'src/bundles/app.ts'),
       output: {
@@ -19,12 +20,6 @@ export default defineConfig({
     },
   },
   resolve: {
-    alias: {
-      '@workspace': resolve(__dirname, 'src/workspace'),
-      '@chat': resolve(__dirname, 'src/chat'),
-      '@skills': resolve(__dirname, 'src/skills'),
-      '@review': resolve(__dirname, 'src/review'),
-      '@shared': resolve(__dirname, 'src/shared'),
-    },
+    alias: createAliases(__dirname),
   },
 });

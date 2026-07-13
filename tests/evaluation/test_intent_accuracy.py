@@ -230,18 +230,13 @@ def test_intent_accuracy(case, eval_provider, evaluator):
         if verdict.pass_:
             pytest.fail(
                 f"[{case['label']}] 规则检查未通过，但 AI 评判也认为不正确:\n"
-                f"  规则错误: {result['errors']}\n"
-                f"  实际: output_mode={result['output_mode']}, "
-                f"write_intent={result['write_intent']}, "
-                f"adjudication={result['adjudication_intent']}\n"
-                f"  评判理由: {verdict.reason}"
+                "  分类详情和评判理由已省略，避免测试日志包含模型派生内容。"
             )
         return
 
     assert result["pass"], (
         f"[{case['label']}] 意图分类不符合预期:\n"
-        f"  错误: {result['errors']}\n"
-        f"  完整输出: {result}"
+        "  分类详情已省略，避免测试日志包含模型派生内容。"
     )
 
 
@@ -288,13 +283,12 @@ def test_intent_accuracy_report(evaluator):
             f"diagnostic={r['diagnostic_request']}"
         )
         if r["errors"]:
-            for e in r["errors"]:
-                print(f"         ERROR: {e}")
+            # Evaluation errors can be derived from model responses.  Keep the
+            # report useful without writing potentially sensitive payloads to
+            # CI logs.
+            print("         ERROR: classification did not match expected values")
         if r["adjudication_intent"]:
-            print(
-                f"         adjudicator: {r['adjudication_intent']} "
-                f"(conf={r['adjudication_confidence']})"
-            )
+            print("         adjudicator result received")
     print(f"{'='*60}")
 
     assert rate >= 0.65, f"意图识别准确率 {rate:.0%} 低于阈值 65%，请检查失败案例"

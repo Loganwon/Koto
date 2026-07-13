@@ -3,6 +3,7 @@
  */
 
 import { csrfFetch } from '../shared/csrf';
+import { debugLog } from '../shared/debug';
 import { closeActiveSidePanel } from '../shared/side-panels';
 
 // ── Event listener lifecycle ──
@@ -23,13 +24,13 @@ document.removeEventListener = function(type: string, listener: EventListener, o
   let c = 0;
   while (_appDocListeners.length) {
     const e = _appDocListeners.pop()!;
-    try { _appOrigRemove(e.type, e.listener, e.options); c++; } catch (_) {}
+    try { _appOrigRemove(e.type, e.listener, e.options); c++; } catch (_) { /* allowed to fail */ }
   }
   document.addEventListener = function(type: string, listener: EventListener, options?: any) {
     _appDocListeners.push({ type, listener, options });
     return _appOrigAdd(type, listener, options);
   };
-  if (c) console.log('[App] Cleaned up ' + c + ' listeners');
+  if (c) debugLog('App', 'Cleaned up ' + c + ' listeners');
 };
 
 // ── Safe DOM helper ──
@@ -44,8 +45,7 @@ function $appEl(id: string | HTMLElement): HTMLElement | null {
 (window as any).selectedFiles = [];
 (window as any).setupComplete = false;
 (window as any).lockedTaskType = null;
-(window as any).selectedModel = 'auto';
-(window as any).enableMiniGame = true;
+if (typeof (window as any).enableMiniGame !== 'boolean') (window as any).enableMiniGame = true;
 (window as any).isScrollLocked = false;
 
 // ── Window controls ──
@@ -84,9 +84,7 @@ export async function closeWindow(): Promise<void> {
 }
 
 // ── Escape HTML ──
-function escapeHtmlLocal(str: string): string {
-  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-}
+
 
 // ── KotoDialog ──
 interface KotoDialogOptions {
@@ -113,9 +111,9 @@ export function KotoDialog(options: KotoDialogOptions): void {
   const icon = iconMap[options.type || 'info'] || '💬';
   let inputHTML = '';
   if (options.input) {
-    inputHTML = `<input class="koto-dialog-input" placeholder="${escapeHtmlLocal(options.inputPlaceholder || '')}" value="${escapeHtmlLocal(options.inputValue || '')}">`;
+    inputHTML = `<input class="koto-dialog-input" placeholder="${escHtml(options.inputPlaceholder || '')}" value="${escHtml(options.inputValue || '')}">`;
   }
-  dlg.innerHTML = `<div class="koto-dialog-icon">${icon}</div><div class="koto-dialog-title">${escapeHtmlLocal(options.title || '提示')}</div><div class="koto-dialog-msg">${escapeHtmlLocal(options.message || '')}</div>${inputHTML}<div class="koto-dialog-btns">${options.cancelText !== null ? `<button class="koto-dialog-cancel">${escapeHtmlLocal(options.cancelText || '取消')}</button>` : ''}<button class="koto-dialog-confirm">${escapeHtmlLocal(options.confirmText || '确定')}</button></div>`;
+  dlg.innerHTML = `<div class="koto-dialog-icon">${icon}</div><div class="koto-dialog-title">${escHtml(options.title || '提示')}</div><div class="koto-dialog-msg">${escHtml(options.message || '')}</div>${inputHTML}<div class="koto-dialog-btns">${options.cancelText !== null ? `<button class="koto-dialog-cancel">${escHtml(options.cancelText || '取消')}</button>` : ''}<button class="koto-dialog-confirm">${escHtml(options.confirmText || '确定')}</button></div>`;
   overlay.appendChild(dlg);
   document.body.appendChild(overlay);
   requestAnimationFrame(() => overlay.classList.add('koto-dialog-visible'));
@@ -156,7 +154,7 @@ export function showNotification(message: string, type: string = 'info', duratio
   }
   const notification = document.createElement('div');
   notification.className = `notification notification-${type}`;
-  notification.innerHTML = `<span>${escapeHtmlLocal(message)}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
+  notification.innerHTML = `<span>${escHtml(message)}</span><button class="notif-dismiss" onclick="this.parentElement.remove()" title="关闭">×</button>`;
   stack.appendChild(notification);
   setTimeout(() => {
     if (notification.parentElement) { notification.classList.add('notif-hiding'); setTimeout(() => notification.remove(), 300); }
@@ -184,7 +182,7 @@ export async function loadFolderList(path: string): Promise<void> {
     if (manualInput) manualInput.value = path;
     const folders = data.folders || [];
     if (data.error) {
-      listEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--accent-danger);">${escapeHtmlLocal(data.error)}</div>`;
+      listEl.innerHTML = `<div style="padding:20px;text-align:center;color:var(--accent-danger);">${escHtml(data.error)}</div>`;
       return;
     }
     if (!folders.length) {
@@ -194,7 +192,7 @@ export async function loadFolderList(path: string): Promise<void> {
     const parent = data.parent ? `<div class="folder-path-row" onclick="loadFolderList('${String(data.parent).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}')" style="cursor:pointer;padding:6px 10px;color:var(--accent-primary);">.. 上一级</div>` : '<div class="folder-path-row" onclick="loadFolderDrives()" style="cursor:pointer;padding:6px 10px;color:var(--accent-primary);">磁盘与快速访问</div>';
     listEl.innerHTML = parent + folders.map((entry: any) => {
         const safePath = String(entry.path || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        return `<div class="folder-entry" onclick="loadFolderList('${safePath}')" ondblclick="selectFolderEntry('${safePath}')" style="cursor:pointer;padding:6px 10px;display:flex;align-items:center;gap:8px;"><span>📁</span><span style="flex:1;">${escapeHtmlLocal(entry.name || '')}</span><button onclick="event.stopPropagation();selectFolderEntry('${safePath}')" style="padding:2px 8px;font-size:11px;">选择</button></div>`;
+        return `<div class="folder-entry" onclick="loadFolderList('${safePath}')" ondblclick="selectFolderEntry('${safePath}')" style="cursor:pointer;padding:6px 10px;display:flex;align-items:center;gap:8px;"><span>📁</span><span style="flex:1;">${escHtml(entry.name || '')}</span><button onclick="event.stopPropagation();selectFolderEntry('${safePath}')" style="padding:2px 8px;font-size:11px;">选择</button></div>`;
       }).join('');
   } catch (e) { /* ignore */ }
 }
@@ -211,7 +209,7 @@ export async function loadFolderDrives(): Promise<void> {
     listEl.innerHTML = entries.map((entry: any) => {
       const path = String(entry.path || entry.name || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
       const icon = entry.type === 'quick' ? '📁' : '💽';
-      return `<div class="folder-entry drive-entry" onclick="loadFolderList('${path}')" style="cursor:pointer;padding:8px 10px;"><span>${icon}</span><span>${escapeHtmlLocal(entry.name || entry.path || '')}</span></div>`;
+      return `<div class="folder-entry drive-entry" onclick="loadFolderList('${path}')" style="cursor:pointer;padding:8px 10px;"><span>${icon}</span><span>${escHtml(entry.name || entry.path || '')}</span></div>`;
     }).join('');
   } catch (e) { /* ignore */ }
 }
@@ -263,7 +261,7 @@ export function chatSearchNavKey(event: KeyboardEvent): void {
 }
 
 // ── Artifacts Panel ──
-let currentArtifact: { code: string; lang: string; title: string } = { code: '', lang: 'plaintext', title: 'Artifact' };
+const currentArtifact: { code: string; lang: string; title: string } = { code: '', lang: 'plaintext', title: 'Artifact' };
 
 export function openArtifactPanel(): void {
   const panel = document.getElementById('artifactsPanel');
@@ -300,13 +298,13 @@ function renderArtifactPreview(): void {
     el.innerHTML = `<div style="text-align:center;padding:20px;">${code}</div>`;
     return;
   }
-  el.innerHTML = `<pre style="white-space:pre-wrap;margin:0;">${escapeHtmlLocal(code)}</pre>`;
+  el.innerHTML = `<pre style="white-space:pre-wrap;margin:0;">${escHtml(code)}</pre>`;
 }
 
 function renderArtifactCode(): void {
   const el = document.getElementById('artifactCode');
   if (!el) return;
-  el.innerHTML = `<textarea class="artifact-editor" spellcheck="false" style="width:100%;height:calc(100vh - 140px);background:var(--code-bg);color:var(--code-text);border:none;padding:18px;font-family:monospace;font-size:13px;line-height:1.6;resize:none;outline:none;">${escapeHtmlLocal(currentArtifact.code)}</textarea>`;
+  el.innerHTML = `<textarea class="artifact-editor" spellcheck="false" style="width:100%;height:calc(100vh - 140px);background:var(--code-bg);color:var(--code-text);border:none;padding:18px;font-family:monospace;font-size:13px;line-height:1.6;resize:none;outline:none;">${escHtml(currentArtifact.code)}</textarea>`;
   const textarea = el.querySelector('textarea') as HTMLTextAreaElement | null;
   if (textarea) textarea.oninput = () => { currentArtifact.code = textarea.value; };
 }
@@ -386,7 +384,7 @@ function renderMemories(memories: any[]): void {
     listEl.innerHTML = '<div class="memory-empty">暂无长期记忆。Koto 会自动记住重要信息，或手动添加。</div>';
     return;
   }
-  listEl.innerHTML = memories.map((m: any) => `<div class="memory-item"><div class="memory-content"><div>${escapeHtmlLocal(m.content)}</div><div class="memory-meta">${m.created_at} · ${m.category}</div></div><button class="memory-delete-btn" onclick="deleteMemory(${m.id})" title="忘记"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>`).join('');
+  listEl.innerHTML = memories.map((m: any) => `<div class="memory-item"><div class="memory-content"><div>${escHtml(m.content)}</div><div class="memory-meta">${m.created_at} · ${m.category}</div></div><button class="memory-delete-btn" onclick="deleteMemory(${m.id})" title="忘记"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg></button></div>`).join('');
 }
 
 export async function addNewMemory(): Promise<void> {
@@ -453,7 +451,7 @@ function renderShadowMemories(memories: any[]): void {
   if (!listEl) return;
   if (!memories || memories.length === 0) { listEl.innerHTML = '<div class="memory-empty" style="font-size:12px;color:var(--text-muted);">暂无影子记忆。</div>'; return; }
   const sorted = [...memories].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-  listEl.innerHTML = sorted.map((m: any) => `<div class="memory-item"><div><div>${escapeHtmlLocal(m.content)}</div><div>${escapeHtmlLocal(m.created_at || '')} · ${m.source === 'shadow' ? '🤖 自动' : '✍️ 手动'} · ${escapeHtmlLocal(m.category || '')}</div></div><button onclick="deleteShadowMemory('${m.id}')">✕</button></div>`).join('');
+  listEl.innerHTML = sorted.map((m: any) => `<div class="memory-item"><div><div>${escHtml(m.content)}</div><div>${escHtml(m.created_at || '')} · ${m.source === 'shadow' ? '🤖 自动' : '✍️ 手动'} · ${escHtml(m.category || '')}</div></div><button onclick="deleteShadowMemory('${m.id}')">✕</button></div>`).join('');
 }
 
 export async function deleteShadowMemory(id: string): Promise<void> {
@@ -605,7 +603,7 @@ export async function loadShadowStatus(): Promise<void> {
     const cardsEl = document.getElementById('shadowSummaryCards');
     if (cardsEl) {
       cardsEl.style.display = '';
-      const topics = (s.top_topics || []).map((t: any) => `<span style="background:var(--bg-hover);border-radius:4px;padding:2px 6px;font-size:11px;">${escapeHtmlLocal(t.topic)} ×${t.count}</span>`).join(' ');
+      const topics = (s.top_topics || []).map((t: any) => `<span style="background:var(--bg-hover);border-radius:4px;padding:2px 6px;font-size:11px;">${escHtml(t.topic)} ×${t.count}</span>`).join(' ');
       cardsEl.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12px;color:var(--text-muted);"><span>📊 已观察 <strong>${s.total_observations || 0}</strong> 次对话</span><span>🔥 连续 <strong>${s.streak_days || 0}</strong> 天</span><span>📌 开放任务 <strong>${s.open_tasks_count || 0}</strong> 项</span><span>💬 待推送 <strong>${s.pending_messages || 0}</strong> 条</span></div>${topics ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:4px;">${topics}</div>` : ''}`;
     }
     await loadShadowOpenTasks();
@@ -646,7 +644,7 @@ export async function loadShadowOpenTasks(): Promise<void> {
     const resp = await fetch('/api/shadow/open-tasks');
     const data = await resp.json();
     if (!data.ok || !data.data?.length) { el.innerHTML = ''; return; }
-    el.innerHTML = data.data.slice(0, 5).map((t: any) => `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;"><span>📌</span><span style="flex:1;">${escapeHtmlLocal(t.text.slice(0, 60))}${t.text.length > 60 ? '…' : ''}</span><button onclick="shadowMarkTaskDone('${t.id}')">✓</button></div>`).join('');
+    el.innerHTML = data.data.slice(0, 5).map((t: any) => `<div style="display:flex;align-items:center;gap:6px;margin-top:4px;font-size:12px;"><span>📌</span><span style="flex:1;">${escHtml(t.text.slice(0, 60))}${t.text.length > 60 ? '…' : ''}</span><button onclick="shadowMarkTaskDone('${t.id}')">✓</button></div>`).join('');
   } catch (e) { el.innerHTML = ''; }
 }
 
@@ -704,8 +702,8 @@ export async function showAgentConfirmDialog(toolName: string, toolArgs: any, re
     overlay.className = 'agent-dialog-overlay';
     const dialog = document.createElement('div');
     dialog.className = 'agent-confirm-dialog';
-    const argsHtml = Object.entries(toolArgs).map(([key, value]) => `<div><strong>${key}:</strong> ${escapeHtmlLocal(String(value))}</div>`).join('');
-    dialog.innerHTML = `<h3 style="margin-top:0;">🤖 Agent需要确认</h3><p>${escapeHtmlLocal(reason || '即将执行以下操作：')}</p><div class="agent-args"><div class="tool-label" style="margin-bottom:8px;">🔧 工具: ${escapeHtmlLocal(toolName)}</div><div>${argsHtml}</div></div><div class="agent-confirm-countdown" id="confirm-countdown">${remaining}s 后自动跳过</div><div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px;"><button id="agent-confirm-no" style="padding:8px 20px;border-radius:6px;border:1px solid var(--border-color);background:transparent;cursor:pointer;">取消</button><button id="agent-confirm-yes" style="padding:8px 20px;border-radius:6px;border:none;background:#4CAF50;color:white;font-weight:bold;cursor:pointer;">确认执行</button></div>`;
+    const argsHtml = Object.entries(toolArgs).map(([key, value]) => `<div><strong>${key}:</strong> ${escHtml(String(value))}</div>`).join('');
+    dialog.innerHTML = `<h3 style="margin-top:0;">🤖 Agent需要确认</h3><p>${escHtml(reason || '即将执行以下操作：')}</p><div class="agent-args"><div class="tool-label" style="margin-bottom:8px;">🔧 工具: ${escHtml(toolName)}</div><div>${argsHtml}</div></div><div class="agent-confirm-countdown" id="confirm-countdown">${remaining}s 后自动跳过</div><div style="display:flex;gap:12px;justify-content:flex-end;margin-top:16px;"><button id="agent-confirm-no" style="padding:8px 20px;border-radius:6px;border:1px solid var(--border-color);background:transparent;cursor:pointer;">取消</button><button id="agent-confirm-yes" style="padding:8px 20px;border-radius:6px;border:none;background:#4CAF50;color:white;font-weight:bold;cursor:pointer;">确认执行</button></div>`;
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     const cleanup = () => { if (document.body.contains(overlay)) document.body.removeChild(overlay); };
@@ -727,8 +725,8 @@ export async function showAgentChoiceDialog(question: string, options: Array<{ l
     overlay.className = 'agent-dialog-overlay';
     const dialog = document.createElement('div');
     dialog.className = 'agent-choice-dialog';
-    const optionsHtml = options.map((opt, idx) => `<button class="agent-choice-option" data-value="${escapeHtmlLocal(opt.value)}">${idx + 1}. ${escapeHtmlLocal(opt.label)}</button>`).join('');
-    dialog.innerHTML = `<h3 style="margin-top:0;">🤖 Agent需要您的选择</h3><p>${escapeHtmlLocal(question)}</p><div>${optionsHtml}</div><div style="text-align:center;margin-top:16px;"><button id="agent-choice-cancel">取消</button></div>`;
+    const optionsHtml = options.map((opt, idx) => `<button class="agent-choice-option" data-value="${escHtml(opt.value)}">${idx + 1}. ${escHtml(opt.label)}</button>`).join('');
+    dialog.innerHTML = `<h3 style="margin-top:0;">🤖 Agent需要您的选择</h3><p>${escHtml(question)}</p><div>${optionsHtml}</div><div style="text-align:center;margin-top:16px;"><button id="agent-choice-cancel">取消</button></div>`;
     overlay.appendChild(dialog);
     document.body.appendChild(overlay);
     dialog.querySelectorAll('.agent-choice-option').forEach((btn, idx) => {
@@ -852,7 +850,7 @@ export async function loadSuggestions(filePath: string, requirement: string): Pr
     if (fill) fill.style.width = '100%';
   } catch (e: any) {
     if (e.name === 'AbortError') return;
-    if (list) list.innerHTML = `<div class="suggestion-empty"><p>分析失败：${escapeHtmlLocal(e.message || String(e))}</p></div>`;
+    if (list) list.innerHTML = `<div class="suggestion-empty"><p>分析失败：${escHtml(e.message || String(e))}</p></div>`;
   }
 }
 
@@ -897,7 +895,7 @@ function renderSuggestionList(): void {
     const original = s.original_text || s.original || s['原文'] || '';
     const replacement = s.suggested_text || s.replacement || s['修改'] || '';
     const reason = s.reason || s.description || s.explanation || '';
-    return `<div class="suggestion-card ${s.accepted ? 'accepted' : 'rejected'}" id="suggestion-${escapeHtmlLocal(s.id)}"><div class="suggestion-title">${escapeHtmlLocal(title)}</div><div class="suggestion-desc">${escapeHtmlLocal(reason)}</div>${original ? `<div class="suggestion-desc">原文：${escapeHtmlLocal(original)}</div>` : ''}${replacement ? `<div class="suggestion-desc">修改：${escapeHtmlLocal(replacement)}</div>` : ''}<div class="suggestion-actions"><button class="btn-sm btn-accept ${s.accepted ? 'active' : ''}" onclick="acceptSuggestion('${escapeHtmlLocal(s.id)}')">接受</button><button class="btn-sm btn-reject ${!s.accepted ? 'active' : ''}" onclick="rejectSuggestion('${escapeHtmlLocal(s.id)}')">拒绝</button></div></div>`;
+    return `<div class="suggestion-card ${s.accepted ? 'accepted' : 'rejected'}" id="suggestion-${escHtml(s.id)}"><div class="suggestion-title">${escHtml(title)}</div><div class="suggestion-desc">${escHtml(reason)}</div>${original ? `<div class="suggestion-desc">原文：${escHtml(original)}</div>` : ''}${replacement ? `<div class="suggestion-desc">修改：${escHtml(replacement)}</div>` : ''}<div class="suggestion-actions"><button class="btn-sm btn-accept ${s.accepted ? 'active' : ''}" onclick="acceptSuggestion('${escHtml(s.id)}')">接受</button><button class="btn-sm btn-reject ${!s.accepted ? 'active' : ''}" onclick="rejectSuggestion('${escHtml(s.id)}')">拒绝</button></div></div>`;
   }).join('');
 }
 
@@ -996,7 +994,7 @@ export async function runTriggerEvaluation(): Promise<void> {
     const decision = data.decision || data.data || {};
     if (decisionEl) {
       decisionEl.innerHTML = decision.reason
-        ? `<strong>${escapeHtmlLocal(decision.reason)}</strong><br>类型: ${escapeHtmlLocal(decision.interaction_type || '')} · 优先级: ${escapeHtmlLocal(decision.priority || '')}`
+        ? `<strong>${escHtml(decision.reason)}</strong><br>类型: ${escHtml(decision.interaction_type || '')} · 优先级: ${escHtml(decision.priority || '')}`
         : '暂无触发结果';
     }
   } catch (error: any) {
@@ -1056,7 +1054,7 @@ export async function openCreateBindingModal(): Promise<void> {
         skills = data.skills || data.data || [];
       } catch {}
     }
-    select.innerHTML = skills.map(skill => `<option value="${escapeHtmlLocal(skill.id)}">${escapeHtmlLocal((skill.icon || '') + ' ' + (skill.name || skill.id))}</option>`).join('') || '<option value="">请先加载 Skill 列表</option>';
+    select.innerHTML = skills.map(skill => `<option value="${escHtml(skill.id)}">${escHtml((skill.icon || '') + ' ' + (skill.name || skill.id))}</option>`).join('') || '<option value="">请先加载 Skill 列表</option>';
   }
   const patterns = document.getElementById('cbPatterns') as HTMLInputElement | null;
   const turns = document.getElementById('cbTurns') as HTMLInputElement | null;
@@ -1200,9 +1198,32 @@ export async function saveCreateSkill(): Promise<void> {
   }
 }
 
-// ── Send Message (main entry for form submit) ──
-export async function sendMessage(event: Event): Promise<void> {
-  event.preventDefault();
+// ── Send Message (legacy-form compatibility entry) ──
+// The workspace owns the visible composer.  A few compatibility hooks still
+// call window.sendMessage(), so forward them instead of opening the retired
+// chat stream alongside the workspace task stream.
+function delegateHiddenLegacySendToWorkspace(event?: Event): boolean {
+  const legacyInput = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+  const workspaceInput = document.getElementById('wa-user-input') as HTMLTextAreaElement | null;
+  const legacyRect = legacyInput?.getBoundingClientRect();
+  const legacyIsVisible = Boolean(legacyRect && legacyRect.width > 0 && legacyRect.height > 0);
+  const workspaceSender = (window as any).WA?.sendMessage;
+
+  if (legacyIsVisible || !workspaceInput || typeof workspaceSender !== 'function') return false;
+
+  event?.preventDefault();
+  const legacyMessage = legacyInput?.value.trim() || '';
+  if (legacyMessage && !workspaceInput.value.trim()) {
+    workspaceInput.value = legacyMessage;
+    workspaceInput.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  if (legacyMessage || workspaceInput.value.trim()) workspaceSender();
+  return true;
+}
+
+export async function sendMessage(event?: Event): Promise<void> {
+  if (delegateHiddenLegacySendToWorkspace(event)) return;
+  event?.preventDefault();
 
   const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
   const sendBtn = document.getElementById('sendBtn') as HTMLButtonElement | null;
@@ -1226,7 +1247,7 @@ export async function sendMessage(event: Event): Promise<void> {
           task_id: (window as any).getSessionTaskId?.(sessionName) || null,
         }),
       });
-    } catch (_) {}
+    } catch (e) { logger.warn("general", "Caught error", e) }
     if (sendBtn) sendBtn.disabled = false;
     return;
   }
@@ -1257,26 +1278,43 @@ export async function sendMessage(event: Event): Promise<void> {
 
   let taskInfo: any = null;
   let taskType = (window as any).lockedTaskType || null;
-  const modelToUse = (window as any).selectedModel || 'auto';
-  try {
-    (window as any).showLoading?.('分析任务类型...', '');
-    const analyzeResp = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        message,
-        locked_task: taskType,
-        locked_model: modelToUse,
-        has_file: selectedFiles.length > 0,
-        file_type: selectedFiles.length === 1 ? selectedFiles[0].type : (selectedFiles.length > 1 ? 'multiple' : ''),
-      }),
-    });
-    taskInfo = await analyzeResp.json().catch(() => null);
-    taskType = taskType || taskInfo?.task || null;
-    const modelDisplay = taskInfo?.model_speed ? `${taskInfo.model_name} ${taskInfo.model_speed}` : (taskInfo?.model_name || '');
-    (window as any).showLoading?.(`${taskType || 'CHAT'} 任务处理中...`, modelDisplay);
-  } catch (_) {
-    (window as any).showLoading?.('Koto 正在思考...', '');
+  // The workspace model control is the sole chat-mode owner.  Do not revive
+  // the old browser-side model cache: it can disagree with saved settings.
+  const workspaceMode = (window as any).WA?.getLockedModel?.();
+  const modelToUse = workspaceMode === 'local' ? 'local' : 'auto';
+
+  // Client-side heuristic pre-classification — skips /api/analyze round-trip
+  // for high-confidence matches, reducing perceived latency by ~200-500ms.
+  const preClass = !taskType ? preClassifyTask(
+    message,
+    selectedFiles.length > 0,
+    selectedFiles.length === 1 ? selectedFiles[0].type : (selectedFiles.length > 1 ? 'multiple' : '')
+  ) : null;
+
+  if (preClass && preClass.confidence === 'high') {
+    taskType = preClass.task;
+    (window as any).showLoading?.(taskType + ' 任务处理中...', '');
+  } else {
+    try {
+      (window as any).showLoading?.('分析任务类型...', '');
+      const analyzeResp = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message,
+          locked_task: taskType,
+          locked_model: modelToUse,
+          has_file: selectedFiles.length > 0,
+          file_type: selectedFiles.length === 1 ? selectedFiles[0].type : (selectedFiles.length > 1 ? 'multiple' : ''),
+        }),
+      });
+      taskInfo = await analyzeResp.json().catch((): any => null);
+      taskType = taskType || taskInfo?.task || null;
+      const modelDisplay = taskInfo?.model_speed ? taskInfo.model_name + ' ' + taskInfo.model_speed : (taskInfo?.model_name || '');
+      (window as any).showLoading?.(taskType + ' 任务处理中...', modelDisplay);
+    } catch (_) {
+      (window as any).showLoading?.('Koto 正在思考...', '');
+    }
   }
 
   const thisSession = sessionName || (window as any).currentSession || 'default';
@@ -1309,15 +1347,10 @@ export async function sendMessage(event: Event): Promise<void> {
   const timeEl = document.getElementById(`${msgId}-time`) as HTMLElement | null;
   const startedAt = Date.now();
   let fullText = '';
-  let agentStepCounter = 0;
-  let canonicalStepTotal = 0;
-  let canonicalCurrentStepIndex = 0;
-  const canonicalStepOrder = new Map<string, number>();
-  const taskStepStates = new Map<number, { status?: string; title?: string; detail?: string }>();
 
   const safeHtml = (value: any) => typeof (window as any).escapeHtml === 'function'
     ? (window as any).escapeHtml(String(value || ''))
-    : escapeHtmlLocal(String(value || ''));
+    : escHtml(String(value || ''));
   const parse = (text: string) => {
     try {
       return typeof (window as any).parseMarkdown === 'function'
@@ -1327,165 +1360,23 @@ export async function sendMessage(event: Event): Promise<void> {
       return `<div class="markdown-fallback" style="white-space:pre-wrap;">${safeHtml(text)}</div>`;
     }
   };
-  const describeAction = (toolName: string, toolArgs: any) => {
-    const args = toolArgs || {};
-    const path = String(args.path || args.file_path || args.filename || '');
-    const query = String(args.query || args.q || args.search_query || '');
-    if (path) return `处理文件：${path.split(/[\\/]/).pop()}`;
-    if (query) return `检索：${query.slice(0, 48)}`;
-    return String(toolName || '执行工具').replace(/_/g, ' ');
-  };
-  const briefObsText = (raw: any) => {
-    const text = typeof raw === 'string' ? raw : JSON.stringify(raw || '');
-    return text.length > 60 ? text.slice(0, 57) + '...' : text;
-  };
-  const ensureCanonicalStepIndex = (rawStepId: any, fallbackTitle = '') => {
-    const key = String(rawStepId || '').trim() || fallbackTitle || `step_${canonicalStepOrder.size + 1}`;
-    if (canonicalStepOrder.has(key)) return canonicalStepOrder.get(key)!;
-    const nextIdx = canonicalStepOrder.size + 1;
-    canonicalStepOrder.set(key, nextIdx);
-    canonicalStepTotal = Math.max(canonicalStepTotal, nextIdx);
-    return nextIdx;
-  };
-  const canonicalProgressFraction = (milestone = 'step_progress') => {
-    const fractions: Record<string, number> = {
-      phase_running: 0.5,
-      phase_done: 1,
-      step_start: 0.35,
-      tool_call: 0.5,
-      step_progress: 0.7,
-      tool_result: 0.85,
-      step_done: 1,
-      step_error: 1,
-    };
-    return Object.prototype.hasOwnProperty.call(fractions, milestone) ? fractions[milestone] : 0;
-  };
-  const canonicalProgressPercent = (index: number, total: number, milestone = 'step_progress') => {
-    const safeTotal = Math.max(Number(total) || 0, Number(index) || 0, 1);
-    const safeIndex = Math.min(Math.max(Number(index) || 1, 1), safeTotal);
-    const fraction = canonicalProgressFraction(milestone);
-    return Math.max(0, Math.min(100, Math.round((((safeIndex - 1) + fraction) / safeTotal) * 100)));
-  };
-  const normalizeEvent = (evt: any) => {
-    if (!evt || typeof evt !== 'object') return evt;
-    if (evt.type === 'error' && evt.data && !evt.message) return { type: 'error', message: evt.data.error || '未知错误' };
-    if (evt.type === 'plan' && Array.isArray(evt.steps)) {
-      canonicalStepOrder.clear();
-      canonicalCurrentStepIndex = 0;
-      canonicalStepTotal = evt.steps.length;
-      const steps = evt.steps.map((step: any, idx: number) => {
-        const title = step.description || step.label || step.text || step.id || `步骤 ${idx + 1}`;
-        const key = String(step.id || step.step_id || step.step || title || idx + 1);
-        canonicalStepOrder.set(key, idx + 1);
-        return { index: idx + 1, title };
-      });
-      return { type: 'task_step', status: 'init', steps, step_total: steps.length };
-    }
-    if (evt.type === 'phase' && Array.isArray(evt.phases) && evt.phases.length) {
-      const currentKey = String(evt.current || '').trim();
-      const currentIdx = evt.phases.findIndex((phase: any) => String(phase.id || phase.label || '').trim() === currentKey);
-      const phaseIndex = currentIdx >= 0 ? currentIdx + 1 : 1;
-      const phase = evt.phases[currentIdx] || evt.phases[0];
-      return {
-        type: 'task_step',
-        step_index: phaseIndex,
-        step_total: evt.phases.length,
-        status: evt.status === 'done' && phaseIndex >= evt.phases.length ? 'done' : 'running',
-        title: phase?.label || phase?.id || evt.text || currentKey || '执行阶段',
-        detail: '',
-        progress: canonicalProgressPercent(phaseIndex, evt.phases.length, evt.status === 'done' ? 'phase_done' : 'phase_running'),
-      };
-    }
-    if (evt.type === 'step_start') {
-      const title = evt.text || evt.label || evt.step_id || evt.step || '执行步骤';
-      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, title);
-      canonicalCurrentStepIndex = idx;
-      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title, detail: evt.detail || '', progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_start') };
-    }
-    if (evt.type === 'step_progress') {
-      const detail = evt.detail || evt.text || '处理中';
-      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, detail);
-      canonicalCurrentStepIndex = idx;
-      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title: taskStepStates.get(idx)?.title || `步骤 ${idx}`, detail, progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_progress') };
-    }
-    if (evt.type === 'step_done') {
-      const title = evt.text || evt.label || evt.step_id || evt.step || '步骤完成';
-      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, title);
-      canonicalCurrentStepIndex = idx;
-      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'done', title, detail: evt.detail || '', progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_done') };
-    }
-    if (evt.type === 'step_error') {
-      const errText = evt.error || evt.text || '步骤失败';
-      const idx = ensureCanonicalStepIndex(evt.step_id || evt.step, errText);
-      canonicalCurrentStepIndex = idx;
-      return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'failed', title: taskStepStates.get(idx)?.title || evt.step_id || `步骤 ${idx}`, detail: errText, progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'step_error') };
-    }
-    if (evt.type === 'tool_call') {
-      if (canonicalCurrentStepIndex > 0 || canonicalStepTotal > 0) {
-        const idx = canonicalCurrentStepIndex || 1;
-        return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title: taskStepStates.get(idx)?.title || `步骤 ${idx}`, detail: describeAction(evt.tool_name, evt.tool_args), progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'tool_call') };
-      }
-      agentStepCounter += 1;
-      return { type: 'agent_step', step_number: agentStepCounter, total_steps: '?', tool_name: evt.tool_name || 'tool', tool_args: evt.tool_args || {} };
-    }
-    if (evt.type === 'tool_result') {
-      const preview = evt.result_preview || evt.content || '';
-      if (canonicalCurrentStepIndex > 0 || canonicalStepTotal > 0) {
-        const idx = canonicalCurrentStepIndex || 1;
-        return { type: 'task_step', step_index: idx, step_total: canonicalStepTotal || idx, status: 'running', title: taskStepStates.get(idx)?.title || `步骤 ${idx}`, detail: briefObsText(preview), progress: canonicalProgressPercent(idx, canonicalStepTotal || idx, 'tool_result') };
-      }
-      return { type: 'observation', message: preview, observation: preview };
-    }
-    if (evt.type === 'task_final' && evt.data) return { type: 'done', content: evt.data.result || '', elapsed_time: evt.data.elapsed_time };
-    return evt;
-  };
-  const renderTaskStep = (data: any) => {
-    if (!bodyEl) return;
-    if (Array.isArray(data.steps)) {
-      data.steps.forEach((s: any) => taskStepStates.set(Number(s.index), { status: 'pending', title: s.title || `步骤 ${s.index}` }));
-    } else if (data.step_index) {
-      taskStepStates.set(Number(data.step_index), { status: data.status, title: data.title, detail: data.detail });
-    }
-    const total = Number(data.step_total || canonicalStepTotal || taskStepStates.size || 1);
-    const rows = Array.from({ length: total }, (_, i) => {
-      const idx = i + 1;
-      const state = taskStepStates.get(idx) || {};
-      const done = state.status === 'done';
-      const failed = state.status === 'failed';
-      const active = data.step_index === idx && !done && !failed;
-      return `<div class="koto-progress-row ${active ? 'active' : ''}">
-        <span>${done ? '✓' : failed ? '!' : active ? '...' : idx}</span>
-        <div><strong>${safeHtml(state.title || `步骤 ${idx}`)}</strong>${state.detail ? `<small>${safeHtml(state.detail)}</small>` : ''}</div>
-      </div>`;
-    }).join('');
-    const pct = Math.max(0, Math.min(100, Number(data.progress || 0)));
-    bodyEl.innerHTML = `<div class="koto-stream-progress">${rows}<div class="koto-stream-progress-track"><i style="width:${pct}%"></i></div></div>`;
-  };
+  // SSE pipeline replaces inline normalizeEvent/applyStreamEvent (extracted to shared/sse-pipeline.ts)
+  const pipeline = new SseStreamRenderer({
+    bodyEl: bodyEl!,
+    safeHtml,
+    parseMd: parse,
+    onScrollToBottom: () => { (window as any).scrollToBottom?.(); },
+  });
   const applyStreamEvent = (data: any) => {
     if (!bodyEl) return;
-    if (data.type === 'token') {
-      fullText += data.content || '';
-      bodyEl.innerHTML = parse(fullText) + '<span class="typing-cursor">▊</span>';
-    } else if (data.type === 'progress') {
+    // Sync fullText for auto-title and other consumers
+    pipeline.normalizeAndApply(data);
+    fullText = pipeline.fullText;
+    // Delegate progress UI to global helpers
+    if (data.type === 'progress') {
       (window as any).showMiniGame?.();
-      (window as any).showLoading?.(data.message || '处理中...', data.detail || '');
-      if (!fullText) {
-        bodyEl.innerHTML = `<div class="doc-progress" style="padding:16px;"><strong>${safeHtml(data.message || '处理中...')}</strong><div style="color:var(--text-muted);font-size:13px;margin-top:4px;">${safeHtml(data.detail || '')}</div><div style="height:6px;border-radius:8px;background:rgba(0,0,0,.08);margin-top:10px;overflow:hidden;"><i style="display:block;height:100%;width:${Math.max(0, Math.min(100, Number(data.progress || 0)))}%;background:var(--accent-primary);"></i></div></div>`;
-      }
-    } else if (data.type === 'task_step') {
-      renderTaskStep(data);
-    } else if (data.type === 'agent_step') {
-      bodyEl.innerHTML = `<div class="koto-steps"><div class="koto-steps-row">${safeHtml(describeAction(data.tool_name, data.tool_args))}</div></div>`;
-    } else if (data.type === 'observation') {
-      const obs = safeHtml(data.observation || data.message || '');
-      bodyEl.insertAdjacentHTML('beforeend', `<div class="agent-observation-text">${obs}</div>`);
-    } else if (data.type === 'done') {
-      if (data.content && !fullText) fullText = data.content;
-      bodyEl.innerHTML = parse(fullText || data.content || '');
-    } else if (data.type === 'error') {
-      bodyEl.innerHTML = `<div class="error-message">${safeHtml(data.message || '请求失败')}</div>`;
+      (window as any).showLoading?.(data.message || '???...', data.detail || '');
     }
-    (window as any).scrollToBottom?.();
   };
 
   try {
@@ -1504,7 +1395,7 @@ export async function sendMessage(event: Event): Promise<void> {
       const streamEndpoint = useUnifiedAgentStream ? '/api/agent/process-stream' : '/api/chat/stream';
       const contextFiles = Array.isArray((window as any)._kotoContextFiles) ? (window as any)._kotoContextFiles.map((f: any) => f.path) : [];
       const payload = useUnifiedAgentStream
-        ? { request: message, context: { history: [] }, session_id: thisSession, model: modelToUse || 'gemini-3-flash-preview', ...(contextFiles.length ? { context_files: contextFiles } : {}) }
+        ? { request: message, context: { history: [] as any[] }, session_id: thisSession, model: modelToUse || 'deepseek-chat', ...(contextFiles.length ? { context_files: contextFiles } : {}) }
         : { session: thisSession, message, locked_task: taskType, locked_model: modelToUse, ...(contextFiles.length ? { context_files: contextFiles } : {}) };
       response = await fetch(streamEndpoint, {
         method: 'POST',
@@ -1519,7 +1410,9 @@ export async function sendMessage(event: Event): Promise<void> {
     if (!response.body || !contentType.includes('text/event-stream')) {
       const data = await response.json().catch(() => ({}));
       fullText = data.response || data.content || data.message || '';
-      if (bodyEl) bodyEl.innerHTML = parse(fullText || JSON.stringify(data));
+      pipeline.reset();
+      pipeline.fullText = fullText;
+      if (bodyEl) pipeline.finalize();
     } else {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -1536,11 +1429,11 @@ export async function sendMessage(event: Event): Promise<void> {
             if (!line.startsWith('data: ')) continue;
             const raw = line.slice(6).trim();
             if (!raw || raw === '[DONE]') { done = true; continue; }
-            try { applyStreamEvent(normalizeEvent(JSON.parse(raw))); } catch (_) {}
+            try { applyStreamEvent(JSON.parse(raw)); } catch (e) { logger.warn("general", "Caught error", e) }
           }
         }
       }
-      if (bodyEl) bodyEl.innerHTML = parse(fullText || bodyEl.textContent || '');
+      if (bodyEl) pipeline.finalize();
     }
     if (timeEl) timeEl.textContent = `${Math.max(1, Math.round((Date.now() - startedAt) / 1000))}s`;
     if ((window as any)._newlyCreatedSessions instanceof Set && (window as any)._newlyCreatedSessions.has(thisSession) && typeof (window as any).autoTitleSession === 'function') {
@@ -1566,7 +1459,7 @@ export async function sendMessage(event: Event): Promise<void> {
 }
 
 // ── Console init message ──
-console.log('🔥 Koto App.js 已加载 - VERSION: 2026-02-14-03');
+// Koto App loaded
 
 // ── DOMContentLoaded initialization ──
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1577,21 +1470,23 @@ document.addEventListener('DOMContentLoaded', async () => {
   if (typeof (window as any).updateThemeSelector === 'function') (window as any).updateThemeSelector(theme);
   const serverZoom = parseFloat(((window as any).currentSettings?.appearance?.ui_zoom || '1'));
   if (typeof (window as any).setUIZoom === 'function') (window as any).setUIZoom(String(serverZoom), true);
-  if (typeof (window as any).checkSetupStatus === 'function') await (window as any).checkSetupStatus();
-  if (typeof (window as any)._syncSidebarState === 'function') (window as any)._syncSidebarState({ forceOpenOverlay: true });
-  if (typeof (window as any).initProjectSelector === 'function') (window as any).initProjectSelector();
-  if (typeof (window as any).loadSessions === 'function') await (window as any).loadSessions();
-  if (typeof (window as any).checkStatus === 'function') (window as any).checkStatus();
-  if (typeof (window as any).initCapabilityButtons === 'function') (window as any).initCapabilityButtons();
   if (typeof (window as any).renderWelcomeScreen === 'function') (window as any).renderWelcomeScreen();
-  if ((window as any).currentSettings?.ai) { (window as any).selectedModel = (window as any).currentSettings.ai.default_model || 'auto'; }
+  // Non-critical subsystems deferred to idle ? reduces Time-To-Interactive
+  batchInit([
+    () => { if (typeof (window as any).checkSetupStatus === 'function') (window as any).checkSetupStatus(); },
+    () => { if (typeof (window as any)._syncSidebarState === 'function') (window as any)._syncSidebarState({ forceOpenOverlay: true }); },
+    () => { if (typeof (window as any).initProjectSelector === 'function') (window as any).initProjectSelector(); },
+    () => { if (typeof (window as any).loadSessions === 'function') (window as any).loadSessions(); },
+    () => { if (typeof (window as any).checkStatus === 'function') (window as any).checkStatus(); },
+    () => { if (typeof (window as any).initCapabilityButtons === 'function') (window as any).initCapabilityButtons(); },
+  ]);
   const newSessionInput = document.getElementById('newSessionName');
   if (newSessionInput) newSessionInput.addEventListener('keydown', (e: Event) => { if ((e as KeyboardEvent).key === 'Enter') { e.preventDefault(); if (typeof (window as any).confirmNewSession === 'function') (window as any).confirmNewSession(); } });
   window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e: MediaQueryListEvent) => {
     if ((((window as any).currentSettings?.appearance?.theme || 'light') === 'auto') && typeof (window as any).applyTheme === 'function') (window as any).applyTheme('auto');
   });
-  if (typeof (window as any).initProactiveUI === 'function') (window as any).initProactiveUI();
-  if (typeof (window as any).initScrollBehavior === 'function') (window as any).initScrollBehavior();
+  deferInit(() => { if (typeof (window as any).initProactiveUI === 'function') (window as any).initProactiveUI(); });
+  deferInit(() => { if (typeof (window as any).initScrollBehavior === 'function') (window as any).initScrollBehavior(); });
   window.addEventListener('keydown', (e: KeyboardEvent) => { if (typeof (window as any).handleGlobalKeyDown === 'function') (window as any).handleGlobalKeyDown(e); });
   window.addEventListener('resize', () => { if (typeof (window as any)._syncSidebarState === 'function') (window as any)._syncSidebarState(); });
   document.addEventListener('click', (e: MouseEvent) => {
@@ -1609,6 +1504,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // ── Backward compat window assignments ──
+
+import { deferInit, batchInit } from '../shared/init-deferred';
+import { SseStreamRenderer } from '../shared/sse-pipeline';
+import { preClassifyTask } from '../shared/task-preclassify';
+import { escHtml } from '../shared/sanitize';
+import { logger } from '../shared/logger';
 (window as any).hideStartupSplash = hideStartupSplash;
 (window as any).showNotification = showNotification;
 (window as any).KotoDialog = KotoDialog;
@@ -1690,5 +1591,5 @@ document.addEventListener('DOMContentLoaded', async () => {
 (window as any).closeCreateSkillModal = closeCreateSkillModal;
 (window as any).saveCreateSkill = saveCreateSkill;
 (window as any).sendMessage = sendMessage;
-(window as any).escapeHtml = escapeHtmlLocal;
+(window as any).escapeHtml = escHtml;
 (window as any)._pendingShadowContext = _pendingShadowContext;

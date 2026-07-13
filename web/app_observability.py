@@ -68,7 +68,14 @@ def configure_observability(
 
         metrics_token = os.environ.get("METRICS_TOKEN", "")
         prometheus = PrometheusMetrics(app, group_by="endpoint")
-        prometheus.info("koto_app_info", "Koto application info", version=app_version)
+        try:
+            prometheus.info("koto_app_info", "Koto application info", version=app_version)
+        except ValueError as exc:
+            # App modules can be reloaded by the desktop runtime and pytest;
+            # the Prometheus global registry already owns this constant metric.
+            if "koto_app_info" not in str(exc):
+                raise
+            logger.debug("Prometheus app-info metric already registered")
 
         if metrics_token:
             @app.before_request

@@ -78,9 +78,9 @@ def _handle_goal_check(ctx) -> Optional[str]:
     try:
         from app.core.agent.tool_registry import ToolRegistry
         from app.core.agent.unified_agent import UnifiedAgent
-        from app.core.llm.gemini import get_gemini_client
+        from app.core.llm.provider_factory import get_llm_provider
 
-        llm = get_gemini_client()
+        llm = get_llm_provider(allow_local_fallback=False)
         agent = UnifiedAgent(
             llm_provider=llm,
             tool_registry=ToolRegistry(),

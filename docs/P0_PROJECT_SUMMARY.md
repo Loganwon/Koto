@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for active guides.
+
 # 🎉 P0 集成功能 - 完成报告总结
 
 ## 📊 项目完成状态
@@ -71,7 +73,7 @@
 ### 代码文件
 | 文件 | 类型 | 大小 | 状态 |
 |------|------|------|------|
-| [web/static/js/app.js](web/static/js/app.js) | 修改 | +50 行 | ✅ |
+| [web/src/app/ (已迁移至模块化主应用)](web/src/app/ (已迁移至模块化主应用)) | 修改 | +50 行 | ✅ |
 | [web/static/css/style.css](web/static/css/style.css) | 新增 | +60 行 | ✅ |
 | [web/app.py](web/app.py) | 修改 | +100 行 | ✅ |
 | [tests/test_p0_comprehensive.py](tests/test_p0_comprehensive.py) | 新建 | 450 行 | ✅ |

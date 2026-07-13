@@ -20,11 +20,8 @@ import {
 } from './state';
 import { _escHtml } from './infrastructure';
 import { _ensurePdfJS, _ensureTipTap, _ensureUniverSheets, _ensureWorkbookDefaults } from '../editors/cdn-loaders';
-import { KotoImageViewer } from '../editors/image-viewer';
-import { KotoPdfViewer } from '../editors/pdf-viewer';
-import { KotoPptxEditor } from '../editors/pptx-editor';
-import { KotoTextEditor } from '../editors/text-editor';
-import { _setupDocOutline } from '../editors/docx-outline';
+import { KotoTextEditor, _setupDocOutline, loadPptxEditor, loadPdfViewer, loadXlsxEditor, loadImageViewer } from '../editors/lazy-loaders';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 function _fileExt(fileName: string): string {
   return (String(fileName || '').split('.').pop() || '').toLowerCase();
@@ -33,6 +30,44 @@ function _fileExt(fileName: string): string {
 function _setHeaderFileName(name: string): void {
   const fileNameEl = document.getElementById('wa-file-name');
   if (fileNameEl) fileNameEl.textContent = name || '未打开文件';
+}
+
+function _docxNumber(data: any, camelKey: string, snakeKey: string): number | null {
+  const value = data?.[camelKey] ?? data?.[snakeKey];
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+/** Translate the parser's stable snake_case contract at the TipTap boundary. */
+function _toDocxRenderOptions(data: any): Record<string, any> {
+  const source = data && typeof data === 'object' ? data : {};
+  return {
+    pageWidthPx: _docxNumber(source, 'pageWidthPx', 'page_width_px'),
+    pageHeightPx: _docxNumber(source, 'pageHeightPx', 'page_height_px'),
+    marginTopPx: _docxNumber(source, 'marginTopPx', 'margin_top_px'),
+    marginBottomPx: _docxNumber(source, 'marginBottomPx', 'margin_bottom_px'),
+    marginLeftPx: _docxNumber(source, 'marginLeftPx', 'margin_left_px'),
+    marginRightPx: _docxNumber(source, 'marginRightPx', 'margin_right_px'),
+    headerHtml: String(source.headerHtml ?? source.header_html ?? ''),
+    footerHtml: String(source.footerHtml ?? source.footer_html ?? ''),
+    sections: Array.isArray(source.sections) ? source.sections : [],
+    renderDegraded: source.render_degraded === true,
+  };
+}
+
+function _showPdfOpenError(error: any): void {
+  const outer = document.getElementById('wa-pdf-editor') as HTMLElement | null;
+  const viewer = document.getElementById('wa-pdf-viewer') as HTMLElement | null;
+  if (outer) outer.classList.add('active');
+  if (viewer) {
+    viewer.classList.add('active');
+    const message = error && error.message ? error.message : String(error || '未知错误');
+    viewer.innerHTML = `
+      <div style="max-width:720px;margin:40px auto;padding:16px 18px;border:1px solid rgba(239,68,68,.45);border-radius:6px;background:#fff;color:#3f1f1f;line-height:1.6;font-size:13px;">
+        <div style="font-weight:700;margin-bottom:6px;color:#b42318;">PDF 加载失败</div>
+        <div>${_escHtml(message)}</div>
+      </div>`;
+  }
 }
 
 function _syncPrimarySaveButtons(tab: TabInfo | null): void {
@@ -66,13 +101,30 @@ export function _serializeEditorForTab(_tab: TabInfo | null, editor: any): any {
   return editor.serialize();
 }
 
+export function _stableWorkspaceSnapshot(value: any): string {
+  if (value === undefined) return 'undefined';
+  if (value === null) return 'null';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch (_) {
+    return String(value);
+  }
+}
+
+export function _rememberSavedSnapshotForTab(tab: TabInfo | null, editor: any = state.activeEditor): void {
+  if (!tab) return;
+  const data = editor ? _serializeEditorForTab(tab, editor) : (tab.cache !== undefined && tab.cache !== null ? tab.cache : tab.serverData);
+  tab.savedSnapshot = _stableWorkspaceSnapshot(data);
+}
+
 async function _mountDocx(tab: TabInfo, data: any): Promise<void> {
   await _ensureTipTap();
-  const html = typeof tab.cache === 'string' && tab.cache.trim()
+  const html = typeof tab.cache === 'string' && (tab.cache as string).trim()
     ? tab.cache
     : (data && data.html) || '';
-  state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor();
-  state.activeEditor.render(html, data || {});
+  state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor() as any;
+  state.activeEditor!.render(html, _toDocxRenderOptions(data));
   setTimeout(() => _setupDocOutline((data && data.headings) || []), 0);
   setTimeout(() => {
     const syncReviewState = (window as any)._syncReviewStateForActiveFile;
@@ -88,22 +140,27 @@ async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
     await _mountDocx(tab, data);
   } else if (tab.fileType === 'xlsx') {
     await _ensureUniverSheets();
-    state.activeEditor = new (window as any).KotoXlsxEditor();
+    state.activeEditor = new (window as any).KotoXlsxEditor() as any;
     const workbook = tab.cache && tab.cache.snapshot ? tab.cache.snapshot : data;
-    state.activeEditor.render(_ensureWorkbookDefaults(workbook));
+    state.activeEditor!.render(_ensureWorkbookDefaults(workbook));
   } else if (tab.fileType === 'pptx') {
-    state.activeEditor = new KotoPptxEditor();
-    state.activeEditor.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
+    state.activeEditor = new (await loadPptxEditor()).KotoPptxEditor() as any;
+    state.activeEditor!.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
   } else if (tab.fileType === 'pdf') {
-    await _ensurePdfJS();
-    state.activeEditor = new KotoPdfViewer();
-    state.activeEditor.render(data && data.raw_url, data);
+    try {
+      await _ensurePdfJS();
+      state.activeEditor = new (await loadPdfViewer()).KotoPdfViewer() as any;
+      await state.activeEditor!.render(data && data.raw_url, data);
+    } catch (error) {
+      console.error('[WA] PDF 打开失败:', error);
+      _showPdfOpenError(error);
+    }
   } else if (tab.fileType === 'image') {
-    state.activeEditor = new KotoImageViewer();
-    state.activeEditor.render(data && data.raw_url);
+    state.activeEditor = new (await loadImageViewer()).KotoImageViewer() as any;
+    state.activeEditor!.render(data && data.raw_url);
   } else if (tab.fileType === 'text' || tab.fileType === 'code') {
-    state.activeEditor = new KotoTextEditor(tab.fileType);
-    state.activeEditor.render(data);
+    state.activeEditor = new KotoTextEditor(tab.fileType) as any;
+    state.activeEditor!.render(data);
   } else {
     const textEditor = document.getElementById('wa-text-editor');
     const textArea = document.getElementById('wa-text-content') as HTMLTextAreaElement | null;
@@ -127,8 +184,9 @@ function _applyTabState(tab: TabInfo): void {
   _syncPrimarySaveButtons(tab);
   _syncZoomControls(tab.fileType);
   toggleWorkspace(true);
-  if (typeof (window as any).WA?.closeMobileFiles === 'function') {
-    (window as any).WA.closeMobileFiles();
+  const closeMobileFiles = getWorkspaceApi().closeMobileFiles;
+  if (typeof closeMobileFiles === 'function') {
+    closeMobileFiles();
   }
 }
 
@@ -145,6 +203,7 @@ async function _switchToTabImpl(path: string): Promise<void> {
   if (!tab) return;
   _applyTabState(tab);
   await _mountEditor(tab, tab.serverData);
+  if (!tab.modified && !tab.savedSnapshot) _rememberSavedSnapshotForTab(tab, state.activeEditor);
   _renderTabs();
   _highlightActiveFile(path);
 }
@@ -179,7 +238,8 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
     fileType,
     fileId: json.file_id || null,
     serverData: json.data,
-    cache: null,
+    cache: undefined,
+    savedSnapshot: null,
     modified: false,
     capabilityProfile: _normalizeCapabilityProfile(json.capability_profile, fileType, fileName),
     reviewState: existingTab && existingTab.reviewState
@@ -194,11 +254,17 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
 
   _applyTabState(tabEntry);
   await _mountEditor(tabEntry, json.data);
+  _rememberSavedSnapshotForTab(tabEntry, state.activeEditor);
+  const clearExternalFileChange = getWorkspaceApi().clearExternalFileChange;
+  if (typeof clearExternalFileChange === 'function') {
+    clearExternalFileChange(resolvedPath);
+  }
   _renderTabs();
   _highlightActiveFile(resolvedPath);
   setTimeout(() => {
-    if (typeof (window as any).WA?._softRefreshBrowser === 'function') {
-      (window as any).WA._softRefreshBrowser().catch(() => {});
+    const refreshBrowser = getWorkspaceApi()._softRefreshBrowser;
+    if (typeof refreshBrowser === 'function') {
+      refreshBrowser().catch(() => {});
     } else {
       loadWorkspaceFiles().catch(() => {});
     }
@@ -208,12 +274,15 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
 
 _registerSwitchToTab(_switchToTabImpl);
 
-const wa = (window as any).WA || {};
-(window as any).WA = wa;
+const wa = getWorkspaceApi();
 (window as any)._serializeEditorForTab = _serializeEditorForTab;
 wa._applyFileJson = _applyFileJson;
 wa._syncPrimarySaveButtons = _syncPrimarySaveButtons;
+wa._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
+wa._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
 
 // Keeps old inline templates that call global helpers from breaking in the TS bundle.
 (window as any)._serializeEditorForTab = _serializeEditorForTab;
+(window as any)._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
+(window as any)._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
 (window as any)._escHtml = (window as any)._escHtml || _escHtml;

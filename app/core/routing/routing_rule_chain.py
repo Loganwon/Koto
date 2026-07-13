@@ -18,6 +18,7 @@ import re as _re
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+from app.core.agent.file_task_review_intent import should_route_docx_file_edit
 from app.core.routing.routing_config import (
     AGENT_NOTIFY_PATTERNS,
     AGENT_SAFETY_PATTERNS,
@@ -58,6 +59,10 @@ logger = logging.getLogger(__name__)
 
 # ── Result type for rule chain ────────────────────────────────────────────────
 RoutingResult = Optional[Tuple[str, str, Optional[Dict]]]
+
+
+def _has_workflow_file_edit_intent(user_lower: str) -> bool:
+    return any(kw in user_lower for kw in EDIT_INTENT_KEYWORDS)
 
 
 @dataclass
@@ -194,9 +199,11 @@ class RuleChain:
         if not (fc and fc.get("has_file")):
             return False
         file_ext = fc.get("file_type", "")
-        return any(kw in ctx.user_lower for kw in EDIT_INTENT_KEYWORDS) and (
-            file_ext in ANNOTATE_FILE_TYPES or file_ext in WORKFLOW_FILE_TYPES
-        )
+        if file_ext in ANNOTATE_FILE_TYPES:
+            return should_route_docx_file_edit(ctx.user_input, has_file=True)
+        if file_ext in WORKFLOW_FILE_TYPES:
+            return _has_workflow_file_edit_intent(ctx.user_lower)
+        return False
 
     def _build_file_edit(self, ctx: RuleContext) -> RoutingResult:
         file_ext = ctx.file_context.get("file_type", "")
@@ -221,8 +228,10 @@ class RuleChain:
     # 3. Short input (≤3 chars) → SYSTEM or CHAT
     def _check_short_input(self, ctx: RuleContext) -> bool:
         # strip [FILE_ATTACHED:ext] prefix for length check
+        from app.core.routing.rule_router import RuleRouter
+
         cleaned = _re.sub(r"^\[FILE_ATTACHED:[^\]]+\]\s*", "", ctx.user_input).strip()
-        return len(cleaned) <= 3
+        return len(cleaned) <= 3 and RuleRouter.quick_task_hint(cleaned) == "CHAT"
 
     def _build_short_input(self, ctx: RuleContext) -> RoutingResult:
         cleaned = _re.sub(r"^\[FILE_ATTACHED:[^\]]+\]\s*", "", ctx.user_input).strip()
@@ -500,8 +509,8 @@ def build_rule_chain(dispatcher: Any) -> RuleChain:
     chain.add_node(
         "capability_query", chain._check_capability_query, chain._build_capability_query
     )
-    # NOTE: model_primary_route is called in SmartDispatcher.analyze() before
-    # this chain only for requests without file context.
+    # Deterministic rules run before model_primary_route so obvious action
+    # requests cannot be downgraded by a weak or unavailable classifier.
     chain.add_node("file_edit", chain._check_file_edit, chain._build_file_edit)
     chain.add_node("short_input", chain._check_short_input, chain._build_short_input)
     chain.add_node("path_listing", chain._check_path_listing, chain._build_path_listing)

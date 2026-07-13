@@ -43,6 +43,11 @@ def is_within_roots(path: str, roots: Sequence[str]) -> bool:
     return False
 
 
+def has_parent_path_segment(path: str) -> bool:
+    """Return whether a relative path tries to traverse through ``..``."""
+    return any(part == ".." for part in str(path or "").replace("\\", "/").split("/"))
+
+
 def resolve_existing_path(
     user_path: str,
     *,

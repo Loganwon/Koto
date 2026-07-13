@@ -567,7 +567,7 @@ class MCPRegistry:
         reg = cls()
         try:
             if settings_path.exists():
-                data = json.loads(settings_path.read_text(encoding="utf-8"))
+                data = json.loads(settings_path.read_text(encoding="utf-8-sig"))
                 mcp_cfg = data.get("mcp_servers") or data.get("mcpServers") or {}
                 if mcp_cfg:
                     reg.from_config(mcp_cfg)

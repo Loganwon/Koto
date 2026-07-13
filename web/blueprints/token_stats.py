@@ -17,7 +17,7 @@ token_stats_bp = Blueprint("token_stats", __name__)
 def api_token_stats() -> Response:
     """Return token usage statistics for today, month, models, and recent days."""
     try:
-        from web.token_tracker import get_stats
+        from app.core.analytics.token_tracker import get_stats
 
         return jsonify(get_stats())
     except Exception as exc:
@@ -29,7 +29,7 @@ def api_token_stats() -> Response:
 def api_token_stats_reset() -> Response:
     """Reset token usage statistics. Body: {"period": "today" | "month" | "all"}."""
     try:
-        from web.token_tracker import reset_stats
+        from app.core.analytics.token_tracker import reset_stats
 
         period = (request.json or {}).get("period", "all")
         return jsonify(reset_stats(period))

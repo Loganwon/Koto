@@ -17,9 +17,9 @@ from typing import Any
 
 from web.runtime_context import (
     get_client_proxy,
-    get_settings_manager,
     get_types,
     get_workspace_dir,
+    service_registry,
 )
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def _client() -> Any:
 
 
 def _settings_manager() -> Any:
-    manager = get_settings_manager()
+    manager = service_registry.settings_manager
     if manager is None:
         raise RuntimeError("runtime settings manager is unavailable")
     return manager
@@ -40,7 +40,7 @@ def _types() -> Any:
     types_module = get_types()
     if types_module is not None:
         return types_module
-    from google.genai import types as genai_types
+    from app.core.llm.provider_compat import types as genai_types
 
     return genai_types
 
@@ -168,7 +168,7 @@ class Utils:
                 f"模型输出:\n{output_text}\n"
             )
             response = _client().models.generate_content(
-                model="gemini-2.5-flash-lite",
+                model="deepseek-chat",
                 contents=check_prompt,
                 config=_types().GenerateContentConfig(
                     max_output_tokens=300,

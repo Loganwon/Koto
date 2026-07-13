@@ -11,22 +11,64 @@ from datetime import datetime
 _logger = logging.getLogger(__name__)
 
 
+def _workspace_file_context_block(file_context):
+    if not isinstance(file_context, dict):
+        return ""
+    parts = []
+    fc_file = file_context.get("file_path") or file_context.get("file_name") or ""
+    fc_type = file_context.get("file_type") or "unknown"
+    if fc_file:
+        parts.append(f"当前打开文件: {fc_file} (类型: {fc_type})")
+    tabs = file_context.get("open_tabs") or []
+    if isinstance(tabs, list) and tabs:
+        parts.append("工作区打开的标签页: " + ", ".join(str(t) for t in tabs[:10]))
+    selection = str(file_context.get("selection") or "").strip()
+    if selection:
+        selection_kind = str(file_context.get("selection_kind") or "").strip()
+        selection_source = str(file_context.get("selection_source") or "").strip()
+        selection_meta = file_context.get("selection_meta")
+        if selection_kind:
+            parts.append(f"选区类型: {selection_kind}")
+        if selection_source:
+            parts.append(f"选区来源: {selection_source}")
+        if isinstance(selection_meta, dict):
+            meta_bits = []
+            for key in ("sheetName", "rangeA1", "rows", "cols", "kind"):
+                value = selection_meta.get(key)
+                if value not in (None, ""):
+                    meta_bits.append(f"{key}={value}")
+            if meta_bits:
+                parts.append("选区元信息: " + ", ".join(meta_bits))
+        parts.append("用户明确选中的内容:\n" + selection[:4000])
+    attached = file_context.get("attached_files") or []
+    if isinstance(attached, list) and attached:
+        names = []
+        for item in attached[:8]:
+            if isinstance(item, dict):
+                names.append(str(item.get("path") or item.get("name") or ""))
+            else:
+                names.append(str(item))
+        names = [name for name in names if name]
+        if names:
+            parts.append("已附加分析文件: " + ", ".join(names))
+    if not parts:
+        return ""
+    return (
+        "\n\n---\n"
+        "## 文件助手上下文\n"
+        "用户正在工作区文件助手中操作文档。回答时优先使用用户明确提供的选区和附加文件；"
+        "如果用户要求只处理选区，不要擅自扩展到全文。\n"
+        + "\n".join(parts)
+    )
+
+
 def _request_allows_skill_injection(data):
     if not isinstance(data, dict):
         return True
 
     def _disabled(value):
         text = str(value).strip().lower()
-        return text in {
-            "0",
-            "false",
-            "off",
-            "no",
-            "disabled",
-            "disable",
-            "detached",
-            "none",
-        }
+        return text in {"0", "false", "off", "no", "disabled", "disable", "detached", "none"}
 
     for key in ("skills_enabled", "enable_skills"):
         if key in data:
@@ -103,9 +145,9 @@ def _inject_skills_for_stream(system_instruction, task_type, user_input, data, a
             if "默认起牌规则" not in system_instruction:
                 system_instruction += (
                     "\n\n**默认起牌规则（高优先级）**\n"
-                    "- 占卜技能开启后，只要用户提出占卜相关问题，即默认按问题起牌并解读。\n"
-                    "- 不需要先追问“要不要抽牌”；直接进入抽牌与解读。\n"
-                    "- 若用户未指定牌阵，默认使用「三张牌阵·处境·行动·结果」。"
+                    '- 占卜技能开启后，只要用户提出占卜相关问题，即默认按问题起牌并解读。\n'
+                    '- 不需要先追问“要不要抽牌”；直接进入抽牌与解读。\n'
+                    '- 若用户未指定牌阵，默认使用「三张牌阵·处境·行动·结果」。'
                 )
 
             if '竞技比赛问题必须直接写出"谁赢，几比几"' not in system_instruction:
@@ -121,13 +163,8 @@ def _inject_skills_for_stream(system_instruction, task_type, user_input, data, a
 
                 div_handler = DivinationDataHandler()
                 div_context = div_handler.analyze_divination_question(user_input or "")
-                if (
-                    div_context.is_data_available
-                    and div_context.domain == "sports_esports"
-                ):
-                    div_prediction = div_handler.generate_data_driven_prediction(
-                        div_context, []
-                    )
+                if div_context.is_data_available and div_context.domain == "sports_esports":
+                    div_prediction = div_handler.generate_data_driven_prediction(div_context, [])
                     system_instruction += (
                         "\n\n**【占卜数据融合提示】**\n"
                         f"问题领域：{div_context.domain}\n"
@@ -140,7 +177,6 @@ def _inject_skills_for_stream(system_instruction, task_type, user_input, data, a
                 app_logger.debug(f"[STREAM] 占卜数据指导注入跳过: {div_err}")
     except Exception as sk_err:
         app_logger.warning(f"[STREAM] ⚠️ Skills 注入失败: {sk_err}")
-
     return system_instruction
 
 
@@ -181,6 +217,7 @@ def setup_chat_stream_context(
     if str(locked_model or "").strip().lower() in {"", "auto"}:
         locked_model = "cloud"
     shadow_context = data.get("shadow_context", "")
+    file_context = data.get("file_context") if isinstance(data.get("file_context"), dict) else None
     doc_edit = bool(data.get("doc_edit", False))
     doc_file_type = str(data.get("doc_file_type", "")).lower().strip()
     doc_has_sel = bool(data.get("doc_has_sel", False))
@@ -202,7 +239,7 @@ def setup_chat_stream_context(
 
     # ── API key check + Ollama fallback ──────────────────────────────────
     if not API_KEY:
-        from app.core.socket_handler import _is_ollama_alive
+        from app.core.shared.llm_helpers import is_ollama_alive as _is_ollama_alive
         from app.core.routing import LocalModelRouter as _LMR_nokey
 
         if _is_ollama_alive():
@@ -212,9 +249,9 @@ def setup_chat_stream_context(
             def no_key_gen():
                 msg = (
                     "⚠️ **API 密钥未配置**\n\n"
-                    "请在 `config/gemini_config.env` 文件中设置：\n"
-                    "```\nGEMINI_API_KEY=你的密钥\n```\n\n"
-                    "💡 获取密钥：[Google AI Studio](https://aistudio.google.com/apikey)\n\n"
+                    "请在 `config/deepseek_config.env` 文件中设置：\n"
+                    "```\nDEEPSEEK_API_KEY=你的密钥\n```\n\n"
+                    "💡 获取密钥：[DeepSeek 开放平台](https://platform.deepseek.com/api_keys)\n\n"
                     "设置完成后重启 Koto 即可使用。"
                 )
                 yield f"data: {json.dumps({'type': 'token', 'content': msg})}\n\n"
@@ -365,6 +402,11 @@ def setup_chat_stream_context(
             f"[STREAM] 📄 doc_edit 模式激活 file_type={doc_file_type} has_sel={doc_has_sel}"
         )
 
+    _workspace_fc_block = _workspace_file_context_block(file_context)
+    if _workspace_fc_block:
+        system_instruction += _workspace_fc_block
+        _app_logger.debug("[STREAM] 文件助手上下文已注入")
+
     if shadow_context:
         _app_logger.debug(
             f"[STREAM] 影子对话模式激活，shadow_context 长度={len(shadow_context)}"
@@ -436,8 +478,8 @@ def setup_chat_stream_context(
         _app_logger.info(f"[STREAM] ✅ Using locked_task: '{task_type}'")
     else:
         context_override = {
-            "has_file": has_recent_upload,
-            "file_type": recent_file_type,
+            "has_file": has_recent_upload or bool(file_context),
+            "file_type": (file_context or {}).get("file_type") or recent_file_type,
         }
         _routing_input = user_input
         if has_recent_upload and recent_file_type:
@@ -576,13 +618,33 @@ def setup_chat_stream_context(
     else:
         model_id = routed_model_id
 
+    # Settings own the local runtime choice.  The browser still sends a
+    # generic `locked_model: local`, while the legacy router may have already
+    # selected a cloud model for display.  Resolve the concrete configured
+    # Ollama tag here so the chat stream, status events and actual client all
+    # agree on the same model.
+    try:
+        from app.core.llm.provider_factory import get_local_model_tag, is_local_mode
+
+        if is_local_mode():
+            model_id = get_local_model_tag() or model_id
+    except Exception as _local_model_config_error:
+        _app_logger.debug(
+            "[STREAM] configured local model lookup skipped: %s",
+            _local_model_config_error,
+        )
+
     _app_logger.debug(
         f"[STREAM] Final: task_type='{task_type}', model_id='{model_id}'\n"
     )
 
     # ── Skills injection ──────────────────────────────────────────────────
     system_instruction = _inject_skills_for_stream(
-        system_instruction, task_type, user_input, data, _app_logger
+        system_instruction,
+        task_type,
+        user_input,
+        data,
+        _app_logger,
     )
 
     # ── RAG context building ──────────────────────────────────────────────
@@ -647,6 +709,7 @@ def setup_chat_stream_context(
         "doc_edit": doc_edit,
         "doc_file_type": doc_file_type,
         "doc_has_sel": doc_has_sel,
+        "file_context": file_context,
         "system_instruction": system_instruction,
         "history": history,
         "full_history": full_history,

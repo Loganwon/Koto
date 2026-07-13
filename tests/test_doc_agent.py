@@ -32,10 +32,7 @@ from app.core.agent.doc_agent import (
     FileHandle,
     create_doc_agent,
 )
-from app.core.agent.doc_event_emitter import (
-    DocEventEmitter,
-    create_emitter,
-)
+from app.core.agent.doc_event_emitter import DocEventEmitter, create_emitter
 from app.core.file.multi_file_coordinator import (
     CompareResult,
     FileSnapshot,

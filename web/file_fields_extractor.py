@@ -17,6 +17,8 @@ import socket
 from datetime import date
 from typing import Any, Dict, Optional
 
+from web.shared import ollama_available as _ollama_available
+
 # ── Ollama 连接 ──────────────────────────────────────────────────────────────
 _OLLAMA_HOST = "127.0.0.1"
 _OLLAMA_PORT = 11434
@@ -47,13 +49,7 @@ _EXTRACT_PROMPT = """\
 """
 
 
-def _ollama_available() -> bool:
-    try:
-        s = socket.create_connection((_OLLAMA_HOST, _OLLAMA_PORT), timeout=1)
-        s.close()
-        return True
-    except OSError:
-        return False
+
 
 
 def extract_fields(

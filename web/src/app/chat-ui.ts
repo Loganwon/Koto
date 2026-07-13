@@ -7,23 +7,20 @@ import { csrfFetch } from '../shared/csrf';
 // ── State ──
 let selectedFiles: File[] = [];
 let lockedTaskType: string | null = null;
-let selectedModel: string = 'auto';
-let enableMiniGame: boolean = true;
 const MAX_UPLOAD_FILES = 10;
 
 const TASK_MODELS: Record<string, string> = {
-  CHAT: 'deepseek-v4-pro',
-  CODER: 'deepseek-v4-pro',
-  VISION: 'deepseek-v4-pro',
-  PAINTER: 'nano-banana-pro-preview',
-  RESEARCH: 'deep-research-pro-preview-12-2025',
-  FILE_GEN: 'deepseek-v4-pro'
+  CHAT: 'deepseek-chat',
+  CODER: 'deepseek-chat',
+  VISION: 'deepseek-chat',
+  PAINTER: 'deepseek-chat',
+  RESEARCH: 'deepseek-chat',
+  FILE_GEN: 'deepseek-chat'
 };
 
 (window as any).selectedFiles = selectedFiles;
 (window as any).lockedTaskType = lockedTaskType;
-(window as any).selectedModel = selectedModel;
-(window as any).enableMiniGame = enableMiniGame;
+if (typeof (window as any).enableMiniGame !== 'boolean') (window as any).enableMiniGame = true;
 (window as any).TASK_MODELS = TASK_MODELS;
 (window as any).MAX_UPLOAD_FILES = MAX_UPLOAD_FILES;
 
@@ -80,7 +77,7 @@ function initMiniGame(): void {
 }
 
 function showMiniGame(): void {
-  if (!enableMiniGame) return;
+  if ((window as any).enableMiniGame === false) return;
   const panel = document.getElementById('miniGamePanel');
   if (!panel) return;
   panel.classList.remove('hidden');
@@ -295,14 +292,7 @@ function renderMessage(role: string, content: string, meta: Record<string, any> 
   const avatar = role === 'user' ? 'U' : `<img src="/static/assets/koto_chat_icon.png" alt="Koto" class="avatar-img">`;
   const sender = role === 'user' ? 'You' : 'Koto';
   const modelDisplayName: Record<string, string> = {
-    'gemini-3-flash-preview': 'DeepSeek',
-    'gemini-3-pro-preview': 'DeepSeek',
-    'gemini-3-pro-image-preview': 'DeepSeek',
-    'gemini-2.5-flash': 'DeepSeek',
-    'gemini-2.5-pro': 'DeepSeek',
-    'deepseek-v4-pro': 'DeepSeek V4 Pro',
-    'nano-banana-pro-preview': 'Nano Banana Pro 🎨',
-    'imagen-4.0-generate-001': 'Imagen 4 🖼️', 'deep-research-pro-preview-12-2025': 'Deep Research 🔬',
+    'deepseek-chat': 'DeepSeek Chat',
     'local-executor': 'Local Executor 🖥️',
   };
   const timestampText = formatMessageTimestamp(meta.timestamp);
@@ -421,7 +411,7 @@ export function removeSingleFile(index: number): void {
 }
 
 export function setSelectedFiles(files: File[], appendMode: boolean = false): void {
-  let newFiles = appendMode ? [...selectedFiles, ...files] : files;
+  const newFiles = appendMode ? [...selectedFiles, ...files] : files;
   const uniqueFiles: File[] = [];
   const seen = new Set<string>();
   for (const file of newFiles) {
@@ -630,11 +620,7 @@ export function chatSearchPrev(): void {
   _scrollToMatch(_chatSearchIdx);
 }
 
-// ── Model change ──
-export function onModelChange(value: string): void {
-  selectedModel = value;
-  (window as any).selectedModel = selectedModel;
-}
+// Model selection now managed by workspace toggle (model-settings.ts)
 
 // ── @File mention ──
 (window as any)._kotoContextFiles = [];
@@ -737,7 +723,6 @@ export function openSavedWorkspaceFile(file: string): void {
 // ── Slash Commands ──
 const SLASH_COMMANDS = [
   { cmd: 'file', desc: '文件处理', icon: '📄' },
-  { cmd: 'image', desc: '生成图片', icon: '🖼️' },
   { cmd: 'code', desc: '编写代码', icon: '💻' },
   { cmd: 'translate', desc: '翻译内容', icon: '🌏' },
   { cmd: 'summarize', desc: '总结内容', icon: '📝' },
@@ -1123,7 +1108,6 @@ export async function trainWritingStyle(): Promise<void> {
 (window as any).chatSearchNext = chatSearchNext;
 (window as any).chatSearchPrev = chatSearchPrev;
 (window as any).clearChatSearchHighlights = clearChatSearchHighlights;
-(window as any).onModelChange = onModelChange;
 (window as any).handleAtMention = handleAtMention;
 (window as any).pinContextFile = pinContextFile;
 (window as any).removeContextFile = removeContextFile;

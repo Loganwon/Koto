@@ -1,5 +1,8 @@
 /** skill-marketplace.ts — Koto Skill Marketplace Frontend Logic */
 
+import { installErrorBoundary } from '../shared/error-boundary';
+installErrorBoundary();
+
 export interface SkillItem {
   id: string;
   name: string;
@@ -1385,12 +1388,12 @@ async function ghInstallSkill(btn: HTMLElement): Promise<void> {
          target="_blank" rel="noopener noreferrer">↗</a>`;
     const item = ghState.allSkills.find(s => s.path === path && s.repo === repo);
     if (item) item.is_installed = true;
-    toast(`✅ "${escHtml(name)}" 安装成功！前往「我的技能库」查看`, 'success', 4000);
+    toast(`✅ "${escHtml(name || "")}" 安装成功！前往「我的技能库」查看`, 'success', 4000);
   } catch (e: any) {
     (btn as HTMLButtonElement).disabled = false;
     btn.textContent = '⬇️ 安装';
     if (e.message && e.message.includes('已安装')) {
-      toast(`"${escHtml(name)}" 已安装`, 'info');
+      toast(`"${escHtml(name || "")}" 已安装`, 'info');
     } else {
       toast(`安装失败: ${e.message}`, 'error');
     }

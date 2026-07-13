@@ -338,6 +338,52 @@ def delete_task(task_id: str):
     return _ok(message="任务已删除")
 
 
+@task_bp.post("/submit")
+def submit_background_task():
+    """
+    提交后台异步任务（轻量线程池，不经过 TaskLedger）。
+
+    Body JSON:
+      {"task": "任务描述"}
+    Returns:
+      {"ok": true, "task_id": "abc123", "message": "任务已提交"}
+    """
+    body = request.get_json(silent=True) or {}
+    task_text = str(body.get("task", "") or body.get("instruction", "")).strip()
+    if not task_text:
+        return _err("缺少 task 字段")
+
+    try:
+        from web.task_queue import task_queue
+    except ImportError:
+        return _err("后台任务队列未启动", 503)
+
+    task_id = task_queue.submit(
+        name=f"bg:{task_text[:40]}",
+        fn=lambda: _execute_background_file_task(task_text, body),
+    )
+    return _ok(
+        data={"task_id": task_id},
+        message="任务已提交，可通过 GET /api/tasks/<task_id> 查询进度",
+    )
+
+
+def _execute_background_file_task(task_text: str, data: dict) -> dict:
+    """Execute a file task in background (called from worker thread)."""
+    try:
+        from web.file_task_stream import stream_file_task_request
+
+        payload = {"task": task_text}
+        payload.update(
+            {k: v for k, v in data.items() if k not in ("task", "instruction")}
+        )
+        for frame in stream_file_task_request(payload):
+            pass  # Consume the SSE stream
+        return {"ok": True}
+    except Exception as e:
+        raise RuntimeError(f"Background task failed: {e}") from e
+
+
 @task_bp.post("/purge")
 def purge_tasks():
     """

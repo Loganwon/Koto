@@ -25,7 +25,7 @@ import os
 
 from flask import Blueprint, Response, jsonify, request, send_file, send_from_directory
 
-from web.auth import require_auth
+from web.blueprints.auth import require_auth
 
 _logger = logging.getLogger("koto.routes.dev")
 

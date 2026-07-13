@@ -14,10 +14,41 @@ import time
 from datetime import datetime
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from app.core.llm.model_capabilities import (
-    get_interactions_only_model_set,
-    is_interactions_only_model,
-    normalize_model_id,
+from app.core.llm.model_capabilities import get_interactions_only_model_set
+from web.document_feedback_annotations import parse_annotation_response
+from web.document_feedback_models import (
+    format_model_table,
+    list_available_models,
+    probe_working_model,
+    select_best_model,
+)
+from web.document_feedback_local_fallback import build_disabled_ai_result
+from web.document_feedback_chunk_runtime import run_ai_chunk_queue
+from web.document_feedback_ai_call import (
+    call_with_timeout,
+    filter_unanchored_annotations,
+)
+from web.document_feedback_text import (
+    select_reference_context,
+    split_into_paragraph_chunks,
+)
+from web.document_feedback_rules import append_pattern_annotations
+from web.document_feedback_result import collect_annotation_loop_result
+from web.document_feedback_progress import (
+    build_analysis_progress_event,
+    build_apply_progress_event,
+)
+from web.document_feedback_background import BackgroundProgressBridge
+from web.document_feedback_preflight import prepare_analysis_preflight
+from web.document_feedback_stream_stages import (
+    build_complete_event,
+    read_document_stage,
+)
+from web.document_feedback_stream import (
+    collect_annotation_result,
+    iter_annotation_progress_events,
+    resolve_document_path,
+    stream_annotation_events,
 )
 
 logger = logging.getLogger(__name__)
@@ -27,11 +58,11 @@ class DocumentFeedbackSystem:
     """文档智能反馈系统"""
 
     def __init__(
-        self, gemini_client=None, default_model_id: str = "gemini-2.5-pro"
+        self, gemini_client=None, default_model_id: str = "deepseek-chat"
     ):
         """
         Args:
-            gemini_client: Gemini API客户端实例
+            gemini_client: 兼容参数名；传入当前活动模型客户端
             default_model_id: 默认优先模型（必须是支持 generate_content 的模型，不能是 Interactions-only 模型）
         """
         self.client = gemini_client
@@ -73,17 +104,15 @@ class DocumentFeedbackSystem:
         if not self._is_local_client():
             return preferred
 
-        lowered = preferred.lower()
-        if lowered and lowered not in {"auto", "cloud", "local"} and not lowered.startswith("gemini"):
-            return preferred
-
+        # A local proxy has already selected the concrete Ollama model. Cloud
+        # defaults or stale UI model ids must not override that runtime identity.
         return self._local_client_model_id() or preferred or "local"
 
     def analyze_and_suggest(
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
     ) -> Dict[str, Any]:
         """
         分析文档并给出AI修改建议
@@ -125,7 +154,7 @@ class DocumentFeedbackSystem:
         logger.info(f"[DocumentFeedback] 🤖 AI分析中...")
 
         try:
-            from google.genai import types
+            from app.core.llm.provider_compat import types
 
             response = self.client.models.generate_content(
                 model=selected_model,
@@ -442,118 +471,29 @@ class DocumentFeedbackSystem:
         """列出当前 API 可用模型（仅包含支持 generateContent 的模型，排除 Interactions-only）"""
         if self._model_cache is not None:
             return self._model_cache
-        if not self.client:
-            self._model_cache = []
-            return self._model_cache
-        if self._is_local_client():
-            local_model = self._resolve_runtime_model_id(None)
-            self._model_cache = (
-                [{"name": local_model, "display_name": local_model}]
-                if local_model
-                else []
-            )
-            return self._model_cache
-        try:
-            import threading
-
-            result_holder: Dict[str, Any] = {"models": None}
-
-            def _fetch_models():
-                try:
-                    models = []
-                    for m in self.client.models.list():
-                        name = getattr(m, "name", "")
-                        display_name = getattr(m, "display_name", "")
-                        base_name = normalize_model_id(name)
-                        if not base_name:
-                            continue
-                        # 新版 google-genai SDK 中 supported_generation_methods 不再作为属性暴露
-                        # 改为：只要 API 返回该模型，默认认为支持 generateContent（排除 Interactions-only 例外）
-                        supported = getattr(m, "supported_generation_methods", None)
-                        if supported is not None:
-                            # 旧式 SDK 仍有此字段时沿用过滤逻辑
-                            if "generateContent" not in supported:
-                                continue
-                        # 跳过 Interactions-only 模型（仅支持 Interactions API，不能用于 generate_content）
-                        if not is_interactions_only_model(
-                            base_name, self._INTERACTIONS_ONLY_MODELS
-                        ):
-                            models.append(
-                                {
-                                    "name": base_name,
-                                    "display_name": display_name or base_name,
-                                }
-                            )
-                    result_holder["models"] = models
-                except Exception:
-                    result_holder["models"] = []
-
-            t = threading.Thread(target=_fetch_models, daemon=True)
-            t.start()
-            t.join(timeout=10)  # models.list() 最多等 10s，防止慢网络卡死分析线程
-            models = result_holder["models"]
-            if models is None:  # timeout
-                logger.warning(
-                    "[DocumentFeedback] ⚠️ models.list() 超时（>10s），使用空列表降级"
-                )
-                models = []
-            self._model_cache = models
-            return models
-        except Exception:
-            self._model_cache = []
-            return self._model_cache
+        self._model_cache = list_available_models(
+            client=self.client,
+            is_local_client=self._is_local_client(),
+            resolve_runtime_model_id=self._resolve_runtime_model_id,
+            interactions_only_models=self._INTERACTIONS_ONLY_MODELS,
+        )
+        return self._model_cache
 
     def _select_best_model(self, preferred: str) -> (str, List[Dict[str, str]]):
         """根据可用模型选择最高质量模型（优先使用 preferred，排除 Interactions-only 模型）"""
         models = self._list_available_models()
-        available = {m["name"] for m in models}
-
-        # 若 preferred 本身是 Interactions-only，直接替换为稳定备选
-        safe_preferred = (
-            preferred
-            if not is_interactions_only_model(preferred, self._INTERACTIONS_ONLY_MODELS)
-            else "gemini-2.5-flash"
+        return (
+            select_best_model(
+                preferred=preferred,
+                models=models,
+                interactions_only_models=self._INTERACTIONS_ONLY_MODELS,
+            ),
+            models,
         )
-
-        if not models:
-            return safe_preferred, models
-
-        priority = [
-            safe_preferred,
-            # gemini-2.5-flash / gemini-2.5-pro 是 generate_content 模型，可正常使用
-            "gemini-2.5-flash",
-            "gemini-2.5-pro",
-            # gemini-2.5-pro 是目前最强的可用模型
-            "gemini-2.5-pro",
-            "gemini-2.5-pro-customtools",
-            "gemini-3-flash",
-            "gemini-3-pro",
-            "gemini-2.5-pro",
-            "gemini-2.5-flash",
-            "gemini-2.0-pro",
-        ]
-
-        for name in priority:
-            if name in available:
-                if name != preferred:
-                    logger.info(f"[DocumentFeedback] 🔄 模型降级: {preferred} → {name}")
-                return name, models
-
-        # 若列表中没有任何匹配，使用 safe_preferred 硬降级
-        logger.warning(
-            f"[DocumentFeedback] ⚠️ 无可用匹配模型，强制使用: {safe_preferred}"
-        )
-        return safe_preferred, models
 
     def _format_model_table(self, models: List[Dict[str, str]]) -> str:
         """生成可用模型表格（Markdown）"""
-        if not models:
-            return "（暂时无法获取可用模型列表）"
-
-        rows = ["| 模型ID | 显示名称 |", "| --- | --- |"]
-        for m in models:
-            rows.append(f"| {m['name']} | {m['display_name']} |")
-        return "\n".join(rows)
+        return format_model_table(models)
 
     def _probe_working_model(self, preferred: str, timeout: int = 12) -> Optional[str]:
         """
@@ -563,77 +503,14 @@ class DocumentFeedbackSystem:
         - 所有候选均失败时返回 None
         返回第一个成功响应的模型名，若全部失败返回 None。
         """
-        resolved_preferred = self._resolve_runtime_model_id(preferred)
-        if not self.client:
-            return resolved_preferred
-        if self._is_local_client():
-            return resolved_preferred
-        from google.genai import types as _gt
-
-        probe_order = list(
-            dict.fromkeys(
-                [
-                    resolved_preferred,
-                    "gemini-2.5-pro",
-                    "gemini-2.5-pro",
-                    "gemini-2.5-flash",
-                    "gemini-2.5-flash",
-                ]
-            )
+        return probe_working_model(
+            preferred=preferred,
+            client=self.client,
+            is_local_client=self._is_local_client(),
+            resolve_runtime_model_id=self._resolve_runtime_model_id,
+            interactions_only_models=self._INTERACTIONS_ONLY_MODELS,
+            timeout_seconds=timeout,
         )
-        probe_order = [
-            m
-            for m in probe_order
-            if not is_interactions_only_model(m, self._INTERACTIONS_ONLY_MODELS)
-        ]
-
-        for candidate in probe_order:
-            import threading
-
-            _result: Dict[str, Any] = {"ok": False, "err": ""}
-
-            def _try(_m=candidate):
-                try:
-                    self.client.models.generate_content(
-                        model=_m,
-                        contents="1",
-                        config=_gt.GenerateContentConfig(
-                            temperature=0.0, max_output_tokens=5
-                        ),
-                    )
-                    _result["ok"] = True
-                except Exception as exc:
-                    _result["err"] = str(exc)
-
-            t = threading.Thread(target=_try, daemon=True)
-            t.start()
-            t.join(timeout)
-            if t.is_alive():
-                logger.info(f"[DocumentFeedback] ⏱️ 探测 {candidate} 超时，跳过")
-                continue
-            if _result["ok"]:
-                logger.info(f"[DocumentFeedback] ✅ 探测成功: {candidate}")
-                return candidate
-            err = _result["err"]
-            _is_503 = (
-                "503" in err
-                or "UNAVAILABLE" in err
-                or "overloaded" in err.lower()
-                or "high demand" in err.lower()
-            )
-            if _is_503:
-                logger.warning(
-                    f"[DocumentFeedback] ⚠️ {candidate} 过载(503)，尝试下一个模型"
-                )
-                continue
-            # 非 503 错误（认证失败/配额超限等）—— 不再往下尝试
-            logger.error(
-                f"[DocumentFeedback] ❌ {candidate} 探测失败(非503): {err[:100]}"
-            )
-            break
-
-        logger.warning(f"[DocumentFeedback] ⚠️ 所有探测候选模型均不可用")
-        return None
 
     # ==================== 文档自动标注功能 ====================
 
@@ -669,13 +546,9 @@ class DocumentFeedbackSystem:
                 logger.debug("[DocumentFeedback] status_callback 调用失败: %s", exc)
 
         def _call_model(contents: str):
-            from google.genai import types
+            from app.core.llm.provider_compat import types
 
-            # gemini-2.5-pro 是思维链模型：thinking tokens 计入 max_output_tokens 预算
-            # 设置 thinking_budget=4096 防止思考链耗尽 token 预算；max_output_tokens 提升至 16000
-            _is_thinking_model = (not is_local_client) and (
-                "2.5" in runtime_model_id or "gemini-3" in runtime_model_id
-            )
+            _is_thinking_model = False
             _thinking_cfg = (
                 types.ThinkingConfig(thinking_budget=4096)
                 if _is_thinking_model
@@ -707,33 +580,6 @@ class DocumentFeedbackSystem:
             if is_local_client
             else max_retries
         )
-
-        def _call_with_timeout(contents: str, timeout_seconds: Optional[int] = None):
-            import threading
-
-            effective_timeout = timeout_seconds or chunk_timeout_seconds
-            result_holder = {"response": None, "error": None}
-
-            def _runner():
-                try:
-                    logger.info(
-                        f"[DocumentFeedback] 🌐 调用AI API (超时: {effective_timeout}s)..."
-                    )
-                    result_holder["response"] = _call_model(contents)
-                    logger.info(f"[DocumentFeedback] ✅ AI响应成功")
-                except Exception as e:
-                    logger.error(f"[DocumentFeedback] ❌ AI调用异常: {e}")
-                    result_holder["error"] = e
-
-            t = threading.Thread(target=_runner, daemon=True)
-            t.start()
-            t.join(effective_timeout)
-            if t.is_alive():
-                logger.info(f"[DocumentFeedback] ⏱️ AI调用超时 ({effective_timeout}s)")
-                return None, TimeoutError(f"Chunk timeout after {effective_timeout}s")
-            if result_holder["error"]:
-                return None, result_holder["error"]
-            return result_holder["response"], None
 
         all_annotations: List[Dict[str, str]] = []
         seen_texts = set()
@@ -801,42 +647,20 @@ class DocumentFeedbackSystem:
                     _emit_status(
                         f"第{chunk_index}/{total_chunks}段，第{round_idx}/{max_rounds}轮：等待 AI({runtime_model_id}) 返回（第{retry + 1}/{retry_limit}次请求）"
                     )
-                    response, err = _call_with_timeout(prompt)  # 默认180秒超时
+                    response, err = call_with_timeout(
+                        _call_model, prompt, chunk_timeout_seconds
+                    )
                     if err:
                         raise err
                     if response and response.text:
                         annotations = self._parse_annotation_response(response.text)
                         if annotations:
-                            # 二次快速检测：仅过滤掉"原文在文档中完全找不到"的幻觉项
-                            try:
-                                from web.document_validator import DocumentValidator
-
-                                validation = DocumentValidator.validate_modifications(
-                                    chunk, annotations
-                                )
-                                if validation.get("risk_level") == "HIGH":
-                                    # 只过滤真正找不到原文的项（幻觉），不过滤其他 warning
-                                    rejected_indices = set()
-                                    for issue in validation.get("issues", []):
-                                        import re
-
-                                        m = re.match(r"#(\d+):\s*原文未找到", issue)
-                                        if m:
-                                            rejected_indices.add(int(m.group(1)) - 1)
-
-                                    if rejected_indices:
-                                        before = len(annotations)
-                                        annotations = [
-                                            a
-                                            for i, a in enumerate(annotations)
-                                            if i not in rejected_indices
-                                        ]
-                                        logger.info(
-                                            f"[DocumentFeedback] 🛡️ 二次检测: 过滤 {before - len(annotations)} 条幻觉项，保留 {len(annotations)} 条"
-                                        )
-                            except Exception as e:
-                                logger.warning(
-                                    f"[DocumentFeedback] ⚠️ 二次检测跳过: {e}"
+                            before = len(annotations)
+                            annotations = filter_unanchored_annotations(chunk, annotations)
+                            if len(annotations) != before:
+                                logger.info(
+                                    "[DocumentFeedback] filtered %s unanchored annotations",
+                                    before - len(annotations),
                                 )
 
                             new_items = []
@@ -997,13 +821,7 @@ class DocumentFeedbackSystem:
             (r"被(视)为", suggest_remove_bei),  # 新增：被视为
             (r"被(认)为", suggest_remove_bei),  # 新增：被认为
         ]
-        for pattern, suggest_func in passive_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, passive_patterns, min_length=3, max_length=15)
 
         # ==================== 优化策略2：名词化问题 ====================
         # 对X进行Y → YX
@@ -1028,13 +846,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in nominalization_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 12:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, nominalization_patterns, min_length=4, max_length=12)
 
         # ==================== 优化策略3：冗余转移词 ====================
         # 通过X来Y → 用X或XY
@@ -1068,13 +880,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in connector_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, connector_patterns, min_length=4, max_length=15)
 
         # ==================== 优化策略4：学术虚词 ====================
         # 影响/作用等 → 具体动词
@@ -1125,13 +931,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in abstract_terms:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 2 <= len(text) <= 6:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, abstract_terms, min_length=2, max_length=6)
 
         # ==================== 优化策略5：所字结构 ====================
         # 所+动词+的 → 去掉"所"
@@ -1147,13 +947,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in suo_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 10:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, suo_patterns, min_length=3, max_length=10)
 
         # ==================== 优化策略6：模糊限定词 ====================
         # 非常/极其等 → 删除或换更强动词
@@ -1177,13 +971,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in hedge_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)[:12]
-                if 3 <= len(text) <= 12:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, hedge_patterns, min_length=3, max_length=12, truncate_to=12)
 
         # ==================== 优化策略7：冗长表达 ====================
         # X之间的Y → X的Y
@@ -1207,13 +995,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in redundant_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, redundant_patterns, min_length=4, max_length=15)
 
         # ==================== 优化策略8：消极表述 ====================
         negative_patterns = [
@@ -1236,13 +1018,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in negative_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)[:10]
-                if 3 <= len(text) <= 10:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, negative_patterns, min_length=3, max_length=10, truncate_to=10)
 
         # ==================== 优化策略9：高频虚词提取 ====================
         freq_words = [
@@ -1309,13 +1085,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in redundancy_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 4 <= len(text) <= 12:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, redundancy_patterns, min_length=4, max_length=12)
 
         # ==================== 优化策略11：学术翻译常见问题 ====================
         academic_patterns = [
@@ -1390,13 +1160,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in academic_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 15:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, academic_patterns, min_length=3, max_length=15)
 
         # ==================== 优化策略12：常见 AI 套话 ====================
         ai_style_patterns = [
@@ -1446,13 +1210,7 @@ class DocumentFeedbackSystem:
                 },
             ),
         ]
-        for pattern, suggest_func in ai_style_patterns:
-            for m in re.finditer(pattern, chunk):
-                text = m.group(0)
-                if 3 <= len(text) <= 20:
-                    anno = suggest_func(m, text)
-                    if isinstance(anno, dict):
-                        annotations.append(anno)
+        append_pattern_annotations(annotations, chunk, ai_style_patterns, min_length=3, max_length=20)
 
         # ==================== 去重+均匀分布 ====================
         # 注：策略12（图标符号）、策略13（中英文混排空格）、策略14（格式标记）
@@ -1478,25 +1236,7 @@ class DocumentFeedbackSystem:
         formatted_content: str, max_chars: int
     ) -> List[str]:
         """按段落切分，保证每段不超过max_chars"""
-        paragraphs = [p for p in formatted_content.split("\n\n") if p.strip()]
-        chunks = []
-        current = []
-        current_len = 0
-
-        for para in paragraphs:
-            para_len = len(para) + 2  # 预留分隔符长度
-            if current_len + para_len > max_chars and current:
-                chunks.append("\n\n".join(current))
-                current = [para]
-                current_len = para_len
-            else:
-                current.append(para)
-                current_len += para_len
-
-        if current:
-            chunks.append("\n\n".join(current))
-
-        return chunks
+        return split_into_paragraph_chunks(formatted_content, max_chars)
 
     def analyze_for_annotation_chunked(
         self,
@@ -1528,42 +1268,6 @@ class DocumentFeedbackSystem:
                 progress_callback(current_value, total_value, message_text, **extra)
             except TypeError:
                 progress_callback(current_value, total_value, message_text)
-
-        def _build_partial_proposal(item: Dict[str, Any], *, chunk_index: int, global_chunk_index: int) -> Optional[Dict[str, Any]]:
-            original_text = str(
-                item.get("原文片段")
-                or item.get("原文")
-                or item.get("original")
-                or ""
-            ).strip()
-            proposed_text = str(
-                item.get("修改建议")
-                or item.get("改为")
-                or item.get("修改后文本")
-                or item.get("modified")
-                or ""
-            ).strip()
-            reason = str(
-                item.get("修改原因")
-                or item.get("原因")
-                or item.get("reason")
-                or ""
-            ).strip()
-            if not original_text or not proposed_text:
-                return None
-            preview = {
-                "original_text": original_text,
-                "proposed_text": proposed_text,
-                "anchor_text": original_text,
-                "chunk_index": chunk_index,
-                "global_chunk_index": global_chunk_index,
-                "source": "doc_review_stream",
-                "preview_only": True,
-            }
-            if reason:
-                preview["rationale"] = reason
-                preview["reason"] = reason
-            return preview
 
         effective_model_id = self._resolve_runtime_model_id(model_id)
         logger.info(f"[DocumentFeedback] 📖 读取大文档: {os.path.basename(file_path)}")
@@ -1698,386 +1402,42 @@ class DocumentFeedbackSystem:
 
         # AI禁用时，对每个chunk应用本地兜底
         if os.getenv("KOTO_DISABLE_AI") == "1":
-            logger.warning(
-                f"[DocumentFeedback] ⚠️ KOTO_DISABLE_AI=1，使用本地兜底标注（{selected_chunk_count or len(chunks)}段）"
+            return build_disabled_ai_result(
+                file_path=file_path,
+                chunks=chunks,
+                selected_chunk_items=selected_chunk_items,
+                selected_content_chars=selected_content_chars,
+                total_length=total_length,
+                total_chunk_count=total_chunk_count,
+                selected_chunk_start=selected_chunk_start,
+                selected_chunk_end=selected_chunk_end,
+                fallback_annotations=self._fallback_annotations_from_chunk,
             )
 
-            # 第一轮：收集所有候选标注，同时统计每段的信息密度
-            all_candidates = []  # [(原文片段, 修改建议, chunk_index, 优先级)]
-            chunk_densities = []  # 记录每段的词汇密度
-
-            logger.info(f"\n[DocumentFeedback] 📋 第一阶段：收集标注候选...\n")
-            for i, (_, chunk) in enumerate(selected_chunk_items or list(enumerate(chunks, start=1))):
-                chunk_fallback = self._fallback_annotations_from_chunk(chunk)
-                density = len(chunk_fallback) / max(
-                    1, len(chunk) / 1000
-                )  # 每1000字的标注密度
-                chunk_densities.append(density)
-
-                for anno in chunk_fallback:
-                    all_candidates.append(
-                        {
-                            "原文片段": anno.get("原文片段", ""),
-                            "修改建议": anno.get("修改建议", ""),
-                            "修改后文本": anno.get("修改后文本", ""),
-                            "理由": anno.get("理由", ""),
-                            "chunk_idx": i,
-                            "density": density,
-                        }
-                    )
-
-                progress = ((i + 1) / max(1, selected_chunk_count or len(chunks))) * 100
-                bar_filled = int(10 * (i + 1) / max(1, selected_chunk_count or len(chunks)))
-                bar = "█" * bar_filled + "░" * (10 - bar_filled)
-                logger.info(
-                    f"[DocumentFeedback] 🔍 [{bar}] {i+1}/{selected_chunk_count or len(chunks)} | 密度: {density:.1f}/千字"
-                )
-
-            # 计算平均密度和目标标注数
-            avg_density = (
-                sum(chunk_densities) / len(chunk_densities) if chunk_densities else 0
-            )
-            target_count = max(1, (selected_content_chars or total_length) // 1000 * 10)
-
-            # 第二轮：按密度均衡选择标注
-            logger.info(
-                f"\n[DocumentFeedback] ⚖️ 第二阶段：均衡分布（目标{target_count}条）...\n"
-            )
-
-            # 分chunk选择，确保每段都有适当数量
-            target_per_chunk = max(1, target_count // max(1, selected_chunk_count or len(chunks)))
-            selected_annotations = []
-            seen_texts = set()
-
-            for chunk_idx in range(selected_chunk_count or len(chunks)):
-                chunk_candidates = [
-                    c for c in all_candidates if c["chunk_idx"] == chunk_idx
-                ]
-
-                # 去重（放宽长度限制）
-                unique_candidates = {}
-                for c in chunk_candidates:
-                    text = c["原文片段"].strip()
-                    if text and 2 <= len(text) <= 20:  # 放宽上限
-                        if text not in unique_candidates:
-                            unique_candidates[text] = c
-
-                # 按密度调整该段应取的数量
-                if chunk_idx < 2:
-                    # 前两段词汇密集，多取
-                    take_count = min(len(unique_candidates), target_per_chunk + 12)
-                elif chunk_idx == 2:
-                    # 第3段相对稀疏
-                    take_count = min(len(unique_candidates), target_per_chunk + 8)
-                elif chunk_idx == 3:
-                    # 第4段密集
-                    take_count = min(len(unique_candidates), target_per_chunk + 12)
-                else:
-                    # 第5段最后的都取
-                    take_count = len(unique_candidates)
-
-                # 选择该段的标注
-                chunk_selection = list(unique_candidates.values())[:take_count]
-
-                for anno in chunk_selection:
-                    text = anno["原文片段"].strip()
-                    if text not in seen_texts:
-                        seen_texts.add(text)
-                        selected_annotations.append(
-                            {
-                                "原文片段": anno["原文片段"],
-                                "修改建议": anno["修改建议"],
-                                "修改后文本": anno.get("修改后文本", ""),
-                                "理由": anno.get("理由", ""),
-                            }
-                        )
-
-                progress = ((chunk_idx + 1) / max(1, selected_chunk_count or len(chunks))) * 100
-                bar_filled = int(20 * (chunk_idx + 1) / max(1, selected_chunk_count or len(chunks)))
-                bar = "█" * bar_filled + "░" * (20 - bar_filled)
-                logger.info(
-                    f"[DocumentFeedback] 📊 [{bar}] {chunk_idx+1}/{selected_chunk_count or len(chunks)} ({progress:.0f}%) | "
-                    + f"本段{len(chunk_selection)}条 | 累计{len(selected_annotations)}条"
-                )
-
-            # 如果标注数不足目标，补充
-            if len(selected_annotations) < target_count:
-                shortage = target_count - len(selected_annotations)
-                for c in all_candidates:
-                    if shortage <= 0:
-                        break
-                    text = c["原文片段"].strip()
-                    if text not in seen_texts and 2 <= len(text) <= 25:  # 放宽限制
-                        seen_texts.add(text)
-                        selected_annotations.append(
-                            {
-                                "原文片段": text,
-                                "修改建议": c["修改建议"],
-                                "修改后文本": c.get("修改后文本", ""),
-                                "理由": c.get("理由", ""),
-                            }
-                        )
-                        shortage -= 1
-
-            return {
-                "success": True,
-                "file_path": file_path,
-                "annotations": selected_annotations[:target_count],
-                "summary": f"本地兜底分{selected_chunk_count or len(chunks)}段生成{len(selected_annotations)}条标注（目标：{target_count}条）",
-                "annotation_count": len(selected_annotations),
-                "chunks_processed": selected_chunk_count or len(chunks),
-                "chunk_densities": chunk_densities,
-                "total_chunk_count": total_chunk_count or len(chunks),
-                "selected_chunk_count": selected_chunk_count or len(chunks),
-                "selected_chunk_start": selected_chunk_start,
-                "selected_chunk_end": selected_chunk_end,
-                # 兜底标记
-                "fallback_used": True,
-                "partial_fallback": False,
-                "fallback_chunk_count": selected_chunk_count or len(chunks),
-                "ai_chunk_count": 0,
-                "last_api_error": "KOTO_DISABLE_AI=1（手动禁用AI）",
-            }
-
-        selected_model, available_models = self._select_best_model(effective_model_id)
-        model_note = f"模型: {selected_model}"
-        if selected_model != effective_model_id:
-            model_note += f"（首选: {effective_model_id}，已自动降级）"
-        model_table = self._format_model_table(available_models)
-
-        # ── 开始前快速探测，确保所选模型实际可用（防止503退回兜底）──
-        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
-            _probed = self._probe_working_model(selected_model)
-            if _probed is None:
-                logger.warning(
-                    f"[DocumentFeedback] ⚠️ 模型探测：所有候选均不可用，将全局使用本地兜底"
-                )
-            elif _probed != selected_model:
-                logger.info(
-                    f"[DocumentFeedback] 🔄 模型探测切换: {selected_model} → {_probed}"
-                )
-                selected_model = _probed
-                model_note = f"模型: {selected_model}（首选 {effective_model_id} 不可用，已自动降级）"
-
-        logger.info(
-            f"[DocumentFeedback] 📦 文档较大({total_length}字符)，本次处理 {selected_chunk_count or len(chunks)} 段"
+        return run_ai_chunk_queue(
+            feedback_system=self,
+            file_path=file_path,
+            doc_type=doc_data.get("type"),
+            user_requirement=user_requirement,
+            effective_model_id=effective_model_id,
+            formatted_content=formatted_content,
+            reference_context=reference_context,
+            chunks=chunks,
+            selected_chunk_items=selected_chunk_items,
+            selected_content_chars=selected_content_chars,
+            total_length=total_length,
+            total_chunk_count=total_chunk_count,
+            selected_chunk_start=selected_chunk_start,
+            selected_chunk_end=selected_chunk_end,
+            analyze_chunk=_invoke_chunk_analyzer,
+            emit_progress=_emit_progress,
         )
-        logger.info(
-            f"[DocumentFeedback] 🎯 目标标注数: 约{max(1, (selected_content_chars or total_length)//1000*10)}条（每1000字10条）\n"
-        )
-
-        # 处理每一段（严格顺序执行，失败自动拆分重试）
-        from collections import deque
-
-        all_annotations = []
-        seen_texts = set()
-        processed = 0
-        min_chunk_size = 800
-        start_time = time.time()
-        queue = deque(selected_chunk_items or list(enumerate(chunks, start=1)))
-        total_chunks_initial = len(queue)
-        # ── 兜底追踪 ──────────────────────────────────────────────────
-        fallback_chunk_count = 0  # 完全使用本地正则兜底的分段数
-        ai_chunk_count = 0  # 成功调用 AI 的分段数
-        empty_result_fallback_chunk_count = 0  # AI 正常返回空结果时，本地规则补充的分段数
-        last_api_error = ""  # 最近一次 API 失败错误信息
-        _model_switched = False  # 是否已因 503 切换过模型（避免反复探测）
-
-        while queue:
-            global_chunk_index, chunk = queue.popleft()
-            processed += 1
-            current_total = processed + len(queue)
-
-            elapsed = time.time() - start_time
-            progress_pct = (processed / max(1, current_total)) * 100
-            bar_length = 20
-            bar_filled = int(bar_length * processed / max(1, current_total))
-            progress_bar = "█" * bar_filled + "░" * (bar_length - bar_filled)
-
-            logger.info(
-                f"\n[DocumentFeedback] 📊 [{progress_bar}] {processed}/{current_total} ({progress_pct:.0f}%)"
-            )
-            logger.info(
-                f"[DocumentFeedback] ⏱️ 已用时: {elapsed:.1f}s | 累计{len(all_annotations)}条标注 | 剩余{len(queue)}段"
-            )
-
-            def _chunk_status(detail: str) -> None:
-                if not detail:
-                    return
-                _emit_progress(
-                    max(0.05, processed - 0.95),
-                    total_chunks_initial,
-                    detail,
-                )
-
-            annotations = _invoke_chunk_analyzer(
-                chunk=chunk,
-                doc_type=doc_data.get("type"),
-                user_requirement=user_requirement,
-                model_id=selected_model,
-                chunk_index=global_chunk_index,
-                total_chunks=total_chunk_count or current_total,
-                full_doc_context=formatted_content,
-                reference_context=reference_context,
-                max_retries=2,
-                status_callback=_chunk_status,
-            )
-
-            if annotations is None:
-                if len(chunk) <= min_chunk_size:
-                    return {
-                        "success": False,
-                        "error": f"分段内容过小仍失败（{len(chunk)}字符），请检查网络或API配置后重试",
-                        "file_path": file_path,
-                    }
-                sub_chunks = self._split_into_chunks_by_paragraphs(
-                    chunk, max(min_chunk_size, len(chunk) // 2)
-                )
-                if len(sub_chunks) <= 1:
-                    return {
-                        "success": False,
-                        "error": f"分段拆分失败，无法继续处理（{len(chunk)}字符）",
-                        "file_path": file_path,
-                    }
-                for sc in reversed(sub_chunks):
-                    queue.appendleft((global_chunk_index, sc))
-                logger.info(
-                    f"[DocumentFeedback] 🔁 分段失败，已拆分为{len(sub_chunks)}段重试"
-                )
-                continue
-
-            empty_result_fallback_applied = False
-            if not annotations:
-                local_annotations = self._fallback_annotations_from_chunk(chunk)
-                if local_annotations:
-                    annotations = local_annotations
-                    empty_result_fallback_applied = True
-                    empty_result_fallback_chunk_count += 1
-                    logger.info(
-                        f"[DocumentFeedback] ℹ️ 第{processed}段 AI 未给出修改，已补充本地规则 {len(local_annotations)} 条"
-                    )
-
-            new_count = 0
-            chunk_preview_items = []
-            # ── 检测本段是否全部来自兜底（_koto_fallback_error 标记） ──
-            fb_items = [a for a in annotations if a.get("_koto_fallback_error")]
-            if fb_items:
-                api_err = fb_items[0].get("_koto_fallback_error", "")
-                if not last_api_error:
-                    last_api_error = api_err
-                if len(fb_items) == len(annotations):
-                    fallback_chunk_count += 1
-                    logger.error(
-                        f"[DocumentFeedback] ⚠️ 第{processed}段全部使用本地兜底（API错误: {api_err[:60]}）"
-                    )
-                else:
-                    # 部分兜底（理论上不会出现，保留以防万一）
-                    fallback_chunk_count += 1
-
-                # ── 503 触发模型切换：探测新可用模型，让后续分段继续用 AI ──
-                if not _model_switched and any(a.get("_koto_503") for a in annotations):
-                    _probed_switch = self._probe_working_model(selected_model)
-                    if _probed_switch and _probed_switch != selected_model:
-                        logger.info(
-                            f"[DocumentFeedback] 🔄 503触发切换: {selected_model} → {_probed_switch}，将重新处理本段"
-                        )
-                        selected_model = _probed_switch
-                        model_note = (
-                            f"模型: {selected_model}（运行中自动从503过载模型切换）"
-                        )
-                        # 把当前段重新推回队列头，用新模型再跑一次
-                        queue.appendleft((global_chunk_index, chunk))
-                        processed -= 1  # 抵消本次 processed+=1，保持计数准确
-                        fallback_chunk_count -= 1  # 本段还没真正兜底，撤回计数
-                        _model_switched = True
-                        continue
-                    _model_switched = True  # 探测失败或模型未变，不再重试
-            else:
-                if annotations and not empty_result_fallback_applied:
-                    ai_chunk_count += 1
-            # 清除内部标记键，兜底标注直接丢弃（避免低质量regex内容污染输出）
-            for ann in annotations:
-                ann.pop("_koto_503", None)
-
-            for item in annotations:
-                if item.pop("_koto_fallback_error", None):
-                    continue  # 跳过兜底标注，保持输出质量
-                text = (item.get("原文片段") or "").strip()
-                if text and text not in seen_texts:
-                    seen_texts.add(text)
-                    all_annotations.append(item)
-                    new_count += 1
-                    preview_item = _build_partial_proposal(
-                        item,
-                        chunk_index=processed,
-                        global_chunk_index=global_chunk_index,
-                    )
-                    if preview_item:
-                        chunk_preview_items.append(preview_item)
-
-            if total_chunks_initial != (total_chunk_count or total_chunks_initial):
-                msg = (
-                    f"已完成本批 {processed}/{total_chunks_initial} 段"
-                    f"（全局 {global_chunk_index}/{total_chunk_count}，本段+{new_count}条，累计{len(all_annotations)}条）"
-                )
-            else:
-                msg = f"已完成 {processed}/{current_total} 段 (本段+{new_count}条，累计{len(all_annotations)}条)"
-            logger.info(
-                f"[DocumentFeedback] ✅ 第 {processed} 段完成（全局 {global_chunk_index}/{total_chunk_count or current_total}）: 新增 {new_count} 条标注"
-            )
-            _emit_progress(
-                processed,
-                total_chunks_initial,
-                msg,
-                chunk_status="completed",
-                chunk_index=processed,
-                chunk_total=total_chunks_initial,
-                global_chunk_index=global_chunk_index,
-                global_chunk_total=total_chunk_count or current_total,
-                added_count=new_count,
-                total_annotations=len(all_annotations),
-                partial_proposals=chunk_preview_items[:3],
-                target_path=file_path,
-            )
-
-        elapsed_total = time.time() - start_time
-
-        logger.info(f"\n[DocumentFeedback] 🎉 分段处理完成")
-        logger.info(f"[DocumentFeedback] ⏱️ 总耗时: {elapsed_total:.1f}s")
-        logger.info(
-            f"[DocumentFeedback] 📊 共生成{len(all_annotations)}条标注（目标: 约{total_length//1000*10}条）\n"
-        )
-
-        return {
-            "success": True,
-            "file_path": file_path,
-            "annotations": all_annotations,
-            "summary": (
-                f"分段顺序处理（本批 {total_chunks_initial} 段，全局 {total_chunk_count or total_chunks_initial} 段），共生成{len(all_annotations)}条标注（耗时{elapsed_total:.1f}s）。"
-                f"{' 其中 ' + str(empty_result_fallback_chunk_count) + ' 段在 AI 未给出修改时由本地规则补充。' if empty_result_fallback_chunk_count else ''}"
-                f"{model_note}\n\n可用模型：\n{model_table}"
-            ),
-            "annotation_count": len(all_annotations),
-            "chunks_processed": processed,
-            "target_count": max(1, (selected_content_chars or total_length) // 1000 * 10),
-            "total_chunk_count": total_chunk_count or total_chunks_initial,
-            "selected_chunk_count": total_chunks_initial,
-            "selected_chunk_start": selected_chunk_start,
-            "selected_chunk_end": selected_chunk_end,
-            # ── 兜底状态（供上层展示警告） ──────────────────────────
-            "fallback_chunk_count": fallback_chunk_count,
-            "ai_chunk_count": ai_chunk_count,
-            "fallback_used": fallback_chunk_count > 0 and ai_chunk_count == 0,
-            "partial_fallback": fallback_chunk_count > 0 and ai_chunk_count > 0,
-            "empty_result_fallback_chunk_count": empty_result_fallback_chunk_count,
-            "last_api_error": last_api_error,
-        }
 
     def analyze_for_annotation(
         self,
         file_path: str,
         user_requirement: str = "",
-        model_id: str = "gemini-2.5-pro",
+        model_id: str = "deepseek-chat",
     ) -> Dict[str, Any]:
         """
         分析文档，生成标注格式的建议
@@ -2149,7 +1509,7 @@ class DocumentFeedbackSystem:
             )
 
             try:
-                from google.genai import types
+                from app.core.llm.provider_compat import types
 
                 response = self.client.models.generate_content(
                     model=selected_model,
@@ -2320,42 +1680,11 @@ class DocumentFeedbackSystem:
             }
             return
 
-        yield {
-            "stage": "reading",
-            "progress": 5,
-            "message": f"📖 正在读取文档: {os.path.basename(file_path)}",
-            "detail": "解析Word文件结构",
-        }
-
-        try:
-            doc_data = self.reader.read_document(file_path)
-            if not doc_data.get("success"):
-                yield {
-                    "stage": "error",
-                    "progress": 0,
-                    "message": f'❌ 读取失败: {doc_data.get("error")}',
-                    "detail": "",
-                }
-                return
-
-            total_paras = len(doc_data.get("paragraphs", []))
-            total_chars = sum(
-                len(p.get("text", "")) for p in doc_data.get("paragraphs", [])
-            )
-
-            yield {
-                "stage": "reading_complete",
-                "progress": 10,
-                "message": "✅ 文档读取完成",
-                "detail": f"{total_paras} 段，{total_chars} 字",
-            }
-        except Exception as e:
-            yield {
-                "stage": "error",
-                "progress": 0,
-                "message": f"❌ 读取错误: {str(e)[:100]}",
-                "detail": "",
-            }
+        doc_data, total_paras, total_chars, reading_events = read_document_stage(
+            self.reader, file_path
+        )
+        yield from reading_events
+        if doc_data is None:
             return
 
         # ===== Stage 2: 分析生成修订建议 =====
@@ -2379,112 +1708,40 @@ class DocumentFeedbackSystem:
             ),
         }
 
-        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
-            chunk_size = (
-                self._env_int("KOTO_DOC_REVIEW_LOCAL_CHUNK_SIZE", 2400, minimum=1200)
-                if self._is_local_client()
-                else 4000
-            )
-        else:
-            chunk_size = 10000
-
-        # ===== 🔌 AI 连通性预检 —— 在开始分段之前快速验证 API 可用，503时自动切模型 =====
-        _preflight_error = ""
-        if self.client and os.getenv("KOTO_DISABLE_AI") != "1":
-            _probed_model = self._probe_working_model(effective_model_id)
-            if _probed_model is None:
-                # 所有候选模型均不可用
-                _preflight_error = "所有可用模型当前均不可用（503或其他错误）"
-                logger.error(
-                    f"[DocumentFeedback] ❌ AI 预检：所有模型不可用，将使用本地规则兜底"
-                )
-                yield {
-                    "stage": "warning",
-                    "progress": 16,
-                    "message": "⚠️ Gemini API 暂时全部不可用，将使用本地规则兜底（质量有限）",
-                    "detail": "建议稍后重试",
-                }
-            elif _probed_model != effective_model_id:
-                logger.info(
-                    f"[DocumentFeedback] 🔄 预检：{effective_model_id} 过载，切换为 {_probed_model}"
-                )
-                yield {
-                    "stage": "info",
-                    "progress": 16,
-                    "message": f"🔄 {effective_model_id} 当前负载过高，已自动切换到 {_probed_model}",
-                    "detail": "系统自动选择可用模型继续任务",
-                }
-                effective_model_id = _probed_model
-            else:
-                logger.info(f"[DocumentFeedback] ✅ AI 预检通过: {effective_model_id}")
-        # ───────────────────────────────────────────────────────────────────────
+        preflight = prepare_analysis_preflight(self, effective_model_id)
+        effective_model_id = preflight.model_id
+        chunk_size = preflight.chunk_size
+        yield from preflight.events
 
         # ===== 使用线程 + Queue 实现真正实时进度推送 =====
-        import queue as queue_module
-        import threading
-
-        progress_q = queue_module.Queue()
-        result_holder = {"result": None, "error": None}
+        analysis_bridge = BackgroundProgressBridge()
         last_yield_time = [0.0]
-
-        _SENTINEL = object()  # 线程完成的标记
 
         def on_analysis_progress(current, total, message, **meta):
             """进度回调 — 在分析线程中调用，通过 Queue 发送到主线程"""
-            progress = 15 + int((current / max(1, total)) * 35)
             current_time = time.time()
             force_emit = str(meta.get("chunk_status") or "").strip().lower() == "completed"
             if force_emit or current_time - last_yield_time[0] >= 0.3:
                 last_yield_time[0] = current_time
-                event = {
-                    "stage": "analyzing",
-                    "progress": progress,
-                    "message": f"🤖 {message}",
-                    "detail": message,
-                }
-                for key in (
-                    "chunk_status",
-                    "chunk_index",
-                    "chunk_total",
-                    "global_chunk_index",
-                    "global_chunk_total",
-                    "added_count",
-                    "total_annotations",
-                    "target_path",
-                ):
-                    value = meta.get(key)
-                    if value not in (None, "", [], {}):
-                        event[key] = value
-                partial_proposals = meta.get("partial_proposals")
-                if isinstance(partial_proposals, list) and partial_proposals:
-                    event["partial_proposals"] = [
-                        dict(item) for item in partial_proposals if isinstance(item, dict)
-                    ]
-                progress_q.put(event)
+                analysis_bridge.emit(
+                    build_analysis_progress_event(current, total, message, meta)
+                )
 
         def run_analysis():
             """在后台线程中运行分析"""
-            try:
-                result_holder["result"] = self.analyze_for_annotation_chunked(
-                    file_path,
-                    user_requirement,
-                    model_id=effective_model_id,
-                    chunk_size=chunk_size,
-                    progress_callback=on_analysis_progress,
-                    reference_context=reference_context,
-                    chunk_range=chunk_range,
-                )
-            except Exception as e:
-                result_holder["error"] = e
-            finally:
-                progress_q.put(_SENTINEL)
+            return self.analyze_for_annotation_chunked(
+                file_path,
+                user_requirement,
+                model_id=effective_model_id,
+                chunk_size=chunk_size,
+                progress_callback=on_analysis_progress,
+                reference_context=reference_context,
+                chunk_range=chunk_range,
+            )
 
-        analysis_thread = threading.Thread(target=run_analysis, daemon=True)
-        analysis_thread.start()
+        analysis_bridge.start(run_analysis)
 
         # 主线程：实时从 Queue 取出进度事件并 yield（SSE 推送给浏览器）
-        heartbeat_interval = 3.0  # 每3秒发一次心跳防止 SSE 超时
-        last_heartbeat = time.time()
         current_progress = [15]  # 跟踪当前进度，防止心跳数字回退
         current_detail = [
             (
@@ -2495,48 +1752,34 @@ class DocumentFeedbackSystem:
         ]
 
         try:
-            while True:
-                if _is_cancelled():
-                    yield {
-                        "stage": "cancelled",
-                        "progress": 0,
-                        "message": "⏸️ 任务已被取消",
-                        "detail": "分析过程中中断",
-                    }
-                    return
-                try:
-                    evt = progress_q.get(timeout=1.0)
-                    if evt is _SENTINEL:
-                        break
-                    current_progress[0] = max(
-                        current_progress[0], evt.get("progress", 15)
-                    )
-                    evt_detail = str(evt.get("detail") or evt.get("message") or "").strip()
-                    if evt_detail:
-                        current_detail[0] = evt_detail
-                    yield evt
-                    last_heartbeat = time.time()
-                except queue_module.Empty:
-                    if not analysis_thread.is_alive():
-                        break
-                    # 发送心跳防止浏览器 SSE 超时断连
-                    now = time.time()
-                    if now - last_heartbeat >= heartbeat_interval:
-                        last_heartbeat = now
-                        yield {
-                            "stage": "analyzing",
-                            "progress": current_progress[0],
-                            "message": "🤖 正在分析文档...",
-                            "detail": f"{current_detail[0]}；等待 AI 响应中..." if current_detail[0] else "等待 AI 响应中...",
-                        }
+            def _update_analysis_progress(event: Dict[str, Any]) -> None:
+                current_progress[0] = max(current_progress[0], event.get("progress", 15))
+                detail = str(event.get("detail") or event.get("message") or "").strip()
+                if detail:
+                    current_detail[0] = detail
 
-            analysis_thread.join(timeout=10)
+            analysis_complete = yield from analysis_bridge.stream_events(
+                is_cancelled=_is_cancelled,
+                cancelled_event=lambda: {
+                    "stage": "cancelled", "progress": 0,
+                    "message": "⏸️ 任务已被取消", "detail": "分析过程中中断",
+                },
+                on_event=_update_analysis_progress,
+                heartbeat=lambda: {
+                    "stage": "analyzing", "progress": current_progress[0],
+                    "message": "🤖 正在分析文档...",
+                    "detail": f"{current_detail[0]}；等待 AI 响应中..." if current_detail[0] else "等待 AI 响应中...",
+                },
+            )
+            if not analysis_complete:
+                return
+            analysis_bridge.join(timeout=10)
 
             # 检查线程执行结果
-            if result_holder["error"]:
-                raise result_holder["error"]
+            if analysis_bridge.error:
+                raise analysis_bridge.error
 
-            analysis_result = result_holder["result"]
+            analysis_result = analysis_bridge.result
 
             if not analysis_result or not analysis_result.get("success"):
                 error_msg = (analysis_result or {}).get("error", "未知错误")
@@ -2656,76 +1899,45 @@ class DocumentFeedbackSystem:
             }
 
             # 文件助手主链路统一写回原生修订，不再混入批注气泡。
-            apply_q = queue_module.Queue()
-            apply_result_holder = {"result": None, "error": None}
+            apply_bridge = BackgroundProgressBridge()
 
             def on_apply_progress(current, total, status, detail, **meta):
-                pct = 60 + int((current / total) * 25) if total > 0 else 60
-                status_text = {
-                    "start": "准备写入修订",
-                    "processing": "正在写入修订",
-                    "success": "已完成当前修订",
-                    "saved": "已写回原文",
-                    "failed": "写回失败",
-                }.get(str(status or "").strip().lower(), str(status or "正在写回").strip() or "正在写回")
-                event = {
-                    "stage": "applying",
-                    "progress": pct,
-                    "message": f"📝 {status_text}",
-                    "detail": detail,
-                }
-                if meta.get("file_updated"):
-                    event.update(
-                        {
-                            "file_updated": True,
-                            "path": str(meta.get("file_path") or revised_file),
-                            "file_path": str(meta.get("file_path") or revised_file),
-                            "supported": True,
-                            "applied": int(meta.get("applied") or current or 0),
-                            "updated_in_place": bool(meta.get("updated_in_place", True)),
-                        }
+                apply_bridge.emit(
+                    build_apply_progress_event(
+                        current,
+                        total,
+                        status,
+                        detail,
+                        meta,
+                        revised_file=revised_file,
                     )
-                apply_q.put(event)
+                )
 
             def run_apply():
-                try:
-                    apply_result_holder["result"] = self._apply_docx_revisions(
-                        revised_file,
-                        annotations,
-                        progress_callback=on_apply_progress,
-                    )
-                except Exception as e:
-                    apply_result_holder["error"] = e
-                finally:
-                    apply_q.put(_SENTINEL)
+                return self._apply_docx_revisions(
+                    revised_file,
+                    annotations,
+                    progress_callback=on_apply_progress,
+                )
 
-            apply_thread = threading.Thread(target=run_apply, daemon=True)
-            apply_thread.start()
+            apply_bridge.start(run_apply)
 
-            while True:
-                if _is_cancelled():
-                    yield {
-                        "stage": "cancelled",
-                        "progress": 0,
-                        "message": "⏸️ 任务已被取消",
-                        "detail": "应用修改过程中中断",
-                    }
-                    return
-                try:
-                    evt = apply_q.get(timeout=1.0)
-                    if evt is _SENTINEL:
-                        break
-                    yield evt
-                except queue_module.Empty:
-                    if not apply_thread.is_alive():
-                        break
+            apply_complete = yield from apply_bridge.stream_events(
+                is_cancelled=_is_cancelled,
+                cancelled_event=lambda: {
+                    "stage": "cancelled", "progress": 0,
+                    "message": "⏸️ 任务已被取消", "detail": "应用修改过程中中断",
+                },
+            )
+            if not apply_complete:
+                return
 
-            apply_thread.join(timeout=10)
+            apply_bridge.join(timeout=10)
 
-            if apply_result_holder["error"]:
-                raise apply_result_holder["error"]
+            if apply_bridge.error:
+                raise apply_bridge.error
 
-            edit_result = apply_result_holder["result"]
+            edit_result = apply_bridge.result
 
             applied = edit_result.get("applied", 0)
             failed = edit_result.get("failed", 0)
@@ -2771,29 +1983,11 @@ class DocumentFeedbackSystem:
         except Exception as e:
             logger.info(f"[DocumentFeedback] 文件网络索引记录失败: {e}")
 
-        yield {
-            "stage": "complete",
-            "progress": 100,
-            "message": "✅ 文档修改完成！",
-            "detail": f"修改位置: {applied}，定位失败: {failed}",
-            "result": {
-                "success": edit_result.get("success", False),
-                "original_file": file_path,
-                "revised_file": revised_file,
-                "updated_in_place": True,
-                "applied": applied,
-                "failed": failed,
-                "total": len(annotations),
-                "analysis_summary": analysis_result.get("summary"),
-                # 兜底状态，供 app.py 展示警告
-                "fallback_used": analysis_result.get("fallback_used", False),
-                "partial_fallback": analysis_result.get("partial_fallback", False),
-                "last_api_error": analysis_result.get("last_api_error", ""),
-                "fallback_chunk_count": analysis_result.get("fallback_chunk_count", 0),
-                "ai_chunk_count": analysis_result.get("ai_chunk_count", 0),
-                "empty_result_fallback_chunk_count": analysis_result.get("empty_result_fallback_chunk_count", 0),
-            },
-        }
+        yield build_complete_event(
+            file_path=file_path, revised_file=revised_file, annotations=annotations,
+            applied=applied, failed=failed, edit_result=edit_result,
+            analysis_result=analysis_result,
+        )
 
     def full_annotation_loop(
         self,
@@ -2821,43 +2015,15 @@ class DocumentFeedbackSystem:
         logger.info("=" * 60)
         logger.info("🔄 启动文档自动修订系统（同步兼容包装）")
         logger.info("=" * 60)
-        final_error = ""
-        for progress_event in self.full_annotation_loop_streaming(
-            file_path,
-            user_requirement,
-            model_id=model_id,
-            reference_context=reference_context,
-        ):
-            stage = str(progress_event.get("stage") or "").strip().lower()
-            if stage == "complete":
-                result = progress_event.get("result")
-                if isinstance(result, dict):
-                    return result
-                return {
-                    "success": False,
-                    "error": "文档修订完成但未返回结果。",
-                    "original_file": file_path,
-                }
-            if stage == "cancelled":
-                return {
-                    "success": False,
-                    "cancelled": True,
-                    "message": str(progress_event.get("message") or progress_event.get("detail") or "文档修订任务已取消").strip() or "文档修订任务已取消",
-                    "original_file": file_path,
-                }
-            if stage == "error":
-                final_error = str(progress_event.get("message") or progress_event.get("detail") or "文档修订失败").strip()
-                return {
-                    "success": False,
-                    "error": final_error or "文档修订失败",
-                    "original_file": file_path,
-                }
-
-        return {
-            "success": False,
-            "error": final_error or "文档修订失败",
-            "original_file": file_path,
-        }
+        return collect_annotation_loop_result(
+            self.full_annotation_loop_streaming(
+                file_path,
+                user_requirement,
+                model_id=model_id,
+                reference_context=reference_context,
+            ),
+            file_path=file_path,
+        )
 
     @staticmethod
     def _strip_markdown_for_annotation(text: str) -> str:
@@ -3064,328 +2230,13 @@ class DocumentFeedbackSystem:
         total_chunks: int = 1,
     ) -> str:
         """Select the most relevant PDF reference window(s) for the current DOCX chunk."""
-        if not reference_context:
-            return ""
-
-        if isinstance(reference_context, str):
-            return reference_context.strip()
-
-        if not isinstance(reference_context, list):
-            return str(reference_context).strip()
-
-        blocks = [str(item or "").strip() for item in reference_context if str(item or "").strip()]
-        if not blocks:
-            return ""
-        if len(blocks) <= 3:
-            return "\n\n".join(blocks)
-
-        normalized_index = max(1, int(chunk_index or 1))
-        normalized_total = max(1, int(total_chunks or 1))
-        if normalized_total <= 1:
-            return "\n\n".join(blocks[:3])
-
-        ratio = (normalized_index - 1) / max(1, normalized_total - 1)
-        center = int(round(ratio * max(0, len(blocks) - 1)))
-        start = max(0, center - 1)
-        end = min(len(blocks), center + 2)
-        return "\n\n".join(blocks[start:end])
+        return select_reference_context(
+            reference_context, chunk_index=chunk_index, total_chunks=total_chunks
+        )
 
     def _parse_annotation_response(self, ai_response: str) -> List[Dict[str, str]]:
-        """解析AI响应为标注格式"""
-        import json
-        import re
-
-        def _clean_original(text: str) -> str:
-            """清理 `原文` 字段：去除 AI 意外输出的 Markdown 标记，确保可精确匹配原文。"""
-            # 去掉行首 Markdown 符号（##, -, *, >）
-            text = re.sub(r"^#{1,6}\s+", "", text.strip())
-            text = re.sub(r"^[-*]\s+", "", text)
-            text = re.sub(r"^>\s*", "", text)
-            # 去掉行内加粗/斜体
-            text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
-            text = re.sub(r"\*(.+?)\*", r"\1", text)
-            # 去掉格式变化标注
-            text = re.sub(r"\s*←\s*\[此段落有格式变化\]", "", text)
-            # 去掉颜色标记
-            text = re.sub(r"\[(.+?)\]\(颜色:[0-9A-Fa-f]+\)", r"\1", text)
-            return text.strip()
-
-        try:
-            # 尝试提取JSON数组
-            json_match = re.search(r"```json\s*(\[.*?\])\s*```", ai_response, re.DOTALL)
-            if json_match:
-                json_str = json_match.group(1)
-            else:
-                # 尝试直接找数组
-                json_match = re.search(r"\[.*\]", ai_response, re.DOTALL)
-                if json_match:
-                    json_str = json_match.group(0)
-                else:
-                    json_str = ai_response
-
-            data = json.loads(json_str)
-
-            # 验证格式
-            if isinstance(data, list):
-                valid_annotations = []
-                for item in data:
-                    if isinstance(item, dict):
-                        # 提取原文
-                        original = (
-                            item.get("原文片段")
-                            or item.get("原文")
-                            or item.get("original")
-                        )
-                        # 提取修改建议
-                        modified = (
-                            item.get("修改建议")
-                            or item.get("改为")
-                            or item.get("修改后文本")
-                            or item.get("modified")
-                        )
-                        # 提取原因
-                        reason = (
-                            item.get("修改原因")
-                            or item.get("原因")
-                            or item.get("reason")
-                        )
-
-                        if original and modified:
-                            cleaned_orig = _clean_original(str(original))
-                            if not cleaned_orig:
-                                continue
-                            # 过滤超长 `原文`（超过60字几乎肯定是整段，无法精确锚定）
-                            if len(cleaned_orig) > 60:
-                                logger.debug(
-                                    f"[DocumentFeedback] ⚠️ 过滤超长原文({len(cleaned_orig)}字): {cleaned_orig[:30]}..."
-                                )
-                                # 超长项：尝试拆分为第一个逗号/句号前的片段
-                                _short = re.split(r"[，。；！？,;!?]", cleaned_orig)[0].strip()
-                                if 4 <= len(_short) <= 40:
-                                    cleaned_orig = _short
-                                else:
-                                    continue  # 无法拆分，丢弃
-                            entry = {
-                                "原文片段": cleaned_orig,
-                                "修改建议": str(modified).strip(),
-                            }
-                            if reason:
-                                entry["修改原因"] = str(reason).strip()
-                            valid_annotations.append(entry)
-                return valid_annotations
-
-            # 如果是对象包裹格式，尝试提取 annotations/modifications/suggestions
-            if isinstance(data, dict):
-                for key in ["annotations", "modifications", "suggestions"]:
-                    if key in data and isinstance(data[key], list):
-                        valid_annotations = []
-                        for item in data[key]:
-                            if isinstance(item, dict):
-                                # 同样支持多种格式
-                                original = (
-                                    item.get("原文片段")
-                                    or item.get("原文")
-                                    or item.get("original")
-                                )
-                                modified = (
-                                    item.get("修改建议")
-                                    or item.get("改为")
-                                    or item.get("修改后文本")
-                                    or item.get("modified")
-                                )
-                                reason = (
-                                    item.get("修改原因")
-                                    or item.get("原因")
-                                    or item.get("reason")
-                                )
-
-                                if original and modified:
-                                    cleaned_orig = _clean_original(str(original))
-                                    if not cleaned_orig:
-                                        continue
-                                    if len(cleaned_orig) > 60:
-                                        logger.debug(
-                                            f"[DocumentFeedback] ⚠️ 过滤超长原文({len(cleaned_orig)}字): {cleaned_orig[:30]}..."
-                                        )
-                                        _short = re.split(r"[，。；！？,;!?]", cleaned_orig)[0].strip()
-                                        if 4 <= len(_short) <= 40:
-                                            cleaned_orig = _short
-                                        else:
-                                            continue
-                                    entry = {
-                                        "原文片段": cleaned_orig,
-                                        "修改建议": str(modified).strip(),
-                                    }
-                                    if reason:
-                                        entry["修改原因"] = str(reason).strip()
-                                    valid_annotations.append(entry)
-                        if valid_annotations:
-                            return valid_annotations
-
-            return []
-
-        except Exception as e:
-            logger.info(f"[DocumentFeedback] 解析标注失败: {e}")
-            return []
-
-
-# ---------------------------------------------------------------------------
-# Convenience wrappers (moved from document_annotation_compat.py)
-# ---------------------------------------------------------------------------
-
-
-def resolve_document_path(file_path: str, workspace_dir: str) -> str:
-    text = str(file_path or "").strip()
-    if not text:
-        return ""
-    if os.path.isabs(text):
-        return text
-    return os.path.join(workspace_dir, "documents", text)
-
-
-def collect_annotation_result(
-    *,
-    file_path: str,
-    user_requirement: str,
-    gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
-    task_id: Optional[str] = None,
-    cancel_check: Optional[Callable[[], bool]] = None,
-    skill_prompt: str = "",
-) -> Dict[str, Any]:
-    feedback_system = DocumentFeedbackSystem(
-        gemini_client=gemini_client, default_model_id=model_id
-    )
-    last_error = ""
-
-    for progress_event in feedback_system.full_annotation_loop_streaming(
-        file_path,
-        user_requirement,
-        task_id=task_id,
-        model_id=model_id,
-        cancel_check=cancel_check,
-        skill_prompt=skill_prompt,
-    ):
-        stage = str(progress_event.get("stage") or "").strip().lower()
-        if stage == "complete":
-            result = progress_event.get("result")
-            if isinstance(result, dict):
-                return result
-            return {"success": False, "error": "兼容标注路径未返回结果"}
-        if stage == "cancelled":
-            return {
-                "success": False,
-                "cancelled": True,
-                "message": str(
-                    progress_event.get("message") or "文档标注任务已取消"
-                ).strip()
-                or "文档标注任务已取消",
-            }
-        if stage == "error":
-            last_error = str(
-                progress_event.get("message")
-                or progress_event.get("detail")
-                or "文档标注失败"
-            ).strip()
-
-    return {"success": False, "error": last_error or "文档标注失败"}
-
-
-def iter_annotation_progress_events(
-    *,
-    file_path: str,
-    user_requirement: str,
-    gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
-    task_id: Optional[str] = None,
-    cancel_check: Optional[Callable[[], bool]] = None,
-    skill_prompt: str = "",
-) -> Iterable[Dict[str, Any]]:
-    feedback_system = DocumentFeedbackSystem(
-        gemini_client=gemini_client, default_model_id=model_id
-    )
-    yield from feedback_system.full_annotation_loop_streaming(
-        file_path,
-        user_requirement,
-        task_id=task_id,
-        model_id=model_id,
-        cancel_check=cancel_check,
-        skill_prompt=skill_prompt,
-    )
-
-
-def analyze_annotations_only(
-    *,
-    file_path: str,
-    user_requirement: str,
-    gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
-) -> Dict[str, Any]:
-    feedback_system = DocumentFeedbackSystem(
-        gemini_client=gemini_client, default_model_id=model_id
-    )
-    return feedback_system.analyze_for_annotation_chunked(
-        file_path,
-        user_requirement,
-        model_id=model_id,
-    )
-
-
-def stream_annotation_events(
-    *,
-    file_path: str,
-    user_requirement: str,
-    gemini_client: Any,
-    model_id: str = "gemini-2.5-pro",
-    task_id: Optional[str] = None,
-    cancel_check: Optional[Callable[[], bool]] = None,
-    skill_prompt: str = "",
-) -> Iterable[str]:
-    feedback_system = DocumentFeedbackSystem(
-        gemini_client=gemini_client, default_model_id=model_id
-    )
-
-    for progress_event in iter_annotation_progress_events(
-        file_path=file_path,
-        user_requirement=user_requirement,
-        gemini_client=gemini_client,
-        model_id=model_id,
-        task_id=task_id,
-        cancel_check=cancel_check,
-        skill_prompt=skill_prompt,
-    ):
-        stage = str(progress_event.get("stage") or "").strip().lower()
-
-        if stage == "complete":
-            result = (
-                progress_event.get("result")
-                if isinstance(progress_event.get("result"), dict)
-                else {}
-            )
-            yield f"event: complete\ndata: {json.dumps({'success': bool(result.get('success')), **result}, ensure_ascii=False)}\n\n"
-            return
-
-        if stage in {"error", "cancelled"}:
-            payload = {
-                "success": False,
-                "stage": stage,
-                "message": str(
-                    progress_event.get("message")
-                    or progress_event.get("detail")
-                    or "文档标注失败"
-                ).strip()
-                or "文档标注失败",
-            }
-            yield f"event: error\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
-            return
-
-        payload = {
-            "stage": stage,
-            "progress": progress_event.get("progress", 0),
-            "message": progress_event.get("message", ""),
-            "detail": progress_event.get("detail", ""),
-        }
-        yield f"event: progress\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+        """Keep the historic instance API while delegating response normalization."""
+        return parse_annotation_response(ai_response)
 
 
 if __name__ == "__main__":

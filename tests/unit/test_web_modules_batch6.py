@@ -490,18 +490,18 @@ class TestFileScanner:
         assert _classify(".xyz") == "其他"
 
     def test_human_size(self):
-        from web.file_scanner import _human_size
+        from web.shared import human_size
 
-        assert "B" in _human_size(100)
-        assert "KB" in _human_size(2048)
-        assert "MB" in _human_size(5 * 1024 * 1024)
+        assert "B" in human_size(100)
+        assert "KB" in human_size(2048)
+        assert "MB" in human_size(5 * 1024 * 1024)
 
     def test_human_time(self):
         import time
 
-        from web.file_scanner import _human_time
+        from web.shared import human_time
 
-        result = _human_time(time.time())
+        result = human_time(time.time())
         assert "-" in result  # date format contains dashes
 
     def test_search_empty_query(self):
@@ -573,7 +573,7 @@ class TestNotificationManager:
         self.db_path = str(tmp_path / "notifications.db")
 
     def _make_manager(self):
-        from web.notification_manager import NotificationManager
+        from app.core.services.notification_manager import NotificationManager
 
         return NotificationManager(db_path=self.db_path)
 

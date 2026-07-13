@@ -507,7 +507,7 @@ class TrainingDataBuilder:
         SYNTHETIC_EXAMPLES = [
             # (user_input, task_type, confidence)
             # ── SYSTEM ──────────────────────────────────────────────────────
-            ("打开微信", "SYSTEM", 0.97),
+            ("打开微信", "SYSTEM", 0.96),
             ("帮我截图", "SYSTEM", 0.95),
             ("打开 Chrome 浏览器", "SYSTEM", 0.95),
             ("关闭所有窗口", "SYSTEM", 0.93),

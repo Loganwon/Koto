@@ -5,35 +5,38 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
     <title>Koto (言) - AI Assistant</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/koto_icon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260625">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-ai-panel.css') }}?v=20260628-ai-panel-layout">
-    <!-- Restore UI zoom before first paint to avoid flash -->
-    <script>(function(){
-        var z=parseFloat(localStorage.getItem('koto.uiZoom')||'1');
-        document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/z)+'px');
-        if(z!==1){
-            document.documentElement.style.zoom=z;
-            var ai=document.getElementById('wa-ai');if(ai)ai.style.minWidth=Math.round(250/z)+'px';
-            var left=document.getElementById('wa-left');if(left)left.style.minWidth=Math.round(150/z)+'px';
-            var canvas=document.getElementById('wa-canvas');if(canvas)canvas.style.minWidth=Math.round(400/z)+'px';
-            window._waZoomMinSize=[Math.round(150/z),Math.round(400/z),Math.round(250/z)];
-        }
-        window.addEventListener('resize',function(){
-            var cz=parseFloat(document.documentElement.style.zoom||'1');
-            document.documentElement.style.setProperty('--viewport-h',(window.innerHeight/cz)+'px');
-        });
-    })()</script>
-<link rel="preload" as="style" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
+    <link rel="icon" type="image/png" href="{{ asset_url('assets/koto_icon.png') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/z-layers.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/skill-ui-extensions.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/workspace.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/workspace-ai-panel.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/utilities.css') }}">
+    <!-- UI zoom is applied by app/theme.ts after settings are loaded.  Do not
+         pre-apply a second html zoom here: it desynchronizes Split.js panels. -->
+<link rel="preload" as="style" href="{{ asset_url('vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
     <noscript>
-        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}">
+        <link rel="stylesheet" href="{{ asset_url('vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}">
     </noscript>
-    <script defer src="{{ url_for('static', filename='vendor/marked/12.0.0/marked.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.css') }}">
-    <!-- highlight.js & KaTeX: lazy-load on idle to avoid blocking initial render -->
-    <script>(function(){var h="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}",k="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}",l=function(u){var s=document.createElement("script");s.src=u;s.defer=true;document.head.appendChild(s)};if(window.requestIdleCallback){requestIdleCallback(function(){l(h);l(k)},{timeout:2000})}else{setTimeout(function(){l(h);l(k)},300)}})();</script>
+    <script defer src="{{ asset_url('vendor/marked/12.0.0/marked.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ asset_url('vendor/katex/0.16.9/katex.min.css') }}">
+    <!-- highlight.js & KaTeX: lazy-load on demand when content needs them -->
+    <script>(function(){
+        var h="{{ asset_url('vendor/highlight.js/11.9.0/highlight.min.js') }}";
+        var k="{{ asset_url('vendor/katex/0.16.9/katex.min.js') }}";
+        var loaded={h:false,k:false};
+        var load=function(u,cb){var s=document.createElement("script");s.src=u;s.defer=true;s.onload=cb;document.head.appendChild(s)};
+        window._kotoEnsureHighlight=function(cb){
+            if(loaded.h){cb&&cb();return}
+            load(h,function(){loaded.h=true;if(window.hljs)window.hljs.configure({cssSelector:'pre code:not(.nohighlight)'});cb&&cb()});
+        };
+        window._kotoEnsureKatex=function(cb){
+            if(loaded.k){cb&&cb();return}
+            load(k,function(){loaded.k=true;cb&&cb()});
+        };
+        // Preload after 3s idle as fallback
+        if(window.requestIdleCallback){requestIdleCallback(function(){window._kotoEnsureHighlight();window._kotoEnsureKatex()},{timeout:3000})}
+    })();</script>
     <!-- ── Token 使用监测嵌入式样式 ── -->
     <!-- Mermaid 图表渲染：按需懒加载（3.2MB，不在启动时阻塞 DOMContentLoaded） -->
 </head>
@@ -69,16 +72,19 @@
                 <button class="activity-btn" id="navSkillsBtn" data-label="技能" onclick="window.toggleSkillsPanel && window.toggleSkillsPanel()" title="Skills 库" aria-label="Skills 库" aria-expanded="false" aria-controls="skillsPanel">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5"/><path d="m3 17 9 5 9-5"/></svg>
                 </button>
+                <button class="activity-btn" id="navAiBtn" data-label="AI 对话" onclick="WA.toggleAiPanel && WA.toggleAiPanel()" title="AI 对话面板" aria-label="AI 对话面板" aria-expanded="true" aria-controls="wa-ai">
+                    <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H8l-5 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </button>
             </div>
 
             <div class="activity-bar-bottom">
                 <button class="activity-btn" id="navSettingsBtn" data-label="设置" onclick="if(window.toggleSettings)window.toggleSettings();else if(window.openSettings)window.openSettings()" title="设置" aria-label="设置" aria-expanded="false" aria-controls="settingsPanel">
                     <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.05a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.88.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.05A1.7 1.7 0 0 0 4.6 9a1.7 1.7 0 0 0-.34-1.88l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.05a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.88-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.28.6.86 1 1.55 1H21a2 2 0 1 1 0 4h-.05a1.7 1.7 0 0 0-1.55 1Z"/></svg>
                 </button>
-                <div class="status-indicator activity-status" id="statusIndicator" onclick="window.toggleLatencyDetail&&window.toggleLatencyDetail(event)" role="button" aria-expanded="false" title="服务状态">
+                <div class="status-indicator activity-status" id="statusIndicator" onclick="window.toggleLatencyDetail&&window.toggleLatencyDetail(event)" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();window.toggleLatencyDetail&&window.toggleLatencyDetail(event)}" role="button" tabindex="0" aria-expanded="false" title="服务状态">
                     <span class="status-dot"></span>
                     <div class="status-info sidebar-text">
-                        <span class="status-text" title="点击展开查看各服务商延迟详情">检查中...</span>
+                        <span class="status-text" title="点击展开查看各服务商延迟详情">正在连接...</span>
                         <span id="opsStatusBadge" style="font-size:10px;color:var(--text-muted);display:none;"></span>
                     </div>
                     <button class="sb-icon-btn" onclick="event.stopPropagation();checkStatus()" title="刷新状态">
@@ -96,22 +102,11 @@
                         </div>
                         <div class="latency-tip">
                             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></svg>
-                            <span>延迟为服务器到 AI 服务商的网络往返时间（RTT），数值越低响应越快，仅供参考</span>
+                            <span>响应延迟越低越好，绿色表示连接顺畅</span>
                         </div>
                     </div>
                 </div>
                 <div id="jobsRunningPill"></div>
-            </div>
-
-            <div class="sidebar-compat" hidden aria-hidden="true">
-                <div class="sidebar-search-wrap" id="sidebarSearchWrap">
-                    <input type="text" class="sidebar-search-input" id="sessionSearchInput"
-                           placeholder="搜索对话..." oninput="filterSessions(this.value)" autocomplete="off">
-                </div>
-                <select id="projectSelect" class="sb-project-select" title="选择项目">
-                    <option value="default">默认项目</option>
-                </select>
-                <div class="sessions-list" id="sessionsList"></div>
             </div>
 
             <div class="resize-handle resize-handle-sidebar" id="sidebarResizeHandle"></div>
@@ -150,7 +145,7 @@
                                 <button class="tp-btn" onclick="tokenWidget.refresh()">↻ 刷新</button>
                             </div>
                         </div>
-                        <div id="tokenChip" onclick="tokenWidget.toggle()">
+                        <div id="tokenChip" role="button" tabindex="0" onclick="tokenWidget.toggle()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();tokenWidget.toggle()}">
                             <span class="tc-icon">📊</span>
                             <span class="tc-label" id="tokenChipLabel">本月 …</span>
                         </div>
@@ -187,23 +182,77 @@
                                     <img src="{{ url_for('static', filename='assets/koto_icon.png') }}" alt="Koto">
                                 </div>
                                 <div class="welcome-copy">
-                                    <h2 id="welcomeGreeting">欢迎使用 Koto</h2>
-                                    <p>直接开始：先说目标，再补充文件或上下文。</p>
+                                    <h2 id="welcomeGreeting">你好，我是 Koto</h2>
+<script>(function(){var h=new Date().getHours();var g=h<6?"夜深了":h<9?"早上好":h<12?"上午好":h<14?"中午好":h<18?"下午好":h<22?"晚上好":"夜深了";var el=document.getElementById("welcomeGreeting");if(el)el.textContent=g+"，我是 Koto";})()</script>
+                                    <p>你的 AI 工作伙伴。直接告诉我你想做什么，我来帮你搞定。</p>
                                 </div>
                             </div>
-                            <div class="welcome-capability-row">
-                                <span>直接告诉 Koto 你想完成什么</span>
-                                <span>不必先选固定任务</span>
-                                <span>可以拖入文件后再细化要求</span>
+                            <div class="welcome-quick-cards">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="帮我写一份产品发布会演讲稿，面向公司全体员工，风格正式但亲切">
+                                    <span class="wqc-icon">✍️</span>
+                                    <span class="wqc-title">写文档</span>
+                                    <span class="wqc-sub">演讲稿、报告、方案</span>
+                                </button>
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="分析这份数据，帮我找出关键趋势并生成图表">
+                                    <span class="wqc-icon">📊</span>
+                                    <span class="wqc-title">分析数据</span>
+                                    <span class="wqc-sub">Excel、CSV、图表</span>
+                                </button>
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="把这些要点内容做成一份10页的PPT演示文稿">
+                                    <span class="wqc-icon">🎨</span>
+                                    <span class="wqc-title">做PPT</span>
+                                    <span class="wqc-sub">演示文稿、汇报材料</span>
+                                </button>
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="搜索整理最近三个月AI行业的重要动态，给我一份简报">
+                                    <span class="wqc-icon">🔍</span>
+                                    <span class="wqc-title">搞研究</span>
+                                    <span class="wqc-sub">搜索、调研、总结</span>
+                                </button>
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="帮我写一个Python脚本，自动整理文件夹里的文件并按日期重命名">
+                                    <span class="wqc-icon">💻</span>
+                                    <span class="wqc-title">写代码</span>
+                                    <span class="wqc-sub">脚本、调试、优化</span>
+                                </button>
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="给我解释一下机器学习的基本概念，用通俗易懂的方式">
+                                    <span class="wqc-icon">📚</span>
+                                    <span class="wqc-title">学知识</span>
+                                    <span class="wqc-sub">概念解释、学习规划</span>
+                                </button>
                             </div>
-                            <div class="welcome-prompt-actions">
-                                <button type="button" class="welcome-prompt-btn" onclick="insertSuggestion('先帮我判断怎么做：')">先帮我判断怎么做</button>
-                                <button type="button" class="welcome-prompt-btn" onclick="insertSuggestion('先给我一个结果，然后说明你做了哪些假设：')">先给我一个结果</button>
+
+                            <!-- 三步上手 Koto -->
+                            <div class="welcome-onboarding">
+                                <p class="welcome-onboarding-title">只需 3 步，开始使用 Koto</p>
+                                <div class="welcome-onboarding-cards">
+                                    <button type="button" class="welcome-ob-card" data-koto-suggestion="帮我写一份本周工作总结，包含完成事项、遇到的问题和下周计划">
+                                        <span class="wob-step">1</span>
+                                        <div class="wob-body">
+                                            <span class="wob-title">写一份工作总结</span>
+                                            <span class="wob-flow">说出目标 → Koto 梳理结构 → 生成可编辑文档</span>
+                                        </div>
+                                        <span class="wob-arrow">→</span>
+                                    </button>
+                                    <button type="button" class="welcome-ob-card" data-koto-suggestion="分析这份销售数据，找出趋势、异常和关键结论，并生成图表">
+                                        <span class="wob-step">2</span>
+                                        <div class="wob-body">
+                                            <span class="wob-title">分析一份数据</span>
+                                            <span class="wob-flow">拖入 Excel/CSV → Koto 分析 → 输出结论与图表</span>
+                                        </div>
+                                        <span class="wob-arrow">→</span>
+                                    </button>
+                                    <button type="button" class="welcome-ob-card" data-koto-suggestion="根据以下要点制作一份10页的PPT：1.项目背景 2.市场分析 3.解决方案 4.实施计划 5.预期收益">
+                                        <span class="wob-step">3</span>
+                                        <div class="wob-body">
+                                            <span class="wob-title">制作一份 PPT</span>
+                                            <span class="wob-flow">提供要点 → Koto 设计结构 → 生成演示文稿</span>
+                                        </div>
+                                        <span class="wob-arrow">→</span>
+                                    </button>
+                                </div>
                             </div>
+                            <p class="welcome-tip">💡 支持拖入文件或粘贴图片 · <kbd>Ctrl+K</kbd> 新建对话 · <kbd>Ctrl+/</kbd> 查看快捷键</p>
                         </div>
                     </div>
-                </section>
-            </div>
 
             <div id="miniGamePanel" class="mini-game-panel hidden">
                 <div class="mini-game-header">
@@ -219,7 +268,7 @@
                 <!-- Active Skills Pill Bar -->
                 <div id="chat-skill-bar" style="display:flex;">
                   <button class="csb-label" id="csbToggleBtn" onclick="window.toggleSkillsPanel && window.toggleSkillsPanel()" title="打开 / 关闭 Skills 库" aria-expanded="false" aria-controls="skillsPanel"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg> Skills <span class="csb-toggle-arrow">▾</span></button>
-                  <div class="csb-pills" id="csb-pills"><span class="csb-hint">暂无激活 — <a href="javascript:void(0)" onclick="window.openSkillsPanel && window.openSkillsPanel()">打开 Skills 库</a></span></div>
+                  <div class="csb-pills" id="csb-pills"><span class="csb-hint">👍 点击左侧 <a href="javascript:void(0)" onclick="window.openSkillsPanel && window.openSkillsPanel()">🧩 Skills</a> 激活技能，增强 Koto 能力</span></div>
                   <button class="csb-dismiss-all" id="csbDismissAllBtn" onclick="csbDismissAllSkills()" title="关闭所有激活的 Skills" style="display:none;"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg> 全关</button>
                 </div>
 
@@ -267,17 +316,16 @@
                     </button>
                 </form>
                 <div class="chat-input-footer">
-                    <div class="chat-model-row">
-                        {% include '_workspace_model_controls.html' %}
-                    </div>
                     <div class="input-meta-bar"></div>
-                    <p class="input-hint">Enter 发送 · Shift+Enter 换行 · Ctrl+/ 快捷键</p>
+                    <p class="input-hint"><kbd>Enter</kbd> 发送 · <kbd>Shift+Enter</kbd> 换行 · <kbd>Ctrl+/</kbd> 查看快捷键</p>
                 </div>
+            </div>
+                </section>
             </div>
                         </div><!-- /chatView -->
 
             <!-- ═══ 文件工作站视图 ═══ -->
-            <div id="workspaceView" class="wa-embedded" style="display:none">
+            <div id="workspaceView" class="wa-embedded" style="display:none" aria-hidden="true" inert>
                 <input type="file" id="wa-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" style="display:none">
                 <input type="file" id="wa-file-input-left" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json,.png,.jpg,.jpeg,.gif,.bmp,.webp,.svg" multiple style="display:none">
                 <input type="file" id="wa-local-file-input" accept=".docx,.xlsx,.pptx,.pdf,.txt,.md,.markdown,.csv,.json" multiple style="display:none">
@@ -317,8 +365,8 @@
                   </div>
                   <div id="wa-local-btns" hidden aria-hidden="true"></div>
                   <div class="wa-section-label collapsible" id="wa-tmpws-label">
-                    <span class="wa-section-arrow open" id="wa-tmpws-arrow" onclick="WA.toggleSection('tmpworkspace')">›</span>
-                    <span onclick="WA.toggleSection('tmpworkspace')" style="flex:1">临时工作区</span>
+                    <span class="wa-section-arrow open" id="wa-tmpws-arrow" aria-hidden="true">›</span>
+                    <span class="wa-section-toggle" data-wa-section-toggle="tmpworkspace" role="button" tabindex="0" aria-expanded="true" aria-controls="wa-tmpws-list" onclick="WA.toggleSection('tmpworkspace')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();WA.toggleSection('tmpworkspace')}" style="flex:1">临时工作区</span>
                     <span class="wa-section-badge" id="wa-tmpws-badge"></span>
                     <div class="wa-section-actions">
                       <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToTempWorkspace()" title="将当前文件加入临时工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
@@ -330,8 +378,8 @@
                     <span>右键文件选择"加入临时工作区"<br>仅在本次会话中保留</span>
                   </div>
                   <div class="wa-section-label collapsible" id="wa-myws-label">
-                    <span class="wa-section-arrow open" id="wa-myws-arrow" onclick="WA.toggleSection('myworkspace')">›</span>
-                    <span onclick="WA.toggleSection('myworkspace')" style="flex:1">我的工作区</span>
+                    <span class="wa-section-arrow open" id="wa-myws-arrow" aria-hidden="true">›</span>
+                    <span class="wa-section-toggle" data-wa-section-toggle="myworkspace" role="button" tabindex="0" aria-expanded="true" aria-controls="wa-myws-list" onclick="WA.toggleSection('myworkspace')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();WA.toggleSection('myworkspace')}" style="flex:1">我的工作区</span>
                     <span class="wa-section-badge" id="wa-myws-badge"></span>
                     <div class="wa-section-actions">
                       <button class="wa-icon-btn" onclick="event.stopPropagation();WA.addToMyWorkspace()" title="添加文件到工作区" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px">＋</button>
@@ -342,8 +390,8 @@
                     <span>右键文件选择"加入工作区"<br>或拖拽文件到此处</span>
                   </div>
                   <div class="wa-section-label collapsible" id="wa-ws-label">
-                    <span class="wa-section-arrow open" id="wa-ws-arrow" onclick="WA.toggleSection('workspace')">›</span>
-                    <span id="wa-ws-root-label" onclick="WA.toggleSection('workspace')" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">文件浏览器</span>
+                    <span class="wa-section-arrow open" id="wa-ws-arrow" aria-hidden="true">›</span>
+                    <span id="wa-ws-root-label" class="wa-section-toggle" data-wa-section-toggle="workspace" role="button" tabindex="0" aria-expanded="true" aria-controls="wa-files-list" onclick="WA.toggleSection('workspace')" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();WA.toggleSection('workspace')}" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">文件浏览器</span>
                     <span class="wa-section-badge" id="wa-ws-badge"></span>
                     <div class="wa-section-actions">
                       <button class="wa-icon-btn" id="wa-browser-sort-btn" onclick="event.stopPropagation();WA.cycleBrowserSort()" title="切换排序" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5l4-3 4 3M4 11l4 3 4-3"/></svg> 名称</button>
@@ -351,15 +399,14 @@
                   </div>
                   <div id="wa-files-list"></div>
                   <div class="wa-section-label collapsible" id="wa-recent-label">
-                    <span class="wa-section-arrow open" id="wa-recent-arrow" onclick="WA.toggleRecentSection()">›</span>
-                    <span onclick="WA.toggleRecentSection()" style="flex:1">最近文件</span>
+                    <span class="wa-section-arrow open" id="wa-recent-arrow" aria-hidden="true">›</span>
+                    <span class="wa-section-toggle" data-wa-section-toggle="recent" role="button" tabindex="0" aria-expanded="true" aria-controls="wa-recent-list" onclick="WA.toggleRecentSection()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();WA.toggleRecentSection()}" style="flex:1">最近文件</span>
                     <div class="wa-section-actions">
                       <button class="wa-icon-btn" onclick="event.stopPropagation();WA.refreshRecent()" title="刷新最近文件" style="width:auto;padding:2px 5px;font-size:10px;border-radius:3px"><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8a5.5 5.5 0 0 1 9.9-3.2M13.5 8a5.5 5.5 0 0 1-9.9 3.2"/><path d="M12.4 1.5v3.3h-3.3M3.6 14.5v-3.3h3.3"/></svg></button>
                     </div>
                   </div>
                   <div class="wa-recent-hint">最近在 Koto 中打开过的文件</div>
                   <div id="wa-recent-list"></div>
-                  <div id="wa-left-latency-slot" class="wa-left-latency-slot"></div>
                   <label id="wa-left-drop" for="wa-file-input-left">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" style="margin-bottom:4px;opacity:0.7"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg><br>
                     拖拽文件至此<br><span style="font-size:10px;opacity:0.55">DOCX · XLSX · PPTX · PDF</span>
@@ -411,23 +458,21 @@
           <!-- Find/Replace bar (Ctrl+F / Ctrl+H) -->
           <div id="wa-docx-find-bar" style="display:none">
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="wa-docx-find-input" placeholder="查找…" autocomplete="off"
-              oninput="WA.docxFindInput(this.value)" onkeydown="WA.docxFindKeydown(event)">
+            <input type="text" id="wa-docx-find-input" placeholder="查找…" autocomplete="off" data-wa-find-input="docx">
             <span id="wa-docx-find-count" class="wa-find-count"></span>
-            <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.docxFindPrev()" title="上一处 (Shift+Enter)">
+            <button class="wa-find-nav" data-wa-find-action="prev" data-wa-find-scope="docx" title="上一处 (Shift+Enter)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
             </button>
-            <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.docxFindNext()" title="下一处 (Enter)">
+            <button class="wa-find-nav" data-wa-find-action="next" data-wa-find-scope="docx" title="下一处 (Enter)">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
             </button>
-            <label class="wa-find-opt"><input type="checkbox" id="wa-docx-find-case" onchange="WA.docxFindInput(document.getElementById('wa-docx-find-input').value)"> 区分大小写</label>
-            <button class="wa-find-replace-toggle" id="wa-docx-replace-toggle" onmousedown="event.preventDefault()" onclick="WA.docxToggleReplace()" title="展开替换">替换</button>
-            <button class="wa-find-close" onmousedown="event.preventDefault()" onclick="WA.docxFindClose()" title="关闭 (Esc)">✕</button>
+            <label class="wa-find-opt"><input type="checkbox" id="wa-docx-find-case" data-wa-find-case="docx"> 区分大小写</label>
+            <button class="wa-find-replace-toggle" id="wa-docx-replace-toggle" data-wa-find-action="toggle-replace" data-wa-find-scope="docx" title="展开替换">替换</button>
+            <button class="wa-find-close" data-wa-find-action="close" data-wa-find-scope="docx" title="关闭 (Esc)">✕</button>
             <div id="wa-docx-replace-row" style="display:none">
-              <input type="text" id="wa-docx-replace-input" placeholder="替换为…" autocomplete="off"
-                onkeydown="if(event.key==='Enter')WA.docxReplaceNext()">
-              <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.docxReplaceNext()">替换</button>
-              <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.docxReplaceAll()">全部替换</button>
+              <input type="text" id="wa-docx-replace-input" placeholder="替换为…" autocomplete="off" data-wa-find-replace-input="docx">
+              <button class="wa-find-replace-btn" data-wa-find-action="replace-next" data-wa-find-scope="docx">替换</button>
+              <button class="wa-find-replace-btn" data-wa-find-action="replace-all" data-wa-find-scope="docx">全部替换</button>
             </div>
           </div>
           <div id="wa-editor-toolbar"></div>
@@ -447,23 +492,21 @@
             <!-- Find/Replace bar (Ctrl+F / Ctrl+H) — inside main column so it spans full width -->
             <div id="wa-pptx-find-bar" style="display:none">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" id="wa-pptx-find-input" placeholder="在幻灯片中查找…" autocomplete="off"
-                oninput="WA.pptxFindInput(this.value)" onkeydown="WA.pptxFindKeydown(event)">
+              <input type="text" id="wa-pptx-find-input" placeholder="在幻灯片中查找…" autocomplete="off" data-wa-find-input="pptx">
               <span id="wa-pptx-find-count" class="wa-find-count"></span>
-              <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.pptxFindPrev()" title="上一处 (Shift+Enter)">
+              <button class="wa-find-nav" data-wa-find-action="prev" data-wa-find-scope="pptx" title="上一处 (Shift+Enter)">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="18 15 12 9 6 15"/></svg>
               </button>
-              <button class="wa-find-nav" onmousedown="event.preventDefault()" onclick="WA.pptxFindNext()" title="下一处 (Enter)">
+              <button class="wa-find-nav" data-wa-find-action="next" data-wa-find-scope="pptx" title="下一处 (Enter)">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="6 9 12 15 18 9"/></svg>
               </button>
-              <label class="wa-find-opt"><input type="checkbox" id="wa-pptx-find-case" onchange="WA.pptxFindInput(document.getElementById('wa-pptx-find-input').value)"> 区分大小写</label>
-              <button class="wa-find-replace-toggle" id="wa-pptx-replace-toggle" onmousedown="event.preventDefault()" onclick="WA.pptxToggleReplace()" title="展开替换">替换</button>
-              <button class="wa-find-close" onmousedown="event.preventDefault()" onclick="WA.pptxFindClose()" title="关闭 (Esc)">✕</button>
+              <label class="wa-find-opt"><input type="checkbox" id="wa-pptx-find-case" data-wa-find-case="pptx"> 区分大小写</label>
+              <button class="wa-find-replace-toggle" id="wa-pptx-replace-toggle" data-wa-find-action="toggle-replace" data-wa-find-scope="pptx" title="展开替换">替换</button>
+              <button class="wa-find-close" data-wa-find-action="close" data-wa-find-scope="pptx" title="关闭 (Esc)">✕</button>
               <div id="wa-pptx-replace-row" style="display:none">
-                <input type="text" id="wa-pptx-replace-input" placeholder="替换为…" autocomplete="off"
-                  onkeydown="if(event.key==='Enter')WA.pptxReplaceNext()">
-                <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.pptxReplaceNext()">替换</button>
-                <button class="wa-find-replace-btn" onmousedown="event.preventDefault()" onclick="WA.pptxReplaceAll()">全部替换</button>
+                <input type="text" id="wa-pptx-replace-input" placeholder="替换为…" autocomplete="off" data-wa-find-replace-input="pptx">
+                <button class="wa-find-replace-btn" data-wa-find-action="replace-next" data-wa-find-scope="pptx">替换</button>
+                <button class="wa-find-replace-btn" data-wa-find-action="replace-all" data-wa-find-scope="pptx">全部替换</button>
               </div>
             </div>
 
@@ -1035,15 +1078,21 @@
                                         </div>
                                         <div id="wa-review-list" class="koto-docx-comment-layer"></div>
                                     </div>
-                  <div id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史">
+                  <div id="wa-ai-session-list-view" class="wa-ai-session-list-view" aria-label="AI 对话与任务历史" hidden>
                     <div class="wa-ai-session-list-head">
                       <div class="wa-ai-session-title-group">
-                        <span>AI 工作区</span>
+                        <span id="wa-ai-session-summary">AI 工作区</span>
                         <strong>对话与任务</strong>
                       </div>
                       <div class="wa-ai-session-actions">
-                        <button type="button" id="wa-ai-session-refresh" title="刷新对话" aria-label="刷新对话" onclick="WA.refreshAiSessions && WA.refreshAiSessions()">
+                        <button type="button" id="wa-ai-panel-close" class="wa-ai-panel-close-btn" title="折叠AI面板" aria-label="折叠AI面板" onclick="WA.toggleAiPanel && WA.toggleAiPanel()">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                      </button>
+                      <button type="button" id="wa-ai-session-refresh" title="刷新对话" aria-label="刷新对话" onclick="WA.refreshAiSessions && WA.refreshAiSessions()">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-15.5 6.2"/><path d="M3 12A9 9 0 0 1 18.5 5.8"/><path d="M18 2v4h4"/><path d="M6 22v-4H2"/></svg>
+                        </button>
+                        <button type="button" id="wa-ai-session-clear" class="wa-ai-session-clear-btn" title="清除全部历史对话" aria-label="清除全部历史对话" onclick="WA.clearAiSessions && WA.clearAiSessions()">
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16"/><path d="M9 6V4h6v2"/><path d="M7 6l1 14h8l1-14"/><path d="M10 10v6"/><path d="M14 10v6"/></svg>
                         </button>
                         <button type="button" id="wa-ai-session-new" class="wa-ai-session-new-btn" title="新建对话" aria-label="新建对话" onclick="WA.newAiSession && WA.newAiSession()">
                           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
@@ -1057,7 +1106,7 @@
                     </div>
                   </div>
 
-                  <div id="wa-ai-chat-view" class="wa-ai-chat-view" hidden>
+                  <div id="wa-ai-chat-view" class="wa-ai-chat-view">
                     <div class="wa-ai-chat-header">
                       <button type="button" id="wa-ai-session-back" class="wa-ai-session-back" title="返回对话列表" aria-label="返回对话列表" onclick="WA.showAiSessionList && WA.showAiSessionList()">
                         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
@@ -1067,6 +1116,8 @@
                         <span id="wa-ai-chat-subtitle">新对话</span>
                       </div>
                     </div>
+
+                  <section id="wa-artifact-panel" class="wa-artifact-panel" hidden></section>
 
                   <div id="wa-ai-messages">
                     <!-- PEMO-style welcome card — hidden once any message is sent -->
@@ -1078,12 +1129,10 @@
                           </svg>
                         </div>
                         <h2 class="wa-welcome-title">Koto AI</h2>
-                                                                                                <p class="wa-welcome-sub">能总结分析、改写润色、生成文档、整理文件。输入任务或附加文件，过程和结果都会显示在这里。</p>
+                                                                                                <p class="wa-welcome-sub">在输入框直接说出任务，或附加文件作为上下文。支持文档分析、PPT生成、代码编写、数据处理等。</p>
                       </div>
                     </div>
                   </div>
-
-                  <section id="wa-artifact-panel" class="wa-artifact-panel" hidden></section>
 
                   <div id="wa-task-live-progress" class="wa-task-live-progress" hidden>
                     <div class="wa-task-live-top">
@@ -1129,7 +1178,7 @@
                         </div>
                         <div class="wa-footer-actions">
                           <button id="wa-attach-file-btn" type="button" class="wa-attach-file-btn" onclick="window.WA && WA.pickAIContextFiles ? WA.pickAIContextFiles() : document.getElementById('wa-ai-context-file-input').click()" title="附加文件" aria-label="附加文件"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 1 1-2.83-2.83l8.49-8.48"/></svg></button>
-                          <span class="wa-input-hint">Enter 发送 Shift+Enter 换行</span>
+                          <span class="wa-input-hint"><kbd>Enter</kbd> 发送 <kbd>Shift+Enter</kbd> 换行</span>
                           <button id="wa-send-btn" type="button" onclick="WA.submitUnifiedAiComposer ? WA.submitUnifiedAiComposer() : WA.sendMessage()" title="发送" aria-label="发送"><svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
                         </div>
                       </div>
@@ -2065,14 +2114,14 @@
     })();
     </script>
 
-    <script defer src="{{ url_for('static', filename='js/build/auth-bundle.js') }}?v=20260616"></script>
-    <script defer src="{{ url_for('static', filename='js/build/app-bundle.js') }}?v=20260626-settings"></script>
+    <script defer src="{{ asset_url('js/build/auth-bundle.js') }}"></script>
+    <script defer src="{{ asset_url('js/build/app-bundle.js') }}"></script>
     <!-- Skills bundles: lazy-load on first panel open -->
     <script>
       (function(){
         var loaded=false, loading=null;
-        var s1="{{ url_for('static', filename='js/build/skills-ui-bundle.js') }}?v=20260616";
-        var s2="{{ url_for('static', filename='js/build/skills-panel-bundle.js') }}?v=20260616";
+        var s1="{{ asset_url('js/build/skills-ui-bundle.js') }}";
+        var s2="{{ asset_url('js/build/skills-panel-bundle.js') }}";
         var stubs={};
         function inject(src){
           return new Promise(function(resolve,reject){
@@ -2151,7 +2200,7 @@
             let modelsHtml = '';
             for (const [model, v] of monthModels) {
                 const pct = Math.max(1, Math.round((v.total / monthTotal) * 100));
-                const shortName = model.replace('gemini-', '').replace('nano-banana-', '').replace('imagen-', 'img-').replace('-image-preview', '-img').replace('-preview', '').replace('-generate-001', '').replace('-fast-generate-001', '-fast');
+                const shortName = model.replace('-preview', '');
                 modelsHtml += `
                     <div class="tp-model-row">
                         <span><span class="tp-model-tag">${shortName}</span></span>
@@ -2313,7 +2362,7 @@
                         ? 'opacity:.45;text-decoration:line-through;cursor:help;'
                         : '';
                     const suppressNote = isSuppressed
-                        ? `<br><span style="color:#ffb86c;font-size:11px">⚠️ 已被「${suppressedBy}」覆盖，本次不生效</span>`
+                        ? `<br><span style="color:#ffb86c;font-size:11px">⚠️ 已被「${safeSuppressedBy}」覆盖，本次不生效</span>`
                         : '';
                     return `<span class="csb-pill" style="${suppressStyle}" title="${isSuppressed ? '与「'+suppressedBy+'」冲突，被抑制' : ''}">
                         <span class="csb-pill-tip">
@@ -2485,7 +2534,7 @@
 
                 // Show parsed fields
                 const fieldsEl = document.getElementById('templateFieldsList');
-                fieldsEl.innerHTML = (data.fields || []).map(f =>
+                fieldsEl.innerHTML = (data.fields || []).map(function(f){ return _escapeHtml(f); }).map(f =>
                     {% raw %}`<span style="background:rgba(16,185,129,.15);border:1px solid rgba(16,185,129,.35);border-radius:4px;padding:2px 7px;font-size:11px;color:#7ecfff;">{{${f}}}</span>`{% endraw %}
                 ).join('');
                 document.getElementById('templateFieldsPreview').style.display = 'block';
@@ -2599,8 +2648,8 @@
         function _showToast(suggestion) {
             _currentSuggestion = suggestion;
 
-            const actions_txt = suggestion.actions.join('、') || '该操作';
-            const objects_txt = suggestion.objects.length ? suggestion.objects.slice(0,2).join('、') : '';
+            const actions_txt = _escapeHtml(suggestion.actions.join('、') || '该操作');
+            const objects_txt = suggestion.objects.length ? _escapeHtml(suggestion.objects.slice(0,2).join('、')) : '';
             const body_el = document.getElementById('macroToastBody');
             if (body_el) {
                 body_el.innerHTML =
@@ -2779,21 +2828,159 @@
             </div>
         </div>
     </div>
-    <script>
-    // Welcome screen suggestion cards — fill input with a prompt template and focus
-    function insertSuggestion(text) {
-        var el = document.getElementById('messageInput');
-        if (!el) return;
-        el.value = text;
-        el.focus();
-        el.setSelectionRange(text.length, text.length);
-        el.dispatchEvent(new Event('input'));
-    }
-    </script>
-
     <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
     {% include '_workspace_asset_scripts.html' %}
 
-<!-- Koto main app logic (real sendMessage + chat + settings) -->
+</div><!-- /app-shell -->
+
+    <!-- Koto Guided Tour Overlay -->
+    <div id="kotoTourOverlay" style="display:none">
+        <div class="koto-tour-backdrop"></div>
+        <div class="koto-tour-spotlight" id="tourSpotlight"></div>
+        <div class="koto-tour-popover" id="tourPopover">
+            <div class="koto-tour-steps" id="tourSteps"></div>
+            <div class="koto-tour-content" id="tourContent"></div>
+            <div class="koto-tour-actions">
+                <button class="koto-tour-btn koto-tour-skip" id="tourSkip">跳过</button>
+                <button class="koto-tour-btn koto-tour-prev" id="tourPrev" style="display:none">上一步</button>
+                <button class="koto-tour-btn koto-tour-next" id="tourNext">下一步</button>
+                <button class="koto-tour-btn koto-tour-done" id="tourDone" style="display:none">开始使用 ✨</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        var TOUR_KEY = "koto_tour_done_v3";
+        if (localStorage.getItem(TOUR_KEY)) return;
+
+        var steps = [
+            { target: ".welcome-quick-cards", title: "👋 欢迎使用 Koto", desc: "Koto 是你的 AI 工作伙伴，可以处理对话、文档、数据、演示文稿和研究任务。" },
+            { target: "#wa-chat-panel, #wa-user-input", title: "💬 开始对话", desc: "在输入框说出目标，也可以先拖入文件；Koto 会根据任务选择聊天或执行流程。" },
+            { target: "#navSkillsBtn", title: "🧩 Skills 技能", desc: "在 Skills 中启用需要的能力，为特定任务增加专业提示和工具。" },
+            { target: "#navAiBtn", title: "🤖 AI 工作区", desc: "文件任务的计划、执行过程、产物和最终汇报都会显示在这里。" },
+            { target: "#sideNav", title: "📁 文件工作区", desc: "打开或拖入 Word、Excel、PPT、PDF 等文件后，可以直接让 Koto 处理。" }
+        ];
+        var currentStep = 0;
+        var _tourListeners = [];
+        var _retryCount = 0;
+        var MAX_RETRIES = 20;
+
+        function _addListener(el, evt, fn) {
+            if (!el) return;
+            el.addEventListener(evt, fn);
+            _tourListeners.push({ el: el, evt: evt, fn: fn });
+        }
+
+        function dismiss() {
+            _tourListeners.forEach(function(l) {
+                try { l.el.removeEventListener(l.evt, l.fn); } catch(e) {}
+            });
+            _tourListeners = [];
+            var overlay = document.getElementById("kotoTourOverlay");
+            if (overlay) overlay.style.display = "none";
+            localStorage.setItem(TOUR_KEY, "1");
+        }
+
+        var overlay = document.getElementById("kotoTourOverlay");
+        var popover = document.getElementById("tourPopover");
+        var spotlight = document.getElementById("tourSpotlight");
+        var content = document.getElementById("tourContent");
+        var stepsDots = document.getElementById("tourSteps");
+        var prevBtn = document.getElementById("tourPrev");
+        var nextBtn = document.getElementById("tourNext");
+        var doneBtn = document.getElementById("tourDone");
+        var skipBtn = document.getElementById("tourSkip");
+
+        if (!overlay || !popover || !content || !stepsDots) return;
+
+        function findTarget(step) {
+            var targets = step.target.split(", ");
+            for (var t = 0; t < targets.length; t++) {
+                var el = document.querySelector(targets[t]);
+                if (el && el.offsetParent !== null) return el;
+            }
+            return null;
+        }
+
+        function renderDots() {
+            var html = "";
+            for (var i = 0; i < steps.length; i++) {
+                html += '<span class="koto-tour-dot' + (i === currentStep ? " active" : i < currentStep ? " done" : "") + '"></span>';
+            }
+            stepsDots.innerHTML = html;
+        }
+
+        function updatePopover() {
+            var step = steps[currentStep];
+            if (!step) return;
+            content.innerHTML = "<h3>" + step.title + "</h3><p>" + step.desc + "</p>";
+            renderDots();
+            var targetEl = findTarget(step);
+            popover.style.transform = "";
+            if (targetEl) {
+                var rect = targetEl.getBoundingClientRect();
+                var pad = 6;
+                spotlight.style.top = (rect.top - pad) + "px";
+                spotlight.style.left = (rect.left - pad) + "px";
+                spotlight.style.width = (rect.width + pad * 2) + "px";
+                spotlight.style.height = (rect.height + pad * 2) + "px";
+                spotlight.style.display = "";
+                var popTop = rect.bottom + 16;
+                var popLeft = Math.max(16, Math.min(rect.left, window.innerWidth - 400));
+                if (popTop + 220 > window.innerHeight) {
+                    popTop = Math.max(16, rect.top - 260);
+                }
+                popover.style.top = popTop + "px";
+                popover.style.left = popLeft + "px";
+                popover.style.maxWidth = Math.min(380, window.innerWidth - 32) + "px";
+            } else {
+                spotlight.style.display = "none";
+                popover.style.top = "50%";
+                popover.style.left = "50%";
+                popover.style.transform = "translate(-50%, -50%)";
+                popover.style.maxWidth = "380px";
+            }
+            if (prevBtn) prevBtn.style.display = currentStep === 0 ? "none" : "";
+            if (nextBtn) nextBtn.style.display = currentStep === steps.length - 1 ? "none" : "";
+            if (doneBtn) doneBtn.style.display = currentStep === steps.length - 1 ? "" : "none";
+        }
+
+        function goToStep(idx) {
+            currentStep = Math.max(0, Math.min(idx, steps.length - 1));
+            updatePopover();
+        }
+
+        _addListener(nextBtn, "click", function(){ goToStep(currentStep + 1); });
+        _addListener(prevBtn, "click", function(){ goToStep(currentStep - 1); });
+        _addListener(doneBtn, "click", dismiss);
+        _addListener(skipBtn, "click", dismiss);
+        _addListener(document, "keydown", function(e) {
+            if (overlay.style.display === "none") return;
+            if (e.key === "Escape") { e.preventDefault(); dismiss(); }
+            if (e.key === "ArrowRight") { e.preventDefault(); goToStep(currentStep + 1); }
+            if (e.key === "ArrowLeft") { e.preventDefault(); goToStep(currentStep - 1); }
+        });
+        _addListener(window, "resize", updatePopover);
+        _addListener(window, "scroll", updatePopover);
+        var backdrop = overlay.querySelector(".koto-tour-backdrop");
+        _addListener(backdrop, "click", dismiss);
+
+        function tryStart() {
+            _retryCount++;
+            var inputEl = document.getElementById("wa-user-input");
+            var welcomeEl = document.getElementById("welcomeScreen");
+            var inputReady = inputEl && inputEl.offsetParent !== null;
+            var welcomeVisible = welcomeEl && welcomeEl.style.display !== "none" && welcomeEl.offsetParent !== null;
+            if (inputReady && welcomeVisible) {
+                overlay.style.display = ""; document.body.style.overflow = "hidden";
+                goToStep(0);
+            } else if (_retryCount < MAX_RETRIES) {
+                setTimeout(tryStart, 500);
+            }
+        }
+        setTimeout(tryStart, 600);
+    })();
+    </script>
+
 </body>
 </html>

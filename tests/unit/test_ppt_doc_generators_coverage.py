@@ -30,11 +30,11 @@ def tmp_dir():
 
 @pytest.mark.unit
 class TestPptGenerator:
-    """Tests for web.ppt_generator.PPTGenerator"""
+    """Tests for app.core.services.ppt_generator.PPTGenerator"""
 
     def _make_gen(self, theme="business"):
-        with patch("web.ppt_themes.get_theme", return_value=None):
-            from web.ppt_generator import PPTGenerator
+        with patch("app.core.services.ppt_themes.get_theme", return_value=None):
+            from app.core.services.ppt_generator import PPTGenerator
 
             return PPTGenerator(theme=theme)
 
@@ -57,57 +57,57 @@ class TestPptGenerator:
     # -- _clean_markdown -----------------------------------------------
 
     def test_clean_markdown_removes_heading_marks(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("### Title text") == "Title text"
 
     def test_clean_markdown_strips_bold_when_requested(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("**bold text**", strip_bold=True)
         assert "**" not in result
         assert "bold text" in result
 
     def test_clean_markdown_preserves_bold_when_not_requested(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("**bold text**", strip_bold=False)
         assert "**bold text**" in result
 
     def test_clean_markdown_removes_bullet_markers(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("- list item").strip() == "list item"
 
     def test_clean_markdown_removes_inline_code(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("`code`") == "code"
 
     def test_clean_markdown_strips_links(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("[click](http://example.com)")
         assert "click" in result
         assert "http" not in result
 
     def test_clean_markdown_removes_strikethrough(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("~~old~~") == "old"
 
     def test_clean_markdown_handles_empty_string(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown("") == ""
 
     def test_clean_markdown_handles_none(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         assert PPTGenerator._clean_markdown(None) is None
 
     def test_clean_markdown_removes_ai_patterns(self):
-        from web.ppt_generator import PPTGenerator
+        from app.core.services.ppt_generator import PPTGenerator
 
         result = PPTGenerator._clean_markdown("Sure! Here is something: real content")
         assert "real content" in result
@@ -527,6 +527,41 @@ class TestFileService:
         assert result["success"] is True
         assert not os.path.exists(src)
         assert os.path.exists(dst)
+
+    def test_copy_move_delete_directory_paths(self, tmp_dir):
+        svc = self._make_svc(tmp_dir)
+        src_dir = Path(tmp_dir) / "src_dir"
+        src_dir.mkdir()
+        (src_dir / "nested.txt").write_text("nested", encoding="utf-8")
+
+        copied_dir = Path(tmp_dir) / "copied_dir"
+        copy_result = svc.copy_path(str(src_dir), str(copied_dir))
+        assert copy_result["success"] is True
+        assert (copied_dir / "nested.txt").read_text(encoding="utf-8") == "nested"
+
+        moved_dir = Path(tmp_dir) / "moved_dir"
+        move_result = svc.move_path(str(copied_dir), str(moved_dir))
+        assert move_result["success"] is True
+        assert not copied_dir.exists()
+        assert (moved_dir / "nested.txt").is_file()
+
+        delete_result = svc.delete_path(str(moved_dir))
+        assert delete_result["success"] is True
+        assert not moved_dir.exists()
+
+    def test_path_operations_reject_existing_destination_without_overwrite(
+        self, tmp_dir
+    ):
+        svc = self._make_svc(tmp_dir)
+        src_dir = Path(tmp_dir) / "src_existing"
+        dst_dir = Path(tmp_dir) / "dst_existing"
+        src_dir.mkdir()
+        dst_dir.mkdir()
+
+        result = svc.copy_path(str(src_dir), str(dst_dir), overwrite=False)
+
+        assert result["success"] is False
+        assert "已存在" in result["error"]
 
     # -- rename_file ---------------------------------------------------
 

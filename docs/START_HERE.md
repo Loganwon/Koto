@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current start page.** Start with [QUICKSTART.md](QUICKSTART.md).
+
 # 👋 从这里开始 - Koto v2.0 触发器功能
 
 **版本**: 1.0 | **日期**: 2025年2月14日 | **状态**: ✅ 完成
@@ -40,7 +42,7 @@
 💻 第三步：查看源代码
    👉 web/proactive_trigger.py (参数管理)
    👉 web/app.py (API 端点)
-   👉 web/static/js/app.js (前端逻辑)
+   👉 web/src/app/ (已迁移至模块化主应用) (前端逻辑)
 
 ✅ 完成！你现在理解了全部实现。
 ```

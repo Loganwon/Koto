@@ -818,11 +818,11 @@ class ProcessedFileNetwork:
 
             elif ext == ".pdf":
                 try:
-                    import PyPDF2
+                    import pypdf
 
                     text = []
                     with open(file_path, "rb") as f:
-                        reader = PyPDF2.PdfReader(f)
+                        reader = pypdf.PdfReader(f)
                         for page in reader.pages:
                             text.append(page.extract_text())
                     return "\n".join(text)

@@ -370,8 +370,8 @@ class TestLocalExecutorIsSystemCommand:
 
         return LocalExecutor
 
-    def test_open_app_not_detected(self):
-        assert self._cls().is_system_command("打开微信") is False
+    def test_whitelisted_app_detected(self):
+        assert self._cls().is_system_command("打开微信") is True
 
     def test_english_open_not_detected(self):
         assert self._cls().is_system_command("open chrome") is False
@@ -490,6 +490,32 @@ class TestLocalExecutorExecute:
     def test_open_without_target_is_not_system_action(self):
         result = self._cls().execute("打开")
         assert result["success"] is False
+
+    def test_open_wechat_uses_whitelist_without_arbitrary_shell(self):
+        with patch("subprocess.Popen") as mock_popen, patch(
+            "os.startfile", create=True
+        ) as mock_startfile, patch.object(
+            self._cls(), "_is_app_running", return_value=False
+        ), patch.object(
+            self._cls(), "_resolve_app_launch_target", return_value=""
+        ):
+            result = self._cls().execute("打开微信")
+        assert result["success"] is False
+        assert result["action"] == "open_app"
+        assert result["retryable"] is False
+        assert "未找到微信" in result["message"]
+        mock_popen.assert_not_called()
+        mock_startfile.assert_not_called()
+
+    def test_arbitrary_open_app_stays_blocked(self):
+        with patch("subprocess.Popen") as mock_popen, patch(
+            "os.startfile", create=True
+        ) as mock_startfile:
+            result = self._cls().execute("打开myapp")
+        assert result["success"] is False
+        assert result["action"] == ""
+        mock_popen.assert_not_called()
+        mock_startfile.assert_not_called()
 
 
 @pytest.mark.unit
@@ -682,8 +708,8 @@ class TestFileProcessorProcessFile:
 
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF-1.4 fake content")
-        # Mock PyPDF2 as unavailable
-        with patch.dict("sys.modules", {"PyPDF2": None}):
+        # Mock both local PDF text parsers as unavailable.
+        with patch.dict("sys.modules", {"pdfplumber": None, "pypdf": None}):
             result = FileProcessor.process_file(str(f))
         assert result["success"] is True
         assert result["binary_data"] is not None
@@ -695,17 +721,16 @@ class TestFileProcessorProcessFile:
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF-1.4 fake content")
 
-        mock_pypdf2 = MagicMock()
+        mock_pypdf = MagicMock()
         mock_reader = MagicMock()
         mock_page = MagicMock()
         mock_page.extract_text.return_value = (
             "这是一段正常的中文文本内容用于测试质量评估功能"
         )
         mock_reader.pages = [mock_page]
-        mock_pypdf2.PdfReader.return_value = mock_reader
+        mock_pypdf.PdfReader.return_value = mock_reader
 
-        # Need to patch the import inside _process_pdf which uses `import PyPDF2`
-        with patch.dict("sys.modules", {"PyPDF2": mock_pypdf2}):
+        with patch.dict("sys.modules", {"pdfplumber": None, "pypdf": mock_pypdf}):
             result = FileProcessor.process_file(str(f))
         assert result["success"] is True
         # Text quality check depends on heuristic; at minimum it should succeed
@@ -716,16 +741,16 @@ class TestFileProcessorProcessFile:
         f = tmp_path / "doc.pdf"
         f.write_bytes(b"%PDF-1.4 content")
 
-        mock_pypdf2 = MagicMock()
+        mock_pypdf = MagicMock()
         mock_reader = MagicMock()
         mock_page = MagicMock()
         # Garbled text: lots of Latin extended chars, few CJK
         garbled = "".join(chr(c) for c in range(0x00C0, 0x00FF)) * 5
         mock_page.extract_text.return_value = garbled
         mock_reader.pages = [mock_page]
-        mock_pypdf2.PdfReader.return_value = mock_reader
+        mock_pypdf.PdfReader.return_value = mock_reader
 
-        with patch.dict("sys.modules", {"PyPDF2": mock_pypdf2}):
+        with patch.dict("sys.modules", {"pdfplumber": None, "pypdf": mock_pypdf}):
             result = FileProcessor.process_file(str(f))
         assert result["success"] is True
         assert result["metadata"].get("text_quality") == "garbled"
@@ -1028,26 +1053,22 @@ class TestRemovedMicrophoneSttModule:
 class TestImageGeneratorInit:
 
     def test_init_with_api_key(self):
-        with patch("web.image_generator.genai") as mock_genai:
-            mock_genai.Client.return_value = MagicMock()
-            from web.image_generator import ImageGenerator
+        from web.image_generator import ImageGenerator
 
-            gen = ImageGenerator(api_key="test-key")
-        assert gen.client is not None
-        assert gen.image_model == "imagen-4.0-generate-001"
+        gen = ImageGenerator(api_key="test-key")
+        assert gen.client is None
+        assert gen.image_model is None
 
     def test_init_without_key_uses_env(self):
-        with patch("web.image_generator.genai") as mock_genai, patch.dict(
-            os.environ, {"GEMINI_API_KEY": "env-key"}
-        ):
-            mock_genai.Client.return_value = MagicMock()
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "env-key"}):
             from web.image_generator import ImageGenerator
 
             gen = ImageGenerator()
-        assert gen.client is not None
+        assert gen.client is None
+        assert gen.image_model is None
 
     def test_init_no_key_no_env(self):
-        with patch("web.image_generator.genai"), patch.dict(os.environ, {}, clear=True):
+        with patch.dict(os.environ, {}, clear=True):
             # Remove GEMINI_API_KEY if present
             os.environ.pop("GEMINI_API_KEY", None)
             from web.image_generator import ImageGenerator
@@ -1075,59 +1096,31 @@ class TestImageGeneratorGenerate:
         gen.image_model = "test"
         assert gen.generate_image("a cat", "/out.png") is False
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_generate_images_success(self, tmp_path):
+    def test_archived_cloud_client_is_not_used(self, tmp_path):
         gen = self._make_gen()
         out = str(tmp_path / "out.png")
 
-        mock_img = MagicMock()
-        mock_img.image.image_bytes = b"PNG_DATA"
-        mock_response = MagicMock()
-        mock_response.generated_images = [mock_img]
-        gen.client.models.generate_images.return_value = mock_response
-
         result = gen.generate_image("a cat", out)
-        assert result is True
-        assert Path(out).read_bytes() == b"PNG_DATA"
+        assert result is False
+        assert not Path(out).exists()
+        gen.client.models.generate_images.assert_not_called()
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_generate_images_empty_no_fallback(self, tmp_path):
+    def test_disabled_generator_does_not_fall_through(self, tmp_path):
         gen = self._make_gen()
         out = str(tmp_path / "out.png")
 
-        # generate_images returns empty - no exception, so except block is NOT entered
-        mock_response = MagicMock()
-        mock_response.generated_images = []
-        gen.client.models.generate_images.return_value = mock_response
-
-        # When generated_images is empty and no exception, function falls through
-        # returning None (implicit) - this matches the actual source behavior
         result = gen.generate_image("a cat", out)
-        assert result is None
+        assert result is False
+        assert not Path(out).exists()
 
-    def test_generate_images_exception_falls_back_to_content(self, tmp_path):
+    def test_disabled_generator_does_not_use_content_fallback(self, tmp_path):
         gen = self._make_gen()
         out = str(tmp_path / "out.png")
 
-        gen.client.models.generate_images.side_effect = Exception("API error")
-
-        # Fallback generate_content with inline image
-        import base64
-
-        img_b64 = base64.b64encode(b"IMG_BYTES").decode()
-        mock_part = MagicMock()
-        mock_part.inline_data = MagicMock(data=img_b64)
-        mock_content_part = MagicMock()
-        mock_content_part.parts = [mock_part]
-        mock_candidate = MagicMock()
-        mock_candidate.content = mock_content_part
-        mock_response = MagicMock()
-        mock_response.candidates = [mock_candidate]
-        gen.client.models.generate_content.return_value = mock_response
-
         result = gen.generate_image("a cat", out)
-        assert result is True
-        assert Path(out).read_bytes() == b"IMG_BYTES"
+        assert result is False
+        assert not Path(out).exists()
+        gen.client.models.generate_content.assert_not_called()
 
     def test_generate_content_no_inline_data(self, tmp_path):
         gen = self._make_gen()

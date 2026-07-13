@@ -17,6 +17,15 @@ def _parse_compact_sse(frame: str) -> dict:
 
 
 @pytest.mark.unit
+def test_runtime_context_model_mode_uses_canonical_default_contract():
+    from web.runtime_context import normalize_model_mode
+
+    assert normalize_model_mode("local", default="deepseek") == "local"
+    assert normalize_model_mode("auto", default="deepseek") == "deepseek"
+    assert normalize_model_mode("gemini", default="deepseek") == "deepseek"
+
+
+@pytest.mark.unit
 def test_file_task_sse_uses_unified_compact_protocol():
     from web.file_task_stream import safe_editor_sse
     from web.sse.protocol import sse
@@ -91,6 +100,37 @@ def test_editor_stream_validation_errors_use_same_sse_headers():
 
 
 @pytest.mark.unit
+def test_task_stream_quick_action_reuses_internal_stream_handler(monkeypatch):
+    import web.blueprints.editor_ai as editor_ai
+
+    received = {}
+
+    def fake_quick_action_stream(data: dict):
+        received.update(data)
+        return editor_ai._sse_response(iter(['data: {"type":"done"}\n\n']))
+
+    monkeypatch.setattr(
+        editor_ai, "_stream_editor_quick_action", fake_quick_action_stream
+    )
+    app = Flask(__name__)
+    app.register_blueprint(editor_ai.editor_ai_bp)
+
+    with app.test_client() as client:
+        response = client.post(
+            "/api/editor/ai/task-stream",
+            json={
+                "task": "润色所选文字",
+                "selection": "  保留这段文字  ",
+                "options": {"quick_action_mode": "simple"},
+            },
+        )
+
+    assert response.status_code == 200
+    assert received["action"] == "polish"
+    assert received["selection"] == "保留这段文字"
+
+
+@pytest.mark.unit
 def test_chart_validation_errors_use_same_sse_headers():
     import web.blueprints.editor_ai as editor_ai
 
@@ -110,15 +150,33 @@ def test_chart_validation_errors_use_same_sse_headers():
 @pytest.mark.unit
 def test_frontend_task_runner_matches_backend_stream_contract():
     runner = Path("web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
+    parser = Path("web/src/workspace/file-task-sse.ts").read_text(encoding="utf-8")
+    dispatcher = Path("web/src/workspace/file-task-dispatch.ts").read_text(
+        encoding="utf-8"
+    )
     bundle = Path("web/static/js/build/workspace-bundle.js").read_text(encoding="utf-8")
 
-    assert "function parseSseEvents" in runner
-    assert "WA.parseSseEvents = parseSseEvents" in runner
+    assert "from './file-task-sse';" in runner
+    assert "from './file-task-dispatch';" in runner
+    assert "export function parseSseEvents" in parser
+    assert "export interface SseParseResult" in parser
+    assert "export function dispatchFileTaskEvent" in dispatcher
+    assert "state.processedEventKeys.has(eventKey)" in dispatcher
+    assert "afterDispatch?: (_card: Card) => void;" in dispatcher
+    assert "dispatchFileTaskEvent(card, evt, {" in runner
+    assert "afterDispatch: notifyTaskWorkbenchForCard" in runner
+    assert "dataset.taskStreamIssueCount" in runner
+    assert "检测到任务进度事件缺失" not in runner
+    assert "检测到任务进度事件顺序异常" not in runner
+    assert "检测到重复进度事件" not in runner
+    assert "publishWorkspaceApi({" in runner
+    assert "parseSseEvents," in runner
     assert "csrfFetch('/api/editor/ai/task-stream'" in runner
     assert "'Accept': 'text/event-stream'" in runner
-    assert 'csrfFetch("/api/editor/ai/task-stream"' in bundle
-    assert '"Accept": "text/event-stream"' in bundle
-    assert re.search(r"WA(?:\$\d+)?\.parseSseEvents = parseSseEvents", bundle)
+    # Production bundles are minified, so local identifier names and quote
+    # styles are not stable. Keep only externally observable literals here.
+    assert "/api/editor/ai/task-stream" in bundle
+    assert "text/event-stream" in bundle
 
 
 @pytest.mark.unit
@@ -132,7 +190,7 @@ def test_workspace_chat_stream_detaches_skills_by_request_contract():
     )
 
     assert "skills_enabled: false" in dispatcher
-    assert "skills_enabled: false" in bundle
+    assert "skills_enabled" in bundle
     assert "def _request_allows_skill_injection(data):" in orchestrator
     assert "system_instruction = _inject_skills_for_stream(" in orchestrator
     assert "SkillManager.inject_into_prompt(" in orchestrator

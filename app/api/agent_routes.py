@@ -490,20 +490,13 @@ def get_agent():
     """获取 Agent 实例 — 委托给 AppContext，兼容旧路径。"""
     global _agent_instance
     if _agent_instance is None:
-        agent = None
         try:
             from app.core.app_context import ctx
 
-            agent = ctx.agent
+            _agent_instance = ctx.agent
         except Exception:
-            logger.debug("[agent_routes] AppContext agent unavailable", exc_info=True)
-        _agent_instance = agent or create_agent()
+            _agent_instance = create_agent()
     return _agent_instance
-
-
-def _agent_unavailable_response(exc: Exception):
-    logger.warning("[agent_routes] agent unavailable: %s", exc)
-    return jsonify({"success": False, "error": f"Agent unavailable: {exc}"}), 503
 
 
 def _resolve_runtime_skill(
@@ -749,10 +742,25 @@ def _build_chat_system_context(
             )
         sel = file_context.get("selection", "")
         if sel:
-            fc_parts.append(f"用户选中的文本:\n{str(sel)[:2000]}")
+            sel_kind = str(file_context.get("selection_kind") or "").strip()
+            sel_source = str(file_context.get("selection_source") or "").strip()
+            sel_meta = file_context.get("selection_meta")
+            if sel_kind:
+                fc_parts.append(f"选区类型: {sel_kind}")
+            if sel_source:
+                fc_parts.append(f"选区来源: {sel_source}")
+            if isinstance(sel_meta, dict):
+                meta_bits = []
+                for key in ("sheetName", "rangeA1", "rows", "cols", "kind"):
+                    value = sel_meta.get(key)
+                    if value not in (None, ""):
+                        meta_bits.append(f"{key}={value}")
+                if meta_bits:
+                    fc_parts.append("选区元信息: " + ", ".join(meta_bits))
+            fc_parts.append(f"用户明确选中的内容:\n{str(sel)[:4000]}")
         if fc_parts:
             fc_block = (
-                "【文件助手上下文】\n用户正在文件助手中操作文档。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n"
+                "【文件助手上下文】\n用户正在文件助手中操作文档。优先使用用户明确提供的选区和附加文件；如果用户要求只处理选区，不要擅自扩展到全文。你可以使用 workspace_* 和 editor_* 工具来读取、修改工作区文件，或直接推送变更到编辑器。\n"
                 + "\n".join(fc_parts)
             )
             sys_ctx = (sys_ctx + "\n\n" + fc_block) if sys_ctx else fc_block
@@ -767,7 +775,7 @@ def chat():
     message = data.get("message")
     session_id = data.get("session_id") or data.get("session", "")
     history = data.get("history") or _load_history(session_id)
-    model_id = data.get("model", "gemini-2.5-flash")
+    model_id = data.get("model", "deepseek-chat")
     locked_model = data.get("locked_model") or (
         "local" if model_id == "local" else "auto"
     )
@@ -797,10 +805,7 @@ def chat():
         rewritten_message, skill_id, task_type
     )
 
-    try:
-        pipeline = _build_chat_pipeline()
-    except Exception as exc:
-        return _agent_unavailable_response(exc)
+    pipeline = _build_chat_pipeline()
     pipeline.tracker = tracker
     pipeline.tracker_path = tracker_path
 
@@ -824,17 +829,14 @@ def chat():
 @agent_bp.route("/tools", methods=["GET"])
 def list_tools():
     """List available tools for the agent."""
-    try:
-        agent = get_agent()
-    except Exception as exc:
-        return _agent_unavailable_response(exc)
+    agent = get_agent()
     definitions = agent.registry.get_definitions()
     return jsonify(definitions)
 
 
 @agent_bp.route("/process", methods=["POST"])
-def process_compat():
-    """Phase2 compatibility endpoint for legacy AdaptiveAgent clients."""
+def process():
+    """Run one unified agent request and return the collected result."""
     data = request.json or {}
     user_request = data.get("request", "")
     session_id = data.get("session_id") or data.get("session", "")
@@ -902,8 +904,8 @@ def process_compat():
 
 
 @agent_bp.route("/process-stream", methods=["POST"])
-def process_stream_compat():
-    """Legacy compatibility SSE endpoint. Delegates to ChatPipeline."""
+def process_stream():
+    """Stream one unified agent request through the current chat pipeline."""
     data = request.json or {}
     user_request = data.get("request", "")
     session_id = data.get("session_id") or data.get("session", "")
@@ -1002,10 +1004,7 @@ def agent_plan():
     if not user_request:
         return jsonify({"success": False, "error": "缺少请求内容"}), 400
 
-    try:
-        agent = get_agent()
-    except Exception as exc:
-        return _agent_unavailable_response(exc)
+    agent = get_agent()
     # Override system instruction for planning mode
     original_instruction = agent.base_system_instruction
     agent.base_system_instruction = (
@@ -1071,10 +1070,7 @@ def agent_optimize():
     if snapshot_ctx:
         history = (history or []) + [{"role": "model", "content": snapshot_ctx}]
 
-    try:
-        agent = get_agent()
-    except Exception as exc:
-        return _agent_unavailable_response(exc)
+    agent = get_agent()
     # Override system instruction for optimization mode
     original_instruction = agent.base_system_instruction
     agent.base_system_instruction = (
@@ -1458,7 +1454,7 @@ def cost_stats():
     try:
         # 导入 token_tracker
         try:
-            import web.token_tracker as token_tracker
+            import app.core.analytics.token_tracker as token_tracker
 
             token_stats = token_tracker.get_stats()
         except Exception as _te:

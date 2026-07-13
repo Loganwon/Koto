@@ -20,11 +20,13 @@ type FrontendAction = {
     | 'press'
     | 'snapshot'
     | 'read_dom'
+    | 'task_result_evidence'
     | 'surface_inventory'
     | 'wait_for'
     | 'open_panel'
     | 'search_workspace'
     | 'submit_prompt'
+    | 'attach_task_file'
     | 'list_workspace_files'
     | 'open_workspace_file'
     | 'current_file_state'
@@ -71,6 +73,95 @@ function _now(): number {
 
 function _route(): string {
   return `${location.pathname}${location.search}${location.hash}`;
+}
+
+function _normalizeFrontendTaskPath(path: string): string {
+  let value = String(path || '').trim().replace(/\\/g, '/');
+  value = value.replace(/^\.\//, '');
+  if (/^workspace\//i.test(value)) {
+    value = value.slice('workspace/'.length);
+  }
+  return value;
+}
+
+function _elementViewportClip(el: Element, padding = 8): Record<string, number> {
+  const rect = el.getBoundingClientRect();
+  const x = Math.max(0, Math.floor(rect.x - padding));
+  const y = Math.max(0, Math.floor(rect.y - padding));
+  const maxWidth = Math.max(1, window.innerWidth - x);
+  const maxHeight = Math.max(1, window.innerHeight - y);
+  return {
+    x,
+    y,
+    width: Math.max(1, Math.min(Math.ceil(rect.width + padding * 2), maxWidth)),
+    height: Math.max(1, Math.min(Math.ceil(rect.height + padding * 2), maxHeight)),
+  };
+}
+
+function _elementRect(el: Element): Record<string, number> {
+  const rect = el.getBoundingClientRect();
+  return {
+    x: Math.round(rect.x),
+    y: Math.round(rect.y),
+    width: Math.round(rect.width),
+    height: Math.round(rect.height),
+  };
+}
+
+function _htmlEscape(value: unknown): string {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function _removeTaskEvidenceOverlay(): void {
+  document.getElementById('koto-task-evidence-capture')?.remove();
+}
+
+function _renderTaskEvidenceOverlay(evidence: Record<string, unknown>): HTMLElement {
+  _removeTaskEvidenceOverlay();
+  const overlay = document.createElement('div');
+  overlay.id = 'koto-task-evidence-capture';
+  overlay.style.cssText = [
+    'position:fixed',
+    'left:12px',
+    'top:12px',
+    'z-index:2147483647',
+    'box-sizing:border-box',
+    'width:min(720px, calc(100vw - 24px))',
+    'max-height:calc(100vh - 24px)',
+    'overflow:auto',
+    'padding:16px',
+    'border:1px solid #d0d7de',
+    'border-radius:8px',
+    'background:#ffffff',
+    'color:#17202a',
+    'box-shadow:0 16px 48px rgba(15, 23, 42, 0.22)',
+    'font:13px/1.5 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    'white-space:normal',
+  ].join(';');
+  const chips = Array.isArray(evidence.chips) ? evidence.chips : [];
+  const chipText = chips
+    .map((item: any) => String(item && (item.title || item.text) || '').trim())
+    .filter(Boolean)
+    .join(', ');
+  const status = String(evidence.terminalStatus || '').trim() || 'unknown';
+  const taskId = String(evidence.taskId || '').trim();
+  const runId = String(evidence.runId || '').trim();
+  const finalAnswer = String(evidence.finalAnswer || evidence.text || '').trim();
+  overlay.innerHTML = [
+    '<div style="font-weight:700;font-size:15px;margin-bottom:8px;">Koto Task Result Evidence</div>',
+    `<div><strong>Status:</strong> ${_htmlEscape(status)}</div>`,
+    taskId ? `<div><strong>Task ID:</strong> ${_htmlEscape(taskId)}</div>` : '',
+    runId ? `<div><strong>Run ID:</strong> ${_htmlEscape(runId)}</div>` : '',
+    chipText ? `<div><strong>Attached:</strong> ${_htmlEscape(chipText)}</div>` : '',
+    '<div style="height:1px;background:#e5e7eb;margin:12px 0;"></div>',
+    `<div style="white-space:pre-wrap;">${_htmlEscape(finalAnswer || 'No final answer text captured.')}</div>`,
+  ].join('');
+  document.body.appendChild(overlay);
+  return overlay;
 }
 
 function _getSessionId(): string {
@@ -371,6 +462,31 @@ function _findFirstVisible(selectors: string[]): Element | null {
     if (match) return match;
   }
   return null;
+}
+
+function _ensureUnifiedAiComposerVisible(): Element | null {
+  const existing = _findFirstVisible(['#wa-user-input']);
+  if (existing) return existing;
+  const wa = (window as any).WA;
+  if (wa && typeof wa.showAiWorkspace === 'function') {
+    try { wa.showAiWorkspace(); } catch (_) { /* keep fallback below */ }
+  } else {
+    const panelTarget = _findFirstVisible(['#navAiSessionsBtn', '[data-action="show-ai-workspace"]']);
+    if (panelTarget) (panelTarget as HTMLElement).click();
+  }
+  return _findFirstVisible(['#wa-user-input']);
+}
+
+function _assistantComposerTargets(): { input: Element | null; send: Element | null; legacy: boolean } {
+  const input = _ensureUnifiedAiComposerVisible();
+  if (input) {
+    return { input, send: _findFirstVisible(['#wa-send-btn']), legacy: false };
+  }
+  return {
+    input: _findFirstVisible(['#messageInput']),
+    send: _findFirstVisible(['#sendBtn']),
+    legacy: true,
+  };
 }
 
 function _selectedTexts(selector: string, limit = 10): string[] {
@@ -1267,6 +1383,69 @@ function _snapshotDetails(): Record<string, unknown> {
   };
 }
 
+function _taskResultEvidence(action: FrontendAction): Record<string, unknown> {
+  const opts = action.options || {};
+  const limit = Math.max(200, Math.min(Number(opts.limit || 2400), 8000));
+  const taskId = String(opts.taskId || opts.task_id || action.value || action.text || '').trim();
+  const runId = String(opts.runId || opts.run_id || action.path || '').trim();
+  const selectors: string[] = [];
+  if (taskId) selectors.push(`.wa-task-run[data-task-id="${CSS.escape(taskId)}"]`);
+  if (runId) selectors.push(`.wa-task-run[data-task-run-id="${CSS.escape(runId)}"]`);
+  selectors.push('.wa-task-run:not([data-history-snapshot="true"])', '.wa-task-run');
+
+  let card: HTMLElement | null = null;
+  let selector = '';
+  for (const candidateSelector of selectors) {
+    const matches = Array.from(document.querySelectorAll(candidateSelector))
+      .filter((item) => _isVisible(item)) as HTMLElement[];
+    if (matches.length) {
+      card = matches[matches.length - 1];
+      selector = candidateSelector;
+      break;
+    }
+  }
+  if (!card) {
+    return {
+      found: false,
+      reason: 'No visible task result card found',
+      chips: Array.from(document.querySelectorAll('#wa-ai-file-chip-list .wa-ctx-file-row'))
+        .map((item) => _visibleText(item, 180)),
+    };
+  }
+  if (opts.scroll !== false) {
+    card.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+  const finalReport = card.querySelector('.wa-task-final-report, .wa-task-final-answer');
+  const chips = Array.from(document.querySelectorAll('#wa-ai-file-chip-list .wa-ctx-file-row')).map((item) => ({
+    text: _visibleText(item, 180),
+    title: item.getAttribute('title') || '',
+  }));
+  const dataset = (card as HTMLElement).dataset || {};
+  const evidence: Record<string, unknown> = {
+    found: true,
+    selector,
+    taskId: dataset.taskId || '',
+    runId: dataset.taskRunId || '',
+    terminalStatus: dataset.taskTerminalStatus || '',
+    text: _visibleText(card, limit),
+    finalAnswer: finalReport ? _visibleText(finalReport, limit) : '',
+    chips,
+    elementRect: _elementRect(card),
+    screenshotClip: _elementViewportClip(card, Number(opts.padding || 8)),
+    viewport: {
+      width: window.innerWidth,
+      height: window.innerHeight,
+      devicePixelRatio: window.devicePixelRatio,
+    },
+  };
+  if (opts.renderOverlay) {
+    const overlay = _renderTaskEvidenceOverlay(evidence);
+    evidence.overlaySelector = '#koto-task-evidence-capture';
+    evidence.overlayClip = _elementViewportClip(overlay, 4);
+  }
+  return evidence;
+}
+
 function _enqueue(event: FrontendEvent): void {
   const enriched = {
     ...event,
@@ -1469,6 +1648,7 @@ async function _waitForTarget(action: FrontendAction): Promise<Element> {
 async function _executeFrontendAction(action: FrontendAction): Promise<Record<string, unknown>> {
   if (action.action === 'snapshot') return _snapshotDetails();
   if (action.action === 'surface_inventory') return _surfaceInventoryDetails(action);
+  if (action.action === 'task_result_evidence') return _taskResultEvidence(action);
   if (action.action === 'read_dom') {
     return {
       snapshot: _snapshotDetails(),
@@ -1507,19 +1687,39 @@ async function _executeFrontendAction(action: FrontendAction): Promise<Record<st
     return { target: _targetSummary(target), valueLength: value.length };
   }
   if (action.action === 'submit_prompt') {
-    const input = _findFirstVisible(['#wa-user-input', 'textarea[name="message"]', 'textarea', '[contenteditable="true"]']);
+    const targets = _assistantComposerTargets();
+    const input = targets.input;
     if (!input) throw new Error('Assistant prompt input not found');
     const prompt = action.value || action.text || '';
     _setElementValue(input, prompt, false);
-    const send = _findFirstVisible(['#wa-send-btn', '[data-action="send"]', 'button[aria-label="发送"]', 'button[title="发送"]']);
+    const send = targets.send;
     if (!send) throw new Error('Assistant send button not found');
     (send as HTMLElement).click();
     return {
       input: _targetSummary(input),
       send: _targetSummary(send),
+      legacyFallback: targets.legacy,
       promptLength: prompt.length,
       submitted: true,
     };
+  }
+  if (action.action === 'attach_task_file') {
+    const rawPath = String(action.path || action.value || action.text || '').trim();
+    const rawPaths = Array.isArray(action.options?.paths) ? action.options.paths : [];
+    const paths = rawPaths.length
+      ? rawPaths.map((item: unknown) => _normalizeFrontendTaskPath(String(item || ''))).filter(Boolean)
+      : [_normalizeFrontendTaskPath(rawPath)].filter(Boolean);
+    if (!paths.length) throw new Error('Task file path is required');
+    const attachFilesToTask = (window as any).WA?.attachFilesToTask;
+    if (typeof attachFilesToTask !== 'function') throw new Error('WA.attachFilesToTask is not available');
+    const result = await attachFilesToTask(paths, {
+      source: 'frontend_action',
+      expandPanel: action.options?.expandPanel !== false,
+      focusInput: action.options?.focusInput !== false,
+      duplicateToast: false,
+      replaceExisting: action.options?.replaceExisting !== false,
+    });
+    return { attached: true, paths, result: _safeJsonClone(result, {}) };
   }
   const target = await _waitForTarget(action);
   if (action.action === 'click') {

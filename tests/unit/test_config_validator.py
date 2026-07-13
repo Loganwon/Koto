@@ -36,14 +36,14 @@ class TestValidConfig:
     def test_valid_config_no_exception(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
-        monkeypatch.setenv("GEMINI_API_KEY", "test-key-123")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "test-key-123")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
         validate_startup_config()  # should not raise
 
     def test_no_env_vars_uses_defaults(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         validate_startup_config()  # defaults to port 5000, no OLLAMA_BASE_URL
 
@@ -55,7 +55,7 @@ class TestPortValidation:
     def test_bad_port_non_numeric(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "abc")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         with pytest.raises(ConfigError, match="must be an integer"):
             validate_startup_config()
@@ -63,7 +63,7 @@ class TestPortValidation:
     def test_bad_port_zero(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "0")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         with pytest.raises(ConfigError, match="must be 1-65535"):
             validate_startup_config()
@@ -71,7 +71,7 @@ class TestPortValidation:
     def test_bad_port_too_high(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "99999")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         with pytest.raises(ConfigError, match="must be 1-65535"):
             validate_startup_config()
@@ -79,7 +79,7 @@ class TestPortValidation:
     def test_valid_port(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "8080")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         validate_startup_config()  # should not raise
 
@@ -92,21 +92,21 @@ class TestCloudApiKeyWarning:
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
-        with patch("src.config_validator.get_gemini_api_key", return_value=None), patch(
+        with patch(
             "src.config_validator.get_deepseek_api_key", return_value=None
         ), caplog.at_level(logging.WARNING, logger=_LOGGER):
             validate_startup_config()  # should NOT raise
-        assert any("No cloud API key configured" in m for m in caplog.messages)
+        assert any("No DeepSeek API key configured" in m for m in caplog.messages)
 
     def test_deepseek_key_suppresses_cloud_warning(self, monkeypatch, tmp_path, caplog):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
-        with patch("src.config_validator.get_gemini_api_key", return_value=None), patch(
+        with patch(
             "src.config_validator.get_deepseek_api_key", return_value="deepseek-key"
         ), caplog.at_level(logging.WARNING, logger=_LOGGER):
             validate_startup_config()
-        assert not any("No cloud API key configured" in m for m in caplog.messages)
+        assert not any("No DeepSeek API key configured" in m for m in caplog.messages)
 
 
 @pytest.mark.unit
@@ -116,7 +116,7 @@ class TestOllamaUrlValidation:
     def test_bad_ollama_url(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         monkeypatch.setenv("OLLAMA_BASE_URL", "not-a-url")
         with pytest.raises(ConfigError, match="OLLAMA_BASE_URL must start with"):
@@ -125,7 +125,7 @@ class TestOllamaUrlValidation:
     def test_valid_ollama_url(self, monkeypatch, tmp_path):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
         validate_startup_config()  # should not raise
@@ -138,7 +138,7 @@ class TestConfigDirWritability:
     def test_non_writable_config_dir_warns(self, monkeypatch, tmp_path, caplog):
         _clear_env(monkeypatch)
         monkeypatch.setenv("KOTO_PORT", "5000")
-        monkeypatch.setenv("GEMINI_API_KEY", "key")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "key")
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
 
         with patch("src.config_validator.Path") as MockPath, patch(

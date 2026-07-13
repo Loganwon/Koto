@@ -5,15 +5,21 @@ from typing import Any
 
 from .deepseek_config import DEEPSEEK_DEFAULT_MODEL
 
-CLOUD_PROVIDER_NAMES = {"gemini", "deepseek", "openai", "anthropic"}
+CLOUD_PROVIDER_NAMES = {"deepseek"}  # Gemini archived
 PROVIDER_MODEL_MODES = CLOUD_PROVIDER_NAMES | {"ollama"}
 DEFAULT_CLOUD_PROVIDER = "deepseek"
+ARCHIVED_CLOUD_MODEL_PREFIXES = (
+    "gemini-",
+    "nano-banana-",
+    "imagen-",
+    "deep-research-",
+)
 
 _PROVIDER_MODEL_DEFAULTS = {
     "deepseek": DEEPSEEK_DEFAULT_MODEL,
 }
 
-_GEMINI_ONLY_TASKS = {"PAINTER", "VISION"}
+_UNSUPPORTED_DEEPSEEK_BINARY_TASKS = {"PAINTER", "VISION"}
 
 
 def normalize_cloud_provider(value: Any, default: str = DEFAULT_CLOUD_PROVIDER) -> str:
@@ -25,6 +31,13 @@ def normalize_cloud_provider(value: Any, default: str = DEFAULT_CLOUD_PROVIDER) 
         default_provider
         if default_provider in CLOUD_PROVIDER_NAMES
         else DEFAULT_CLOUD_PROVIDER
+    )
+
+
+def is_archived_cloud_model(model_id: Any) -> bool:
+    normalized = str(model_id or "").strip().lower()
+    return any(
+        normalized.startswith(prefix) for prefix in ARCHIVED_CLOUD_MODEL_PREFIXES
     )
 
 
@@ -59,16 +72,14 @@ def get_configured_cloud_model(
 ) -> str:
     provider_name = normalize_cloud_provider(
         provider or get_configured_cloud_provider(),
-        default="gemini",
+        default="deepseek",
     )
     task = str(task_type or "").strip().upper()
-    if provider_name == "gemini":
-        return str(fallback_model or "").strip()
-    if task in _GEMINI_ONLY_TASKS:
+    if task in _UNSUPPORTED_DEEPSEEK_BINARY_TASKS:
         return str(fallback_model or "").strip()
 
     env_model = os.getenv(f"KOTO_{provider_name.upper()}_MODEL")
-    if env_model:
+    if env_model and not is_archived_cloud_model(env_model):
         return env_model.strip()
 
     try:
@@ -78,7 +89,7 @@ def get_configured_cloud_model(
         configured = settings.get("ai", f"{provider_name}_model") or settings.get(
             "ai", "cloud_model"
         )
-        if configured:
+        if configured and not is_archived_cloud_model(configured):
             return str(configured).strip()
     except Exception:
         pass

@@ -37,6 +37,18 @@ _PATH_SCOPED_PROTECTION_PATTERN = re.compile(
     r".{0,18}(?:修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)",
     re.IGNORECASE,
 )
+_OTHER_FILES_PROTECTION_PATTERN = re.compile(
+    r"(?:不要|不用|无需|不需要|不必|别|不|do not|don't|dont|no need to|without)"
+    r".{0,64}(?:任何|所有|全部|其他|other|any\s+other|all\s+other)"
+    r".{0,12}(?:文件|文档|file|document|files|documents)",
+    re.IGNORECASE,
+)
+_TARGETED_ARTIFACT_CREATION_PATTERN = re.compile(
+    r"(?:create|generate|export|save as).{0,28}"
+    r"(?:specified|target|output|new).{0,24}"
+    r"(?:text\s+)?(?:file|document|report|spreadsheet|slides?)",
+    re.IGNORECASE,
+)
 _PAST_ARTIFACT_REFERENCE_PATTERN = re.compile(
     r"(?:刚才|之前|上次|上一轮|前面|已|已经|already|previously).{0,18}"
     r"(?:生成|创建|导出|保存|created|generated|exported|saved)(?:的|好)?",
@@ -44,6 +56,48 @@ _PAST_ARTIFACT_REFERENCE_PATTERN = re.compile(
 )
 _READONLY_FOLLOWUP_VERB_PATTERN = re.compile(
     r"(?:读取|阅读|查看|分析|确认|指出|说明|总结|审阅|检查|read|analy[sz]e|review|summari[sz]e|check)",
+    re.IGNORECASE,
+)
+_TARGET_SCOPED_WRITE_PATTERNS = (
+    re.compile(
+        r"(?P<action>修复|修改|更新|补全|完善|写入|写回|保存|edit|modify|repair|update|complete|write|save)"
+        r".{0,24}(?:这个|当前|目标|指定的|this|current|target)"
+        r".{0,10}(?:文件|文档|报告|docx|document|file|report)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:这个|当前|目标|指定的|this|current|target)"
+        r".{0,10}(?:文件|文档|报告|docx|document|file|report)"
+        r".{0,24}(?P<action>修复|修改|更新|补全|完善|写入|写回|保存|edit|modify|repair|update|complete|write|save)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?P<action>写入|写回|追加|添加|插入|保存|导出|write|append|insert|save|export)"
+        r".{0,80}(?:\.(?:docx|xlsx|pptx|pdf|md|txt|csv)|docx|word|excel|ppt|目标\s*(?:文件|文档|表格|幻灯片|docx|xlsx|pptx)|target\s+(?:file|document|spreadsheet|slides?))",
+        re.IGNORECASE,
+    ),
+)
+_NEGATED_TARGET_ACTION_PREFIX = re.compile(
+    r"(?:不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without)"
+    r"(?:\s|对|把|将|直接|这个|当前|目标|指定的|this|current|target|文件|文档|报告|file|document|report|做|进行)*$",
+    re.IGNORECASE,
+)
+_CONFIRMATION_ONLY_NEGATION_PATTERN = re.compile(
+    r"(?:询问|确认|等待确认|中途确认|ask|confirm|confirmation)",
+    re.IGNORECASE,
+)
+_DOCX_OR_TABLE_WRITE_REQUEST_PATTERN = re.compile(
+    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入).{0,32}"
+    r"(?:docx|word|文档|文件|报告|表格|table)"
+    r"|(?:docx|word|文档|文件|报告|表格|table).{0,32}"
+    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入)",
+    re.IGNORECASE,
+)
+_PPT_WRITE_REQUEST_PATTERN = re.compile(
+    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入|补充|扩写|更新)"
+    r".{0,32}(?:pptx?|演示文稿|幻灯片|slides?)"
+    r"|(?:pptx?|演示文稿|幻灯片|slides?).{0,32}"
+    r"(?:新增|创建|生成|追加|加入|添加|插入|放入|写入|补充|扩写|更新)",
     re.IGNORECASE,
 )
 
@@ -73,6 +127,12 @@ def has_strong_write_intent(task: str) -> bool:
         return True
     if any(pattern.search(task_text) for pattern in _IMPERATIVE_WRITE_PATTERNS):
         return True
+    if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
+        return True
+    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
+        task_text
+    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
+        return True
     markers = semantic_markers(task_text)
     if (
         markers.get("docx_write_phrase")
@@ -89,7 +149,9 @@ def has_strong_write_intent(task: str) -> bool:
     ):
         return True
     return bool(
-        re.search(
+        _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(task_text)
+        or _PPT_WRITE_REQUEST_PATTERN.search(task_text)
+        or re.search(
             r"(?:加入|添加|插入|放入|写入).{0,18}(?:docx|word|文档|pptx?|幻灯片|slides?)",
             task_text,
             re.IGNORECASE,
@@ -109,6 +171,10 @@ def has_explicit_write_intent(task: str) -> bool:
     if any(pattern.search(task_text) for pattern in _WRITE_INTENT_PATTERNS):
         return True
     if any(pattern.search(task_text) for pattern in _IMPERATIVE_WRITE_PATTERNS):
+        return True
+    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
+        task_text
+    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
         return True
     has_soft_action = any(word in lowered for word in _SOFT_WRITE_ACTION_WORDS)
     has_target_hint = any(word in lowered for word in _WRITE_TARGET_HINT_WORDS)
@@ -141,12 +207,42 @@ def has_readonly_write_negation(task: str) -> bool:
         and not has_global_readonly_write_negation(task_text)
     ):
         return False
+    if (
+        has_source_scoped_write_negation(task_text)
+        and has_target_scoped_write_intent(task_text)
+        and not has_global_readonly_write_negation(task_text)
+    ):
+        return False
     if _has_disjoint_target_write_and_path_protection(task_text):
+        return False
+    # "Do not modify any other file" protects the rest of the workspace; it
+    # does not cancel a clear request to create the specified target artifact.
+    if _OTHER_FILES_PROTECTION_PATTERN.search(task_text) and (
+        has_artifact_creation_intent(task_text)
+        or has_target_scoped_write_intent(task_text)
+    ):
         return False
     if has_global_readonly_write_negation(task_text):
         return True
+    readonly_matches = [
+        match
+        for pattern in _READONLY_WRITE_NEGATION_PATTERNS
+        for match in pattern.finditer(task_text)
+    ]
+    if has_source_scoped_write_negation(task_text) and has_target_scoped_write_intent(
+        task_text
+    ):
+        source_spans = _source_scoped_write_negation_spans(task_text)
+        return any(
+            not _span_overlaps_any(readonly_match.span(), source_spans)
+            and not _is_confirmation_only_negation_match(readonly_match)
+            and not _is_only_write_negation_match(readonly_match)
+            for readonly_match in readonly_matches
+        )
     return any(
-        pattern.search(task_text) for pattern in _READONLY_WRITE_NEGATION_PATTERNS
+        not _is_confirmation_only_negation_match(readonly_match)
+        and not _is_only_write_negation_match(readonly_match)
+        for readonly_match in readonly_matches
     )
 
 
@@ -154,9 +250,27 @@ def has_global_readonly_write_negation(task: str) -> bool:
     task_text = str(task or "").strip()
     if not task_text:
         return False
-    return any(
-        pattern.search(task_text)
+    global_matches = [
+        match
         for pattern in _GLOBAL_READONLY_WRITE_NEGATION_PATTERNS
+        for match in pattern.finditer(task_text)
+    ]
+    if not global_matches:
+        return False
+    if has_source_scoped_write_negation(task_text) and has_target_scoped_write_intent(
+        task_text
+    ):
+        source_spans = _source_scoped_write_negation_spans(task_text)
+        return any(
+            not _span_overlaps_any(global_match.span(), source_spans)
+            and not _is_confirmation_only_negation_match(global_match)
+            and not _is_only_write_negation_match(global_match)
+            for global_match in global_matches
+        )
+    return any(
+        not _is_confirmation_only_negation_match(global_match)
+        and not _is_only_write_negation_match(global_match)
+        for global_match in global_matches
     )
 
 
@@ -169,13 +283,76 @@ def has_source_scoped_write_negation(task: str) -> bool:
     )
 
 
+def _source_scoped_write_negation_spans(task: str) -> List[tuple[int, int]]:
+    return [
+        match.span()
+        for pattern in _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS
+        for match in pattern.finditer(task)
+    ]
+
+
+def _span_overlaps_any(
+    span: tuple[int, int], candidates: List[tuple[int, int]]
+) -> bool:
+    start, end = span
+    return any(
+        max(start, candidate_start) < min(end, candidate_end)
+        for candidate_start, candidate_end in candidates
+    )
+
+
+def _is_confirmation_only_negation_match(match: re.Match[str]) -> bool:
+    return bool(_CONFIRMATION_ONLY_NEGATION_PATTERN.search(match.group(0)))
+
+
+def _is_only_write_negation_match(match: re.Match[str]) -> bool:
+    text = str(match.group(0) or "")
+    return bool(
+        re.search(
+            r"(?:不要|不用|无需|不需要|不必|别|不).{0,8}(?:只|仅|只是|仅仅).{0,8}(?:写|写入)",
+            text,
+        )
+        or re.search(
+            r"(?:do not|don't|dont|without).{0,16}(?:only|just).{0,12}(?:write|insert)",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def has_target_scoped_write_intent(task: str) -> bool:
+    task_text = str(task or "").strip()
+    if not task_text:
+        return False
+    for pattern in _TARGET_SCOPED_WRITE_PATTERNS:
+        for match in pattern.finditer(task_text):
+            action_start = match.start("action")
+            prefix = task_text[max(0, action_start - 28) : action_start]
+            if _NEGATED_TARGET_ACTION_PREFIX.search(prefix):
+                continue
+            return True
+    return False
+
+
 def has_artifact_creation_intent(task: str) -> bool:
     task_text = str(task or "").strip()
     if not task_text:
         return False
+    # A creation verb inside a global read-only instruction (for example,
+    # "do not modify or create any files") is a prohibition, not a request to
+    # create an artifact.  This check must precede the broad creation regexes
+    # below, otherwise their keyword match can suppress the read-only guard.
+    if has_global_readonly_write_negation(task_text):
+        return False
     if is_readonly_existing_artifact_followup(task_text):
         return False
     if any(pattern.search(task_text) for pattern in _ARTIFACT_CREATION_INTENT_PATTERNS):
+        return True
+    if _TARGETED_ARTIFACT_CREATION_PATTERN.search(task_text):
+        return True
+    if _DOCX_OR_TABLE_WRITE_REQUEST_PATTERN.search(
+        task_text
+    ) or _PPT_WRITE_REQUEST_PATTERN.search(task_text):
         return True
     markers = semantic_markers(task_text)
     return bool(

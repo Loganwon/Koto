@@ -30,9 +30,7 @@ from app.core.agent.file_task_doc_annotate_intent import (
 )
 from app.core.agent.file_task_review_intent import request_has_file_type
 
-
-def should_use_bridge_execution(request: FileTaskRequest) -> bool:
-    return _should_use_bridge_exec(request)
+should_use_bridge_execution = _should_use_bridge_exec
 
 
 def bridge_recipe_id(request: FileTaskRequest) -> str:
@@ -73,13 +71,7 @@ def stream_bridge_request_as_tool(
     )
 
 
-def looks_like_docx_review_clear_request(task_text: str) -> bool:
-    return _looks_like_docx_review_clear_request(task_text)
-
-
-def looks_like_direct_docx_rewrite_request(task_text: str) -> bool:
-    return _looks_like_direct_docx_rewrite_request(task_text)
-
-
-def looks_like_multi_file_compare_request(request: FileTaskRequest) -> bool:
-    return _looks_like_multi_file_compare_request(request)
+# Direct re-exports from canonical source (no wrapper needed)
+looks_like_docx_review_clear_request = _looks_like_docx_review_clear_request
+looks_like_direct_docx_rewrite_request = _looks_like_direct_docx_rewrite_request
+looks_like_multi_file_compare_request = _looks_like_multi_file_compare_request

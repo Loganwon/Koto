@@ -4,6 +4,7 @@
  */
 
 import type { DocxHeadingEntry } from './types';
+import { publishWorkspaceApi } from '../shared/workspace-api';
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 
@@ -341,7 +342,7 @@ export function _setupDocOutline(headings: DocxHeadingEntry[] | any[]) {
 
   const prevOutline = $('wa-doc-outline');
   if (prevOutline && typeof (prevOutline as any)._scrollSyncCleanup === 'function') {
-    try { (prevOutline as any)._scrollSyncCleanup(); } catch (_) {}
+    try { (prevOutline as any)._scrollSyncCleanup(); } catch (_) { /* allowed to fail */ }
   }
   if (prevOutline) prevOutline.remove();
   const prevRow = docxEditor.querySelector('.wa-docx-body-row');
@@ -396,8 +397,8 @@ export function _setupDocOutline(headings: DocxHeadingEntry[] | any[]) {
   _toggleDocOutline(headings.length > 0);
 }
 
-// Backward compat
-Object.assign((window as any).WA || ((window as any).WA = {}), {
+// Cross-bundle compatibility boundary; editor callers should import directly.
+publishWorkspaceApi({
   _setupDocOutline,
   _toggleDocOutline,
   _ensureOutlineToggleBtn,

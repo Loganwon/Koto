@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install lint tools
-        run: pip install flake8 black isort bandit
+        run: pip install flake8 black isort==5.9.3 bandit
 
       - name: Run flake8
         run: flake8 src/ app/ tests/ --count --show-source --statistics
@@ -75,6 +75,7 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: .
+          KOTO_PYTEST_HARD_EXIT: "0"
         run: |
           pytest \
             tests/unit/ \
@@ -89,7 +90,7 @@ jobs:
             tests/test_unified_agent.py \
             -v --tb=short -q \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=40
+            --cov-fail-under=50
 
       - name: Upload coverage report
         if: always()

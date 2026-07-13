@@ -7,7 +7,6 @@ import os
 from pathlib import Path
 
 from app.core.llm.deepseek_config import get_deepseek_api_key
-from app.core.llm.gemini_config import get_gemini_api_key
 
 logger = logging.getLogger(__name__)
 
@@ -35,11 +34,10 @@ def validate_startup_config():
         errors.append(f"KOTO_PORT must be an integer, got '{port_str}'")
 
     # 2. Check cloud API keys (warn, don't fail — local-only mode is valid)
-    gemini_key = get_gemini_api_key()
     deepseek_key = get_deepseek_api_key()
-    if not gemini_key and not deepseek_key:
+    if not deepseek_key:
         warnings.append(
-            "No cloud API key configured — Gemini and DeepSeek features will be unavailable"
+            "No DeepSeek API key configured — cloud features will be unavailable"
         )
 
     # 3. Validate workspace directory

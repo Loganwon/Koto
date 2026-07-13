@@ -24,19 +24,24 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 import tarfile
 import zipfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
+from app.core.file.path_policy import DEFAULT_FILE_PATH_POLICY, FilePathPolicy
+from app.core.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
 
 
 class FileToolsPlugin(AgentPlugin):
     """Koto 文件能力 AgentPlugin。"""
+
+    def __init__(self, path_policy: FilePathPolicy = DEFAULT_FILE_PATH_POLICY) -> None:
+        self.path_policy = path_policy
+        self.file_service = FileService(path_policy=path_policy)
 
     @property
     def name(self) -> str:
@@ -791,6 +796,8 @@ class FileToolsPlugin(AgentPlugin):
 
     def rename_file(self, path: str, new_name: str) -> str:
         """重命名文件，保持在原目录。"""
+        if not self.path_policy.is_outside_protected_dirs(path):
+            return "错误：路径在系统保护目录中"
         p = Path(path)
         if not p.exists():
             return f"错误：文件不存在 → {path}"
@@ -802,10 +809,9 @@ class FileToolsPlugin(AgentPlugin):
         new_path = p.parent / new_name
         if new_path.exists():
             return f"错误：目标文件已存在 → {new_path}"
-        try:
-            p.rename(new_path)
-        except Exception as e:
-            return f"重命名失败：{e}"
+        result = self.file_service.rename_file(str(p), new_name)
+        if not result.get("success"):
+            return f"重命名失败：{result.get('error', '未知错误')}"
         try:
             from app.core.file.file_registry import get_file_registry
 
@@ -819,6 +825,10 @@ class FileToolsPlugin(AgentPlugin):
 
     def move_file(self, source_path: str, dest_dir: str, new_name: str = "") -> str:
         """移动文件到另一个目录。"""
+        if not self.path_policy.is_outside_protected_dirs(source_path):
+            return "错误：源路径在系统保护目录中"
+        if not self.path_policy.is_outside_protected_dirs(dest_dir):
+            return "错误：目标路径在系统保护目录中"
         src = Path(source_path)
         if not src.exists():
             return f"错误：源文件不存在 → {source_path}"
@@ -832,10 +842,9 @@ class FileToolsPlugin(AgentPlugin):
         new_path = dest_d / fname
         if new_path.exists():
             return f"错误：目标文件已存在 → {new_path}"
-        try:
-            shutil.move(str(src), str(new_path))
-        except Exception as e:
-            return f"移动失败：{e}"
+        result = self.file_service.move_file(str(src), str(new_path))
+        if not result.get("success"):
+            return f"移动失败：{result.get('error', '未知错误')}"
         try:
             from app.core.file.file_registry import get_file_registry
 
@@ -849,6 +858,10 @@ class FileToolsPlugin(AgentPlugin):
 
     def copy_file(self, source_path: str, dest_dir: str, new_name: str = "") -> str:
         """复制文件到另一个目录。"""
+        if not self.path_policy.is_outside_protected_dirs(source_path):
+            return "错误：源路径在系统保护目录中"
+        if not self.path_policy.is_outside_protected_dirs(dest_dir):
+            return "错误：目标路径在系统保护目录中"
         src = Path(source_path)
         if not src.exists():
             return f"错误：源文件不存在 → {source_path}"
@@ -862,10 +875,9 @@ class FileToolsPlugin(AgentPlugin):
         new_path = dest_d / fname
         if new_path.exists():
             return f"错误：目标文件已存在 → {new_path}"
-        try:
-            shutil.copy2(str(src), str(new_path))
-        except Exception as e:
-            return f"复制失败：{e}"
+        result = self.file_service.copy_file(str(src), str(new_path))
+        if not result.get("success"):
+            return f"复制失败：{result.get('error', '未知错误')}"
         try:
             from app.core.file.file_registry import get_file_registry
 
@@ -878,6 +890,8 @@ class FileToolsPlugin(AgentPlugin):
 
     def delete_file(self, path: str, use_trash: bool = True) -> str:
         """删除文件，默认使用系统回收站。"""
+        if not self.path_policy.is_outside_protected_dirs(path):
+            return "错误：路径在系统保护目录中"
         p = Path(path)
         if not p.exists():
             return f"错误：文件不存在 → {path}"
@@ -885,16 +899,14 @@ class FileToolsPlugin(AgentPlugin):
             return f"错误：不是文件 → {path}"
         try:
             if use_trash:
-                try:
-                    import send2trash
-
-                    send2trash.send2trash(str(p))
-                except ImportError:
-                    # 降级：永久删除但给出提示
-                    p.unlink()
-                    use_trash = False
+                result = self.file_service.delete_path(str(p), use_trash=True)
+                if not result.get("success"):
+                    return f"删除失败：{result.get('error', '未知错误')}"
+                use_trash = bool(result.get("trash", False))
             else:
-                p.unlink()
+                result = self.file_service.delete_path(str(p), use_trash=False)
+                if not result.get("success"):
+                    return f"删除失败：{result.get('error', '未知错误')}"
         except Exception as e:
             return f"删除失败：{e}"
         try:
@@ -918,33 +930,38 @@ class FileToolsPlugin(AgentPlugin):
         sort_by: str = "name",
     ) -> str:
         """列出目录内容。"""
-        d = Path(path)
-        if not d.exists():
-            return f"错误：路径不存在 → {path}"
-        if not d.is_dir():
-            return f"错误：不是目录 → {path}"
+        listing = self.file_service.list_directory(path, max_items=1000)
+        if not listing.get("success"):
+            error = listing.get("error", "未知错误")
+            if "不存在" in error:
+                return f"错误：路径不存在 → {path}"
+            if "不是目录" in error:
+                return f"错误：不是目录 → {path}"
+            return f"列目录失败：{error}"
         items = []
-        for child in d.iterdir():
-            if not show_hidden and child.name.startswith("."):
+        for child in listing.get("items", []):
+            name = str(child.get("name", ""))
+            if not show_hidden and name.startswith("."):
                 continue
             if (
                 filter_ext
-                and child.is_file()
-                and child.suffix.lower() != filter_ext.lower()
+                and child.get("type") == "file"
+                and str(child.get("suffix", "")).lower() != filter_ext.lower()
             ):
                 continue
+            child_path = Path(str(child.get("path", name)))
             try:
-                stat = child.stat()
-                items.append(
-                    {
-                        "name": child.name,
-                        "type": "目录" if child.is_dir() else "文件",
-                        "size_bytes": stat.st_size if child.is_file() else 0,
-                        "mtime": stat.st_mtime,
-                    }
-                )
-            except Exception:
-                continue
+                mtime = child_path.stat().st_mtime
+            except OSError:
+                mtime = 0
+            items.append(
+                {
+                    "name": name,
+                    "type": "目录" if child.get("type") == "dir" else "文件",
+                    "size_bytes": int(child.get("size") or 0),
+                    "mtime": mtime,
+                }
+            )
         if sort_by == "size":
             items.sort(key=lambda x: x["size_bytes"], reverse=True)
         elif sort_by == "mtime":
@@ -1169,7 +1186,12 @@ class FileToolsPlugin(AgentPlugin):
                     errors.append(f"  ⚠️ 跳过（目标已存在）: {new_name}")
                     continue
                 try:
-                    src.rename(new_path)
+                    result = self.file_service.rename_file(str(src), new_name)
+                    if not result.get("success"):
+                        errors.append(
+                            f"  ❌ 失败 {src.name}: {result.get('error', '未知错误')}"
+                        )
+                        continue
                     from app.core.file.file_registry import get_file_registry
 
                     reg = get_file_registry()
@@ -1199,7 +1221,9 @@ class FileToolsPlugin(AgentPlugin):
         if not src_d.is_dir():
             return f"错误：来源目录不存在 → {source_dir}"
         if not dry_run:
-            Path(dest_dir).mkdir(parents=True, exist_ok=True)
+            result = self.file_service.create_directory(dest_dir)
+            if not result.get("success"):
+                return f"移动失败：{result.get('error', '未知错误')}"
 
         _EXT_CAT: Dict[str, str] = {}
         _CAT_EXTS = {
@@ -1250,7 +1274,12 @@ class FileToolsPlugin(AgentPlugin):
                     errors.append(f"  ⚠️ 跳过（目标已存在）: {src.name}")
                     continue
                 try:
-                    shutil.move(str(src), str(new_path))
+                    result = self.file_service.move_path(str(src), str(new_path))
+                    if not result.get("success"):
+                        errors.append(
+                            f"  ❌ 失败 {src.name}: {result.get('error', '未知错误')}"
+                        )
+                        continue
                     from app.core.file.file_registry import get_file_registry
 
                     reg = get_file_registry()
@@ -1305,12 +1334,14 @@ class FileToolsPlugin(AgentPlugin):
                     try:
                         p = Path(e.path)
                         if p.exists():
-                            try:
-                                import send2trash
-
-                                send2trash.send2trash(str(p))
-                            except ImportError:
-                                p.unlink()
+                            result = self.file_service.delete_path(
+                                str(p), use_trash=True
+                            )
+                            if not result.get("success"):
+                                lines.append(
+                                    f"    ❌ 删除失败: {result.get('error', '未知错误')}"
+                                )
+                                continue
                         reg.delete(e.path)
                         reg.log_op(
                             "delete",
@@ -1562,12 +1593,11 @@ class FileToolsPlugin(AgentPlugin):
             f"内容：\n{safe_content}"
         )
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            llm = GeminiProvider()
+            llm = get_llm_provider(provider="deepseek", allow_local_fallback=False)
             resp = llm.generate_content(
                 prompt=prompt,
-                model="gemini-2.5-flash",
                 system_instruction="你是一个专业的文件摘要助手，输出简洁精准的中文摘要。",
             )
             text = ""
@@ -1633,7 +1663,9 @@ class FileToolsPlugin(AgentPlugin):
             if op_type == "rename" and src and dst:
                 p = Path(dst)
                 if p.exists():
-                    p.rename(Path(src))
+                    result = self.file_service.rename_file(str(p), Path(src).name)
+                    if not result.get("success"):
+                        return f"撤销失败：{result.get('error', '未知错误')}"
                     reg.update_path(dst, src)
                     return f"✅ 已撤销重命名：{Path(dst).name}  →  {Path(src).name}"
                 return f"撤销失败：文件不存在 → {dst}"
@@ -1641,7 +1673,9 @@ class FileToolsPlugin(AgentPlugin):
             elif op_type == "move" and src and dst:
                 p = Path(dst)
                 if p.exists():
-                    shutil.move(str(p), src)
+                    result = self.file_service.move_path(str(p), src)
+                    if not result.get("success"):
+                        return f"撤销失败：{result.get('error', '未知错误')}"
                     reg.update_path(dst, src)
                     return (
                         f"✅ 已撤销移动：{Path(dst).name} 已还原到 {Path(src).parent}"
@@ -1651,7 +1685,9 @@ class FileToolsPlugin(AgentPlugin):
             elif op_type == "copy" and dst:
                 p = Path(dst)
                 if p.exists():
-                    p.unlink()
+                    result = self.file_service.delete_path(str(p))
+                    if not result.get("success"):
+                        return f"撤销失败：{result.get('error', '未知错误')}"
                     reg.delete(dst)
                     return f"✅ 已撤销复制：副本 {Path(dst).name} 已删除"
                 return f"撤销失败：副本不存在 → {dst}"
@@ -1749,9 +1785,9 @@ class FileToolsPlugin(AgentPlugin):
         )
 
         try:
-            from app.core.llm.gemini import GeminiProvider
+            from app.core.llm.provider_factory import get_llm_provider
 
-            provider = GeminiProvider()
+            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
             resp = provider.generate_content(prompt)
             answer = resp.get("content") or resp.get("text") or str(resp)
         except Exception as exc:

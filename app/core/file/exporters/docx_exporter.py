@@ -312,7 +312,12 @@ def _add_paragraph_from_tag(doc: Any, tag: Any) -> None:
                                     w_val = Inches(float(w_str.replace("in", "")))
                                 elif w_str.isdigit():
                                     w_val = Pt(float(w_str) * 0.75)
-                            except:
+                            except Exception:
+                                import logging
+
+                                logging.getLogger(__name__).warning(
+                                    "Silenced exception caught", exc_info=True
+                                )
                                 pass
 
                         if w_val:
@@ -508,7 +513,12 @@ def _insert_block_image(doc: Any, tag: Any) -> None:
                 w_val = Inches(float(w_str.replace("in", "")))
             elif w_str.isdigit():
                 w_val = Pt(float(w_str) * 0.75)
-        except:
+        except Exception:
+            import logging
+
+            logging.getLogger(__name__).warning(
+                "Silenced exception caught", exc_info=True
+            )
             pass
 
     try:

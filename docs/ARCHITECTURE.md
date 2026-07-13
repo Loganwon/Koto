@@ -1,141 +1,55 @@
-# Koto Architecture
+# Koto architecture
 
-> Last updated: 2025
+Last verified: 2026-07-12. For current run, test, and release instructions use
+the [documentation index](DOCUMENTATION_INDEX.md).
 
-## System Overview
+## Runtime shape
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                      Web Browser / pywebview                │
-│                   (HTML/CSS/JS Frontend)                     │
-└──────────────────────────┬──────────────────────────────────┘
-                           │ HTTP/REST + SSE
-┌──────────────────────────▼──────────────────────────────────┐
-│                     Flask Application (web/app.py)          │
-│  ┌──────────┐  ┌──────────┐  ┌───────────┐  ┌───────────┐  │
-│  │ Auth     │  │ CORS     │  │ CSRF      │  │ Rate      │  │
-│  │ Middleware│  │          │  │ Protection│  │ Limiting  │  │
-│  └──────────┘  └──────────┘  └───────────┘  └───────────┘  │
-├─────────────────────────────────────────────────────────────┤
-│                     API Routes Layer                         │
-│  /api/chat  /api/auth  /api/files  /api/goals  /api/jobs   │
-└──────────────────────────┬──────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│                  Unified Agent Framework                     │
-│                  (app/core/agent/)                           │
-│                                                             │
-│  ┌─────────────────────────────────────────────────────┐    │
-│  │              Plugin System (AgentPlugin)             │    │
-│  │  ┌──────────┐ ┌───────────┐ ┌───────────────────┐   │    │
-│  │  │ Basic    │ │ System    │ │ Data Process      │   │    │
-│  │  │ Tools    │ │ Tools     │ │ Plugin            │   │    │
-│  │  └──────────┘ └───────────┘ └───────────────────┘   │    │
-│  └─────────────────────────────────────────────────────┘    │
-│                                                             │
-│  ┌──────────────────┐  ┌──────────────────────────────┐     │
-│  │ LangGraph        │  │ Gemini / LLM Provider       │     │
-│  │ State Machine    │  │ (google-genai)               │     │
-│  └──────────────────┘  └──────────────────────────────┘     │
-└─────────────────────────────────────────────────────────────┘
-                           │
-┌──────────────────────────▼──────────────────────────────────┐
-│                    Services Layer                            │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌───────────┐   │
-│  │ File     │  │ Document │  │ Goal     │  │ Job       │   │
-│  │ Registry │  │ Processing│  │ Manager  │  │ Runner    │   │
-│  └──────────┘  └──────────┘  └──────────┘  └───────────┘   │
-└─────────────────────────────────────────────────────────────┘
+```text
+launcher/entry.py
+  -> web/app.py (Flask app assembly)
+       -> web/app_blueprints.py and web/blueprints/* (HTTP boundaries)
+       -> web/services/* (web-facing orchestration)
+       -> app/core/* (agents, files, LLMs, skills, domain services)
+
+Browser / desktop shell
+  -> web/templates/index.html
+  -> web/src/* TypeScript source
+  -> web/static/js/build/workspace-bundle.js generated runtime asset
 ```
 
-## Key Components
+## Ownership boundaries
 
-### 1. Web Layer (`web/`)
+| Boundary | Current owner | Rule |
+| --- | --- | --- |
+| Flask assembly and compatibility wiring | `web/app.py` | Do not add new route business logic here. |
+| HTTP request/response mapping | `web/blueprints/*` | Blueprints parse requests and map domain results to HTTP/SSE. |
+| Web flow orchestration | `web/services/*`, `web/file_task_stream.py` | Keep route-independent orchestration out of blueprint files. |
+| File-task execution | `app/core/agent/file_task_runtime.py` plus phase helpers | Keep request, planning, execution, and finalization contracts explicit. |
+| File/document operations | `app/core/file/*`, `app/core/agent/task_tools*.py` | Format-specific behavior belongs behind core boundaries. |
+| Skills | `app/core/skills/*` | Read runtime skills through public `SkillManager` methods. |
+| Unified frontend | `web/src/*` | TypeScript source is authoritative; the generated bundle is not a second owner. |
+| Desktop/release assembly | `src/*`, `koto.spec`, `Build_Release.ps1` | Packaging changes require release-gate verification. |
 
-| File | Responsibility |
-|------|----------------|
-| `app.py` | Flask app factory, route registration, middleware |
-| `auth.py` | JWT authentication, rate limiting, user management |
+## Request flows
 
-### 2. Agent Framework (`app/core/agent/`)
+### Chat
 
-The agent system uses a **plugin architecture**:
-
-- **`base.py`** — `AgentPlugin` abstract base class
-- **Plugins** register tools that the LLM can invoke
-- **Sandboxing** — All code execution plugins use AST validation to block
-  dangerous operations (imports, builtins, dunder access)
-
-### 3. Plugin Security Model
-
-```
-User prompt → LLM → Tool call → AST validation → Sandboxed exec/eval
-                                      │
-                                      ├─ Blocked AST nodes (Import, ImportFrom)
-                                      ├─ Blocked names (os, sys, subprocess...)
-                                      ├─ Blocked attributes (__builtins__, __globals__...)
-                                      └─ Safe builtins (no exec, eval, open...)
+```text
+Browser -> POST /api/chat/stream -> web/blueprints/chat.py
+  -> web/app.py / web/services/chat_stream/* -> app/core/llm/*
+  -> SSE -> browser
 ```
 
-### 4. Authentication & Authorization
+### File task
 
-- **JWT-based** authentication with configurable expiry
-- **3-tier rate limiting**: strict (10/min), standard (30/min), relaxed (120/min)
-- **CSRF protection** via Flask-WTF on form-based routes
-- Auth is **enabled by default**; set `KOTO_AUTH_ENABLED=false` for local dev
-
-### 5. Data Flow
-
-```
-1. Client sends request → Flask middleware (auth, rate limit, CSRF)
-2. Route handler invokes UnifiedAgent
-3. Agent selects tool via LLM reasoning
-4. Plugin validates input (AST check) → executes in sandbox
-5. Result returned through SSE stream or JSON response
+```text
+Browser -> POST /api/editor/ai/task-stream -> web/blueprints/editor_ai.py
+  -> web/runtime_context.py -> web/file_task_stream.py
+  -> app/core/agent/file_task_runtime.py -> task tools
+  -> SSE progress and artifacts -> browser
 ```
 
-## Architecture Decision Records (ADRs)
-
-### ADR-001: Plugin-based Agent Architecture
-
-**Decision**: Use a plugin system where each capability is an independent
-`AgentPlugin` subclass.
-
-**Rationale**: Allows adding new tools without modifying the core agent loop.
-Plugins are self-contained and testable in isolation.
-
-### ADR-002: AST-based Sandbox for Code Execution
-
-**Decision**: Validate all user-supplied code via `ast.parse()` + node
-whitelist/blocklist before `exec()`/`eval()`.
-
-**Rationale**: String-based blocklists are easy to bypass. AST walking catches
-obfuscated attacks (e.g., `getattr(os, 'system')`) at the structural level.
-
-### ADR-003: Auth Enabled by Default
-
-**Decision**: `KOTO_AUTH_ENABLED` defaults to `"true"`.
-
-**Rationale**: Secure-by-default prevents accidental exposure when deploying.
-Local developers can opt out with `KOTO_AUTH_ENABLED=false`.
-
-### ADR-004: Sliding-Window Rate Limiting
-
-**Decision**: Replace daily counter with per-minute sliding window buckets.
-
-**Rationale**: Daily counters don't prevent burst abuse. Sliding windows
-provide smoother traffic shaping and allow tiered limits per endpoint
-sensitivity.
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `KOTO_AUTH_ENABLED` | `true` | Enable/disable authentication |
-| `KOTO_DEPLOY_MODE` | `local` | `local` or `cloud` |
-| `KOTO_JWT_SECRET` | (ephemeral) | JWT signing secret |
-| `KOTO_JWT_EXPIRY_HOURS` | `72` | Token lifetime |
-| `KOTO_MAX_DAILY_REQUESTS` | `100` | Legacy daily request cap |
-| `KOTO_CORS_ORIGINS` | `*` | Allowed CORS origins |
-| `KOTO_SECRET_KEY` | (random) | Flask secret key for CSRF |
-| `SENTRY_DSN` | (none) | Sentry error tracking DSN |
+See [ARCHITECTURE_CLEANUP_ROADMAP.md](ARCHITECTURE_CLEANUP_ROADMAP.md) for
+open structural work and [KOTO_CODE_DEBT_REPORT.md](KOTO_CODE_DEBT_REPORT.md)
+for its current baseline.

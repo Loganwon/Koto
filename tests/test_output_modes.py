@@ -13,7 +13,7 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from web.intelligent_document_analyzer import IntelligentDocumentAnalyzer
+from app.core.services.intelligent_document_analyzer import IntelligentDocumentAnalyzer
 
 
 async def test_flexible_output_modes():

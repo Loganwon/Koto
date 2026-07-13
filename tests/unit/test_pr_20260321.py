@@ -62,8 +62,6 @@ class TestProviderFactoryListProviders(unittest.TestCase):
         from app.core.llm.provider_factory import list_available_providers
 
         with patch(
-            "app.core.llm.provider_factory.get_gemini_api_key", return_value=None
-        ), patch(
             "app.core.llm.provider_factory.get_deepseek_api_key", return_value=None
         ):
             providers = list_available_providers()
@@ -71,12 +69,12 @@ class TestProviderFactoryListProviders(unittest.TestCase):
         cloud = [p for p in providers if p != "ollama"]
         self.assertEqual(cloud, [])
 
-    def test_gemini_detected_via_api_key(self):
+    def test_archived_gemini_key_is_ignored(self):
         from app.core.llm.provider_factory import list_available_providers
 
         with patch.dict(os.environ, {"GEMINI_API_KEY": "test-key"}):
             providers = list_available_providers()
-        self.assertIn("gemini", providers)
+        self.assertNotIn("gemini", providers)
 
     def test_openai_detected_via_openai_key(self):
         from app.core.llm.provider_factory import list_available_providers
@@ -108,15 +106,14 @@ class TestProviderFactoryListProviders(unittest.TestCase):
 class TestProviderFactoryGetProvider(unittest.TestCase):
     """get_llm_provider selects correct provider."""
 
-    def test_explicit_provider_gemini(self):
-        from app.core.llm.provider_factory import get_llm_provider
+    def test_explicit_provider_gemini_is_rejected(self):
+        from app.core.llm.provider_factory import (
+            CloudProviderUnavailableError,
+            get_llm_provider,
+        )
 
-        mock_inst = MagicMock()
-        with patch(
-            "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
-        ), patch("app.core.llm.provider_factory.has_gemini_api_key", return_value=True):
-            result = get_llm_provider(provider="gemini")
-        self.assertIs(result, mock_inst)
+        with self.assertRaisesRegex(CloudProviderUnavailableError, "archived"):
+            get_llm_provider(provider="gemini")
 
     def test_explicit_provider_openai(self):
         from app.core.llm.provider_factory import get_llm_provider
@@ -148,15 +145,14 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             result = get_llm_provider(model="claude-3-sonnet-20240229")
         self.assertIs(result, mock_inst)
 
-    def test_model_prefix_gemini_selects_gemini(self):
-        from app.core.llm.provider_factory import get_llm_provider
+    def test_model_prefix_gemini_is_rejected(self):
+        from app.core.llm.provider_factory import (
+            CloudProviderUnavailableError,
+            get_llm_provider,
+        )
 
-        mock_inst = MagicMock()
-        with patch(
-            "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
-        ), patch("app.core.llm.provider_factory.has_gemini_api_key", return_value=True):
-            result = get_llm_provider(model="gemini-3-flash-preview")
-        self.assertIs(result, mock_inst)
+        with self.assertRaisesRegex(CloudProviderUnavailableError, "archived"):
+            get_llm_provider(model="gemini-3-flash-preview")
 
     def test_model_prefix_llama_selects_ollama(self):
         from app.core.llm.provider_factory import get_llm_provider
@@ -190,12 +186,8 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         ):
             os.environ.pop(k, None)
         with patch(
-            "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
-        ), patch(
             "app.core.llm.provider_factory.has_deepseek_api_key", return_value=False
-        ), self.assertRaises(
-            CloudProviderUnavailableError
-        ):
+        ), self.assertRaises(CloudProviderUnavailableError):
             get_llm_provider(provider="nonexistent_provider")
 
     def test_allow_local_fallback_returns_ollama_when_cloud_missing(self):
@@ -217,16 +209,12 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
         ):
             os.environ.pop(k, None)
         with patch(
-            "app.core.llm.provider_factory.has_gemini_api_key", return_value=False
-        ), patch(
             "app.core.llm.provider_factory.has_deepseek_api_key", return_value=False
-        ), patch(
-            "app.core.llm.provider_factory._load_ollama", return_value=mock_inst
-        ):
+        ), patch("app.core.llm.provider_factory._load_ollama", return_value=mock_inst):
             result = get_llm_provider(allow_local_fallback=True)
         self.assertIs(result, mock_inst)
 
-    def test_auto_detect_loads_gemini_config_when_env_empty(self):
+    def test_auto_detect_loads_deepseek_config_when_env_empty(self):
         from app.core.llm.provider_factory import (
             get_llm_provider,
             list_available_providers,
@@ -237,29 +225,29 @@ class TestProviderFactoryGetProvider(unittest.TestCase):
             root = Path(tmpdir)
             config_dir = root / "config"
             config_dir.mkdir(parents=True, exist_ok=True)
-            (config_dir / "gemini_config.env").write_text(
-                "GEMINI_API_KEY=config-key-123\n",
+            (config_dir / "deepseek_config.env").write_text(
+                "DEEPSEEK_API_KEY=config-key-123\n",
                 encoding="utf-8",
             )
 
             for k in (
-                "GEMINI_API_KEY",
-                "API_KEY",
-                "GOOGLE_API_KEY",
-                "GOOGLE_GENAI_API_KEY",
+                "DEEPSEEK_API_KEY",
+                "DEEPSEEK_KEY",
+                "DS_API_KEY",
+                "DS_KEY",
             ):
                 os.environ.pop(k, None)
 
             with patch(
-                "app.core.llm.gemini_config.project_root", return_value=root
+                "app.core.llm.deepseek_config.project_root", return_value=root
             ), patch(
-                "app.core.llm.provider_factory._load_gemini", return_value=mock_inst
+                "app.core.llm.provider_factory._load_deepseek", return_value=mock_inst
             ):
                 result = get_llm_provider()
                 providers = list_available_providers()
 
         self.assertIs(result, mock_inst)
-        self.assertIn("gemini", providers)
+        self.assertIn("deepseek", providers)
 
 
 # ══════════════════════════════════════════════════════════════════════════════

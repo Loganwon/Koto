@@ -282,7 +282,7 @@ def _route_after_validate(state: "AgentState") -> Literal["reason", "__end__"]:
 
 def build_graph(
     registry,
-    model_id: str = "gemini-2.5-flash",
+    model_id: str = "deepseek-chat",
     system_instruction: Optional[str] = None,
     enable_pii: bool = True,
     enable_validation: bool = True,
@@ -391,7 +391,7 @@ class LangGraphAgent:
     def __init__(
         self,
         registry=None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         system_instruction: Optional[str] = None,
         skill_id: Optional[str] = None,
         task_type: Optional[str] = None,
@@ -568,11 +568,15 @@ class LangGraphAgent:
         skill_id: Optional[str] = None,
         task_type: Optional[str] = None,
         system_context: Optional[str] = None,
+        record_task: bool = True,
     ):
         """
         UnifiedAgent 兼容接口：yield AgentStep 对象。
 
         内部通过 stream() 获取 LangGraph 事件，转换为 AgentStep 供 agent_routes 消费。
+        ``record_task`` is accepted for UnifiedAgent compatibility. LangGraph
+        does not create a separate ledger entry from this wrapper, so background
+        jobs can pass ``False`` without failing on an unexpected keyword.
         """
         from app.core.agent.types import AgentStep, AgentStepType
 

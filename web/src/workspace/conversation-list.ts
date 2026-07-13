@@ -25,6 +25,9 @@ import {
   taskStatusLabel,
 } from './conversation-sessions';
 import { $, _CHAT_SVG, _TRASH_SVG, _escHtml, showToast } from './infrastructure';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 interface RefreshOptions {
   silent?: boolean;
@@ -40,6 +43,7 @@ let _sessions: AiSessionPreview[] = [];
 let _refreshPromise: Promise<AiSessionPreview[]> | null = null;
 let _bound = false;
 let _sessionsExpanded = false;
+let _sessionActionsBusy = false;
 
 const _SESSION_PREVIEW_LIMIT = 5;
 
@@ -53,10 +57,9 @@ function _focusComposer(): void {
 }
 
 function _closeSkillLibrary(): void {
-  const WA = (window as any).WA || {};
-  if (typeof WA.closeSkillLibrary === 'function') {
+  if (typeof workspaceApi.closeSkillLibrary === 'function') {
     try {
-      WA.closeSkillLibrary();
+      workspaceApi.closeSkillLibrary();
     } catch (_) { /* noop */ }
   }
 }
@@ -72,7 +75,7 @@ function _setChatHeader(sessionId?: string): void {
   const meta = _sessions.find((session) => session.id === id) || (id ? { id, title: sessionTitle(null, id) } : null);
   const title = $('wa-ai-chat-title');
   const subtitle = $('wa-ai-chat-subtitle');
-  if (title) title.textContent = sessionTitle(meta, _activeAiSessionId);
+  if (title) title.textContent = sessionTitle(meta, _activeAiSessionId) || 'Koto AI';
   if (subtitle) {
     const count = Number(meta && meta.message_count || 0);
     const taskCount = Number(meta && meta.task_count || 0);
@@ -80,7 +83,7 @@ function _setChatHeader(sessionId?: string): void {
       count ? `${count} 条消息` : '',
       taskCount ? `${taskCount} 个任务` : '',
     ].filter(Boolean);
-    subtitle.textContent = parts.length ? parts.join(' · ') : '新对话 · 直接输入问题或附加文件';
+    subtitle.textContent = parts.length ? parts.join(' · ') : '新对话 · 输入问题或拖入文件开始';
   }
 }
 
@@ -88,16 +91,38 @@ function _renderLoading(): void {
   const list = $('wa-ai-session-list');
   if (!list) return;
   list.innerHTML = '<div class="wa-ai-session-state">正在读取对话...</div>';
+  _syncSessionActionState();
 }
 
-function _renderEmpty(message = '暂无对话与任务'): void {
+function _renderEmpty(message = '发送第一条消息开始对话'): void {
   const list = $('wa-ai-session-list');
   if (!list) return;
   list.innerHTML = `
     <div class="wa-ai-session-empty">
       <strong>${_escHtml(message)}</strong>
-      <span>在底部输入即可开始新对话；附加文件后会进入文件任务流程。</span>
+      <span>在输入框输入即可开始新对话；附加文件后会进入文件任务流程。</span>
     </div>`;
+  _syncSessionActionState();
+}
+
+function _syncSessionActionState(): void {
+  const clearButton = $('wa-ai-session-clear') as HTMLButtonElement | null;
+  const refreshButton = $('wa-ai-session-refresh') as HTMLButtonElement | null;
+  const summary = $('wa-ai-session-summary');
+  const totalTasks = _sessions.reduce((sum, session) => sum + Math.max(0, Number(session.task_count || 0)), 0);
+  if (summary) {
+    summary.textContent = _sessions.length
+      ? `${_sessions.length} 条对话${totalTasks ? ` · ${totalTasks} 个任务` : ''}`
+      : 'AI 工作区';
+  }
+  if (clearButton) {
+    clearButton.disabled = _sessionActionsBusy || !_sessions.length;
+    clearButton.classList.toggle('is-busy', _sessionActionsBusy);
+  }
+  if (refreshButton) {
+    refreshButton.disabled = _sessionActionsBusy;
+    refreshButton.classList.toggle('is-busy', !!_refreshPromise);
+  }
 }
 
 function _renderSessions(): void {
@@ -111,8 +136,9 @@ function _renderSessions(): void {
   const hiddenCount = Math.max(0, _sessions.length - visibleSessions.length);
   const sessionHtml = visibleSessions.map((session) => {
     const active = session.id === _activeAiSessionId ? ' is-active' : '';
-    const title = sessionTitle(session, _activeAiSessionId);
-    const preview = session.preview || '暂无消息';
+    const taskTitle = String(session.latest_task_title || '').trim();
+    const title = taskTitle || sessionTitle(session, _activeAiSessionId);
+    const preview = session.preview || '（空消息）';
     const time = formatSessionTime(session);
     const count = Number(session.message_count || 0);
     const countText = count ? `${count} 条消息` : '空会话';
@@ -123,7 +149,7 @@ function _renderSessions(): void {
       ? `<span class="wa-ai-session-task-badge" data-status="${_escHtml(taskStatus || 'task')}">${_escHtml(taskCount > 1 ? `任务 ${taskCount} · ${taskStatusLabel(taskStatus)}` : taskStatusLabel(taskStatus))}</span>`
       : '';
     return `
-      <div role="button" tabindex="0" class="wa-ai-session-item${hasTaskFlow ? ' has-task-flow' : ''}${active}" data-ai-session-id="${_escHtml(session.id)}" data-task-count="${_escHtml(String(taskCount))}" data-latest-task-status="${_escHtml(taskStatus)}" title="${_escHtml(title)}">
+      <div role="button" tabindex="0" class="wa-ai-session-item${hasTaskFlow ? ' has-task-flow' : ''}${active}" data-ai-session-id="${_escHtml(session.id)}" data-task-count="${_escHtml(String(taskCount))}" data-latest-task-title="${_escHtml(taskTitle)}" data-latest-task-status="${_escHtml(taskStatus)}" title="${_escHtml(title)}">
         <span class="wa-ai-session-icon">${_CHAT_SVG}</span>
         <span class="wa-ai-session-main">
           <span class="wa-ai-session-top">
@@ -143,6 +169,7 @@ function _renderSessions(): void {
     ? `<button type="button" class="wa-ai-session-expand" data-ai-session-expand="${_sessionsExpanded ? '0' : '1'}">${_escHtml(_sessionsExpanded ? '收起历史' : `展开 ${hiddenCount} 条历史`)}</button>`
     : '';
   list.innerHTML = sessionHtml + expandHtml;
+  _syncSessionActionState();
   _setChatHeader();
 }
 
@@ -151,10 +178,9 @@ function _openLatestTaskFlowForSession(sessionId: string): void {
   const taskId = String(session && session.latest_task_id || '').trim();
   if (!taskId) return;
   _syncHistoricalTaskLiveProgress(session);
-  const WA = (window as any).WA || {};
-  if (typeof WA.openTaskWorkbenchForCurrentRun !== 'function') return;
+  if (typeof workspaceApi.openTaskWorkbenchForCurrentRun !== 'function') return;
   window.setTimeout(() => {
-    WA.openTaskWorkbenchForCurrentRun({
+    workspaceApi.openTaskWorkbenchForCurrentRun({
       taskId,
       runId: String(session && session.latest_task_run_id || '').trim(),
       scroll: false,
@@ -180,7 +206,7 @@ function _syncHistoricalTaskLiveProgress(session?: AiSessionPreview): void {
     planEl.textContent = '历史任务';
     planEl.style.display = '';
   }
-  if (valueEl) valueEl.textContent = status === 'running' ? '继续观察步骤' : '查看下方步骤';
+  if (valueEl) valueEl.textContent = status === 'running' ? '继续观察步骤' : '查看执行过程';
   if (fillEl) fillEl.style.width = status === 'running' ? '55%' : '100%';
 }
 
@@ -193,6 +219,15 @@ function _showChatView(): void {
   if (chatView) chatView.hidden = false;
   mountWorkspaceAiComposer('chat');
   _setChatHeader();
+}
+
+/**
+ * The activity-bar AI entry is a conversation entry point, not a history
+ * browser.  Keep the history list behind the back button in the chat header.
+ */
+export function showAiChat(): void {
+  _showChatView();
+  _focusComposer();
 }
 
 export function showAiSessionList(): void {
@@ -211,6 +246,7 @@ export async function refreshAiSessions(options: RefreshOptions = {}): Promise<A
   if (_refreshPromise) return _refreshPromise;
   const list = $('wa-ai-session-list');
   if (list && (!options.silent || !list.children.length)) _renderLoading();
+  _syncSessionActionState();
   _refreshPromise = fetchAiSessionPreviews()
     .then((sessions) => {
       _sessions = sessions;
@@ -224,6 +260,7 @@ export async function refreshAiSessions(options: RefreshOptions = {}): Promise<A
     })
     .finally(() => {
       _refreshPromise = null;
+      _syncSessionActionState();
     });
   return _refreshPromise;
 }
@@ -235,9 +272,8 @@ export async function openAiSession(sessionId: string, options: RefreshOptions &
   _showChatView();
   _renderSessions();
 
-  const WA = (window as any).WA || {};
-  if (typeof WA.useHostSession === 'function') {
-    const opened = await WA.useHostSession(normalized, { force: options.force !== false });
+  if (typeof workspaceApi.useHostSession === 'function') {
+    const opened = await workspaceApi.useHostSession(normalized, { force: options.force !== false });
     _openLatestTaskFlowForSession(normalized);
     return opened;
   }
@@ -258,9 +294,8 @@ export async function deleteAiSession(sessionId: string): Promise<boolean> {
       const next = _sessions[0];
       if (next) {
         _activeAiSessionId = next.id;
-        const WA = (window as any).WA || {};
-        if (typeof WA.useHostSession === 'function') {
-          await WA.useHostSession(next.id, { force: true });
+        if (typeof workspaceApi.useHostSession === 'function') {
+          await workspaceApi.useHostSession(next.id, { force: true });
         }
       } else {
         _activeAiSessionId = '';
@@ -280,13 +315,61 @@ export async function deleteAiSession(sessionId: string): Promise<boolean> {
   }
 }
 
+export async function clearAiSessions(): Promise<boolean> {
+  if (!_sessions.length) {
+    showToast('没有可清除的历史对话', 'info');
+    return false;
+  }
+  const count = _sessions.length;
+  if (!window.confirm(`确认清除全部 ${count} 条历史对话？此操作不可撤销。`)) return false;
+
+  const sessionsToDelete = _sessions.map((session) => session.id).filter(Boolean);
+  const clearButton = $('wa-ai-session-clear') as HTMLButtonElement | null;
+  _sessionActionsBusy = true;
+  if (clearButton) clearButton.disabled = true;
+  _syncSessionActionState();
+
+  const failedIds: string[] = [];
+  try {
+    for (const sessionId of sessionsToDelete) {
+      try {
+        await deleteAiSessionRecord(sessionId);
+      } catch (error) {
+        console.warn('[WA] clear AI session failed:', sessionId, error);
+        failedIds.push(sessionId);
+      }
+    }
+
+    _sessions = failedIds.length
+      ? _sessions.filter((session) => failedIds.includes(session.id))
+      : [];
+    if (!failedIds.length) {
+      _activeAiSessionId = '';
+      const runtime = (window as any)._waConversationRuntime;
+      if (runtime && typeof runtime.reset === 'function') runtime.reset();
+    }
+    showAiSessionList();
+    await refreshAiSessions({ silent: true });
+
+    if (failedIds.length) {
+      showToast(`已清除 ${count - failedIds.length} 条，${failedIds.length} 条失败`, 'error');
+      return false;
+    }
+    showToast(`已清除 ${count} 条历史对话`, 'success');
+    return true;
+  } finally {
+    _sessionActionsBusy = false;
+    _syncSessionActionState();
+  }
+}
+
 export async function newAiSession(options: NewSessionOptions = {}): Promise<any> {
   _closeSkillLibrary();
   try {
     const sessionId = await createAiSessionRecord();
     await refreshAiSessions({ silent: true });
     const opened = await openAiSession(sessionId, { force: true });
-    if (options.toast !== false) showToast('新对话已创建，直接输入问题或附加文件即可开始。', 'success');
+    if (options.toast !== false) showToast('新对话已创建，在下方输入框开始吧。', 'success');
     if (options.focus !== false) _focusComposer();
     return opened;
   } catch (error: any) {
@@ -298,8 +381,7 @@ export async function newAiSession(options: NewSessionOptions = {}): Promise<any
 export async function submitUnifiedAiComposer(): Promise<any> {
   const mode = workspaceAiComposerMode();
   if (mode !== 'sessionList') {
-    const WA = (window as any).WA || {};
-    if (typeof WA.sendMessage === 'function') return WA.sendMessage();
+    if (typeof workspaceApi.sendMessage === 'function') return workspaceApi.sendMessage();
     return null;
   }
 
@@ -324,9 +406,8 @@ export async function submitUnifiedAiComposer(): Promise<any> {
     const chatInput = setWorkspaceAiComposerValue('chat', text, { focus: false, dispatchInput: true });
     if (!chatInput) throw new Error('对话输入框未就绪');
 
-    const WA = (window as any).WA || {};
-    if (typeof WA.sendMessage !== 'function') throw new Error('模型发送通路未就绪');
-    WA.sendMessage();
+    if (typeof workspaceApi.sendMessage !== 'function') throw new Error('模型发送通路未就绪');
+    workspaceApi.sendMessage();
 
     return sessionId;
   } catch (error: any) {
@@ -417,25 +498,26 @@ export function syncAiSessionSelection(sessionId: string, options: { showChat?: 
 function _initAiSessionBrowser(): void {
   if (!$('wa-ai-session-list-view')) return;
   _bindAiSessionBrowser();
-  mountWorkspaceAiComposer(workspaceAiComposerMode());
+  _showChatView();
   _setChatHeader(_activeAiSessionId);
   refreshAiSessions({ silent: true }).catch(() => {});
 }
 
-if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.showAiSessionList = showAiSessionList;
-  (window as any).WA.refreshAiSessions = refreshAiSessions;
-  (window as any).WA.openAiSession = openAiSession;
-  (window as any).WA.deleteAiSession = deleteAiSession;
-  (window as any).WA.newAiSession = newAiSession;
-  (window as any).WA.submitUnifiedAiComposer = submitUnifiedAiComposer;
-  (window as any).WA.handleUnifiedComposerKeydown = handleUnifiedComposerKeydown;
-  (window as any).WA.sendSessionListComposer = sendSessionListComposer;
-  (window as any).WA.handleSessionListComposerKeydown = handleSessionListComposerKeydown;
-  (window as any).WA._syncAiSessionSelection = syncAiSessionSelection;
-  (window as any).WA._activeAiSessionMeta = _activeSessionMeta;
-}
+publishWorkspaceApi({
+  showAiSessionList,
+  showAiChat,
+  refreshAiSessions,
+  openAiSession,
+  deleteAiSession,
+  clearAiSessions,
+  newAiSession,
+  submitUnifiedAiComposer,
+  handleUnifiedComposerKeydown,
+  sendSessionListComposer,
+  handleSessionListComposerKeydown,
+  _syncAiSessionSelection: syncAiSessionSelection,
+  _activeAiSessionMeta: _activeSessionMeta,
+});
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', _initAiSessionBrowser);

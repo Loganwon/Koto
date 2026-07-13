@@ -163,7 +163,7 @@ class TestOpenAIProviderTracking:
 
         provider.generate_content(
             prompt="hi",
-            model="deepseek-v4-pro",
+            model="deepseek-chat",
             extra_body={"thinking": {"type": "enabled"}},
         )
 
@@ -193,7 +193,7 @@ class TestDeepSeekProvider:
             get_configured_cloud_model(
                 "FILE_TASK", fallback_model="gemini-3.1-pro-preview"
             )
-            == "deepseek-v4-pro"
+            == "deepseek-chat"
         )
         assert (
             get_configured_cloud_model(
@@ -223,7 +223,7 @@ class TestDeepSeekProvider:
             get_configured_cloud_model(
                 "FILE_TASK", fallback_model="gemini-3.1-pro-preview"
             )
-            == "deepseek-v4-pro"
+            == "deepseek-chat"
         )
         assert (
             get_configured_cloud_model(
@@ -236,11 +236,9 @@ class TestDeepSeekProvider:
         from app.core.llm.model_fallback import ModelFallbackExecutor
 
         executor = ModelFallbackExecutor()
-        candidates = executor._build_candidate_list("deepseek-v4-pro", "FILE_TASK")
+        candidates = executor._build_candidate_list("deepseek-chat", "FILE_TASK")
 
-        assert "deepseek-v4-pro" in candidates
-        assert "deepseek-v4-flash" in candidates
-        assert "deepseek-chat" not in candidates
+        assert "deepseek-chat" in candidates
         assert "deepseek-reasoner" not in candidates
         assert all(not model.startswith("gemini-") for model in candidates)
 
@@ -250,7 +248,7 @@ class TestDeepSeekProvider:
         executor = ModelFallbackExecutor()
         candidates = executor._build_candidate_list("", "FILE_TASK")
 
-        assert candidates[:2] == ["deepseek-v4-pro", "deepseek-v4-flash"]
+        assert "deepseek-chat" in candidates
         assert all(not model.startswith("gemini-") for model in candidates)
 
 
@@ -322,11 +320,17 @@ class TestOllamaLLMProviderResolveModel:
         # Either the mock intercepted it or it returned the patched value
         assert isinstance(result, str)
 
-    def test_cached_auto_model_used_within_ttl(self):
+    def test_cached_auto_model_used_within_ttl_when_no_model_is_configured(
+        self, monkeypatch
+    ):
         import time
 
+        from app.core.llm import local_model_runtime
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         OllamaLLMProvider._auto_model = "cached-model:7b"
         OllamaLLMProvider._auto_model_ts = time.time()  # fresh timestamp — within TTL
         prov = OllamaLLMProvider(model=None)  # no explicit model
@@ -557,12 +561,18 @@ class TestOllamaAutoDetectExtended:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_auto_model_cache_class_level(self):
+    def test_auto_model_cache_class_level_when_no_model_is_configured(
+        self, monkeypatch
+    ):
         """Two instances with model=None share the class-level cache."""
         import time
 
+        from app.core.llm import local_model_runtime
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         OllamaLLMProvider._auto_model = "shared:7b"
         OllamaLLMProvider._auto_model_ts = time.time()
 

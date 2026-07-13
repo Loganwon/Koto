@@ -272,21 +272,19 @@ def shadow_tick():
         # 尝试获取 LLM 函数（可选）
         llm_fn = None
         try:
-            from google.genai import types as _types
+            from app.core.llm.provider_factory import get_llm_provider
 
-            from web.runtime_context import get_client_proxy
-
-            client = get_client_proxy()
+            client = get_llm_provider(provider="deepseek", allow_local_fallback=False)
 
             def _llm(prompt: str) -> str:
-                resp = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
-                    contents=prompt,
-                    config=_types.GenerateContentConfig(
-                        temperature=0.7, max_output_tokens=80
-                    ),
+                resp = client.generate_content(
+                    prompt=prompt,
+                    temperature=0.7,
+                    max_tokens=80,
                 )
-                return resp.text or ""
+                if isinstance(resp, dict):
+                    return str(resp.get("content") or resp.get("text") or "")
+                return str(getattr(resp, "text", resp) or "")
 
             llm_fn = _llm
         except Exception:

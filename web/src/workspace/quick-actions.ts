@@ -1,3 +1,5 @@
+import { publishWorkspaceApi } from '../shared/workspace-api';
+
 export interface QuickActionDefinition {
   action: string;
   id?: string;
@@ -9,6 +11,26 @@ export interface QuickActionDefinition {
   taskFlowMode?: string;
   prompt?: string;
   language?: string;
+}
+
+const QUICK_ACTION_ALIASES: Record<string, string> = {
+  polish: '润色',
+  translate: '翻译',
+  explain: '解释',
+  chart: '可视化',
+  visualize: '可视化',
+  visualise: '可视化',
+  summarize: '总结',
+  summary: '总结',
+  continue: '续写',
+  rewrite: '改写',
+  check: '检查',
+};
+
+export function normalizeQuickActionId(actionId: string): string {
+  const source = String(actionId || '').trim();
+  if (!source) return '';
+  return QUICK_ACTION_ALIASES[source.toLowerCase()] || source;
 }
 
 export interface QuickActionDeps {
@@ -25,6 +47,7 @@ export interface QuickActionContext {
   text?: string;
   selectionText?: string;
   selectionSource?: string;
+  selectionContext?: Record<string, any> | null;
   pinnedSelSource?: string;
   model_mode?: string;
   model_id?: string;
@@ -52,6 +75,13 @@ function normalizeKeywords(keywords: string[], actionId: string): string[] {
   return Array.from(new Set(values.map((k) => String(k || '').trim()).filter(Boolean)));
 }
 
+function aliasesForAction(actionId: string): string[] {
+  const canonical = normalizeQuickActionId(actionId);
+  return Object.entries(QUICK_ACTION_ALIASES)
+    .filter(([, target]) => target === canonical)
+    .map(([alias]) => alias);
+}
+
 export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
   const options = deps || {};
   const actions = new Map<string, QuickActionDefinition>();
@@ -71,7 +101,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
   }
 
   function getAction(actionId: string): QuickActionDefinition | null {
-    return actions.get(String(actionId || '').trim()) || null;
+    return actions.get(normalizeQuickActionId(actionId)) || null;
   }
 
   function registerAction(definition: QuickActionDefinition): QuickActionDefinition {
@@ -94,7 +124,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
   }
 
   function matchAction(text: string): string {
-    const source = String(text || '').trim();
+    const source = normalizeQuickActionId(text);
     return actions.has(source) ? source : '';
   }
 
@@ -189,6 +219,9 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     if (!attachedDispatcher || !action) return action;
     if (typeof attachedDispatcher.registerQuickActionHandler === 'function') {
       attachedDispatcher.registerQuickActionHandler(action.action, (context: any) => sendAction(action.action, context));
+      aliasesForAction(action.action).forEach((alias) => {
+        attachedDispatcher.registerQuickActionHandler(alias, (context: any) => sendAction(action.action, Object.assign({}, context, { action: action.action })));
+      });
     }
     return action;
   }
@@ -201,11 +234,13 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
   }
 
   function sendAction(actionId: string, context: QuickActionContext): Promise<any> {
-    const action = getAction(actionId);
+    const canonicalActionId = normalizeQuickActionId(actionId);
+    const action = getAction(canonicalActionId);
     if (!action) return Promise.reject(new Error(`未注册任务动作：${actionId}`));
-    if (action.route === 'chart') return sendChartAction(Object.assign({ action: actionId }, context), action);
-    if (usesProposalTaskFlow(action)) return sendProposalTaskFlowAction(Object.assign({ action: actionId }, context), action);
-    if (usesSimpleTaskFlow(action)) return sendSimpleTaskFlowAction(Object.assign({ action: actionId }, context), action);
+    const payload = Object.assign({}, context, { action: canonicalActionId });
+    if (action.route === 'chart') return sendChartAction(payload, action);
+    if (usesProposalTaskFlow(action)) return sendProposalTaskFlowAction(payload, action);
+    if (usesSimpleTaskFlow(action)) return sendSimpleTaskFlowAction(payload, action);
     return Promise.reject(new Error(`快捷动作 ${actionId} 未配置可用的执行路径`));
   }
 
@@ -216,12 +251,13 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
       throw new Error('快捷动作任务流程运行时未加载，请刷新后重试。');
     }
-    const taskText = buildSimpleTaskFlowTask(payload, action);
+    const taskText = buildSimpleTaskFlowTask(payload, action || undefined);
     if (!taskText) throw new Error(`快捷动作 ${payload.action || ''} 未生成可执行任务`);
     return attachedDispatcher.dispatchMessage({
       text: taskText,
       pinnedSelText: payload.selectionText || '',
       pinnedSelSource: payload.selectionSource || payload.pinnedSelSource || '',
+      selectionContext: payload.selectionContext || null,
       model_mode: payload.model_mode || getModelMode(),
       model_id: payload.model_id || getSelectedCloudModelId(),
       msgs,
@@ -237,7 +273,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
     if (!attachedDispatcher || typeof attachedDispatcher.dispatchMessage !== 'function') {
       throw new Error('快捷动作任务流程运行时未加载，请刷新后重试。');
     }
-    const taskText = buildProposalTaskFlowTask(payload, action);
+    const taskText = buildProposalTaskFlowTask(payload, action || undefined);
     if (!taskText) throw new Error(`快捷动作 ${payload.action || ''} 未生成可执行任务`);
     const selectionText = String(payload.selectionText || '').trim();
     const hasSelection = !!selectionText;
@@ -245,6 +281,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
       text: taskText,
       pinnedSelText: payload.selectionText || '',
       pinnedSelSource: payload.selectionSource || payload.pinnedSelSource || '',
+      selectionContext: payload.selectionContext || null,
       model_mode: payload.model_mode || getModelMode(),
       model_id: payload.model_id || getSelectedCloudModelId(),
       msgs,
@@ -282,6 +319,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
       text: chartTaskText,
       pinnedSelText: payload.csv_data || payload.selectionText || '',
       pinnedSelSource: payload.csv_data ? 'chart_csv' : (payload.selectionSource || payload.pinnedSelSource || 'chart_request'),
+      selectionContext: payload.selectionContext || null,
       model_mode: modelMode,
       model_id: modelId,
       msgs,
@@ -308,7 +346,7 @@ export function createQuickActionDispatcher(deps: QuickActionDeps = {}) {
   };
 }
 
-const WA = (window as any).WA || {};
-WA.createQuickActionDispatcher = createQuickActionDispatcher;
-WA.createWorkspaceQuickActionRuntime = createQuickActionDispatcher;
-(window as any).WA = WA;
+publishWorkspaceApi({
+  createQuickActionDispatcher,
+  createWorkspaceQuickActionRuntime: createQuickActionDispatcher,
+});

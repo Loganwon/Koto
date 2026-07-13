@@ -34,12 +34,13 @@ import time
 
 from flask import Blueprint, Response, jsonify, request
 
-from app.core.llm.gemini_config import get_gemini_api_key
-from web.runtime_context import (
+from app.core.llm.provider_factory import get_llm_provider
+from web.runtime_services import (
     get_concept_extractor,
     get_file_editor,
     get_file_indexer,
 )
+from web.runtime_context import service_registry
 
 _logger = logging.getLogger("koto.routes.file_editor")
 
@@ -62,9 +63,17 @@ def _get_concept_extractor():
 
 
 def _get_settings_manager():
-    from web.runtime_context import get_settings_manager
+    return service_registry.settings_manager
 
-    return get_settings_manager()
+
+def _active_cloud_provider():
+    return get_llm_provider(provider="deepseek", allow_local_fallback=False)
+
+
+def _provider_text(response) -> str:
+    if isinstance(response, dict):
+        return str(response.get("content") or response.get("text") or "")
+    return str(getattr(response, "text", response) or "")
 
 
 # ═══════════════════════════════════════════════════
@@ -88,13 +97,16 @@ def notebook_overview() -> Response:
             output_dir=os.path.join(settings_manager.workspace_dir, "audio_cache")
         )
 
-        import google.genai as genai
         import requests as _requests
 
-        client = genai.Client(api_key=get_gemini_api_key())
-        model = client.models
+        provider = _active_cloud_provider()
 
-        script = asyncio.run(generator.generate_script(content, model))
+        class _ModelAdapter:
+            def generate_content(self, prompt):
+                text = _provider_text(provider.generate_content(prompt=prompt))
+                return type("ProviderResponse", (), {"text": text})()
+
+        script = asyncio.run(generator.generate_script(content, _ModelAdapter()))
         if not script:
             return jsonify({"success": False, "error": "剧本生成失败"}), 500
 
@@ -141,13 +153,8 @@ def notebook_qa() -> Response:
     """
 
     try:
-        import google.genai as genai
-
-        client = genai.Client(api_key=get_gemini_api_key())
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", contents=prompt
-        )
-        return jsonify({"success": True, "answer": response.text})
+        response = _active_cloud_provider().generate_content(prompt=prompt)
+        return jsonify({"success": True, "answer": _provider_text(response)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -170,13 +177,8 @@ def notebook_study_guide() -> Response:
     full_prompt = f"{selected_prompt}\n\n[Source Text]\n{content[:20000]}"
 
     try:
-        import google.genai as genai
-
-        client = genai.Client(api_key=get_gemini_api_key())
-        response = client.models.generate_content(
-            model="gemini-2.5-flash", contents=full_prompt
-        )
-        return jsonify({"success": True, "result": response.text})
+        response = _active_cloud_provider().generate_content(prompt=full_prompt)
+        return jsonify({"success": True, "result": _provider_text(response)})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 

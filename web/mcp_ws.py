@@ -6,68 +6,25 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
 import time
+import uuid
 from typing import Any, Dict
 
-_SESSIONS: Dict[str, Dict[str, Any]] = {}
-_LOCK = threading.RLock()
+from app.core.mcp.session_store import (
+    get_mcp_ws_status,
+    mark_initialized,
+    register_session,
+    unregister_session,
+)
 
+from flask import request
 
-def _register_session(session_id: str) -> None:
-    with _LOCK:
-        _SESSIONS[session_id] = {
-            "session_id": session_id,
-            "connected_at": time.time(),
-            "last_seen_at": time.time(),
-            "initialized": False,
-            "client_info": {},
-        }
-
-
-def _unregister_session(session_id: str) -> None:
-    with _LOCK:
-        _SESSIONS.pop(session_id, None)
-
-
-def _mark_initialized(session_id: str, client_info: Dict[str, Any] | None = None) -> None:
-    with _LOCK:
-        session = _SESSIONS.setdefault(
-            session_id,
-            {
-                "session_id": session_id,
-                "connected_at": time.time(),
-                "last_seen_at": time.time(),
-            },
-        )
-        session["initialized"] = True
-        session["client_info"] = client_info or {}
-        session["last_seen_at"] = time.time()
-
-
-def _is_external_session(session: Dict[str, Any]) -> bool:
-    client = session.get("client_info") or {}
-    name = str(client.get("name") or "").lower()
-    return name not in {"koto-ui", "koto", "koto-frontend"}
-
-
-def get_mcp_ws_status() -> Dict[str, Any]:
-    with _LOCK:
-        sessions = [dict(item) for item in _SESSIONS.values()]
-    external = [item for item in sessions if _is_external_session(item)]
-    for item in sessions:
-        client = item.get("client_info") or {}
-        item["client_name"] = client.get("name", "")
-    for item in external:
-        client = item.get("client_info") or {}
-        item["client_name"] = client.get("name", "")
-    return {
-        "success": True,
-        "active_session_count": len(sessions),
-        "active_external_session_count": len(external),
-        "sessions": sessions,
-        "external_sessions": external,
-    }
+# Backward-compatible aliases for internal use
+_register_session = register_session
+_unregister_session = unregister_session
+_mark_initialized = mark_initialized
 
 
 class MCPWebSocketSession:
@@ -116,6 +73,7 @@ class MCPWebSocketSession:
         return {"content": [{"type": "text", "text": _json_text(data)}], "isError": False}
 
     def handle_message(self, raw: str) -> str:
+        raw = str(raw).lstrip("\ufeff")
         payload = json.loads(raw)
         req_id = payload.get("id")
         method = payload.get("method", "")
@@ -146,3 +104,37 @@ class MCPWebSocketSession:
                 },
                 ensure_ascii=False,
             )
+
+
+def _authorized_ws_request() -> bool:
+    required_key = os.environ.get("KOTO_MCP_API_KEY", "").strip()
+    if not required_key:
+        return True
+    bearer = request.headers.get("Authorization", "")
+    provided = (
+        request.headers.get("X-Koto-MCP-Key")
+        or request.args.get("key")
+        or (bearer.removeprefix("Bearer ").strip() if bearer.startswith("Bearer ") else "")
+    )
+    return provided == required_key
+
+
+def register_mcp_ws(sock: Any) -> None:
+    """Register Koto's external MCP WebSocket endpoint on a Flask-Sock instance."""
+
+    @sock.route("/ws/mcp")
+    def ws_mcp(ws):
+        if not _authorized_ws_request():
+            ws.close()
+            return
+        session = MCPWebSocketSession(f"mcp-ws-{uuid.uuid4().hex}")
+        try:
+            while True:
+                raw = ws.receive()
+                if raw is None:
+                    break
+                if isinstance(raw, bytes):
+                    raw = raw.decode("utf-8", errors="replace")
+                ws.send(session.handle_message(str(raw)))
+        finally:
+            session.close()

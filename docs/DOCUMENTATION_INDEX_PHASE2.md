@@ -1,3 +1,5 @@
+> **Historical snapshot — not a current documentation index.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) instead.
+
 # 📚 Koto Phase 1 & 2 文档索引
 
 快速找到你需要的文档和脚本。

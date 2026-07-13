@@ -14,7 +14,7 @@ def test_workspace_ai_onboarding_copy_tracks_goal_first_task_flow():
 
     assert "Koto AI" in embedded_html
     assert (
-        "能总结分析、改写润色、生成文档、整理文件。输入任务或附加文件，过程和结果都会显示在这里。"
+        "在输入框直接说出任务，或附加文件作为上下文。支持文档分析、PPT生成、代码编写、数据处理等。"
         in embedded_html
     )
     assert "wa-welcome-lede" not in embedded_html

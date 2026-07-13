@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** This 2025 trigger-document index may reference removed files and retired tests. Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) instead.
+
 # 📚 Koto 触发器功能 - 完整导航指南
 
 > **项目状态**: ✅ 完成 | **版本**: 1.0 | **日期**: 2025-02-14
@@ -174,7 +176,7 @@
 [3] 研究代码:
     - web/proactive_trigger.py (参数管理)
     - web/app.py (API 端点)
-    - web/static/js/app.js (前端逻辑)
+    - web/src/app/ (已迁移至模块化主应用) (前端逻辑)
  ↓
 [4] 运行测试:
     python test_trigger_params_integration.py

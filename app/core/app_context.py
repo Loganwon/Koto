@@ -198,12 +198,12 @@ class AppContext:
 
     @property
     def settings_manager(self):
-        """web.settings.SettingsManager"""
+        """app.core.config.user_settings.SettingsManager"""
         return self.get("settings_manager")
 
     @property
     def memory_manager(self):
-        """web.enhanced_memory_manager.EnhancedMemoryManager"""
+        """app.core.services.memory_manager.EnhancedMemoryManager"""
         return self.get("memory_manager")
 
     @property
@@ -228,7 +228,7 @@ class AppContext:
 
     @property
     def notification_manager(self):
-        """web.notification_manager.NotificationManager"""
+        """app.core.services.notification_manager.NotificationManager"""
         return self.get("notification_manager")
 
     @property
@@ -248,7 +248,7 @@ class AppContext:
 
     @property
     def token_tracker(self):
-        """web.token_tracker module-level functions proxy"""
+        """app.core.analytics.token_tracker module-level functions proxy"""
         return self.get("token_tracker")
 
 
@@ -268,13 +268,13 @@ def _make_settings_manager():
     try:
         from settings import SettingsManager
     except ImportError:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
     logger.debug("[AppContext] 创建 SettingsManager")
     return SettingsManager()
 
 
 def _make_memory_manager():
-    from web.enhanced_memory_manager import EnhancedMemoryManager
+    from app.core.services.memory_manager import EnhancedMemoryManager
 
     logger.debug("[AppContext] 创建 EnhancedMemoryManager")
     return EnhancedMemoryManager()
@@ -282,7 +282,7 @@ def _make_memory_manager():
 
 def _make_knowledge_base():
     try:
-        from web.knowledge_base import get_knowledge_base
+        from app.core.services.knowledge_base import get_knowledge_base
 
         logger.debug("[AppContext] 创建 KnowledgeBase")
         return get_knowledge_base()
@@ -334,7 +334,7 @@ def _make_notification_manager():
         )
     db_path = os.path.join(root, "config", "notifications.sqlite")
     try:
-        from web.notification_manager import NotificationManager
+        from app.core.services.notification_manager import NotificationManager
 
         logger.debug("[AppContext] 创建 NotificationManager")
         return NotificationManager(db_path)
@@ -366,7 +366,7 @@ def _make_checkpointer():
 
 def _make_model_manager():
     try:
-        from web.model_manager import ModelManager
+        from app.core.services.model_manager import ModelManager
 
         logger.debug("[AppContext] 创建 ModelManager")
         return ModelManager()
@@ -388,7 +388,7 @@ def _make_agent():
 
 def _make_token_tracker():
     try:
-        import web.token_tracker as tt
+        import app.core.analytics.token_tracker as tt
 
         logger.debug("[AppContext] 加载 TokenTracker 模块")
         return tt

@@ -2,6 +2,8 @@
  * Find/replace for DOCX and PPTX editors.
  */
 
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
 interface DocxMatch {
   from: number;
   to: number;
@@ -81,15 +83,8 @@ interface PptxFindState {
   replaceOpen: boolean;
 }
 
-declare global {
-  interface Window {
-    WA: any;
-    __workspaceFindReplaceInstalled?: boolean;
-  }
-}
-
 function installDocxFindReplace(deps: FindReplaceDeps) {
-  const { getActiveEditor, showToast, scheduleAutoSave } = deps;
+  const { getActiveEditor, showToast } = deps;
   const docxFind: DocxFindState = {
     matches: [],
     idx: 0,
@@ -135,9 +130,9 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     if (docxFind.matches.length) docxFindGo(docxFind.matches, 0);
   }
 
-  window.WA.docxFindInput = (value: unknown) => docxFindUpdateCount(String(value || '').trim());
+  const docxFindInput = (value: unknown) => docxFindUpdateCount(String(value || '').trim());
 
-  window.WA.docxFindNext = () => {
+  const docxFindNext = () => {
     if (!docxFind.matches.length) return;
     docxFind.idx = (docxFind.idx + 1) % docxFind.matches.length;
     docxFindGo(docxFind.matches, docxFind.idx);
@@ -145,7 +140,7 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     if (countEl) countEl.textContent = `${docxFind.idx + 1} / ${docxFind.matches.length}`;
   };
 
-  window.WA.docxFindPrev = () => {
+  const docxFindPrev = () => {
     if (!docxFind.matches.length) return;
     docxFind.idx = (docxFind.idx - 1 + docxFind.matches.length) % docxFind.matches.length;
     docxFindGo(docxFind.matches, docxFind.idx);
@@ -153,19 +148,19 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     if (countEl) countEl.textContent = `${docxFind.idx + 1} / ${docxFind.matches.length}`;
   };
 
-  window.WA.docxFindKeydown = (event: KeyboardEvent) => {
+  const docxFindKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      window.WA.docxFindNext();
+      docxFindNext();
     }
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault();
-      window.WA.docxFindPrev();
+      docxFindPrev();
     }
-    if (event.key === 'Escape') window.WA.docxFindClose();
+    if (event.key === 'Escape') docxFindClose();
   };
 
-  window.WA.docxFindClose = () => {
+  const docxFindClose = () => {
     const bar = document.getElementById('wa-docx-find-bar');
     if (bar) bar.style.display = 'none';
     docxFind.matches = [];
@@ -181,7 +176,7 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     if (pm) (pm as HTMLElement).focus();
   };
 
-  window.WA.docxToggleReplace = (forceOpen: boolean) => {
+  const docxToggleReplace = (forceOpen: boolean) => {
     const row = document.getElementById('wa-docx-replace-row');
     const btn = document.getElementById('wa-docx-replace-toggle');
     if (!row) return;
@@ -194,7 +189,7 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     }
   };
 
-  window.WA.docxReplaceNext = () => {
+  const docxReplaceNext = () => {
     const activeEditor = getActiveEditor();
     const editor = activeEditor && activeEditor.editor;
     if (!editor || !docxFind.matches.length || docxFind.idx < 0) return;
@@ -205,7 +200,7 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     docxFindUpdateCount(query.trim());
   };
 
-  window.WA.docxReplaceAll = () => {
+  const docxReplaceAll = () => {
     const activeEditor = getActiveEditor();
     const editor = activeEditor && activeEditor.editor;
     if (!editor || !docxFind.matches.length) return;
@@ -219,6 +214,17 @@ function installDocxFindReplace(deps: FindReplaceDeps) {
     if (showToast) showToast(`已替换 ${count} 处`, 'success');
     const query = ((document.getElementById('wa-docx-find-input') as HTMLInputElement) || { value: '' }).value || '';
     docxFindUpdateCount(query.trim());
+  };
+
+  return {
+    docxFindInput,
+    docxFindNext,
+    docxFindPrev,
+    docxFindKeydown,
+    docxFindClose,
+    docxToggleReplace,
+    docxReplaceNext,
+    docxReplaceAll,
   };
 }
 
@@ -274,9 +280,9 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     if (pptxFind.matches.length) pptxFindGo(pptxFind.matches, 0);
   }
 
-  window.WA.pptxFindInput = (value: unknown) => pptxFindUpdateCount(String(value || '').trim());
+  const pptxFindInput = (value: unknown) => pptxFindUpdateCount(String(value || '').trim());
 
-  window.WA.pptxFindNext = () => {
+  const pptxFindNext = () => {
     if (!pptxFind.matches.length) return;
     pptxFind.idx = (pptxFind.idx + 1) % pptxFind.matches.length;
     pptxFindGo(pptxFind.matches, pptxFind.idx);
@@ -284,7 +290,7 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     if (countEl) countEl.textContent = `${pptxFind.idx + 1} / ${pptxFind.matches.length}`;
   };
 
-  window.WA.pptxFindPrev = () => {
+  const pptxFindPrev = () => {
     if (!pptxFind.matches.length) return;
     pptxFind.idx = (pptxFind.idx - 1 + pptxFind.matches.length) % pptxFind.matches.length;
     pptxFindGo(pptxFind.matches, pptxFind.idx);
@@ -292,19 +298,19 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     if (countEl) countEl.textContent = `${pptxFind.idx + 1} / ${pptxFind.matches.length}`;
   };
 
-  window.WA.pptxFindKeydown = (event: KeyboardEvent) => {
+  const pptxFindKeydown = (event: KeyboardEvent) => {
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      window.WA.pptxFindNext();
+      pptxFindNext();
     }
     if (event.key === 'Enter' && event.shiftKey) {
       event.preventDefault();
-      window.WA.pptxFindPrev();
+      pptxFindPrev();
     }
-    if (event.key === 'Escape') window.WA.pptxFindClose();
+    if (event.key === 'Escape') pptxFindClose();
   };
 
-  window.WA.pptxFindClose = () => {
+  const pptxFindClose = () => {
     const bar = document.getElementById('wa-pptx-find-bar');
     if (bar) bar.style.display = 'none';
     pptxFind.matches = [];
@@ -318,7 +324,7 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     if (countEl) countEl.textContent = '';
   };
 
-  window.WA.pptxToggleReplace = (forceOpen: boolean) => {
+  const pptxToggleReplace = (forceOpen: boolean) => {
     const row = document.getElementById('wa-pptx-replace-row');
     const btn = document.getElementById('wa-pptx-replace-toggle');
     if (!row) return;
@@ -349,7 +355,7 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     return true;
   }
 
-  window.WA.pptxReplaceNext = () => {
+  const pptxReplaceNext = () => {
     if (!pptxFind.matches.length || pptxFind.idx < 0) return;
     const replaceVal = ((document.getElementById('wa-pptx-replace-input') as HTMLInputElement) || { value: '' }).value || '';
     pptxApplyReplace(pptxFind.matches[pptxFind.idx], replaceVal);
@@ -357,7 +363,7 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     pptxFindUpdateCount(query.trim());
   };
 
-  window.WA.pptxReplaceAll = () => {
+  const pptxReplaceAll = () => {
     if (!pptxFind.matches.length) return;
     const replaceVal = ((document.getElementById('wa-pptx-replace-input') as HTMLInputElement) || { value: '' }).value || '';
     const count = pptxFind.matches.length;
@@ -366,16 +372,103 @@ function installPptxFindReplace(deps: FindReplaceDeps) {
     const query = ((document.getElementById('wa-pptx-find-input') as HTMLInputElement) || { value: '' }).value || '';
     pptxFindUpdateCount(query.trim());
   };
+
+  return {
+    pptxFindInput,
+    pptxFindNext,
+    pptxFindPrev,
+    pptxFindKeydown,
+    pptxFindClose,
+    pptxToggleReplace,
+    pptxReplaceNext,
+    pptxReplaceAll,
+  };
+}
+
+let _findReplaceActionDelegationInstalled = false;
+
+function _findReplaceApiMethod(scope: string, action: string): string {
+  const prefix = scope === 'docx' ? 'docx' : scope === 'pptx' ? 'pptx' : '';
+  if (!prefix) return '';
+  const suffixes: Record<string, string> = {
+    input: 'FindInput',
+    keydown: 'FindKeydown',
+    prev: 'FindPrev',
+    next: 'FindNext',
+    close: 'FindClose',
+    'toggle-replace': 'ToggleReplace',
+    'replace-next': 'ReplaceNext',
+    'replace-all': 'ReplaceAll',
+  };
+  return suffixes[action] ? `${prefix}${suffixes[action]}` : '';
+}
+
+function _invokeFindReplaceAction(scope: string, action: string, ...args: any[]): void {
+  const method = _findReplaceApiMethod(scope, action);
+  const handler = method ? getWorkspaceApi()[method] : null;
+  if (typeof handler === 'function') handler(...args);
+}
+
+function _installFindReplaceActionDelegation(): void {
+  if (_findReplaceActionDelegationInstalled) return;
+  _findReplaceActionDelegationInstalled = true;
+
+  document.addEventListener('mousedown', (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.('[data-wa-find-action]')) event.preventDefault();
+  }, true);
+
+  document.addEventListener('input', (event) => {
+    const input = event.target as HTMLInputElement | null;
+    const scope = String(input?.dataset.waFindInput || '');
+    if (scope && input) _invokeFindReplaceAction(scope, 'input', input.value);
+  });
+
+  document.addEventListener('change', (event) => {
+    const input = event.target as HTMLInputElement | null;
+    const scope = String(input?.dataset.waFindCase || '');
+    if (!scope) return;
+    const query = document.getElementById(`wa-${scope}-find-input`) as HTMLInputElement | null;
+    _invokeFindReplaceAction(scope, 'input', query?.value || '');
+  });
+
+  document.addEventListener('keydown', (event) => {
+    const input = event.target as HTMLInputElement | null;
+    const findScope = String(input?.dataset.waFindInput || '');
+    if (findScope) {
+      _invokeFindReplaceAction(findScope, 'keydown', event);
+      return;
+    }
+    const replaceScope = String(input?.dataset.waFindReplaceInput || '');
+    if (replaceScope && event.key === 'Enter') {
+      event.preventDefault();
+      _invokeFindReplaceAction(replaceScope, 'replace-next');
+    }
+  });
+
+  document.addEventListener('click', (event) => {
+    const target = event.target as HTMLElement | null;
+    const control = target?.closest?.<HTMLElement>('[data-wa-find-action]');
+    if (!control) return;
+    const scope = String(control.dataset.waFindScope || '');
+    const action = String(control.dataset.waFindAction || '');
+    if (!scope || !action) return;
+    event.preventDefault();
+    event.stopPropagation();
+    _invokeFindReplaceAction(scope, action);
+  }, true);
 }
 
 export function installWorkspaceFindReplace(deps: FindReplaceDeps): void {
-  if ((window as any).WA?.__workspaceFindReplaceInstalled) return;
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.__workspaceFindReplaceInstalled = true;
+  const workspaceApi = getWorkspaceApi();
+  if (workspaceApi.__workspaceFindReplaceInstalled) return;
+  workspaceApi.__workspaceFindReplaceInstalled = true;
 
-  installDocxFindReplace(deps);
-  installPptxFindReplace(deps);
+  publishWorkspaceApi({
+    ...installDocxFindReplace(deps),
+    ...installPptxFindReplace(deps),
+  });
 }
 
-(window as any).WA = (window as any).WA || {};
-(window as any).WA.installWorkspaceFindReplace = installWorkspaceFindReplace;
+publishWorkspaceApi({ installWorkspaceFindReplace });
+_installFindReplaceActionDelegation();

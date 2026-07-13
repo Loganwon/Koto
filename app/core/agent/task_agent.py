@@ -431,7 +431,7 @@ class TaskAgent:
     def __init__(
         self,
         socketio=None,
-        model_id: str = "gemini-3.1-pro-preview",
+        model_id: str = "deepseek-chat",
         api_key: Optional[str] = None,
     ):
         self._socketio = socketio

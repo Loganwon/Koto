@@ -312,6 +312,14 @@ class JobRunner:
             from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
             ledger = get_ledger()
+            try:
+                ledger.cancel_stale_running_tasks(timeout_seconds=86400.0)
+            except Exception as exc:
+                logger.debug("[JobRunner] running 孤儿任务清理跳过: %s", exc)
+            try:
+                ledger.cancel_stale_startup_health_tasks(timeout_seconds=300.0)
+            except Exception as exc:
+                logger.debug("[JobRunner] 启动自检残留清理跳过: %s", exc)
             stale = ledger.list_tasks(
                 status=TaskStatus.PENDING, source="job_runner", limit=100
             )
@@ -388,7 +396,7 @@ def _handle_agent_query(ctx: JobContext) -> Optional[str]:
 
         agent = get_agent()
         final_answer = ""
-        for step in agent.run(input_text=query, history=history):
+        for step in agent.run(input_text=query, history=history, record_task=False):
             from app.api.agent_routes import AgentStepType
 
             step_data = step.to_dict()
@@ -501,17 +509,16 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         # 尝试获取 LLM 函数（非必须）
         llm_fn = None
         try:
-            from google.genai import types as _types
-
+            from app.core.llm.provider_compat import types as _types
             from web.runtime_context import get_client_proxy
 
             client = get_client_proxy()
             if client is None:
-                raise RuntimeError("Gemini client unavailable")
+                raise RuntimeError("Active LLM client unavailable")
 
             def _llm(prompt: str) -> str:
                 resp = client.models.generate_content(
-                    model="gemini-2.5-flash-lite",
+                    model="deepseek-chat",
                     contents=prompt,
                     config=_types.GenerateContentConfig(
                         temperature=0.7, max_output_tokens=80

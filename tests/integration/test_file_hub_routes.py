@@ -16,7 +16,7 @@ import types
 
 import pytest
 
-from web.settings import settings as web_settings
+from app.core.config.user_settings import settings as web_settings
 
 
 def _check(resp, ok_status=(200, 201)):
@@ -182,7 +182,7 @@ class TestFileOpenEndpoint:
             json={},
             content_type="application/json",
         )
-        assert resp.status_code == 404
+        assert resp.status_code == 405
 
 
 @pytest.mark.integration
@@ -246,7 +246,6 @@ class TestFilehubLegacyUISource:
             root / "web" / "templates" / "index.html",
             root / "web" / "src" / "bundles" / "app.ts",
             root / "web" / "src" / "app" / "main.ts",
-            root / "web" / "static" / "css" / "inline-extracted.css",
         ]:
             src_parts.append(path.read_text(encoding="utf-8", errors="replace"))
         return "\n".join(src_parts)
@@ -283,13 +282,7 @@ class TestFilehubHTMLSource:
 
         root = Path(__file__).resolve().parents[2]
         html_path = root / "web" / "templates" / "index.html"
-        css_path = root / "web" / "static" / "css" / "inline-extracted.css"
-        return "\n".join(
-            [
-                html_path.read_text(encoding="utf-8", errors="replace"),
-                css_path.read_text(encoding="utf-8", errors="replace"),
-            ]
-        )
+        return html_path.read_text(encoding="utf-8", errors="replace")
 
     def test_filehub_modal_css_removed(self, index_html):
         assert ".fh-app" not in index_html

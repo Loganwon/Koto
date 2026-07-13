@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.core.agent.file_task_runtime_utils import (
-    _followup_has_prior_excel_docx_insert,
-)
+from app.core.agent.file_task_runtime_utils import _followup_has_prior_excel_docx_insert
 
 
 def financial_chart_docx_guidance(enabled: bool) -> str:
@@ -20,6 +18,7 @@ def financial_chart_docx_guidance(enabled: bool) -> str:
         "- 优先用 openpyxl/data_only=True 读取公式结果，并通过行标签匹配“收入合计、毛利合计、费用合计、净利润、销量”等指标；不要猜空列名。\n"
         "- 用 run_python_code 生成真实 PNG/JPG 图表，stdout 必须包含 KOTO_CREATED: <图片路径>；仅打印数据或错误栈不算完成。\n"
         "- 随后调用 write_docx_content 写入问题清单/分析结论，再调用 insert_image_into_docx 插入真实图片；没有 file.changed 不能结束。\n"
+        "任务完成后请按系统汇报格式（①②③）输出，重点说明各图表内容和发现的问题。\n"
     )
 
 

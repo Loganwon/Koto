@@ -4,11 +4,12 @@
 
 import { csrfFetch } from '../shared/csrf';
 import { markSidePanelClosed, markSidePanelOpen } from '../shared/side-panels';
+import { getWorkspaceApi } from '../shared/workspace-api';
 
 interface KotoSettings {
   storage?: { workspace_dir?: string; documents_dir?: string; images_dir?: string; chats_dir?: string };
   appearance?: { theme?: string; ui_zoom?: string };
-  ai?: { cloud_provider?: string; show_thinking?: boolean; show_task_type?: boolean; auto_save_files?: boolean; enable_mini_game?: boolean; use_local_only?: boolean; default_model?: string; local_model?: string };
+  ai?: { cloud_provider?: string; show_thinking?: boolean; show_task_type?: boolean; auto_save_files?: boolean; enable_mini_game?: boolean; use_local_only?: boolean; local_model?: string };
   local_model?: string;
   proxy?: { enabled?: boolean; manual_proxy?: string };
 }
@@ -71,10 +72,12 @@ export function applySettingsToUI(): void {
   }
 
   const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
-  if (localOnlyEl) { const localOnly = s.ai?.use_local_only === true; localOnlyEl.checked = localOnly; applyLocalOnlyMode(localOnly); }
+  if (localOnlyEl) localOnlyEl.checked = s.ai?.use_local_only === true;
 
-  const savedZoom = parseFloat(s.appearance?.ui_zoom || '1');
-  if (savedZoom && savedZoom !== 1) { if (typeof (window as any).setUIZoom === 'function') (window as any).setUIZoom(String(savedZoom), true); }
+  const savedZoom = parseFloat(String(s.appearance?.ui_zoom || '1'));
+  if (Number.isFinite(savedZoom) && typeof (window as any).setUIZoom === 'function') {
+    (window as any).setUIZoom(String(savedZoom), true);
+  }
 
   const proxyEnabledEl = document.getElementById('settingProxyEnabled') as HTMLInputElement | null;
   if (proxyEnabledEl) proxyEnabledEl.checked = s.proxy?.enabled !== false;
@@ -105,8 +108,6 @@ export function openSettings(): void {
   document.body.classList.add('settings-panel-open');
   markSidePanelOpen('settingsPanel');
   setActivityActive('navSettingsBtn');
-  const savedZ = parseFloat(localStorage.getItem('koto.uiZoom') || '1');
-  if (typeof (window as any).setUIZoom === 'function') (window as any).setUIZoom(String(savedZ), true);
 }
 
 export function closeSettings(): void {
@@ -135,8 +136,8 @@ export function syncCloudProviderUi(provider: string): void {
   const input = document.getElementById('settingsApiKeyInput') as HTMLInputElement | null;
   const providerEl = document.getElementById('settingCloudProvider') as HTMLSelectElement | null;
   if (providerEl) providerEl.value = normalized;
-  if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek V4 Pro。';
-  if (hint) hint.textContent = '云端模式下使用 DeepSeek V4 Pro，支持文字对话、代码和文件任务规划。';
+  if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek Chat。';
+  if (hint) hint.textContent = '云端模式下使用 DeepSeek Chat，支持文字对话、代码和文件任务规划。';
   if (input) input.placeholder = '粘贴 DeepSeek API Key…';
 }
 
@@ -144,9 +145,9 @@ export async function onCloudProviderChange(provider: string): Promise<void> {
   const normalized = 'deepseek';
   syncCloudProviderUi(normalized);
   await updateSetting('ai', 'cloud_provider', normalized);
-  if (normalized === 'deepseek') { await updateSetting('ai', 'deepseek_model', 'deepseek-v4-pro'); }
+  if (normalized === 'deepseek') { await updateSetting('ai', 'deepseek_model', 'deepseek-chat'); }
   csrfFetch('/api/local-model/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'cloud' }) }).catch(() => {});
-  if ((window as any).WA && typeof (window as any).WA.refreshModelCatalog === 'function') { (window as any).WA.refreshModelCatalog(true); }
+  getWorkspaceApi().refreshModelCatalog?.(true);
 }
 
 export async function saveSettingsApiKey(): Promise<void> {
@@ -177,21 +178,76 @@ export async function saveSettingsApiKey(): Promise<void> {
   }
 }
 
-export async function updateSetting(section: string, key: string, value: any): Promise<void> {
+function rememberSetting(category: string, key: string, value: any): void {
+  currentSettings = {
+    ...(currentSettings || {}),
+    [category]: {
+      ...(((currentSettings as any)?.[category]) || {}),
+      [key]: value,
+    },
+  };
+  (window as any).currentSettings = currentSettings;
+}
+
+export async function updateSetting(category: string, key: string, value: any): Promise<boolean> {
   try {
-    await csrfFetch('/api/settings', {
+    const response = await csrfFetch('/api/settings', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ section, key, value })
+      body: JSON.stringify({ category, key, value })
     });
-  } catch (e) { /* ignore */ }
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) {
+      throw new Error(data.error || '设置保存失败');
+    }
+    rememberSetting(category, key, value);
+    return true;
+  } catch (e: any) {
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(e?.message || '设置保存失败', 'error', 2200);
+    }
+    console.warn('Failed to update setting', category, key, e);
+    return false;
+  }
+}
+
+export async function onBooleanSettingChange(input: HTMLInputElement, category: string, key: string): Promise<void> {
+  const nextValue = input.checked;
+  const previousValue = typeof (currentSettings as any)?.[category]?.[key] === 'boolean'
+    ? (currentSettings as any)[category][key]
+    : !nextValue;
+  const saved = await updateSetting(category, key, nextValue);
+  if (!saved) {
+    input.checked = previousValue;
+    return;
+  }
+  if (category === 'ai' && key === 'enable_mini_game') {
+    (window as any).enableMiniGame = nextValue;
+    if (!nextValue) (window as any).hideMiniGame?.();
+  }
 }
 
 export function applyLocalOnlyMode(enabled: boolean): void {
-  (window as any).selectedModel = enabled ? 'local' : 'auto';
-  const modelSelector = document.getElementById('modelSelect');
-  if (modelSelector) (modelSelector as HTMLSelectElement).value = enabled ? 'local' : 'auto';
+  // The workspace owns the visible chat-mode control.  Settings only
+  // publishes confirmed server state, avoiding a second mode-switch request.
+  window.dispatchEvent(new CustomEvent('koto:model-mode-changed', {
+    detail: { mode: enabled ? 'local' : 'cloud', source: 'settings' },
+  }));
 }
+
+function syncLocalOnlyControlFromWorkspace(event: Event): void {
+  const mode = String((event as CustomEvent<any>).detail?.mode || '').trim().toLowerCase();
+  if (!mode) return;
+  const enabled = mode === 'local';
+  const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
+  if (localOnlyEl) localOnlyEl.checked = enabled;
+  if (currentSettings) {
+    currentSettings.ai = { ...(currentSettings.ai || {}), use_local_only: enabled };
+    (window as any).currentSettings = currentSettings;
+  }
+}
+
+window.addEventListener('koto:model-mode-changed', syncLocalOnlyControlFromWorkspace);
 
 export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
   const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
@@ -238,14 +294,40 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
     }
   }
 
-  applyLocalOnlyMode(enabled);
-  await updateSetting('ai', 'use_local_only', enabled);
   const modelTag = selectEl?.value || currentSettings?.local_model || currentSettings?.ai?.local_model || '';
-  csrfFetch('/api/local-model/switch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(enabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
-  }).catch(() => {});
+  const previousEnabled = currentSettings?.ai?.use_local_only === true;
+  let runtimeSwitched = false;
+  try {
+    const response = await csrfFetch('/api/local-model/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(enabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
+    runtimeSwitched = true;
+    if (currentSettings) {
+      currentSettings.ai = { ...(currentSettings.ai || {}), use_local_only: enabled };
+      (window as any).currentSettings = currentSettings;
+    }
+    applyLocalOnlyMode(enabled);
+    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
+      detail: { model: data.model || modelTag, source: 'settings' },
+    }));
+  } catch (error: any) {
+    if (localOnlyEl) localOnlyEl.checked = previousEnabled;
+    applyLocalOnlyMode(previousEnabled);
+    if (runtimeSwitched) {
+      void csrfFetch('/api/local-model/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(previousEnabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
+      });
+    }
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 4000);
+    }
+  }
 }
 
 export function filterLocalModels(query: string): void {
@@ -270,7 +352,7 @@ export async function detectLocalModels(): Promise<void> {
     renderLocalModelOptions((document.getElementById('localModelSearch') as HTMLInputElement | null)?.value || '');
     if (container) {
       container.innerHTML = models.length
-        ? models.map((m: string) => `<div style="font-size:12px;padding:4px 0;">${escapeHtml(m)}</div>`).join('')
+        ? models.map((m: string) => `<div style="font-size:12px;padding:4px 0;">${escHtml(m)}</div>`).join('')
         : '<div style="color:var(--text-muted);font-size:12px;">未检测到本地模型</div>';
     }
     if (badgeEl) {
@@ -298,7 +380,7 @@ function renderLocalModelOptions(query: string): void {
   if (!selectEl) return;
   const q = String(query || '').trim().toLowerCase();
   const filtered = q ? allLocalModels.filter((model) => model.toLowerCase().includes(q)) : allLocalModels;
-  const saved = currentSettings?.local_model || currentSettings?.ai?.local_model || '';
+  const saved = currentSettings?.ai?.local_model || currentSettings?.local_model || '';
   if (!filtered.length) {
     selectEl.innerHTML = `<option value="">${allLocalModels.length ? '— 无匹配模型 —' : '— 检测后选择 —'}</option>`;
     if (hintEl && allLocalModels.length) hintEl.textContent = `无匹配结果（共 ${allLocalModels.length} 个模型）`;
@@ -306,7 +388,7 @@ function renderLocalModelOptions(query: string): void {
   }
   selectEl.innerHTML = filtered.map((model) => {
     const selected = model === saved ? ' selected' : '';
-    return `<option value="${escapeHtml(model)}"${selected}>${escapeHtml(model)}</option>`;
+    return `<option value="${escHtml(model)}"${selected}>${escHtml(model)}</option>`;
   }).join('');
   if (!selectEl.value && filtered[0]) selectEl.value = filtered[0];
   if (hintEl) hintEl.textContent = q ? `过滤结果：${filtered.length} / ${allLocalModels.length} 个模型` : `共 ${filtered.length} 个本地模型`;
@@ -315,21 +397,30 @@ function renderLocalModelOptions(query: string): void {
 export async function onLocalModelChange(modelTag: string): Promise<void> {
   const nextModel = String(modelTag || '').trim();
   if (!nextModel) return;
-  await updateSetting('ai', 'local_model', nextModel);
   try {
+    const localOnly = (document.getElementById('settingLocalOnly') as HTMLInputElement | null)?.checked === true;
+    // Always use the model-switch endpoint.  It atomically mirrors the
+    // top-level runtime model and ai.local_model while preserving the current
+    // local/cloud mode when no mode is supplied.  Going through updateSetting
+    // here left the runtime source stale whenever local-only was unchecked.
     const resp = await csrfFetch('/api/local-model/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ mode: 'local', model_tag: nextModel }),
+      body: JSON.stringify({ model_tag: nextModel }),
     });
     const data = await resp.json().catch(() => ({}));
-    if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
+    if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型保存失败');
     if (currentSettings) {
       currentSettings.local_model = nextModel;
       currentSettings.ai = { ...(currentSettings.ai || {}), local_model: nextModel };
       (window as any).currentSettings = currentSettings;
     }
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`已切换本地模型：${nextModel}`, 'success', 1800);
+    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
+      detail: { model: data.model || nextModel, source: 'settings' },
+    }));
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(localOnly ? `已切换本地模型：${nextModel}` : `已保存本地模型：${nextModel}`, 'success', 1800);
+    }
   } catch (error: any) {
     if (typeof (window as any).showNotification === 'function') (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 3000);
   }
@@ -587,10 +678,10 @@ export function toggleLatencyDetail(event?: Event): void {
     updateLatencyDetail((window as any)._lastCloudLatency || { deepseek: { reachable: false, error: 'checking' } });
     checkStatus();
   }
-  const leftSlot = document.getElementById('wa-left-latency-slot');
-  if (leftSlot && detail.parentElement !== leftSlot) {
-    leftSlot.appendChild(detail);
-  }
+  // The status detail belongs to the activity rail.  Moving it into the file
+  // browser made a global component participate in the workspace column's
+  // flex layout, which caused both panels to overlap in narrow windows.
+  // Keep its DOM owner stable; the activity-rail CSS positions it as a popover.
   if (detail) detail.style.display = willOpen ? 'block' : 'none';
   detail.classList.toggle('open', willOpen);
   const arrow = document.querySelector('.status-expand-arrow'); if (arrow) arrow.classList.toggle('open', willOpen);
@@ -686,7 +777,7 @@ export async function refreshBatchJobs(): Promise<void> {
       const outputDir = job.output_dir || '';
       const encodedOutput = encodeURIComponent(outputDir);
       const status = job.status || 'unknown';
-      return `<div class="batch-job-card"><div class="batch-job-title">${escapeHtml(job.name || job.job_id)}</div><div class="batch-job-meta"><span>状态: ${escapeHtml(status)}</span><span>${processed}/${total}</span></div><div class="batch-job-progress"><div class="batch-job-progress-fill" style="width:${percent}%"></div></div><div class="batch-job-meta" style="margin-top:6px;"><span>${escapeHtml(outputDir)}</span><button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">复制路径</button></div></div>`;
+      return `<div class="batch-job-card"><div class="batch-job-title">${escHtml(job.name || job.job_id)}</div><div class="batch-job-meta"><span>状态: ${escHtml(status)}</span><span>${processed}/${total}</span></div><div class="batch-job-progress"><div class="batch-job-progress-fill" style="width:${percent}%"></div></div><div class="batch-job-meta" style="margin-top:6px;"><span>${escHtml(outputDir)}</span><button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">复制路径</button></div></div>`;
     }).join('');
   } catch (error) { /* ignore */ }
 }
@@ -775,7 +866,7 @@ function copyPathToClipboard(path: string, label: string = '路径'): void {
   }).catch(() => { prompt(`复制${label}：`, path); });
 }
 
-function escapeHtml(str: string): string {
+function escHtml(str: string): string {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
@@ -789,6 +880,7 @@ function escapeHtml(str: string): string {
 (window as any).onCloudProviderChange = onCloudProviderChange;
 (window as any).saveSettingsApiKey = saveSettingsApiKey;
 (window as any).updateSetting = updateSetting;
+(window as any).onBooleanSettingChange = onBooleanSettingChange;
 (window as any).applyLocalOnlyMode = applyLocalOnlyMode;
 (window as any).onLocalOnlyChange = onLocalOnlyChange;
 (window as any).filterLocalModels = filterLocalModels;

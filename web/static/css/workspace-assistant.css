@@ -1,3 +1,0 @@
-/* Compatibility stylesheet manifest for the workspace assistant.
-	Keep selector ownership in workspace.css during the first migration wave. */
-@import url("./workspace.css");

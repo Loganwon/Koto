@@ -41,6 +41,7 @@ if _PROJECT_ROOT not in sys.path:
 os.environ.setdefault("KOTO_AUTH_ENABLED", "false")
 os.environ.setdefault("KOTO_DEPLOY_MODE", "local")
 os.environ.setdefault("GEMINI_API_KEY", "test-key-for-unit-tests")
+os.environ.setdefault("DEEPSEEK_API_KEY", "test-key-for-unit-tests")
 
 
 # =====================================================================
@@ -78,40 +79,41 @@ def _import_filegen_time_context():
 class TestGetLocalModelConfig:
     def test_returns_cloud_none_on_missing_file(self, tmp_path):
         app = _import_app()
-        with patch.object(app, "PROJECT_ROOT", str(tmp_path)):
+        with patch("app.core.llm.provider_factory.is_local_mode", return_value=False):
             mode, tag = app._get_local_model_config()
         assert mode == "cloud"
         assert tag is None
 
     def test_reads_local_mode(self, tmp_path):
         app = _import_app()
-        cfg_dir = tmp_path / "config"
-        cfg_dir.mkdir()
-        (cfg_dir / "user_settings.json").write_text(
-            json.dumps({"model_mode": "local", "local_model": "qwen2.5:7b"}),
-            encoding="utf-8",
-        )
-        with patch.object(app, "PROJECT_ROOT", str(tmp_path)):
+        with patch(
+            "app.core.llm.provider_factory.is_local_mode", return_value=True
+        ), patch(
+            "app.core.llm.provider_factory.get_local_model_tag",
+            return_value="qwen2.5:7b",
+        ):
             mode, tag = app._get_local_model_config()
         assert mode == "local"
         assert tag == "qwen2.5:7b"
 
     def test_defaults_cloud_when_mode_missing(self, tmp_path):
         app = _import_app()
-        cfg_dir = tmp_path / "config"
-        cfg_dir.mkdir()
-        (cfg_dir / "user_settings.json").write_text("{}", encoding="utf-8")
-        with patch.object(app, "PROJECT_ROOT", str(tmp_path)):
+        with patch(
+            "app.core.llm.provider_factory.is_local_mode", return_value=False
+        ), patch(
+            "app.core.llm.provider_factory.get_local_model_tag",
+            return_value="qwen2.5:7b",
+        ):
             mode, tag = app._get_local_model_config()
         assert mode == "cloud"
         assert tag is None
 
     def test_handles_corrupt_json(self, tmp_path):
         app = _import_app()
-        cfg_dir = tmp_path / "config"
-        cfg_dir.mkdir()
-        (cfg_dir / "user_settings.json").write_text("NOT JSON", encoding="utf-8")
-        with patch.object(app, "PROJECT_ROOT", str(tmp_path)):
+        with patch(
+            "app.core.llm.provider_factory.is_local_mode",
+            side_effect=RuntimeError("provider settings unavailable"),
+        ):
             mode, tag = app._get_local_model_config()
         assert mode == "cloud"
         assert tag is None
@@ -227,7 +229,7 @@ class TestTrackedModels:
         tm, real, app = self._make()
         real.generate_content.return_value = Mock(text="ok", usage_metadata=None)
         with patch.object(app, "_is_interactions_only", return_value=False):
-            resp = tm.generate_content(model="gemini-2.5-flash", contents="hi")
+            resp = tm.generate_content(model="deepseek-chat", contents="hi")
         assert resp.text == "ok"
 
     def test_generate_content_interactions_only_passthrough(self):
@@ -243,15 +245,11 @@ class TestTrackedModels:
         real.generate_content.assert_called_once()
 
     def test_generate_content_error_propagates(self):
-        """When generate_content raises 'Interactions API required', code retries via
-        _call_ia; if that also fails, the original error propagates to the caller."""
-        tm, real, app = self._make()
+        """Archived Interactions errors preserve the original provider failure."""
+        tm, real, _app = self._make()
         real.generate_content.side_effect = Exception("Interactions API required")
-        with patch.object(
-            app, "_call_interactions_api_sync", side_effect=Exception("IA also failed")
-        ):
-            with pytest.raises(Exception, match="Interactions API required"):
-                tm.generate_content(model="some-model", contents="hi")
+        with pytest.raises(Exception, match="Interactions API required"):
+            tm.generate_content(model="some-model", contents="hi")
 
     def test_generate_content_non_interactions_error_raises(self):
         tm, real, app = self._make()
@@ -283,47 +281,23 @@ class TestTrackedModels:
         assert len(chunks) == 1
         assert chunks[0].text == "stream_chunk"
 
-    def test_generate_images_records_usage(self):
+    def test_generate_images_is_blocked_by_archive_boundary(self):
         tm, real, app = self._make()
-        img_resp = Mock()
-        img_resp.generated_images = [Mock(), Mock()]
-        real.generate_images.return_value = img_resp
-        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), patch.object(
-            app, "_record_token_usage"
-        ) as mock_rec:
-            resp = tm.generate_images(model="imagen-3.0", prompt="cat")
-        assert resp == img_resp
-        mock_rec.assert_called_once()
-        call_kwargs = mock_rec.call_args[1]
-        assert call_kwargs["prompt_tokens"] == 2000  # 2 images * 1000
+        with pytest.raises(RuntimeError, match="图片生成提供商未配置"):
+            tm.generate_images(model="archived-image-model", prompt="cat")
+        real.generate_images.assert_not_called()
 
-    def test_embed_content_with_usage_metadata(self):
+    def test_embed_content_with_usage_metadata_is_blocked(self):
         tm, real, app = self._make()
-        usage = Mock()
-        usage.prompt_token_count = 42
-        embed_resp = Mock(usage_metadata=usage)
-        real.embed_content.return_value = embed_resp
-        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), patch.object(
-            app, "_record_token_usage"
-        ) as mock_rec:
-            resp = tm.embed_content(model="text-embedding-004", contents="text")
-        assert resp == embed_resp
-        mock_rec.assert_called_once()
-        assert mock_rec.call_args[1]["prompt_tokens"] == 42
+        with pytest.raises(RuntimeError, match="云端 embedding 未配置"):
+            tm.embed_content(model="text-embedding-004", contents="text")
+        real.embed_content.assert_not_called()
 
-    def test_embed_content_no_usage_estimates(self):
+    def test_embed_content_without_usage_is_blocked(self):
         tm, real, app = self._make()
-        embed_resp = Mock(usage_metadata=None)
-        real.embed_content.return_value = embed_resp
-        with patch.object(app, "_TOKEN_TRACKER_ENABLED", True), patch.object(
-            app, "_record_token_usage"
-        ) as mock_rec:
-            resp = tm.embed_content(
-                model="text-embedding-004", contents="hello world test"
-            )
-        mock_rec.assert_called_once()
-        # Estimation: len("hello world test") // 4 = 4
-        assert mock_rec.call_args[1]["prompt_tokens"] >= 1
+        with pytest.raises(RuntimeError, match="云端 embedding 未配置"):
+            tm.embed_content(model="text-embedding-004", contents="hello world test")
+        real.embed_content.assert_not_called()
 
     def test_getattr_passthrough(self):
         tm, real, app = self._make()
@@ -724,9 +698,7 @@ class TestTaskOrchestratorValidateQuality:
     def test_no_output(self):
         orchestrator = _import_task_orchestrator()
         combined = {"steps": [], "final_output": ""}
-        score = asyncio.get_event_loop().run_until_complete(
-            orchestrator._validate_quality("test", combined, {})
-        )
+        score = asyncio.run(orchestrator._validate_quality("test", combined, {}))
         assert 0 <= score <= 100
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
@@ -740,9 +712,7 @@ class TestTaskOrchestratorValidateQuality:
         mock_resp.text = "25"
         with patch("web.task_orchestrator_quality.client") as mock_client:
             mock_client.models.generate_content.return_value = mock_resp
-            score = asyncio.get_event_loop().run_until_complete(
-                orchestrator._validate_quality("test", combined, {})
-            )
+            score = asyncio.run(orchestrator._validate_quality("test", combined, {}))
         assert score >= 40
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
@@ -754,9 +724,7 @@ class TestTaskOrchestratorValidateQuality:
         }
         with patch("web.task_orchestrator_quality.client") as mock_client:
             mock_client.models.generate_content.side_effect = Exception("API down")
-            score = asyncio.get_event_loop().run_until_complete(
-                orchestrator._validate_quality("test", combined, {})
-            )
+            score = asyncio.run(orchestrator._validate_quality("test", combined, {}))
         assert 0 <= score <= 100
 
 
@@ -775,9 +743,7 @@ class TestExecuteCompoundTask:
         mock_resp.text = "20"
         with patch("web.task_orchestrator_quality.client") as mc:
             mc.models.generate_content.return_value = mock_resp
-            result = asyncio.get_event_loop().run_until_complete(
-                orchestrator.execute_compound_task("test", subtasks)
-            )
+            result = asyncio.run(orchestrator.execute_compound_task("test", subtasks))
         assert result["success"] is False or any(
             "未知" in e for e in result.get("errors", [])
         )
@@ -794,9 +760,7 @@ class TestExecuteCompoundTask:
             orchestrator, "_execute_web_search", side_effect=Exception("boom")
         ), patch("web.task_orchestrator_quality.client") as mc:
             mc.models.generate_content.return_value = mock_resp
-            result = asyncio.get_event_loop().run_until_complete(
-                orchestrator.execute_compound_task("test", subtasks)
-            )
+            result = asyncio.run(orchestrator.execute_compound_task("test", subtasks))
         assert len(result["errors"]) > 0
 
 
@@ -945,46 +909,21 @@ class TestGetMemoryManager:
     def test_returns_instance(self):
         app = _import_app()
         memory_runtime = _import_memory_runtime()
-        old = memory_runtime._memory_manager
-        try:
-            memory_runtime._memory_manager = None
-            mock_mgr = MagicMock()
-            ctx_mod = types.ModuleType("app.core.app_context")
-            ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
+        mock_mgr = MagicMock()
+        ctx_mod = types.ModuleType("app.core.app_context")
+        ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
 
-            with patch.dict(
-                sys.modules, {"app.core.app_context": ctx_mod}
-            ), patch.object(memory_runtime, "_inject_memory_adapters"):
-                mgr = app.get_memory_manager()
-                assert mgr is mock_mgr
-                # Second call returns same instance
-                assert app.get_memory_manager() is mgr
-        finally:
-            memory_runtime._memory_manager = old
+        with patch.dict(sys.modules, {"app.core.app_context": ctx_mod}), patch.object(
+            memory_runtime, "_inject_memory_adapters"
+        ):
+            assert app.get_memory_manager() is mock_mgr
 
-    def test_fallback_to_basic(self):
-        app = _import_app()
+    def test_has_no_legacy_manager_fallback(self):
         memory_runtime = _import_memory_runtime()
-        old = memory_runtime._memory_manager
-        try:
-            memory_runtime._memory_manager = None
-            mock_basic = MagicMock()
-            basic_mod = types.ModuleType("memory_manager")
-            basic_mod.MemoryManager = MagicMock(return_value=mock_basic)
+        source = Path(memory_runtime.__file__).read_text(encoding="utf-8")
 
-            with patch.dict(
-                sys.modules,
-                {
-                    "app.core.app_context": None,
-                    "enhanced_memory_manager": None,
-                    "web.enhanced_memory_manager": None,
-                    "memory_manager": basic_mod,
-                },
-            ), patch.object(memory_runtime, "_inject_memory_adapters"):
-                mgr = app.get_memory_manager()
-                assert mgr is mock_basic
-        finally:
-            memory_runtime._memory_manager = old
+        assert "from web.memory_manager import MemoryManager" not in source
+        assert "from enhanced_memory_manager import EnhancedMemoryManager" not in source
 
 
 # =====================================================================
@@ -994,20 +933,12 @@ class TestGetMemoryManager:
 class TestGetKnowledgeBase:
     def test_returns_instance(self):
         app = _import_app()
-        memory_runtime = _import_memory_runtime()
-        old = memory_runtime._kb
-        try:
-            memory_runtime._kb = None
-            mock_kb = MagicMock()
-            kb_mod = types.ModuleType("knowledge_base")
-            kb_mod.KnowledgeBase = MagicMock(return_value=mock_kb)
+        mock_kb = MagicMock()
+        ctx_mod = types.ModuleType("app.core.app_context")
+        ctx_mod.ctx = MagicMock(knowledge_base=mock_kb)
 
-            with patch.dict(sys.modules, {"knowledge_base": kb_mod}):
-                kb = app.get_knowledge_base()
-                assert kb is mock_kb
-                assert app.get_knowledge_base() is kb
-        finally:
-            memory_runtime._kb = old
+        with patch.dict(sys.modules, {"app.core.app_context": ctx_mod}):
+            assert app.get_knowledge_base() is mock_kb
 
 
 # =====================================================================
@@ -1046,11 +977,11 @@ class TestKotoBrainChat:
             result = brain.chat(
                 [],
                 "hello",
-                model="gemini-2.5-flash",
+                model="deepseek-chat",
                 auto_model=False,
                 task_type="CHAT",
             )
-        assert result["model"] == "gemini-2.5-flash"
+        assert result["model"] == "deepseek-chat"
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_image_file_edit_route(self):
@@ -1063,7 +994,7 @@ class TestKotoBrainChat:
         ), patch.object(
             app, "_start_memory_extraction"
         ):
-            mock_sd.get_model_for_task.return_value = "gemini-2.5-flash"
+            mock_sd.get_model_for_task.return_value = "deepseek-chat"
             mock_resp = Mock()
             mock_resp.text = "no code generated"
             mock_resp.usage_metadata = None

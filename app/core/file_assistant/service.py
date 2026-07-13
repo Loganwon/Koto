@@ -12,6 +12,7 @@ TEXT_EXTENSIONS = {
     ".txt",
     ".md",
     ".markdown",
+    ".csv",
     ".py",
     ".js",
     ".ts",
@@ -155,7 +156,9 @@ class FileAssistantService:
         if ext in TEXT_EXTENSIONS:
             source = Path(text_source_path) if text_source_path is not None else path
             content = source.read_text(encoding="utf-8", errors="replace")
-            file_type = "text" if ext in {".txt", ".md", ".markdown"} else "code"
+            file_type = (
+                "text" if ext in {".txt", ".md", ".markdown", ".csv"} else "code"
+            )
             return ParsedEditorFile(
                 file_type=file_type,
                 data={

@@ -100,7 +100,7 @@ async function notebookPost(url: string, files: NotebookFile[] = _opt('getFiles'
       const data = await response.json();
       message = String(data?.error || data?.message || message);
     } catch (_) {
-      try { message = (await response.text()).trim() || message; } catch (_) {}
+      try { message = (await response.text()).trim() || message; } catch (e) { console.warn("[Koto]", e) }
     }
     throw new Error(message);
   }

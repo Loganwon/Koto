@@ -3,12 +3,14 @@
  * Workspace model settings and provider controls.
  */
 
+import { publishWorkspaceApi } from '../shared/workspace-api';
+
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var _waAiResultsRuntime: any;
-declare var _waQuickActionRuntime: any;
-declare var _waConversationRuntime: any;
-declare var _waTaskDispatcher: any;
+declare let state: any;
+declare let _waAiResultsRuntime: any;
+declare let _waQuickActionRuntime: any;
+declare let _waConversationRuntime: any;
+declare let _waTaskDispatcher: any;
 
 declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
 declare function _normalizeWorkspaceModelMode(mode: string, fallback: string): string;
@@ -46,8 +48,30 @@ export interface SettingsState {
 }
 
 export function toggleSettings(): void {
-  const active = document.querySelector('.wa-model-mode-toggle-btn.active') as HTMLElement;
+  const active = _modelControlsRoot()?.querySelector('.wa-model-mode-toggle-btn.active') as HTMLElement | null;
   if (active) active.focus();
+}
+
+function _modelControlsRoot(): HTMLElement | null {
+  return document.getElementById('wa-ai-input-area');
+}
+
+function _bindModelModeControls(): void {
+  const root = _modelControlsRoot();
+  if (!root || root.dataset.modelControlsBound === 'true') return;
+
+  root.dataset.modelControlsBound = 'true';
+  root.addEventListener('click', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const button = target.closest<HTMLButtonElement>('.wa-model-mode-toggle-btn[data-model-mode]');
+    if (!button || !root.contains(button) || button.disabled) return;
+
+    const mode = String(button.dataset.modelMode || '').trim();
+    if (!mode) return;
+    event.preventDefault();
+    setLockedModel(mode);
+  });
 }
 
 // ── Skill Library compatibility ──────────────────────────────────
@@ -90,7 +114,7 @@ export function toggleTheme(): void {
 export const _MODEL_LABELS: Record<string, string> = {
   cloud: '\u4e91\u7aef',
   local: '\u672c\u5730',
-  'deepseek-v4-pro': 'DeepSeek V4 Pro',
+  'deepseek-chat': 'DeepSeek Chat',
   'deepseek-v4-flash': 'DeepSeek V4 Flash',
 };
 
@@ -138,7 +162,6 @@ export function _formatLocalRuntimeModelLabel(label: any, options?: { running?: 
 
 export function _modelDisplayName(modelId: string, fallback?: string): string {
   if (!modelId) return fallback || '\u4e91\u7aef';
-  if (modelId === 'gemini') return 'DeepSeek';  // legacy compat
   if (modelId === 'deepseek') return 'DeepSeek';
   if (modelId === 'local') return '\u672c\u5730';
   const meta = _lookupModelMeta(modelId);
@@ -152,7 +175,7 @@ export function _currentCloudModelHint(): string {
   if (explicitCloudModel) return _modelDisplayName(explicitCloudModel, explicitCloudModel);
 
   if (state.lockedModel === 'deepseek') {
-    return _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+    return _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
   }
 
   if (state.lockedModel !== 'local' && state._activeRoute?.modelId && state._activeRoute.modelId !== 'local') {
@@ -162,17 +185,18 @@ export function _currentCloudModelHint(): string {
   const mappedFileTaskModel = state._modelMap?.FILE_TASK || state._modelMap?.DOC_ANNOTATE || state._modelMap?.FILE_GEN || state._modelMap?.AGENT || state._modelMap?.CHAT || '';
   if (mappedFileTaskModel) return _modelDisplayName(mappedFileTaskModel, mappedFileTaskModel);
 
-  return _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+  return _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
 }
 
 export function _syncModelStatusUi(): void {
+  const controlsRoot = _modelControlsRoot();
   const badge = $('wa-ai-model-badge');
-  const deepseekModelEl = $('wa-model-mode-deepseek-model');
-  const localModelEl = $('wa-model-mode-local-model');
+  const deepseekModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-deepseek-model') || null;
+  const localModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-local-model') || null;
   const routeInfo = $('wa-ai-route-info');
   const explicitCloudModel = _selectedCloudModelId();
   const activeRoute = state._activeRoute || null;
-  const deepseekModelHint = _modelDisplayName('deepseek-v4-pro', 'DeepSeek V4 Pro');
+  const deepseekModelHint = _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
   const localModelHint = state._localRuntimeModel || '\u672a\u542f\u52a8';
   const lockedMode = _normalizeWorkspaceModelMode(state.lockedModel, 'deepseek');
   const rawActiveMode = lockedMode === 'cloud'
@@ -201,7 +225,7 @@ export function _syncModelStatusUi(): void {
     localModelEl.title = `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}`;
     localModelEl.hidden = false;
   }
-  document.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]').forEach((button) => {
+  controlsRoot?.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]').forEach((button) => {
     const btn = button as HTMLElement;
     const isActive = btn.dataset.modelMode === activeMode;
     btn.classList.toggle('active', isActive);
@@ -278,7 +302,7 @@ export function _refreshModelCatalog(force: boolean = false): Promise<any> {
       _syncModelStatusUi();
       return data;
     })
-    .catch((error) => {
+    .catch((error: any): any => {
       console.warn('[WA] model catalog fetch failed:', error);
       state._modelsReady = false;
       state._modelMap = {};
@@ -298,7 +322,7 @@ export function _checkOllamaStatus(): void {
   fetch('/api/v1/workspace/ollama-status')
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
-      const localButton = document.getElementById('wa-model-mode-local-btn') as HTMLButtonElement | null;
+      const localButton = _modelControlsRoot()?.querySelector<HTMLButtonElement>('#wa-model-mode-local-btn') || null;
       if (!localButton) return;
       const configuredModel = _normalizeLocalRuntimeModelLabel(
         (data && (data.configured_model || data.model)) || state._localRuntimeModel
@@ -319,11 +343,42 @@ export function _checkOllamaStatus(): void {
     .catch(() => {});
 }
 
+function _applyWorkspaceModelMode(mode: string): void {
+  const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');
+  const nextMode = normalized === 'cloud' ? 'deepseek' : normalized;
+  state.lockedModel = nextMode;
+  if (nextMode === 'deepseek') state._cloudProvider = nextMode;
+  (window as any)._waLockedModelCache = nextMode;
+  _clearActiveRoute();
+  _syncModelStatusUi();
+}
+
+function _bindSettingsModelBridge(): void {
+  const bridgeKey = '__kotoSettingsModelBridgeBound';
+  if ((window as any)[bridgeKey]) return;
+  (window as any)[bridgeKey] = true;
+
+  window.addEventListener('koto:local-model-changed', (event: Event) => {
+    const model = _normalizeLocalRuntimeModelLabel((event as CustomEvent<any>).detail?.model);
+    if (!model) return;
+    state._localRuntimeModel = model;
+    _syncModelStatusUi();
+  });
+
+  window.addEventListener('koto:model-mode-changed', (event: Event) => {
+    const mode = String((event as CustomEvent<any>).detail?.mode || '').trim();
+    if (!mode) return;
+    _applyWorkspaceModelMode(mode);
+    _checkOllamaStatus();
+  });
+}
+
 export function _syncLockedModelFromServer(): Promise<any> {
   return fetch('/api/local-model/status', { cache: 'no-store' })
     .then((response) => (response.ok ? response.json() : null))
     .then((data) => {
       if (!data || data.success === false) return null;
+      if (data.model) state._localRuntimeModel = _normalizeLocalRuntimeModelLabel(data.model);
       const serverModeRaw = _normalizeWorkspaceModelMode(data.mode, 'deepseek');
       const serverMode = serverModeRaw === 'cloud' ? 'deepseek' : serverModeRaw;
       const pendingMode = String(state._modelChoicePendingMode || '').trim();
@@ -341,30 +396,24 @@ export function _syncLockedModelFromServer(): Promise<any> {
       }
       const serverLockedModel = serverMode === 'local' ? 'local' : serverMode;
       if (state.lockedModel !== serverLockedModel) {
-        state.lockedModel = serverLockedModel;
-        localStorage.setItem('wa_locked_model', serverLockedModel);
-        _clearActiveRoute();
+        _applyWorkspaceModelMode(serverLockedModel);
       }
       if (serverMode === 'deepseek') {
         state._cloudProvider = serverMode;
       }
-      if (data.mode === 'local') {
-        state._hasExplicitModelChoice = true;
-        if (data.model) state._localRuntimeModel = data.model;
-      }
       _syncModelStatusUi();
       return data;
     })
-    .catch(() => null);
+    .catch((): any => null);
 }
 
 export function initSocket(): void {
-  const storedLockedModel = localStorage.getItem('wa_locked_model');
-  if (storedLockedModel !== state.lockedModel) {
-    localStorage.setItem('wa_locked_model', state.lockedModel);
-    _clearActiveRoute();
-  }
-  state.aiOutputMode = 'inline';
+  _bindModelModeControls();
+  _bindSettingsModelBridge();
+  // Retire browser-only model preferences.  The server setting is the one
+  // authoritative source shared by chat, file tasks, and the settings panel.
+  localStorage.removeItem('wa_locked_model');
+  localStorage.removeItem('wa_model_choice_explicit');
   localStorage.removeItem('wa_ai_output_mode');
   _syncModelStatusUi();
   _refreshModelCatalog();
@@ -373,50 +422,68 @@ export function initSocket(): void {
   });
 }
 
-export function setUseLocalModel(useLocal: boolean): void {
-  _setWorkspaceModelMode(useLocal ? 'local' : (state._cloudProvider || 'deepseek'));
-}
-
 export function setLockedModel(val: string): void {
   _setWorkspaceModelMode(val);
+}
+
+export function getLockedModel(): string {
+  return state.lockedModel === 'local' ? 'local' : 'auto';
 }
 
 function _setWorkspaceModelMode(mode: string): void {
   const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');
   const newModel = normalized === 'cloud' ? 'deepseek' : normalized;
-  state.lockedModel = newModel;
-  if (newModel === 'deepseek') state._cloudProvider = newModel;
-  state._hasExplicitModelChoice = true;
+
+  // Prevent redundant switches (loop guard during cross-bundle sync)
+  if (state.lockedModel === newModel) return;
+
+  const previousModel = state.lockedModel;
+  _applyWorkspaceModelMode(newModel);
   state._modelChoicePendingMode = newModel;
   state._modelChoiceUpdatedAt = Date.now();
-  localStorage.setItem('wa_locked_model', newModel);
-  localStorage.setItem('wa_model_choice_explicit', '1');
-  _clearActiveRoute();
-  _syncModelStatusUi();
   _checkOllamaStatus();
+
   _csrfFetch('/api/local-model/switch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: newModel }),
-  }).then(() => _refreshModelCatalog(true))
-    .catch(() => {/* silent */});
+  }).then(async (response) => {
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || data.success === false) throw new Error(data.error || '模型模式切换失败');
+    state._modelChoicePendingMode = '';
+    if (data.model) state._localRuntimeModel = _normalizeLocalRuntimeModelLabel(data.model);
+    window.dispatchEvent(new CustomEvent('koto:model-mode-changed', {
+      detail: { mode: data.mode || newModel, source: 'workspace' },
+    }));
+    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
+      detail: { model: data.model || '', source: 'workspace' },
+    }));
+    return _refreshModelCatalog(true);
+  }).catch((error: any) => {
+    if (state.lockedModel === newModel) _applyWorkspaceModelMode(previousModel);
+    state._modelChoicePendingMode = '';
+    if (typeof (window as any).showNotification === 'function') {
+      (window as any).showNotification(error?.message || '模型模式切换失败', 'error', 3000);
+    }
+  });
 }
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.toggleSettings = toggleSettings;
-  (window as any).WA.toggleSkillLibrary = toggleSkillLibrary;
-  (window as any).WA.closeSkillLibrary = closeSkillLibrary;
-  (window as any).WA.toggleWorkflowPanel = toggleWorkflowPanel;
-  (window as any).WA.toggleTheme = toggleTheme;
-  (window as any).WA.setUseLocalModel = setUseLocalModel;
-  (window as any).WA.setLockedModel = setLockedModel;
-  (window as any).WA.refreshModelCatalog = (force: boolean = true) => _refreshModelCatalog(force);
-  (window as any).WA.checkOllamaStatus = _checkOllamaStatus;
-  (window as any).WA.syncLockedModelFromServer = _syncLockedModelFromServer;
-  (window as any).WA.initSocket = initSocket;
-  (window as any).initSocket = initSocket;
+  publishWorkspaceApi({
+    toggleSettings,
+    toggleSkillLibrary,
+    closeSkillLibrary,
+    toggleWorkflowPanel,
+    toggleTheme,
+    setLockedModel,
+    getLockedModel,
+    refreshModelCatalog: (force: boolean = true) => _refreshModelCatalog(force),
+    checkOllamaStatus: _checkOllamaStatus,
+    syncModelStatusUi: _syncModelStatusUi,
+    syncLockedModelFromServer: _syncLockedModelFromServer,
+    initSocket,
+  });
 }
 
 initSocket();

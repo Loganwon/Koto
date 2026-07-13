@@ -19,7 +19,7 @@ _FILE_EXT_TO_TYPE = {
     ".pptx": "pptx",
     ".xls": "xlsx",
     ".xlsx": "xlsx",
-    ".csv": "xlsx",
+    ".csv": "data",
     ".pdf": "pdf",
     ".png": "image",
     ".jpg": "image",
@@ -67,6 +67,19 @@ def _clean_path(value: Any) -> str:
     if path.startswith("./"):
         path = path[2:]
     return path
+
+
+def canonical_artifact_path_key(value: Any) -> str:
+    """Return a comparison key for paths exposed by task tools.
+
+    A task can report the same workspace file once as ``workspace/tmp/...``
+    and again as ``tmp/...``.  Those are two transport representations of one
+    workspace-relative file, not two user-facing artifacts.
+    """
+    path = _clean_path(value).lstrip("/")
+    if path.lower().startswith("workspace/"):
+        path = path[len("workspace/") :]
+    return path.lower()
 
 
 def _safe_int(value: Any) -> int:
@@ -400,7 +413,7 @@ def _file_task_source_path(change: Mapping[str, Any]) -> str:
 
 
 def _file_task_change_key(change: Mapping[str, Any]) -> str:
-    path = _file_task_output_path(change).lower()
+    path = canonical_artifact_path_key(_file_task_output_path(change))
     operation = (
         str(_field_value(change, "operation", "tool_name") or "").strip().lower()
     )
@@ -676,7 +689,7 @@ def build_file_task_artifact_result(
     seen_artifacts = set()
     for change in changes_payload:
         path = _file_task_output_path(change)
-        key = path.lower()
+        key = canonical_artifact_path_key(path)
         if not path or key in seen_artifacts:
             continue
         seen_artifacts.add(key)

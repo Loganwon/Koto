@@ -12,11 +12,28 @@ local_executor.py — 本地系统信息执行器
 
 from __future__ import annotations
 
+
 class LocalExecutor:
     """
     本地系统信息执行器。
-    高风险的系统原生打开、应用控制、电源操作、按键模拟已移除。
+    高风险的任意系统原生命令、电源操作、按键模拟已移除；仅允许严格匹配的白名单应用启动。
     """
+
+    APP_LAUNCHERS = {
+        "wechat": {
+            "label": "微信",
+            "aliases": ("微信", "wechat", "weixin"),
+            "process_names": ("WeChat.exe", "Weixin.exe"),
+            "app_paths": ("WeChat.exe", "Weixin.exe"),
+            "common_paths": (
+                r"C:\Program Files\Tencent\WeChat\WeChat.exe",
+                r"C:\Program Files (x86)\Tencent\WeChat\WeChat.exe",
+                r"C:\Program Files\Tencent\Weixin\Weixin.exe",
+                r"C:\Program Files (x86)\Tencent\Weixin\Weixin.exe",
+            ),
+            "protocols": ("weixin://", "wechat://"),
+        },
+    }
 
     # 知识提问模式 —— 如果匹配到这些，说明用户是在**问问题**，不是在下命令
     QUESTION_PATTERNS = [
@@ -79,6 +96,9 @@ class LocalExecutor:
         if len(text_lower) > 30:
             return False
 
+        if cls._match_app_launch(text_lower):
+            return True
+
         action_keywords = [
             "时间",
             "几点",
@@ -123,6 +143,10 @@ class LocalExecutor:
         """执行系统操作"""
         text_lower = user_input.lower()
         result = {"success": False, "action": "", "message": "", "details": ""}
+
+        app_key = cls._match_app_launch(user_input)
+        if app_key:
+            return cls.open_whitelisted_app(app_key)
 
         # === 系统时间/日期 ===
         if any(
@@ -187,7 +211,152 @@ class LocalExecutor:
                 return result
 
         result["message"] = "❓ 无法识别该系统操作"
+        result["retryable"] = False
         return result
+
+    @classmethod
+    def _match_app_launch(cls, text):
+        """Return a whitelist key for simple app-launch commands only."""
+        import re
+
+        source = str(text or "").strip().lower()
+        if not source:
+            return ""
+        match = re.fullmatch(r"(?:请|帮我|麻烦)?\s*(?:打开|启动|开启|open|launch)\s*([a-z0-9_\-\u4e00-\u9fff]+)\s*(?:应用|app)?", source)
+        if not match:
+            return ""
+        app_name = match.group(1)
+        for key, config in cls.APP_LAUNCHERS.items():
+            aliases = tuple(str(item).lower() for item in config.get("aliases", ()))
+            if app_name in aliases:
+                return key
+        return ""
+
+    @classmethod
+    def open_whitelisted_app(cls, app_key):
+        """Open a whitelisted desktop app without accepting arbitrary shell input."""
+        config = cls.APP_LAUNCHERS.get(str(app_key or "").strip().lower())
+        if not config:
+            return {
+                "success": False,
+                "action": "open_app",
+                "message": "❌ 该应用不在 Koto 的系统动作白名单中。",
+                "details": "目前只允许明确列入白名单的低风险应用启动动作。",
+                "retryable": False,
+            }
+
+        label = str(config.get("label") or app_key)
+        if cls._is_app_running(config):
+            return {
+                "success": True,
+                "action": "open_app",
+                "message": f"✅ {label} 已在运行。",
+                "details": "",
+            }
+
+        target = cls._resolve_app_launch_target(config)
+        if not target:
+            return {
+                "success": False,
+                "action": "open_app",
+                "message": f"❌ 未找到{label}的安装路径。",
+                "details": "请确认应用已安装，或后续在 Koto 设置中配置该白名单应用的启动路径。",
+                "retryable": False,
+            }
+
+        try:
+            cls._launch_target(target)
+            return {
+                "success": True,
+                "action": "open_app",
+                "message": f"✅ 已打开{label}。",
+                "details": "",
+            }
+        except Exception as exc:
+            return {
+                "success": False,
+                "action": "open_app",
+                "message": f"❌ 打开{label}失败。",
+                "details": str(exc),
+                "retryable": False,
+            }
+
+    @classmethod
+    def _is_app_running(cls, config):
+        try:
+            import psutil
+
+            names = {str(name).lower() for name in config.get("process_names", ())}
+            if not names:
+                return False
+            for proc in psutil.process_iter(["name"]):
+                try:
+                    if str(proc.info.get("name") or "").lower() in names:
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            return False
+        return False
+
+    @classmethod
+    def _resolve_app_launch_target(cls, config):
+        import os
+        import shutil
+
+        for app_name in config.get("app_paths", ()):
+            registry_path = cls._windows_app_path(str(app_name))
+            if registry_path:
+                return registry_path
+        for candidate in config.get("common_paths", ()):
+            path = os.path.expandvars(str(candidate))
+            if path and os.path.exists(path):
+                return path
+        for app_name in config.get("process_names", ()):
+            found = shutil.which(str(app_name))
+            if found:
+                return found
+        protocols = tuple(config.get("protocols", ()))
+        return protocols[0] if protocols else ""
+
+    @classmethod
+    def _windows_app_path(cls, app_name):
+        try:
+            import winreg
+        except Exception:
+            return ""
+
+        subkey = rf"Software\Microsoft\Windows\CurrentVersion\App Paths\{app_name}"
+        roots = (
+            getattr(winreg, "HKEY_CURRENT_USER", None),
+            getattr(winreg, "HKEY_LOCAL_MACHINE", None),
+        )
+        views = (0, getattr(winreg, "KEY_WOW64_64KEY", 0), getattr(winreg, "KEY_WOW64_32KEY", 0))
+        for root in roots:
+            if root is None:
+                continue
+            for view in views:
+                try:
+                    with winreg.OpenKey(root, subkey, 0, winreg.KEY_READ | view) as key:
+                        value, _ = winreg.QueryValueEx(key, "")
+                        if value:
+                            return str(value)
+                except Exception:
+                    continue
+        return ""
+
+    @classmethod
+    def _launch_target(cls, target):
+        import os
+        import subprocess
+
+        value = str(target or "").strip()
+        if not value:
+            raise ValueError("empty launch target")
+        if value.lower().endswith("://"):
+            os.startfile(value)
+            return
+        subprocess.Popen([value], close_fds=True)
 
     @classmethod
     def get_clipboard(cls):

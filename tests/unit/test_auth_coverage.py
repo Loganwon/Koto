@@ -20,7 +20,7 @@ import pytest
 
 def _get_auth_module():
     """Import (or re-import) the auth module."""
-    import web.auth as auth_mod
+    import web.blueprints.auth as auth_mod
 
     return auth_mod
 
@@ -263,7 +263,7 @@ class TestFlaskDecorators:
             auth_mod,
             "_load_users",
             lambda: {
-                "ok@test.com": {"user_id": "uid-ok", "gemini_api_key": "test-key"}
+                "ok@test.com": {"user_id": "uid-ok", "deepseek_api_key": "test-key"}
             },
         )
         token = auth_mod._generate_token("uid-ok", "ok@test.com")
@@ -284,12 +284,12 @@ class TestFlaskDecorators:
             assert resp.get_json()["user"] == "local"
 
     def test_require_auth_local_mode_uses_runtime_system_key(self, monkeypatch):
-        """Local mode should read the latest system Gemini key instead of an import-time snapshot."""
+        """Local mode should read the latest DeepSeek key instead of an import-time snapshot."""
         from flask import Flask, g, jsonify
 
         auth_mod = _get_auth_module()
         monkeypatch.setattr(auth_mod, "AUTH_ENABLED", False)
-        monkeypatch.setenv("GEMINI_API_KEY", "runtime-key-123")
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "runtime-key-123")
 
         app = Flask(__name__)
         app.config["TESTING"] = True

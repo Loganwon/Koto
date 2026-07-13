@@ -5,8 +5,8 @@
 Koto LLM Provider Factory
 ==========================
 Single entry point to get the appropriate LLMProvider based on:
-  1. Explicit `provider` argument ("gemini" | "openai" | "anthropic" | "ollama")
-  2. `model` prefix  (deepseek-* → deepseek, gpt-* → openai, claude-* → anthropic, gemini-* → gemini)
+  1. Explicit `provider` argument ("deepseek" | "openai" | "anthropic" | "ollama")
+  2. `model` prefix  (deepseek-* → deepseek, gpt-* → openai, claude-* → anthropic)
   3. Available API keys in environment
 
 Usage:
@@ -25,9 +25,14 @@ from typing import Optional
 
 from .base import LLMProvider
 from .deepseek_config import get_deepseek_api_key, has_deepseek_api_key
-from .gemini_config import get_gemini_api_key, has_gemini_api_key
 
 logger = logging.getLogger(__name__)
+
+
+def _get_settings_manager():
+    from app.core.config.user_settings import SettingsManager
+
+    return SettingsManager()
 
 
 class CloudProviderUnavailableError(RuntimeError):
@@ -35,12 +40,6 @@ class CloudProviderUnavailableError(RuntimeError):
 
 
 # ── Provider registry ─────────────────────────────────────────────────────────
-
-
-def _load_gemini(api_key: str = None) -> LLMProvider:
-    from .gemini import GeminiProvider
-
-    return GeminiProvider(api_key=api_key)
 
 
 def _load_openai() -> LLMProvider:
@@ -73,7 +72,6 @@ def _load_ollama() -> LLMProvider:
 
 
 _LOADERS = {
-    "gemini": _load_gemini,
     "openai": _load_openai,
     "deepseek": _load_deepseek,
     "anthropic": _load_anthropic,
@@ -88,8 +86,6 @@ _MODEL_PREFIX_MAP = (
     ("o4", "openai"),
     ("claude-", "anthropic"),
     ("deepseek-", "deepseek"),
-    ("gemini-", "gemini"),
-    ("deep-research", "gemini"),
     ("llama", "ollama"),
     ("qwen", "ollama"),
     ("mistral", "ollama"),
@@ -103,14 +99,14 @@ def get_llm_provider(
     allow_local_fallback: bool = False,
 ) -> LLMProvider:
     """
-      Return an initialised LLMProvider.
+    Return an initialised LLMProvider.
 
-      Selection logic (highest to lowest priority):
-      1. `provider` argument (explicit override)
-      2. `model` string prefix
-      3. Per-request API key in flask.g (set by auth middleware)
-    4. Available cloud API keys: DEEPSEEK_API_KEY → OPENAI_API_KEY → GEMINI_API_KEY → ANTHROPIC_API_KEY
-      5. Local fallback only when explicitly allowed
+    Selection logic (highest to lowest priority):
+    1. `provider` argument (explicit override)
+    2. `model` string prefix
+    3. Per-request API key in flask.g (set by auth middleware)
+    4. Available cloud API keys: DEEPSEEK_API_KEY → OPENAI_API_KEY → ANTHROPIC_API_KEY
+    5. Local fallback only when explicitly allowed
     """
     # Collect per-request key from Flask g (if inside a request context)
     request_api_key: Optional[str] = None
@@ -124,20 +120,11 @@ def get_llm_provider(
     # 1. Explicit provider name
     if provider:
         name = provider.lower().strip()
+        if name == "gemini":
+            raise CloudProviderUnavailableError(
+                "Gemini cloud provider has been archived and is no longer available."
+            )
         if name in _LOADERS:
-            if name == "gemini" and request_api_key:
-                return _load_gemini(api_key=request_api_key)
-            if name == "gemini" and has_gemini_api_key():
-                return _load_gemini()
-            if name == "gemini":
-                if allow_local_fallback:
-                    logger.warning(
-                        "[ProviderFactory] Gemini unavailable, using explicit local fallback"
-                    )
-                    return _load_ollama()
-                raise CloudProviderUnavailableError(
-                    "Gemini cloud provider is not configured"
-                )
             if name == "deepseek" and not has_deepseek_api_key():
                 if allow_local_fallback:
                     logger.warning(
@@ -155,21 +142,12 @@ def get_llm_provider(
     # 2. Infer from model name prefix
     if model:
         m = model.lower()
+        if m.startswith("gemini"):
+            raise CloudProviderUnavailableError(
+                f"Gemini model '{model}' has been archived and is no longer available."
+            )
         for prefix, pname in _MODEL_PREFIX_MAP:
             if m.startswith(prefix):
-                if pname == "gemini" and request_api_key:
-                    return _load_gemini(api_key=request_api_key)
-                if pname == "gemini" and has_gemini_api_key():
-                    return _load_gemini()
-                if pname == "gemini":
-                    if allow_local_fallback:
-                        logger.warning(
-                            "[ProviderFactory] Gemini model requested without cloud config; using local fallback"
-                        )
-                        return _load_ollama()
-                    raise CloudProviderUnavailableError(
-                        f"Gemini cloud provider is not configured for model '{model}'"
-                    )
                 if pname == "deepseek" and not has_deepseek_api_key():
                     if allow_local_fallback:
                         logger.warning(
@@ -181,19 +159,13 @@ def get_llm_provider(
                     )
                 return _LOADERS[pname]()
 
-    # 3/4. Auto-detect from available cloud keys.
-    # Runtime DeepSeek keys keep priority, while config-file discovery stays
-    # side-effect free so Gemini config fallback is not masked by stale env.
+    # 3/4. Auto-detect from active cloud keys.
     if has_deepseek_api_key(ensure_loaded=False):
+        return _load_deepseek()
+    if has_deepseek_api_key():
         return _load_deepseek()
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         return _load_openai()
-    if request_api_key:
-        return _load_gemini(api_key=request_api_key)
-    if has_gemini_api_key():
-        return _load_gemini()
-    if has_deepseek_api_key():
-        return _load_deepseek()
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
         return _load_anthropic()
 
@@ -205,6 +177,20 @@ def get_llm_provider(
     raise CloudProviderUnavailableError("No cloud LLM provider configured")
 
 
+def is_local_mode() -> bool:
+    """Return True if user_settings.json has model_mode == local."""
+    from .local_model_runtime import get_configured_model_mode
+
+    return get_configured_model_mode() == "local"
+
+
+def get_local_model_tag() -> str:
+    """Return the configured local model tag, or empty string."""
+    from .local_model_runtime import get_configured_local_model_tag
+
+    return get_configured_local_model_tag()
+
+
 def list_available_providers() -> list[str]:
     """Return names of providers whose API keys are present in the environment."""
     available = []
@@ -212,8 +198,6 @@ def list_available_providers() -> list[str]:
         available.append("deepseek")
     if os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_KEY"):
         available.append("openai")
-    if get_gemini_api_key():
-        available.append("gemini")
     if os.getenv("ANTHROPIC_API_KEY") or os.getenv("CLAUDE_API_KEY"):
         available.append("anthropic")
     # Ollama is always potentially available (check runtime)

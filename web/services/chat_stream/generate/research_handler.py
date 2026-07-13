@@ -33,12 +33,16 @@ def handle_research(
     Deep research mode with streaming response.
     Handles fallback to flash model on 503 errors.
     """
-    from google.genai import types
+    from app.core.llm.provider_compat import types
 
     if task_type != "RESEARCH":
         return
 
-    research_model = model_id or MODEL_MAP.get("RESEARCH", "gemini-2.5-pro")
+    from app.core.llm.provider_boundary import normalize_public_model
+
+    research_model = normalize_public_model(
+        model_id or MODEL_MAP.get("RESEARCH", "deepseek-chat")
+    )
     used_model = research_model
     t = yield_thinking(
         f"进入深度研究模式，使用 {research_model} 进行专业级分析",
@@ -203,10 +207,10 @@ def handle_research(
         if "503" in error_msg or "UNAVAILABLE" in error_msg:
             try:
                 newline = "\n"
-                yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 服务繁忙，切换到 Gemini 2.5 Flash...', 'detail': ''})}{newline}{newline}"
+                yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 服务繁忙，正在使用 DeepSeek 快速重试...', 'detail': ''})}{newline}{newline}"
 
                 response_stream = client.models.generate_content_stream(
-                    model="gemini-2.5-flash",
+                    model="deepseek-chat",  # was gemini-2.5-flash
                     contents=effective_input,
                     config=types.GenerateContentConfig(
                         system_instruction=research_instruction,
@@ -235,7 +239,7 @@ def handle_research(
                     user_input,
                     final_text[:4000],
                     task="RESEARCH",
-                    model_name="gemini-2.5-flash",
+                    model_name="deepseek-chat"  # was gemini-2.5-flash,
                 )
 
             except Exception as fallback_err:
@@ -246,7 +250,7 @@ def handle_research(
                     user_input,
                     error_text[:1000],
                     task="RESEARCH",
-                    model_name="gemini-2.5-flash",
+                    model_name="deepseek-chat"  # was gemini-2.5-flash,
                 )
 
         elif (

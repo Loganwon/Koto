@@ -8,7 +8,7 @@ import os
 import time
 
 try:
-    from google.genai import types
+    from app.core.llm.provider_compat import types
 except Exception:  # pragma: no cover - optional SDK in some test envs
     types = None
 
@@ -170,7 +170,7 @@ async def execute_coder(
             progress_callback(msg, detail)
 
     try:
-        model_id = MODEL_MAP.get("CODER", "gemini-2.5-pro")
+        model_id = MODEL_MAP.get("CODER", "deepseek-chat")
         _report("启动代码生成...", f"模型: {model_id}")
 
         # 注入前步搜索/研究结果（如有）
@@ -207,8 +207,7 @@ async def execute_coder(
         )
 
         if not result_text:
-            # 降级到 gemini-2.5-flash
-            _report("⚠️ 主模型超时，降级生成...", "gemini-2.5-flash")
+            _report("⚠️ 主模型超时，尝试稳定模式...", "deepseek-chat")
             resp = await asyncio.to_thread(
                 lambda: client.models.generate_content(
                     model=get_interactions_fallback_model(),

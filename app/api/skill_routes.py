@@ -11,7 +11,7 @@ skill_routes.py — Skill CRUD & MCP 导出 API Blueprint
   GET    /api/skills/<id>             获取单个 Skill 详情
   PUT    /api/skills/<id>             更新 Skill
   DELETE /api/skills/<id>             删除 Skill（仅自定义）
-  POST   /api/skills/<id>/enable      启用 / 禁用 Skill
+  POST   /api/skills/<id>/toggle      启用 / 禁用 Skill
   POST   /api/skills/<id>/record      从会话提取 Skill（触发 SkillRecorder）
   GET    /api/skills/mcp              以 MCP 工具格式导出所有启用的 Skill
   GET    /api/skills/stats            每个 Skill 的调用成本统计
@@ -80,7 +80,7 @@ def _tracer():
 
 
 def _token_tracker():
-    import web.token_tracker as token_tracker
+    import app.core.analytics.token_tracker as token_tracker
 
     return token_tracker
 
@@ -678,22 +678,6 @@ def delete_skill(skill_id: str):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# POST /api/skills/<id>/enable  —  [已废弃] 委托给 /toggle
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-@skill_bp.route("/<skill_id>/enable", methods=["POST"])
-def toggle_skill(skill_id: str):
-    """
-    [已废弃] 请改用 POST /api/skills/<id>/toggle。
-    此路由保留向后兼容，内部直接委托给 toggle_skill_v2，
-    以确保 SkillManager.set_enabled() 和 affinity 记录正确执行。
-    请求体: { "enabled": true | false }
-    """
-    return toggle_skill_v2(skill_id)
-
-
-# ══════════════════════════════════════════════════════════════════════════════
 # POST /api/skills/<id>/record  —  从会话自动提取 Skill
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -707,38 +691,12 @@ def toggle_skill_v2(skill_id: str):
     data = request.json or {}
     enabled = bool(data.get("enabled", True))
     try:
-        sm = _sm()
-        ok = sm.set_enabled(skill_id, enabled)
-        if not ok:
+        from app.core.skills.skill_mutations import set_skill_enabled
+
+        if not set_skill_enabled(skill_id, enabled):
             return (
                 jsonify({"success": False, "error": f"Skill '{skill_id}' 不存在"}),
                 404,
-            )
-        # 记录亲和度
-        if enabled:
-            try:
-                from app.core.skills.skill_affinity import SkillAffinityTracker
-
-                SkillAffinityTracker.get_instance().record_activation(skill_id)
-            except Exception:
-                import logging
-
-                logging.getLogger(__name__).warning(
-                    "Silenced exception caught", exc_info=True
-                )
-        try:
-            from app.core.hooks.hook_manager import HookContext, get_hook_manager
-
-            get_hook_manager().fire_on_skill_change(
-                skill_id,
-                enabled,
-                HookContext(task_type="skill_toggle", skill_id=skill_id),
-            )
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
             )
         return jsonify({"success": True, "skill_id": skill_id, "enabled": enabled})
     except Exception as e:
@@ -1163,12 +1121,11 @@ def ask_koto_recommend():
   "reasoning": "简短说明为什么选这几个（≤60字）"
 }}"""
 
-        from app.core.llm.gemini import GeminiProvider
+        from app.core.llm.provider_factory import get_llm_provider
 
-        client = GeminiProvider()
+        client = get_llm_provider(provider="deepseek", allow_local_fallback=False)
         raw = client.generate_content(
             prompt=prompt,
-            model="gemini-2.5-flash",
             temperature=0.2,
             max_tokens=400,
         )

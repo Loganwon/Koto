@@ -10,8 +10,8 @@ Koto RAG Service (Retrieval-Augmented Generation)
 架构选型决策：
 ┌─────────────────────────────────────────────────────────────────────┐
 │  向量数据库：FAISS (本地文件，无服务器，毫秒级检索)                   │
-│  嵌入模型  ：Google text-embedding-004（复用已有 API Key）             │
-│             降级方案：langchain sentence-transformers（全本地）         │
+│  嵌入模型  ：BAAI/bge-m3（本地，多语言）                               │
+│             降级方案：Ollama embeddings / all-MiniLM-L6-v2（全本地）    │
 │  分块策略  ：RecursiveCharacterTextSplitter + 中文分词兼容              │
 │  检索策略  ：Cosine Similarity Top-K                                    │
 │  持久化    ：config/rag_index/ 目录（FAISS 二进制文件 + JSON 元数据）   │
@@ -103,39 +103,13 @@ def _get_embeddings(prefer_local: bool = False):
     获取嵌入模型。
 
         优先级：
-            1. Google Gemini embedding（需要 GEMINI_API_KEY，自动选择当前可用模型）
-      2. BAAI/bge-m3（本地，多语言 SOTA，1024 维，中文远优于 MiniLM）
+      1. BAAI/bge-m3（本地，多语言 SOTA，1024 维，中文远优于 MiniLM）
+      2. Ollama embeddings（本地 API）
       3. sentence-transformers all-MiniLM-L6-v2（兜底，英文优化，384 维）
 
     参数:
-        prefer_local: True = 跳过 Google，直接使用本地模型
+        prefer_local: 保留的兼容参数；嵌入始终在本地运行。
     """
-    if not prefer_local:
-        api_key = (
-            os.environ.get("GEMINI_API_KEY")
-            or os.environ.get("API_KEY")
-            or os.environ.get("GOOGLE_API_KEY")
-        )
-        if api_key:
-            try:
-                from langchain_google_genai import GoogleGenerativeAIEmbeddings
-
-                from app.core.llm.embedding_model_selector import (
-                    resolve_gemini_embedding_model,
-                )
-
-                embedding_model = resolve_gemini_embedding_model(api_key)
-                emb = GoogleGenerativeAIEmbeddings(
-                    model=embedding_model,
-                    google_api_key=api_key,
-                )
-                logger.info("[RAGService] 嵌入模型: Google %s", embedding_model)
-                return emb
-            except Exception as exc:
-                logger.warning(
-                    f"[RAGService] Google Embeddings 初始化失败: {exc}，尝试本地模型"
-                )
-
     # 本地模型优先顺序：BGE-M3（多语言 SOTA）→ MiniLM（兜底）
     try:
         from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -194,8 +168,8 @@ def _get_embeddings(prefer_local: bool = False):
     except Exception as exc:
         raise RuntimeError(
             f"[RAGService] 无法加载嵌入模型。\n"
-            f"请安装：pip install langchain-google-genai（云端）\n"
-            f"或：pip install sentence-transformers（本地，含 BGE-M3）\n"
+            f"请安装：pip install sentence-transformers（本地，含 BGE-M3）\n"
+            f"或启动 Ollama 并安装 nomic-embed-text / mxbai-embed-large。\n"
             f"错误: {exc}"
         ) from exc
 
@@ -226,7 +200,7 @@ class RAGService:
     def __init__(
         self,
         index_dir: Optional[str] = None,
-        prefer_local_embeddings: bool = False,
+        prefer_local_embeddings: bool | None = None,
         auto_load: bool = True,
     ):
         self.index_dir = Path(index_dir or _DEFAULT_INDEX_DIR)
@@ -235,7 +209,12 @@ class RAGService:
         self._embeddings = None  # 懒加载
         self._vectorstore = None
         self._doc_count = 0
-        self._prefer_local = prefer_local_embeddings
+        self._prefer_local = (
+            prefer_local_embeddings
+            if prefer_local_embeddings is not None
+            else os.environ.get("KOTO_PREFER_LOCAL_EMBEDDINGS", "").lower()
+            in ("1", "true", "yes")
+        )
         self._metadata_path = self.index_dir / "metadata.json"
         self._index_path = str(self.index_dir / "faiss_index")
         self._bm25_cache: Optional[Tuple] = (
@@ -628,7 +607,7 @@ class RAGService:
         self,
         question: str,
         k: int = DEFAULT_K,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         score_threshold: float = 0.2,
     ) -> Dict[str, Any]:
         """

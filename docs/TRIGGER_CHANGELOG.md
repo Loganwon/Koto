@@ -1,3 +1,5 @@
+> **Historical snapshot — not current implementation guidance.** Use [DOCUMENTATION_INDEX.md](DOCUMENTATION_INDEX.md) for active guides.
+
 # Koto v2.0 - 触发器参数编辑功能更新日志
 
 ## 🆕 新增功能
@@ -75,7 +77,7 @@ CREATE TABLE trigger_parameters (
 - `_check_morning_time()` - 使用 `morning_start_hour/end_hour`
 - 其他 7 个检查函数也已更新
 
-### 前端改动 (`web/static/js/app.js`)
+### 前端改动 (`web/src/app/ (已迁移至模块化主应用)`)
 
 #### 新增 JavaScript 函数
 ```javascript

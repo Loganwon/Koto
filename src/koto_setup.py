@@ -85,21 +85,21 @@ ASSETS_DIR = (
 ) / "assets"
 
 
-def _read_user_cloud_provider(default: str = "gemini") -> str:
+def _read_user_cloud_provider(default: str = "deepseek") -> str:
     settings_path = APP_ROOT / "config" / "user_settings.json"
     try:
         import json
 
         data = json.loads(settings_path.read_text(encoding="utf-8-sig"))
         provider = str(data.get("ai", {}).get("cloud_provider") or "").strip().lower()
-        if provider in {"gemini", "deepseek"}:
+        if provider == "deepseek":
             return provider
     except Exception:
         pass
     env_provider = (
         os.getenv("KOTO_CLOUD_PROVIDER") or os.getenv("KOTO_LLM_PROVIDER") or default
     )
-    return "deepseek" if str(env_provider).strip().lower() == "deepseek" else "gemini"
+    return "deepseek" if str(env_provider).strip().lower() == "deepseek" else "deepseek"
 
 
 # ── API 密钥配置向导 ───────────────────────────────────
@@ -185,7 +185,7 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     steps_frame.pack(fill="x", pady=(0, 16))
     steps_title = tk.Label(
         steps_frame,
-        text="如何获取 Gemini API 密钥：",
+        text="如何获取 DeepSeek API 密钥：",
         font=f_step,
         bg=BG3,
         fg=TEXT2,
@@ -193,19 +193,13 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     )
     steps_title.pack(fill="x")
     step_labels = []
-    gemini_steps = [
-        "① 访问  https://aistudio.google.com/apikey",
-        "② 登录 Google 账号",
-        "③ 点击「Create API key」",
-        "④ 复制密钥粘贴到下方输入框",
-    ]
     deepseek_steps = [
         "① 访问  https://platform.deepseek.com/api_keys",
         "② 登录 DeepSeek 账号",
         "③ 创建新的 API Key",
         "④ 复制密钥粘贴到下方输入框",
     ]
-    for s in gemini_steps:
+    for s in deepseek_steps:
         lbl = tk.Label(steps_frame, text=s, font=f_step, bg=BG3, fg=TEXT2, anchor="w")
         lbl.pack(fill="x", pady=1)
         step_labels.append(lbl)
@@ -234,12 +228,11 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
             bd=0,
         ).pack(side="left", padx=(0, 18))
 
-    _radio("Gemini", "gemini")
     _radio("DeepSeek", "deepseek")
 
     # ── API Key 输入 ──
     key_label = tk.Label(
-        body, text="Gemini API 密钥  *", font=f_label, bg=BG, fg=ACCENT, anchor="w"
+        body, text="DeepSeek API 密钥  *", font=f_label, bg=BG, fg=ACCENT, anchor="w"
     )
     key_label.pack(fill="x", pady=(0, 4))
 
@@ -355,37 +348,13 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     code_hint_label.pack(fill="x", pady=(2, 12))
 
     def sync_provider_ui(provider: str):
-        provider = "deepseek" if provider == "deepseek" else "gemini"
-        title = (
-            "如何获取 DeepSeek API 密钥："
-            if provider == "deepseek"
-            else "如何获取 Gemini API 密钥："
-        )
-        steps = deepseek_steps if provider == "deepseek" else gemini_steps
-        steps_title.config(text=title)
+        provider_var.set("deepseek")
+        steps_title.config(text="如何获取 DeepSeek API 密钥：")
         for idx, lbl in enumerate(step_labels):
-            lbl.config(text=steps[idx])
-        key_label.config(
-            text=(
-                "DeepSeek API 密钥  *"
-                if provider == "deepseek"
-                else "Gemini API 密钥  *"
-            )
-        )
-        base_hint_label.config(
-            text=(
-                "默认: https://api.deepseek.com"
-                if provider == "deepseek"
-                else "例: https://your-proxy.com/v1beta"
-            )
-        )
-        code_hint_label.config(
-            text=(
-                "激活码当前仅用于 Gemini 内置 Key；DeepSeek 请填写 API Key"
-                if provider == "deepseek"
-                else "💬 没有 API Key 或激活码？加微信 18913921188 申请"
-            )
-        )
+            lbl.config(text=deepseek_steps[idx])
+        key_label.config(text="DeepSeek API 密钥  *")
+        base_hint_label.config(text="默认: https://api.deepseek.com")
+        code_hint_label.config(text="激活码已停用，请填写 DeepSeek API Key")
 
     sync_provider_ui(provider_var.get())
 
@@ -419,44 +388,10 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
         raw_key = key_var.get().strip()
         code = code_var.get().strip()
         provider = provider_var.get()
-        if not raw_key and not code:
-            status_var.set("❌ 请输入 API 密钥或激活码")
+        if not raw_key:
+            status_var.set("❌ 请输入 DeepSeek API 密钥")
             status_lbl.config(fg=DANGER)
             key_entry.focus_set()
-            return
-        # Validate activation code if provided without API key
-        if code and not raw_key:
-            if provider == "deepseek":
-                status_var.set("❌ DeepSeek 模式请填写 API Key，激活码仅用于 Gemini")
-                status_lbl.config(fg=DANGER)
-                return
-            try:
-                from app.core.llm._license import get_system_key
-
-                resolved = get_system_key(code)
-            except Exception:
-                resolved = None
-            if not resolved:
-                status_var.set("❌ 激活码无效")
-                status_lbl.config(fg=DANGER)
-                return
-            # Use the resolved key from activation code
-            result["provider"] = "gemini"
-            result["key"] = resolved
-            result["base"] = base_var.get().strip()
-            result["code"] = code
-            status_var.set("✅ 激活成功，正在启动…")
-            status_lbl.config(fg=SUCCESS)
-            root.after(600, root.destroy)
-            return
-        if (
-            provider == "gemini"
-            and raw_key
-            and not (raw_key.startswith("AIza") and len(raw_key) >= 30)
-        ):
-            status_var.set("⚠️ 密钥格式看起来不对（应以 AIza 开头），确认继续？")
-            status_lbl.config(fg="#ffb44a")
-            confirm_btn.config(text="仍然保存", command=_save)
             return
         _save()
 
@@ -547,22 +482,6 @@ def _show_api_setup_wizard(initial_status: str = "") -> dict:
     return result
 
 
-def _write_gemini_config(api_key: str, api_base: str = ""):
-    """将用户填写的 API 信息写入 gemini_config.env"""
-    config_dir = APP_ROOT / "config"
-    config_dir.mkdir(parents=True, exist_ok=True)
-    config_path = config_dir / "gemini_config.env"
-
-    lines = [
-        "# Koto 配置文件（由启动向导自动生成）\n",
-        f"GEMINI_API_KEY={api_key}\n",
-        f"API_KEY={api_key}\n",
-        f"GEMINI_API_BASE={api_base}\n",
-        "FORCE_PROXY=auto\n",
-    ]
-    config_path.write_text("".join(lines), encoding="utf-8")
-
-
 def _write_deepseek_config(api_key: str, api_base: str = ""):
     """将用户填写的 DeepSeek API 信息写入 deepseek_config.env"""
     config_dir = APP_ROOT / "config"
@@ -580,7 +499,7 @@ def _write_deepseek_config(api_key: str, api_base: str = ""):
 
 def _write_cloud_provider_setting(provider: str):
     """同步云端供应商到 user_settings.json，便于 Web 设置页与运行时识别。"""
-    provider = "deepseek" if provider == "deepseek" else "gemini"
+    provider = "deepseek"
     settings_path = APP_ROOT / "config" / "user_settings.json"
     settings_path.parent.mkdir(parents=True, exist_ok=True)
     try:
@@ -595,7 +514,7 @@ def _write_cloud_provider_setting(provider: str):
         if isinstance(ai, dict):
             ai["cloud_provider"] = provider
             if provider == "deepseek":
-                ai.setdefault("deepseek_model", "deepseek-v4-pro")
+                ai.setdefault("deepseek_model", "deepseek-chat")
         data.setdefault("model_mode", "cloud")
         settings_path.write_text(
             json.dumps(data, ensure_ascii=False, indent=2),
@@ -606,32 +525,20 @@ def _write_cloud_provider_setting(provider: str):
 
 
 def _write_cloud_config(provider: str, api_key: str, api_base: str = ""):
-    provider = "deepseek" if provider == "deepseek" else "gemini"
-    if provider == "deepseek":
-        _write_deepseek_config(api_key, api_base)
-    else:
-        _write_gemini_config(api_key, api_base)
-    _write_cloud_provider_setting(provider)
+    _write_deepseek_config(api_key, api_base)
+    _write_cloud_provider_setting("deepseek")
 
 
 def _api_key_configured(provider: str | None = None) -> bool:
     """检查是否已有有效的云端 API 密钥配置"""
     provider = provider or _read_user_cloud_provider()
-    cfg = (
-        APP_ROOT
-        / "config"
-        / ("deepseek_config.env" if provider == "deepseek" else "gemini_config.env")
-    )
+    cfg = APP_ROOT / "config" / "deepseek_config.env"
     if not cfg.exists():
         return False
     text = cfg.read_text(encoding="utf-8", errors="ignore")
     for line in text.splitlines():
         line = line.strip()
-        key_prefixes = (
-            ("DEEPSEEK_API_KEY=", "DEEPSEEK_KEY=", "DS_API_KEY=", "DS_KEY=")
-            if provider == "deepseek"
-            else ("GEMINI_API_KEY=", "API_KEY=")
-        )
+        key_prefixes = ("DEEPSEEK_API_KEY=", "DEEPSEEK_KEY=", "DS_API_KEY=", "DS_KEY=")
         if line.startswith(key_prefixes):
             val = line.split("=", 1)[1].strip()
             if val and val not in ("your_api_key_here", "", "None"):
@@ -642,79 +549,55 @@ def _api_key_configured(provider: str | None = None) -> bool:
 def _read_config_values(provider: str | None = None) -> tuple:
     """从供应商配置文件读取 (api_key, api_base)"""
     provider = provider or _read_user_cloud_provider()
-    cfg = (
-        APP_ROOT
-        / "config"
-        / ("deepseek_config.env" if provider == "deepseek" else "gemini_config.env")
-    )
+    cfg = APP_ROOT / "config" / "deepseek_config.env"
     key, base = "", ""
     if not cfg.exists():
         return key, base
     for line in cfg.read_text(encoding="utf-8", errors="ignore").splitlines():
         line = line.strip()
         if (
-            provider == "deepseek"
-            and line.startswith(
+            line.startswith(
                 ("DEEPSEEK_API_KEY=", "DEEPSEEK_KEY=", "DS_API_KEY=", "DS_KEY=")
             )
             and not key
         ):
             key = line.split("=", 1)[1].strip()
-        elif (
-            provider == "deepseek"
-            and line.startswith(("DEEPSEEK_BASE_URL=", "DEEPSEEK_API_BASE="))
-            and not base
-        ):
-            base = line.split("=", 1)[1].strip()
-        elif provider != "deepseek" and line.startswith("GEMINI_API_KEY=") and not key:
-            key = line.split("=", 1)[1].strip()
-        elif (
-            provider != "deepseek" and line.startswith("GEMINI_API_BASE=") and not base
-        ):
+        elif line.startswith(("DEEPSEEK_BASE_URL=", "DEEPSEEK_API_BASE=")) and not base:
             base = line.split("=", 1)[1].strip()
     return key, base
 
 
-def _validate_api_key(key: str, base: str = "", provider: str = "gemini") -> tuple:
+def _validate_api_key(key: str, base: str = "", provider: str = "deepseek") -> tuple:
     """向云端服务器发送轻量请求验证密钥，返回 (ok: bool, msg: str)。
     超时 8 秒，网络异常时返回 (False, ⚠️ 提示) 而不是 (False, ❌ 无效)。"""
     try:
         import urllib.error
         import urllib.request
 
-        if provider == "deepseek":
-            base_url = (base.strip() or "https://api.deepseek.com").rstrip("/")
-            urls = [f"{base_url}/models"]
-            if not base_url.endswith("/v1"):
-                urls.append(f"{base_url}/v1/models")
-            last_error = None
-            for url in urls:
-                req = urllib.request.Request(
-                    url,
-                    headers={
-                        "Accept": "application/json",
-                        "Authorization": f"Bearer {key}",
-                    },
-                )
-                try:
-                    with urllib.request.urlopen(req, timeout=8) as r:
-                        if r.status == 200:
-                            return (True, "")
-                except urllib.error.HTTPError as e:
-                    last_error = e
-                    if e.code != 404:
-                        raise
-            if last_error:
-                raise last_error
-            return (False, "❌ DeepSeek 密钥验证失败")
-
-        base_url = (base.strip() or "https://generativelanguage.googleapis.com").rstrip(
-            "/"
-        )
-        url = f"{base_url}/v1beta/models?key={key}"
-        req = urllib.request.Request(url, headers={"Accept": "application/json"})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            return (r.status == 200, "")
+        base_url = (base.strip() or "https://api.deepseek.com").rstrip("/")
+        urls = [f"{base_url}/models"]
+        if not base_url.endswith("/v1"):
+            urls.append(f"{base_url}/v1/models")
+        last_error = None
+        for url in urls:
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "Accept": "application/json",
+                    "Authorization": f"Bearer {key}",
+                },
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=8) as r:
+                    if r.status == 200:
+                        return (True, "")
+            except urllib.error.HTTPError as e:
+                last_error = e
+                if e.code != 404:
+                    raise
+        if last_error:
+            raise last_error
+        return (False, "❌ DeepSeek 密钥验证失败")
     except urllib.error.HTTPError as e:
         if e.code == 400:
             return (False, "❌ 密钥无效（API_KEY_INVALID）")
@@ -761,7 +644,7 @@ def _run_setup_if_needed():
         res = _show_api_setup_wizard(initial_status=wizard_status)
         if res["key"] or res.get("code"):
             _write_cloud_config(
-                res.get("provider", "gemini"),
+                "deepseek",
                 res["key"] or "",
                 res.get("base", ""),
             )
@@ -984,7 +867,9 @@ if __name__ == "__main__":
     # 这里再加一道保险：用命名 Mutex 确保只有一个 Koto 主窗口实例在运行。
     # 这对所有子进程（包括 pystray、pythonnet/WebView2 产生的子进程）都有效。
     _mutex_handle = None
-    if sys.platform == "win32":
+    # Service-only release checks do not create a desktop window, so they do
+    # not compete with a user's already-running desktop instance.
+    if sys.platform == "win32" and os.environ.get("KOTO_SERVER_ONLY") != "1":
         try:
             import ctypes
             import ctypes.wintypes

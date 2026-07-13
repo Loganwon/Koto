@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import inspect
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as _FuturesTimeout
 from typing import Any, Callable, Dict, List, Optional, get_type_hints
@@ -63,6 +64,36 @@ _ARG_ALIASES = {
     "file_paths": ("paths", "path_list"),
 }
 
+_INTEGER_TEXT_RE = re.compile(r"^[+-]?\d+$")
+_FLOAT_TEXT_RE = re.compile(r"^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$")
+
+
+def _coerce_scalar_tool_args(
+    func: Callable, normalized: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Coerce only unambiguous numeric text emitted by model tool calls.
+
+    Several hot-path tools are Cython-compiled and enforce annotations before
+    their own defensive normalizers execute.  JSON producers occasionally emit
+    `"2"` for an INTEGER parameter, so normalize that narrow, lossless case
+    at the common registry boundary.
+    """
+    try:
+        type_hints = get_type_hints(func)
+    except Exception:
+        type_hints = {}
+
+    for name, value in list(normalized.items()):
+        if not isinstance(value, str):
+            continue
+        text = value.strip()
+        expected = type_hints.get(name)
+        if expected is int and _INTEGER_TEXT_RE.fullmatch(text):
+            normalized[name] = int(text)
+        elif expected is float and _FLOAT_TEXT_RE.fullmatch(text):
+            normalized[name] = float(text)
+    return normalized
+
 
 def _normalize_tool_args(func: Callable, tool_args: Dict[str, Any]) -> Dict[str, Any]:
     normalized = dict(tool_args or {})
@@ -84,7 +115,7 @@ def _normalize_tool_args(func: Callable, tool_args: Dict[str, Any]) -> Dict[str,
                 normalized[canonical_name] = normalized.pop(alias)
                 break
     if accepts_var_kwargs:
-        return normalized
+        return _coerce_scalar_tool_args(func, normalized)
     known = {name: value for name, value in normalized.items() if name in parameters}
     dropped = [name for name in normalized if name not in parameters]
     if dropped:
@@ -93,7 +124,7 @@ def _normalize_tool_args(func: Callable, tool_args: Dict[str, Any]) -> Dict[str,
             getattr(func, "__name__", func),
             dropped,
         )
-    return known
+    return _coerce_scalar_tool_args(func, known)
 
 
 class ToolRegistry:

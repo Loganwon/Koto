@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Set
 
-from concept_extractor import ConceptExtractor
+from web.concept_extractor import ConceptExtractor
 
 logger = logging.getLogger(__name__)
 

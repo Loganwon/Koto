@@ -672,13 +672,15 @@ class TestFileEditor:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestIntelligentDocumentAnalyzer:
-    """Tests for web.intelligent_document_analyzer.IntelligentDocumentAnalyzer"""
+    """Tests for app.core.services.intelligent_document_analyzer.IntelligentDocumentAnalyzer"""
 
     def _make(self):
         with patch.dict(
             "sys.modules", {"docx": MagicMock(), "docx.shared": MagicMock()}
         ):
-            from web.intelligent_document_analyzer import IntelligentDocumentAnalyzer
+            from app.core.services.intelligent_document_analyzer import (
+                IntelligentDocumentAnalyzer,
+            )
 
             return IntelligentDocumentAnalyzer(llm_client=MagicMock())
 
@@ -752,38 +754,38 @@ class TestIntelligentDocumentAnalyzer:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestDocxTranslatorModule:
-    """Tests for web.docx_translator_module functions"""
+    """Tests for app.core.services.docx_translator_module functions"""
 
     def test_detect_target_language_english(self):
-        from web.docx_translator_module import detect_target_language
+        from app.core.services.docx_translator_module import detect_target_language
 
         assert detect_target_language("translate to english") == "English"
 
     def test_detect_target_language_japanese(self):
-        from web.docx_translator_module import detect_target_language
+        from app.core.services.docx_translator_module import detect_target_language
 
         assert detect_target_language("翻译成日语") == "Japanese"
 
     def test_detect_target_language_default(self):
-        from web.docx_translator_module import detect_target_language
+        from app.core.services.docx_translator_module import detect_target_language
 
         assert detect_target_language("random text") == "English"
 
     def test_lang_map_coverage(self):
-        from web.docx_translator_module import LANG_MAP
+        from app.core.services.docx_translator_module import LANG_MAP
 
         assert "en" in LANG_MAP
         assert "ja" in LANG_MAP
         assert "zh-cn" in LANG_MAP
 
     def test_lang_suffix_coverage(self):
-        from web.docx_translator_module import LANG_SUFFIX
+        from app.core.services.docx_translator_module import LANG_SUFFIX
 
         assert LANG_SUFFIX["English"] == "en"
         assert LANG_SUFFIX["Japanese"] == "ja"
 
     def test_translate_docx_streaming_no_docx(self):
-        from web.docx_translator_module import translate_docx_streaming
+        from app.core.services.docx_translator_module import translate_docx_streaming
 
         with patch.dict("sys.modules", {"docx": None}):
             # Force re-import failure inside generator by patching builtins
@@ -803,14 +805,14 @@ class TestDocxTranslatorModule:
         assert events[0]["stage"] == "error"
 
     def test_translate_batch_llm_empty(self):
-        from web.docx_translator_module import _translate_batch_llm
+        from app.core.services.docx_translator_module import _translate_batch_llm
 
         result = _translate_batch_llm([], "English", MagicMock())
         assert result == []
 
-    @patch("web.docx_translator_module._translate_one_by_one")
+    @patch("app.core.services.docx_translator_module._translate_one_by_one")
     def test_translate_batch_llm_mismatch_fallback(self, mock_fallback):
-        from web.docx_translator_module import _translate_batch_llm
+        from app.core.services.docx_translator_module import _translate_batch_llm
 
         mock_fallback.return_value = ["翻译A", "翻译B"]
         mock_client = MagicMock()

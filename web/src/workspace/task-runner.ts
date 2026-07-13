@@ -1,7 +1,47 @@
-﻿export interface SseParseResult {
-  events: Record<string, any>[];
-  remainder: string;
-}
+import {
+  fileTaskOutcomeCopy,
+  fileTaskTerminalUiStatus,
+  isFileTaskAttentionStatus,
+  isFileTaskConfirmationStatus,
+  isFileTaskFailureStatus,
+  isFileTaskIncompleteBlockedStatus,
+  isFileTaskWaitingStatus,
+  normalizeFileTaskTerminalStatus,
+  normalizedResumeStatus,
+} from './file-task-status';
+import { parseSseEvents } from './file-task-sse';
+import { showToast } from './infrastructure';
+import { dispatchFileTaskEvent } from './file-task-dispatch';
+import { taskReportStageDoneText } from './task-report-layout';
+import {
+  isInternalTaskTool,
+  isReadTaskTool,
+  shouldAlwaysSuppressTaskToolFinished,
+  taskPlanViolationLabel,
+  taskStepTitle,
+  taskToolLabel,
+} from './task-step-labels';
+import {
+  compactFlowSummary,
+  looksLikeFullAnswerText,
+  previewText,
+  renderTaskFinalReport,
+  terminalAnswerText,
+} from './task-final-report';
+import {
+  createModelSummaryState,
+  updateModelSummaryState,
+  updateTaskPerformanceDataset,
+  type ModelSummaryState,
+} from './task-performance';
+import {
+  renderTaskMemoryCard,
+  renderTaskUnderstandingCard,
+  taskContextSummaryText,
+} from './task-interaction-summary';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
+const workspaceApi = getWorkspaceApi();
 
 export interface TaskCardElement extends HTMLElement {
   _waRunCardBehaviorAttached?: boolean;
@@ -15,6 +55,7 @@ export interface TaskCardElement extends HTMLElement {
   _completedChunkRows?: Map<string, HTMLElement>;
   _singletonRows?: Map<string, HTMLElement>;
   _fileRefreshHashes?: Map<string, string>;
+  _terminalSnapshotHandler?: (_card: TaskCardElement) => void;
 }
 
 export interface FileTaskUiState {
@@ -40,16 +81,6 @@ export interface FileTaskUiState {
   streamIssueRow?: HTMLElement;
 }
 
-export interface ModelSummaryState {
-  rounds: Set<number>;
-  startedRounds: Set<number>;
-  toolCalls: number;
-  contentChars: number;
-  latestRound: number;
-  mode: string;
-  failed: boolean;
-}
-
 export interface TerminalResult {
   summary: string;
   status: string;
@@ -66,7 +97,7 @@ export interface StreamFileTaskOptions {
   loadingEl?: HTMLElement | null;
   signal?: AbortSignal;
   abortController?: AbortController;
-  onTaskCardSnapshot?: (card: TaskCardElement) => void;
+  onTaskCardSnapshot?: (_card: TaskCardElement) => void;
 }
 
 export interface ResumeFileTaskOptions {
@@ -79,7 +110,7 @@ export interface ResumeFileTaskOptions {
   taskCardSnapshot?: Record<string, any>;
   initialStatus?: string;
   status?: string;
-  onTaskCardSnapshot?: (card: TaskCardElement) => void;
+  onTaskCardSnapshot?: (_card: TaskCardElement) => void;
   replay?: boolean;
   taskPayload?: Record<string, any>;
   actionLabel?: string;
@@ -98,85 +129,20 @@ export interface TaskContract {
 }
 
 export interface CompactTextOptions {
-  text?: (value: string, limit: number) => string;
+  text?: (_value: string, _limit: number) => string;
 }
 
 const FILE_TASK_LOG_PREFIX = '[WA fileTask]';
 const FILE_TASK_IDLE_NOTICE_MS = 25000;
 const FILE_TASK_IDLE_WARN_MS = 60000;
-const TaskStatus: Record<string, any> = (window as any).WA?.fileTaskStatus || {};
-
-const TOOL_LABELS: Record<string, string> = {
-  selection_context: '读取选区',
-  provided_file_context: '读取文件上下文',
-  parse_file_to_text: '解析文件文本',
-  read_sheet_data: '读取表格数据',
-  read_docx_content: '读取 Word 内容',
-  insert_excel_as_docx_table: '插入 Excel 表格',
-  insert_image_into_docx: '插入 Word 图片',
-  write_docx_content: '写入 Word 内容',
-  write_sheet_data: '写入 Excel 单元格',
-  design_pptx_theme_layout: '设计 PPT 主题版式',
-  write_pptx_slides: '更新 PPT 页面',
-  convert_pptx_picture_slides_to_textboxes: '图片页转可编辑文本',
-  add_pptx_slides: '新增 PPT 页面',
-  run_python_code: '运行 Python',
-  read_file_range: '读取文本片段',
-  replace_file_selection: '替换文本选区',
-  create_file: '创建文件',
-  copy_file: '复制文件',
-  compare_files: '对比文件',
-  extract_to_file: '提取到文件',
-  annotate_file: '添加批注',
-  list_conversions: '查询可转换格式',
-  convert_file: '格式转换',
-  list_workspace_files: '列出文件',
-  open_file_in_editor: '打开文件',
-  verify_task_completion: '核验结果',
-  model_message: '模型说明',
-  write_guard: '继续写入',
-  supervisor_guard: '监管纠偏',
-  plan_gate: '计划监管',
-};
-
-const INTERNAL_TOOL_NAMES = new Set([
-  'selection_context', 'provided_file_context', 'parse_file_to_text',
-  'model_message', 'answer_guard', 'readonly_answer_guard', 'repair_guard',
-  'duplicate_guard', 'supervisor_guard', 'write_guard', 'plan_gate',
-]);
-
-const ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES = new Set([
-  'answer_guard', 'readonly_answer_guard', 'repair_guard', 'duplicate_guard',
-  'supervisor_guard', 'write_guard', 'plan_gate',
-]);
-
-const READ_TOOL_NAMES = new Set([
-  'read_sheet_data', 'read_docx_content', 'inspect_workbook_structure', 'audit_financial_workbook',
-]);
-
-const PRIMARY_STEP_TITLES: Record<string, string> = {
-  route: '任务识别',
-  plan: '执行方案',
-  context: '读取文件',
-  execute: '执行进度',
-  check: '完成核验',
-  run: '任务状态',
-};
-
-const PLAN_VIOLATION_LABELS: Record<string, string> = {
-  'write_required_but_plan_not_write': '任务需要写回，但计划没有标记为写入',
-  'write_required_but_output_not_write': '任务需要写回，但输出模式不是 write',
-  'clear_review_misclassified_as_annotation': '清除批注被误判为新增批注',
-  'clear_review_allows_annotate_file': '清除批注任务误选择了 annotate_file 能力',
-  'annotation_request_not_classified_as_annotation': '批注任务未被识别为批注流程',
+const TaskStatus: Record<string, any> = workspaceApi.fileTaskStatus || {};
+const TASK_RUNNER_PLAN_VIOLATION_LABELS: Record<string, string> = {
   'read_request_escalated_to_write': '只读任务被错误升级为写入',
 };
 
-function planViolationLabel(code: string): string {
+function taskRunnerPlanViolationLabel(code: string): string {
   const value = String(code || '').trim();
-  if (!value) return '';
-  if (PLAN_VIOLATION_LABELS[value]) return PLAN_VIOLATION_LABELS[value];
-  return value.replace(/_/g, ' ');
+  return TASK_RUNNER_PLAN_VIOLATION_LABELS[value] || taskPlanViolationLabel(value);
 }
 
 function planGateVisibleIssues(data: Record<string, any>): string[] {
@@ -244,32 +210,85 @@ function scrollToBottom(container?: HTMLElement | null): void {
   if (container) container.scrollTop = container.scrollHeight;
 }
 
-function eventPayload(evt: Record<string, any>): Record<string, any> {
-  return (evt && evt.payload && typeof evt.payload === 'object') ? evt.payload : {};
-}
-
 function normalizedTaskLifecyclePayload(payload: any): Record<string, any> {
   const data = payload && typeof payload === 'object' ? payload : {};
-  const classification = data.classification && typeof data.classification === 'object' ? data.classification : null;
+  const decisionContext = data.decision_context && typeof data.decision_context === 'object' ? data.decision_context : null;
+  const classification = decisionContext && decisionContext.classification && typeof decisionContext.classification === 'object'
+    ? decisionContext.classification
+    : (data.classification && typeof data.classification === 'object' ? data.classification : null);
   if (!classification) return data;
   const normalized = Object.assign({}, classification);
-  if (data.intent_plan && typeof data.intent_plan === 'object') normalized.intent_plan = data.intent_plan;
+  if (decisionContext) normalized.decision_context = decisionContext;
+  const intentPlan = decisionContext && decisionContext.intent_plan && typeof decisionContext.intent_plan === 'object'
+    ? decisionContext.intent_plan
+    : (data.intent_plan && typeof data.intent_plan === 'object' ? data.intent_plan : null);
+  const requirements = decisionContext && decisionContext.requirements && typeof decisionContext.requirements === 'object'
+    ? decisionContext.requirements
+    : (data.requirements && typeof data.requirements === 'object' ? data.requirements : null);
+  const planCheck = decisionContext && decisionContext.plan_check && typeof decisionContext.plan_check === 'object'
+    ? decisionContext.plan_check
+    : (data.plan_check && typeof data.plan_check === 'object' ? data.plan_check : null);
+  const routingDecision = decisionContext && decisionContext.routing_decision && typeof decisionContext.routing_decision === 'object'
+    ? decisionContext.routing_decision
+    : (data.routing_decision && typeof data.routing_decision === 'object' ? data.routing_decision : null);
+  if (intentPlan) normalized.intent_plan = intentPlan;
+  if (requirements) normalized.requirements = requirements;
+  if (planCheck) normalized.plan_check = planCheck;
+  if (routingDecision) normalized.routing_decision = routingDecision;
   if (data.runtime && typeof data.runtime === 'object') normalized.runtime = data.runtime;
+  if (data.performance && typeof data.performance === 'object') normalized.performance = data.performance;
   if (data.next_action_artifact && typeof data.next_action_artifact === 'object') normalized.next_action_artifact = data.next_action_artifact;
   if (data.artifact_result && typeof data.artifact_result === 'object') normalized.artifact_result = data.artifact_result;
   if (data.followup_record && typeof data.followup_record === 'object') normalized.followup_record = data.followup_record;
-  if (data.requirements && typeof data.requirements === 'object') normalized.requirements = data.requirements;
-  if (data.plan_check && typeof data.plan_check === 'object') normalized.plan_check = data.plan_check;
+  if (decisionContext && decisionContext.intent_adjudication && typeof decisionContext.intent_adjudication === 'object') normalized.intent_adjudication = decisionContext.intent_adjudication;
+  if (decisionContext && decisionContext.effective_planner && typeof decisionContext.effective_planner === 'object') normalized.effective_planner = decisionContext.effective_planner;
   if (data.constraint_audit && typeof data.constraint_audit === 'object') normalized.constraint_audit = data.constraint_audit;
   if (data.workflow_state && typeof data.workflow_state === 'object') normalized.workflow_state = data.workflow_state;
   if (data.supervisor_audit && typeof data.supervisor_audit === 'object') normalized.supervisor_audit = data.supervisor_audit;
+  if (data.task_context && typeof data.task_context === 'object') normalized.task_context = data.task_context;
+  if (data.task_request_payload && typeof data.task_request_payload === 'object') normalized.task_request_payload = data.task_request_payload;
   if (data.quick_action_mode) normalized.quick_action_mode = data.quick_action_mode;
   if (data.task_id) normalized.task_id = data.task_id;
   if (data.run_id) normalized.run_id = data.run_id;
   if (data.task) normalized.task = data.task;
+  if (data.task_title) normalized.task_title = data.task_title;
+  if (data.title) normalized.title = data.title;
   if (data.summary) normalized.summary = data.summary;
+  if (data.memory_summary) normalized.memory_summary = data.memory_summary;
+  if (data.model_context_text) normalized.model_context_text = data.model_context_text;
   if (data.text || data.error) normalized.text = data.text || data.error;
+  [
+    'final_answer', 'finalAnswer', 'answer', 'result', 'output',
+    'output_text', 'content', 'message', 'data', 'payload',
+  ].forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(data, key)) normalized[key] = data[key];
+  });
   if (Object.prototype.hasOwnProperty.call(data, 'completed_task')) normalized.completed_task = data.completed_task;
+  return normalized;
+}
+
+function updateTaskPerformanceRow(card: TaskCardElement, data: Record<string, any>): void {
+  const current = String(card && card.dataset ? card.dataset.taskPerformance || '' : '').trim();
+  const next = updateTaskPerformanceDataset(current, data);
+  if (card && card.dataset) {
+    try { card.dataset.taskPerformance = next.encoded; }
+    catch { delete card.dataset.taskPerformance; }
+  }
+  const summary = next.summary;
+  if (!summary) return;
+  const step = taskStageStep(card, 'route');
+  upsertStepSingletonRow(
+    step,
+    'task.performance',
+    'model-summary wa-task-performance',
+    '<span class="wa-task-chip">耗时</span>' + esc(summary),
+  );
+}
+
+function normalizeQuickActionMode(value: string): string {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'simple') return 'answer';
+  if (normalized === 'proposal') return 'hybrid';
   return normalized;
 }
 
@@ -277,14 +296,6 @@ function makeTaskError(message: string): Error & { waTaskError: boolean } {
   const error = new Error(String(message || '任务失败')) as Error & { waTaskError: boolean };
   error.waTaskError = true;
   return error;
-}
-
-function normalizeTaskContractText(value: unknown, limit: number): string {
-  const text = String(value || '').trim();
-  const max = Number(limit) > 0 ? Number(limit) : 0;
-  if (!text) return '';
-  if (!max || text.length <= max) return text;
-  return text.slice(0, max) + '...';
 }
 
 function decodeTaskRequestPayload(encoded: string): Record<string, any> | null {
@@ -309,31 +320,11 @@ function isTaskCardElement(value: unknown): value is TaskCardElement {
     && typeof (value as TaskCardElement).querySelectorAll === 'function');
 }
 
-function toolLabel(name: string): string { return TOOL_LABELS[name] || name || '工具'; }
-function isInternalTool(name: string): boolean { return INTERNAL_TOOL_NAMES.has(name || ''); }
-function isReadTool(name: string): boolean { return READ_TOOL_NAMES.has(name || ''); }
-function stepTitle(stepId: string, fallback?: string): string { return PRIMARY_STEP_TITLES[stepId] || fallback || '步骤'; }
-function toolStepTitle(name: string): string { return '工具:' + toolLabel(name); }
-
 function basename(path: string): string {
   const text = String(path || '').trim();
   if (!text) return '';
   const parts = text.split(/[\\/]+/).filter(Boolean);
   return parts.length ? parts[parts.length - 1] : text;
-}
-
-function rowsColsText(payload: Record<string, any>): string {
-  const rows = Number(payload.rows_written || 0);
-  const cols = Number(payload.columns_written || 0);
-  if (rows && cols) return rows + ' 行 x ' + cols + ' 列';
-  if (rows) return rows + ' 行';
-  if (cols) return cols + ' 列';
-  return '';
-}
-
-function isReviewChangePayload(payload: any): boolean {
-  if (!payload || typeof payload !== 'object') return false;
-  return payload.operation === 'annotate_file' || payload.operation === 'annotate' || Number(payload.annotations_added || 0) > 0;
 }
 
 function isConfirmEachStepResumePayload(payload: any): boolean {
@@ -342,42 +333,30 @@ function isConfirmEachStepResumePayload(payload: any): boolean {
   return String(checkpoint && checkpoint.policy || '').trim().toLowerCase() === 'confirm_each_step';
 }
 
-function previewText(value: string, limit: number): string {
-  const text = String(value || '').trim();
-  const max = Number(limit) > 0 ? Number(limit) : 0;
-  if (!max || text.length <= max) return text;
-  return text.slice(0, max) + '...';
-}
-
-function looksLikeFullAnswerText(value: string): boolean {
-  const text = String(value || '').trim();
-  if (!text) return false;
-  if (text.length > 260) return true;
-  return /(^|\n)\s*#{1,6}\s|\*\*|```|(^|\n)\s*[-*]\s+\S/u.test(text);
-}
-
-function compactFlowSummary(value: string, fallback = '完整结果见对话汇报。'): string {
-  const text = String(value || '').trim();
-  if (!text) return fallback;
-  if (looksLikeFullAnswerText(text)) return fallback;
-  return previewText(text.replace(/\s+/g, ' '), 160);
-}
-
-function renderTaskFinalReport(value: string): string {
-  const text = String(value || '').trim();
-  if (!text) return '';
-  const renderer = (window as any)._waRenderMarkdown;
-  if (typeof renderer === 'function') {
-    try { return renderer(text); } catch { /* noop */ }
-  }
-  if ((window as any).marked) {
-    try {
-      const sanitizer = (window as any)._sanitizeRenderedHtml;
-      const html = (window as any).marked.parse(text);
-      return typeof sanitizer === 'function' ? sanitizer(html) : html;
-    } catch { /* noop */ }
-  }
-  return esc(text).replace(/\n/g, '<br>');
+function syncTaskInteractionSummary(card: TaskCardElement): void {
+  if (!isTaskCardElement(card)) return;
+  ensureTaskReportAfterProcess(card);
+  const summary = card.querySelector('[data-role="summary"]') as HTMLElement | null;
+  if (!summary) return;
+  const pairs = [
+    { role: 'task-understanding', html: renderTaskUnderstandingCard(card) },
+    { role: 'task-memory-summary', html: renderTaskMemoryCard(card) },
+  ];
+  pairs.forEach((pair) => {
+    const existing = summary.querySelector('[data-role="' + pair.role + '"]') as HTMLElement | null;
+    if (!pair.html) {
+      if (existing) existing.remove();
+      return;
+    }
+    if (existing) {
+      existing.outerHTML = pair.html;
+      return;
+    }
+    const anchor = summary.querySelector('[data-role="final-report"]') as HTMLElement | null;
+    if (anchor) anchor.insertAdjacentHTML('beforebegin', pair.html);
+    else summary.insertAdjacentHTML('beforeend', pair.html);
+  });
+  if (String(summary.textContent || '').trim()) summary.hidden = false;
 }
 
 function tryParseJson(value: string): any {
@@ -437,21 +416,58 @@ function artifactSrc(artifact: Record<string, any>): string {
   return 'data:' + mime + ';base64,' + raw;
 }
 
+function artifactKey(artifact: Record<string, any>, src: string): string {
+  const path = String((artifact && artifact.path) || '').trim();
+  const name = String((artifact && artifact.name) || '').trim();
+  return path || name || src.slice(0, 96);
+}
+
+function artifactHostForRow(row: HTMLElement): HTMLElement {
+  const existing = Array.from(row.children).find((child) =>
+    child.classList.contains('wa-task-artifacts')
+  );
+  if (existing instanceof HTMLElement) return existing;
+  const host = document.createElement('div');
+  host.className = 'wa-task-artifacts';
+  return host;
+}
+
+function artifactFigureByKey(host: HTMLElement, key: string): HTMLElement | null {
+  const figures = Array.from(host.querySelectorAll<HTMLElement>('.wa-task-artifact'));
+  return figures.find((figure) => figure.dataset.artifactKey === key) || null;
+}
+
 function appendToolArtifacts(row: HTMLElement, payload: Record<string, any>): void {
   const artifacts = Array.isArray(payload.artifacts) ? payload.artifacts : [];
   if (!row || !artifacts.length) return;
-  const host = document.createElement('div');
-  host.className = 'wa-task-artifacts';
+  const host = artifactHostForRow(row);
   artifacts.forEach((artifact: Record<string, any>) => {
     if (artifact && artifact.kind && artifact.kind !== 'image') return;
     const src = artifactSrc(artifact);
     if (!src) return;
-    const figure = document.createElement('figure');
+    const key = artifactKey(artifact, src);
+    let figure = artifactFigureByKey(host, key);
+    const label = String((artifact && artifact.name) || '查看图像');
+    if (figure) {
+      const img = figure.querySelector<HTMLImageElement>('img');
+      const link = figure.querySelector<HTMLAnchorElement>('a');
+      if (img) {
+        img.src = src;
+        img.alt = label;
+      }
+      if (link) {
+        link.href = src;
+        link.textContent = label;
+      }
+      return;
+    }
+    figure = document.createElement('figure');
     figure.className = 'wa-task-artifact';
+    figure.dataset.artifactKey = key;
     const img = document.createElement('img');
     img.className = 'wa-task-artifact-image';
     img.src = src;
-    img.alt = String((artifact && artifact.name) || 'artifact');
+    img.alt = label;
     img.loading = 'lazy';
     figure.appendChild(img);
     const caption = document.createElement('figcaption');
@@ -459,12 +475,12 @@ function appendToolArtifacts(row: HTMLElement, payload: Record<string, any>): vo
     const link = document.createElement('a');
     link.className = 'wa-task-artifact-open';
     link.href = src; link.target = '_blank'; link.rel = 'noopener';
-    link.textContent = String((artifact && artifact.name) || '查看图像');
+    link.textContent = label;
     caption.appendChild(link);
     figure.appendChild(caption);
     host.appendChild(figure);
   });
-  if (host.childNodes.length) row.appendChild(host);
+  if (host.childNodes.length && !host.isConnected) row.appendChild(host);
 }
 
 function resultPreviewHtml(payload: Record<string, any>): string {
@@ -475,7 +491,7 @@ function resultPreviewHtml(payload: Record<string, any>): string {
   if (toolName === 'provided_file_context' || toolName === 'selection_context') return '';
   if (toolName === 'parse_file_to_text' && payload.success !== false) return '';
   if (looksLikeFullAnswerText(preview)) {
-    return '<div class="wa-task-result-text">' + esc('结果已生成，完整内容见对话汇报。') + '</div>';
+    return '<div class="wa-task-result-text">' + esc('已收到较长内容，详细内容见任务结果。') + '</div>';
   }
   const summary = toolPreviewSummary(toolName, preview);
   if (!summary) return '';
@@ -485,29 +501,15 @@ function resultPreviewHtml(payload: Record<string, any>): string {
 
 function shouldSuppressToolStart(payload: Record<string, any>): boolean {
   const name = payload.tool_name || '';
-  return isInternalTool(name) || isReadTool(name);
+  return isInternalTaskTool(name) || isReadTaskTool(name);
 }
 
 function shouldSuppressToolFinished(payload: Record<string, any>): boolean {
   const name = payload.tool_name || '';
-  if (ALWAYS_SUPPRESS_TOOL_FINISHED_NAMES.has(name)) return true;
-  if (isInternalTool(name) && payload.success !== false && !payload.blocked) return true;
+  if (shouldAlwaysSuppressTaskToolFinished(name)) return true;
+  if (isInternalTaskTool(name) && payload.success !== false && !payload.blocked) return true;
   if (payload.skipped) return true;
   return false;
-}
-
-function parseSseEvents(buffer: string, flush: boolean): SseParseResult {
-  const source = String(buffer || '').replace(/\r\n/g, '\n');
-  const frames = source.split('\n\n');
-  const remainder = flush ? '' : (frames.pop() || '');
-  const completeFrames = flush ? frames.filter((f) => f.trim()) : frames;
-  const events: Record<string, any>[] = [];
-  completeFrames.forEach((frame) => {
-    const dataLines = String(frame || '').split('\n').filter((l) => l.startsWith('data:')).map((l) => l.replace(/^data:\s?/, ''));
-    if (!dataLines.length) return;
-    try { events.push(JSON.parse(dataLines.join('\n'))); } catch { /* noop */ }
-  });
-  return { events, remainder };
 }
 
 function ensureTaskUiState(card: TaskCardElement): FileTaskUiState {
@@ -517,7 +519,7 @@ function ensureTaskUiState(card: TaskCardElement): FileTaskUiState {
       streamIssueKeys: new Set(), processedEventKeys: new Set(), lastEventRunId: '',
       lastEventSeq: 0, fileChanges: [], readSummaries: new Map(),
       modelSummaryRows: new Map(),
-      modelSummary: { rounds: new Set(), startedRounds: new Set(), toolCalls: 0, contentChars: 0, latestRound: 0, mode: '', failed: false },
+      modelSummary: createModelSummaryState(),
       codeSummaryRows: new Map(), uiProgress: 0, progressExplicit: false,
       plannedStepCount: 0, lastActivityAt: 0, heartbeatTimer: null, multiTargetActive: false, domHydrated: true,
     };
@@ -528,7 +530,7 @@ function ensureTaskUiState(card: TaskCardElement): FileTaskUiState {
       streamIssueKeys: new Set(), processedEventKeys: new Set(), lastEventRunId: '',
       lastEventSeq: 0, fileChanges: [], readSummaries: new Map(),
       modelSummaryRows: new Map(),
-      modelSummary: { rounds: new Set(), startedRounds: new Set(), toolCalls: 0, contentChars: 0, latestRound: 0, mode: '', failed: false },
+      modelSummary: createModelSummaryState(),
       codeSummaryRows: new Map(), uiProgress: 0, progressExplicit: false,
       plannedStepCount: 0, lastActivityAt: 0, heartbeatTimer: null, multiTargetActive: false, domHydrated: false,
     };
@@ -571,7 +573,7 @@ function ensureStep(card: TaskCardElement, stepId: string, title: string): HTMLE
   const safeId = String(stepId || 'run');
   let step = Array.from(steps.children).find((n) => (n as HTMLElement).dataset.stepId === safeId) as HTMLElement;
   if (step) {
-    setStepTitle(step, title || stepTitle(safeId));
+    setStepTitle(step, title || taskStepTitle(safeId));
     return step;
   }
   step = document.createElement('div');
@@ -601,7 +603,7 @@ function markStepFailed(step: HTMLElement): void {
 }
 
 function taskStageStep(card: TaskCardElement, stepId: string): HTMLElement {
-  return ensureStep(card, stepId, stepTitle(stepId));
+  return ensureStep(card, stepId, taskStepTitle(stepId));
 }
 
 function appendRow(step: HTMLElement, kind: string, html: string): HTMLElement {
@@ -624,29 +626,16 @@ function upsertStepSingletonRow(step: HTMLElement, role: string, kind: string, h
   return row;
 }
 
-function upsertMultiTargetTerminalRow(step: HTMLElement, kind: string, html: string): HTMLElement | null {
-  if (!step) return null;
-  let row = (step as any)._multiTargetTerminalRow as HTMLElement;
-  if (!row) { row = appendRow(step, kind, html); row.dataset.role = 'multi-target-terminal'; (step as any)._multiTargetTerminalRow = row; return row; }
-  row.className = ('wa-task-row ' + (kind || '')).trim();
-  row.innerHTML = html;
-  return row;
-}
-
 function noteStreamIssue(card: TaskCardElement, key: string, text: string): void {
   if (!card) return;
   const state = ensureTaskUiState(card);
   if (state.streamIssueKeys.has(key)) return;
   state.streamIssueKeys.add(key);
-  const step = ensureStep(card, 'run', '任务状态');
-  step.classList.remove('pending', 'failed');
-  if (!step.classList.contains('running')) step.classList.add('done');
-  const message = text || '检测到重复进度事件，已自动合并。';
-  if (!state.streamIssueRow) {
-    state.streamIssueRow = appendRow(step, 'warn', '');
-    state.streamIssueRow.dataset.role = 'stream-issue';
+  const issues = Number(card.dataset.taskStreamIssueCount || '0') || 0;
+  card.dataset.taskStreamIssueCount = String(issues + 1);
+  if (typeof console !== 'undefined' && typeof console.debug === 'function') {
+    console.debug('[FileTaskStream]', text || 'stream event issue', key);
   }
-  state.streamIssueRow.innerHTML = '<span class="wa-task-chip warn">提示</span>' + esc(message);
 }
 
 function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void {
@@ -655,15 +644,38 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
   const data = normalizedTaskLifecyclePayload(payload);
   const taskContract = data.task_contract && typeof data.task_contract === 'object' ? data.task_contract : null;
   const artifactResult = data.artifact_result && typeof data.artifact_result === 'object' ? data.artifact_result : null;
+  const taskRequestPayload = data.task_request_payload && typeof data.task_request_payload === 'object' ? data.task_request_payload : null;
+  const taskContext = data.task_context && typeof data.task_context === 'object'
+    ? data.task_context
+    : (taskRequestPayload && taskRequestPayload.task_context && typeof taskRequestPayload.task_context === 'object' ? taskRequestPayload.task_context : null);
   const taskId = String(eventData.task_id || data.task_id || (artifactResult && artifactResult.task_id) || '').trim();
   const runId = String(eventData.run_id || data.run_id || '').trim();
   if (taskId) card.dataset.taskId = taskId;
   if (runId) card.dataset.taskRunId = runId;
+  const taskTitle = String(data.task_title || data.title || '').trim();
+  if (taskTitle) {
+    card.dataset.taskTitle = taskTitle;
+    const titleEl = card.querySelector('.wa-task-title');
+    if (titleEl) titleEl.textContent = taskTitle;
+  }
   if (data.task) card.dataset.taskRequest = String(data.task || '').trim();
+  const contextSummary = taskContextSummaryText(taskContext);
+  if (contextSummary) card.dataset.taskContextSummary = contextSummary;
+  const memorySummary = String(data.memory_summary || data.model_context_text || '').trim();
+  if (memorySummary) card.dataset.taskMemorySummary = memorySummary;
+  if (artifactResult) {
+    try { card.dataset.taskArtifactResult = encodeURIComponent(JSON.stringify(artifactResult)); } catch { delete card.dataset.taskArtifactResult; }
+  }
   if (data.mode) card.dataset.taskMode = String(data.mode || '').trim();
-  if (data.summary) card.dataset.taskSummary = compactFlowSummary(String(data.summary || '').trim(), '任务已完成，完整结果见对话汇报。');
-  if (data.text || data.error) card.dataset.taskSummary = compactFlowSummary(String(data.text || data.error || '').trim(), '任务已完成，完整结果见对话汇报。');
-  if (data.quick_action_mode) card.dataset.taskQuickActionMode = String(data.quick_action_mode || '').trim();
+  const eventAnswer = terminalAnswerText(data);
+  if (eventAnswer) {
+    card.dataset.taskSummary = compactFlowSummary(eventAnswer, '详细内容见任务结果。');
+    card.dataset.taskFinalAnswer = eventAnswer;
+  }
+  if (data.quick_action_mode) {
+    const quickActionMode = normalizeQuickActionMode(String(data.quick_action_mode || '').trim());
+    card.dataset.taskQuickActionMode = quickActionMode;
+  }
   if (Object.prototype.hasOwnProperty.call(data, 'completed_task')) card.dataset.taskCompleted = data.completed_task ? 'true' : 'false';
   if (data.request_kind) card.dataset.taskRequestKind = String(data.request_kind || '').trim();
   if (data.task_family) card.dataset.taskFamily = String(data.task_family || '').trim();
@@ -672,6 +684,12 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
   if (data.selected_recipe) card.dataset.taskSelectedRecipe = String(data.selected_recipe || '').trim();
   if (data.output_mode) card.dataset.taskOutputMode = String(data.output_mode || '').trim();
   if (data.target_file_type) card.dataset.taskTargetFileType = String(data.target_file_type || '').trim();
+  const routingDecision = data.routing_decision && typeof data.routing_decision === 'object' ? data.routing_decision : null;
+  if (routingDecision) {
+    if (routingDecision.route) card.dataset.taskRoute = String(routingDecision.route || '').trim();
+    if (routingDecision.route_source) card.dataset.taskRouteSource = String(routingDecision.route_source || '').trim();
+    try { card.dataset.taskRoutingDecision = encodeURIComponent(JSON.stringify(routingDecision)); } catch { delete card.dataset.taskRoutingDecision; }
+  }
   if (Object.prototype.hasOwnProperty.call(data, 'confidence')) {
     const c = Number(data.confidence);
     if (Number.isFinite(c) && c >= 0) card.dataset.taskClassificationConfidence = String(c);
@@ -679,7 +697,7 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
   if (Array.isArray(data.reason_codes)) {
     try { card.dataset.taskClassificationReasons = JSON.stringify(data.reason_codes); } catch { delete card.dataset.taskClassificationReasons; }
   }
-  const encodedTaskContract = typeof (window as any).WA.encodeTaskContract === 'function' ? (window as any).WA.encodeTaskContract(taskContract) : '';
+  const encodedTaskContract = typeof workspaceApi.encodeTaskContract === 'function' ? workspaceApi.encodeTaskContract(taskContract) : '';
   if (encodedTaskContract) card.dataset.taskContract = encodedTaskContract; else delete card.dataset.taskContract;
   const intentPlan = data.intent_plan && typeof data.intent_plan === 'object' ? data.intent_plan : {};
   const intentStrategy = String(intentPlan.recommended_strategy || '').trim();
@@ -687,7 +705,7 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
   if (Object.prototype.hasOwnProperty.call(intentPlan, 'can_apply')) card.dataset.taskIntentCanApply = intentPlan.can_apply ? 'true' : 'false'; else delete card.dataset.taskIntentCanApply;
   if (Object.prototype.hasOwnProperty.call(intentPlan, 'requires_confirmation')) card.dataset.taskIntentRequiresConfirmation = intentPlan.requires_confirmation ? 'true' : 'false'; else delete card.dataset.taskIntentRequiresConfirmation;
   const runtime = data.runtime && typeof data.runtime === 'object' ? data.runtime : {};
-  const terminalStatus = String(runtime.terminal_status || '').trim();
+  const terminalStatus = normalizeFileTaskTerminalStatus(runtime.terminal_status || '');
   if (terminalStatus) card.dataset.taskTerminalStatus = terminalStatus;
   const nextActionArtifact = data.next_action_artifact && typeof data.next_action_artifact === 'object' ? data.next_action_artifact : null;
   const resumeRequest = nextActionArtifact && nextActionArtifact.resume_request && typeof nextActionArtifact.resume_request === 'object' ? nextActionArtifact.resume_request : null;
@@ -700,56 +718,169 @@ function setTaskRunContext(card: TaskCardElement, evt: Record<string, any>, payl
     const existingResumePayload = decodeTaskRequestPayload(card.dataset.taskPendingResumePayload || '');
     if (!isConfirmEachStepResumePayload(existingResumePayload)) { delete card.dataset.taskPendingResumePayload; delete card.dataset.taskPendingResumeLabel; }
   }
+  syncTaskInteractionSummary(card);
+}
+
+function decodeTaskArtifactResult(card: TaskCardElement): Record<string, any> | null {
+  const encoded = String(card && card.dataset && card.dataset.taskArtifactResult || '').trim();
+  if (!encoded) return null;
+  try {
+    const decoded = JSON.parse(decodeURIComponent(encoded));
+    return decoded && typeof decoded === 'object' ? decoded : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function taskArtifactItems(card: TaskCardElement): any[] {
+  const artifactResult = decodeTaskArtifactResult(card);
+  const artifacts = artifactResult && Array.isArray(artifactResult.artifacts) ? artifactResult.artifacts : [];
+  const unique = new Map<string, any>();
+  artifacts.forEach((item: any) => {
+    if (!item || typeof item !== 'object') return;
+    const path = String(item.path || '').replace(/\\/g, '/').replace(/^\.\//, '').trim();
+    const canonical = path.replace(/^workspace\//i, '').toLowerCase();
+    const key = canonical || ('title:' + String(item.title || '').trim().toLowerCase());
+    if (!key) return;
+    const existing = unique.get(key);
+    const prefersWorkspacePath = /^workspace\//i.test(path);
+    const existingPath = String(existing && existing.path || '').replace(/\\/g, '/');
+    if (!existing || (prefersWorkspacePath && !/^workspace\//i.test(existingPath))) {
+      unique.set(key, item);
+    }
+  });
+  return Array.from(unique.values());
+}
+
+function artifactDisplayName(item: any): string {
+  const title = String(item && item.title || '').trim();
+  if (title) return title;
+  const path = String(item && item.path || '').replace(/\\/g, '/');
+  return path.split('/').pop() || path || '任务产物';
+}
+
+function taskArtifactsSummaryHtml(card: TaskCardElement): string {
+  const artifacts = taskArtifactItems(card);
+  if (!artifacts.length) return '';
+  const visibleLimit = 3;
+  const rows = artifacts.slice(0, visibleLimit).map((item: any) => {
+    const name = artifactDisplayName(item);
+    const path = String(item.path || '').replace(/\\/g, '/').trim();
+    const type = String(item.type || '').trim();
+    const isTemporary = /(^|\/)(tmp|temp)(\/|$)/i.test(path.replace(/^workspace\//i, ''));
+    const meta = [type, isTemporary ? '临时产物' : '工作区文件'].filter(Boolean).join(' · ');
+    return '<li title="' + escAttr(path) + '"><span class="wa-task-artifact-name">' + esc(name) + '</span>'
+      + (meta ? '<span class="wa-task-artifact-meta">' + esc(meta) + '</span>' : '')
+      + '</li>';
+  }).join('');
+  const overflow = artifacts.length > visibleLimit ? '<div class="wa-task-artifact-overflow">另有 ' + esc(String(artifacts.length - visibleLimit)) + ' 个产物</div>' : '';
+  return [
+    '<div class="wa-task-artifact-summary-card" data-role="artifact-summary">',
+    '  <div class="wa-task-artifact-summary-head">',
+    '    <strong>任务产物</strong>',
+    '    <button type="button" class="wa-task-artifact-open-panel" data-task-artifacts-open="1">查看产物</button>',
+    '  </div>',
+    '  <ul>',
+    rows,
+    '  </ul>',
+    overflow,
+    '</div>',
+  ].join('');
 }
 
 function taskTerminalResult(card: TaskCardElement, fallbackSummary?: string): TerminalResult {
   const dataset = card && card.dataset ? card.dataset : {};
-  const terminalStatus = String(dataset.taskTerminalStatus || '').trim().toLowerCase();
-  const explicitSummary = String(dataset.taskSummary || fallbackSummary || '').trim();
+  const terminalStatus = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
+  const explicitSummary = String(fallbackSummary || dataset.taskFinalAnswer || dataset.taskSummary || '').trim();
   const fatalSummary = String(card && card._fatalErrorText || '').trim();
-  const completedTask = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted') ? boolAttr(dataset.taskCompleted) : true;
-  let status = 'done';
-  if (fatalSummary) status = 'error';
-  else if (terminalStatus === 'cancelled') status = 'cancelled';
-  else if (terminalStatus === 'awaiting_confirmation' || terminalStatus === 'needs_attention' || terminalStatus === 'pending') status = 'pending';
-  else if (
-    terminalStatus === 'failed'
-    || terminalStatus === 'blocked'
-    || terminalStatus === 'write_blocked'
-    || terminalStatus === 'tool_gap'
-    || terminalStatus === 'no_file_change'
-    || terminalStatus === 'model_unavailable'
-    || terminalStatus === 'quality_gate_failed'
-  ) status = 'error';
-  else if (!completedTask) status = 'pending';
-  return { summary: explicitSummary || fatalSummary || '文件任务流已完成。', status, task_id: String(dataset.taskId || '').trim(), run_id: String(dataset.taskRunId || '').trim(), loadingEl: card || null, terminal_status: terminalStatus, completed_task: completedTask };
+  const completedTask = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted')
+    ? boolAttr(dataset.taskCompleted)
+    : ['completed', 'done', 'verified'].includes(terminalStatus);
+  const status = fileTaskTerminalUiStatus(terminalStatus, completedTask, fatalSummary);
+  return { summary: explicitSummary || fatalSummary || '文件任务流已结束。', status, task_id: String(dataset.taskId || '').trim(), run_id: String(dataset.taskRunId || '').trim(), loadingEl: card || null, terminal_status: terminalStatus, completed_task: completedTask };
+}
+
+function taskResultRequiresUserConfirmation(result: TerminalResult): boolean {
+  return !!result && isFileTaskConfirmationStatus(result.terminal_status);
+}
+
+function taskResultNeedsAttention(result: TerminalResult): boolean {
+  return isFileTaskAttentionStatus(result && result.terminal_status);
+}
+
+function taskResultOutcomeCopy(result: TerminalResult): ReturnType<typeof fileTaskOutcomeCopy> {
+  if (normalizeFileTaskTerminalStatus(result && result.terminal_status) === 'context_summary_fallback') {
+    return {
+      title: '需复核',
+      detail: '模型未返回完整答案；当前仅显示基于已读上下文的临时摘要。',
+      stepSummary: '已保留临时摘要，仍需重新生成完整回答。',
+      toast: '任务需要复核：当前只是临时摘要',
+      toastType: 'info',
+    };
+  }
+  if (taskResultNeedsAttention(result)) {
+    return {
+      title: '需处理',
+      detail: '当前任务未完成，原因和可继续处理的建议已整理到任务结果区域。',
+      stepSummary: '任务需要处理，进度已保留。',
+      toast: '任务需要处理，请查看任务结果',
+      toastType: 'info',
+    };
+  }
+  return fileTaskOutcomeCopy(result && result.status || 'done', taskResultRequiresUserConfirmation(result));
 }
 
 function terminalStepSummary(result: TerminalResult): string {
-  if (!result) return '最终汇报已生成。';
-  if (result.status === 'error') return '执行失败，错误信息已写入最终汇报。';
-  if (result.status === 'cancelled') return '任务已取消。';
-  if (result.status === 'pending') return '任务等待确认。';
-  return '最终汇报已生成。';
+  return taskResultOutcomeCopy(result).stepSummary;
+}
+
+function taskCompletionBannerHtml(result: TerminalResult): string {
+  const status = result && result.status ? result.status : 'done';
+  const label = taskResultOutcomeCopy(result);
+  return '<div class="wa-task-completion-banner" data-status="' + escAttr(status) + '" role="status" aria-live="polite">'
+    + '<span class="wa-task-completion-icon" aria-hidden="true"></span>'
+    + '<span class="wa-task-completion-copy"><strong>' + esc(label.title) + '</strong><span>' + esc(label.detail) + '</span></span>'
+    + '</div>';
+}
+
+function taskResultContextDetailsHtml(card: TaskCardElement): string {
+  const understanding = renderTaskUnderstandingCard(card);
+  if (!understanding) return '';
+  return '<details class="wa-task-result-context"><summary>任务说明</summary>' + understanding + '</details>';
+}
+
+function announceTaskCompletion(card: TaskCardElement, result: TerminalResult, report: HTMLElement | null): void {
+  if (!card || card.dataset.historySnapshot === 'true' || !card.isConnected) return;
+  const status = String(result && result.status || 'done').trim() || 'done';
+  if (card.dataset.taskCompletionAnnounced === status) return;
+  card.dataset.taskCompletionAnnounced = status;
+  const copy = taskResultOutcomeCopy(result);
+  showToast(copy.toast, copy.toastType, copy.toastType === 'error' ? 3600 : 3200);
+  window.requestAnimationFrame(() => {
+    if (!report || !report.isConnected) return;
+    report.classList.add('is-revealed');
+    if (typeof report.scrollIntoView === 'function') {
+      report.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  });
 }
 
 function taskResultActionsHtml(card: TaskCardElement): string {
   const dataset = card && card.dataset ? card.dataset : {};
-  const terminal = String(dataset.taskTerminalStatus || '').trim().toLowerCase();
+  const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
   const pendingResumePayload = String(dataset.taskPendingResumePayload || '').trim();
-  const completed = String(dataset.taskCompleted || '').trim().toLowerCase() !== 'false'
-    && !['failed', 'blocked', 'write_blocked', 'tool_gap', 'no_file_change', 'model_unavailable', 'quality_gate_failed', 'cancelled'].includes(terminal);
+  const completedTask = String(dataset.taskCompleted || '').trim().toLowerCase() !== 'false';
+  const uiStatus = fileTaskTerminalUiStatus(terminal, completedTask);
+  const completed = uiStatus === 'done';
+  const incompleteBlocked = isFileTaskIncompleteBlockedStatus(terminal, completedTask);
   const request = String(dataset.taskRequest || '').trim();
   const pendingLabel = String(dataset.taskPendingResumeLabel || '').trim();
-  const quickActionMode = String(dataset.taskQuickActionMode || '').trim();
+  const quickActionMode = normalizeQuickActionMode(String(dataset.taskQuickActionMode || '').trim());
   const canApply = String(dataset.taskIntentCanApply || '').trim().toLowerCase() === 'true';
   const requiresConfirmation = String(dataset.taskIntentRequiresConfirmation || '').trim().toLowerCase() === 'true';
   const outputMode = String(dataset.taskOutputMode || '').trim().toLowerCase();
-  const waitingForContinuation = terminal === 'awaiting_confirmation'
-    || terminal === 'needs_attention'
-    || terminal === 'pending'
-    || !completed;
-  if (pendingResumePayload && terminal === 'awaiting_confirmation' && waitingForContinuation) {
+  const waitingForConfirmation = isFileTaskConfirmationStatus(terminal);
+  if (pendingResumePayload && waitingForConfirmation) {
     const actionLabel = pendingLabel || '继续下一步';
     return [
       '<div class="wa-task-actions">',
@@ -761,38 +892,71 @@ function taskResultActionsHtml(card: TaskCardElement): string {
       '</div>',
     ].join('');
   }
-  let improveText = completed ? '继续优化' : '继续修复';
+  const questionText = completed ? '询问结果' : '追问原因';
+  let improveText = completed ? '继续处理' : '继续修复';
+  const actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';
   let applyActionHtml = '';
-
+  if (incompleteBlocked) improveText = '重新发起';
   if (quickActionMode === 'answer') {
-    improveText = '继续分析';
+    if (!incompleteBlocked) improveText = '继续分析';
   } else if (quickActionMode === 'hybrid') {
-    if (canApply) {
-      improveText = '继续细化方案';
-      applyActionHtml = `    <button type="button" class="wa-task-followup-action primary" data-task-followup-action="apply">${esc(requiresConfirmation ? '应用建议' : '应用到文件')}</button>`;
-    } else if (outputMode && outputMode !== 'write') {
-      improveText = '继续细化';
+    if (!incompleteBlocked) {
+      if (canApply) {
+        improveText = '继续细化方案';
+        applyActionHtml = `    <button type="button" class="wa-task-followup-action primary" data-task-followup-action="apply">${esc(requiresConfirmation ? '应用建议' : '应用到文件')}</button>`;
+      } else if (outputMode && outputMode !== 'write') {
+        improveText = '继续细化';
+      }
     }
-  } else if (pendingLabel) {
+  } else if (pendingLabel && !incompleteBlocked) {
     improveText = pendingLabel;
   }
 
   return [
     '<div class="wa-task-actions">',
+    `  <span class="wa-task-action-hint">${esc(actionHint)}</span>`,
     '  <div class="wa-task-action-buttons">',
     applyActionHtml,
-    '    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">追问</button>',
+    `    <button type="button" class="wa-task-followup-action" data-task-followup-action="question">${esc(questionText)}</button>`,
     `    <button type="button" class="wa-task-followup-action" data-task-followup-action="improve" data-task-followup-request="${escAttr(request || '')}">${esc(improveText)}</button>`,
     '  </div>',
     '</div>',
   ].join('');
 }
 
+function renderTaskResultSummaryBar(card: TaskCardElement, _result: Record<string, any>): string {
+  const state = ensureTaskUiState(card);
+  const changes = Array.isArray(state.fileChanges) ? state.fileChanges : [];
+  if (!changes.length) return '';
+  const imgRe = /\.(png|jpe?g|gif|webp|svg|bmp)$/i;
+  const seen = new Set<string>();
+  const items: Array<{ name: string; path: string; isImg: boolean }> = [];
+  for (const c of changes) {
+    const rawPath = String(c.path || c.file_path || '').trim();
+    if (!rawPath) continue;
+    const normalized = rawPath.replace(/\\/g, '/');
+    const name = normalized.split('/').pop() || rawPath;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    items.push({ name, path: normalized, isImg: imgRe.test(name) });
+    if (items.length >= 4) break;
+  }
+  if (!items.length) return '';
+  const chips = items.map((item) => {
+    if (item.isImg) {
+      const src = escAttr(encodeURIComponent(item.path));
+      return '<span class="wa-task-summary-chip has-thumb"><img src="/api/file/raw?path=' + src + '" alt="' + esc(item.name) + '" loading="lazy" /><span>' + esc(item.name) + '</span></span>';
+    }
+    return '<span class="wa-task-summary-chip">' + esc(item.name) + '</span>';
+  }).join('');
+  return '<div class="wa-task-result-summary-bar"><span class="wa-task-summary-label">已生成</span>' + chips + '</div>';
+}
+
 function scheduleTaskLiveProgressCollapse(card: TaskCardElement): void {
   const host = document.getElementById('wa-task-live-progress');
   if (!host) return;
-  const terminalStatus = String(card && card.dataset && card.dataset.taskTerminalStatus || '').trim().toLowerCase();
-  if (terminalStatus === 'awaiting_confirmation' || terminalStatus === 'needs_attention' || terminalStatus === 'pending') return;
+  const terminalStatus = normalizeFileTaskTerminalStatus(card && card.dataset && card.dataset.taskTerminalStatus || '');
+  if (isFileTaskConfirmationStatus(terminalStatus)) return;
   const currentTimer = (host as any)._waCollapseTimer;
   if (currentTimer) window.clearTimeout(currentTimer);
   (host as any)._waCollapseTimer = window.setTimeout(() => {
@@ -805,16 +969,19 @@ function initializeRecoveredRunCard(card: TaskCardElement, opts: Record<string, 
   const settings = opts && typeof opts === 'object' ? opts : {};
   if (!card) return null;
   card.classList.add('streaming');
+  const waiting = isFileTaskWaitingStatus(settings.initialStatus);
+  const confirmation = isFileTaskConfirmationStatus(settings.initialStatus);
   if (card.dataset) {
     if (settings.taskId) card.dataset.taskId = String(settings.taskId || '').trim();
     if (settings.runId) card.dataset.taskRunId = String(settings.runId || '').trim();
-    if (settings.initialStatus === 'waiting') card.dataset.taskTerminalStatus = 'awaiting_confirmation';
+    if (confirmation) card.dataset.taskTerminalStatus = 'awaiting_confirmation';
+    else if (waiting) card.dataset.taskTerminalStatus = normalizeFileTaskTerminalStatus(settings.initialStatus);
   }
   const statusEl = card.querySelector('[data-role="status"]');
-  if (statusEl) statusEl.textContent = settings.initialStatus === 'waiting' ? '待确认' : '恢复中';
+  if (statusEl) statusEl.textContent = confirmation ? '待确认' : (waiting ? '待处理' : '恢复中');
   const summaryEl = card.querySelector('[data-role="summary"]');
   if (summaryEl && !String(summaryEl.textContent || '').trim()) {
-    summaryEl.innerHTML = '<div class="wa-task-plan-summary wa-task-outcome">' + esc(settings.initialStatus === 'waiting' ? '已恢复等待确认的后台任务，正在同步最新进度…' : '已恢复后台任务，正在同步最新进度…') + '</div>';
+    summaryEl.innerHTML = '<div class="wa-task-plan-summary wa-task-outcome">' + esc(confirmation ? '已恢复等待确认的后台任务，正在同步最新进度…' : (waiting ? '已恢复待处理的后台任务，正在同步最新进度…' : '已恢复后台任务，正在同步最新进度…')) + '</div>';
   }
   return card;
 }
@@ -881,14 +1048,14 @@ function attachRunCardBehavior(card: TaskCardElement): TaskCardElement {
       const taskActionButton = target && target.closest ? target.closest('[data-task-followup-action]') : null;
       if (taskActionButton) {
         const action = taskActionButton.getAttribute('data-task-followup-action') || '';
-        if (action && (window as any).WA && typeof (window as any).WA.beginTaskResultFollowup === 'function') {
+        if (action && typeof workspaceApi.beginTaskResultFollowup === 'function') {
           const taskState = ensureTaskUiState(card);
-          const taskContract = typeof (window as any).WA.decodeTaskContract === 'function'
-            ? (window as any).WA.decodeTaskContract(card.dataset.taskContract || '')
+          const taskContract = typeof workspaceApi.decodeTaskContract === 'function'
+            ? workspaceApi.decodeTaskContract(card.dataset.taskContract || '')
             : null;
           const taskPayload = decodeTaskRequestPayload(card.dataset.taskFollowupPayload || '');
           const pendingTaskPayload = decodeTaskRequestPayload(card.dataset.taskPendingResumePayload || '');
-          (window as any).WA.beginTaskResultFollowup({
+          workspaceApi.beginTaskResultFollowup({
             action,
             task_id: card.dataset.taskId || '',
             run_id: card.dataset.taskRunId || '',
@@ -916,23 +1083,32 @@ function attachRunCardBehavior(card: TaskCardElement): TaskCardElement {
         return;
       }
 
+      const artifactOpenButton = target && target.closest ? target.closest('[data-task-artifacts-open]') : null;
+      if (artifactOpenButton) {
+        const artifactResult = decodeTaskArtifactResult(card);
+        if (artifactResult && typeof workspaceApi.renderArtifactResult === 'function') {
+          workspaceApi.renderArtifactResult(artifactResult);
+        }
+        return;
+      }
+
       const resumeButton = target && target.closest ? target.closest('[data-task-artifact-resume]') : null;
       if (resumeButton) {
         const encodedPayload = resumeButton.getAttribute('data-task-artifact-resume') || '';
         const actionLabel = resumeButton.getAttribute('data-task-artifact-label') || resumeButton.textContent || '';
-        if (!encodedPayload || !(window as any).WA || typeof (window as any).WA.resumeTaskArtifact !== 'function') return;
+        if (!encodedPayload || typeof workspaceApi.resumeTaskArtifact !== 'function') return;
         try {
           const taskPayload = JSON.parse(decodeURIComponent(encodedPayload));
           const taskId = String(taskPayload && taskPayload.task_id || card.dataset.taskId || '').trim();
-          if (taskId && typeof (window as any).WA.resumePersistedTaskArtifact === 'function') {
-            Promise.resolve((window as any).WA.resumePersistedTaskArtifact({
+          if (taskId && typeof workspaceApi.resumePersistedTaskArtifact === 'function') {
+            Promise.resolve(workspaceApi.resumePersistedTaskArtifact({
               taskId,
               taskPayload,
               actionLabel,
               loadingEl: card,
             })).catch((error: any) => console.warn(FILE_TASK_LOG_PREFIX + ' persisted task resume failed:', error));
           } else {
-            (window as any).WA.resumeTaskArtifact({ taskPayload, actionLabel });
+            workspaceApi.resumeTaskArtifact({ taskPayload, actionLabel });
           }
         } catch (error) {
           console.warn(FILE_TASK_LOG_PREFIX + ' task artifact resume parse failed:', error);
@@ -954,11 +1130,29 @@ function attachRunCardBehavior(card: TaskCardElement): TaskCardElement {
   return card;
 }
 
+function ensureTaskReportAfterProcess(card: TaskCardElement | null): TaskCardElement | null {
+  if (!card || !isTaskCardElement(card)) return card;
+  const process = card.querySelector('[data-role="process"]') as HTMLElement | null;
+  let summary = card.querySelector('[data-role="summary"]') as HTMLElement | null;
+  if (!summary) {
+    summary = document.createElement('div');
+    summary.className = 'wa-task-summary';
+    summary.dataset.role = 'summary';
+  }
+  if (process && process.nextElementSibling !== summary) {
+    process.insertAdjacentElement('afterend', summary);
+  } else if (!process && summary.parentElement !== card) {
+    card.appendChild(summary);
+  }
+  return card;
+}
+
 function makeRunCard(loadingEl?: TaskCardElement | null): TaskCardElement {
   const card = isTaskCardElement(loadingEl) ? loadingEl : document.createElement('div') as TaskCardElement;
   card.className = 'wa-msg ai wa-task-run is-compact';
   card._fatalErrorText = '';
-  card.innerHTML = '<div class="wa-task-header"><div class="wa-task-title-wrap"><div class="wa-task-title">文件任务</div><div class="wa-task-progress" data-role="ui-progress" data-status="running"><div class="wa-task-progress-meta"><span data-role="ui-phase">执行任务</span><span data-role="ui-progress-value">准备识别任务</span></div><div class="wa-task-progress-track"><i data-role="ui-progress-fill"></i></div></div></div><div class="wa-task-status" data-role="status">处理中</div><button type="button" class="wa-task-cancel-btn" data-role="cancel" title="取消任务">取消</button></div><details class="wa-task-process" data-role="process" open><summary><span data-role="process-title">执行过程</span><span data-role="process-state">进行中</span></summary><div class="wa-task-plan" data-role="plan"></div><div class="wa-task-steps" data-role="steps"></div></details><div class="wa-task-summary" data-role="summary"></div>';
+  card.innerHTML = '<div class="wa-task-header"><div class="wa-task-title-wrap"><div class="wa-task-title">文件任务</div><div class="wa-task-progress" data-role="ui-progress" data-status="running"><div class="wa-task-progress-meta"><span data-role="ui-phase">处理中</span><span data-role="ui-progress-value">初始化</span></div><div class="wa-task-progress-track"><i data-role="ui-progress-fill"></i></div></div></div><div class="wa-task-status" data-role="status">处理中</div><button type="button" class="wa-task-cancel-btn" data-role="cancel" title="取消任务">取消</button></div><details class="wa-task-process" data-role="process" open><summary><span data-role="process-title">执行过程</span><span data-role="process-state">进行中</span></summary><div class="wa-task-plan" data-role="plan"></div><div class="wa-task-steps" data-role="steps"></div></details><div class="wa-task-summary" data-role="summary"></div>';
+  ensureTaskReportAfterProcess(card);
   const attached = attachRunCardBehavior(card);
   syncTaskLiveProgress(attached);
   return attached;
@@ -973,7 +1167,7 @@ function ensureTaskLiveProgressHost(): HTMLElement | null {
   host.id = 'wa-task-live-progress';
   host.className = 'wa-task-live-progress';
   host.hidden = true;
-  host.innerHTML = '<div class="wa-task-live-top"><span class="wa-task-live-title">文件任务</span><span class="wa-task-live-status" data-role="live-status">处理中</span></div><div class="wa-task-live-meta"><span data-role="live-phase">执行任务</span><span data-role="live-plan" style="display:none"></span><span data-role="live-progress-value">准备识别任务</span></div><div class="wa-task-live-track"><i data-role="live-progress-fill"></i></div>';
+  host.innerHTML = '<div class="wa-task-live-top"><span class="wa-task-live-title">文件任务</span><span class="wa-task-live-status" data-role="live-status">处理中</span></div><div class="wa-task-live-meta"><span data-role="live-phase">处理中</span><span data-role="live-plan" style="display:none"></span><span data-role="live-progress-value">初始化</span></div><div class="wa-task-live-track"><i data-role="live-progress-fill"></i></div>';
   msgs.parentNode.insertBefore(host, msgs.nextSibling);
   return host;
 }
@@ -988,10 +1182,25 @@ function taskPlanProgress(card: TaskCardElement): { total: number; completed: nu
   return { total, completed: total ? Math.min(completed, total) : 0, running };
 }
 
+function taskCardIsVisibleInViewport(card: TaskCardElement): boolean {
+  if (!card || !card.isConnected || typeof card.getBoundingClientRect !== 'function') return false;
+  const rect = card.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0
+    && rect.bottom > 0 && rect.right > 0
+    && rect.top < window.innerHeight && rect.left < window.innerWidth;
+}
+
 function syncTaskLiveProgress(card: TaskCardElement): void {
   if (!isTaskCardElement(card)) return;
   const host = ensureTaskLiveProgressHost();
   if (!host) return;
+  // The inline task card is the primary progress surface.  Keep the compact
+  // global indicator only as an off-screen reminder, never as a duplicate.
+  if (taskCardIsVisibleInViewport(card)) {
+    host.hidden = true;
+    host.dataset.inlineOwner = 'true';
+    return;
+  }
   const state = ensureTaskUiState(card);
   const statusEl = card.querySelector('[data-role="status"]');
   const phaseEl = card.querySelector('[data-role="ui-phase"]');
@@ -999,20 +1208,24 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
   const valueEl = card.querySelector('[data-role="ui-progress-value"]');
   const fillEl = card.querySelector('[data-role="ui-progress-fill"]');
   const statusRaw = String(statusEl && (statusEl as HTMLElement).dataset ? (statusEl as HTMLElement).dataset.status || (progressEl && (progressEl as HTMLElement).dataset ? (progressEl as HTMLElement).dataset.status || '' : '') : '').trim().toLowerCase() || 'running';
+  const normalizedStatus = normalizeFileTaskTerminalStatus(statusRaw);
   const explicit = state.progressExplicit === true || String(progressEl && (progressEl as HTMLElement).dataset ? (progressEl as HTMLElement).dataset.explicit || '' : '').trim().toLowerCase() === 'true';
   const plan = taskPlanProgress(card);
-  const terminal = ['failed', 'succeeded', 'success', 'cancelled', 'waiting', 'awaiting_confirmation'].includes(statusRaw) || String(card.dataset.taskTerminalStatus || '').trim() !== '';
+  const terminal = ['completed', 'failed', 'cancelled'].includes(normalizedResumeStatus(normalizedStatus))
+    || isFileTaskConfirmationStatus(normalizedStatus)
+    || String(card.dataset.taskTerminalStatus || '').trim() !== '';
   const basis = explicit ? 'explicit' : (plan.total ? 'planned' : 'estimated');
   let percent = Number(state.uiProgress || 0);
   let valueText = valueEl ? String(valueEl.textContent || '').trim() : '';
   if (!explicit && plan.total) { percent = terminal && !plan.completed ? 100 : Math.round((plan.completed / plan.total) * 100); valueText = '步骤 ' + plan.completed + '/' + plan.total; }
-  else if (!explicit) valueText = plan.running ? '执行中' : (valueText && valueText !== '准备中' ? valueText : '准备识别任务');
+  else if (!explicit) valueText = plan.running ? '执行中' : (valueText && valueText !== '初始化' ? valueText : '初始化');
   if (terminal && explicit) percent = Math.max(percent, statusRaw === 'failed' ? percent : 100);
   percent = Math.max(0, Math.min(100, Math.round(percent)));
   if (progressEl) (progressEl as HTMLElement).dataset.basis = basis;
   if (!explicit && valueEl) valueEl.textContent = valueText;
   if (!explicit && fillEl) (fillEl as HTMLElement).style.width = percent + '%';
   host.hidden = false;
+  delete host.dataset.inlineOwner;
   host.dataset.status = statusRaw || 'running';
   host.dataset.basis = basis;
   const liveStatus = host.querySelector('[data-role="live-status"]');
@@ -1021,7 +1234,7 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
   const liveValue = host.querySelector('[data-role="live-progress-value"]');
   const liveFill = host.querySelector('[data-role="live-progress-fill"]') as HTMLElement | null;
   if (liveStatus) liveStatus.textContent = statusEl ? String(statusEl.textContent || '').trim() || '处理中' : '处理中';
-  if (livePhase) livePhase.textContent = phaseEl ? String(phaseEl.textContent || '').trim() || '执行任务' : '执行任务';
+  if (livePhase) livePhase.textContent = phaseEl ? String(phaseEl.textContent || '').trim() || '处理中' : '处理中';
   if (livePlan) { livePlan.textContent = plan.total ? '规划 ' + plan.completed + '/' + plan.total : '等待规划'; (livePlan as HTMLElement).style.display = plan.total ? '' : 'none'; }
   if (liveValue) liveValue.textContent = explicit ? percent + '%' : valueText;
   if (liveFill) liveFill.style.width = percent + '%';
@@ -1029,23 +1242,21 @@ function syncTaskLiveProgress(card: TaskCardElement): void {
 
 function notifyTaskWorkbenchForCard(card: TaskCardElement, options?: { delayed?: boolean }): void {
   if (!isTaskCardElement(card)) return;
-  if ((window as any).WA && typeof (window as any).WA.notifyTaskFlowChanged === 'function') {
+  if (typeof workspaceApi.notifyTaskFlowChanged === 'function') {
     const taskId = card.dataset.taskId || '';
-    (window as any).WA.notifyTaskFlowChanged(taskId);
+    workspaceApi.notifyTaskFlowChanged(taskId);
     if (options && options.delayed) {
-      window.setTimeout(() => (window as any).WA.notifyTaskFlowChanged(taskId), 1200);
-      window.setTimeout(() => (window as any).WA.notifyTaskFlowChanged(taskId), 3000);
+      window.setTimeout(() => workspaceApi.notifyTaskFlowChanged(taskId), 1200);
+      window.setTimeout(() => workspaceApi.notifyTaskFlowChanged(taskId), 3000);
     }
   }
 }
 
 function revealTaskWorkbenchForCard(card: TaskCardElement, options?: { scroll?: boolean }): void {
   if (!isTaskCardElement(card)) return;
-  const WA = (window as any).WA;
-  if (!WA) return;
   const taskId = String(card.dataset.taskId || '').trim();
-  if (typeof WA.openTaskWorkbenchForCurrentRun === 'function') {
-    WA.openTaskWorkbenchForCurrentRun({ taskId, scroll: options && options.scroll });
+  if (typeof workspaceApi.openTaskWorkbenchForCurrentRun === 'function') {
+    workspaceApi.openTaskWorkbenchForCurrentRun({ taskId, scroll: options && options.scroll });
   }
 }
 
@@ -1078,8 +1289,10 @@ function classificationValueLabel(kind: string, value: unknown): string {
     return normalized;
   }
   if (kind === 'output') {
+    if (normalized === 'simple') return '只给答案';
     if (normalized === 'answer') return '只给答案';
     if (normalized === 'write') return '写入文件';
+    if (normalized === 'proposal') return '先分析后决定';
     if (normalized === 'hybrid') return '先分析后决定';
     return normalized;
   }
@@ -1103,7 +1316,7 @@ function taskRecognitionText(data: Record<string, any>): string {
   const output = classificationValueLabel('output', data.output_mode || data.outputMode || '');
   const fileCount = Number(data.file_count || data.fileCount || 0);
   const writeIntent = data.write_intent === true || String(data.output_mode || data.outputMode || '').trim().toLowerCase() === 'write';
-  const taskLabel = [family, operation].filter(Boolean).join(' · ');
+  const taskLabel = [family, operation].filter(Boolean).join(' · ') || '准备识别任务';
   return uniqueTextParts([
     taskLabel,
     fileCount > 0 ? `${fileCount} 个文件` : '',
@@ -1135,25 +1348,47 @@ function supervisorAuditStatusLabel(status: unknown): string {
   return value || '检查';
 }
 
-function supervisorAuditHtml(data: Record<string, any>): string {
+function supervisorAuditHtml(data: Record<string, any>, options: { compact?: boolean } = {}): string {
   const audit = supervisorAuditFromPayload(data);
   if (!audit) return '';
   const status = String(audit.status || '').trim().toLowerCase();
   const chipClass = status === 'blocked' || status === 'warning' ? 'warn' : 'success';
   const summary = String(audit.summary || '').trim();
   const warnings = Array.isArray(audit.warnings) ? audit.warnings.map((item: any) => String(item || '').trim()).filter(Boolean).slice(0, 4) : [];
-  const actions = Array.isArray(audit.required_actions) ? audit.required_actions.map((item: any) => String(item || '').trim()).filter(Boolean).slice(0, 3) : [];
+  const constraints = Array.isArray(audit.execution_constraints)
+    ? audit.execution_constraints.map((item: any) => String(item || '').trim()).filter(Boolean).slice(0, 4)
+    : [];
+  const userActions = Array.isArray(audit.user_actions) ? audit.user_actions.map((item: any) => String(item || '').trim()).filter(Boolean).slice(0, 3) : [];
+  const legacyActions = !constraints.length && !userActions.length && Array.isArray(audit.required_actions)
+    ? audit.required_actions.map((item: any) => String(item || '').trim()).filter(Boolean).slice(0, 3)
+    : [];
   const confidence = Number(audit.confidence);
   const meta = [
     Number.isFinite(confidence) && confidence >= 0 && confidence <= 1 ? `置信度 ${Math.round(confidence * 100)}%` : '',
     audit.risk_level ? `风险 ${audit.risk_level}` : '',
   ].filter(Boolean);
-  const details = uniqueTextParts([...warnings, ...actions.map((item) => `要求：${item}`)]);
+  const showDetails = !options.compact || status === 'blocked';
+  const details = showDetails ? uniqueTextParts([
+    ...warnings,
+    ...constraints.map((item) => `执行约束：${item}`),
+    ...userActions.map((item) => `需要补充：${item}`),
+    ...legacyActions.map((item) => `执行约束：${item}`),
+  ]) : [];
   return '<div class="wa-task-result-text"><span class="wa-task-chip ' + chipClass + '">监管' + esc(supervisorAuditStatusLabel(status)) + '</span>'
     + esc(summary)
     + '</div>'
     + (meta.length ? '<div class="wa-task-meta">' + meta.map((item) => '<span class="wa-task-meta-item">' + esc(item) + '</span>').join('') + '</div>' : '')
     + (details.length ? '<ul class="wa-task-plan-violations">' + details.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>' : '');
+}
+
+function shouldShowSupervisorAuditInResult(data: Record<string, any>): boolean {
+  const audit = supervisorAuditFromPayload(data);
+  if (!audit) return false;
+  const status = String(audit.status || '').trim().toLowerCase();
+  return status === 'warning'
+    || status === 'blocked'
+    || audit.review_recommended === true
+    || audit.execution_allowed === false;
 }
 
 function modelLabel(mode: string, modelId?: string): string {
@@ -1169,9 +1404,11 @@ function seedRouteModelContext(card: TaskCardElement, payload: Record<string, an
   if (!isTaskCardElement(card) || !payload || typeof payload !== 'object') return;
   if (payload.task && !card.dataset.taskRequest) card.dataset.taskRequest = String(payload.task || '').trim();
   const options = payload.options && typeof payload.options === 'object' ? payload.options : {};
-  const routeIntent = options.workspace_route_intent && typeof options.workspace_route_intent === 'object'
+  const routeIntent = payload.routing_decision && typeof payload.routing_decision === 'object'
+    ? payload.routing_decision
+    : (options.workspace_route_intent && typeof options.workspace_route_intent === 'object'
     ? options.workspace_route_intent
-    : null;
+    : null);
   const route = String(routeIntent && routeIntent.route || '').trim();
   const mode = String(payload.model_mode || '').trim();
   const model = modelLabel(mode, payload.model_id);
@@ -1182,6 +1419,7 @@ function seedRouteModelContext(card: TaskCardElement, payload: Record<string, an
   const content = '<span class="wa-task-chip">模型调用</span>' + esc(reason ? `${routeText} · ${reason}` : routeText);
   const row = upsertStepSingletonRow(step, 'model:route', 'model-summary', content);
   if (row) ensureTaskUiState(card).modelSummaryRows.set('route', row);
+  updateTaskPerformanceRow(card, { routing_decision: routeIntent || {} });
   syncTaskLiveProgress(card);
   notifyTaskWorkbenchForCard(card);
 }
@@ -1206,20 +1444,8 @@ function planSummaryFromPayload(data: Record<string, any>): string {
     || data.summary
     || data.goal
     || (data.execution_plan && (data.execution_plan.plan_summary || data.execution_plan.goal))
-    || '已生成执行方案'
-    || '',
+    || '已生成执行计划'
   ).trim();
-}
-
-function renderPlanStepItem(item: any, index: number): string {
-  if (item && typeof item === 'object') {
-    const title = String(item.title || item.name || item.label || item.stage || `步骤 ${index + 1}`).trim();
-    const tool = String(item.tool || item.tool_name || '').trim();
-    const why = String(item.why || item.reason || item.description || item.detail || '').trim();
-    const meta = [tool ? `工具：${tool}` : '', why].filter(Boolean).join(' · ');
-    return `<li><strong>${esc(title)}</strong>${meta ? `<span>${esc(meta)}</span>` : ''}</li>`;
-  }
-  return `<li><strong>${esc(String(item || `步骤 ${index + 1}`))}</strong></li>`;
 }
 
 function renderPlanIntoCard(card: TaskCardElement, data: Record<string, any>): void {
@@ -1235,15 +1461,28 @@ function renderPlanIntoCard(card: TaskCardElement, data: Record<string, any>): v
 
 function terminalStepCompactText(card: TaskCardElement, stepId: string, title: string, result: TerminalResult): string {
   if (result && result.status === 'error') {
-    if (stepId === 'check') return '已记录失败原因，详见底部答复。';
+    if (stepId === 'check') return '已记录失败原因，详见任务结果。';
     if (stepId === 'execute') return '执行未完成，已停止继续处理。';
   }
   if (result && result.status === 'pending') {
-    if (stepId === 'check') return '等待用户确认后继续。';
-    return '已暂停，等待下一步确认。';
+    if (taskResultRequiresUserConfirmation(result)) {
+      if (stepId === 'check') return '等待用户确认后继续。';
+      return '已暂停，等待下一步确认。';
+    }
+    if (taskResultNeedsAttention(result)) {
+      if (stepId === 'check') return '需要处理后才能继续，进度已保留。';
+      if (stepId === 'execute') return '执行未完成，等待补充或修正。';
+      return taskReportStageDoneText(stepId) || '已完成前置步骤。';
+    }
+    if (stepId === 'check') return '当前任务尚未完成，进度已保留。';
+    return '仍在处理中或等待同步。';
   }
-  if (stepId === 'route') return '已识别任务目标和文件上下文。';
-  if (stepId === 'plan') return '已确认执行方案和约束。';
+  const sharedDoneText = taskReportStageDoneText(stepId);
+  if (sharedDoneText && stepId !== 'execute') {
+    return stepId === 'check'
+      ? sharedDoneText
+      : '步骤已结束，详细内容见任务结果。';
+  }
   if (stepId === 'context') return '已读取并整理必要文件内容。';
   if (stepId === 'execute') {
     const changes = ensureTaskUiState(card).fileChanges || [];
@@ -1252,9 +1491,8 @@ function terminalStepCompactText(card: TaskCardElement, stepId: string, title: s
       .filter(Boolean)
       .slice(0, 2);
     if (names.length) return `已完成处理：${names.join('、')}。`;
-    return '已完成文件处理或分析。';
+    return sharedDoneText || '已完成文件处理或分析。';
   }
-  if (stepId === 'check') return '已完成核验，答复见底部。';
   return title ? `${title}已完成。` : '已完成。';
 }
 
@@ -1272,10 +1510,12 @@ function compactTerminalProcess(card: TaskCardElement, result: TerminalResult): 
     const stepId = String(step.dataset.stepId || '').trim();
     const title = String(step.querySelector('.wa-task-step-title')?.textContent || '').trim();
     const failed = step.classList.contains('failed');
-    const pending = step.classList.contains('running') || result.status === 'pending';
-    const chip = failed ? '异常' : (pending ? '待确认' : '完成');
-    const kind = failed ? 'warn' : (pending ? 'progress' : 'success');
-    body.innerHTML = '<div class="wa-task-row ' + kind + '" data-role="compact-terminal"><span class="wa-task-chip ' + (failed ? 'warn' : (!pending ? 'success' : '')) + '">' + esc(chip) + '</span>' + esc(terminalStepCompactText(card, stepId, title, result)) + '</div>';
+    const pending = result.status === 'pending';
+    const confirmationPending = pending && taskResultRequiresUserConfirmation(result);
+    const needsAttention = pending && taskResultNeedsAttention(result);
+    const chip = failed ? '异常' : (pending ? (confirmationPending ? '待确认' : (needsAttention ? '需处理' : '进行中')) : '完成');
+    const kind = failed || needsAttention ? 'warn' : (pending ? 'progress' : 'success');
+    body.innerHTML = '<div class="wa-task-row ' + kind + '" data-role="compact-terminal"><span class="wa-task-chip ' + (failed || needsAttention ? 'warn' : (!pending ? 'success' : '')) + '">' + esc(chip) + '</span>' + esc(terminalStepCompactText(card, stepId, title, result)) + '</div>';
     (step as any)._singletonRows = new Map([['compact-terminal', body.firstElementChild]]);
   });
 }
@@ -1287,7 +1527,8 @@ function handleEvent_task_classified(card: TaskCardElement, evt: Record<string, 
   const recognition = taskRecognitionText(data);
   const confidence = Number(data.confidence);
   const confidenceText = Number.isFinite(confidence) && confidence > 0 ? ` · 置信度 ${Math.round(confidence * 100)}%` : '';
-  upsertStepSingletonRow(step, 'task.classified', 'plan', '<span class="wa-task-chip success">识别</span>' + esc((recognition || '已完成任务识别') + confidenceText) + supervisorAuditHtml(data));
+  upsertStepSingletonRow(step, 'task.classified', 'plan', '<span class="wa-task-chip success">识别</span>' + esc((recognition || '已完成需求分析') + confidenceText) + supervisorAuditHtml(data, { compact: true }));
+  updateTaskPerformanceRow(card, data);
   markStepDone(step);
   setStatus(card, '已识别');
   syncTaskLiveProgress(card);
@@ -1319,9 +1560,10 @@ function handleEvent_plan_checked(card: TaskCardElement, evt: Record<string, any
   const passed = data.passed !== false && String(data.status || '').trim().toLowerCase() !== 'replan';
   const violations = Array.isArray(data.violations) ? data.violations : [];
   const warnings = Array.isArray(data.warnings) ? data.warnings : [];
-  const detail = [...violations, ...warnings].slice(0, 5).map((item: any) => planViolationLabel(String(item || '')) || String(item || '')).filter(Boolean).join('；');
+  const detail = [...violations, ...warnings].slice(0, 5).map((item: any) => taskRunnerPlanViolationLabel(String(item || '')) || String(item || '')).filter(Boolean).join('；');
   const summary = passed ? planCheckSummaryText(data, true) : (detail || planCheckSummaryText(data, false));
-  upsertStepSingletonRow(step, 'plan.checked', passed ? 'success' : 'warn', '<span class="wa-task-chip ' + (passed ? 'success' : 'warn') + '">' + esc(passed ? '监管' : '需调整') + '</span>' + esc(summary) + supervisorAuditHtml(data));
+  upsertStepSingletonRow(step, 'plan.checked', passed ? 'success' : 'warn', '<span class="wa-task-chip ' + (passed ? 'success' : 'warn') + '">' + esc(passed ? '监管' : '需调整') + '</span>' + esc(summary) + supervisorAuditHtml(data, { compact: true }));
+  updateTaskPerformanceRow(card, data);
   if (passed) markStepDone(step); else markStepRunning(step);
   syncTaskLiveProgress(card);
 }
@@ -1329,7 +1571,7 @@ function handleEvent_plan_checked(card: TaskCardElement, evt: Record<string, any
 function planGateIssueHtml(data: Record<string, any>): string {
   const details = planGateVisibleIssues(data)
     .slice(0, 5)
-    .map((item) => planViolationLabel(item));
+    .map((item) => taskRunnerPlanViolationLabel(item));
   return details.length
     ? '<ul class="wa-task-plan-violations">' + details.map((item) => '<li>' + esc(item) + '</li>').join('') + '</ul>'
     : '';
@@ -1360,7 +1602,7 @@ function handleEvent_supervisor_status(card: TaskCardElement, evt: Record<string
   const summary = String(data.summary || supervisorAuditFromPayload(data)?.summary || '监管检查已更新。').trim();
   const audit = supervisorAuditFromPayload(data);
   const auditStatus = audit ? ` · 监管${supervisorAuditStatusLabel(audit.status)}` : '';
-  upsertStepSingletonRow(step, 'supervisor.status:' + stage, 'plan', '<span class="wa-task-chip success">监管</span>' + esc((stage || '检查') + auditStatus + ' · ' + summary) + supervisorAuditHtml(data));
+  upsertStepSingletonRow(step, 'supervisor.status:' + stage, 'plan', '<span class="wa-task-chip success">监管</span>' + esc((stage || '检查') + auditStatus + ' · ' + summary) + supervisorAuditHtml(data, { compact: true }));
   markStepRunning(step);
   syncTaskLiveProgress(card);
 }
@@ -1370,12 +1612,12 @@ function handleEvent_supervisor_intervention(card: TaskCardElement, evt: Record<
   setTaskRunContext(card, evt, payload);
   const step = taskStageStep(card, 'plan');
   const reason = String(data.reason || '').trim();
-  const summary = String(data.summary || data.message || data.text || '监管已纠偏执行方案。').trim();
+  const summary = String(data.summary || data.message || data.text || '监管已纠偏执行计划。').trim();
   upsertStepSingletonRow(
     step,
     'supervisor.intervention:' + (reason || 'default'),
     'warn',
-    '<span class="wa-task-chip warn">监管纠偏</span>' + esc(reason ? `${reason} · ${summary}` : summary) + supervisorAuditHtml(data),
+    '<span class="wa-task-chip warn">监管纠偏</span>' + esc(reason ? `${reason} · ${summary}` : summary) + supervisorAuditHtml(data, { compact: true }),
   );
   markStepRunning(step);
   syncTaskLiveProgress(card);
@@ -1485,11 +1727,12 @@ function handleEvent_run_started(card: TaskCardElement, evt: Record<string, any>
   card.classList.add('streaming');
   const step = taskStageStep(card, 'execute');
   markStepRunning(step);
-  const summaryRow = upsertStepSingletonRow(step, 'run.started', 'plan', '<span class="wa-task-chip">' + esc(data.mode || '启动') + '</span>' + esc(data.summary || data.text || data.error || '开始执行任务'));
+  const summaryRow = upsertStepSingletonRow(step, 'run.started', 'plan', '<span class="wa-task-chip">' + esc(data.mode || '启动') + '</span>' + esc(data.summary || data.text || data.error || '执行中'));
   if (summaryRow) {
     const state = ensureTaskUiState(card);
     state.modelSummaryRows.set('operation', summaryRow);
   }
+  updateTaskPerformanceRow(card, data);
   setStatus(card, '处理中');
   startTaskHeartbeat(card);
   if (data.tool_use_id) card.dataset.taskToolUseId = String(data.tool_use_id || '').trim();
@@ -1498,13 +1741,16 @@ function handleEvent_run_started(card: TaskCardElement, evt: Record<string, any>
 
 function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>): void {
   const data = normalizedTaskLifecyclePayload(payload);
+  ensureTaskReportAfterProcess(card);
   setTaskRunContext(card, evt, payload);
   stopTaskHeartbeat(card);
   const executeStep = taskStageStep(card, 'execute');
   const planStep = card.querySelector('[data-role="steps"] .wa-task-step[data-step-id="plan"]') as HTMLElement | null;
   if (planStep && !planStep.classList.contains('failed')) markStepDone(planStep);
   const step = taskStageStep(card, 'check');
-  const result = taskTerminalResult(card, data.summary || data.text || data.error || '文件任务已完成。');
+  const terminalAnswer = terminalAnswerText(data, terminalAnswerText(payload, ''));
+  const result = taskTerminalResult(card, terminalAnswer || '文件任务流已结束。');
+  const needsAttention = taskResultNeedsAttention(result);
   if (result.status === 'error') markStepFailed(executeStep);
   else if (result.status === 'pending') markStepRunning(executeStep);
   else markStepDone(executeStep);
@@ -1515,47 +1761,98 @@ function handleEvent_run_finished(card: TaskCardElement, evt: Record<string, any
   }
   if (result.status === 'cancelled') { markStepDone(step); setStatus(card, '已取消'); }
   else if (result.status === 'error') { markStepFailed(step); setStatus(card, '执行失败'); card.dataset.taskTerminalStatus = result.terminal_status; }
-  else if (result.status === 'pending') { markStepRunning(step); setStatus(card, '待确认'); }
+  else if (result.status === 'pending') { markStepRunning(step); setStatus(card, taskResultRequiresUserConfirmation(result) ? '待确认' : (needsAttention ? '需处理' : '处理中')); }
   else { markStepDone(step); setStatus(card, '已完成'); }
   const titleEl = card.querySelector('.wa-task-title');
   if (titleEl) {
-    if (result.status === 'pending') titleEl.textContent = '等待确认';
+    const semanticTitle = String(card.dataset.taskTitle || '').trim();
+    if (semanticTitle) titleEl.textContent = semanticTitle;
+    else if (result.status === 'pending') titleEl.textContent = taskResultRequiresUserConfirmation(result) ? '等待确认' : (needsAttention ? '任务需处理' : '任务进行中');
     else if (result.status === 'error') titleEl.textContent = '任务未完成';
     else if (result.status === 'cancelled') titleEl.textContent = '任务已取消';
     else titleEl.textContent = '任务完成';
   }
-  const summaryRow = upsertStepSingletonRow(step, 'model:operation', result.status === 'error' ? 'warn' : 'success', '<span class="wa-task-chip ' + (result.status === 'error' ? 'warn' : 'success') + '">' + esc(data.mode || '完成') + '</span>' + esc(terminalStepSummary(result)));
+  const summaryKind = result.status === 'error' || needsAttention ? 'warn' : 'success';
+  const summaryRow = upsertStepSingletonRow(step, 'model:operation', summaryKind, '<span class="wa-task-chip ' + summaryKind + '">' + esc(data.mode || '完成') + '</span>' + esc(terminalStepSummary(result)));
   if (summaryRow) {
     const state = ensureTaskUiState(card);
     state.modelSummaryRows.set('operation', summaryRow);
   }
   compactTerminalProcess(card, result);
+  updateTaskPerformanceRow(card, data);
   card.classList.remove('streaming');
   if (result.status === 'error') card.classList.add('failed');
   else if (result.status === 'cancelled') card.classList.add('cancelled');
   else card.classList.add('done');
   const summaryContainer = card.querySelector('[data-role="summary"]') as HTMLElement;
+  let finalReportEl: HTMLElement | null = null;
   if (summaryContainer) {
-    const finalReport = String(data.summary || data.text || data.error || result.summary || '').trim();
+    const finalReport = terminalAnswerText(data, result.summary);
     const visibleSummary = finalReport || terminalStepSummary(result);
-    const auditHtml = supervisorAuditHtml(data);
-    summaryContainer.innerHTML = taskResultActionsHtml(card) + auditHtml + '<div class="wa-task-final-report">' + renderTaskFinalReport(visibleSummary) + '</div>';
+    const artifactsHtml = taskArtifactsSummaryHtml(card);
+    const auditHtml = (needsAttention || result.status === 'error' || shouldShowSupervisorAuditInResult(data))
+      ? supervisorAuditHtml(data)
+      : '';
+    summaryContainer.innerHTML = taskCompletionBannerHtml(result)
+      + artifactsHtml
+      + auditHtml
+      + taskResultActionsHtml(card)
+      + taskResultContextDetailsHtml(card)
+      + (artifactsHtml ? '' : renderTaskResultSummaryBar(card, result))
+      + '<div class="wa-task-final-report" data-role="final-report" tabindex="-1"><div class="wa-task-final-report-content">'
+      + renderTaskFinalReport(visibleSummary)
+      + '</div></div>';
     summaryContainer.hidden = false;
+    finalReportEl = summaryContainer.querySelector('[data-role="final-report"]') as HTMLElement | null;
+    card.dataset.taskSummary = visibleSummary;
+    card.dataset.taskFinalAnswer = visibleSummary;
   }
   const process = card.querySelector('[data-role="process"]') as HTMLDetailsElement | null;
   if (process) {
-    process.open = true;
-    const title = process.querySelector('[data-role="process-title"]');
+    const terminalOk = result.status !== 'error' && result.status !== 'pending';
+    const stateText = result.status === 'error' ? '未完成'
+      : (result.status === 'pending'
+        ? (taskResultRequiresUserConfirmation(result) ? '待确认' : (needsAttention ? '需处理' : '进行中'))
+        : '已完成');
+    if (terminalOk) {
+      process.open = false;
+      const title = process.querySelector('[data-role="process-title"]');
+      if (title) {
+        const artifactCount = (card.querySelectorAll('[data-role="process"] .wa-task-artifact-row') || []).length;
+        const suffix = artifactCount > 0 ? ' · ' + artifactCount + '个产出' : '';
+        title.textContent = '执行过程' + suffix;
+      }
+    } else {
+      process.open = true;
+      const title = process.querySelector('[data-role="process-title"]');
+      if (title) title.textContent = '执行过程';
+    }
     const state = process.querySelector('[data-role="process-state"]');
-    if (title) title.textContent = '执行过程';
-    if (state) state.textContent = result.status === 'error' ? '未完成' : (result.status === 'pending' ? '待确认' : '已完成');
+    if (state) state.textContent = stateText;
   }
-  const loadedSummary = data.summary || data.text || data.error || '';
-  card.dataset.taskSummary = loadedSummary || result.summary || card.dataset.taskSummary || '';
+  const loadedSummary = terminalAnswerText(data, result.summary);
+  card.dataset.taskSummary = loadedSummary || card.dataset.taskSummary || '';
+  card.dataset.taskFinalAnswer = loadedSummary || card.dataset.taskFinalAnswer || card.dataset.taskSummary || '';
   const cancelBtn = card.querySelector('[data-role="cancel"]');
   if (cancelBtn) { (cancelBtn as HTMLElement).textContent = '关闭'; (cancelBtn as HTMLElement).dataset.action = 'close'; }
   syncTaskLiveProgress(card);
   scheduleTaskLiveProgressCollapse(card);
+  announceTaskCompletion(card, result, finalReportEl);
+  if (typeof card._terminalSnapshotHandler === 'function') {
+    try { card._terminalSnapshotHandler(card); } catch (_) { /* noop */ }
+    window.setTimeout(() => {
+      if (!card || !card.dataset || card.dataset.taskTerminalPersisted === 'true' || card.dataset.historySnapshot === 'true') return;
+      const persistTerminalCard = workspaceApi.persistTerminalTaskRunCard;
+      if (typeof persistTerminalCard === 'function') {
+        Promise.resolve(persistTerminalCard(card)).catch(() => { /* best effort */ });
+      }
+    }, 1000);
+  } else {
+    const persistTerminalCard = workspaceApi.persistTerminalTaskRunCard;
+    if (typeof persistTerminalCard === 'function') {
+      Promise.resolve(persistTerminalCard(card)).catch(() => { /* best effort */ });
+    }
+  }
   notifyTaskWorkbenchForCard(card, { delayed: true });
 }
 
@@ -1574,12 +1871,12 @@ function handleEvent_tool_started(card: TaskCardElement, evt: Record<string, any
   markStepRunning(step);
   setStatus(card, '处理中');
   const toolName = data.tool_name || '';
-  const toolTitle = data.tool_title || toolName;
+  const toolTitle = data.tool_title || taskToolLabel(toolName);
   const args = data.tool_args || '';
   const argStr = args ? ' ' + esc(String(args).trim()) : '';
   const content = '<span class="wa-task-chip">' + esc(toolTitle) + '</span>' + esc('准备执行') + argStr;
   const tag = 'tool:' + toolName + ':' + String(data.tool_use_id || data.execution_id || '');
-  const row = upsertStepSingletonRow(step, tag, 'tool-start', content);
+  upsertStepSingletonRow(step, tag, 'tool-start', content);
   markTaskActivity(card);
 }
 
@@ -1590,7 +1887,7 @@ function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, an
   const step = taskStageStep(card, 'execute');
   markStepRunning(step);
   const toolName = data.tool_name || '';
-  const toolTitle = data.tool_title || toolName;
+  const toolTitle = data.tool_title || taskToolLabel(toolName);
   const tag = 'tool:' + toolName + ':' + String(data.tool_use_id || data.execution_id || '');
   const finished = data.success !== false && !data.blocked && !data.skipped;
   const kind = data.blocked || data.tool_name === 'ask_user' ? 'warn' : (finished ? 'tool-finished' : 'tool-error');
@@ -1600,9 +1897,9 @@ function handleEvent_tool_finished(card: TaskCardElement, evt: Record<string, an
   const content = '<span class="wa-task-chip ' + (data.blocked ? 'warn' : (finished ? 'success' : '')) + '">' + esc(icon) + ' ' + esc(toolTitle) + '</span>' + (preview || esc(fallbackText));
   if (data.blocked) {
     upsertStepSingletonRow(step, tag, 'warn', content);
-    setStatus(card, '待确认');
+    setStatus(card, data.tool_name === 'ask_user' || isFileTaskConfirmationStatus(data.status || data.terminal_status || '') ? '待确认' : '已阻止');
   } else {
-    const row = upsertStepSingletonRow(step, tag, kind, content);
+    upsertStepSingletonRow(step, tag, kind, content);
   }
   appendToolArtifacts(step, data);
   markTaskActivity(card);
@@ -1618,6 +1915,10 @@ function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any
   const changeType = String(data.change_type || 'modified').trim();
   if (!path) return;
   if (data.prefix && !path.includes('/')) { path = data.prefix.replace(/\/+$/, '') + '/' + path; }
+  const refreshPath = typeof workspaceApi.normalizeWorkspaceFilePath === 'function'
+    ? String(workspaceApi.normalizeWorkspaceFilePath(path) || path).trim()
+    : path;
+  if (typeof workspaceApi.markExternalFileChange === 'function') workspaceApi.markExternalFileChange(refreshPath || path);
   const state = ensureTaskUiState(card);
   const key = changeType + ':' + path;
   if (state.fileChangeKeys.has(key)) return;
@@ -1628,9 +1929,9 @@ function handleEvent_file_changed(card: TaskCardElement, evt: Record<string, any
   appendRow(step, 'tool-finished', content);
   if (data.supported !== false && data.refresh_supported !== false) {
     window.setTimeout(() => {
-      const reload = (window as any).WA && (window as any).WA.reloadFileByPath;
+      const reload = workspaceApi.reloadFileByPath;
       if (typeof reload !== 'function') return;
-      Promise.resolve(reload(path, true)).catch((error) => {
+      Promise.resolve(reload(refreshPath || path, true)).catch((error) => {
         console.warn('[FileTask] refresh after file.changed failed:', error);
       });
     }, 200);
@@ -1653,7 +1954,7 @@ function handleEvent_read_changed(card: TaskCardElement, evt: Record<string, any
   const key = 'read:' + path;
   if (state.readKeys.has(key)) return;
   state.readKeys.add(key);
-  let row = state.readSummaries.get(key);
+  const row = state.readSummaries.get(key);
   if (row) return;
   const shortPath = path.split('/').pop() || path;
   const content = '<span class="wa-task-chip">读取</span><a class="wa-task-file-link" href="javascript:void(0)" data-file-path="' + escAttr(path) + '">' + esc(shortPath) + '</a>';
@@ -1676,18 +1977,8 @@ function handleEvent_model_summary(card: TaskCardElement, evt: Record<string, an
   const step = taskStageStep(card, 'execute');
   markStepRunning(step);
   const state = ensureTaskUiState(card);
-  const ms = state.modelSummary;
-  ms.latestRound = Number(data.round || ms.latestRound || 0);
-  ms.toolCalls = Number(data.tool_calls || ms.toolCalls || 0);
-  ms.contentChars = Number(data.content_chars || ms.contentChars || 0);
-  ms.mode = String(data.mode || ms.mode || '').trim();
-  if (data.failed) ms.failed = true;
-  if (data.round !== undefined && !ms.startedRounds.has(ms.latestRound)) ms.startedRounds.add(ms.latestRound);
-  if (data.round_finished !== undefined && ms.latestRound) ms.rounds.add(ms.latestRound);
-  const roundLabel = ms.latestRound ? '第' + ms.latestRound + '轮' : '';
-  const callsLabel = ms.toolCalls ? ms.toolCalls + '次工具调用' : '';
-  const summaryText = [roundLabel, callsLabel].filter(Boolean).join('，') || '思考中';
-  const content = '<span class="wa-task-chip">' + esc(ms.mode || '思考') + '</span>' + esc(summaryText);
+  const summary = updateModelSummaryState(state.modelSummary, data);
+  const content = '<span class="wa-task-chip">' + esc(summary.chip) + '</span>' + esc(summary.summary);
   const row = upsertStepSingletonRow(step, 'model:thinking', 'model-summary', content);
   if (row) state.modelSummaryRows.set('thinking', row);
   markTaskActivity(card);
@@ -1751,14 +2042,14 @@ function handleEvent_step_result(card: TaskCardElement, evt: Record<string, any>
   const data = normalizedTaskLifecyclePayload(payload);
   const stepId = stepIdFromEvent(evt, data);
   const step = taskStageStep(card, stepId);
-  const status = String(data.status || '').trim().toLowerCase();
-  const failed = status === 'failed' || status === 'error' || status === 'needs_attention';
-  const pending = status === 'pending' || status === 'awaiting_confirmation';
+  const status = normalizeFileTaskTerminalStatus(data.status || '');
+  const pending = isFileTaskWaitingStatus(status);
+  const failed = !pending && isFileTaskFailureStatus(status);
   if (failed) markStepFailed(step);
   else if (pending) markStepRunning(step);
   else markStepDone(step);
   const title = String(data.title || evt.step_id || stepId || '任务步骤').trim();
-  const summary = compactFlowSummary(String(data.summary || data.text || data.message || '').trim(), '步骤已完成，结果见对话汇报。');
+  const summary = compactFlowSummary(String(data.summary || data.text || data.message || '').trim(), '已完成');
   const chip = failed ? '需处理' : (pending ? '待处理' : '完成');
   const kind = failed ? 'warn' : (pending ? 'progress' : 'success');
   upsertStepSingletonRow(
@@ -1782,7 +2073,7 @@ function handleEvent_code_summary(card: TaskCardElement, evt: Record<string, any
   if (!file && !summary) return;
   const codeKey = 'code:' + (file || 'file:' + Date.now());
   if (file) {
-    let row = state.codeSummaryRows.get(codeKey);
+    const row = state.codeSummaryRows.get(codeKey);
     if (row) return;
     const shortFile = file.split('/').pop() || file;
     const content = '<span class="wa-task-chip success">' + esc(action === 'delete' ? '删除' : '写入') + '</span><a class="wa-task-file-link" href="javascript:void(0)" data-file-path="' + escAttr(file) + '">' + esc(shortFile) + '</a>';
@@ -1798,15 +2089,14 @@ function handleEvent_code_summary(card: TaskCardElement, evt: Record<string, any
 let fileRefreshControllerInstance: any = null;
 
 function fileRefreshController(): any {
-  const WA = (window as any).WA || {};
-  if (!fileRefreshControllerInstance && typeof WA.createFileTaskRefreshController === 'function') {
-    fileRefreshControllerInstance = WA.createFileTaskRefreshController({
+  if (!fileRefreshControllerInstance && typeof workspaceApi.createFileTaskRefreshController === 'function') {
+    fileRefreshControllerInstance = workspaceApi.createFileTaskRefreshController({
       ensureTaskUiState,
       basename,
       setStatus,
       normalizePath: (path: string) => (
-        WA && typeof WA.normalizeWorkspaceFilePath === 'function'
-          ? WA.normalizeWorkspaceFilePath(path)
+        typeof workspaceApi.normalizeWorkspaceFilePath === 'function'
+          ? workspaceApi.normalizeWorkspaceFilePath(path)
           : path
       ),
       logPrefix: '[WA fileTask]',
@@ -1819,7 +2109,12 @@ function handleEvent_file_refresh(card: TaskCardElement, evt: Record<string, any
   const data = normalizedTaskLifecyclePayload(payload);
   const path = String(data.path || data.file_path || '').trim();
   if (!path) return;
-  const normalizedPath = String(path || '').replace(/\\/g, '/').toLowerCase();
+  const refreshPath = typeof workspaceApi.normalizeWorkspaceFilePath === 'function'
+    ? String(workspaceApi.normalizeWorkspaceFilePath(path) || path).trim()
+    : path;
+  if (typeof workspaceApi.markExternalFileChange === 'function') workspaceApi.markExternalFileChange(refreshPath || path);
+  const normalizedPath = String(refreshPath || path || '').replace(/\\/g, '/').toLowerCase();
+  data.path = refreshPath || path;
   const fileRefreshHash = (data as any).file_refresh_hash || '';
   const hashStore = card._fileRefreshHashes || new Map<string, string>();
   card._fileRefreshHashes = hashStore;
@@ -1839,7 +2134,7 @@ function handleEvent_file_refresh(card: TaskCardElement, evt: Record<string, any
   }
 }
 
-const EVENT_HANDLERS: Record<string, (card: TaskCardElement, evt: Record<string, any>, payload: Record<string, any>) => void> = {
+const EVENT_HANDLERS: Record<string, (_card: TaskCardElement, _evt: Record<string, any>, _payload: Record<string, any>) => void> = {
   'plan': handleEvent_plan,
   'task.classified': handleEvent_task_classified,
   'plan.created': handleEvent_plan,
@@ -1875,32 +2170,54 @@ function getEventHandlers(): typeof EVENT_HANDLERS {
   return EVENT_HANDLERS;
 }
 
-function dispatchEventToCard(card: TaskCardElement, evt: Record<string, any>): void {
-  if (!card || !evt || typeof evt !== 'object') return;
-  const etype = String(evt.type || '').trim().toLowerCase();
-  if (!etype) return;
-  const handler = EVENT_HANDLERS[etype];
-  if (!handler) return;
+function streamEventSeq(evt: Record<string, any>, payload: Record<string, any>): number {
+  const raw = evt.seq || evt.event_seq || payload.seq || payload.event_seq || 0;
+  const seq = Number(raw);
+  return Number.isFinite(seq) ? seq : 0;
+}
+
+function shouldDispatchStreamEvent(card: TaskCardElement, evt: Record<string, any>): boolean {
+  if (!card || !evt || typeof evt !== 'object') return false;
+  const eventType = String(evt.type || '').trim().toLowerCase();
+  if (!eventType) return false;
   const payload = evt.payload || evt;
   const state = ensureTaskUiState(card);
   const runId = String(evt.run_id || payload.run_id || '').trim();
-  const seq = Number(evt.seq || payload.seq || 0);
-  const eventKey = runId + ':' + etype + ':' + seq;
-  if (runId && state.lastEventRunId && state.lastEventRunId !== runId) { state.processedEventKeys.clear(); state.lastEventSeq = 0; }
-  state.lastEventRunId = runId;
-  if (runId && seq > 0 && state.lastEventSeq >= seq) {
-    if (state.processedEventKeys.has(eventKey)) return;
+  const seq = streamEventSeq(evt, payload);
+  const eventKey = `${runId}:${eventType}:${seq}`;
+
+  if (!runId || seq <= 0) return true;
+  if (runId && state.lastEventRunId && state.lastEventRunId !== runId) return true;
+  if (state.processedEventKeys.has(eventKey)) {
+    noteStreamIssue(card, 'duplicate-event-' + eventKey, 'Duplicate progress event merged.');
+    return false;
   }
-  state.lastEventSeq = Math.max(state.lastEventSeq, seq);
-  state.processedEventKeys.add(eventKey);
-  handler(card, evt, payload);
-  notifyTaskWorkbenchForCard(card);
+  if (state.lastEventSeq > 0 && seq <= state.lastEventSeq) {
+    noteStreamIssue(card, 'out-of-order-event-' + runId + '-' + seq, 'Progress event arrived out of order.');
+  } else if (state.lastEventSeq > 0 && seq > state.lastEventSeq + 1) {
+    noteStreamIssue(card, 'missing-event-' + runId + '-' + state.lastEventSeq + '-' + seq, 'Progress event sequence has a gap.');
+  }
+  return true;
+}
+
+function dispatchEventToCard(card: TaskCardElement, evt: Record<string, any>): void {
+  if (!shouldDispatchStreamEvent(card, evt)) return;
+  dispatchFileTaskEvent(card, evt, {
+    handlers: EVENT_HANDLERS,
+    getState: ensureTaskUiState,
+    afterDispatch: notifyTaskWorkbenchForCard,
+  });
 }
 
 function processFileTaskStreamEvent(card: TaskCardElement, evt: Record<string, any>): void {
   if (!card || !evt || typeof evt !== 'object') return;
   if (!card.classList.contains('streaming')) { card.classList.add('streaming'); startTaskHeartbeat(card); }
   dispatchEventToCard(card, evt);
+}
+
+function isTaskStreamTerminalEvent(evt: Record<string, any>): boolean {
+  const type = String(evt && evt.type || '').trim();
+  return type === 'run.finished' || type === 'run.cancelled' || type === 'run.error' || type === 'error';
 }
 
 function handleEvent(card: TaskCardElement, evt: Record<string, any>): void {
@@ -1914,32 +2231,44 @@ function scheduleTaskStream(run: () => void): void {
   scheduler(run);
 }
 
+function createFileTaskId(): string {
+  const uuid = window.crypto && typeof window.crypto.randomUUID === 'function'
+    ? window.crypto.randomUUID().replace(/-/g, '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  return `task_${uuid.slice(0, 32)}`;
+}
+
+function persistedTaskStreamEvent(event: Record<string, any>): Record<string, any> {
+  const nested = event && event.detail && typeof event.detail === 'object'
+    ? (event.detail as Record<string, any>).event
+    : null;
+  return nested && typeof nested === 'object' && String((nested as Record<string, any>).type || '').trim()
+    ? nested as Record<string, any>
+    : event;
+}
+
+function showTaskStreamReconnectNotice(card: TaskCardElement, text = '连接短暂中断，正在从任务记录恢复进度…'): void {
+  const step = taskStageStep(card, 'run');
+  markStepRunning(step);
+  upsertStepSingletonRow(step, 'stream-reconnect', 'plan', '<span class="wa-task-chip">恢复连接</span>' + esc(text));
+  setStatus(card, '恢复连接中');
+  syncTaskLiveProgress(card);
+}
+
 function appendTaskRunCardIfDetached(card: TaskCardElement): void {
   if (!card || card.isConnected) return;
   const msgs = document.getElementById('wa-ai-messages');
   if (msgs) msgs.appendChild(card);
 }
 
-function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, body: Record<string, any> | FormData, method?: string, opts?: Record<string, any>): Promise<TaskCardElement> {
+function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, body: Record<string, any> | FormData, method?: string, _opts?: Record<string, any>): Promise<TaskCardElement> {
   const streamingCard = makeRunCard(cardOrLoadingEl);
   streamingCard.dataset.taskUrl = url;
   appendTaskRunCardIfDetached(streamingCard);
   revealTaskWorkbenchForCard(streamingCard, { scroll: true });
-  const options = opts && typeof opts === 'object' ? opts : {};
   const httpMethod = String(method || 'POST').toUpperCase() || 'POST';
   const fetchAbort = new AbortController();
   const signal: AbortSignal = fetchAbort.signal;
-  const finishRunWithError = (errText: string) => {
-    if (streamingCard.dataset.taskTerminalStatus === 'cancelled') return;
-    streamingCard.dataset.taskTerminalStatus = 'error';
-    streamingCard._fatalErrorText = errText;
-    dispatchEventToCard(streamingCard, { type: 'error', payload: { text: errText } });
-    streamingCard.classList.remove('streaming');
-    streamingCard.classList.add('failed');
-    const cancelBtn = streamingCard.querySelector('[data-role="cancel"]');
-    if (cancelBtn) { (cancelBtn as HTMLElement).textContent = '关闭'; (cancelBtn as HTMLElement).dataset.action = 'close'; }
-    syncTaskLiveProgress(streamingCard);
-  };
   const cancellationHandler = () => {
     if (!fetchAbort) return;
     try { fetchAbort.abort(); } catch { /* noop */ }
@@ -1952,7 +2281,7 @@ function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, bod
     syncTaskLiveProgress(streamingCard);
   };
   streamingCard._cancelHandler = cancellationHandler;
-  scheduleTaskStream(async () => {
+  return new Promise<TaskCardElement>((resolve, reject) => scheduleTaskStream(async () => {
     try {
       const resp = await fetch(url, {
         method: httpMethod,
@@ -1960,34 +2289,41 @@ function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, bod
         body: httpMethod !== 'GET' ? JSON.stringify(body) : undefined,
         signal: signal || undefined,
       });
-      if (!resp.ok) { finishRunWithError('请求失败: ' + resp.status + ' ' + resp.statusText); return; }
-      if (!resp.body) { finishRunWithError('响应流不可用'); return; }
+      if (!resp.ok) throw new Error('请求失败: ' + resp.status + ' ' + resp.statusText);
+      if (!resp.body) throw new Error('响应流不可用');
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      const readLoop = async (): Promise<void> => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) { 
-            const flushed = parseSseEvents(buffer, true);
-            flushed.events.forEach((evt) => processFileTaskStreamEvent(streamingCard, evt));
-            stopTaskHeartbeat(streamingCard);
-            if (!streamingCard.dataset.taskTerminalStatus) { dispatchEventToCard(streamingCard, { type: 'run.finished', payload: { text: '流已结束。' } }); }
-            break;
-          }
-          buffer += decoder.decode(value, { stream: true });
-          const parsed = parseSseEvents(buffer, false);
-          parsed.events.forEach((evt) => processFileTaskStreamEvent(streamingCard, evt));
-          buffer = parsed.remainder;
-        }
+      let terminalSeen = false;
+      const applyEvents = (events: Record<string, any>[]) => {
+        events.map(persistedTaskStreamEvent).forEach((evt) => {
+          processFileTaskStreamEvent(streamingCard, evt);
+          if (isTaskStreamTerminalEvent(evt)) terminalSeen = true;
+        });
       };
-      readLoop().catch((err) => finishRunWithError(String(err.message || err)));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          const flushed = parseSseEvents(buffer, true);
+          applyEvents(flushed.events);
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSseEvents(buffer, false);
+        applyEvents(parsed.events);
+        buffer = parsed.remainder;
+      }
+      if (!terminalSeen) {
+        showTaskStreamReconnectNotice(streamingCard);
+        throw new Error('任务状态流已断开，正在保留后台任务状态。');
+      }
+      stopTaskHeartbeat(streamingCard);
+      resolve(streamingCard);
     } catch (err: any) {
-      if ((err as any)?.name === 'AbortError') return;
-      finishRunWithError(String(err.message || err));
+      if ((err as any)?.name !== 'AbortError') showTaskStreamReconnectNotice(streamingCard, '连接恢复失败；任务仍可在任务流程中继续查看。');
+      reject(err);
     }
-  });
-  return Promise.resolve(streamingCard);
+  }));
 }
 
 function cancelFileTaskRun(card: TaskCardElement): boolean {
@@ -2078,20 +2414,43 @@ function decodeTaskContract(encoded: string): Record<string, any> | null {
 
 function markTaskRunCardAsHistory(card: TaskCardElement, options?: Record<string, any>): TaskCardElement {
   const settings = options && typeof options === 'object' ? options : {};
+  ensureTaskReportAfterProcess(card);
   const label = String(settings.history_label || '历史任务记录').trim() || '历史任务记录';
   const note = String(settings.history_note || '这是一条历史运行记录，不代表当前文件状态。').trim();
+  const historyStatus = normalizedResumeStatus(settings.initialStatus || card.dataset.taskTerminalStatus || '');
+  const statusText = historyStatus === 'failed'
+    ? '执行失败'
+    : historyStatus === 'cancelled'
+      ? '已取消'
+      : historyStatus === 'completed'
+        ? '已完成'
+        : '历史记录';
   card.classList.remove('streaming', 'pending');
   card.classList.add('is-history-snapshot');
   card.dataset.historySnapshot = 'true';
   card.dataset.taskCurrentRun = 'false';
+  card.dataset.historyStatus = historyStatus || 'history';
   card.setAttribute('aria-label', label);
   card.querySelector('[data-role="cancel"]')?.remove();
   card.querySelectorAll('.wa-task-actions').forEach((node) => node.remove());
+  const statusEl = card.querySelector('[data-role="status"]');
+  if (statusEl) {
+    statusEl.textContent = statusText;
+    (statusEl as HTMLElement).dataset.status = historyStatus || 'history';
+  }
+  const process = card.querySelector('[data-role="process"]') as HTMLDetailsElement | null;
+  if (process && typeof process.removeAttribute === 'function') {
+    process.removeAttribute('open');
+    process.dataset.historyCollapsed = 'true';
+    const state = process.querySelector('[data-role="process-state"]');
+    if (state) state.textContent = '可展开';
+  }
   const titleWrap = card.querySelector('.wa-task-title-wrap');
   if (titleWrap && !titleWrap.querySelector('[data-role="history-badge"]')) {
     const badge = document.createElement('span');
     badge.className = 'wa-task-history-badge';
     badge.dataset.role = 'history-badge';
+    badge.dataset.status = historyStatus || 'history';
     badge.textContent = label;
     titleWrap.appendChild(badge);
   }
@@ -2109,25 +2468,27 @@ function markTaskRunCardAsHistory(card: TaskCardElement, options?: Record<string
   return card;
 }
 
-function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>, initialSummary?: string | Record<string, any>, initialStatus?: string, recoveryPayload?: Record<string, any>): TaskCardElement | null {
+function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any>, initialSummary?: string | Record<string, any>, initialStatus?: string, _recoveryPayload?: Record<string, any>): TaskCardElement | null {
   if (cardOrSnapshot && !isTaskCardElement(cardOrSnapshot as TaskCardElement) && typeof cardOrSnapshot === 'object' && (cardOrSnapshot as Record<string, any>).html) {
     const wrapper = document.createElement('div');
     wrapper.innerHTML = String((cardOrSnapshot as Record<string, any>).html || '').trim();
     const card = wrapper.firstElementChild as TaskCardElement | null;
     if (!card || !isTaskCardElement(card)) return null;
     card._fatalErrorText = String((cardOrSnapshot as Record<string, any>).fatal_error_text || '');
+    ensureTaskReportAfterProcess(card);
     const restored = attachRunCardBehavior(card);
     const options = initialSummary && typeof initialSummary === 'object' ? initialSummary as Record<string, any> : {};
     return options.history ? markTaskRunCardAsHistory(restored, options) : restored;
   }
   const cardEl = cardOrSnapshot as TaskCardElement;
   if (!cardEl || !isTaskCardElement(cardEl)) return null;
+  ensureTaskReportAfterProcess(cardEl);
   const settings: Record<string, any> = {
     taskId: String(cardEl.dataset.taskId || '').trim(),
     runId: String(cardEl.dataset.taskRunId || '').trim(),
-    initialStatus: String(initialStatus || cardEl.dataset.taskTerminalStatus || '').trim(),
+    initialStatus: normalizeFileTaskTerminalStatus(initialStatus || cardEl.dataset.taskTerminalStatus || ''),
   };
-  if (settings.initialStatus === 'waiting' || settings.initialStatus === 'awaiting_confirmation') {
+  if (isFileTaskWaitingStatus(settings.initialStatus)) {
     initializeRecoveredRunCard(cardEl, settings);
   }
   const summaryText = typeof initialSummary === 'string' ? initialSummary : '';
@@ -2135,21 +2496,11 @@ function restoreTaskRunCard(cardOrSnapshot: TaskCardElement | Record<string, any
   const stepsHost = cardEl.querySelector('[data-role="steps"]');
   if (stepsHost && !stepsHost.children.length) { stepsHost.innerHTML = '<div class="wa-task-step pending" data-step-id="run"><details class="wa-task-step-detail" open><summary class="wa-task-step-head"><span class="wa-task-step-dot"></span><span class="wa-task-step-title">任务状态</span></summary><div class="wa-task-step-body"></div></details></div>'; }
   cardEl.classList.remove('streaming', 'pending');
-  if (settings.initialStatus === 'waiting' || settings.initialStatus === 'awaiting_confirmation') { cardEl.classList.add('pending'); }
+  if (isFileTaskWaitingStatus(settings.initialStatus)) { cardEl.classList.add('pending'); }
   else if (settings.initialStatus === 'running' || !settings.initialStatus) { cardEl.classList.add('streaming'); startTaskHeartbeat(cardEl); }
   else { cardEl.classList.add('done'); }
   syncTaskLiveProgress(cardEl);
   return cardEl;
-}
-
-function normalizedResumeStatus(status: string): string {
-  const value = String(status || '').trim().toLowerCase();
-  if (['completed', 'complete', 'success', 'succeeded', 'done', 'verified'].includes(value)) return 'completed';
-  if (['failed', 'failure', 'error'].includes(value)) return 'failed';
-  if (value === 'cancelled' || value === 'canceled') return 'cancelled';
-  if (value === 'waiting' || value === 'awaiting_confirmation') return 'waiting';
-  if (value === 'running' || value === 'streaming') return 'running';
-  return value;
 }
 
 function isTerminalResumeStatus(status: string): boolean {
@@ -2172,7 +2523,7 @@ function resumePersistedFileTask(optionsOrCard: ResumeFileTaskOptions | TaskCard
   restoreTaskRunCard(card, contract.summary || '', initialStatus, {});
   if (isTerminalResumeStatus(initialStatus)) {
     appendTaskRunCardIfDetached(card);
-    revealTaskWorkbenchForCard(card, { scroll: true });
+    revealTaskWorkbenchForCard(card, { scroll: false });
     const terminalStatus = normalizedResumeStatus(initialStatus);
     dispatchEventToCard(card, {
       type: terminalStatus === 'cancelled' ? 'run.cancelled' : 'run.finished',
@@ -2216,45 +2567,56 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
       : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     payload.run_id = randomId;
   }
+  if (!String(payload.task_id || payload.taskId || '').trim()) {
+    payload.task_id = createFileTaskId();
+  }
+  card.dataset.taskId = String(payload.task_id || payload.taskId || '').trim();
   card.dataset.taskRunId = String(payload.run_id || '').trim();
   seedRouteModelContext(card, payload);
-  const quickActionMode = payload.options && typeof payload.options === 'object'
+  let quickActionMode = payload.options && typeof payload.options === 'object'
     ? String(payload.options.quick_action_mode || '').trim()
     : '';
+  quickActionMode = normalizeQuickActionMode(quickActionMode);
   if (quickActionMode) card.dataset.taskQuickActionMode = quickActionMode;
   if (!options.loadingEl && msgs) msgs.appendChild(card);
   card.classList.add('streaming');
   startTaskHeartbeat(card);
-  revealTaskWorkbenchForCard(card, { scroll: true });
+  revealTaskWorkbenchForCard(card, { scroll: false });
+  card._terminalSnapshotHandler = typeof options.onTaskCardSnapshot === 'function'
+    ? options.onTaskCardSnapshot
+    : undefined;
   if (typeof options.onTaskCardSnapshot === 'function') {
     try { options.onTaskCardSnapshot(card); } catch (_) { /* noop */ }
   }
   scrollToBottom(msgs);
 
-  const resp = await csrfFetch('/api/editor/ai/task-stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-    body: JSON.stringify(payload),
-    signal: options.signal,
-  });
-  if (!resp.ok) throw new Error(await describeHttpError(resp));
-  if (!resp.body) throw new Error('响应流不可用');
-
-  const reader = resp.body.getReader();
-  card._abortFileTaskStream = () => {
-    try {
-      if (options.abortController && typeof options.abortController.abort === 'function' && !(options.abortController.signal && options.abortController.signal.aborted)) {
-        options.abortController.abort();
-      }
-    } catch (_) { /* noop */ }
-    try {
-      if (reader && typeof reader.cancel === 'function') reader.cancel();
-    } catch (_) { /* noop */ }
-  };
-
-  const decoder = new TextDecoder();
-  let buffer = '';
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let recoveryAttempted = false;
   try {
+    const resp = await csrfFetch('/api/editor/ai/task-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify(payload),
+      signal: options.signal,
+    });
+    if (!resp.ok) throw new Error(await describeHttpError(resp));
+    if (!resp.body) throw new Error('响应流不可用');
+
+    reader = resp.body.getReader();
+    card._abortFileTaskStream = () => {
+      try {
+        if (options.abortController && typeof options.abortController.abort === 'function' && !(options.abortController.signal && options.abortController.signal.aborted)) {
+          options.abortController.abort();
+        }
+      } catch (_) { /* noop */ }
+      try {
+        if (reader && typeof reader.cancel === 'function') reader.cancel();
+      } catch (_) { /* noop */ }
+    };
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let terminalSeen = false;
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
@@ -2266,12 +2628,36 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
         try { options.onTaskCardSnapshot(card); } catch (_) { /* noop */ }
       }
       scrollToBottom(msgs);
+      if (parsed.events.some(isTaskStreamTerminalEvent)) {
+        terminalSeen = true;
+        try { Promise.resolve(reader.cancel()).catch(() => {}); } catch (_) { /* noop */ }
+        break;
+      }
     }
 
     const trailing = parseSseEvents(buffer, true);
     trailing.events.forEach((evt) => processFileTaskStreamEvent(card, evt));
-  } catch (error) {
+    if (trailing.events.some(isTaskStreamTerminalEvent)) terminalSeen = true;
+    if (trailing.events.length && typeof options.onTaskCardSnapshot === 'function') {
+      try { options.onTaskCardSnapshot(card); } catch (_) { /* noop */ }
+    }
+    if (!terminalSeen) throw new Error('任务状态流已断开。');
+  } catch (error: any) {
     if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);
+    const aborted = error && error.name === 'AbortError';
+    const taskId = String(card.dataset.taskId || '').trim();
+    if (!aborted && !recoveryAttempted && taskId) {
+      recoveryAttempted = true;
+      showTaskStreamReconnectNotice(card);
+      const recovered = await resumePersistedFileTask({
+        taskId,
+        runId: String(card.dataset.taskRunId || '').trim(),
+        loadingEl: card,
+        initialStatus: 'running',
+        replay: true,
+      });
+      return taskTerminalResult(recovered);
+    }
     throw error;
   } finally {
     card.classList.remove('streaming');
@@ -2280,6 +2666,7 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
       try { options.onTaskCardSnapshot(card); } catch (_) { /* noop */ }
     }
     if (card._abortFileTaskStream) delete card._abortFileTaskStream;
+    if (card._terminalSnapshotHandler) delete card._terminalSnapshotHandler;
   }
 
   const terminalResult = taskTerminalResult(card, '');
@@ -2287,32 +2674,32 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
   return terminalResult;
 }
 
-const WA = (window as any).WA || {};
-WA.streamTaskFlow = streamTaskFlow;
-WA.cancelFileTaskRun = cancelFileTaskRun;
-WA.makeRunCard = makeRunCard;
-WA.compactTaskContract = compactTaskContract;
-WA.encodeTaskContract = encodeTaskContract;
-WA.decodeTaskContract = decodeTaskContract;
-WA.restoreTaskRunCard = restoreTaskRunCard;
-WA.resumePersistedFileTask = resumePersistedFileTask;
-WA.ensureTaskUiState = ensureTaskUiState;
-WA.syncTaskLiveProgress = syncTaskLiveProgress;
-WA.processFileTaskStreamEvent = processFileTaskStreamEvent;
-WA.getEventHandlers = getEventHandlers;
-WA.parseSseEvents = parseSseEvents;
-WA.setTaskRunContext = setTaskRunContext;
-WA.taskTerminalResult = taskTerminalResult;
-WA.handleEvent = handleEvent;
-WA.handleEvent_run_started = handleEvent_run_started;
-WA.handleEvent_run_finished = handleEvent_run_finished;
-WA.handleEvent_tool_started = handleEvent_tool_started;
-WA.handleEvent_tool_finished = handleEvent_tool_finished;
-WA.handleEvent_file_changed = handleEvent_file_changed;
-WA.handleEvent_error = handleEvent_error;
-WA.TaskStatus = TaskStatus;
-(window as any).WA = WA;
-(window as any).WA.parseSseEvents = parseSseEvents;
+publishWorkspaceApi({
+  streamTaskFlow,
+  cancelFileTaskRun,
+  makeRunCard,
+  compactTaskContract,
+  encodeTaskContract,
+  decodeTaskContract,
+  restoreTaskRunCard,
+  resumePersistedFileTask,
+  ensureTaskUiState,
+  syncTaskLiveProgress,
+  syncTaskInteractionSummary,
+  processFileTaskStreamEvent,
+  getEventHandlers,
+  parseSseEvents,
+  setTaskRunContext,
+  taskTerminalResult,
+  handleEvent,
+  handleEvent_run_started,
+  handleEvent_run_finished,
+  handleEvent_tool_started,
+  handleEvent_tool_finished,
+  handleEvent_file_changed,
+  handleEvent_error,
+  TaskStatus,
+});
 
 export {
   streamTaskFlow,
@@ -2326,6 +2713,7 @@ export {
   resumePersistedFileTask,
   ensureTaskUiState,
   syncTaskLiveProgress,
+  syncTaskInteractionSummary,
   processFileTaskStreamEvent,
   getEventHandlers,
   parseSseEvents,

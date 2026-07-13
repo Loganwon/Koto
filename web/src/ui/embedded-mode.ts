@@ -8,8 +8,8 @@ import { _initSplit } from './panel-layout';
 import { _addLocalFilesToAIContext, _attachFilesToTask } from '../workspace/ai-context';
 
 declare function $(id: string): HTMLElement | null;
-declare var state: any;
-declare var WA: any;
+declare let state: any;
+declare let WA: any;
 declare function showToast(message: string, kind?: string, duration?: number): void;
 declare function loadFiles(files: FileList | File[]): void;
 declare function loadFileBrowser(): void;
@@ -78,7 +78,7 @@ export function _getAIAttachmentDropPayload(e: DragEvent): AIAttachmentDropPaylo
     if (filePath) return { kind: 'workspace', filePath };
     const files = Array.from(e.dataTransfer!.files || []).filter(Boolean);
     if (files.length) return { kind: 'local', files };
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
   return { kind: null };
 }
 
@@ -230,6 +230,18 @@ _initAIAttachmentDrops();
 
 export const _isEmbedded: boolean = !!document.getElementById('workspaceView');
 
+function setMainViewActive(view: HTMLElement | null, active: boolean): void {
+  if (!view) return;
+  view.style.display = active ? '' : 'none';
+  view.setAttribute('aria-hidden', active ? 'false' : 'true');
+  if (active) {
+    view.removeAttribute('inert');
+  } else {
+    view.setAttribute('inert', '');
+  }
+  (view as any).inert = !active;
+}
+
 export function toggleFileMenu(): void {
   const dd = $('wa-file-dropdown');
   const btn = $('wa-ribbon-file-btn');
@@ -287,7 +299,8 @@ export function openInMainView(): void {
   const shell = document.querySelector('.app-shell');
   if (shell) shell.classList.add('koto-unified-workspace');
   _setActivityActive('navWorkspaceBtn');
-  if (chatView) chatView.style.display = 'none';
+  setMainViewActive(chatView, false);
+  setMainViewActive(wsView, true);
   wsView.style.display = 'flex';
   localStorage.setItem('koto.inWorkspace', '1');
   if ((window as any).KotoSessionBridge && typeof (window as any).KotoSessionBridge.getSession === 'function') {
@@ -297,15 +310,6 @@ export function openInMainView(): void {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       _initSplit();
-      if ((window as any)._waSplit) {
-        let sizes = [68, 32];
-        try {
-          const raw = localStorage.getItem('wa_split_sizes_embedded');
-          const parsed = raw ? JSON.parse(raw) : null;
-          if (Array.isArray(parsed) && parsed.length === 2) sizes = parsed;
-        } catch {}
-        try { (window as any)._waSplit.setSizes(sizes); } catch {}
-      }
     });
   });
   if ((window as any).WA && typeof (window as any).WA.loadFileBrowser === 'function' && !(window as any)._WA_fileBrowserLoaded) {
@@ -353,16 +357,13 @@ export function showFileWorkspace(): void {
 
 export function showAiWorkspace(): void {
   openInMainView();
-  if (typeof (window as any).WA?.showAiSessionList === 'function') {
-    (window as any).WA.showAiSessionList();
+  if (typeof (window as any).WA?.showAiChat === 'function') {
+    (window as any).WA.showAiChat();
   }
-  _setActivityActive('navAiSessionsBtn');
+  _setActivityActive('navAiBtn');
   requestAnimationFrame(() => {
-    const sessionList = document.getElementById('wa-ai-session-list') as HTMLElement | null;
     const userInput = document.getElementById('wa-user-input') as HTMLTextAreaElement | null;
-    if (sessionList && !document.getElementById('wa-ai-chat-view')?.hasAttribute('hidden')) return;
-    if (sessionList) sessionList.scrollIntoView({ block: 'nearest' });
-    else if (userInput) {
+    if (userInput) {
       try { userInput.focus({ preventScroll: true }); } catch { userInput.focus(); }
     }
   });
@@ -371,8 +372,8 @@ export function showAiWorkspace(): void {
 export function closeInMainView(): void {
   const chatView = document.getElementById('chatView');
   const wsView = document.getElementById('workspaceView');
-  if (wsView) wsView.style.display = 'none';
-  if (chatView) chatView.style.display = '';
+  setMainViewActive(wsView, false);
+  setMainViewActive(chatView, true);
   localStorage.removeItem('koto.inWorkspace');
   const navBtn = document.getElementById('navWorkspaceBtn');
   if (navBtn) navBtn.classList.remove('active');

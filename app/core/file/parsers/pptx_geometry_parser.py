@@ -90,8 +90,15 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                                         _theme_colors[_name] = "#" + _last.lower()
                         break
                 break
-    except Exception:
-        pass
+    except Exception as exc:
+        # Theme colors determine the default fill/border colors of many slides.
+        # Keep rendering with explicit/default colors, but make this fidelity loss
+        # diagnosable instead of silently returning a visually different deck.
+        logger.warning(
+            "[PptxGeometry] Failed to read the presentation theme; "
+            "using explicit/default colors: %s",
+            exc,
+        )
 
     # ── Extract presentation-level default font size (defaultTextStyle) ──
     # Non-placeholder shapes inherit font size from this style chain.
@@ -107,8 +114,12 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                 _drp = _lvl1.find(f"{{{_NS_T}}}defRPr")
                 if _drp is not None and _drp.get("sz"):
                     _default_font_size_pt = int(_drp.get("sz")) / 100.0
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "[PptxGeometry] Failed to read the presentation default font size; "
+            "using 18pt fallback: %s",
+            exc,
+        )
     # ── Extract title font size from slideMaster txStyles/titleStyle ──
     try:
         _NS_P = "http://schemas.openxmlformats.org/presentationml/2006/main"
@@ -123,8 +134,12 @@ def parse_pptx_geometry(file_path: Any) -> dict[str, Any]:
                         if _drpt is not None and _drpt.get("sz"):
                             _default_title_font_size_pt = int(_drpt.get("sz")) / 100.0
             break  # only need first master
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning(
+            "[PptxGeometry] Failed to read the title font size; "
+            "using 36pt fallback: %s",
+            exc,
+        )
 
     def _resolve_color(color_obj: Any) -> str | None:
         """Return "#rrggbb" from a python-pptx color object, resolving scheme colors via theme."""

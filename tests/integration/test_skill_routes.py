@@ -66,9 +66,9 @@ class TestSkillCRUD:
 
 @pytest.mark.integration
 class TestSkillEnable:
-    def test_enable_endpoint_exists(self, client):
-        """Enable endpoint should return 200 or 404 (skill not found), not 500."""
-        resp = client.post("/api/skills/concise_mode/enable", json={"enabled": True})
+    def test_toggle_endpoint_exists(self, client):
+        """The current toggle endpoint should return a domain response, not 500."""
+        resp = client.post("/api/skills/concise_mode/toggle", json={"enabled": True})
         assert resp.status_code in (200, 404, 400), resp.get_data(as_text=True)
 
 

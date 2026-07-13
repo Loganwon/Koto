@@ -5,7 +5,8 @@
 
 import { _csrfFetch, $, showToast } from './infrastructure';
 import { _fsHandleMap, _renderTabs, loadRecentFiles, state, type TabInfo } from './state';
-import { _serializeEditorForTab } from './file-open';
+import { _serializeEditorForTab, _stableWorkspaceSnapshot } from './file-open';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
 const _MIME: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -20,6 +21,7 @@ const _MIME: Record<string, string> = {
 let _isSaving = false;
 let _autoSaveTimer: ReturnType<typeof setTimeout> | null = null;
 let _autoSaveEnabled = localStorage.getItem('wa_autosave') === 'on';
+const _externallyChangedPaths = new Set<string>();
 
 async function _safeJson(res: Response): Promise<any> {
   try {
@@ -31,6 +33,43 @@ async function _safeJson(res: Response): Promise<any> {
 
 function _activeTab(): TabInfo | null {
   return state.openTabs.find((tab) => tab.path === state.activeTabPath) || null;
+}
+
+function _normalizeWorkspaceSavePath(path: string): string {
+  const raw = String(path || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+  if (!raw) return '';
+  const sharedNormalizer = getWorkspaceApi().normalizeWorkspaceFilePath;
+  if (typeof sharedNormalizer === 'function') {
+    try {
+      const normalized = String(sharedNormalizer(raw) || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
+      if (normalized) return normalized;
+    } catch (_) {
+      /* fallback below */
+    }
+  }
+  return raw.replace(/^workspace\//i, '');
+}
+
+function markExternalFileChange(path: string): void {
+  const normalized = _normalizeWorkspaceSavePath(path);
+  if (!normalized) return;
+  _externallyChangedPaths.add(normalized.toLowerCase());
+  const tab = state.openTabs.find((item) => _normalizeWorkspaceSavePath(item.path || '').toLowerCase() === normalized.toLowerCase());
+  if (tab) (tab as any).externalFileChangePending = true;
+}
+
+function clearExternalFileChange(path: string): void {
+  const normalized = _normalizeWorkspaceSavePath(path);
+  if (!normalized) return;
+  _externallyChangedPaths.delete(normalized.toLowerCase());
+  const tab = state.openTabs.find((item) => _normalizeWorkspaceSavePath(item.path || '').toLowerCase() === normalized.toLowerCase());
+  if (tab) delete (tab as any).externalFileChangePending;
+}
+
+function _hasPendingExternalFileChange(tab: TabInfo | null): boolean {
+  const path = _normalizeWorkspaceSavePath((tab && tab.path) || state.wsSourcePath || '');
+  if (!path) return false;
+  return !!(tab as any)?.externalFileChangePending || _externallyChangedPaths.has(path.toLowerCase());
 }
 
 function _isReadonlyType(): boolean {
@@ -77,6 +116,9 @@ function _setSaveButtonsBusy(busy: boolean): void {
 }
 
 async function _postAutoSave(tab: TabInfo | null, explicit: boolean): Promise<any> {
+  if (explicit && _hasPendingExternalFileChange(tab)) {
+    throw new Error('文件已被任务更新，请重新打开后再保存，避免覆盖任务结果。');
+  }
   const data = _serializeEditorForTab(tab, state.activeEditor);
   const res = await _csrfFetch('/api/v1/workspace/auto_save', {
     method: 'POST',
@@ -93,7 +135,8 @@ async function _postAutoSave(tab: TabInfo | null, explicit: boolean): Promise<an
   if (!res.ok) throw new Error(json.error || '保存失败');
   if (tab) {
     tab.modified = false;
-    if (state.fileType !== 'docx') tab.cache = data;
+    tab.savedSnapshot = _stableWorkspaceSnapshot(data);
+    if (tab.fileType !== 'docx') tab.cache = data;
     _notifyPyModified(tab, false);
     _renderTabs();
   }
@@ -236,14 +279,17 @@ function _installSaveShortcuts(): void {
   }, true);
 }
 
-(window as any).WA = (window as any).WA || {};
-(window as any).WA.saveFile = saveFile;
-(window as any).WA.saveAs = saveAs;
-(window as any).WA.autoSave = autoSave;
-(window as any).WA.scheduleAutoSave = scheduleAutoSave;
-(window as any).WA.toggleAutoSave = toggleAutoSave;
-(window as any).WA.renderAutoSaveToggle = _renderAutoSaveToggle;
-(window as any)._safeJson = (window as any)._safeJson || _safeJson;
+publishWorkspaceApi({
+  saveFile,
+  saveAs,
+  autoSave,
+  scheduleAutoSave,
+  _notifyPyModified,
+  markExternalFileChange,
+  clearExternalFileChange,
+  toggleAutoSave,
+  renderAutoSaveToggle: _renderAutoSaveToggle,
+});
 
 _installSaveShortcuts();
 if (document.readyState === 'loading') {

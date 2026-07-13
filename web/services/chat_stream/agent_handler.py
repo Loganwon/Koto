@@ -37,7 +37,10 @@ def handle_agent_task(
 
     def generate_agent():
         if locked_model == "local":
-            from app.core.socket_handler import _is_ollama_alive, _get_local_provider
+            from app.core.shared.llm_helpers import (
+                get_local_provider as _get_local_provider,
+                is_ollama_alive as _is_ollama_alive,
+            )
             if not _is_ollama_alive():
                 yield _safe_sse({
                     "type": "error",

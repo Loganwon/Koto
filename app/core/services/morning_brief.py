@@ -194,7 +194,7 @@ class MorningBriefService:
 
             # 推送到 Telegram
             try:
-                from web.telegram_bot import get_telegram_bot
+                from app.core.services.telegram_bot import get_telegram_bot
 
                 bot = get_telegram_bot()
                 if bot and bot.is_running:

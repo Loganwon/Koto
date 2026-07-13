@@ -53,6 +53,7 @@ def client(monkeypatch, tmp_path: Path, workspace_dir: Path):
 
         _shared.clear_user_settings_cache()
         app.config["TESTING"] = True
+        app.config["WTF_CSRF_ENABLED"] = False
         with app.test_client() as c:
             yield c
         _shared.clear_user_settings_cache()
@@ -1576,7 +1577,8 @@ class TestJavaScriptSourceChecks:
 
     def test_auto_save_timer_exists(self):
         assert "_autoSaveTimer" in self.js
-        assert "(window as any).WA.scheduleAutoSave = scheduleAutoSave" in self.js
+        assert "publishWorkspaceApi({" in self.js
+        assert "scheduleAutoSave," in self.js
         assert "autoSave().catch(() => {});" in self.js
 
 

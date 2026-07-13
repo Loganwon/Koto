@@ -5,12 +5,12 @@ Tests: 云端模型断开时本地模型兜底覆盖验证
 
 覆盖的三条降级路径：
   1. _stream_llm()         — client_request 快捷操作（润色/翻译等）
-  2. _call_llm_sync()      — 代码生成（图表/可视化）
+  2. call_llm_sync()       — 代码生成（图表/可视化）
   3. doc_ai_request 内部   — 主对话流 _try_online → _try_local 闭包
 
 以及辅助函数：
-  - _is_online_failure()   — 错误分类（覆盖所有预期关键词）
-  - _is_ollama_alive()     — 端口探测
+  - is_online_failure()    — 错误分类（覆盖所有预期关键词）
+  - is_ollama_alive()      — 端口探测
 """
 
 import sys
@@ -28,14 +28,13 @@ if str(ROOT) not in sys.path:
 # Lazy import helpers — skip entire module cleanly if socket_handler can't load
 # ---------------------------------------------------------------------------
 try:
-    from app.core.socket_handler import (  # noqa: E402
-        _call_llm_sync,
-        _get_local_provider,
-        _get_provider,
-        _is_ollama_alive,
-        _is_online_failure,
-        _stream_llm,
+    from app.core.agent import llm_provider_helpers  # noqa: E402
+    from app.core.shared.llm_helpers import (  # noqa: E402
+        get_local_provider,
+        is_ollama_alive,
+        is_online_failure,
     )
+    from app.core.socket_handler import _get_provider, _stream_llm  # noqa: E402
 
     _IMPORT_OK = True
 except Exception as _exc:
@@ -49,12 +48,12 @@ skipif_no_import = pytest.mark.skipif(
 
 
 # ===========================================================================
-# 1. _is_online_failure() — 错误分类
+# 1. is_online_failure() — 错误分类
 # ===========================================================================
 
 
 class TestIsOnlineFailure:
-    """_is_online_failure 必须正确识别所有可恢复的云端错误。"""
+    """is_online_failure 必须正确识别所有可恢复的云端错误。"""
 
     @pytest.mark.parametrize(
         "msg",
@@ -78,7 +77,7 @@ class TestIsOnlineFailure:
     @skipif_no_import
     def test_recoverable_errors_trigger_fallback(self, msg):
         exc = RuntimeError(msg)
-        assert _is_online_failure(exc), f"Expected True for: {msg!r}"
+        assert is_online_failure(exc), f"Expected True for: {msg!r}"
 
     @pytest.mark.parametrize(
         "msg",
@@ -92,11 +91,11 @@ class TestIsOnlineFailure:
     @skipif_no_import
     def test_non_recoverable_errors_do_not_trigger_fallback(self, msg):
         exc = RuntimeError(msg)
-        assert not _is_online_failure(exc), f"Expected False for: {msg!r}"
+        assert not is_online_failure(exc), f"Expected False for: {msg!r}"
 
 
 # ===========================================================================
-# 2. _is_ollama_alive() — 端口探测
+# 2. is_ollama_alive() — 端口探测
 # ===========================================================================
 
 
@@ -108,7 +107,7 @@ class TestIsOllamaAlive:
         mock_opener = MagicMock()
         mock_opener.open.side_effect = ConnectionRefusedError()
         with patch("urllib.request.build_opener", return_value=mock_opener):
-            result = _is_ollama_alive()
+            result = is_ollama_alive()
         assert result is False
 
     @skipif_no_import
@@ -120,12 +119,12 @@ class TestIsOllamaAlive:
         mock_opener.open.return_value = mock_resp
 
         with patch("urllib.request.build_opener", return_value=mock_opener):
-            result = _is_ollama_alive()
+            result = is_ollama_alive()
         assert result is True
 
 
 # ===========================================================================
-# 3. _call_llm_sync() — 代码生成降级
+# 3. call_llm_sync() — 代码生成降级
 # ===========================================================================
 
 
@@ -143,9 +142,14 @@ class TestCallLlmSync:
         """云端成功时直接返回，不调用本地。"""
         online_prov = _make_provider("online answer")
         with patch(
-            "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
-            result = _call_llm_sync("test prompt")
+            "app.core.agent.llm_provider_helpers.get_provider", return_value=online_prov
+        ), patch(
+            "app.core.agent.llm_provider_helpers.pick_online_model",
+            return_value="gemini-test",
+        ), patch(
+            "app.core.shared.llm_helpers.get_local_provider"
+        ) as mock_local:
+            result = llm_provider_helpers.call_llm_sync("test prompt")
         assert result == "online answer"
         mock_local.assert_not_called()
 
@@ -168,11 +172,17 @@ class TestCallLlmSync:
         local_prov = _make_provider("local answer")
 
         with patch(
-            "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._is_ollama_alive", return_value=True), patch(
-            "app.core.socket_handler._get_local_provider", return_value=local_prov
+            "app.core.agent.llm_provider_helpers.get_provider", return_value=online_prov
+        ), patch(
+            "app.core.agent.llm_provider_helpers.pick_online_model",
+            return_value="gemini-test",
+        ), patch(
+            "app.core.agent.llm_provider_helpers.is_ollama_alive", return_value=True
+        ), patch(
+            "app.core.agent.llm_provider_helpers.get_local_provider",
+            return_value=local_prov,
         ):
-            result = _call_llm_sync("test prompt")
+            result = llm_provider_helpers.call_llm_sync("test prompt")
 
         assert (
             result == "local answer"
@@ -185,9 +195,14 @@ class TestCallLlmSync:
         online_prov.generate_content.side_effect = RuntimeError("503 unavailable")
 
         with patch(
-            "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._is_ollama_alive", return_value=False):
-            result = _call_llm_sync("test prompt")
+            "app.core.agent.llm_provider_helpers.get_provider", return_value=online_prov
+        ), patch(
+            "app.core.agent.llm_provider_helpers.pick_online_model",
+            return_value="gemini-test",
+        ), patch(
+            "app.core.agent.llm_provider_helpers.is_ollama_alive", return_value=False
+        ):
+            result = llm_provider_helpers.call_llm_sync("test prompt")
 
         assert result is None
 
@@ -198,9 +213,16 @@ class TestCallLlmSync:
         online_prov.generate_content.side_effect = ValueError("unexpected token")
 
         with patch(
-            "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
-            result = _call_llm_sync("test prompt")
+            "app.core.agent.llm_provider_helpers.get_provider", return_value=online_prov
+        ), patch(
+            "app.core.agent.llm_provider_helpers.pick_online_model",
+            return_value="gemini-test",
+        ), patch(
+            "app.core.agent.llm_provider_helpers.is_ollama_alive", return_value=False
+        ), patch(
+            "app.core.agent.llm_provider_helpers.get_local_provider"
+        ) as mock_local:
+            result = llm_provider_helpers.call_llm_sync("test prompt")
 
         assert result is None
         mock_local.assert_not_called()
@@ -215,11 +237,17 @@ class TestCallLlmSync:
         local_prov.generate_content.side_effect = Exception("Ollama crashed")
 
         with patch(
-            "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._is_ollama_alive", return_value=True), patch(
-            "app.core.socket_handler._get_local_provider", return_value=local_prov
+            "app.core.agent.llm_provider_helpers.get_provider", return_value=online_prov
+        ), patch(
+            "app.core.agent.llm_provider_helpers.pick_online_model",
+            return_value="gemini-test",
+        ), patch(
+            "app.core.agent.llm_provider_helpers.is_ollama_alive", return_value=True
+        ), patch(
+            "app.core.agent.llm_provider_helpers.get_local_provider",
+            return_value=local_prov,
         ):
-            result = _call_llm_sync("test prompt")
+            result = llm_provider_helpers.call_llm_sync("test prompt")
 
         assert result is None
 
@@ -250,7 +278,7 @@ class TestStreamLlm:
 
         with patch(
             "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
+        ), patch("app.core.shared.llm_helpers.get_local_provider") as mock_local:
             result = _stream_llm(fake_emit, "Polish:", "some text")
 
         assert result == "hello world"
@@ -284,8 +312,10 @@ class TestStreamLlm:
 
         with patch(
             "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._is_ollama_alive", return_value=True), patch(
-            "app.core.socket_handler._get_local_provider", return_value=local_prov
+        ), patch(
+            "app.core.shared.llm_helpers.is_ollama_alive", return_value=True
+        ), patch(
+            "app.core.shared.llm_helpers.get_local_provider", return_value=local_prov
         ):
             result = _stream_llm(fake_emit, "Polish:", "text")
 
@@ -306,7 +336,7 @@ class TestStreamLlm:
 
         with patch(
             "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._is_ollama_alive", return_value=False):
+        ), patch("app.core.shared.llm_helpers.is_ollama_alive", return_value=False):
             result = _stream_llm(fake_emit, "Polish:", "text")
 
         assert result is None
@@ -331,7 +361,7 @@ class TestStreamLlm:
 
         with patch(
             "app.core.socket_handler._get_provider", return_value=online_prov
-        ), patch("app.core.socket_handler._get_local_provider") as mock_local:
+        ), patch("app.core.shared.llm_helpers.get_local_provider") as mock_local:
             result = _stream_llm(fake_emit, "Polish:", "text")
 
         assert result is None
@@ -341,16 +371,24 @@ class TestStreamLlm:
 
 
 # ===========================================================================
-# 5. _get_local_provider() — 本地 provider 选取逻辑
+# 5. get_local_provider() — 本地 provider 选取逻辑
 # ===========================================================================
 
 
 class TestGetLocalProvider:
 
     @skipif_no_import
-    def test_selects_model_from_ollama_tags(self):
+    def test_selects_model_from_ollama_tags_when_no_model_is_configured(
+        self, monkeypatch
+    ):
         """应从 /api/tags 列表中选取模型（优先大参数）。"""
         import json
+
+        from app.core.llm import local_model_runtime
+
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
 
         tags_payload = json.dumps(
             {
@@ -372,7 +410,7 @@ class TestGetLocalProvider:
             "app.core.llm.ollama_llm_provider.OllamaLLMProvider"
         ) as MockOllama:
             MockOllama.return_value = MagicMock()
-            provider = _get_local_provider()
+            provider = get_local_provider()
 
         # OllamaLLMProvider 应被调用，且 model= 包含 8b
         call_kwargs = MockOllama.call_args
@@ -386,14 +424,21 @@ class TestGetLocalProvider:
                 ), f"Expected 8b model, got: {model_arg}"
 
     @skipif_no_import
-    def test_falls_back_to_none_model_when_tags_fail(self):
+    def test_falls_back_to_none_model_when_tags_fail_and_no_model_is_configured(
+        self, monkeypatch
+    ):
         """当无法查询 Ollama tags 时，应使用 model=None 的默认选择。"""
+        from app.core.llm import local_model_runtime
+
+        monkeypatch.setattr(
+            local_model_runtime, "get_configured_local_model_tag", lambda: ""
+        )
         mock_opener = MagicMock()
         mock_opener.open.side_effect = ConnectionRefusedError()
         with patch("urllib.request.build_opener", return_value=mock_opener), patch(
             "app.core.llm.ollama_llm_provider.OllamaLLMProvider"
         ) as MockOllama:
             MockOllama.return_value = MagicMock()
-            _get_local_provider()
+            get_local_provider()
 
         MockOllama.assert_called_once_with(model=None)

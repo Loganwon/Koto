@@ -5,10 +5,16 @@ from __future__ import annotations
 
 import logging
 import re
-import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Iterable
+
+from app.core.file.path_policy import (
+    DEFAULT_FILE_PATH_POLICY,
+    FilePathPolicy,
+    PathPolicyError,
+)
+from app.core.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +34,14 @@ class WorkspaceFsPathResult:
 
 
 class WorkspaceFsService:
+    def __init__(
+        self,
+        path_policy: FilePathPolicy = DEFAULT_FILE_PATH_POLICY,
+        file_service: FileService | None = None,
+    ) -> None:
+        self.path_policy = path_policy
+        self.file_service = file_service or FileService(path_policy=path_policy)
+
     def create_absolute_file(
         self,
         *,
@@ -90,7 +104,11 @@ class WorkspaceFsService:
             raise WorkspaceFsError(f'"{name}" 已存在', status_code=409)
 
         try:
-            target.mkdir()
+            result = self.file_service.create_directory(str(target))
+            if not result.get("success"):
+                self._raise_file_service_error(result, fallback="创建失败")
+        except WorkspaceFsError:
+            raise
         except Exception as exc:
             raise WorkspaceFsError(f"创建失败: {exc}", status_code=500) from exc
 
@@ -112,12 +130,13 @@ class WorkspaceFsService:
             raise WorkspaceFsError("路径不存在", status_code=404)
 
         try:
-            if target.is_dir():
-                shutil.rmtree(target)
-            else:
-                target.unlink()
+            result = self.file_service.delete_path(str(target))
+            if not result.get("success"):
+                self._raise_file_service_error(result, fallback="删除失败")
         except PermissionError as exc:
             raise WorkspaceFsError("权限不足，无法删除", status_code=403) from exc
+        except WorkspaceFsError:
+            raise
         except Exception as exc:
             raise WorkspaceFsError(f"删除失败: {exc}", status_code=500) from exc
 
@@ -149,9 +168,16 @@ class WorkspaceFsService:
             raise WorkspaceFsError("名称已存在", status_code=409)
 
         try:
-            target.rename(new_target)
+            if target.is_file():
+                result = self.file_service.rename_file(str(target), final_name)
+            else:
+                result = self.file_service.move_path(str(target), str(new_target))
+            if not result.get("success"):
+                self._raise_file_service_error(result, fallback="重命名失败")
         except PermissionError as exc:
             raise WorkspaceFsError("权限不足，无法重命名", status_code=403) from exc
+        except WorkspaceFsError:
+            raise
         except Exception as exc:
             raise WorkspaceFsError(f"重命名失败: {exc}", status_code=500) from exc
 
@@ -180,13 +206,15 @@ class WorkspaceFsService:
         final = self._dedupe_target(dst_path, src_path.name)
         try:
             if move:
-                shutil.move(str(src_path), str(final))
-            elif src_path.is_dir():
-                shutil.copytree(str(src_path), str(final))
+                result = self.file_service.move_path(str(src_path), str(final))
             else:
-                shutil.copy2(str(src_path), str(final))
+                result = self.file_service.copy_path(str(src_path), str(final))
+            if not result.get("success"):
+                self._raise_file_service_error(result, fallback="操作失败")
         except PermissionError as exc:
             raise WorkspaceFsError("权限不足", status_code=403) from exc
+        except WorkspaceFsError:
+            raise
         except Exception as exc:
             raise WorkspaceFsError(f"操作失败: {exc}", status_code=500) from exc
 
@@ -288,7 +316,9 @@ class WorkspaceFsService:
         new_target = old_target.parent / final_name
         if new_target.exists():
             raise WorkspaceFsError("文件名已存在", status_code=409)
-        old_target.rename(new_target)
+        result = self.file_service.rename_file(str(old_target), final_name)
+        if not result.get("success"):
+            self._raise_file_service_error(result, fallback="重命名失败")
         return WorkspaceFsPathResult(
             path=new_target.relative_to(root).as_posix(),
             name=final_name,
@@ -374,7 +404,11 @@ class WorkspaceFsService:
             raise WorkspaceFsError(f'"{name}" 已存在', status_code=409)
 
         try:
-            target.mkdir()
+            result = self.file_service.create_directory(str(target))
+            if not result.get("success"):
+                self._raise_file_service_error(result, fallback="创建失败")
+        except WorkspaceFsError:
+            raise
         except Exception as exc:
             raise WorkspaceFsError(f"创建失败: {exc}", status_code=500) from exc
 
@@ -383,20 +417,13 @@ class WorkspaceFsService:
         )
 
     def _root(self, workspace_dir: str | Path) -> Path:
-        return Path(workspace_dir).resolve()
+        return self.path_policy.root(workspace_dir)
 
     def _resolve_under_root(self, root: Path, rel_path: str) -> Path:
-        raw = str(rel_path or "")
-        parts = [part for part in re.split(r"[\\/]+", raw) if part and part != "."]
-        if Path(raw).is_absolute() or re.match(r"^[A-Za-z]:", raw) or ".." in parts:
-            raise WorkspaceFsError("路径不合法", status_code=403)
-
-        target = root.joinpath(*parts).resolve() if parts else root.resolve()
         try:
-            target.relative_to(root)
-        except ValueError as exc:
+            return self.path_policy.resolve_under_root(root, rel_path)
+        except PathPolicyError as exc:
             raise WorkspaceFsError("路径不合法", status_code=403) from exc
-        return target
 
     def _validate_name(
         self, name: str, *, empty_message: str, invalid_message: str
@@ -418,20 +445,19 @@ class WorkspaceFsService:
         return parent / f"{stem} ({index}){ext}"
 
     def _trash_or_delete(self, target: Path) -> None:
-        try:
-            from send2trash import send2trash
+        result = self.file_service.delete_path(str(target), use_trash=True)
+        if not result.get("success"):
+            self._raise_file_service_error(result, fallback="删除失败")
 
-            send2trash(str(target))
-            logger.info("[WorkspaceFsService] moved to trash: %s", target)
-        except Exception as exc:
-            logger.warning(
-                "[WorkspaceFsService] send2trash failed, deleting directly: %s",
-                exc,
-            )
-
-        if not target.exists():
-            return
-        if target.is_dir():
-            shutil.rmtree(target)
-        else:
-            target.unlink()
+    def _raise_file_service_error(
+        self, result: dict[str, Any], *, fallback: str
+    ) -> None:
+        message = str(result.get("error") or fallback)
+        status_code = 500
+        if "不存在" in message:
+            status_code = 404
+        elif "已存在" in message:
+            status_code = 409
+        elif "保护" in message or "权限" in message or "拒绝" in message:
+            status_code = 403
+        raise WorkspaceFsError(message, status_code=status_code)

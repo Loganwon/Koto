@@ -1,9 +1,10 @@
 // @ts-nocheck
 import type { WorkspaceEditor, PdfViewerOptions, PdfOutlineItem, PdfAnnotation, PdfSearchMatch } from './types';
+import { _updatePdfZoomUI } from './cdn-loaders';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
-declare const WA: any;
 declare const state: any;
-declare var lastSelectionText: string;
+declare let lastSelectionText: string;
 declare function showToast(msg: string, type?: string, duration?: number): void;
 declare function $(id: string): any;
 declare function _csrfFetch(url: string, opts?: RequestInit): Promise<Response>;
@@ -12,10 +13,11 @@ declare function _expandWAPanel(): void;
 declare function _initWorkspaceAiRuntimes(): void;
 declare function _hideWelcome(): void;
 declare function _setStreamBtn(isLoading: boolean): void;
-declare var _waTaskDispatcher: any;
-declare var _waConversationRuntime: any;
-declare function _updatePdfZoomUI(pct: number): void;
-declare var pdfjsLib: any;
+declare let _waTaskDispatcher: any;
+declare let _waConversationRuntime: any;
+declare let pdfjsLib: any;
+
+const workspaceApi = getWorkspaceApi();
 
 export class KotoPdfViewer implements WorkspaceEditor {
     constructor() {
@@ -139,7 +141,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         // Estimate page size for placeholders (use page 1)
         const firstPage = await pdf.getPage(1);
         const baseVP = firstPage.getViewport({ scale: 1 });
-        const containerW = (c.clientWidth || 800) - 32;
+        const containerW = Math.max(240, (c.clientWidth || c.getBoundingClientRect?.().width || 800) - 32);
         const dpr = window.devicePixelRatio || 1;
         this._quality = Math.max(2, dpr);
         this._containerW = containerW;
@@ -167,18 +169,21 @@ export class KotoPdfViewer implements WorkspaceEditor {
 
         // Disconnect old observer and set up new one
         if (this._observer) this._observer.disconnect();
-        this._observer = new IntersectionObserver(
-          (entries) => entries.forEach(en => {
-            if (en.isIntersecting) {
-              const pg = parseInt(en.target.dataset.page, 10);
-              if (pg && !this._renderedPgs.has(pg)) {
-                this._renderPage(pg);
+        if (typeof IntersectionObserver !== 'undefined') {
+          this._observer = new IntersectionObserver(
+            (entries) => entries.forEach(en => {
+              if (en.isIntersecting) {
+                const pg = parseInt(en.target.dataset.page, 10);
+                if (pg && !this._renderedPgs.has(pg)) {
+                  this._renderPage(pg);
+                }
               }
-            }
-          }),
-          { root: c, rootMargin: '300px 0px 300px 0px', threshold: 0 }
-        );
-        c.querySelectorAll('.wa-pdf-page-wrap').forEach(el => this._observer.observe(el));
+            }),
+            { root: c, rootMargin: '300px 0px 300px 0px', threshold: 0 }
+          );
+          c.querySelectorAll('.wa-pdf-page-wrap').forEach(el => this._observer.observe(el));
+        }
+        this._scheduleVisiblePageRenderPasses();
 
         // Build sidebar
         this._buildThumbs();
@@ -190,6 +195,41 @@ export class KotoPdfViewer implements WorkspaceEditor {
       } catch (e) {
         console.error('[KotoPdfViewer] render error:', e);
         c.innerHTML = `<div style="color:var(--danger);padding:16px">PDF 渲染报错: ${e.message}</div>`;
+      }
+    }
+
+    _scheduleVisiblePageRenderPasses() {
+      this._renderVisiblePagesNow();
+      requestAnimationFrame(() => this._renderVisiblePagesNow());
+      setTimeout(() => this._renderVisiblePagesNow(), 120);
+      setTimeout(() => this._renderVisiblePagesNow(), 500);
+    }
+
+    _renderVisiblePagesNow() {
+      const c = $(this.containerId);
+      if (!c || !this._pdfDoc) return;
+      const wraps = Array.from(c.querySelectorAll('.wa-pdf-page-wrap'));
+      if (!wraps.length) return;
+
+      const rootRect = c.getBoundingClientRect?.();
+      const hasViewport = rootRect && rootRect.width > 0 && rootRect.height > 0;
+      const margin = 300;
+      let renderedAny = false;
+
+      wraps.forEach((wrap) => {
+        const pg = parseInt(wrap.dataset.page, 10);
+        if (!pg || this._renderedPgs.has(pg)) return;
+        if (!hasViewport) return;
+        const rect = wrap.getBoundingClientRect();
+        const visible = rect.bottom >= rootRect.top - margin && rect.top <= rootRect.bottom + margin;
+        if (visible) {
+          renderedAny = true;
+          this._renderPage(pg);
+        }
+      });
+
+      if (!renderedAny && !this._renderedPgs.has(1)) {
+        this._renderPage(1);
       }
     }
 
@@ -322,7 +362,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
       try {
         const tc = await page.getTextContent();
         this._textContent[pageNum] = tc.items.map(it => it.str).join(' ');
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     // ─── _buildThumbs ────────────────────────────────────────────────────────
@@ -372,7 +412,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         canvas.style.width  = Math.floor(vp.width) + 'px';
         canvas.style.height = Math.floor(vp.height) + 'px';
         await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     _drawThumbForPage(pageNum, page, baseViewport) {
@@ -516,6 +556,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
           c.querySelectorAll('.wa-pdf-page-wrap').forEach(el => this._observer.observe(el));
         }
       }
+      this._scheduleVisiblePageRenderPasses();
     }
 
     // ─── Sidebar tab switch ───────────────────────────────────────────────────
@@ -701,7 +742,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
           if (isCurrent) rect.classList.add('current');
           svg.appendChild(rect);
         });
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     _clearSearchHighlights() {
@@ -1243,7 +1284,9 @@ export class KotoPdfViewer implements WorkspaceEditor {
 
       menu.querySelector('#wa-annt-explain').addEventListener('click', () => {
         menu.remove();
-        if (annot.text) WA.sendCustomMessage(`请解释以下内容：\n\n"${annot.text}"`);
+        if (annot.text && typeof workspaceApi.sendCustomMessage === 'function') {
+          workspaceApi.sendCustomMessage(`请解释以下内容：\n\n"${annot.text}"`);
+        }
       });
       menu.querySelector('#wa-annt-del').addEventListener('click', () => {
         menu.remove();
@@ -1278,7 +1321,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
       popup.style.top  = (iy - 20) + 'px';
 
       popup.innerHTML = `
-        <div class="wa-pdf-note-header" onmousedown="WA._pdfDragNote(event, this.parentElement)">
+        <div class="wa-pdf-note-header" data-wa-pdf-note-drag>
           <span>便笺</span>
           <button class="wa-pdf-note-close" onmousedown="event.stopPropagation()">✕</button>
         </div>
@@ -1287,6 +1330,10 @@ export class KotoPdfViewer implements WorkspaceEditor {
           <button class="wa-pdf-note-save">保存</button>
         </div>`;
 
+      popup.querySelector('[data-wa-pdf-note-drag]')?.addEventListener('mousedown', (event) => {
+        _pdfDragNote(event, popup);
+      });
+      popup.querySelector('.wa-pdf-note-close').addEventListener('mousedown', (event) => event.stopPropagation());
       popup.querySelector('.wa-pdf-note-close').addEventListener('click', () => {
         popup.remove(); annot._open = false;
       });
@@ -1349,7 +1396,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
           // Re-render all loaded pages
           this._renderedPgs.forEach(pg => this._renderAnnotationsOnPage(pg));
         }
-      } catch (_) {}
+      } catch (e) { console.warn("[Koto]", e) }
     }
 
     _normalizeTextWithMap(text) {
@@ -1387,7 +1434,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
               : []);
           const normalized = list.map((item) => this._normalizeAiAnnotationSuggestion(item)).filter(Boolean);
           if (normalized.length) return normalized;
-        } catch (_) {}
+        } catch (e) { console.warn("[Koto]", e) }
       }
       return [];
     }
@@ -1731,9 +1778,6 @@ export class KotoPdfViewer implements WorkspaceEditor {
       annotBtns.forEach((el: HTMLElement) => { el.style.display = 'none'; });
     }
   }
-(window as any).KotoPdfViewer = KotoPdfViewer;
-(window as any).WA = (window as any).WA || {};
-
 function _pdfActiveEditor(): any {
   return state && state.activeEditor ? state.activeEditor : null;
 }
@@ -1760,7 +1804,7 @@ async function _pdfPageMgrRenderThumb(ed: any, pageNum: number, canvas: HTMLCanv
     canvas.width = vp.width;
     canvas.height = vp.height;
     await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
-  } catch (_) {}
+  } catch (e) { console.warn("[Koto]", e) }
 }
 
 function _setupPageMgrDrag(card: HTMLElement): void {
@@ -1811,10 +1855,17 @@ function _pdfPageMgrBuild(ed: any): void {
       <div class="wa-pmgr-rotation-badge"></div>
       <div class="wa-pmgr-label">第 ${pageNum} 页</div>
       <div class="wa-pmgr-controls">
-        <div class="wa-pmgr-ctrl-btn" title="顺时针旋转 90°" onclick="WA._pdfPageMgrRotate(this.closest('.wa-pmgr-card'), 90)">↻</div>
-        <div class="wa-pmgr-ctrl-btn" title="逆时针旋转 90°" onclick="WA._pdfPageMgrRotate(this.closest('.wa-pmgr-card'), -90)">↺</div>
-        <div class="wa-pmgr-ctrl-btn" title="删除此页" onclick="WA._pdfPageMgrDelete(this.closest('.wa-pmgr-card'))">✕</div>
+        <div class="wa-pmgr-ctrl-btn" title="顺时针旋转 90°" data-wa-pdf-page-action="rotate" data-delta="90">↻</div>
+        <div class="wa-pmgr-ctrl-btn" title="逆时针旋转 90°" data-wa-pdf-page-action="rotate" data-delta="-90">↺</div>
+        <div class="wa-pmgr-ctrl-btn" title="删除此页" data-wa-pdf-page-action="delete">✕</div>
       </div>`;
+    card.querySelectorAll<HTMLElement>('[data-wa-pdf-page-action]').forEach((control) => {
+      control.addEventListener('click', () => {
+        const action = control.dataset.waPdfPageAction;
+        if (action === 'rotate') pdfPageMgrRotate(card, Number(control.dataset.delta) || 0);
+        if (action === 'delete') pdfPageMgrDelete(card);
+      });
+    });
     const checkbox = card.querySelector('.wa-pmgr-check') as HTMLInputElement | null;
     if (checkbox) checkbox.addEventListener('change', () => card.classList.toggle('selected', checkbox.checked));
     _setupPageMgrDrag(card);
@@ -1828,87 +1879,87 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   return grid ? Array.from(grid.querySelectorAll(selector)) as HTMLElement[] : [];
 }
 
-(window as any).WA.pdfZoom = (value: string | number) => {
+const pdfZoom = (value: string | number) => {
   const ed = _pdfActiveEditor();
   const pct = parseInt(String(value), 10);
   if (ed && typeof ed.setZoom === 'function' && Number.isFinite(pct)) ed.setZoom(pct);
 };
-(window as any).WA.pdfSidebarTab = (btn: HTMLElement) => {
+const pdfSidebarTab = (btn: HTMLElement) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.sidebarTab === 'function') ed.sidebarTab(btn);
 };
-(window as any).WA.pdfToggleSidebar = () => {
+const pdfToggleSidebar = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.toggleSidebar === 'function') ed.toggleSidebar();
 };
-(window as any).WA.pdfAnnotMode = (mode: string) => {
+const pdfAnnotMode = (mode: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.setAnnotMode === 'function') ed.setAnnotMode(mode);
 };
-(window as any).WA.pdfAnnotColor = (hex: string) => {
+const pdfAnnotColor = (hex: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.setAnnotColor === 'function') ed.setAnnotColor(hex);
 };
-(window as any).WA.pdfAnnotOpen = () => {
+const pdfAnnotOpen = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.annotOpen === 'function') ed.annotOpen();
 };
-(window as any).WA.pdfAnnotClose = () => {
+const pdfAnnotClose = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.annotClose === 'function') ed.annotClose();
 };
-(window as any).WA.pdfAnnotateSelection = (type: string) => {
+const pdfAnnotateSelection = (type: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.annotateSelection === 'function') ed.annotateSelection(type);
 };
-(window as any).WA.pdfSaveAnnotations = () => {
+const pdfSaveAnnotations = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.saveAnnotations === 'function') ed.saveAnnotations();
 };
-(window as any).WA.pdfAIAnnotate = () => {
+const pdfAIAnnotate = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.aiAnnotate === 'function') ed.aiAnnotate();
 };
-(window as any).WA.pdfLineWidth = (width: string | number) => {
+const pdfLineWidth = (width: string | number) => {
   const ed = _pdfActiveEditor();
   if (ed) ed._annotLineWidth = parseFloat(String(width)) || 2;
 };
-(window as any).WA.pdfRemoveWatermark = () => {
+const pdfRemoveWatermark = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.pdfRemoveWatermark === 'function') ed.pdfRemoveWatermark();
 };
-(window as any).WA.pdfWatermarkClose = () => {
+const pdfWatermarkClose = () => {
   const overlay = document.getElementById('wa-pdf-watermark-overlay');
   if (overlay) {
     overlay.style.display = 'none';
     overlay.classList.remove('open');
   }
 };
-(window as any).WA.pdfSearchOpen = () => {
+const pdfSearchOpen = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchOpen === 'function') ed.searchOpen();
 };
-(window as any).WA.pdfSearchClose = () => {
+const pdfSearchClose = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchClose === 'function') ed.searchClose();
 };
-(window as any).WA.pdfSearchInput = (value: string) => {
+const pdfSearchInput = (value: string) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchInput === 'function') ed.searchInput(value);
 };
-(window as any).WA.pdfSearchKeydown = (event: KeyboardEvent) => {
+const pdfSearchKeydown = (event: KeyboardEvent) => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchKeydown === 'function') ed.searchKeydown(event);
 };
-(window as any).WA.pdfSearchNext = () => {
+const pdfSearchNext = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchNext === 'function') ed.searchNext();
 };
-(window as any).WA.pdfSearchPrev = () => {
+const pdfSearchPrev = () => {
   const ed = _pdfActiveEditor();
   if (ed && typeof ed.searchPrev === 'function') ed.searchPrev();
 };
-(window as any).WA.pdfPageMgrOpen = () => {
+const pdfPageMgrOpen = () => {
   const ed = _pdfActiveEditor();
   if (!ed || !_pdfDocumentForEditor(ed)) {
     showToast('请先打开一个 PDF 文件', 'warning');
@@ -1919,11 +1970,11 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   mgr.style.display = 'flex';
   _pdfPageMgrBuild(ed);
 };
-(window as any).WA.pdfPageMgrClose = () => {
+const pdfPageMgrClose = () => {
   const mgr = document.getElementById('wa-pdf-pagemgr');
   if (mgr) mgr.style.display = 'none';
 };
-(window as any).WA.pdfPageMgrApply = async () => {
+const pdfPageMgrApply = async () => {
   if (!state.fileId) return;
   const pages = _pdfPageMgrCards('.wa-pmgr-card:not(.deleted)').map((card) => ({
     orig_page: parseInt(card.dataset.origPage || '0', 10),
@@ -1941,13 +1992,13 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
       throw new Error(error.error || response.statusText);
     }
     _downloadPdfBlob(await response.blob(), state.fileName || 'modified.pdf');
-    (window as any).WA.pdfPageMgrClose();
+    pdfPageMgrClose();
     showToast('页面更改已导出', 'success');
   } catch (error: any) {
     showToast('操作失败: ' + (error && error.message ? error.message : error), 'error');
   }
 };
-(window as any).WA.pdfPageMgrExport = async () => {
+const pdfPageMgrExport = async () => {
   if (!state.fileId) return;
   const pages = _pdfPageMgrCards('.wa-pmgr-card.selected:not(.deleted)').map((card) => ({
     orig_page: parseInt(card.dataset.origPage || '0', 10),
@@ -1975,7 +2026,7 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
     showToast('导出失败: ' + (error && error.message ? error.message : error), 'error');
   }
 };
-(window as any).WA._pdfPageMgrRotate = (card: HTMLElement, delta: number) => {
+const pdfPageMgrRotate = (card: HTMLElement, delta: number) => {
   if (!card) return;
   const current = parseInt(card.dataset.rotation || '0', 10);
   const next = ((current + delta) % 360 + 360) % 360;
@@ -1988,13 +2039,13 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   const canvas = card.querySelector('canvas') as HTMLElement | null;
   if (canvas) canvas.style.transform = `rotate(${next}deg)`;
 };
-(window as any).WA._pdfPageMgrDelete = (card: HTMLElement) => {
+const pdfPageMgrDelete = (card: HTMLElement) => {
   if (!card) return;
   card.classList.toggle('deleted');
   const label = card.querySelector('.wa-pmgr-label') as HTMLElement | null;
   if (label) label.textContent = card.classList.contains('deleted') ? '已删除' : `第 ${card.dataset.origPage} 页`;
 };
-(window as any).WA.pdfConvertMenu = (btn: HTMLElement) => {
+const pdfConvertMenu = (btn: HTMLElement) => {
   const menu = document.getElementById('wa-pdf-convert-menu');
   if (!menu) return;
   const visible = menu.style.display !== 'none';
@@ -2010,7 +2061,7 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
     document.addEventListener('mousedown', close);
   }
 };
-(window as any).WA.pdfConvert = async (targetFormat: string) => {
+const pdfConvert = async (targetFormat: string) => {
   const menu = document.getElementById('wa-pdf-convert-menu');
   if (menu) menu.style.display = 'none';
   if (!state.fileId) {
@@ -2039,7 +2090,7 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   }
 };
 
-(window as any).WA._pdfDragNote = function(event, popup) {
+function _pdfDragNote(event: MouseEvent, popup: HTMLElement): void {
   const startX = event.clientX, startY = event.clientY;
   const startLeft = parseFloat(popup.style.left), startTop = parseFloat(popup.style.top);
   const onMove = (e) => {
@@ -2052,4 +2103,35 @@ function _pdfPageMgrCards(selector: string): HTMLElement[] {
   };
   document.addEventListener('mousemove', onMove);
   document.addEventListener('mouseup', onUp);
-};
+}
+
+publishWorkspaceApi({
+  pdfZoom,
+  pdfSidebarTab,
+  pdfToggleSidebar,
+  pdfAnnotMode,
+  pdfAnnotColor,
+  pdfAnnotOpen,
+  pdfAnnotClose,
+  pdfAnnotateSelection,
+  pdfSaveAnnotations,
+  pdfAIAnnotate,
+  pdfLineWidth,
+  pdfRemoveWatermark,
+  pdfWatermarkClose,
+  pdfSearchOpen,
+  pdfSearchClose,
+  pdfSearchInput,
+  pdfSearchKeydown,
+  pdfSearchNext,
+  pdfSearchPrev,
+  pdfPageMgrOpen,
+  pdfPageMgrClose,
+  pdfPageMgrApply,
+  pdfPageMgrExport,
+  _pdfPageMgrRotate: pdfPageMgrRotate,
+  _pdfPageMgrDelete: pdfPageMgrDelete,
+  pdfConvertMenu,
+  pdfConvert,
+  _pdfDragNote,
+});

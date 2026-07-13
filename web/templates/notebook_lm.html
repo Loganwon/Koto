@@ -154,8 +154,16 @@
                 addSystemMessage(`📤 正在上传并解析 ${file.name}...`);
                 
                 try {
+                    const csrfResponse = await fetch('/api/csrf-token', {
+                        credentials: 'same-origin',
+                        cache: 'no-store'
+                    });
+                    const csrfPayload = csrfResponse.ok ? await csrfResponse.json() : {};
+                    const csrfToken = csrfPayload.csrf_token || csrfPayload.token || '';
                     const response = await fetch('/api/notebook/upload', {
                         method: 'POST',
+                        credentials: 'same-origin',
+                        headers: csrfToken ? { 'X-CSRFToken': csrfToken } : {},
                         body: formData
                     });
                     const data = await response.json();

@@ -46,6 +46,21 @@ def _open_settings(page) -> None:
     page.wait_for_timeout(400)
 
 
+def _settings_json(page, base_url: str) -> dict:
+    resp = page.request.get(f"{base_url}/api/settings")
+    assert resp.ok, f"GET /api/settings failed: {resp.status}"
+    return resp.json()
+
+
+def _toggle_setting_checkbox(page, checkbox_id: str, checked: bool) -> None:
+    checkbox = page.locator(f"#{checkbox_id}")
+    assert checkbox.count() == 1, f"Missing #{checkbox_id}"
+    if checkbox.is_checked() == checked:
+        return
+    page.locator(f"#{checkbox_id} + .toggle-slider").click()
+    page.wait_for_timeout(500)
+
+
 # ── tests ────────────────────────────────────────────────────────────────
 
 
@@ -123,6 +138,51 @@ def test_settings_panel_opens(e2e_page, e2e_base_url, console_errors):
         )
         assert not has_active_after, "Settings panel still active after close"
 
+    assert (
+        _filter_errors(console_errors) == []
+    ), f"JS errors: {_filter_errors(console_errors)}"
+
+
+@pytest.mark.e2e
+def test_settings_persist_to_backend_from_ui(e2e_page, e2e_base_url, console_errors):
+    """Settings toggles and zoom controls must update /api/settings, not just the DOM."""
+    _navigate_and_wait(e2e_page, e2e_base_url)
+    original = _settings_json(e2e_page, e2e_base_url)
+    original_task_type = bool(original.get("ai", {}).get("show_task_type"))
+    original_zoom = str(original.get("appearance", {}).get("ui_zoom", "1"))
+
+    _open_settings(e2e_page)
+    try:
+        _toggle_setting_checkbox(
+            e2e_page, "settingShowTaskType", not original_task_type
+        )
+        changed = _settings_json(e2e_page, e2e_base_url)
+        assert changed.get("ai", {}).get("show_task_type") is (not original_task_type)
+
+        zoom_target = "110%" if original_zoom in {"1", "1.0", "1.00"} else "100%"
+        e2e_page.locator(".fs-preset-btn", has_text=zoom_target).click()
+        e2e_page.wait_for_timeout(500)
+        zoomed = _settings_json(e2e_page, e2e_base_url)
+        expected_zoom = "1.1" if zoom_target == "110%" else "1"
+        assert str(zoomed.get("appearance", {}).get("ui_zoom")) == expected_zoom
+    finally:
+        _toggle_setting_checkbox(e2e_page, "settingShowTaskType", original_task_type)
+        restore_zoom = (
+            "100%"
+            if original_zoom in {"1", "1.0", "1.00"}
+            else f"{round(float(original_zoom) * 100):.0f}%"
+        )
+        preset = e2e_page.locator(".fs-preset-btn", has_text=restore_zoom)
+        if preset.count():
+            preset.click()
+            e2e_page.wait_for_timeout(500)
+
+    restored = _settings_json(e2e_page, e2e_base_url)
+    assert restored.get("ai", {}).get("show_task_type") is original_task_type
+    assert str(restored.get("appearance", {}).get("ui_zoom")) in {
+        original_zoom,
+        original_zoom.rstrip(".0") or "1",
+    }
     assert (
         _filter_errors(console_errors) == []
     ), f"JS errors: {_filter_errors(console_errors)}"
@@ -292,8 +352,10 @@ def test_keyboard_shortcuts(e2e_page, e2e_base_url, console_errors):
             e2e_page.keyboard.press("Escape")
             e2e_page.wait_for_timeout(300)
 
-    # ── Enter in message input: should not crash (no text = no send) ──
-    msg_input = e2e_page.locator("#messageInput")
+    # ── Enter in the active assistant input should not crash (no text = no send) ──
+    msg_input = e2e_page.locator("#wa-user-input")
+    if msg_input.count() == 0 or not msg_input.is_visible():
+        msg_input = e2e_page.locator("#messageInput")
     if msg_input.count() > 0 and msg_input.is_visible():
         msg_input.focus()
         e2e_page.keyboard.press("Enter")

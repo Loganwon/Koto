@@ -13,6 +13,7 @@ work_file_library.py — Koto 工作文件库
 from __future__ import annotations
 
 import logging
+from web.shared import human_size, human_time
 import os
 import re
 import sqlite3
@@ -463,9 +464,9 @@ class WorkFileLibrary:
                     "ext": row["ext"],
                     "category": row["category"],
                     "size": row["size"],
-                    "size_str": _human_size(row["size"]),
+                    "size_str": human_size(row["size"]),
                     "mtime": row["mtime"],
-                    "mtime_str": _human_time(row["mtime"]),
+                    "mtime_str": human_time(row["mtime"]),
                     "score": round(score, 3),
                 }
             )
@@ -488,9 +489,9 @@ class WorkFileLibrary:
                     "ext": r["ext"],
                     "category": r["category"],
                     "size": r["size"],
-                    "size_str": _human_size(r["size"]),
+                    "size_str": human_size(r["size"]),
                     "mtime": r["mtime"],
-                    "mtime_str": _human_time(r["mtime"]),
+                    "mtime_str": human_time(r["mtime"]),
                 }
                 for r in rows
                 if os.path.exists(r["path"])
@@ -517,16 +518,10 @@ class WorkFileLibrary:
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _human_size(size: int) -> str:
-    if size < 1024:
-        return f"{size} B"
-    if size < 1_048_576:
-        return f"{size / 1024:.1f} KB"
-    return f"{size / 1_048_576:.1f} MB"
 
 
-def _human_time(ts: float) -> str:
-    return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+
+
 
 
 # ── Category detection from user input ───────────────────────────────────────

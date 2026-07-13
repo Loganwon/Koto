@@ -145,6 +145,50 @@ def test_recipe_selects_generic_file_format_convert():
     assert match.recipe.matched_capabilities == ("convert_file",)
 
 
+def test_recipe_does_not_treat_frontend_status_output_as_file_convert():
+    task = (
+        "请完整读取并复核 service_agreement_v1.docx、service_agreement_v2.docx、renewal_budget.xlsx "
+        "和当前目标报告 service_agreement_full_test_20260628.docx，核验条款差异、预算一致性表、"
+        "风险矩阵、谈判建议和最终核验结论是否完整覆盖。必须写回当前目标 DOCX，"
+        "不要修改另外三个源文件，不要中途询问确认；写入后请再次核验目标文件段落数、"
+        "表格数和章节完整性，并在前端输出完成状态。"
+    )
+    request = FileTaskRequest(
+        task=task,
+        target_path="service_agreement_full_test_20260628.docx",
+        files=[
+            FileTaskFile(
+                path="service_agreement_v1.docx",
+                name="service_agreement_v1.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="service_agreement_v2.docx",
+                name="service_agreement_v2.docx",
+                type="docx",
+            ),
+            FileTaskFile(
+                path="renewal_budget.xlsx", name="renewal_budget.xlsx", type="xlsx"
+            ),
+            FileTaskFile(
+                path="service_agreement_full_test_20260628.docx",
+                name="service_agreement_full_test_20260628.docx",
+                type="docx",
+                target=True,
+            ),
+        ],
+    )
+
+    markers = semantic_markers(
+        task, file_types={"docx", "xlsx"}, target_file_type="docx"
+    )
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert markers["file_format_convert_request"] is False
+    assert match is not None
+    assert match.recipe.id == "docx_report_table_write"
+
+
 def test_recipe_selects_docx_clear_review_marks_without_annotation_bridge():
     request = FileTaskRequest(
         task="清除这个 Word 文档里的所有批注和修订",
@@ -187,6 +231,16 @@ def test_recipe_selects_spreadsheet_cell_write():
     assert match is not None
     assert match.recipe.id == "spreadsheet_cell_write"
     assert "write_sheet_data" in match.recipe.matched_capabilities
+
+
+def test_semantic_markers_treat_specific_chart_types_as_chart_requests():
+    markers = semantic_markers(
+        "生成一个包含 profit 列和月度 profit 折线图的 Excel 文件",
+        file_types={"xlsx"},
+        target_file_type="xlsx",
+    )
+
+    assert markers["chart_request"] is True
 
 
 def test_recipe_selects_text_selection_replace():
@@ -448,6 +502,10 @@ def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
         "docx_pdf_export": {"docx_pdf_export_uses_converter"},
         "docx_clear_review_marks": {"docx_clear_review_uses_cleanup_tool"},
         "docx_chart_report": {"docx_chart_request_has_image"},
+        "docx_report_table_write": {
+            "docx_report_has_narrative",
+            "docx_table_request_has_table",
+        },
         "docx_report_write": {"docx_report_has_narrative"},
         "spreadsheet_cell_write": {"spreadsheet_write_has_cells"},
         "workspace_file_copy": {"workspace_file_copy_uses_copy_tool"},

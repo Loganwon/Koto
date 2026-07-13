@@ -1,6 +1,11 @@
 // Workspace bundle entry — imports all workspace, editors, and ui modules
 // Order: infrastructure → state → everything else (depends on WA namespace)
 
+import { installErrorBoundary } from '../shared/error-boundary';
+import { getWorkspaceApi } from '../shared/workspace-api';
+installErrorBoundary();
+getWorkspaceApi();
+
 import { installFrontendObserver } from '../mcp/frontend-observer';
 
 installFrontendObserver();
@@ -9,13 +14,18 @@ installFrontendObserver();
 import { $, showToast, _escHtml, _fileIcon, _CHAT_SVG, _PIN_SVG, _CLIPBOARD_SVG } from '../workspace/infrastructure';
 import { state } from '../workspace/state';
 
+// Shared entrypoint for welcome cards, skills, and other cross-feature input.
+import '../workspace/primary-composer';
+
+// AI context must be installed before file-tree action buttons can attach files.
+import '../workspace/ai-context';
+
 // File system
 import '../workspace/fs-tree';
 import '../workspace/fs-context-menu';
 import '../workspace/fs-actions';
 
 // AI / task modules
-import '../workspace/ai-context';
 import '../workspace/ai-review';
 import '../workspace/model-settings';
 import '../workspace/task-runner';
@@ -40,15 +50,13 @@ import '../ui/panel-layout';
 import '../ui/selection-toolbar';
 import '../ui/docx-pptx-toolbar';
 
-// Editors
+// Editors ? heavy ones are lazy-loaded via editors/lazy-loaders.ts
 import '../editors/types';
 import '../editors/cdn-loaders';
 import '../editors/docx-outline';
-import '../editors/xlsx-editor';
-import '../editors/pptx-editor';
-import '../editors/pdf-viewer';
-import '../editors/image-viewer';
 import '../editors/text-editor';
+// PPTX, PDF, XLSX, Image viewers are loaded on demand
+import '../editors/lazy-loaders';
 
 // File mounting must load after editor classes are registered.
 import '../workspace/file-open';
@@ -63,24 +71,23 @@ import '../workspace/docx-review-runtime';
 // published their WA entry points.
 function _autoInitEmbedded(): void {
   if (!document.getElementById('workspaceView')) return;
-  const WA = (window as any).WA;
-  if (!WA) return;
+  const workspaceApi = getWorkspaceApi();
 
-  if (typeof WA.installWorkspaceFindReplace === 'function') {
-    WA.installWorkspaceFindReplace({
+  if (typeof workspaceApi.installWorkspaceFindReplace === 'function') {
+    workspaceApi.installWorkspaceFindReplace({
       getActiveEditor: () => state.activeEditor,
       showToast,
       pptxNav: (delta: number) => {
-        if (typeof WA.pptxNav === 'function') WA.pptxNav(delta);
+        if (typeof workspaceApi.pptxNav === 'function') workspaceApi.pptxNav(delta);
       },
       scheduleAutoSave: () => {
-        if (typeof WA.scheduleAutoSave === 'function') WA.scheduleAutoSave();
+        if (typeof workspaceApi.scheduleAutoSave === 'function') workspaceApi.scheduleAutoSave();
       },
     });
   }
 
-  if (typeof WA.installWorkspaceNotebookTools === 'function') {
-    WA.installWorkspaceNotebookTools({
+  if (typeof workspaceApi.installWorkspaceNotebookTools === 'function') {
+    workspaceApi.installWorkspaceNotebookTools({
       $,
       getFiles: () => (state as any)._aiFileContext || [],
       getSessionId: () => {

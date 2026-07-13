@@ -6,18 +6,20 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 from app.core.agent._file_task_stepwise_helpers import (
+    explicit_pdf_letter_window,
+    explicit_pdf_page_window,
     looks_like_windowed_pdf_task,
     stepwise_docx_polish_step_index,
     stepwise_docx_polish_window_paragraphs,
     stepwise_pdf_step_index,
     stepwise_pdf_window_pages,
 )
-from app.core.agent.file_task_checkpoint_options import workflow_checkpoint_from_options
 from app.core.agent.file_task_contract import (
     FileTaskClassification,
     FileTaskFile,
     FileTaskRequest,
 )
+from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.agent.file_task_tool_catalog import is_write_tool
 
 
@@ -105,19 +107,37 @@ def _int_or_zero(value: Any) -> int:
 
 
 def _pdf_window(request: FileTaskRequest, file_info: FileTaskFile) -> Dict[str, Any]:
-    size = stepwise_pdf_window_pages(request)
-    step_index = stepwise_pdf_step_index(request)
-    start = 1 + step_index * size
-    end = start + size - 1
+    explicit_letter_window = explicit_pdf_letter_window(request)
+    if explicit_letter_window:
+        start = int(explicit_letter_window["start"])
+        end = int(explicit_letter_window["end"])
+        size = max(1, end - start + 1)
+        step_index = 0
+        unit = "pdf_letter"
+        strategy = "letter_window"
+    elif explicit_window := explicit_pdf_page_window(request):
+        start = int(explicit_window["start"])
+        end = int(explicit_window["end"])
+        size = max(1, end - start + 1)
+        step_index = 0
+        unit = "page"
+        strategy = "explicit_page_window"
+    else:
+        size = stepwise_pdf_window_pages(request)
+        step_index = stepwise_pdf_step_index(request)
+        start = 1 + step_index * size
+        end = start + size - 1
+        unit = "page"
+        strategy = "page_window"
     return {
         "file_type": "pdf",
         "path": file_info.path or file_info.name,
-        "unit": "page",
+        "unit": unit,
         "window_size": size,
         "step_index": step_index,
         "current": {"start": start, "end": end},
         "next": {"start": end + 1, "end": end + size},
-        "strategy": "page_window",
+        "strategy": strategy,
     }
 
 
@@ -187,6 +207,8 @@ def large_file_windows(
         suffix = _file_type(file_info)
         if suffix == "pdf" and (
             has_resume_control
+            or explicit_pdf_letter_window(request)
+            or explicit_pdf_page_window(request)
             or looks_like_windowed_pdf_task(request, dict(recipe_skeleton))
         ):
             windows.append(_pdf_window(request, file_info))
@@ -611,6 +633,7 @@ def request_with_workflow_checkpoint(request: FileTaskRequest) -> FileTaskReques
             model_id=request.model_id,
             history=list(request.history),
             options=normalized_options,
+            routing_decision=request.routing_decision,
         )
     resume_control = {
         "adapter": str(checkpoint.get("adapter") or "generic_tool_loop").strip(),
@@ -651,6 +674,7 @@ def request_with_workflow_checkpoint(request: FileTaskRequest) -> FileTaskReques
         model_id=request.model_id,
         history=list(request.history),
         options=normalized_options,
+        routing_decision=request.routing_decision,
     )
 
 
@@ -683,6 +707,14 @@ def window_read_args_for_file(
                 "max_chars": min(default_max_chars, 9000),
                 "start_page": int(current.get("start") or 1),
                 "end_page": int(current.get("end") or current.get("start") or 1),
+            }
+        if unit == "pdf_letter":
+            return {
+                "path": path,
+                "max_chars": min(max(default_max_chars * 2, default_max_chars), 24_000),
+                "window_unit": "pdf_letter",
+                "start": int(current.get("start") or 1),
+                "end": int(current.get("end") or current.get("start") or 1),
             }
         if unit in {"paragraph", "slide"}:
             return {

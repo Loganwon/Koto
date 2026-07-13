@@ -34,7 +34,7 @@ import os
 
 from flask import Blueprint, Response, jsonify, request, send_file, stream_with_context
 
-from web.runtime_context import (
+from web.runtime_services import (
     get_batch_ops_manager,
     get_file_analyzer,
     get_file_organizer,
@@ -735,7 +735,7 @@ def compare_ai_stream() -> Response:
             if not prompt:
                 yield "data: " + json.dumps({"error": "无法构建分析 prompt"}) + "\n\n"
                 return
-            model_id = "gemini-2.5-flash"
+            model_id = "deepseek-chat"
             try:
                 for chunk in client.models.generate_content_stream(
                     model=model_id, contents=prompt

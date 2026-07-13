@@ -30,7 +30,7 @@ Deep Research Agent
     agent = DeepResearchAgent(
         llm_provider=get_llm_provider(),
         tool_registry=registry,          # 需已注册 web_search
-        model_id="gemini-2.5-flash",
+        model_id="deepseek-chat",
         max_rounds=3,
         queries_per_round=4,
     )
@@ -160,7 +160,7 @@ class DeepResearchAgent:
         self,
         llm_provider,
         tool_registry=None,
-        model_id: str = "gemini-2.5-flash",
+        model_id: str = "deepseek-chat",
         max_rounds: int = _DEFAULT_MAX_ROUNDS,
         queries_per_round: int = _DEFAULT_QUERIES_PER_ROUND,
         max_results_per_query: int = _DEFAULT_MAX_RESULTS_PER_Q,
@@ -405,7 +405,7 @@ class DeepResearchAgent:
         evidence = self._build_evidence_summary(results)
         prompt = _SYNTHESIS_PROMPT.format(
             original_query=original_query,
-            evidence=evidence[:12000],  # Gemini 2.5 Flash 支持长上下文
+            evidence=evidence[:12000],
         )
         raw = self._llm_call(prompt, temperature=0.4)
         # 最终报告有害内容检测
@@ -437,15 +437,12 @@ def create_deep_research_agent(
     如依赖不可用则返回 None（降级处理）。
     """
     try:
-        import os
-
         from app.core.agent.factory import create_agent  # noqa: F401
         from app.core.agent.plugins.search_plugin import SearchPlugin
         from app.core.agent.tool_registry import ToolRegistry
-        from app.core.llm.gemini import GeminiProvider
+        from app.core.llm.provider_factory import get_llm_provider
 
-        api_key = os.environ.get("GEMINI_API_KEY", "")
-        llm = GeminiProvider(api_key=api_key)
+        llm = get_llm_provider(provider="deepseek", allow_local_fallback=False)
         registry = ToolRegistry()
         registry.register_plugin(SearchPlugin())
 
