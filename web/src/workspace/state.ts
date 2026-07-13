@@ -194,7 +194,6 @@ export interface WorkspaceState {
   _activeRoute: Record<string, unknown> | null;
   _activeTaskReconnectors: Map<string, any>;
   _localRuntimeModel: string;
-  _hasExplicitModelChoice: boolean;
   _modelChoicePendingMode?: string;
   _modelChoiceUpdatedAt?: number;
   useAgentMode: boolean;
@@ -242,7 +241,9 @@ export const state: WorkspaceState = {
   selectedFiles: new Set(),
   openTabs: [..._WA_EMPTY_WORKSPACE_LAYOUT.open_tabs],
   activeTabPath: _WA_EMPTY_WORKSPACE_LAYOUT.active_tab_path,
-  lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek'),
+  // Runtime settings are server-authoritative.  The old localStorage value
+  // could outlive a settings change and briefly route chat to the wrong mode.
+  lockedModel: 'deepseek',
   _reviewCenterOpen: localStorage.getItem('wa_review_center_open') !== '0',
   _reviewMode: ['all', 'comments', 'proposals'].includes(localStorage.getItem('wa_review_mode') || '')
     ? localStorage.getItem('wa_review_mode') || 'all'
@@ -279,9 +280,6 @@ export const state: WorkspaceState = {
   _activeRoute: null,
   _activeTaskReconnectors: new Map(),
   _localRuntimeModel: '',
-  _hasExplicitModelChoice:
-    localStorage.getItem('wa_model_choice_explicit') === '1' ||
-    _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', '') === 'local',
   useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',
   _aiFileContext: [],
   _aiTargetFileIdx: -1,

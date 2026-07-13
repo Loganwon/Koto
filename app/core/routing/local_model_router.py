@@ -512,6 +512,19 @@ class LocalModelRouter:
     # ══════════════════════════════════════════════════════════════════
 
     @classmethod
+    def _content_model(cls) -> str | None:
+        """Return the user-selected model for content generation when set."""
+        try:
+            from app.core.llm.local_model_runtime import get_configured_local_model_tag
+
+            configured = get_configured_local_model_tag()
+            if configured:
+                return configured
+        except Exception:
+            pass
+        return cls._model_name
+
+    @classmethod
     def call_ollama_chat(
         cls,
         messages: list,
@@ -526,7 +539,7 @@ class LocalModelRouter:
 
         Args:
             messages:   Ollama 格式的消息列表 [{"role": ..., "content": ...}]。
-            model_name: 模型名称；None 时使用已初始化的 ``_model_name``。
+            model_name: 模型名称；None 时优先使用设置中的本地模型。
             fmt:        Ollama ``format`` 字段（如 ``"json"``）；None 表示不限制。
             options:    Ollama ``options`` 字典（temperature / num_predict 等）。
             timeout:    HTTP 超时秒数。
@@ -537,7 +550,7 @@ class LocalModelRouter:
               - 成功时 error 为 None；
               - 失败时 content 为空字符串，error 包含描述。
         """
-        _model = model_name or cls._model_name
+        _model = model_name or cls._content_model()
         if not _model:
             return "", "❌ 无可用模型（请先调用 init_model()）"
 
@@ -924,6 +937,12 @@ class LocalModelRouter:
     _response_model_inited = False
 
     @classmethod
+    def reset_response_model(cls) -> None:
+        """Forget the cached response model after a user settings change."""
+        cls._response_model = None
+        cls._response_model_inited = False
+
+    @classmethod
     def _init_response_model(cls) -> bool:
         """初始化用于响应生成的本地模型"""
         if cls._response_model_inited and cls._response_model:
@@ -942,6 +961,24 @@ class LocalModelRouter:
             return False
 
         if not installed:
+            return False
+
+        # This path generates user-visible content.  It must use the model
+        # chosen in Settings instead of silently applying the response-model
+        # preference list below.
+        try:
+            from app.core.llm.local_model_runtime import get_configured_local_model_tag
+
+            configured = get_configured_local_model_tag()
+        except Exception:
+            configured = ""
+        if configured:
+            if configured in installed:
+                cls._response_model = configured
+                cls._response_model_inited = True
+                logger.info("[LocalModelRouter] 使用配置的响应模型: %s", configured)
+                return True
+            logger.warning("[LocalModelRouter] 配置模型未安装: %s", configured)
             return False
 
         # 优先选择更大的生成模型
@@ -1189,7 +1226,7 @@ class LocalModelRouter:
             resp = requests.post(
                 f"{_OLLAMA_API_BASE}/api/chat",
                 json={
-                    "model": cls._model_name,
+                    "model": cls._content_model(),
                     "messages": [
                         {"role": "system", "content": PLAN_PROMPT},
                         {

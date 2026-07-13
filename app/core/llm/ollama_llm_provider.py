@@ -58,6 +58,12 @@ _KOTO_SKILL_PREAMBLE = """\
 _SKILL_BLOCK_MARKER = "## 🎯 当前激活的 Skills"
 
 
+def _supports_thinking_toggle(model_tag: str) -> bool:
+    """Only send Ollama's ``think`` field to model families known to support it."""
+    normalized = str(model_tag or "").strip().lower()
+    return normalized.startswith("qwen3") or normalized.startswith("qwen-3")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Format helpers
 # ─────────────────────────────────────────────────────────────────────────────
@@ -356,6 +362,17 @@ class OllamaLLMProvider(LLMProvider):
         """
         if self.model:
             return self.model
+        # A user-selected model always wins over the historical automatic
+        # scorer and its process-local cache.  Auto-selection below is only a
+        # first-run fallback before the user has made a selection.
+        try:
+            from app.core.llm.local_model_runtime import get_configured_local_model_tag
+
+            configured = get_configured_local_model_tag()
+            if configured:
+                return configured
+        except Exception:
+            pass
         now = time.time()
         if (
             OllamaLLMProvider._auto_model
@@ -411,6 +428,11 @@ class OllamaLLMProvider(LLMProvider):
         }
         if ollama_tools:
             payload["tools"] = ollama_tools
+        # File-task calls explicitly opt out of Qwen3's long internal reasoning
+        # phase.  Keep the field family-scoped so non-Qwen models keep their
+        # normal Ollama-compatible payload.
+        if kwargs.get("think") is not None and _supports_thinking_toggle(target):
+            payload["think"] = bool(kwargs["think"])
 
         url = f"{self.base_url}/api/chat"
         timeout_seconds = kwargs.get("call_timeout")

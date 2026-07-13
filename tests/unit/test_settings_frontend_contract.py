@@ -47,7 +47,9 @@ def test_settings_controls_have_one_persisted_runtime_path() -> None:
     assert "onBooleanSettingChange(this, 'ai', 'enable_mini_game')" in panel
     assert "export async function onBooleanSettingChange" in settings
     assert "return false;" in settings[settings.index("export async function updateSetting") :]
-    assert "if (localOnly)" in settings[settings.index("export async function onLocalModelChange") :]
+    local_model_change = settings[settings.index("export async function onLocalModelChange") :]
+    assert "body: JSON.stringify({ model_tag: nextModel })" in local_model_change
+    assert "if (localOnly)" not in local_model_change.split("// ── Setup Wizard", 1)[0]
     assert "export function previewUIZoom" in theme
     assert "currentSettings?.appearance?.ui_zoom" in theme
     assert "_systemThemeQuery.addEventListener('change'" in theme

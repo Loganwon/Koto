@@ -71,7 +71,7 @@ export function applySettingsToUI(): void {
   }
 
   const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
-  if (localOnlyEl) { const localOnly = s.ai?.use_local_only === true; localOnlyEl.checked = localOnly; applyLocalOnlyMode(localOnly); }
+  if (localOnlyEl) localOnlyEl.checked = s.ai?.use_local_only === true;
 
   const savedZoom = parseFloat(String(s.appearance?.ui_zoom || '1'));
   if (Number.isFinite(savedZoom) && typeof (window as any).setUIZoom === 'function') {
@@ -227,24 +227,26 @@ export async function onBooleanSettingChange(input: HTMLInputElement, category: 
 }
 
 export function applyLocalOnlyMode(enabled: boolean): void {
-  // Sync window.selectedModel for chat API payloads
-  (window as any).selectedModel = enabled ? 'local' : 'auto';
-  // If switching to local, show the saved model name immediately
-  if (enabled) {
-    const savedModel = (currentSettings?.ai?.local_model || currentSettings?.local_model || '').trim();
-    if (savedModel) {
-      const localModelLabel = document.getElementById('wa-model-mode-local-model');
-      if (localModelLabel) localModelLabel.textContent = savedModel;
-    }
-  }
-  // Sync the workspace chat toggle (WA bridge). Guard against
-  // re-entrant calls that could cause double-switch loops during init.
-  const waCurrentModel = String((window as any)._waLockedModelCache || '').trim();
-  const targetMode = enabled ? 'local' : 'deepseek';
-  if (waCurrentModel === targetMode) return; // already synced, skip
-  const waSetLocked = (window as any).WA?.setLockedModel as ((v: string) => void) | undefined;
-  if (typeof waSetLocked === 'function') waSetLocked(targetMode);
+  // The workspace owns the visible chat-mode control.  Settings only
+  // publishes confirmed server state, avoiding a second mode-switch request.
+  window.dispatchEvent(new CustomEvent('koto:model-mode-changed', {
+    detail: { mode: enabled ? 'local' : 'cloud', source: 'settings' },
+  }));
 }
+
+function syncLocalOnlyControlFromWorkspace(event: Event): void {
+  const mode = String((event as CustomEvent<any>).detail?.mode || '').trim().toLowerCase();
+  if (!mode) return;
+  const enabled = mode === 'local';
+  const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
+  if (localOnlyEl) localOnlyEl.checked = enabled;
+  if (currentSettings) {
+    currentSettings.ai = { ...(currentSettings.ai || {}), use_local_only: enabled };
+    (window as any).currentSettings = currentSettings;
+  }
+}
+
+window.addEventListener('koto:model-mode-changed', syncLocalOnlyControlFromWorkspace);
 
 export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
   const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
@@ -303,13 +305,14 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
     runtimeSwitched = true;
-    if (!await updateSetting('ai', 'use_local_only', enabled)) throw new Error('设置保存失败');
-    applyLocalOnlyMode(enabled);
-    // Directly update chat label with selected model name
-    if (enabled && modelTag) {
-      const localModelLabel = document.getElementById('wa-model-mode-local-model');
-      if (localModelLabel) localModelLabel.textContent = modelTag;
+    if (currentSettings) {
+      currentSettings.ai = { ...(currentSettings.ai || {}), use_local_only: enabled };
+      (window as any).currentSettings = currentSettings;
     }
+    applyLocalOnlyMode(enabled);
+    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
+      detail: { model: data.model || modelTag, source: 'settings' },
+    }));
   } catch (error: any) {
     if (localOnlyEl) localOnlyEl.checked = previousEnabled;
     applyLocalOnlyMode(previousEnabled);
@@ -395,27 +398,28 @@ export async function onLocalModelChange(modelTag: string): Promise<void> {
   if (!nextModel) return;
   try {
     const localOnly = (document.getElementById('settingLocalOnly') as HTMLInputElement | null)?.checked === true;
-    if (localOnly) {
-      const resp = await csrfFetch('/api/local-model/switch', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode: 'local', model_tag: nextModel }),
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
-    }
-    if (!await updateSetting('ai', 'local_model', nextModel)) throw new Error('设置保存失败');
+    // Always use the model-switch endpoint.  It atomically mirrors the
+    // top-level runtime model and ai.local_model while preserving the current
+    // local/cloud mode when no mode is supplied.  Going through updateSetting
+    // here left the runtime source stale whenever local-only was unchecked.
+    const resp = await csrfFetch('/api/local-model/switch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model_tag: nextModel }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型保存失败');
     if (currentSettings) {
       currentSettings.local_model = nextModel;
       currentSettings.ai = { ...(currentSettings.ai || {}), local_model: nextModel };
       (window as any).currentSettings = currentSettings;
     }
+    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
+      detail: { model: data.model || nextModel, source: 'settings' },
+    }));
     if (typeof (window as any).showNotification === 'function') {
       (window as any).showNotification(localOnly ? `已切换本地模型：${nextModel}` : `已保存本地模型：${nextModel}`, 'success', 1800);
     }
-    // Directly update the chat entry local model label
-    const localModelLabel = document.getElementById('wa-model-mode-local-model');
-    if (localModelLabel) localModelLabel.textContent = nextModel;
   } catch (error: any) {
     if (typeof (window as any).showNotification === 'function') (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 3000);
   }

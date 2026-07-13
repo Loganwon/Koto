@@ -178,21 +178,16 @@ def get_llm_provider(
 
 def is_local_mode() -> bool:
     """Return True if user_settings.json has model_mode == local."""
-    try:
-        sm = _get_settings_manager()
-        return str(sm.get_all().get("model_mode") or "").strip().lower() == "local"
-    except Exception:
-        return False
+    from .local_model_runtime import get_configured_model_mode
+
+    return get_configured_model_mode() == "local"
 
 
 def get_local_model_tag() -> str:
     """Return the configured local model tag, or empty string."""
-    try:
-        sm = _get_settings_manager()
-        all_s = sm.get_all()
-        return str(all_s.get("local_model") or (all_s.get("ai") or {}).get("local_model") or "").strip()
-    except Exception:
-        return ""
+    from .local_model_runtime import get_configured_local_model_tag
+
+    return get_configured_local_model_tag()
 
 
 def list_available_providers() -> list[str]:

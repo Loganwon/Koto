@@ -2656,8 +2656,8 @@ class TestLocalModelMode:
         assert "options.handleProposals({" in quick_actions
         assert "sendEditorAction" not in quick_actions
 
-    def test_workspace_model_state_uses_wa_keys_only(self):
-        """Workspace assistant should use wa_* model state only and not write legacy editor_* keys."""
+    def test_workspace_model_state_uses_server_settings_only(self):
+        """Workspace assistant must not retain a competing browser model preference."""
         src = "\n".join(
             [
                 _read_frontend_source("web/src/workspace/model-settings.ts"),
@@ -2671,10 +2671,9 @@ class TestLocalModelMode:
         assert "function _syncEditorModelPreference(" not in src
         assert "editor_model_mode" not in src
         assert "editor_locked_model" not in src
-        assert "localStorage.setItem('wa_locked_model', newModel);" in toggle_section
-        assert (
-            "localStorage.setItem('wa_model_choice_explicit', '1');" in toggle_section
-        )
+        assert "localStorage.setItem('wa_locked_model'" not in src
+        assert "localStorage.setItem('wa_model_choice_explicit'" not in src
+        assert "body: JSON.stringify({ mode: newModel })," in toggle_section
 
     def test_workspace_chart_requests_delegate_to_whitebox_dispatcher(self):
         """Python chart requests should route through the whitebox dispatcher instead of the legacy chart SSE helper."""
@@ -3112,13 +3111,8 @@ class TestLocalModelMode:
             "const _WA_MODEL_MODES = new Set(['cloud', 'deepseek', 'local']);"
             in js
         )
-        assert (
-            "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek')"
-            in js
-        )
-        assert (
-            "const storedLockedModel = localStorage.getItem('wa_locked_model');" in js
-        )
+        assert "lockedModel: 'deepseek'" in js
+        assert "localStorage.getItem('wa_locked_model')" not in js
         assert "const normalized = _normalizeWorkspaceModelMode(mode, 'deepseek');" in js
         assert "model_mode: payload.model_mode || getModelMode()," in quick_actions
         assert "model_mode: modelMode," in quick_actions
@@ -3126,6 +3120,7 @@ class TestLocalModelMode:
             "(window as any).WA.setLockedModel = setLockedModel;"
             in js
         )
+        assert "(window as any).WA.getLockedModel = getLockedModel;" in js
         assert "body: JSON.stringify({ mode: newModel })," in js
 
     def test_workspace_quick_actions_do_not_render_raw_tool_result_previews_as_progress(

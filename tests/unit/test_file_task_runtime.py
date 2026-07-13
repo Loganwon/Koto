@@ -6964,7 +6964,8 @@ def test_file_task_model_client_passes_file_task_timeout_to_local_provider(monke
     assert response["content"] == "local ok"
     assert captured["model"] is None
     assert (
-        captured["call_timeout"] == file_task_model_module._FILE_TASK_LLM_CALL_TIMEOUT
+        captured["call_timeout"]
+        == file_task_model_module._LOCAL_FILE_TASK_LLM_CALL_TIMEOUT
     )
     assert captured["system_instruction"] == "system"
     assert captured["tools"] == [{"name": "parse_file_to_text"}]

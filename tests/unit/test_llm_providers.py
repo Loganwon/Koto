@@ -320,11 +320,13 @@ class TestOllamaLLMProviderResolveModel:
         # Either the mock intercepted it or it returned the patched value
         assert isinstance(result, str)
 
-    def test_cached_auto_model_used_within_ttl(self):
+    def test_cached_auto_model_used_within_ttl_when_no_model_is_configured(self, monkeypatch):
         import time
 
+        from app.core.llm import local_model_runtime
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
         OllamaLLMProvider._auto_model = "cached-model:7b"
         OllamaLLMProvider._auto_model_ts = time.time()  # fresh timestamp — within TTL
         prov = OllamaLLMProvider(model=None)  # no explicit model
@@ -555,12 +557,14 @@ class TestOllamaAutoDetectExtended:
         assert isinstance(result, str)
         assert len(result) > 0
 
-    def test_auto_model_cache_class_level(self):
+    def test_auto_model_cache_class_level_when_no_model_is_configured(self, monkeypatch):
         """Two instances with model=None share the class-level cache."""
         import time
 
+        from app.core.llm import local_model_runtime
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
         OllamaLLMProvider._auto_model = "shared:7b"
         OllamaLLMProvider._auto_model_ts = time.time()
 

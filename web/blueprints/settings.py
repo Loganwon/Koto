@@ -74,6 +74,50 @@ def _normalize_setting_value(category: str, key: str, value):
 def _get_settings_manager():
     return get_settings_manager()
 
+
+def _save_model_runtime(sm, *, mode: str, model_tag=None) -> tuple[bool, str]:
+    """Persist the one shared model-mode/model-tag runtime contract."""
+    with sm._lock:
+        sm._settings["model_mode"] = mode
+        ai_settings = sm._settings.setdefault("ai", {})
+        if not isinstance(ai_settings, dict):
+            ai_settings = {}
+            sm._settings["ai"] = ai_settings
+        # model_mode is the canonical global inference mode.  Keep this older
+        # compatibility flag derived from it so socket and editor paths cannot
+        # retain a contradictory local-only mode.
+        ai_settings["use_local_only"] = mode == "local"
+        if mode == "deepseek":
+            ai_settings["cloud_provider"] = mode
+        elif mode == "cloud":
+            ai_settings.setdefault("cloud_provider", "deepseek")
+        normalized_model_tag = str(model_tag or "").strip()
+        if normalized_model_tag:
+            # Older UI code still reads ai.local_model, while all model
+            # providers read the top-level value.  They must never diverge.
+            sm._settings["local_model"] = normalized_model_tag
+            ai_settings["local_model"] = normalized_model_tag
+        active_model = str(sm._settings.get("local_model") or "").strip()
+        saved = sm._save_settings()
+    if saved:
+        # LocalModelRouter has a separate response cache for legacy fast
+        # paths.  Clear it here so it cannot keep answering with the model
+        # selected before this atomic settings update.
+        try:
+            from app.core.routing.local_model_router import LocalModelRouter
+
+            LocalModelRouter.reset_response_model()
+        except Exception:
+            pass
+        try:
+            from app.core.llm.local_model_capabilities import clear_ollama_capability_cache
+
+            clear_ollama_capability_cache()
+        except Exception:
+            pass
+    return saved, active_model
+
+
 def _augment_models_for_cloud_provider(payload: dict) -> dict:
     try:
         from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_MODEL, has_deepseek_api_key
@@ -269,8 +313,7 @@ def local_model_switch() -> Response:
             mode:
               type: string
               enum: [local, cloud]
-              default: cloud
-              description: AI inference mode
+              description: AI inference mode; omit this field to update only the local model tag
             model_tag:
               type: string
               description: Specific local model tag to use (only relevant when mode is local)
@@ -301,7 +344,15 @@ def local_model_switch() -> Response:
     """
     try:
         data = request.json or {}
-        raw_mode = str(data.get("mode") or "cloud").strip().lower()
+        # A settings-panel model selection is not a request to change between
+        # local and cloud modes.  Preserve the current mode when the caller
+        # only submits model_tag; defaulting to cloud here used to make the
+        # workspace toggle race the setting back to its previous model.
+        requested_mode = data.get("mode")
+        sm = _get_settings_manager()
+        with sm._lock:
+            current_mode = sm._settings.get("model_mode") or "cloud"
+        raw_mode = str(requested_mode if requested_mode is not None else current_mode).strip().lower()
         if raw_mode == "gemini":
             return jsonify(
                 {
@@ -313,27 +364,7 @@ def local_model_switch() -> Response:
         mode = raw_mode if raw_mode in {"local", "cloud", "deepseek"} else "cloud"
         model_tag = data.get("model_tag")  # 本地模式时可指定模型
 
-        sm = _get_settings_manager()
-
-        # model_mode / local_model are top-level keys, not category.key – use
-        # the lock + _save_settings directly to ensure atomic write.
-        with sm._lock:
-            sm._settings["model_mode"] = mode
-            ai_settings = sm._settings.setdefault("ai", {})
-            if isinstance(ai_settings, dict):
-                if mode == "deepseek":
-                    ai_settings["cloud_provider"] = mode
-                elif mode == "cloud":
-                    ai_settings.setdefault("cloud_provider", "deepseek")
-            if model_tag:
-                # Keep the legacy nested value in sync with the runtime
-                # source of truth.  Older UI code still reads ai.local_model,
-                # while all model providers read the top-level value.
-                normalized_model_tag = str(model_tag).strip()
-                sm._settings["local_model"] = normalized_model_tag
-                if isinstance(ai_settings, dict):
-                    ai_settings["local_model"] = normalized_model_tag
-            save_ok = sm._save_settings()
+        save_ok, active_model = _save_model_runtime(sm, mode=mode, model_tag=model_tag)
         if not save_ok:
             return jsonify({"success": False, "error": "保存设置到磁盘失败"}), 500
 
@@ -345,7 +376,8 @@ def local_model_switch() -> Response:
             {
                 "success": True,
                 "mode": mode,
-                "model": model_tag or sm.get_all().get("local_model"),
+                "model": active_model,
+                "use_local_only": mode == "local",
             }
         )
     except Exception as e:
@@ -451,21 +483,19 @@ def update_settings() -> Response:
         value, validation_error = _normalize_setting_value(category, key, value)
         if validation_error:
             return jsonify({"success": False, "error": validation_error}), 400
-        if category == "ai" and key == "local_model":
-            # The settings picker used to write only ai.local_model.  That
-            # left the top-level runtime value stale, so chat and file tasks
-            # could silently use different local models.  Mirror the setting
-            # atomically to keep one configured model for every entry point.
-            normalized_model_tag = str(value or "").strip()
-            with sm._lock:
-                ai_settings = sm._settings.setdefault("ai", {})
-                if not isinstance(ai_settings, dict):
-                    ai_settings = {}
-                    sm._settings["ai"] = ai_settings
-                ai_settings["local_model"] = normalized_model_tag
-                sm._settings["local_model"] = normalized_model_tag
-                sm._dirty = True
-                success = sm._save_settings()
+        if category == "ai" and key in {"local_model", "use_local_only"}:
+            # Legacy callers of /api/settings use the exact same atomic
+            # model-runtime writer as the settings picker and workspace mode
+            # control.  There is no longer a competing persistence path.
+            current_mode = str(sm.get_all().get("model_mode") or "cloud").strip().lower()
+            target_mode = (
+                "local" if bool(value) else "cloud"
+            ) if key == "use_local_only" else current_mode
+            success, _ = _save_model_runtime(
+                sm,
+                mode=target_mode,
+                model_tag=value if key == "local_model" else None,
+            )
         else:
             success = sm.set(category, key, value)
         if not success:
@@ -475,7 +505,7 @@ def update_settings() -> Response:
         sm.ensure_directories()
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
         invalidate_settings_cache()
-        if category == "ai" and key == "local_model":
+        if category == "ai" and key in {"local_model", "use_local_only"}:
             reset_client_cache()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
         if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):

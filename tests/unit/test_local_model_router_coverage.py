@@ -791,9 +791,11 @@ class TestLocalModelRouterCoverage:
         assert result is True
 
     @patch("app.core.routing.local_model_router.requests.get")
-    def test_init_response_model_from_ollama(self, mock_get):
+    def test_init_response_model_from_ollama(self, mock_get, monkeypatch):
+        from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
         LocalModelRouter._response_model = None
         LocalModelRouter._response_model_inited = False
 
@@ -803,9 +805,11 @@ class TestLocalModelRouterCoverage:
         assert result is True
         assert LocalModelRouter._response_model is not None
 
-    def test_init_response_model_fallback_to_classifier(self):
+    def test_init_response_model_fallback_to_classifier(self, monkeypatch):
+        from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
         LocalModelRouter._response_model = None
         LocalModelRouter._response_model_inited = False
         LocalModelRouter._model_name = "qwen3:4b"
@@ -1215,9 +1219,12 @@ class TestLocalModelRouterCoverage:
     # ── _init_response_model ───────────────────────────────────────
 
     @patch("app.core.routing.local_model_router.requests.get")
-    def test_init_response_model_success(self, mock_get):
+    def test_init_response_model_success(self, mock_get, monkeypatch):
+        from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
+        LocalModelRouter.reset_response_model()
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):
             mock_get.return_value = _mock_tags_response(["qwen3:8b"])
             result = LocalModelRouter._init_response_model()
@@ -1225,9 +1232,12 @@ class TestLocalModelRouterCoverage:
         assert LocalModelRouter._response_model is not None
 
     @patch("app.core.routing.local_model_router.requests.get")
-    def test_init_response_model_fallback_to_classifier(self, mock_get):
+    def test_init_response_model_fallback_to_classifier(self, mock_get, monkeypatch):
+        from app.core.llm import local_model_runtime
         from app.core.routing.local_model_router import LocalModelRouter
 
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
+        LocalModelRouter.reset_response_model()
         LocalModelRouter._model_name = "qwen3:4b"
         with patch.object(LocalModelRouter, "is_ollama_available", return_value=True):
             # No response models match installed list

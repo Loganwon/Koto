@@ -28,7 +28,6 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from pathlib import Path
 from typing import Any, Dict, Generator, Iterator, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -541,14 +540,14 @@ def create_ollama_client(
 ) -> OllamaClientProxy:
     """
     创建 OllamaClientProxy。
-    model_tag 为 None 时，尝试从 config/user_settings.json 自动读取。
+    model_tag 为 None 时，从统一运行时设置读取用户选择的模型。
     """
     if model_tag is None:
         model_tag = _resolve_model_from_settings()
 
     if not model_tag:
         raise ValueError(
-            "未指定 Ollama 模型，且 user_settings.json 中未配置 local_model"
+            "未指定 Ollama 模型，且统一运行时设置中未配置 local_model"
         )
 
     return OllamaClientProxy(model_tag=model_tag, base_url=base_url)
@@ -596,27 +595,17 @@ def _choose_installed_model(models: List[str]) -> Optional[str]:
 
 
 def _resolve_model_from_settings() -> Optional[str]:
-    """从 user_settings.json 读取 local_model 字段"""
+    """Read the selected model through the shared runtime contract."""
     try:
-        # 兼容打包/开发两种路径
-        import sys
+        from app.core.llm.local_model_runtime import get_configured_local_model_tag
 
-        if getattr(sys, "frozen", False):
-            root = Path(sys.executable).parent
-        else:
-            root = Path(__file__).parent.parent.parent.parent  # Koto root
-
-        settings_path = root / "config" / "user_settings.json"
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            configured = data.get("local_model") or data.get("ai", {}).get(
-                "local_model"
-            )
-            if configured:
-                return str(configured).strip()
+        configured = get_configured_local_model_tag()
+        if configured:
+            return configured
     except Exception as e:
-        logger.warning(f"[OllamaProvider] 读取 user_settings.json 失败: {e}")
+        logger.warning("[OllamaProvider] 读取本地模型设置失败: %s", e)
+    # No user choice exists yet.  Auto-detection is onboarding-only and must
+    # never replace a configured tag.
     return _choose_installed_model(_list_installed_models())
 
 
@@ -626,29 +615,35 @@ def get_local_model_info() -> Dict[str, Any]:
     供 web/app.py 的状态接口使用。
     """
     try:
-        import sys
+        from app.core.llm.local_model_runtime import (
+            get_configured_local_model_tag,
+            get_configured_model_mode,
+        )
 
-        if getattr(sys, "frozen", False):
-            root = Path(sys.executable).parent
-        else:
-            root = Path(__file__).parent.parent.parent.parent
+        model_mode = get_configured_model_mode()
+        local_model = get_configured_local_model_tag()
+        # Keep the active-mode indicator for existing UI, while exposing the
+        # actual service reachability so Settings can explain an available
+        # local model before the user switches into local mode.
+        ollama_reachable = _is_ollama_running()
+        running = ollama_reachable if model_mode == "local" else False
+        capabilities = None
+        if local_model and ollama_reachable:
+            try:
+                from app.core.llm.local_model_capabilities import get_ollama_model_capabilities
 
-        settings_path = root / "config" / "user_settings.json"
-        if not settings_path.exists():
-            return {"mode": "cloud", "model": None, "running": False}
-
-        with open(settings_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-
-        model_mode = data.get("model_mode", "cloud")
-        local_model = data.get("local_model")
-        running = _is_ollama_running() if model_mode == "local" else False
+                capability_set = get_ollama_model_capabilities(local_model)
+                capabilities = sorted(capability_set) if capability_set is not None else None
+            except Exception:
+                pass
 
         return {
             "mode": model_mode,
             "model": local_model,
             "running": running,
+            "ollama_reachable": ollama_reachable,
             "ollama_installed": shutil.which("ollama") is not None,
+            "capabilities": capabilities,
         }
     except Exception:
         return {"mode": "cloud", "model": None, "running": False}

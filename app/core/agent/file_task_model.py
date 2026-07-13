@@ -15,6 +15,18 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_FILE_TASK_MODEL = "deepseek-chat"
 _FILE_TASK_LLM_CALL_TIMEOUT = float(os.getenv("KOTO_FILE_TASK_LLM_TIMEOUT", "45"))
+# A local model has to load weights and execute on the user's hardware.  It
+# therefore needs a separate budget from cloud requests; keeping this setting
+# explicit makes slow hardware configurable without slowing cloud failures.
+_LOCAL_FILE_TASK_LLM_CALL_TIMEOUT = float(
+    os.getenv("KOTO_LOCAL_FILE_TASK_LLM_TIMEOUT", "180")
+)
+# File-task execution is iterative: it needs concise decisions and tool
+# arguments, not a 4k-token essay on every turn.  Bounding one turn prevents a
+# stalled local generation from monopolising Ollama and blocking the next task.
+_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS = max(
+    128, int(os.getenv("KOTO_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS", "1536"))
+)
 
 
 def _runtime_model_map() -> Dict[str, Any]:
@@ -144,12 +156,13 @@ class FileTaskModelClient:
         from app.core.llm.ollama_llm_provider import OllamaLLMProvider
 
         model_id = self._local_model_id(request)
+        self._ensure_local_tool_support(model_id, tools)
         logger.info(
             "[FileTaskModelClient] local file-task call model=%s messages=%d tools=%d timeout=%.1fs",
             model_id or "<auto>",
             len(messages),
             len(tools or []),
-            _FILE_TASK_LLM_CALL_TIMEOUT,
+            _LOCAL_FILE_TASK_LLM_CALL_TIMEOUT,
         )
         provider = OllamaLLMProvider(model=model_id or None)
         return provider.generate_content(
@@ -158,9 +171,38 @@ class FileTaskModelClient:
             system_instruction=system,
             tools=tools if tools else None,
             stream=False,
-            call_timeout=_FILE_TASK_LLM_CALL_TIMEOUT,
+            call_timeout=_LOCAL_FILE_TASK_LLM_CALL_TIMEOUT,
             temperature=0.2,
+            think=False,
+            num_predict=_LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS,
         )
+
+    @staticmethod
+    def _ensure_local_tool_support(model_id: str, tools: List[Dict[str, Any]]) -> None:
+        """Fail before the task stream starts when Ollama says tools are unsupported."""
+        if not tools:
+            return
+        resolved_model = str(model_id or "").strip()
+        if not resolved_model:
+            try:
+                from app.core.llm.local_model_runtime import get_configured_local_model_tag
+
+                resolved_model = str(get_configured_local_model_tag() or "").strip()
+            except Exception:
+                return
+        if not resolved_model:
+            return
+        try:
+            from app.core.llm.local_model_capabilities import local_model_supports_tools
+
+            supports_tools = local_model_supports_tools(resolved_model)
+        except Exception:
+            return
+        if supports_tools is False:
+            raise RuntimeError(
+                f"本地模型 {resolved_model} 不支持工具调用，无法执行文件任务。"
+                "请在设置中选择支持 tools 的模型（例如 qwen3.5:9b）。"
+            )
 
     def _cloud_model_id(self, request: FileTaskRequest) -> str:
         requested = str(request.model_id or "").strip()

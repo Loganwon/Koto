@@ -311,21 +311,14 @@ def create_local_agent(model: str = None, base_url: str = None) -> "UnifiedAgent
     """
     from app.core.agent.unified_agent import UnifiedAgent
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
-    from app.core.routing.local_model_router import LocalModelRouter
 
     if not model:
         try:
-            LocalModelRouter.init_model()
-            model = (
-                getattr(LocalModelRouter, "_model_name", None)
-                or LocalModelRouter.pick_best_chat_model()
-            )
-        except Exception:
-            import logging
+            from app.core.llm.local_model_runtime import get_configured_local_model_tag
 
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
-            )  # model 保持 None → OllamaLLMProvider 在调用时自动解析
+            model = get_configured_local_model_tag() or None
+        except Exception:
+            model = None  # OllamaLLMProvider applies the onboarding fallback.
 
     llm_kwargs = {}
     if base_url:
