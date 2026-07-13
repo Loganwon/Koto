@@ -20,7 +20,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install lint tools
-        run: pip install flake8 black isort bandit
+        run: pip install flake8 black isort==5.9.3 bandit
 
       - name: Run flake8
         run: flake8 src/ app/ tests/ --count --show-source --statistics
