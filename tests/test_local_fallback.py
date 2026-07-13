@@ -366,9 +366,12 @@ class TestStreamLlm:
 class TestGetLocalProvider:
 
     @skipif_no_import
-    def test_selects_model_from_ollama_tags(self):
+    def test_selects_model_from_ollama_tags_when_no_model_is_configured(self, monkeypatch):
         """应从 /api/tags 列表中选取模型（优先大参数）。"""
         import json
+        from app.core.llm import local_model_runtime
+
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
 
         tags_payload = json.dumps(
             {
@@ -404,8 +407,11 @@ class TestGetLocalProvider:
                 ), f"Expected 8b model, got: {model_arg}"
 
     @skipif_no_import
-    def test_falls_back_to_none_model_when_tags_fail(self):
+    def test_falls_back_to_none_model_when_tags_fail_and_no_model_is_configured(self, monkeypatch):
         """当无法查询 Ollama tags 时，应使用 model=None 的默认选择。"""
+        from app.core.llm import local_model_runtime
+
+        monkeypatch.setattr(local_model_runtime, "get_configured_local_model_tag", lambda: "")
         mock_opener = MagicMock()
         mock_opener.open.side_effect = ConnectionRefusedError()
         with patch("urllib.request.build_opener", return_value=mock_opener), patch(
