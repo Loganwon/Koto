@@ -33,6 +33,10 @@ def test_evaluation_reports_do_not_log_model_derived_error_payloads():
 
     assert 'print(f"         ERROR: {e}")' not in source
     assert "ERROR: classification did not match expected values" in source
+    assert "adjudicator: {r['adjudication_intent']}" not in source
+    assert "评判理由: {verdict.reason}" not in source
+    assert "完整输出: {result}" not in source
+    assert "adjudicator result received" in source
 
 
 def test_release_build_includes_file_task_chart_dependencies():
