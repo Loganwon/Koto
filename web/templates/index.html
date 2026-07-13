@@ -5,25 +5,25 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="{{ csrf_token() if csrf_token is defined else '' }}">
     <title>Koto (言) - AI Assistant</title>
-    <link rel="icon" type="image/png" href="{{ url_for('static', filename='assets/koto_icon.png') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}?v=20260323a">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/z-layers.css') }}?v=20260706">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/skill-ui-extensions.css') }}?v=20260526">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace.css') }}?v=20260625">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/workspace-ai-panel.css') }}?v=20260706-ai-panel-fix-v2">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/utilities.css') }}?v=20260705">
+    <link rel="icon" type="image/png" href="{{ asset_url('assets/koto_icon.png') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/style.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/z-layers.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/skill-ui-extensions.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/workspace.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/workspace-ai-panel.css') }}">
+    <link rel="stylesheet" href="{{ asset_url('css/utilities.css') }}">
     <!-- UI zoom is applied by app/theme.ts after settings are loaded.  Do not
          pre-apply a second html zoom here: it desynchronizes Split.js panels. -->
-<link rel="preload" as="style" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
+<link rel="preload" as="style" href="{{ asset_url('vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}" onload="this.rel='stylesheet'">
     <noscript>
-        <link rel="stylesheet" href="{{ url_for('static', filename='vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}">
+        <link rel="stylesheet" href="{{ asset_url('vendor/highlight.js/11.9.0/styles/vs2015.min.css') }}">
     </noscript>
-    <script defer src="{{ url_for('static', filename='vendor/marked/12.0.0/marked.min.js') }}"></script>
-    <link rel="stylesheet" href="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.css') }}">
+    <script defer src="{{ asset_url('vendor/marked/12.0.0/marked.min.js') }}"></script>
+    <link rel="stylesheet" href="{{ asset_url('vendor/katex/0.16.9/katex.min.css') }}">
     <!-- highlight.js & KaTeX: lazy-load on demand when content needs them -->
     <script>(function(){
-        var h="{{ url_for('static', filename='vendor/highlight.js/11.9.0/highlight.min.js') }}";
-        var k="{{ url_for('static', filename='vendor/katex/0.16.9/katex.min.js') }}";
+        var h="{{ asset_url('vendor/highlight.js/11.9.0/highlight.min.js') }}";
+        var k="{{ asset_url('vendor/katex/0.16.9/katex.min.js') }}";
         var loaded={h:false,k:false};
         var load=function(u,cb){var s=document.createElement("script");s.src=u;s.defer=true;s.onload=cb;document.head.appendChild(s)};
         window._kotoEnsureHighlight=function(cb){
@@ -109,17 +109,6 @@
                 <div id="jobsRunningPill"></div>
             </div>
 
-            <div class="sidebar-compat" hidden aria-hidden="true">
-                <div class="sidebar-search-wrap" id="sidebarSearchWrap">
-                    <input type="text" class="sidebar-search-input" id="sessionSearchInput"
-                           placeholder="搜索对话..." oninput="filterSessions(this.value)" autocomplete="off">
-                </div>
-                <select id="projectSelect" class="sb-project-select" title="选择项目">
-                    <option value="default">默认项目</option>
-                </select>
-                <div class="sessions-list" id="sessionsList"></div>
-            </div>
-
             <div class="resize-handle resize-handle-sidebar" id="sidebarResizeHandle"></div>
         </aside>
 
@@ -199,32 +188,32 @@
                                 </div>
                             </div>
                             <div class="welcome-quick-cards">
-                                <button type="button" class="welcome-quick-card" onclick="insertSuggestion('帮我写一份产品发布会演讲稿，面向公司全体员工，风格正式但亲切')">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="帮我写一份产品发布会演讲稿，面向公司全体员工，风格正式但亲切">
                                     <span class="wqc-icon">✍️</span>
                                     <span class="wqc-title">写文档</span>
                                     <span class="wqc-sub">演讲稿、报告、方案</span>
                                 </button>
-                                <button type="button" class="welcome-quick-card" onclick="insertSuggestion('分析这份数据，帮我找出关键趋势并生成图表')">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="分析这份数据，帮我找出关键趋势并生成图表">
                                     <span class="wqc-icon">📊</span>
                                     <span class="wqc-title">分析数据</span>
                                     <span class="wqc-sub">Excel、CSV、图表</span>
                                 </button>
-                                <button type="button" class="welcome-quick-card" onclick="insertSuggestion('把这些要点内容做成一份10页的PPT演示文稿')">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="把这些要点内容做成一份10页的PPT演示文稿">
                                     <span class="wqc-icon">🎨</span>
                                     <span class="wqc-title">做PPT</span>
                                     <span class="wqc-sub">演示文稿、汇报材料</span>
                                 </button>
-                                <button type="button" class="welcome-quick-card" onclick="insertSuggestion('搜索整理最近三个月AI行业的重要动态，给我一份简报')">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="搜索整理最近三个月AI行业的重要动态，给我一份简报">
                                     <span class="wqc-icon">🔍</span>
                                     <span class="wqc-title">搞研究</span>
                                     <span class="wqc-sub">搜索、调研、总结</span>
                                 </button>
-                                <button type="button" class="welcome-quick-card" onclick="insertSuggestion('帮我写一个Python脚本，自动整理文件夹里的文件并按日期重命名')">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="帮我写一个Python脚本，自动整理文件夹里的文件并按日期重命名">
                                     <span class="wqc-icon">💻</span>
                                     <span class="wqc-title">写代码</span>
                                     <span class="wqc-sub">脚本、调试、优化</span>
                                 </button>
-                                <button type="button" class="welcome-quick-card" onclick="insertSuggestion('给我解释一下机器学习的基本概念，用通俗易懂的方式')">
+                                <button type="button" class="welcome-quick-card" data-koto-suggestion="给我解释一下机器学习的基本概念，用通俗易懂的方式">
                                     <span class="wqc-icon">📚</span>
                                     <span class="wqc-title">学知识</span>
                                     <span class="wqc-sub">概念解释、学习规划</span>
@@ -235,7 +224,7 @@
                             <div class="welcome-onboarding">
                                 <p class="welcome-onboarding-title">只需 3 步，开始使用 Koto</p>
                                 <div class="welcome-onboarding-cards">
-                                    <button type="button" class="welcome-ob-card" onclick="insertSuggestion('帮我写一份本周工作总结，包含完成事项、遇到的问题和下周计划')">
+                                    <button type="button" class="welcome-ob-card" data-koto-suggestion="帮我写一份本周工作总结，包含完成事项、遇到的问题和下周计划">
                                         <span class="wob-step">1</span>
                                         <div class="wob-body">
                                             <span class="wob-title">写一份工作总结</span>
@@ -243,7 +232,7 @@
                                         </div>
                                         <span class="wob-arrow">→</span>
                                     </button>
-                                    <button type="button" class="welcome-ob-card" onclick="insertSuggestion('分析这份销售数据，找出趋势、异常和关键结论，并生成图表')">
+                                    <button type="button" class="welcome-ob-card" data-koto-suggestion="分析这份销售数据，找出趋势、异常和关键结论，并生成图表">
                                         <span class="wob-step">2</span>
                                         <div class="wob-body">
                                             <span class="wob-title">分析一份数据</span>
@@ -251,7 +240,7 @@
                                         </div>
                                         <span class="wob-arrow">→</span>
                                     </button>
-                                    <button type="button" class="welcome-ob-card" onclick="insertSuggestion('根据以下要点制作一份10页的PPT：1.项目背景 2.市场分析 3.解决方案 4.实施计划 5.预期收益')">
+                                    <button type="button" class="welcome-ob-card" data-koto-suggestion="根据以下要点制作一份10页的PPT：1.项目背景 2.市场分析 3.解决方案 4.实施计划 5.预期收益">
                                         <span class="wob-step">3</span>
                                         <div class="wob-body">
                                             <span class="wob-title">制作一份 PPT</span>
@@ -2130,14 +2119,14 @@
     })();
     </script>
 
-    <script defer src="{{ url_for('static', filename='js/build/auth-bundle.js') }}?v=20260616"></script>
-    <script defer src="{{ url_for('static', filename='js/build/app-bundle.js') }}?v=20260626-settings"></script>
+    <script defer src="{{ asset_url('js/build/auth-bundle.js') }}"></script>
+    <script defer src="{{ asset_url('js/build/app-bundle.js') }}"></script>
     <!-- Skills bundles: lazy-load on first panel open -->
     <script>
       (function(){
         var loaded=false, loading=null;
-        var s1="{{ url_for('static', filename='js/build/skills-ui-bundle.js') }}?v=20260616";
-        var s2="{{ url_for('static', filename='js/build/skills-panel-bundle.js') }}?v=20260616";
+        var s1="{{ asset_url('js/build/skills-ui-bundle.js') }}";
+        var s2="{{ asset_url('js/build/skills-panel-bundle.js') }}";
         var stubs={};
         function inject(src){
           return new Promise(function(resolve,reject){
@@ -2844,28 +2833,6 @@
             </div>
         </div>
     </div>
-    <script>
-    // Welcome screen suggestion cards — fill input with a prompt template and focus
-    window.insertSuggestion = function(text) {
-        // The workspace composer is the only visible primary input.  The
-        // former chat composer remains temporarily for compatibility but is
-        // collapsed in the unified workspace, so never target it first.
-        var el = document.getElementById('wa-user-input');
-        if (!el || el.getBoundingClientRect().width === 0 || el.getBoundingClientRect().height === 0) {
-            el = document.getElementById('messageInput');
-        }
-        if (!el) return;
-        el.value = text;
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.focus();
-        el.setSelectionRange(text.length, text.length);
-        el.dispatchEvent(new Event('input'));
-        el.classList.add('input-flash');
-        setTimeout(function(){ el.classList.remove('input-flash'); }, 800);
-        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    };
-    </script>
-
     <!-- ── 文件工作站 CDN deps (lazy-loaded by WA.openInMainView) ── -->
     {% include '_workspace_asset_scripts.html' %}
 

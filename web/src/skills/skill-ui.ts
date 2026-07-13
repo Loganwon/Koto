@@ -1,5 +1,7 @@
 /** skill-ui.ts — Koto Skill UI 定制引擎 */
 
+import { getActiveKotoComposer, getActiveKotoMessageContainer } from '../shared/active-composer';
+
 export interface SkillUiConfig {
   css_vars?: Record<string, string>;
   theme?: string;
@@ -30,6 +32,7 @@ let _originalTitle = '';
 let _originalSubtitle = '';
 let _originalTheme = '';
 let _originalPlaceholder = '';
+let _placeholderTarget: HTMLInputElement | HTMLTextAreaElement | null = null;
 let _assistantPrefix = '';
 let _lastDivinationConfig: SkillUiConfig | null = null;
 
@@ -58,7 +61,7 @@ function applyCSS(cssVars: Record<string, string> | undefined, theme: string): v
 
   if (cssVars && cssVars['--text-primary']) {
     const c = cssVars['--text-primary'];
-    rules.push(`#messageInput { color: ${c} !important; caret-color: ${c}; }`);
+    rules.push(`#wa-user-input, #messageInput { color: ${c} !important; caret-color: ${c}; }`);
   }
 
   styleEl.textContent = rules.join('\n');
@@ -94,7 +97,7 @@ function applyFont(fontStyle: string): void {
   const family = fontMap[fontStyle] || fontStyle;
   if (family) {
     styleEl.textContent = `body { font-family: ${family} !important; }`;
-    styleEl.textContent += `\n#messageInput, .message-content, .tp-heading, .tp-subheading, .tp-face-name-zh { font-family: ${family} !important; }`;
+    styleEl.textContent += `\n#wa-user-input, #messageInput, .message-content, .tp-heading, .tp-subheading, .tp-face-name-zh { font-family: ${family} !important; }`;
   }
 }
 
@@ -161,16 +164,19 @@ function removeOverlay(): void {
 }
 
 function applyPlaceholder(text: string): void {
-  const input = (document.getElementById('messageInput') || document.querySelector('.chat-input textarea, textarea[placeholder]')) as HTMLInputElement | HTMLTextAreaElement | null;
+  const input = getActiveKotoComposer();
   if (!input) return;
-  if (!_originalPlaceholder) _originalPlaceholder = input.placeholder;
+  if (_placeholderTarget !== input) {
+    restorePlaceholder();
+    _placeholderTarget = input;
+    _originalPlaceholder = input.placeholder;
+  }
   if (text) input.placeholder = text;
 }
 
 function restorePlaceholder(): void {
-  const input = (document.getElementById('messageInput') || document.querySelector('.chat-input textarea, textarea[placeholder]')) as HTMLInputElement | HTMLTextAreaElement | null;
-  if (!input) return;
-  if (_originalPlaceholder) input.placeholder = _originalPlaceholder;
+  if (_placeholderTarget && _originalPlaceholder) _placeholderTarget.placeholder = _originalPlaceholder;
+  _placeholderTarget = null;
   _originalPlaceholder = '';
 }
 
@@ -210,7 +216,7 @@ function escapeHtml(s: string): string {
 
 function showWelcomeText(text: string): void {
   if (!text) return;
-  const chatMessages = document.getElementById('chatMessages') || document.querySelector('.messages-container, .chat-messages');
+  const chatMessages = getActiveKotoMessageContainer();
   if (!chatMessages) return;
 
   const existing = document.getElementById('skill-ui-welcome');

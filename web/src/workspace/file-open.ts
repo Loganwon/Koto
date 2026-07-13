@@ -31,6 +31,29 @@ function _setHeaderFileName(name: string): void {
   if (fileNameEl) fileNameEl.textContent = name || '未打开文件';
 }
 
+function _docxNumber(data: any, camelKey: string, snakeKey: string): number | null {
+  const value = data?.[camelKey] ?? data?.[snakeKey];
+  const numeric = Number(value);
+  return Number.isFinite(numeric) && numeric > 0 ? numeric : null;
+}
+
+/** Translate the parser's stable snake_case contract at the TipTap boundary. */
+function _toDocxRenderOptions(data: any): Record<string, any> {
+  const source = data && typeof data === 'object' ? data : {};
+  return {
+    pageWidthPx: _docxNumber(source, 'pageWidthPx', 'page_width_px'),
+    pageHeightPx: _docxNumber(source, 'pageHeightPx', 'page_height_px'),
+    marginTopPx: _docxNumber(source, 'marginTopPx', 'margin_top_px'),
+    marginBottomPx: _docxNumber(source, 'marginBottomPx', 'margin_bottom_px'),
+    marginLeftPx: _docxNumber(source, 'marginLeftPx', 'margin_left_px'),
+    marginRightPx: _docxNumber(source, 'marginRightPx', 'margin_right_px'),
+    headerHtml: String(source.headerHtml ?? source.header_html ?? ''),
+    footerHtml: String(source.footerHtml ?? source.footer_html ?? ''),
+    sections: Array.isArray(source.sections) ? source.sections : [],
+    renderDegraded: source.render_degraded === true,
+  };
+}
+
 function _showPdfOpenError(error: any): void {
   const outer = document.getElementById('wa-pdf-editor') as HTMLElement | null;
   const viewer = document.getElementById('wa-pdf-viewer') as HTMLElement | null;
@@ -100,7 +123,7 @@ async function _mountDocx(tab: TabInfo, data: any): Promise<void> {
     ? tab.cache
     : (data && data.html) || '';
   state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor() as any;
-  state.activeEditor!.render(html, data || {});
+  state.activeEditor!.render(html, _toDocxRenderOptions(data));
   setTimeout(() => _setupDocOutline((data && data.headings) || []), 0);
   setTimeout(() => {
     const syncReviewState = (window as any)._syncReviewStateForActiveFile;

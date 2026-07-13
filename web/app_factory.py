@@ -5,7 +5,7 @@ import os
 import uuid
 from pathlib import Path
 
-from flask import Flask, g, jsonify, request
+from flask import Flask, g, jsonify, request, url_for
 from flask_cors import CORS
 try:
     from flask_wtf.csrf import CSRFProtect
@@ -24,6 +24,18 @@ def _read_app_version() -> str:
         return (Path(__file__).parent.parent / "VERSION").read_text(encoding="utf-8").strip()
     except Exception:
         return "unknown"
+
+
+def _asset_version(static_root: Path, filename: str) -> str:
+    """Return a stable cache key that changes only when a shipped asset changes."""
+    root = static_root.resolve()
+    try:
+        asset = (root / filename).resolve()
+        asset.relative_to(root)
+        return str(asset.stat().st_mtime_ns)
+    except (OSError, ValueError):
+        # Keep missing assets debuggable without making template rendering fail.
+        return "0"
 
 
 def _load_secret_key() -> str:
@@ -66,6 +78,15 @@ def create_flask_app(import_name: str):
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     app.config["SESSION_COOKIE_SECURE"] = os.environ.get("KOTO_DEPLOY_MODE") == "cloud"
+
+    @app.context_processor
+    def _inject_asset_url():
+        static_root = Path(app.static_folder or Path(__file__).parent / "static")
+
+        def asset_url(filename: str) -> str:
+            return url_for("static", filename=filename, v=_asset_version(static_root, filename))
+
+        return {"asset_url": asset_url}
 
     cors_origins = _resolve_cors_origins()
     CORS(app, origins=cors_origins)

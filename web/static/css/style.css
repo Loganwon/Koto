@@ -6043,7 +6043,8 @@ kbd {
     0%, 100% { box-shadow: 0 0 0 0 rgba(79,139,255,0); }
     50% { box-shadow: 0 0 0 4px rgba(79,139,255,0.35); }
 }
-#messageInput.input-flash {
+#messageInput.input-flash,
+#wa-user-input.input-flash {
     animation: inputFlash 0.8s ease;
     border-color: var(--accent-color, #4F8BFF);
 }

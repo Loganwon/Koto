@@ -5,9 +5,18 @@
  */
 
 import { Extension, Mark, Node, mergeAttributes } from '@tiptap/core';
-import { NodeSelection, Plugin, PluginKey } from 'prosemirror-state';
-import { Decoration, DecorationSet } from 'prosemirror-view';
-import { TableMap } from '@tiptap/pm/tables';
+import { NodeSelection, Plugin, PluginKey } from '@tiptap/pm/state';
+import { Decoration, DecorationSet } from '@tiptap/pm/view';
+import {
+  ResizeState,
+  TableMap,
+  cellAround,
+  columnResizingPluginKey,
+  pointsAtCell,
+  tableEditing,
+  tableNodeTypes,
+  updateColumnsOnResize,
+} from '@tiptap/pm/tables';
 import { Table, TableView } from '@tiptap/extension-table';
 import { TableRow } from '@tiptap/extension-table-row';
 import { TableCell } from '@tiptap/extension-table-cell';
@@ -16,15 +25,7 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import Image from '@tiptap/extension-image';
 import Heading from '@tiptap/extension-heading';
 import { resolveDocxBreakChrome } from './docx-pagination-runtime.js';
-import {
-  ResizeState,
-  cellAround,
-  columnResizingPluginKey,
-  pointsAtCell,
-  tableEditing,
-  tableNodeTypes,
-  updateColumnsOnResize,
-} from 'prosemirror-tables';
+import { createDocxPaginationScheduler } from './docx-pagination-scheduler.js';
 
 export const DOCX_ROW_RESIZE_SKIP_AUTOSAVE_META = 'kotoDocxRowResizeSkipAutoSave';
 export const DOCX_TABLE_RESIZE_TRANSACTION_META = 'kotoDocxTableResizeTransaction';
@@ -1008,7 +1009,7 @@ function _docxImageLayoutFromElement(el) {
   const left = _docxImageStyleRaw(container, 'left');
   const top = _docxImageStyleRaw(container, 'top');
 
-  // docx-preview encodes wrapNone/anchored drawings as a zero-sized relative
+  // Imported DOCX encodes wrapNone/anchored drawings as a zero-sized relative
   // wrapper with left/top offsets. Treat those as unsupported floating imports
   // instead of misclassifying them as top/bottom-wrapped images.
   const looksAnchored = !!container
@@ -2924,81 +2925,13 @@ export const AutoPageBreakPlugin = Extension.create({
 
       // ── View plugin: triggers measurement after DOM settles ────────────
       view(editorView) {
-        let _timer = null;
         let _measuring = false;  // guard against re-entrant measurement
-        let _mediaResizeObserver = null;
-        let _layoutResizeObserver = null;
-        const _watchedMedia = new Map();
         // A document's node tree is not a layout cache key. Fonts, images,
         // style commands and the available editor width can all change the
         // rendered heights without changing node text or nodeSize. Reusing
         // old break positions here was the reason a stale blank page could
         // remain visible after the document had reflowed.
         let _lastLayoutSignature = null;
-
-        const _schedule = (delayMs = _AUTO_PB_UPDATE_DELAY_MS) => {
-          clearTimeout(_timer);
-          _timer = setTimeout(() => {
-            requestAnimationFrame(() => _measure(editorView));
-          }, delayMs);
-        };
-
-        // Listen for header/footer edits so the page-break chrome
-        // stays in sync with the latest header/footer values.
-        const _onHdrFtrChanged = () => _schedule(40);
-        window.addEventListener('koto-hdrftr-changed', _onHdrFtrChanged);
-        const _onWindowResize = () => _schedule(40);
-        window.addEventListener('resize', _onWindowResize, { passive: true });
-
-        const _scheduleAfterMediaSettles = () => _schedule(40);
-
-        const _watchLayoutForPagination = (view) => {
-          const pmDom = view?.dom;
-          if (!pmDom || typeof ResizeObserver === 'undefined' || _layoutResizeObserver) return;
-          _layoutResizeObserver = new ResizeObserver(() => _scheduleAfterMediaSettles());
-          try {
-            _layoutResizeObserver.observe(pmDom);
-          } catch (_) {
-            _layoutResizeObserver = null;
-          }
-        };
-
-        const _watchMediaForPagination = (view) => {
-          const pmDom = view?.dom;
-          if (!pmDom || !pmDom.querySelectorAll) return;
-
-          if (
-            typeof ResizeObserver !== 'undefined'
-            && !_mediaResizeObserver
-          ) {
-            _mediaResizeObserver = new ResizeObserver(() => {
-              _scheduleAfterMediaSettles();
-            });
-          }
-
-          const mediaNodes = Array.from(pmDom.querySelectorAll(
-            'img,svg,canvas,video,.koto-img-wrapper'
-          ));
-
-          mediaNodes.forEach((node) => {
-            if (!node || _watchedMedia.has(node)) return;
-            const onSettled = () => _scheduleAfterMediaSettles();
-            _watchedMedia.set(node, onSettled);
-
-            try {
-              _mediaResizeObserver?.observe(node);
-            } catch (_) {}
-
-            if (node.tagName === 'IMG' || node.tagName === 'VIDEO') {
-              node.addEventListener('load', onSettled, { passive: true });
-              node.addEventListener('error', onSettled, { passive: true });
-
-              if (node.tagName === 'IMG' && node.complete) {
-                _scheduleAfterMediaSettles();
-              }
-            }
-          });
-        };
 
         const _measure = (view) => {
           if (_measuring) return;
@@ -3351,43 +3284,23 @@ export const AutoPageBreakPlugin = Extension.create({
           }
         };
 
-        _watchMediaForPagination(editorView);
-        _watchLayoutForPagination(editorView);
-        // Web fonts can settle after the initial DOM pass without causing a
-        // document transaction. Re-measure then, using the real font metrics.
-        try {
-          document.fonts?.ready?.then(() => _schedule(40));
-        } catch (_) {}
-        _schedule(_AUTO_PB_INITIAL_DELAY_MS);
+        const _scheduler = createDocxPaginationScheduler({
+          view: editorView,
+          measure: () => _measure(editorView),
+          initialDelayMs: _AUTO_PB_INITIAL_DELAY_MS,
+          updateDelayMs: _AUTO_PB_UPDATE_DELAY_MS,
+        });
+        _scheduler.start();
 
         return {
           update(view, prevState) {
             // Only re-measure when doc content changed (not on meta dispatches)
             if (view.state.doc !== prevState.doc) {
-              _watchMediaForPagination(view);
-              _watchLayoutForPagination(view);
-              _schedule();
+              _scheduler.onDocumentChanged(view);
             }
           },
           destroy() {
-            clearTimeout(_timer);
-            window.removeEventListener('koto-hdrftr-changed', _onHdrFtrChanged);
-            window.removeEventListener('resize', _onWindowResize);
-            if (_mediaResizeObserver) {
-              try { _mediaResizeObserver.disconnect(); } catch (_) {}
-              _mediaResizeObserver = null;
-            }
-            if (_layoutResizeObserver) {
-              try { _layoutResizeObserver.disconnect(); } catch (_) {}
-              _layoutResizeObserver = null;
-            }
-            _watchedMedia.forEach((onSettled, node) => {
-              try {
-                node.removeEventListener('load', onSettled);
-                node.removeEventListener('error', onSettled);
-              } catch (_) {}
-            });
-            _watchedMedia.clear();
+            _scheduler.destroy();
             _lastLayoutSignature = null;
           },
         };

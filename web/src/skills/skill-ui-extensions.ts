@@ -1,5 +1,7 @@
 /** skill-ui-extensions.ts — Koto Skill UI 交互扩展引擎 */
 
+import { submitActiveKotoComposerText } from '../shared/active-composer';
+
 export interface ActionButton {
   id?: string;
   label?: string;
@@ -47,40 +49,8 @@ function esc(str: string): string {
     .replace(/"/g, '&quot;');
 }
 
-function _setChatInputValue(input: HTMLInputElement | HTMLTextAreaElement, text: string): void {
-  const prototype = input instanceof HTMLTextAreaElement
-    ? window.HTMLTextAreaElement.prototype
-    : window.HTMLInputElement.prototype;
-  const nativeSetter = Object.getOwnPropertyDescriptor(prototype, 'value');
-  if (nativeSetter?.set) nativeSetter.set.call(input, text);
-  else input.value = text;
-  input.dispatchEvent(new Event('input', { bubbles: true }));
-}
-
 function _submitSkillMessage(text: string): void {
-  const workspaceInput = document.getElementById('wa-user-input') as HTMLTextAreaElement | null;
-  if (workspaceInput && workspaceInput.offsetParent !== null) {
-    _setChatInputValue(workspaceInput, text);
-    const WA = (window as any).WA || {};
-    if (typeof WA.submitUnifiedAiComposer === 'function') {
-      WA.submitUnifiedAiComposer();
-      return;
-    }
-    if (typeof WA.sendMessage === 'function') {
-      WA.sendMessage();
-      return;
-    }
-  }
-
-  const input = document.querySelector('#messageInput, #userInput, [data-role="chat-input"]') as HTMLInputElement | HTMLTextAreaElement | null;
-  if (!input) return;
-  _setChatInputValue(input, text);
-  const sendBtn = document.querySelector('#sendBtn, [data-role="send-button"], button[type="submit"]') as HTMLElement | null;
-  if (sendBtn) {
-    sendBtn.click();
-  } else {
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }));
-  }
+  submitActiveKotoComposerText(text);
 }
 
 // ─── 1. Action Buttons ───────────────────────────────────
@@ -176,7 +146,7 @@ function startQuickReplyObserver(replies: string[]): void {
   if (!replies || replies.length === 0) return;
 
   const container = document.querySelector(
-    '#messages, #messageList, .messages, .chat-messages, [data-role="messages"]'
+    '#wa-ai-messages, #messages, #messageList, .messages, .chat-messages, [data-role="messages"]'
   );
   if (!container) return;
 
@@ -188,12 +158,13 @@ function startQuickReplyObserver(replies: string[]): void {
         const isAI = el.classList.contains('assistant') ||
           el.classList.contains('message--assistant') ||
           el.getAttribute('data-role') === 'assistant-message' ||
-          el.classList.contains('ai-message');
+          el.classList.contains('ai-message') ||
+          (el.classList.contains('wa-msg') && el.classList.contains('ai'));
         if (isAI) {
           attachQuickRepliesToMessage(el, replies);
         }
         const inner = el.querySelector(
-          '.message.assistant, .message--assistant, [data-role="assistant-message"], .ai-message'
+          '.message.assistant, .message--assistant, [data-role="assistant-message"], .ai-message, .wa-msg.ai'
         );
         if (inner) attachQuickRepliesToMessage(inner, replies);
       });

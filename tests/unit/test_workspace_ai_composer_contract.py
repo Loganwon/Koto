@@ -151,6 +151,8 @@ def test_workspace_ai_panel_css_selectors_do_not_overlap_workspace_css() -> None
 def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
     composer = _read("web/src/workspace/ai-composer.ts")
     conversation_list = _read("web/src/workspace/conversation-list.ts")
+    bundle_entry = _read("web/src/bundles/workspace.ts")
+    primary_composer = _read("web/src/workspace/primary-composer.ts")
     ai_review = _read("web/src/workspace/ai-review.ts")
     bundle = _read("web/static/js/build/workspace-bundle.js")
 
@@ -171,6 +173,9 @@ def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
     assert "wa-chat-composer-host" in bundle
     assert "wa-session-list-composer-host" in bundle
     assert "submitUnifiedAiComposer" in bundle
+    assert "import '../workspace/primary-composer';" in bundle_entry
+    assert "data-koto-suggestion" in _read("web/templates/index.html")
+    assert "setActiveKotoComposerText" in primary_composer
 
 
 def test_workspace_ai_session_api_is_split_from_list_rendering() -> None:

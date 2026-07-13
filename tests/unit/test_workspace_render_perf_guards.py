@@ -15,8 +15,11 @@ def test_workspace_loader_dedupes_inflight_library_loads():
         in js
     )
     assert "const _assetCacheBust = String(Date.now());" in js
+    assert "const _scriptLoadPromises = new Map<string, Promise<void>>();" in js
     assert "if (_libLoadPromises.sheets) return _libLoadPromises.sheets;" in js
     assert "if (_libLoadPromises.tiptap) return _libLoadPromises.tiptap;" in js
+    assert "s.dataset.kotoLoaderState = 'failed';" in js
+    assert "s.remove();" in js
 
 
 def test_workspace_layout_waits_have_fast_ready_path():

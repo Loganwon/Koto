@@ -9424,9 +9424,6 @@ body.koto-unified-workspace.skills-panel-open .main-content {
 .koto-activity-bar .status-expand-arrow,
 .koto-activity-bar #jobsRunningPill,
 .koto-activity-bar .resize-handle,
-.koto-activity-bar .sidebar-compat {
-  display: none !important;
-}
 
 .koto-activity-bar .latency-detail.open {
   display: block !important;

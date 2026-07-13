@@ -20,20 +20,21 @@ def test_pdf_viewer_forces_initial_visible_page_render_passes():
     assert "this._renderPage(1)" in src
 
 
-def test_pdfjs_loader_prefers_local_vendor_and_reports_failures():
+def test_pdfjs_loader_uses_packaged_runtime_only_and_reports_failures():
     src = (_repo_root() / "web" / "src" / "editors" / "cdn-loaders.ts").read_text(
         encoding="utf-8"
     )
 
     assert "/static/vendor/pdfjs-dist/3.11.174/build/pdf.min.js" in src
     assert "/static/vendor/pdfjs-dist/3.11.174/build/pdf.worker.min.js" in src
-    assert "https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js" in src
-    assert "https://unpkg.com/pdfjs-dist@3.11.174/build/pdf.min.js" in src
-    assert "GlobalWorkerOptions.workerSrc = candidate.worker" in src
+    assert "cdn.jsdelivr.net" not in src
+    assert "unpkg.com" not in src
+    assert "PDF rendering is a packaged capability" in src
+    assert "GlobalWorkerOptions.workerSrc = worker" in src
     assert "Object.assign(window as any" in src
     assert "_updatePdfZoomUI" in src
     assert "_updateDocxZoomUI" in src
-    assert "PDF.js 加载失败" in src
+    assert "PDF.js 本地运行时未注册" in src
 
 
 def test_pdf_open_path_surfaces_errors_in_the_viewer():

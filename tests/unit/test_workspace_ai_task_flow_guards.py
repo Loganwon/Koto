@@ -1315,7 +1315,8 @@ def test_workspace_model_controls_default_to_deepseek_primary_path():
     workbench_js = _read("web/src/workspace/task-workbench.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
-    assert "lockedModel: _normalizeWorkspaceModelMode(localStorage.getItem('wa_locked_model') || '', 'deepseek')" in state_ts
+    assert "lockedModel: 'deepseek'" in state_ts
+    assert "localStorage.getItem('wa_locked_model')" not in state_ts
     assert "_cloudProvider: 'deepseek'" in state_ts
     assert "state._cloudProvider || 'deepseek'" in model_settings_ts
     assert "return _modelDisplayName('deepseek-chat', 'DeepSeek Chat');" in model_settings_ts
@@ -1327,7 +1328,7 @@ def test_workspace_model_controls_default_to_deepseek_primary_path():
     assert "Gemini" not in task_workbench_ts
     assert "Gemini" not in workbench_js
     assert 'data-model-mode="gemini"' not in controls_html
-    assert "wa_locked_model" in workspace_bundle
+    assert "__kotoSettingsModelBridgeBound" in workspace_bundle
     assert "deepseek-chat" in workspace_bundle
 
 

@@ -45,7 +45,6 @@ function $appEl(id: string | HTMLElement): HTMLElement | null {
 (window as any).selectedFiles = [];
 (window as any).setupComplete = false;
 (window as any).lockedTaskType = null;
-(window as any).selectedModel = 'auto';
 if (typeof (window as any).enableMiniGame !== 'boolean') (window as any).enableMiniGame = true;
 (window as any).isScrollLocked = false;
 
@@ -1279,7 +1278,10 @@ export async function sendMessage(event?: Event): Promise<void> {
 
   let taskInfo: any = null;
   let taskType = (window as any).lockedTaskType || null;
-  const modelToUse = (window as any).selectedModel || 'auto';
+  // The workspace model control is the sole chat-mode owner.  Do not revive
+  // the old browser-side model cache: it can disagree with saved settings.
+  const workspaceMode = (window as any).WA?.getLockedModel?.();
+  const modelToUse = workspaceMode === 'local' ? 'local' : 'auto';
 
   // Client-side heuristic pre-classification — skips /api/analyze round-trip
   // for high-confidence matches, reducing perceived latency by ~200-500ms.

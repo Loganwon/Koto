@@ -2188,6 +2188,30 @@ function scheduleTaskStream(run: () => void): void {
   scheduler(run);
 }
 
+function createFileTaskId(): string {
+  const uuid = window.crypto && typeof window.crypto.randomUUID === 'function'
+    ? window.crypto.randomUUID().replace(/-/g, '')
+    : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 12)}`;
+  return `task_${uuid.slice(0, 32)}`;
+}
+
+function persistedTaskStreamEvent(event: Record<string, any>): Record<string, any> {
+  const nested = event && event.detail && typeof event.detail === 'object'
+    ? (event.detail as Record<string, any>).event
+    : null;
+  return nested && typeof nested === 'object' && String((nested as Record<string, any>).type || '').trim()
+    ? nested as Record<string, any>
+    : event;
+}
+
+function showTaskStreamReconnectNotice(card: TaskCardElement, text = '连接短暂中断，正在从任务记录恢复进度…'): void {
+  const step = taskStageStep(card, 'run');
+  markStepRunning(step);
+  upsertStepSingletonRow(step, 'stream-reconnect', 'plan', '<span class="wa-task-chip">恢复连接</span>' + esc(text));
+  setStatus(card, '恢复连接中');
+  syncTaskLiveProgress(card);
+}
+
 function appendTaskRunCardIfDetached(card: TaskCardElement): void {
   if (!card || card.isConnected) return;
   const msgs = document.getElementById('wa-ai-messages');
@@ -2202,17 +2226,6 @@ function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, bod
   const httpMethod = String(method || 'POST').toUpperCase() || 'POST';
   const fetchAbort = new AbortController();
   const signal: AbortSignal = fetchAbort.signal;
-  const finishRunWithError = (errText: string) => {
-    if (streamingCard.dataset.taskTerminalStatus === 'cancelled') return;
-    streamingCard.dataset.taskTerminalStatus = 'error';
-    streamingCard._fatalErrorText = errText;
-    dispatchEventToCard(streamingCard, { type: 'error', payload: { text: errText } });
-    streamingCard.classList.remove('streaming');
-    streamingCard.classList.add('failed');
-    const cancelBtn = streamingCard.querySelector('[data-role="cancel"]');
-    if (cancelBtn) { (cancelBtn as HTMLElement).textContent = '关闭'; (cancelBtn as HTMLElement).dataset.action = 'close'; }
-    syncTaskLiveProgress(streamingCard);
-  };
   const cancellationHandler = () => {
     if (!fetchAbort) return;
     try { fetchAbort.abort(); } catch { /* noop */ }
@@ -2225,7 +2238,7 @@ function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, bod
     syncTaskLiveProgress(streamingCard);
   };
   streamingCard._cancelHandler = cancellationHandler;
-  scheduleTaskStream(async () => {
+  return new Promise<TaskCardElement>((resolve, reject) => scheduleTaskStream(async () => {
     try {
       const resp = await fetch(url, {
         method: httpMethod,
@@ -2233,34 +2246,41 @@ function streamTaskSse(cardOrLoadingEl: TaskCardElement | null, url: string, bod
         body: httpMethod !== 'GET' ? JSON.stringify(body) : undefined,
         signal: signal || undefined,
       });
-      if (!resp.ok) { finishRunWithError('请求失败: ' + resp.status + ' ' + resp.statusText); return; }
-      if (!resp.body) { finishRunWithError('响应流不可用'); return; }
+      if (!resp.ok) throw new Error('请求失败: ' + resp.status + ' ' + resp.statusText);
+      if (!resp.body) throw new Error('响应流不可用');
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
-      const readLoop = async (): Promise<void> => {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) { 
-            const flushed = parseSseEvents(buffer, true);
-            flushed.events.forEach((evt) => processFileTaskStreamEvent(streamingCard, evt));
-            stopTaskHeartbeat(streamingCard);
-            if (!streamingCard.dataset.taskTerminalStatus) { dispatchEventToCard(streamingCard, { type: 'run.finished', payload: { text: '流已结束。' } }); }
-            break;
-          }
-          buffer += decoder.decode(value, { stream: true });
-          const parsed = parseSseEvents(buffer, false);
-          parsed.events.forEach((evt) => processFileTaskStreamEvent(streamingCard, evt));
-          buffer = parsed.remainder;
-        }
+      let terminalSeen = false;
+      const applyEvents = (events: Record<string, any>[]) => {
+        events.map(persistedTaskStreamEvent).forEach((evt) => {
+          processFileTaskStreamEvent(streamingCard, evt);
+          if (isTaskStreamTerminalEvent(evt)) terminalSeen = true;
+        });
       };
-      readLoop().catch((err) => finishRunWithError(String(err.message || err)));
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) {
+          const flushed = parseSseEvents(buffer, true);
+          applyEvents(flushed.events);
+          break;
+        }
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSseEvents(buffer, false);
+        applyEvents(parsed.events);
+        buffer = parsed.remainder;
+      }
+      if (!terminalSeen) {
+        showTaskStreamReconnectNotice(streamingCard);
+        throw new Error('任务状态流已断开，正在保留后台任务状态。');
+      }
+      stopTaskHeartbeat(streamingCard);
+      resolve(streamingCard);
     } catch (err: any) {
-      if ((err as any)?.name === 'AbortError') return;
-      finishRunWithError(String(err.message || err));
+      if ((err as any)?.name !== 'AbortError') showTaskStreamReconnectNotice(streamingCard, '连接恢复失败；任务仍可在任务流程中继续查看。');
+      reject(err);
     }
-  });
-  return Promise.resolve(streamingCard);
+  }));
 }
 
 function cancelFileTaskRun(card: TaskCardElement): boolean {
@@ -2504,6 +2524,10 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
       : `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     payload.run_id = randomId;
   }
+  if (!String(payload.task_id || payload.taskId || '').trim()) {
+    payload.task_id = createFileTaskId();
+  }
+  card.dataset.taskId = String(payload.task_id || payload.taskId || '').trim();
   card.dataset.taskRunId = String(payload.run_id || '').trim();
   seedRouteModelContext(card, payload);
   let quickActionMode = payload.options && typeof payload.options === 'object'
@@ -2523,30 +2547,33 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
   }
   scrollToBottom(msgs);
 
-  const resp = await csrfFetch('/api/editor/ai/task-stream', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
-    body: JSON.stringify(payload),
-    signal: options.signal,
-  });
-  if (!resp.ok) throw new Error(await describeHttpError(resp));
-  if (!resp.body) throw new Error('响应流不可用');
-
-  const reader = resp.body.getReader();
-  card._abortFileTaskStream = () => {
-    try {
-      if (options.abortController && typeof options.abortController.abort === 'function' && !(options.abortController.signal && options.abortController.signal.aborted)) {
-        options.abortController.abort();
-      }
-    } catch (_) { /* noop */ }
-    try {
-      if (reader && typeof reader.cancel === 'function') reader.cancel();
-    } catch (_) { /* noop */ }
-  };
-
-  const decoder = new TextDecoder();
-  let buffer = '';
+  let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+  let recoveryAttempted = false;
   try {
+    const resp = await csrfFetch('/api/editor/ai/task-stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Accept': 'text/event-stream' },
+      body: JSON.stringify(payload),
+      signal: options.signal,
+    });
+    if (!resp.ok) throw new Error(await describeHttpError(resp));
+    if (!resp.body) throw new Error('响应流不可用');
+
+    reader = resp.body.getReader();
+    card._abortFileTaskStream = () => {
+      try {
+        if (options.abortController && typeof options.abortController.abort === 'function' && !(options.abortController.signal && options.abortController.signal.aborted)) {
+          options.abortController.abort();
+        }
+      } catch (_) { /* noop */ }
+      try {
+        if (reader && typeof reader.cancel === 'function') reader.cancel();
+      } catch (_) { /* noop */ }
+    };
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let terminalSeen = false;
     while (true) {
       const chunk = await reader.read();
       if (chunk.done) break;
@@ -2559,6 +2586,7 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
       }
       scrollToBottom(msgs);
       if (parsed.events.some(isTaskStreamTerminalEvent)) {
+        terminalSeen = true;
         try { Promise.resolve(reader.cancel()).catch(() => {}); } catch (_) { /* noop */ }
         break;
       }
@@ -2566,11 +2594,27 @@ async function streamTaskFlow(optionsOrLoadingEl: StreamFileTaskOptions | TaskCa
 
     const trailing = parseSseEvents(buffer, true);
     trailing.events.forEach((evt) => processFileTaskStreamEvent(card, evt));
+    if (trailing.events.some(isTaskStreamTerminalEvent)) terminalSeen = true;
     if (trailing.events.length && typeof options.onTaskCardSnapshot === 'function') {
       try { options.onTaskCardSnapshot(card); } catch (_) { /* noop */ }
     }
-  } catch (error) {
+    if (!terminalSeen) throw new Error('任务状态流已断开。');
+  } catch (error: any) {
     if (card._fatalErrorText) throw makeTaskError(card._fatalErrorText);
+    const aborted = error && error.name === 'AbortError';
+    const taskId = String(card.dataset.taskId || '').trim();
+    if (!aborted && !recoveryAttempted && taskId) {
+      recoveryAttempted = true;
+      showTaskStreamReconnectNotice(card);
+      const recovered = await resumePersistedFileTask({
+        taskId,
+        runId: String(card.dataset.taskRunId || '').trim(),
+        loadingEl: card,
+        initialStatus: 'running',
+        replay: true,
+      });
+      return taskTerminalResult(recovered);
+    }
     throw error;
   } finally {
     card.classList.remove('streaming');

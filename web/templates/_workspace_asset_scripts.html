@@ -1,5 +1,5 @@
 <!-- Split.js served locally so a CDN failure cannot crash the workspace runtime -->
-<script src="/static/vendor/split.min.js"></script>
+<script src="{{ asset_url('vendor/split.min.js') }}"></script>
 <script>
   var $, WA = window.WA = window.WA || {}, state, Router, showToast, autoResize, lastSelectionText;
   var _csrfFetch, _escHtml, _fileIcon, _normalizeWorkspaceModelMode;
@@ -23,6 +23,6 @@
   };
 </script>
 <!-- Bundled TS → IIFE: workspace + editors + ui -->
-<script src="{{ url_for('static', filename='js/build/workspace-bundle.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ asset_url('js/build/workspace-bundle.js') }}"></script>
 <!-- Bundled TS → IIFE: docx review modules -->
-<script src="{{ url_for('static', filename='js/build/review-bundle.js') }}?v={{ range(100000,999999)|random }}"></script>
+<script src="{{ asset_url('js/build/review-bundle.js') }}"></script>

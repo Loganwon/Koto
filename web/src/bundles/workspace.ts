@@ -12,6 +12,9 @@ installFrontendObserver();
 import { $, showToast, _escHtml, _fileIcon, _CHAT_SVG, _PIN_SVG, _CLIPBOARD_SVG } from '../workspace/infrastructure';
 import { state } from '../workspace/state';
 
+// Shared entrypoint for welcome cards, skills, and other cross-feature input.
+import '../workspace/primary-composer';
+
 // AI context must be installed before file-tree action buttons can attach files.
 import '../workspace/ai-context';
 

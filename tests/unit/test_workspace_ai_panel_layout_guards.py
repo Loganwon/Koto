@@ -112,6 +112,7 @@ def test_workspace_ai_panel_rejects_narrow_persisted_split_sizes() -> None:
 def test_workspace_uses_only_current_file_menu_and_skill_message_paths() -> None:
     context_menu = _read("web/src/workspace/fs-context-menu.ts")
     skill_extensions = _read("web/src/skills/skill-ui-extensions.ts")
+    skill_ui = _read("web/src/skills/skill-ui.ts")
 
     assert "wa._showCtxMenu" not in context_menu
     assert "wa.renameWorkspaceFile" not in context_menu
@@ -119,6 +120,11 @@ def test_workspace_uses_only_current_file_menu_and_skill_message_paths() -> None
     assert "function sendMessage(text: string)" not in skill_extensions
     assert "#wa-ai-input-area" in skill_extensions
     assert "#wa-ai-messages .wa-msg.ai" in skill_extensions
+    assert "#wa-ai-messages, #messages" in skill_extensions
+    assert "el.classList.contains('wa-msg') && el.classList.contains('ai')" in skill_extensions
+    assert "#wa-user-input, #messageInput" in skill_ui
+    assert "getActiveKotoComposer" in skill_ui
+    assert "from '../shared/active-composer';" in skill_ui
 
 
 def test_workspace_ai_controls_have_an_actionable_default_state() -> None:
@@ -217,7 +223,7 @@ def test_workspace_subject_bar_and_action_row_styles_support_restored_layout() -
     assert "toggleCurrentFileAIContext" not in task_dispatcher
     assert "files.push(currentFile)" not in task_dispatcher
     assert "current_file: currentFile," in task_dispatcher
-    assert "wa_model_choice_explicit" in model_settings
+    assert "koto:local-model-changed" in model_settings
     assert "_localRuntimeModel" in model_settings
 
     assert "#wa-subject-bar { display: none !important;" not in css

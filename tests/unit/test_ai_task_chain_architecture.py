@@ -39,12 +39,31 @@ def test_workspace_uses_bundled_ts_assets_without_legacy_static_entrypoints() ->
     assert "js/build/workspace-bundle.js" in assets
     assert "workspace-assistant.js" not in assets
     assert "workspace-task-dispatcher.js" not in assets
+    assert "range(100000,999999)|random" not in assets
+    assert "asset_url('vendor/split.min.js')" in assets
+    assert "asset_url('js/build/workspace-bundle.js')" in assets
+    assert "asset_url('js/build/review-bundle.js')" in assets
+    assert assets.index("split.min.js") < assets.index("workspace-bundle.js")
+    assert assets.index("workspace-bundle.js") < assets.index("review-bundle.js")
     assert "import '../workspace/ai-review';" in bundle_entry
     assert "import '../workspace/task-dispatcher';" in bundle_entry
     assert not (ROOT / "web/static/js/workspace-assistant.js").exists()
     assert not (ROOT / "web/static/js/workspace-task-dispatcher.js").exists()
     assert not (ROOT / "web/static/js/src/workspace-assistant.js").exists()
     assert not (ROOT / "web/static/js/src/workspace-task-dispatcher.js").exists()
+
+
+def test_unified_workspace_shell_has_no_hidden_legacy_sidebar_surface() -> None:
+    index = _read("web/templates/index.html")
+    workspace_css = _read("web/static/css/workspace.css")
+
+    assert "sidebar-compat" not in index
+    assert "sidebar-compat" not in workspace_css
+    # The session bridge has null-safe guards, so deleting the unreachable
+    # compatibility surface cannot resurrect a second sidebar at runtime.
+    session_bridge = _read("web/src/app/session-bridge.ts")
+    assert "if (!container) return;" in session_bridge
+    assert "if (!select) return;" in session_bridge
 
 
 def test_workspace_page_routes_are_registered_without_legacy_page_shell() -> None:
