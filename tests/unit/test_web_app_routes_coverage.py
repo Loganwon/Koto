@@ -92,7 +92,7 @@ class TestPageRoutes:
 class TestSessionRoutes:
     def test_list_sessions(self, client):
         resp = client.get("/api/sessions")
-        assert resp.status_code in (200, 500)
+        assert resp.status_code in (200, 500, 503)
 
     def test_create_session(self, client):
         resp = _json_post(

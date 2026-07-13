@@ -25,6 +25,8 @@ def get_filegen_brief_instruction() -> str:
 
 class ClientProxy:
     def __getattr__(self, name: str) -> Any:
+        if name.startswith("__"):
+            raise AttributeError(name)
         from web.runtime_context import service_registry
 
         return getattr(service_registry.client, name)

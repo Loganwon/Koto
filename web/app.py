@@ -486,6 +486,8 @@ class _ClientProxy:
     """?????????"""
 
     def __getattr__(self, name):
+        if name.startswith("__"):
+            raise AttributeError(name)
         obj = getattr(get_client(), name)
         if name == "models":
             return _TrackedModels(obj)
