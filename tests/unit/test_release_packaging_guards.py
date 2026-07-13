@@ -26,6 +26,15 @@ def test_release_metadata_uses_one_valid_semantic_version():
     assert f"## [{version}]" in changelog
 
 
+def test_evaluation_reports_do_not_log_model_derived_error_payloads():
+    source = Path("tests/evaluation/test_intent_accuracy.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert 'print(f"         ERROR: {e}")' not in source
+    assert "ERROR: classification did not match expected values" in source
+
+
 def test_release_build_includes_file_task_chart_dependencies():
     requirements = Path("config/requirements.txt").read_text(encoding="utf-8")
     lock = Path("config/requirements.lock").read_text(encoding="utf-8")

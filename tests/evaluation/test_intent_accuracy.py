@@ -288,8 +288,10 @@ def test_intent_accuracy_report(evaluator):
             f"diagnostic={r['diagnostic_request']}"
         )
         if r["errors"]:
-            for e in r["errors"]:
-                print(f"         ERROR: {e}")
+            # Evaluation errors can be derived from model responses.  Keep the
+            # report useful without writing potentially sensitive payloads to
+            # CI logs.
+            print("         ERROR: classification did not match expected values")
         if r["adjudication_intent"]:
             print(
                 f"         adjudicator: {r['adjudication_intent']} "
