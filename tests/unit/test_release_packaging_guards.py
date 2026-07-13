@@ -163,6 +163,9 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "正式发布需要 Node.js/npm 从锁文件重建前端" in local_release
     assert "完整 Windows 发布必须生成安装包" in local_release
     assert "工作区存在未提交改动" in local_release
+    assert "release-build.lock" in local_release
+    assert "已有发布构建正在运行" in local_release
+    assert "[System.IO.FileShare]::None" in local_release
     assert 'Join-Path $StaticRoot "univer-dist\\index.html"' in local_release
     assert "包含已废弃的 Univer index.html" in local_release
     assert "Get-UniverIndexAssetRefs" not in local_release

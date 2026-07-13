@@ -248,6 +248,28 @@ if (-not (Test-Path $PYTHON)) {
     exit 1
 }
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
+
+# The Cython step emits in-place extensions that the PyInstaller step consumes.
+# A second build can otherwise finish first and delete those extensions during
+# its cleanup, leaving the first build with dangling binary entries.  Keep the
+# handle open for this PowerShell process; Windows releases it automatically on
+# every exit path, so a stale lock file never blocks a later build.
+$releaseBuildLockPath = Join-Path $LOG_DIR "release-build.lock"
+try {
+    $releaseBuildLock = [System.IO.File]::Open(
+        $releaseBuildLockPath,
+        [System.IO.FileMode]::OpenOrCreate,
+        [System.IO.FileAccess]::ReadWrite,
+        [System.IO.FileShare]::None
+    )
+} catch [System.IO.IOException] {
+    Write-Fail "已有发布构建正在运行；为避免 Cython 产物互相清理，本次构建已取消。"
+    exit 1
+}
+$lockMarker = [System.Text.Encoding]::UTF8.GetBytes("PID=$PID`nStarted=$(Get-Date -Format o)`n")
+$releaseBuildLock.SetLength(0)
+$releaseBuildLock.Write($lockMarker, 0, $lockMarker.Length)
+$releaseBuildLock.Flush()
 Write-OK "虚拟环境 OK"
 
 # 正式发布必须对应一个可追溯的 Git 提交。否则 manifest 只能记录 HEAD，
