@@ -34,6 +34,10 @@ from web.document_feedback_text import (
 )
 from web.document_feedback_rules import append_pattern_annotations
 from web.document_feedback_result import collect_annotation_loop_result
+from web.document_feedback_progress import (
+    build_analysis_progress_event,
+    build_apply_progress_event,
+)
 from web.document_feedback_stream import (
     collect_annotation_result,
     iter_annotation_progress_events,
@@ -1781,36 +1785,13 @@ class DocumentFeedbackSystem:
 
         def on_analysis_progress(current, total, message, **meta):
             """进度回调 — 在分析线程中调用，通过 Queue 发送到主线程"""
-            progress = 15 + int((current / max(1, total)) * 35)
             current_time = time.time()
             force_emit = str(meta.get("chunk_status") or "").strip().lower() == "completed"
             if force_emit or current_time - last_yield_time[0] >= 0.3:
                 last_yield_time[0] = current_time
-                event = {
-                    "stage": "analyzing",
-                    "progress": progress,
-                    "message": f"🤖 {message}",
-                    "detail": message,
-                }
-                for key in (
-                    "chunk_status",
-                    "chunk_index",
-                    "chunk_total",
-                    "global_chunk_index",
-                    "global_chunk_total",
-                    "added_count",
-                    "total_annotations",
-                    "target_path",
-                ):
-                    value = meta.get(key)
-                    if value not in (None, "", [], {}):
-                        event[key] = value
-                partial_proposals = meta.get("partial_proposals")
-                if isinstance(partial_proposals, list) and partial_proposals:
-                    event["partial_proposals"] = [
-                        dict(item) for item in partial_proposals if isinstance(item, dict)
-                    ]
-                progress_q.put(event)
+                progress_q.put(
+                    build_analysis_progress_event(current, total, message, meta)
+                )
 
         def run_analysis():
             """在后台线程中运行分析"""
@@ -2010,32 +1991,16 @@ class DocumentFeedbackSystem:
             apply_result_holder = {"result": None, "error": None}
 
             def on_apply_progress(current, total, status, detail, **meta):
-                pct = 60 + int((current / total) * 25) if total > 0 else 60
-                status_text = {
-                    "start": "准备写入修订",
-                    "processing": "正在写入修订",
-                    "success": "已完成当前修订",
-                    "saved": "已写回原文",
-                    "failed": "写回失败",
-                }.get(str(status or "").strip().lower(), str(status or "正在写回").strip() or "正在写回")
-                event = {
-                    "stage": "applying",
-                    "progress": pct,
-                    "message": f"📝 {status_text}",
-                    "detail": detail,
-                }
-                if meta.get("file_updated"):
-                    event.update(
-                        {
-                            "file_updated": True,
-                            "path": str(meta.get("file_path") or revised_file),
-                            "file_path": str(meta.get("file_path") or revised_file),
-                            "supported": True,
-                            "applied": int(meta.get("applied") or current or 0),
-                            "updated_in_place": bool(meta.get("updated_in_place", True)),
-                        }
+                apply_q.put(
+                    build_apply_progress_event(
+                        current,
+                        total,
+                        status,
+                        detail,
+                        meta,
+                        revised_file=revised_file,
                     )
-                apply_q.put(event)
+                )
 
             def run_apply():
                 try:

@@ -37,6 +37,7 @@ DOCUMENT_FEEDBACK_AI_CALL = ROOT / "web" / "document_feedback_ai_call.py"
 DOCUMENT_FEEDBACK_TEXT = ROOT / "web" / "document_feedback_text.py"
 DOCUMENT_FEEDBACK_RULES = ROOT / "web" / "document_feedback_rules.py"
 DOCUMENT_FEEDBACK_RESULT = ROOT / "web" / "document_feedback_result.py"
+DOCUMENT_FEEDBACK_PROGRESS = ROOT / "web" / "document_feedback_progress.py"
 
 
 def _source(path: Path) -> str:
@@ -48,7 +49,7 @@ def test_god_file_line_budgets_only_ratchet_down() -> None:
     assert len(_source(TASK_TOOLS).splitlines()) <= 5395
     assert len(_source(TASK_RUNTIME).splitlines()) <= 3421
     assert len(_source(DOCX_PARSER).splitlines()) <= 762
-    assert len(_source(DOCUMENT_FEEDBACK).splitlines()) <= 2405
+    assert len(_source(DOCUMENT_FEEDBACK).splitlines()) <= 2375
 
 
 def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
@@ -81,6 +82,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     document_feedback_text = _source(DOCUMENT_FEEDBACK_TEXT)
     document_feedback_rules = _source(DOCUMENT_FEEDBACK_RULES)
     document_feedback_result = _source(DOCUMENT_FEEDBACK_RESULT)
+    document_feedback_progress = _source(DOCUMENT_FEEDBACK_PROGRESS)
 
     assert "from app.core.agent.task_tools_office_create import" in task_tools
     assert "from app.core.agent.task_tools_conversion import (" in task_tools
@@ -124,6 +126,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "from web.document_feedback_text import (" in document_feedback
     assert "from web.document_feedback_rules import append_pattern_annotations" in document_feedback
     assert "from web.document_feedback_result import collect_annotation_loop_result" in document_feedback
+    assert "from web.document_feedback_progress import (" in document_feedback
     assert "def parse_annotation_response(" in document_feedback_annotations
     assert "def stream_annotation_events(" in document_feedback_stream
     assert "def probe_working_model(" in document_feedback_models
@@ -133,6 +136,7 @@ def test_extracted_boundaries_remain_explicit_and_acyclic() -> None:
     assert "def split_into_paragraph_chunks(" in document_feedback_text
     assert "def append_pattern_annotations(" in document_feedback_rules
     assert "def collect_annotation_loop_result(" in document_feedback_result
+    assert "def build_analysis_progress_event(" in document_feedback_progress
     stream_tree = ast.parse(document_feedback_stream)
     assert not any(
         isinstance(node, ast.ImportFrom) and node.module == "web.document_feedback"
