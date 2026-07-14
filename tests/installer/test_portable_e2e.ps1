@@ -184,8 +184,8 @@ Write-Host "  Koto.exe PID: $($kotoProc.Id)"
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 4 — Poll /api/health
 # ══════════════════════════════════════════════════════════════════════════
-Write-Host "`n[Step 4] Waiting for http://localhost:$Port/api/health (up to ${HealthTimeoutSec}s)..."
-$healthUrl = "http://localhost:$Port/api/health"
+Write-Host "`n[Step 4] Waiting for http://127.0.0.1:$Port/api/health (up to ${HealthTimeoutSec}s)..."
+$healthUrl = "http://127.0.0.1:$Port/api/health"
 $deadline  = (Get-Date).AddSeconds($HealthTimeoutSec)
 $healthy   = $false
 
@@ -221,7 +221,7 @@ if (-not $healthy) {
 # /api/ping endpoint check
 if ($healthy) {
     try {
-        $assetResp = Invoke-RestMethod "http://localhost:$Port/api/v1/workspace/asset_health" -TimeoutSec 5
+        $assetResp = Invoke-RestMethod "http://127.0.0.1:$Port/api/v1/workspace/asset_health" -TimeoutSec 5
         if ($assetResp.ok -eq $true) {
             Pass "/api/v1/workspace/asset_health returned ok"
         } else {
@@ -232,7 +232,7 @@ if ($healthy) {
     }
 
     try {
-        Invoke-RestMethod "http://localhost:$Port/api/ping" -TimeoutSec 5 | Out-Null
+        Invoke-RestMethod "http://127.0.0.1:$Port/api/ping" -TimeoutSec 5 | Out-Null
         Pass "/api/ping responded"
     } catch {
         Write-Host "  WARN: /api/ping did not respond"

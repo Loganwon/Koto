@@ -305,6 +305,8 @@ def test_release_e2e_uses_available_loopback_ports():
         assert "Show-KotoStartupDiagnostics" in source
         assert "Koto startup diagnostics" in source
         assert "Get-NetTCPConnection" in source
+        assert "http://127.0.0.1:$Port" in source
+        assert "http://localhost:$Port" not in source
 
 
 def test_release_pipelines_publish_manifest_and_sha256_checksums():
