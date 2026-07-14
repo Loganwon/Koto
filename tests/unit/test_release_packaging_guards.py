@@ -265,6 +265,7 @@ def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
 
 def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
     setup = Path("src/koto_setup.py").read_text(encoding="utf-8")
+    desktop_entry = Path("src/koto_app.py").read_text(encoding="utf-8")
     installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
         encoding="utf-8"
     )
@@ -273,6 +274,13 @@ def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
     )
 
     assert 'os.environ.get("KOTO_SERVER_ONLY") != "1"' in setup
+    server_only = 'if os.environ.get("KOTO_SERVER_ONLY") == "1":'
+    assert server_only in desktop_entry
+    assert (
+        desktop_entry.index("server_info = start_flask_server()")
+        < desktop_entry.index(server_only)
+        < desktop_entry.index("import webview")
+    )
     for source in (installer_e2e, portable_e2e):
         assert '$env:KOTO_SERVER_ONLY = "1"' in source
         assert "server-only mode" in source
