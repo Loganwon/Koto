@@ -226,6 +226,11 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "Cython 编译前清理源码覆盖产物" in local_release
     assert "发布收尾：清理源码覆盖产物" in local_release
     assert "版本号仅可包含字母、数字、点、下划线、加号和连字符" in local_release
+    assert "$staticRoot\\js\\build\\workspace-bundle.js" in release
+    assert "$staticRoot\\js\\workspace-assistant.js" not in release
+    assert "$staticRoot\\docx-preview.min.js" not in release
+    assert 'Name = "macro_suggestions.json"' in release
+    assert 'Name = "personality_matrix.json"' in release
 
 
 def test_release_build_seeds_gitignored_runtime_defaults_in_packages():

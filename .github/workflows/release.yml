@@ -195,6 +195,17 @@ jobs:
               Write-Host "  NOTE: normalized empty config dir: $dirPath"
             }
           }
+          $runtimeDefaults = @(
+            @{ Name = "macro_suggestions.json"; Content = "{`"suggestions`": [], `"seen_fingerprints`": []}" },
+            @{ Name = "personality_matrix.json"; Content = "{`"cognitive`": {`"exploratory`": 0.5, `"executor`": 0.5, `"analytical`": 0.5, `"creative`": 0.5}, `"expertise`": {}, `"goals`": [], `"recent_themes`": [], `"values`": {`"efficiency`": 0.5, `"depth`": 0.5, `"formality`": 0.5}, `"last_updated`": null}" }
+          )
+          foreach ($default in $runtimeDefaults) {
+            $path = Join-Path $configRoot $default.Name
+            if (-not (Test-Path $path)) {
+              Set-Content -Path $path -Value $default.Content -Encoding UTF8
+              Write-Host "  NOTE: seeded runtime default: $($default.Name)"
+            }
+          }
           $checks = @(
             "dist\Koto\Koto.exe",
             "$internal\base_library.zip",
@@ -202,9 +213,8 @@ jobs:
             "$internal\app",
             "$internal\web",
             "$internal\config",
-            "$staticRoot\js\workspace-assistant.js",
+            "$staticRoot\js\build\workspace-bundle.js",
             "$staticRoot\jszip.min.js",
-            "$staticRoot\docx-preview.min.js",
             "$staticRoot\univer-dist\assets\sheets-main.js",
             "$staticRoot\univer-dist\assets\sheets-main.css",
             "$configRoot\.builtin_key",
