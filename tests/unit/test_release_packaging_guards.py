@@ -49,6 +49,22 @@ def test_ci_and_release_workflows_enforce_the_same_locked_dependency_audit():
     assert "pip-audit --desc || true" not in ci
 
 
+def test_public_release_docs_have_download_and_safe_support_entrypoints():
+    readme = Path("README.md").read_text(encoding="utf-8")
+    index = Path("docs/DOCUMENTATION_INDEX.md").read_text(encoding="utf-8")
+    guide = Path("docs/USER_GUIDE.md").read_text(encoding="utf-8")
+    support = Path("docs/SUPPORT.md").read_text(encoding="utf-8")
+
+    assert "docs/USER_GUIDE.md" in readme
+    assert "docs/SUPPORT.md" in readme
+    assert "USER_GUIDE.md" in index
+    assert "SUPPORT.md" in index
+    assert "releases/latest" in guide
+    assert "API Key" in guide
+    assert "issues/new/choose" in support
+    assert "不要上传" in support
+
+
 def test_release_build_includes_file_task_chart_dependencies():
     requirements = Path("config/requirements.txt").read_text(encoding="utf-8")
     lock = Path("config/requirements.lock").read_text(encoding="utf-8")
@@ -226,6 +242,11 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "Cython 编译前清理源码覆盖产物" in local_release
     assert "发布收尾：清理源码覆盖产物" in local_release
     assert "版本号仅可包含字母、数字、点、下划线、加号和连字符" in local_release
+    assert "$staticRoot\\js\\build\\workspace-bundle.js" in release
+    assert "$staticRoot\\js\\workspace-assistant.js" not in release
+    assert "$staticRoot\\docx-preview.min.js" not in release
+    assert 'Name = "macro_suggestions.json"' in release
+    assert 'Name = "personality_matrix.json"' in release
 
 
 def test_release_build_seeds_gitignored_runtime_defaults_in_packages():

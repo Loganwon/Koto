@@ -8,6 +8,8 @@ guide.
 
 | Need | Current document | Canonical command or owner |
 | --- | --- | --- |
+| Download, configure, and complete first tasks | [USER_GUIDE.md](USER_GUIDE.md) | Windows release / first-run checklist |
+| Get help or send a safe problem report | [SUPPORT.md](SUPPORT.md) | GitHub Issues and diagnostic checklist |
 | Install and start Koto | [QUICKSTART.md](QUICKSTART.md) | `start_koto.bat` / `.venv\\Scripts\\python.exe -m web.app` |
 | Set up and run tests | [PYTHON_TEST_ENV.md](PYTHON_TEST_ENV.md) | `.venv` Python, `npm --prefix web run typecheck` |
 | Test AI assistant flows | [ai-assistant-testing.md](ai-assistant-testing.md) | `python scripts/run_ai_assistant_flow_tests.py smoke` |
@@ -20,9 +22,9 @@ guide.
 
 - The root [README](../README.md) and this page are the only general entry
   indexes.
-- `docs/QUICKSTART.md`, `docs/PYTHON_TEST_ENV.md`, and
-  `docs/RELEASE_GATE.md` are the only current startup, testing, and release
-  guides.
+- `docs/USER_GUIDE.md`, `docs/SUPPORT.md`, `docs/QUICKSTART.md`,
+  `docs/PYTHON_TEST_ENV.md`, and `docs/RELEASE_GATE.md` are the current
+  user, support, startup, testing, and release guides.
 - Documents headed **Historical snapshot** record a past state only. They may
   mention removed files, old test counts, or retired routes and must not be
   used to make implementation decisions.
