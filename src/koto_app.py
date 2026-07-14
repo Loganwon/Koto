@@ -1352,6 +1352,18 @@ def main():
     # 图标生成 + Flask 启动 + webview 导入 三者并行，大幅缩短启动时间
     server_info = start_flask_server() or {}
 
+    # 打包端到端测试和无界面运维场景只需要 HTTP 服务。明确跳过
+    # pywebview 初始化，避免无交互 Windows 会话阻塞桌面后端并掩盖
+    # Flask 的真实启动状态。
+    if os.environ.get("KOTO_SERVER_ONLY") == "1":
+        _write_log("ℹ️ KOTO_SERVER_ONLY=1：仅运行 Flask 服务，不启动桌面窗口")
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            _write_log("ℹ️ 收到停止信号，结束仅服务模式")
+        return
+
     # 图标生成（仅首次运行需要；与 Flask 启动并行完成）
     _icon_ready = threading.Event()
     ico_path = ASSETS_DIR / "koto_icon.ico"
