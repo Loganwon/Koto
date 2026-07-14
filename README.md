@@ -5,6 +5,15 @@ automation. The Flask application serves one unified browser/desktop shell;
 the current workspace frontend is authored in TypeScript under `web/src/` and
 published as the generated `web/static/js/build/workspace-bundle.js` asset.
 
+## Download and use Koto
+
+Download the current Windows release from the [Koto Releases page](https://github.com/Loganwon/Koto/releases/latest).
+Choose the installer for a normal Windows setup, or the portable ZIP if you
+prefer to keep Koto in a self-contained folder. Start with the
+[user guide](docs/USER_GUIDE.md) for the first-run checklist and example
+prompts. If something does not work, use [support and feedback](docs/SUPPORT.md)
+before sharing logs or screenshots.
+
 ## Start here
 
 Use the [current documentation index](docs/DOCUMENTATION_INDEX.md). It is the
@@ -12,6 +21,8 @@ only entrypoint for the supported startup, test, architecture, and release
 guides:
 
 - [Quick start](docs/QUICKSTART.md)
+- [User guide](docs/USER_GUIDE.md)
+- [Support and feedback](docs/SUPPORT.md)
 - [Python and frontend test environment](docs/PYTHON_TEST_ENV.md)
 - [Architecture and active ownership](docs/ARCHITECTURE.md)
 - [Architecture debt and cleanup roadmap](docs/KOTO_CODE_DEBT_REPORT.md)
