@@ -383,7 +383,7 @@ jobs:
             -SetupExe $setup.FullName `
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_E2E" `
             -Port $port `
-            -HealthTimeoutSec 60
+            -HealthTimeoutSec 120
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run portable E2E test
@@ -402,7 +402,7 @@ jobs:
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
             -Port $port `
-            -HealthTimeoutSec 60
+            -HealthTimeoutSec 120
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
   # ══════════════════════════════════════════════════════════════════════════

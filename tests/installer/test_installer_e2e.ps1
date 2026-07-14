@@ -66,6 +66,24 @@ Write-Host "[E2E] Port: $Port"
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
+    Write-Host "::group::Koto startup diagnostics"
+    Write-Host "Process PID: $($kotoProc.Id); exited: $($kotoProc.HasExited); expected port: $HealthPort"
+    try {
+        Get-NetTCPConnection -State Listen -LocalPort $HealthPort -ErrorAction Stop |
+            Format-Table -AutoSize | Out-String | Write-Host
+    } catch {
+        Write-Host "No listener found on port $HealthPort"
+    }
+    foreach ($logName in @("startup.log", "runtime.log")) {
+        $logPath = Join-Path $InstallDir "logs\$logName"
+        if (Test-Path $logPath) {
+            Write-Host "--- $logPath (last 200 lines) ---"
+            Get-Content -LiteralPath $logPath -Tail 200 -ErrorAction Continue
+        }
+    }
+    Write-Host "::endgroup::"
+}
 function Test-WorkspaceAssetBundle([string]$StaticRoot) {
     $legacyIndexHtml = Join-Path $StaticRoot "univer-dist\index.html"
     if (Test-Path $legacyIndexHtml) {
@@ -228,6 +246,7 @@ if (-not $healthy -and -not $kotoProc.HasExited) {
 }
 
 if (-not $healthy) {
+    Show-KotoStartupDiagnostics -InstallDir $TestInstallDir -HealthPort $Port
     if ($RequireHealth) {
         Fail "Health endpoint did not respond within ${HealthTimeoutSec}s"
     } else {
