@@ -373,11 +373,16 @@ jobs:
         run: |
           $setup = Get-Item "dist\Koto_v*_Setup.exe" | Select-Object -First 1
           if (-not $setup) { Write-Host "::error::Setup EXE not found in dist\"; exit 1 }
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+          $listener.Stop()
           Write-Host "Testing installer: $($setup.FullName)"
+          Write-Host "Using available loopback port: $port"
           & tests\installer\test_installer_e2e.ps1 `
             -SetupExe $setup.FullName `
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_E2E" `
-            -Port 5099 `
+            -Port $port `
             -HealthTimeoutSec 60
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
@@ -388,10 +393,15 @@ jobs:
         run: |
           $zip = Get-Item "dist\Koto_v*_Windows.zip" | Select-Object -First 1
           if (-not $zip) { Write-Host "::error::ZIP not found; portable E2E is required for release"; exit 1 }
+          $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+          $listener.Start()
+          $port = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+          $listener.Stop()
           Write-Host "Testing portable: $($zip.FullName)"
+          Write-Host "Using available loopback port: $port"
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
-            -Port 5098 `
+            -Port $port `
             -HealthTimeoutSec 60
           if ($LASTEXITCODE -ne 0) { exit 1 }
 

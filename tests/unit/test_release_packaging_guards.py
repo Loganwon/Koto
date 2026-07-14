@@ -286,6 +286,16 @@ def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
         assert "server-only mode" in source
 
 
+def test_release_e2e_uses_available_loopback_ports():
+    release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert release.count("System.Net.Sockets.TcpListener") == 2
+    assert release.count("Using available loopback port: $port") == 2
+    assert release.count("-Port $port") == 2
+    assert "-Port 5099" not in release
+    assert "-Port 5098" not in release
+
+
 def test_release_pipelines_publish_manifest_and_sha256_checksums():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     build = Path(".github/workflows/build.yml").read_text(encoding="utf-8")
