@@ -10,9 +10,11 @@
   <meta property="og:description" content="在本地文件、编辑器和 AI 协作之间保持同一条工作流。">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://loganwon.github.io/Koto/">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Manrope:wght@500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <meta property="og:locale" content="zh_CN">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="Koto - 本地文件工作台">
+  <meta name="twitter:description" content="让文件管理、编辑和 AI 协作，在同一个工作台完成。">
+  <link rel="canonical" href="https://loganwon.github.io/Koto/">
   <style>
     :root {
       --canvas: #f6f4ef;
@@ -34,9 +36,9 @@
       --radius-md: 18px;
       --radius-sm: 12px;
       --shadow: 0 28px 70px rgba(20, 38, 33, .13);
-      --title: "Manrope", "Noto Sans SC", sans-serif;
+      --title: "Segoe UI", "Noto Sans SC", "Microsoft YaHei", sans-serif;
       --body: "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-      --mono: "DM Mono", ui-monospace, monospace;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
     }
 
     * { box-sizing: border-box; margin: 0; }
@@ -53,6 +55,9 @@
         var(--canvas);
     }
     a { color: inherit; }
+    a:focus-visible { outline: 3px solid rgba(18, 106, 88, .34); outline-offset: 3px; }
+    .skip-link { position: fixed; top: 10px; left: 10px; z-index: 50; padding: 9px 13px; border-radius: 9px; color: #fff; background: var(--forest-dark); text-decoration: none; transform: translateY(-150%); }
+    .skip-link:focus { transform: translateY(0); }
     .shell { position: relative; overflow: hidden; }
     .shell::before {
       position: absolute;
@@ -212,11 +217,24 @@
     .principle p { color: #adbfba; font-size: 13px; line-height: 1.75; }
 
     .download-section { padding: 112px 0; }
-    .download-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 45px; padding: clamp(26px, 5vw, 56px); overflow: hidden; border: 1px solid #bcd7ca; border-radius: var(--radius-lg); background: linear-gradient(125deg, #e0f2e9, #f8f7f2 58%, #f7e9c7); }
+    .download-card { display: grid; grid-template-columns: minmax(0, .82fr) minmax(360px, 1.18fr); align-items: center; gap: 45px; padding: clamp(26px, 5vw, 56px); overflow: hidden; border: 1px solid #bcd7ca; border-radius: var(--radius-lg); background: linear-gradient(125deg, #e0f2e9, #f8f7f2 58%, #f7e9c7); }
     .download-card h2 { max-width: 590px; }
     .download-card p { max-width: 600px; margin-top: 17px; color: #527068; font-size: 15px; line-height: 1.8; }
-    .download-actions { display: grid; gap: 10px; min-width: 210px; }
-    .download-actions .button { min-width: 210px; }
+    .release-status { display: inline-flex; align-items: center; gap: 7px; margin-top: 20px; padding: 7px 10px; border: 1px solid rgba(18, 106, 88, .18); border-radius: 999px; color: var(--forest-dark); background: rgba(255, 255, 255, .62); font: 600 11px/1.3 var(--mono); }
+    .release-status::before { width: 7px; height: 7px; border-radius: 50%; content: ""; background: #35a978; box-shadow: 0 0 0 4px rgba(53, 169, 120, .12); }
+    .download-panel { display: grid; gap: 11px; padding: 14px; border: 1px solid rgba(18, 106, 88, .15); border-radius: 20px; background: rgba(255, 255, 255, .76); box-shadow: 0 18px 34px rgba(30, 72, 58, .08); }
+    .download-option { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 76px; padding: 12px; border: 1px solid var(--line); border-radius: 13px; color: var(--ink); background: rgba(255, 255, 255, .86); text-decoration: none; transition: transform .2s ease, border-color .2s ease, box-shadow .2s ease; }
+    .download-option:hover { transform: translateY(-2px); border-color: #90c5ad; box-shadow: 0 10px 22px rgba(30, 72, 58, .08); }
+    .download-option.recommended { border-color: rgba(18, 106, 88, .28); background: #f7fcf9; }
+    .download-icon { display: grid; width: 42px; height: 42px; place-items: center; border-radius: 12px; color: #fff; background: var(--forest); font: 800 12px/1 var(--title); }
+    .download-option.portable .download-icon { color: var(--forest-dark); background: var(--mint); }
+    .download-copy { min-width: 0; }
+    .download-copy strong { display: block; font: 800 14px/1.35 var(--title); }
+    .download-copy small { display: block; margin-top: 4px; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.35; text-overflow: ellipsis; white-space: nowrap; }
+    .download-arrow { color: var(--forest); font-size: 20px; }
+    .download-meta { display: flex; flex-wrap: wrap; gap: 8px 14px; padding: 3px 4px 1px; color: #5b6d66; font-size: 11px; }
+    .download-meta a { text-underline-offset: 3px; }
+    .download-meta a:hover { color: var(--forest); }
     .download-note { margin-top: 16px; color: #63756e; font-size: 11px; }
 
     footer { padding: 25px 0 33px; border-top: 1px solid var(--line); }
@@ -237,8 +255,6 @@
       .proof-item:nth-child(3) { border-left: 0; border-top: 1px solid var(--line); }
       .proof-item:nth-child(4) { border-top: 1px solid var(--line); }
       .download-card { grid-template-columns: 1fr; }
-      .download-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .download-actions .button { min-width: 0; }
     }
     @media (max-width: 720px) {
       .container { width: min(100% - 32px, 1180px); }
@@ -263,7 +279,7 @@
       .workflow-card { min-height: 225px; }
       .format-grid { gap: 9px; }
       .format-card { min-height: 150px; padding: 15px; }
-      .download-actions { grid-template-columns: 1fr; }
+      .download-panel { padding: 10px; }
       .footer-inner { align-items: flex-start; flex-direction: column; }
     }
     @media (max-width: 420px) {
@@ -274,14 +290,21 @@
       .panel-label { font-size: 8px; }
       .format-grid { grid-template-columns: 1fr; }
       .hero-actions .button { width: 100%; }
+      .download-option { grid-template-columns: 38px minmax(0, 1fr) auto; gap: 10px; }
+      .download-icon { width: 38px; height: 38px; }
+    }
+    @media (prefers-reduced-motion: reduce) {
+      html { scroll-behavior: auto; }
+      *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; }
     }
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
   <div class="shell">
     <header class="site-header">
       <div class="container header-inner">
-        <a class="brand" href="#top" aria-label="Koto 首页">
+        <a class="brand" href="#main-content" aria-label="Koto 首页">
           <span class="brand-mark">言</span>
           <span class="brand-name"><strong>Koto</strong><small>本地文件工作台</small></span>
         </a>
@@ -294,7 +317,7 @@
       </div>
     </header>
 
-    <main id="top">
+    <main id="main-content">
       <section class="hero container">
         <div class="hero-grid">
           <div>
@@ -302,7 +325,7 @@
             <h1>让<em>文件管理、编辑</em>和 AI 协作，在同一个工作台完成。</h1>
             <p class="hero-copy">Koto 围绕你的本地文件工作：在左侧找到文件，在中间直接编辑，在右侧与 AI 一起推进任务。文件、上下文和每一步操作不再散落在不同工具里。</p>
             <div class="hero-actions">
-              <a class="button button-primary" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">获取 Windows 版本 <span class="arrow">↗</span></a>
+              <a class="button button-primary" href="#download">选择 Windows 版本 <span class="arrow">↓</span></a>
               <a class="button button-secondary" href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">查看项目源码</a>
             </div>
             <div class="hero-facts" aria-label="产品特点">
@@ -402,14 +425,89 @@
       <section class="download-section" id="download">
         <div class="container">
           <div class="download-card">
-            <div><div class="section-kicker">开始使用</div><h2>把下一份正在做的文件，放进 Koto。</h2><p>从 Windows 版本开始，直接进入本地文件工作区；也可以在 GitHub 查看项目和发布记录。</p><div class="download-note">下载链接会跳转到项目的 GitHub Releases 页面。</div></div>
-            <div class="download-actions"><a class="button button-primary" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">获取 Windows 版本 <span class="arrow">↗</span></a><a class="button button-secondary" href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">前往 GitHub</a></div>
+            <div>
+              <div class="section-kicker">开始使用</div>
+              <h2>把下一份正在做的文件，放进 Koto。</h2>
+              <p>选择安装版直接开始，或下载免安装便携版。页面会从 GitHub Release 自动读取最新版本和文件大小。</p>
+              <div class="release-status" id="release-status" role="status" aria-live="polite">正在读取最新版本…</div>
+              <div class="download-note">如果版本信息暂时加载失败，按钮会安全回退到 GitHub Releases 最新发布页。</div>
+            </div>
+            <div class="download-panel" aria-label="Windows 下载选项">
+              <a class="download-option recommended" id="download-setup" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">
+                <span class="download-icon">EXE</span>
+                <span class="download-copy"><strong>Windows 安装版</strong><small id="setup-caption">推荐 · 自动获取最新 Setup.exe</small></span>
+                <span class="download-arrow" aria-hidden="true">↓</span>
+              </a>
+              <a class="download-option portable" id="download-portable" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">
+                <span class="download-icon">ZIP</span>
+                <span class="download-copy"><strong>Windows 便携版</strong><small id="portable-caption">免安装 · 自动获取最新 Windows.zip</small></span>
+                <span class="download-arrow" aria-hidden="true">↓</span>
+              </a>
+              <div class="download-meta">
+                <a id="release-notes" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">发布说明</a>
+                <a id="checksum-link" href="https://github.com/Loganwon/Koto/releases/latest" target="_blank" rel="noopener">SHA-256 校验</a>
+                <a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">源码与 Issues</a>
+              </div>
+            </div>
           </div>
         </div>
       </section>
     </main>
 
-    <footer><div class="container footer-inner"><div class="footer-brand"><span>言</span> Koto</div><div>本地文件工作台</div><div class="footer-links"><a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a><a href="#top">回到顶部 ↑</a></div></div></footer>
+    <footer><div class="container footer-inner"><div class="footer-brand"><span>言</span> Koto</div><div>本地文件工作台</div><div class="footer-links"><a href="https://github.com/Loganwon/Koto" target="_blank" rel="noopener">GitHub</a><a href="#main-content">回到顶部 ↑</a></div></div></footer>
   </div>
+  <script>
+    (function () {
+      var repo = 'Loganwon/Koto';
+      var latestReleaseUrl = 'https://github.com/' + repo + '/releases/latest';
+
+      function byId(id) { return document.getElementById(id); }
+      function formatBytes(bytes) {
+        if (!Number.isFinite(bytes) || bytes <= 0) return '';
+        return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+      }
+      function findAsset(assets, patterns) {
+        return patterns.reduce(function (match, pattern) {
+          return match || assets.find(function (asset) { return pattern.test(asset.name || ''); });
+        }, null);
+      }
+      function bindAsset(linkId, captionId, asset, tag, fallbackText) {
+        var link = byId(linkId);
+        var caption = byId(captionId);
+        if (!link || !caption || !asset) return;
+        link.href = asset.browser_download_url;
+        link.setAttribute('aria-label', fallbackText + ' ' + tag + '，' + asset.name);
+        caption.textContent = [tag, asset.name, formatBytes(asset.size)].filter(Boolean).join(' · ');
+      }
+
+      fetch('https://api.github.com/repos/' + repo + '/releases/latest', {
+        cache: 'no-store',
+        headers: { Accept: 'application/vnd.github+json' }
+      })
+        .then(function (response) {
+          if (!response.ok) throw new Error('Release API returned ' + response.status);
+          return response.json();
+        })
+        .then(function (release) {
+          var assets = Array.isArray(release.assets) ? release.assets : [];
+          var tag = release.tag_name || 'Latest';
+          var setup = findAsset(assets, [/setup.*\.exe$/i, /\.exe$/i]);
+          var portable = findAsset(assets, [/windows.*\.zip$/i, /portable.*\.zip$/i, /\.zip$/i]);
+          var checksum = findAsset(assets, [/sha256.*\.txt$/i, /checksums?.*\.txt$/i]);
+
+          bindAsset('download-setup', 'setup-caption', setup, tag, '下载 Windows 安装版');
+          bindAsset('download-portable', 'portable-caption', portable, tag, '下载 Windows 便携版');
+
+          var published = release.published_at ? new Date(release.published_at).toLocaleDateString('zh-CN') : '';
+          byId('release-status').textContent = [tag, published ? '发布于 ' + published : ''].filter(Boolean).join(' · ');
+          byId('release-notes').href = release.html_url || latestReleaseUrl;
+          byId('release-notes').textContent = '查看 ' + tag + ' 发布说明';
+          if (checksum) byId('checksum-link').href = checksum.browser_download_url;
+        })
+        .catch(function () {
+          byId('release-status').textContent = 'GitHub 最新版本';
+        });
+    })();
+  </script>
 </body>
 </html>
