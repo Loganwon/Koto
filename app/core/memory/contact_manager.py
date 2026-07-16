@@ -14,7 +14,7 @@ Koto ContactManager — 关系记忆 / 社交 CRM
   - 支持手动增删查改
 
 集成点：
-  - MemoryReflector.reflect_async() 调用后触发 observe_turn()
+  - ConversationMemoryExtractor 在结构化提取后触发 observe_turn()
   - ProactiveAgent.tick() 检查需要跟进的联系人
 
 存储结构（SQLite table: contacts）:
@@ -161,7 +161,7 @@ class ContactManager:
     def observe_turn(self, user_msg: str, ai_msg: str, topic: str = ""):
         """
         分析一轮对话，提取人物提及并更新联系人记录。
-        由 MemoryReflector 或 app.py 的对话管道在每轮结束后异步调用。
+        由 ConversationMemoryExtractor 在每轮结束后异步调用。
         """
         names = self._extract_names(user_msg + " " + ai_msg)
         if not names:

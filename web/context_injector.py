@@ -530,18 +530,13 @@ class ContextInjector:
         # ── 注入个人记忆矩阵（认知风格/专长/近期目标）──
         _personality_part = ""
         try:
-            import sys as _sys
+            from web.memory_runtime import get_memory_manager
 
-            _emm_mod = _sys.modules.get(
-                "web.enhanced_memory_manager"
-            ) or _sys.modules.get("enhanced_memory_manager")
-            if _emm_mod is None:
-                import importlib
-
-                _emm_mod = importlib.import_module("web.enhanced_memory_manager")
-            _PM = getattr(_emm_mod, "PersonalityMatrix", None)
-            if _PM is not None:
-                _pm_ctx = _PM().to_context_string()
+            _personality_matrix = getattr(
+                get_memory_manager(), "personality_matrix", None
+            )
+            if _personality_matrix is not None:
+                _pm_ctx = _personality_matrix.to_context_string()
                 if _pm_ctx:
                     _personality_part = f"\n\n## 🧠 用户画像（持续学习更新）\n{_pm_ctx}"
         except Exception as _e:

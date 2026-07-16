@@ -400,7 +400,6 @@ hiddenimports = [
     'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
     'web.document_feedback', 'web.document_generator', 'web.document_reader',
     'web.document_validator',
-    'web.enhanced_memory_manager',
     'web.file_analyzer', 'web.file_converter',
     'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
     'web.file_organizer', 'web.file_parser', 'web.file_processor',
@@ -408,7 +407,7 @@ hiddenimports = [
     'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
     'web.image_manager', 'web.insight_reporter', 
     'web.knowledge_graph', 'web.local_executor',
-    'web.memory_integration', 'web.memory_manager', 'web.note_manager',
+    'web.note_manager',
     'web.operation_history', 'web.organize_cleanup',
     'web.parallel_executor', 'web.ppt_api_routes',
     

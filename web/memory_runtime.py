@@ -2,7 +2,6 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-import asyncio
 import logging
 import threading
 from typing import Any
@@ -112,11 +111,6 @@ def _start_memory_extraction(
     task_type: str = "CHAT",
     session_name: str = "default",
 ) -> None:
-    try:
-        from web.memory_integration import MemoryIntegration
-    except ImportError:
-        MemoryIntegration = None
-
     def _reflection_llm(prompt: str) -> str:
         return _llm_sync(
             prompt,
@@ -125,82 +119,28 @@ def _start_memory_extraction(
             max_tokens=600,
         )
 
-    def _quality_llm(prompt: str) -> str:
-        quality_models = ["deepseek-chat"]
-        model = quality_models[0]
-        try:
-            from app.core.llm.model_fallback import get_fallback_executor
-
-            fallback_executor = get_fallback_executor()
-            model = next(
-                (item for item in quality_models if fallback_executor.is_available(item)),
-                quality_models[-1],
-            )
-        except Exception:
-            logger.warning("[MemoryRuntime] Model fallback lookup failed", exc_info=True)
-        result = _llm_sync(
-            prompt,
-            model=model,
-            temperature=0.15,
-            max_tokens=800,
-        )
-        return result or _reflection_llm(prompt)
-
     def _worker() -> None:
-        if MemoryIntegration and MemoryIntegration.should_extract(user_msg, ai_msg):
-            try:
-                memory_mgr = get_memory_manager()
-
-                class _LLMAdapter:
-                    async def generate(self, prompt, temperature=0.1, max_tokens=500):
-                        return _reflection_llm(prompt)
-
-                result = asyncio.run(
-                    MemoryIntegration.extract_and_apply(
-                        memory_mgr,
-                        user_msg,
-                        ai_msg,
-                        _LLMAdapter(),
-                        history,
-                    )
+        try:
+            memory_mgr = get_memory_manager()
+            if memory_mgr.should_auto_extract(user_msg, ai_msg, task_type):
+                result = memory_mgr.auto_extract_from_conversation(
+                    user_msg,
+                    ai_msg,
+                    history,
+                    task_type=task_type,
+                    session_name=session_name,
                 )
-                if result.get("success"):
-                    logger.info("[MemoryIntegration] automatic extraction completed")
-                else:
-                    logger.warning(
-                        "[MemoryIntegration] extraction failed: %s",
-                        result.get("error"),
-                    )
-            except Exception as exc:
-                logger.error("[MemoryIntegration] extraction error: %s", exc)
-
-        try:
-            from app.core.memory.memory_reflector import MemoryReflector
-
-            MemoryReflector.reflect_async(
-                user_msg=user_msg,
-                ai_msg=ai_msg,
-                task_type=task_type,
-                session_name=session_name,
-                get_memory_fn=get_memory_manager,
-                llm_fn=_reflection_llm,
-            )
+                logger.info(
+                    "[MemoryRuntime] automatic profile extraction completed: "
+                    "%d memories, %d profile fields, %d personality fields, "
+                    "%d triples",
+                    len(result.get("memories", [])),
+                    len(result.get("profile_updates", {})),
+                    len(result.get("personality_updates", {})),
+                    len(result.get("triples", [])),
+                )
         except Exception as exc:
-            logger.warning("[MemoryReflector] start failed: %s", exc)
-
-        try:
-            pm_mgr = get_memory_manager()
-            if pm_mgr and hasattr(pm_mgr, "update_personality_async"):
-                pm_mgr.update_personality_async(user_msg, ai_msg, _quality_llm)
-        except Exception as exc:
-            logger.warning("[PersonalityMatrix] update start failed: %s", exc)
-
-        try:
-            from app.core.monitoring.shadow_watcher import ShadowWatcher
-
-            ShadowWatcher.observe(user_msg, ai_msg, session_name)
-        except Exception as exc:
-            logger.warning("[ShadowWatcher] observe failed: %s", exc)
+            logger.error("[MemoryRuntime] profile extraction error: %s", exc)
 
         try:
             from app.core.learning.rating_store import RatingStore

@@ -167,13 +167,13 @@ def test_core_llm_provider_helpers_do_not_reflect_through_web_runtime_context():
     assert "web.runtime_context" not in source
 
 
-def test_memory_tools_plugin_uses_the_memory_runtime_owner_directly():
+def test_memory_tools_plugin_uses_the_application_context_owner_directly():
     source = _read(
         ROOT / "app" / "core" / "agent" / "plugins" / "memory_tools_plugin.py"
     )
 
-    assert "from web.memory_runtime import get_memory_manager" in source
-    assert "web.runtime_context" not in source
+    assert "from app.core.app_context import ctx" in source
+    assert "web.memory_runtime" not in source
     assert "EnhancedMemoryManager()" not in source
 
 

@@ -42,6 +42,14 @@ from app.core.skills.builtin_skills import BUILTIN_SKILLS  # noqa: E402 — data
 _SKILL_STATE_UNSET = object()
 
 
+def _get_long_term_memory_context(user_input: str) -> str:
+    """Read prompt memory from the application-owned manager instance."""
+    from app.core.app_context import ctx
+
+    manager = ctx.memory_manager
+    return str(manager.get_context_string(user_input or "") or "")
+
+
 class SkillManager:
     """
     Skills 管理器 v2
@@ -696,28 +704,14 @@ class SkillManager:
             if not cls._task_type_matches(task_type, applicable_types):
                 continue
 
-            # ── 长期记忆 skill：优先从 ShadowWatcher 检索记忆并注入 ────────────
+            # ── 长期记忆 skill：从当前 MemoryManager 检索并注入 ──────────────
             if skill_id == "long_term_memory":
                 try:
-                    from app.core.monitoring.shadow_watcher import get_shadow_watcher
-
-                    ctx = get_shadow_watcher().get_memories_context_string(
-                        user_input or ""
-                    )
-                    if ctx.strip():
-                        memory_block = ctx
+                    memory_context = _get_long_term_memory_context(user_input or "")
+                    if memory_context.strip():
+                        memory_block = memory_context
                 except Exception as _me:
-                    logger.debug(f"[SkillManager] 影子记忆注入跳过: {_me}")
-                    # 回退：旧 MemoryManager
-                    try:
-                        from web.memory_manager import MemoryManager
-
-                        _mm = MemoryManager()
-                        ctx = _mm.get_context_string(user_input or "")
-                        if ctx.strip():
-                            memory_block = ctx
-                    except Exception:
-                        pass
+                    logger.debug(f"[SkillManager] 长期记忆注入跳过: {_me}")
                 continue  # 长期记忆不走普通 prompt 通道
 
             # ── 注入上限检测（长期记忆走了 continue，不计入此计数）─────────────

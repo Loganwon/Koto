@@ -364,12 +364,17 @@ class TestMemoryToolsPlugin:
         names = {t["name"] for t in tools}
         assert names == {"memory_search", "memory_save", "context_recall"}
 
-    def test_memory_manager_uses_memory_runtime_owner(self):
+    def test_memory_manager_uses_application_context_owner(self):
+        from app.core.app_context import ctx
+
         p = self._make()
         manager = MagicMock()
 
-        with patch("web.memory_runtime.get_memory_manager", return_value=manager):
+        ctx.override("memory_manager", manager)
+        try:
             assert p._get_memory_manager() is manager
+        finally:
+            ctx.reset("memory_manager")
 
     def test_memory_search_no_manager(self):
         p = self._make()
@@ -416,7 +421,19 @@ class TestMemoryToolsPlugin:
         with patch.object(type(p), "_get_memory_manager", return_value=mock_mgr):
             p.memory_save("data", category="invalid_cat")
             mock_mgr.add_memory.assert_called_once_with(
-                content="data", category="user_fact", source="agent"
+                content="data", category="fact", source="agent"
+            )
+
+    def test_memory_save_normalizes_preference_category(self):
+        p = self._make()
+        mock_mgr = MagicMock()
+        mock_mgr.add_memory.return_value = True
+        with patch.object(type(p), "_get_memory_manager", return_value=mock_mgr):
+            p.memory_save("prefers concise output", category="preference")
+            mock_mgr.add_memory.assert_called_once_with(
+                content="prefers concise output",
+                category="user_preference",
+                source="agent",
             )
 
     def test_context_recall_no_manager(self):

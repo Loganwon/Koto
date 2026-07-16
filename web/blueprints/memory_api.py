@@ -98,15 +98,6 @@ def _build_writing_style_profile(text: str) -> dict:
     }
 
 
-def _get_shadow_watcher():
-    """获取 ShadowWatcher 实例（作为记忆存储后端）。"""
-    try:
-        from app.core.monitoring.shadow_watcher import get_shadow_watcher
-        return get_shadow_watcher()
-    except Exception:
-        return None
-
-
 def register_memory_routes(app, get_memory_manager):
     """注册记忆系统API路由到Flask app
 
@@ -120,23 +111,8 @@ def register_memory_routes(app, get_memory_manager):
 
     @memory_api_bp.route("/api/memories", methods=["GET"])
     def get_all_memories():
-        """获取所有记忆（优先从 ShadowWatcher 读取，回退到 MemoryManager）"""
+        """获取所有已保存的用户记忆。"""
         try:
-            sw = _get_shadow_watcher()
-            if sw is not None:
-                memories = sw.get_user_memories()
-                # 兼容旧格式：补充 MemoryManager 的记忆（若有）
-                try:
-                    memory_mgr = get_memory_manager()
-                    old_mems = memory_mgr.get_all_memories()
-                    existing_ids = {m.get("id") for m in memories}
-                    for m in old_mems:
-                        if m.get("id") not in existing_ids:
-                            memories.append(m)
-                except Exception:
-                    pass
-                return jsonify(memories)
-            # fallback: 旧 MemoryManager
             memory_mgr = get_memory_manager()
             memories = memory_mgr.get_all_memories()
             return jsonify(memories)
@@ -157,11 +133,6 @@ def register_memory_routes(app, get_memory_manager):
             if not content:
                 return jsonify({"success": False, "error": "内容不能为空"}), 400
 
-            sw = _get_shadow_watcher()
-            if sw is not None:
-                new_memory = sw.add_user_memory(content, category, source)
-                return jsonify({"success": True, "memory": new_memory})
-            # fallback
             memory_mgr = get_memory_manager()
             new_memory = memory_mgr.add_memory(content, category, source)
             return jsonify({"success": True, "memory": new_memory})
@@ -175,13 +146,6 @@ def register_memory_routes(app, get_memory_manager):
     def delete_memory(mem_id):
         """删除记忆"""
         try:
-            sw = _get_shadow_watcher()
-            if sw is not None:
-                success = sw.delete_user_memory(str(mem_id))
-                if success:
-                    return jsonify({"success": True, "message": "记忆已删除"})
-                return jsonify({"success": False, "error": "记忆不存在"}), 404
-            # fallback
             memory_mgr = get_memory_manager()
             success = memory_mgr.delete_memory(int(mem_id))
             if success:
@@ -384,7 +348,7 @@ def register_memory_routes(app, get_memory_manager):
 
     @memory_api_bp.route("/api/memory/personality", methods=["GET"])
     def get_personality_matrix():
-        """获取个人记忆矩阵（含 ShadowWatcher 整合数据）"""
+        """获取个人记忆矩阵。"""
         try:
             memory_mgr = get_memory_manager()
             if not hasattr(memory_mgr, "personality_matrix"):
@@ -396,32 +360,11 @@ def register_memory_routes(app, get_memory_manager):
             pm = memory_mgr.personality_matrix
             data = dict(pm.data)
 
-            # 追加 ShadowWatcher 摘要，方便前端一次性展示全貌
-            shadow_summary = {}
-            try:
-                from app.core.monitoring.shadow_watcher import ShadowWatcher
-
-                obs = ShadowWatcher.get().get_observations()
-                shadow_summary = {
-                    "streak_days": obs.get("streak", {}).get("days", 0),
-                    "total_observations": obs.get("total_observations", 0),
-                    "open_tasks_count": sum(
-                        1 for t in obs.get("open_tasks", []) if not t.get("done")
-                    ),
-                    "recent_topics_7d": obs.get("recent_topics_7d", {}),
-                    "task_types": obs.get("task_style", {}).get("task_types", {}),
-                    "active_hours": obs.get("active_hours", {}),
-                    "last_seen": obs.get("last_seen"),
-                }
-            except Exception:
-                logger.debug("Non-fatal", exc_info=True)
-
             return jsonify(
                 {
                     "success": True,
                     "matrix": data,
                     "context": pm.to_context_string(),
-                    "shadow": shadow_summary,
                 }
             )
         except Exception as e:
@@ -610,19 +553,13 @@ def register_memory_routes(app, get_memory_manager):
                 return jsonify({"success": False, "error": "没有找到聊天记录文件"}), 404
 
             def _run():
-                try:
-                    from app.core.memory.memory_reflector import MemoryReflector
-                except Exception:
-                    logger.error("[BatchExtract] 无法导入 MemoryReflector")
-                    return
-
                 # 构造一个简单的 LLM 函数（使用 get_memory_manager 中已有的 generate_fn）
                 llm_fn = None
                 try:
                     mgr = get_memory_manager()
                     if hasattr(mgr, "_generate_fn") and mgr._generate_fn:
                         llm_fn = lambda p: mgr._generate_fn(
-                            p, temperature=0.15, max_tokens=600
+                            p, temperature=0.1, max_tokens=1100
                         )
                 except Exception:
                     logger.debug("Non-fatal", exc_info=True)
@@ -682,16 +619,19 @@ def register_memory_routes(app, get_memory_manager):
 
                         for user_msg, ai_msg, task_type in pairs:
                             try:
-                                mgr = get_memory_manager()
-                                saved = MemoryReflector.reflect_sync(
-                                    user_msg=user_msg,
-                                    ai_msg=ai_msg,
+                                normalized_task_type = task_type or "CHAT"
+                                if not mgr.should_auto_extract(
+                                    user_msg, ai_msg, normalized_task_type
+                                ):
+                                    continue
+                                result = mgr.auto_extract_from_conversation(
+                                    user_msg,
+                                    ai_msg,
                                     task_type=task_type or "CHAT",
                                     session_name=session,
-                                    get_memory_fn=lambda: mgr,
                                     llm_fn=llm_fn,
                                 )
-                                total_saved += saved or 0
+                                total_saved += int(result.get("saved_count", 0))
                             except Exception as e:
                                 logger.debug(f"[BatchExtract] turn failed: {e}")
 

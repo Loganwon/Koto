@@ -26,33 +26,6 @@ from unittest.mock import MagicMock, Mock, PropertyMock, mock_open, patch
 import pytest
 
 # ── Pre-import patching ──────────────────────────────────────────────────────
-# PersonalityMatrix is referenced in enhanced_memory_manager but not imported
-# at module level (likely loaded via exec/plugin at runtime). Inject a stub
-# into the module namespace so the class can be instantiated in tests.
-
-
-def _ensure_personality_matrix():
-    """Inject a stub PersonalityMatrix into the enhanced_memory_manager module."""
-    import web.enhanced_memory_manager as _emm
-
-    if not hasattr(_emm, "PersonalityMatrix"):
-
-        class _StubPersonalityMatrix:
-            def __init__(self, path=None):
-                self.data = {}
-
-            def to_context_string(self):
-                return ""
-
-            @staticmethod
-            def update_async(*args, **kwargs):
-                pass
-
-        _emm.PersonalityMatrix = _StubPersonalityMatrix
-
-
-_ensure_personality_matrix()
-
 # concept_extractor is imported at top-level in knowledge_graph.py but may
 # not be on sys.path. Provide a stub module so the import succeeds.
 if "concept_extractor" not in sys.modules:
@@ -68,12 +41,12 @@ if "concept_extractor" not in sys.modules:
 
 @pytest.mark.unit
 class TestUserProfile:
-    """Tests for web.enhanced_memory_manager.UserProfile."""
+    """Tests for app.core.services.memory_manager.UserProfile."""
 
     @pytest.fixture()
     def tmp_profile(self, tmp_path):
         profile_file = tmp_path / "profile.json"
-        from web.enhanced_memory_manager import UserProfile
+        from app.core.services.memory_manager import UserProfile
 
         return UserProfile(str(profile_file))
 
@@ -85,7 +58,7 @@ class TestUserProfile:
 
     def test_save_and_reload(self, tmp_path):
         profile_file = tmp_path / "profile.json"
-        from web.enhanced_memory_manager import UserProfile
+        from app.core.services.memory_manager import UserProfile
 
         up = UserProfile(str(profile_file))
         up.profile["communication_style"]["formality"] = "formal"
@@ -147,7 +120,7 @@ class TestUserProfile:
     def test_load_corrupt_file_falls_back_default(self, tmp_path):
         profile_file = tmp_path / "bad.json"
         profile_file.write_text("NOT JSON", encoding="utf-8")
-        from web.enhanced_memory_manager import UserProfile
+        from app.core.services.memory_manager import UserProfile
 
         up = UserProfile(str(profile_file))
         assert "communication_style" in up.profile
@@ -155,7 +128,7 @@ class TestUserProfile:
 
 @pytest.mark.unit
 class TestEnhancedMemoryManager:
-    """Tests for web.enhanced_memory_manager.EnhancedMemoryManager."""
+    """Tests for app.core.services.memory_manager.EnhancedMemoryManager."""
 
     @pytest.fixture()
     def mgr(self, tmp_path):
@@ -163,7 +136,7 @@ class TestEnhancedMemoryManager:
         prof_path = str(tmp_path / "profile.json")
         sum_path = str(tmp_path / "summaries.json")
         vec_path = str(tmp_path / "vectors.json")
-        from web.enhanced_memory_manager import EnhancedMemoryManager
+        from app.core.services.memory_manager import EnhancedMemoryManager
 
         m = EnhancedMemoryManager(
             memory_path=mem_path,
@@ -250,10 +223,58 @@ class TestEnhancedMemoryManager:
         contents = [m["content"] for m in mgr.memories]
         assert "user added" in contents
 
-    def test_keyword_extract_detects_python(self, mgr):
-        extracted = {"memories": [], "profile_updates": {}}
-        mgr._keyword_extract("I am learning python web dev", extracted)
+    def test_keyword_fallback_detects_python(self, mgr):
+        mgr._generate_fn = None
+        extracted = mgr.auto_extract_from_conversation(
+            "I am learning python web dev", "Thanks for sharing."
+        )
+        assert extracted["used_fallback"] is True
         assert "python" in extracted["profile_updates"].get("programming_languages", [])
+
+    @pytest.mark.parametrize(
+        ("message", "expected"),
+        [
+            ("hi", False),
+            ("你好", False),
+            ("我非常喜欢简洁的代码风格", True),
+            ("帮我写一个Python爬虫", True),
+            ("我正在学习AI模型调优", True),
+            (
+                "这是一段比较长的消息，包含了一些有价值的信息，"
+                "足够触发记忆提取的阈值，需要超过四十个字符。",
+                True,
+            ),
+        ],
+    )
+    def test_should_auto_extract(self, mgr, message, expected):
+        assert mgr.should_auto_extract(message) is expected
+
+    def test_auto_extract_updates_profile_and_memory(self, mgr):
+        mgr._generate_fn = lambda *args, **kwargs: json.dumps(
+            {
+                "programming_languages": ["Python"],
+                "tools": [],
+                "domains": ["AI"],
+                "likes": ["简洁输出"],
+                "dislikes": [],
+                "communication_style": {"preferred_detail_level": "brief"},
+                "memories_to_save": [
+                    {
+                        "content": "用户偏好简洁的技术回答",
+                        "category": "user_preference",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        )
+
+        result = mgr.auto_extract_from_conversation("我喜欢简洁的 Python 回答", "好的")
+
+        assert result["memories"] == ["用户偏好简洁的技术回答"]
+        assert result["profile_updates"]["programming_languages"] == ["Python"]
+        assert any(
+            item["content"] == "用户偏好简洁的技术回答" for item in mgr.memories
+        )
 
     def test_get_profile_returns_dict(self, mgr):
         p = mgr.get_profile()
