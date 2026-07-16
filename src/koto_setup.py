@@ -3,15 +3,16 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-koto_setup.py — Koto 启动入口（带首次设置向导）
+koto_setup.py — Koto 启动入口（带首次 AI 方式设置）
 
 打包后产生的 EXE 入口：
-  1. 首次运行 → 弹出 API 密钥配置向导
+  1. 首次运行 → 用户选择云端 API 或本地模型
   2. 后续运行 → 直接启动 Koto 桌面程序
 """
 
 import os
 import runpy
+import subprocess
 import sys
 from pathlib import Path
 
@@ -86,11 +87,10 @@ ASSETS_DIR = (
 
 
 def _read_user_cloud_provider(default: str = "deepseek") -> str:
-    settings_path = APP_ROOT / "config" / "user_settings.json"
     try:
-        import json
+        from app.core.config.settings_store import load_settings_document
 
-        data = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+        data = load_settings_document(APP_ROOT / "config" / "user_settings.json")
         provider = str(data.get("ai", {}).get("cloud_provider") or "").strip().lower()
         if provider == "deepseek":
             return provider
@@ -501,24 +501,18 @@ def _write_cloud_provider_setting(provider: str):
     """同步云端供应商到 user_settings.json，便于 Web 设置页与运行时识别。"""
     provider = "deepseek"
     settings_path = APP_ROOT / "config" / "user_settings.json"
-    settings_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        import json
+        from app.core.config.settings_store import atomic_update_settings
 
-        data = {}
-        if settings_path.exists():
-            data = json.loads(settings_path.read_text(encoding="utf-8-sig"))
-        if not isinstance(data, dict):
-            data = {}
-        ai = data.setdefault("ai", {})
-        if isinstance(ai, dict):
-            ai["cloud_provider"] = provider
-            if provider == "deepseek":
-                ai.setdefault("deepseek_model", "deepseek-chat")
-        data.setdefault("model_mode", "cloud")
-        settings_path.write_text(
-            json.dumps(data, ensure_ascii=False, indent=2),
-            encoding="utf-8",
+        atomic_update_settings(
+            settings_path,
+            {
+                "ai": {
+                    "cloud_provider": provider,
+                    "deepseek_model": "deepseek-chat",
+                },
+                "model_mode": "cloud",
+            },
         )
     except Exception:
         pass
@@ -544,6 +538,46 @@ def _api_key_configured(provider: str | None = None) -> bool:
             if val and val not in ("your_api_key_here", "", "None"):
                 return True
     return False
+
+
+def _local_model_configured() -> bool:
+    """Return whether first-run setup completed with the local-model path."""
+    import json
+
+    config_dir = APP_ROOT / "config"
+    try:
+        flag = json.loads((config_dir / "model_setup_done.json").read_text(encoding="utf-8"))
+        if isinstance(flag, dict) and flag.get("done") and flag.get("mode") == "local":
+            return bool(str(flag.get("model") or "").strip())
+    except Exception:
+        pass
+    try:
+        from app.core.config.settings_store import load_settings_document
+
+        settings = load_settings_document(config_dir / "user_settings.json")
+        return (
+            isinstance(settings, dict)
+            and settings.get("model_mode") == "local"
+            and bool(str(settings.get("local_model") or "").strip())
+        )
+    except Exception:
+        return False
+
+
+def _run_unified_setup() -> bool:
+    """Run the bundled chooser and require cloud or local configuration."""
+    installer = APP_ROOT / "LocalModelInstaller.exe"
+    source_installer = APP_ROOT / "src" / "local_model_installer.py"
+    try:
+        if installer.exists():
+            subprocess.run([str(installer)], cwd=str(APP_ROOT), check=False)
+        elif source_installer.exists():
+            subprocess.run([sys.executable, str(source_installer)], cwd=str(APP_ROOT), check=False)
+        else:
+            return False
+    except Exception:
+        return False
+    return _api_key_configured() or _local_model_configured()
 
 
 def _read_config_values(provider: str | None = None) -> tuple:
@@ -609,22 +643,24 @@ def _validate_api_key(key: str, base: str = "", provider: str = "deepseek") -> t
         return (False, f"⚠️ 网络异常，无法验证（{msg[:60]}）")
 
 
-def _run_setup_if_needed():
-    """首次运行（或未配置 / API 密钥失效）时弹出配置向导"""
+def _run_setup_if_needed() -> bool:
+    """Require a usable cloud key or a configured local model before launch."""
     # 支持命令行强制重新配置:  Koto.exe --setup
     force = "--setup" in sys.argv or "--reconfigure" in sys.argv
 
     # 如果内置密钥文件存在且尚未配置，跳过桌面向导（由 Web 界面处理激活码）
     builtin_key_file = APP_ROOT / "config" / ".builtin_key"
     if not force and builtin_key_file.exists():
-        return
+        return True
 
     wizard_status = ""  # 传给向导的初始提示（密钥失效时填充）
     provider = _read_user_cloud_provider()
 
     if not force:
+        if _local_model_configured():
+            return True
         if not _api_key_configured(provider):
-            pass  # 没有密钥/激活码 → 弹向导
+            return _run_unified_setup()
         else:
             # 密钥存在 → 静默验证（网络正常时 ~1-3s）
             key, base = _read_config_values(provider)
@@ -633,13 +669,21 @@ def _run_setup_if_needed():
             else:
                 ok, err_msg = _validate_api_key(key, base, provider=provider)
                 if ok:
-                    return  # 验证通过，正常启动
+                    return True  # 验证通过，正常启动
                 # 网络异常（⚠️前缀）→ 不强制弹向导，允许继续启动
                 if err_msg.startswith("⚠️"):
-                    return
+                    return True
                 # 密钥明确无效（❌前缀）→ 弹向导并带提示
                 wizard_status = f"{err_msg} — 请重新填写密钥"
 
+    # Unified chooser is present in every supported installer/portable build.
+    # It has no "continue without configuration" path: users select cloud or
+    # local explicitly, and this process only continues after either persists.
+    unified_result = _run_unified_setup()
+    if unified_result:
+        return True
+
+    # Development fallback when the standalone chooser was not built yet.
     try:
         res = _show_api_setup_wizard(initial_status=wizard_status)
         if res["key"] or res.get("code"):
@@ -653,7 +697,8 @@ def _run_setup_if_needed():
 
             flag = APP_ROOT / "config" / "model_setup_done.json"
             flag.write_text(json.dumps({"done": True, "version": 1}), encoding="utf-8")
-        # 用户点「跳过」或关闭窗口 → 允许继续启动（功能受限，但不卡死）
+            return True
+        return False
     except Exception as e:
         try:
             (APP_ROOT / "logs" / "setup_error.log").write_text(
@@ -661,6 +706,7 @@ def _run_setup_if_needed():
             )
         except Exception:
             pass
+        return False
 
 
 # ── 本地模型安装提示（首次启动，可选）────────────────
@@ -812,13 +858,11 @@ def _prompt_local_model_if_needed():
 def main():
     # In server-only mode, skip all interactive setup and go straight to app
     if os.environ.get("KOTO_SERVER_ONLY") != "1":
-        # Step 1: 运行设置向导（首次/强制模式）
-        _run_setup_if_needed()
+        # Step 1: 首次必须选择云端 API 或本地模型；未完成则不启动空壳应用。
+        if not _run_setup_if_needed():
+            return
 
-        # Step 2: 询问是否安装本地 AI 模型（首次启动，可选）
-        _prompt_local_model_if_needed()
-
-    # Step 3: 启动 Koto 桌面程序
+    # Step 2: 启动 Koto 桌面程序
     # 兼容 src/ 布局：先找项目根，再找 src/ 子目录
     koto_main_path = BUNDLE_DIR / "koto_app.py"
     if not koto_main_path.exists():

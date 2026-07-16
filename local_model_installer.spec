@@ -42,13 +42,14 @@ a = Analysis(
         "socket",
         "json",
         "pathlib",
+        "app.core.config.settings_store",
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
         # 排除 Koto 业务逻辑，严格精简
-        "web", "app", "google", "flask",
+        "web", "google", "flask",
         "torch", "transformers", "faiss",
         "langchain", "langgraph",
         "pandas", "numpy", "PIL",

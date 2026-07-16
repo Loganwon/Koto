@@ -278,7 +278,7 @@ def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
     assert server_only in desktop_entry
     assert (
         desktop_entry.index("server_info = start_flask_server()")
-        < desktop_entry.index(server_only)
+        < desktop_entry.rindex(server_only)
         < desktop_entry.index("import webview")
     )
     for source in (installer_e2e, portable_e2e):

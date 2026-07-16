@@ -1297,10 +1297,10 @@ def create_system_tray(window_ref=None):
         return None
 
 
-def _bootstrap_api_setup():
-    """从 _internal/koto_setup.py 加载并执行 API 密钥向导。
-    兼容旧版编译入口：写入 model_setup_done.json 防止 model_downloader 重复弹出。
-    """
+def _bootstrap_api_setup() -> bool:
+    """Run the shared first-run chooser before the desktop app starts."""
+    if os.environ.get("KOTO_SERVER_ONLY") == "1":
+        return True
     import json as _json
 
     # 抑制旧版编译入口下次弹出 model_downloader
@@ -1327,16 +1327,18 @@ def _bootstrap_api_setup():
                 str(_setup_py)
             )  # run_name 默认非 __main__，不触发 main()
             if "_run_setup_if_needed" in _ns:
-                _ns["_run_setup_if_needed"]()
+                return bool(_ns["_run_setup_if_needed"]())
     except Exception:
-        pass
+        return False
+    return False
 
 
 def main():
     """主入口 - 桌面应用模式"""
     # 初始化
     ensure_directories()
-    _bootstrap_api_setup()  # API 密钥向导（便携版 / 首次启动 / 密钥失效时触发）
+    if not _bootstrap_api_setup():
+        return
     check_config()
     if not ensure_dependencies():
         return
