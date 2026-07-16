@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import stat
@@ -28,6 +29,29 @@ REQUIRED_CONFIG_DIRS = (
     "tools",
     "workflows",
 )
+RUNTIME_CONFIG_DEFAULTS = {
+    "macro_suggestions.json": {
+        "suggestions": [],
+        "seen_fingerprints": [],
+    },
+    "personality_matrix.json": {
+        "cognitive": {
+            "exploratory": 0.5,
+            "executor": 0.5,
+            "analytical": 0.5,
+            "creative": 0.5,
+        },
+        "expertise": {},
+        "goals": [],
+        "recent_themes": [],
+        "values": {
+            "efficiency": 0.5,
+            "depth": 0.5,
+            "formality": 0.5,
+        },
+        "last_updated": None,
+    },
+}
 
 LOCAL_INSTALLER_CANDIDATES = [
     ROOT / "dist" / "LocalModelInstaller.exe",
@@ -98,6 +122,19 @@ def ensure_required_config_dirs(config_root: Path) -> None:
         (config_root / dir_name).mkdir(parents=True, exist_ok=True)
 
 
+def ensure_runtime_config_defaults(config_root: Path) -> None:
+    """Seed empty runtime-owned config files without packaging local user data."""
+    config_root.mkdir(parents=True, exist_ok=True)
+    for file_name, default_value in RUNTIME_CONFIG_DEFAULTS.items():
+        config_path = config_root / file_name
+        if config_path.exists():
+            continue
+        write_text(
+            config_path,
+            json.dumps(default_value, ensure_ascii=False, indent=2) + "\n",
+        )
+
+
 def create_launchers(output_dir: Path, include_installer: bool) -> None:
     write_text(
         output_dir / "Start_Koto.bat",
@@ -151,6 +188,10 @@ def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
             "未找到 LocalModelInstaller.exe，请先构建本地模型安装器"
         )
 
+    app_config_root = APP_BUILD_DIR / "_internal" / "config"
+    ensure_required_config_dirs(app_config_root)
+    ensure_runtime_config_defaults(app_config_root)
+
     ensure_clean_output(output_dir)
 
     for entry_name in RELEASE_ROOT_ENTRIES:
@@ -163,7 +204,9 @@ def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
         else:
             shutil.copy2(source_path, target_path)
 
-    ensure_required_config_dirs(output_dir / "_internal" / "config")
+    portable_config_root = output_dir / "_internal" / "config"
+    ensure_required_config_dirs(portable_config_root)
+    ensure_runtime_config_defaults(portable_config_root)
 
     if installer_path is not None:
         shutil.copy2(installer_path, output_dir / "LocalModelInstaller.exe")

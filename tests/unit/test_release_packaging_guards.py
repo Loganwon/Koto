@@ -251,6 +251,7 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
 
 def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     release_build = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    portable_builder = Path("src/deploy_portable.py").read_text(encoding="utf-8")
 
     assert "function Set-PackagedRuntimeConfigDefaults" in release_build
     assert 'Name = "macro_suggestions.json"' in release_build
@@ -261,6 +262,42 @@ def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     assert release_build.index(
         "Set-PackagedRuntimeConfigDefaults -ConfigRoot"
     ) < release_build.index("Test-PackagedConfigDefaults -ConfigRoot")
+    assert "RUNTIME_CONFIG_DEFAULTS" in portable_builder
+    assert "ensure_runtime_config_defaults(app_config_root)" in portable_builder
+    assert "ensure_runtime_config_defaults(portable_config_root)" in portable_builder
+    assert '"suggestions": []' in portable_builder
+    assert '"exploratory": 0.5' in portable_builder
+
+
+def test_portable_builder_seeds_empty_runtime_defaults_without_overwriting(tmp_path):
+    spec = importlib.util.spec_from_file_location(
+        "deploy_portable_under_test", Path("src/deploy_portable.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    config_root = tmp_path / "config"
+    module.ensure_runtime_config_defaults(config_root)
+
+    suggestions_path = config_root / "macro_suggestions.json"
+    matrix_path = config_root / "personality_matrix.json"
+    assert json.loads(suggestions_path.read_text(encoding="utf-8")) == {
+        "suggestions": [],
+        "seen_fingerprints": [],
+    }
+    assert json.loads(matrix_path.read_text(encoding="utf-8"))["cognitive"] == {
+        "exploratory": 0.5,
+        "executor": 0.5,
+        "analytical": 0.5,
+        "creative": 0.5,
+    }
+
+    suggestions_path.write_text('{"suggestions": ["keep-me"]}\n', encoding="utf-8")
+    module.ensure_runtime_config_defaults(config_root)
+    assert json.loads(suggestions_path.read_text(encoding="utf-8")) == {
+        "suggestions": ["keep-me"]
+    }
 
 
 def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
