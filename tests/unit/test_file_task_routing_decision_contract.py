@@ -152,6 +152,51 @@ def test_trusted_file_task_route_still_adjudicates_ambiguous_write_intent():
     )
 
 
+def test_forced_ai_intent_adjudicator_bypasses_local_classifier_fast_path(
+    monkeypatch,
+):
+    import app.core.agent.file_task_intent_adjudicator as adjudicator_module
+    from app.core.agent.file_task_contract import (
+        FileTaskClassification,
+        FileTaskRequest,
+    )
+
+    monkeypatch.setattr(
+        adjudicator_module,
+        "task_classifier_fast_path",
+        lambda _request: (_ for _ in ()).throw(
+            AssertionError("forced AI adjudication must bypass the local fast path")
+        ),
+    )
+    model_calls = []
+
+    def call_model(**kwargs):
+        model_calls.append(kwargs)
+        return {
+            "content": (
+                '{"intent":"create_file","confidence":0.95,'
+                '"should_write":true,"needs_clarification":false}'
+            )
+        }
+
+    result = adjudicator_module.adjudicate_intent_if_needed(
+        request=FileTaskRequest(
+            task="Create a new Word report without modifying the source file.",
+            options={"enable_ai_intent_adjudicator": True},
+        ),
+        files=[],
+        classification=FileTaskClassification(write_intent=True),
+        should_adjudicate=lambda _request, _files, _classification: True,
+        call_model=call_model,
+        logger=adjudicator_module.logging.getLogger(__name__),
+    )
+
+    assert result["source"] == "ai_intent_adjudicator"
+    assert result["status"] == "ok"
+    assert result["intent"] == "create_file"
+    assert len(model_calls) == 1
+
+
 def test_workspace_file_task_payload_exposes_top_level_routing_decision():
     source = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(encoding="utf-8")
 

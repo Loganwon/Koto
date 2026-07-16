@@ -87,6 +87,11 @@ def task_classifier_fast_path(request: FileTaskRequest) -> Dict[str, Any]:
     return {}
 
 
+def ai_intent_adjudicator_is_forced(request: FileTaskRequest) -> bool:
+    options = request.options if isinstance(request.options, dict) else {}
+    return bool(options.get("enable_ai_intent_adjudicator"))
+
+
 def adjudicate_intent_if_needed(
     *,
     request: FileTaskRequest,
@@ -105,7 +110,7 @@ def adjudicate_intent_if_needed(
     ):
         return trusted_route_adjudication_payload(request)
 
-    if trusted_route is None:
+    if trusted_route is None and not ai_intent_adjudicator_is_forced(request):
         fast_path = task_classifier_fast_path(request)
         if fast_path:
             return fast_path
