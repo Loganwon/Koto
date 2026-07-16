@@ -189,9 +189,18 @@ class TestStorageHelpers:
 
         webcfg._user_settings_cache.clear()
 
-    def test_workspace_root_from_settings(self):
-        webapp = self._with_settings({"storage": {"workspace_dir": "D:\\work"}})
-        assert webapp.get_workspace_root() == "D:\\work"
+    def test_workspace_root_from_runtime_owner(self):
+        from app.core.config.workspace_runtime import (
+            clear_workspace_root_override,
+            set_workspace_root,
+        )
+        from web import app as webapp
+
+        try:
+            expected = set_workspace_root("D:\\work")
+            assert webapp.get_workspace_root() == expected
+        finally:
+            clear_workspace_root_override()
 
     def test_workspace_root_default(self):
         webapp = self._with_settings({})

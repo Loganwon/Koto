@@ -48,6 +48,21 @@ class TestListWorkspace:
         assert "files" in data
         assert isinstance(data["files"], list)
 
+    def test_quick_access_uses_live_workspace_path(self, monkeypatch, tmp_path):
+        """The Koto workspace shortcut must follow a workspace switch immediately."""
+        import web.shared as shared
+        from web.blueprints.workspace import _quick_access_locations
+
+        live_workspace = tmp_path / "live_workspace"
+        live_workspace.mkdir()
+        monkeypatch.setattr(shared, "WORKSPACE_DIR", str(live_workspace))
+
+        workspace_entry = next(
+            item for item in _quick_access_locations()
+            if item["name"] == "Koto 工作区"
+        )
+        assert workspace_entry["path"] == str(live_workspace)
+
 
 # ── GET /workspace-assistant ────────────────────────────────────────────────
 

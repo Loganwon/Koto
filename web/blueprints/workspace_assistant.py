@@ -1526,8 +1526,6 @@ def set_workspace_dir_endpoint():
     Body (JSON): {"path": "/absolute/path/to/folder"}
     持久化到 config/user_settings.json 并立即生效（无需重启）。
     """
-    import json as _json
-
     body = request.get_json(force=True, silent=True) or {}
     new_path = (body.get("path") or "").strip()
     if not new_path:
@@ -1547,27 +1545,26 @@ def set_workspace_dir_endpoint():
     if not target.is_dir():
         return jsonify({"error": "路径不是文件夹"}), 400
 
-    # Persist to user_settings.json
+    # Persist through the canonical crash-safe settings transaction while
+    # honoring portable/test overrides of the settings file location.
+    from app.core.config.settings_store import atomic_update_settings
+    from app.core.config.user_settings import DEFAULT_SETTINGS
     from web.shared import clear_user_settings_cache, get_user_settings_path
 
-    settings_path = Path(get_user_settings_path())
     try:
-        try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = _json.load(f)
-        except Exception:
-            settings = {}
-        settings.setdefault("storage", {})["workspace_dir"] = str(target)
-        with open(settings_path, "w", encoding="utf-8") as f:
-            _json.dump(settings, f, ensure_ascii=False, indent=2)
+        atomic_update_settings(
+            get_user_settings_path(),
+            {"storage": {"workspace_dir": str(target)}},
+            defaults=DEFAULT_SETTINGS,
+        )
     except Exception as e:
         return jsonify({"error": f"设置保存失败: {e}"}), 500
 
     # Invalidate cache and update live module variable (no restart needed)
     clear_user_settings_cache()
-    import web.shared as _shared
+    from web.shared import update_workspace_root
 
-    _shared.WORKSPACE_DIR = str(target)
+    update_workspace_root(str(target))
 
     logger.info("[WorkspaceAssistant] 工作区已切换: %s", target)
     return jsonify({"ok": True, "path": str(target), "name": target.name})

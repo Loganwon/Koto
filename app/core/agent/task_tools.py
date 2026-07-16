@@ -186,22 +186,15 @@ _SANDBOX_CLEANUP_RETRY_DELAY_SECONDS = float(
 )
 
 # ── Workspace root (same resolver as WorkspaceEditorPlugin) ──────────────────
-_WORKSPACE_ROOT: Optional[str] = None
+_WORKSPACE_ROOT: Optional[str] = None  # test/compatibility override only
 
 
 def _get_workspace_root() -> str:
-    global _WORKSPACE_ROOT
-    if _WORKSPACE_ROOT is None:
-        configured_root = str(os.getenv("KOTO_WORKSPACE_DIR") or "").strip()
-        if configured_root:
-            workspace_root = Path(configured_root).expanduser().resolve()
-        elif getattr(sys, "frozen", False):
-            workspace_root = Path(sys.executable).resolve().parent / "workspace"
-        else:
-            project_root = Path(__file__).resolve().parent.parent.parent.parent
-            workspace_root = project_root / "workspace"
-        _WORKSPACE_ROOT = str(workspace_root)
-    return _WORKSPACE_ROOT
+    if _WORKSPACE_ROOT is not None:
+        return _WORKSPACE_ROOT
+    from app.core.config.workspace_runtime import get_workspace_root
+
+    return get_workspace_root()
 
 
 def _get_project_root() -> str:
@@ -2836,7 +2829,7 @@ def annotate_file(
             requirement=requirement_text,
             model_id=model_id,
             gemini_client=gemini_client,
-            workspace_root=_WORKSPACE_ROOT,
+            workspace_root=_get_workspace_root(),
         )
 
     try:

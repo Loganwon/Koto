@@ -16,30 +16,24 @@ and routes them to the appropriate DocController.
 import json
 import logging
 import os
-from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from app.core.agent.base import AgentPlugin
 
 logger = logging.getLogger(__name__)
 
-# Workspace root — set at app startup; defaults to <project>/workspace
-_WORKSPACE_ROOT: Optional[str] = None
-
-
 def set_workspace_root(path: str):
-    """Call once at app startup to set the workspace directory."""
-    global _WORKSPACE_ROOT
-    _WORKSPACE_ROOT = os.path.abspath(path)
+    """Compatibility setter for the shared runtime workspace owner."""
+    from app.core.config.workspace_runtime import set_workspace_root as _set_root
+
+    return _set_root(path)
 
 
 def _get_workspace_root() -> str:
-    """Resolve workspace root lazily."""
-    global _WORKSPACE_ROOT
-    if _WORKSPACE_ROOT is None:
-        project_root = Path(__file__).parent.parent.parent.parent
-        _WORKSPACE_ROOT = str(project_root / "workspace")
-    return _WORKSPACE_ROOT
+    """Resolve the live workspace root without retaining a private cache."""
+    from app.core.config.workspace_runtime import get_workspace_root
+
+    return get_workspace_root()
 
 
 def _safe_resolve(relative_path: str) -> Optional[str]:

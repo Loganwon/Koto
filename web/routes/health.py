@@ -24,10 +24,10 @@ health_bp = Blueprint("health", __name__)
 
 _START_TIME = time.monotonic()
 
-# Resolve paths once at import time
+# Resolve immutable application paths once at import time. The workspace root
+# remains dynamic and is read from the shared runtime owner in _check_disk().
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _VERSION_FILE = _PROJECT_ROOT / "VERSION"
-_WORKSPACE_DIR = _PROJECT_ROOT / "workspace"
 
 # Minimum free disk space in bytes (100 MB)
 _MIN_DISK_FREE_BYTES = 100 * 1024 * 1024
@@ -55,7 +55,10 @@ def _check_ollama() -> dict:
 def _check_disk() -> dict:
     """Check that workspace directory has enough free disk space."""
     try:
-        path = str(_WORKSPACE_DIR) if _WORKSPACE_DIR.exists() else str(_PROJECT_ROOT)
+        from app.core.config.workspace_runtime import get_workspace_root
+
+        workspace_dir = Path(get_workspace_root())
+        path = str(workspace_dir) if workspace_dir.exists() else str(_PROJECT_ROOT)
         usage = shutil.disk_usage(path)
         ok = usage.free > _MIN_DISK_FREE_BYTES
         free_mb = round(usage.free / (1024 * 1024), 1)

@@ -27,6 +27,11 @@ else:
 
 # ─── Settings Manager (single source of truth) ───────────────────────────────
 from app.core.config.user_settings import SettingsManager
+from app.core.config.workspace_runtime import (
+    get_workspace_root as _get_runtime_workspace_root,
+    reload_workspace_root as _reload_runtime_workspace_root,
+    set_workspace_root as _set_runtime_workspace_root,
+)
 
 settings_manager = SettingsManager()
 
@@ -59,11 +64,16 @@ def get_user_settings_path() -> str:
 
 
 def get_workspace_root() -> str:
-    settings = _load_user_settings()
-    workspace_dir = settings.get("storage", {}).get("workspace_dir")
-    if workspace_dir:
-        return workspace_dir
-    return settings_manager.workspace_dir
+    """Return the process-wide workspace root from its Core runtime owner."""
+    return _get_runtime_workspace_root()
+
+
+def update_workspace_root(path: str) -> str:
+    """Synchronize the canonical runtime root and the legacy module alias."""
+    normalized = _set_runtime_workspace_root(path)
+    global WORKSPACE_DIR
+    WORKSPACE_DIR = normalized
+    return normalized
 
 
 def get_organize_root() -> str:
@@ -80,10 +90,11 @@ def get_default_wechat_files_dir() -> str:
 
 
 def invalidate_settings_cache() -> None:
-    """Clear cache and force SettingsManager to re-read from disk."""
+    """Force SettingsManager and the workspace runtime to re-read disk state."""
     with _user_settings_lock:
         _user_settings_cache.clear()
     settings_manager.reload()
+    update_workspace_root(_reload_runtime_workspace_root())
 
 
 def clear_user_settings_cache():
