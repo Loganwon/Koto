@@ -322,6 +322,23 @@ def test_release_pipelines_publish_manifest_and_sha256_checksums():
         assert "Koto_v$($env:VERSION)_release-manifest.json" in workflow
 
 
+def test_release_pipeline_rejects_reusing_published_tags():
+    release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "Reject reused release tags" in release
+    assert 'gh release view "$GITHUB_REF_NAME"' in release
+    assert "Create a new patch tag instead of rebuilding" in release
+
+
+def test_github_pages_uses_asset_build_date_instead_of_stale_release_date():
+    page = Path("docs/index.html").read_text(encoding="utf-8")
+
+    assert "构建更新于" in page
+    assert "latestAssetTimestamp" in page
+    assert "asset.updated_at || asset.created_at" in page
+    assert "发布于 ' + published" not in page
+
+
 def test_inno_setup_path_resolution_is_shared():
     resolver = Path("scripts/resolve_inno_setup.ps1").read_text(encoding="utf-8")
     build_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
