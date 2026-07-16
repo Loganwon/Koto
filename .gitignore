@@ -46,6 +46,8 @@ config/insights.db
 config/context_awareness.db
 config/knowledge_graph.db
 config/concepts.db
+config/suggestions.db
+config/user_behavior.db
 
 # IDE
 .vscode/
@@ -92,6 +94,8 @@ build_log.txt
 /app/core/workspace/clipboard/history.json
 config/auto_execution.db
 config/user_settings.json
+config/user_settings.json.lock
+config/user_settings.json.corrupt-*
 
 # One-off local diagnostics captured during the 2026-07 worktree inventory.
 # These are deliberately exact names, rather than broad patterns, so fixtures
@@ -134,7 +138,8 @@ archive/installer_backup/
 config/users.json
 
 # User uploads
-web/uploads/
+web/uploads/*
+!web/uploads/.gitkeep
 
 # Node modules (if any)
 node_modules/
@@ -145,6 +150,8 @@ node_modules/
 # pytest local temp dirs
 .pytest_tmp/
 .pytest_cache_local/
+/.pytest_*.xml
+/.codex-runtime/
 
 # Hypothesis test data
 .hypothesis/

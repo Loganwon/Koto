@@ -10,6 +10,8 @@
 
 import os
 import sys
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # 添加项目根目录到路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -27,13 +29,13 @@ from web.proactive_trigger import ProactiveTriggerSystem
 from web.suggestion_engine import SuggestionEngine
 
 
-def test_notification_system():
+def test_notification_system(tmp_path):
     """测试实时通知系统"""
     print("\n" + "=" * 60)
     print("🔔 测试1: 实时通知系统")
     print("=" * 60)
 
-    manager = NotificationManager(db_path="config/test_notifications.db")
+    manager = NotificationManager(db_path=str(tmp_path / "notifications.db"))
     user_id = "test_user"
 
     # 1. 发送不同类型的通知
@@ -118,19 +120,19 @@ def test_notification_system():
     print("\n✅ 通知系统测试完成！")
 
 
-def test_proactive_dialogue():
+def test_proactive_dialogue(tmp_path):
     """测试主动对话引擎"""
     print("\n" + "=" * 60)
     print("💬 测试2: 主动对话引擎")
     print("=" * 60)
 
     # 准备依赖
-    notif_mgr = NotificationManager(db_path="config/test_notifications.db")
-    behavior_mon = BehaviorMonitor(db_path="config/test_behavior.db")
-    suggestion_eng = SuggestionEngine(db_path="config/test_suggestions.db")
+    notif_mgr = NotificationManager(db_path=str(tmp_path / "notifications.db"))
+    behavior_mon = BehaviorMonitor(db_path=str(tmp_path / "behavior.db"))
+    suggestion_eng = SuggestionEngine(db_path=str(tmp_path / "suggestions.db"))
 
     engine = ProactiveDialogueEngine(
-        db_path="config/test_dialogue.db",
+        db_path=str(tmp_path / "dialogue.db"),
         notification_manager=notif_mgr,
         behavior_monitor=behavior_mon,
         suggestion_engine=suggestion_eng,
@@ -172,14 +174,14 @@ def test_proactive_dialogue():
     print("\n✅ 主动对话测试完成！")
 
 
-def test_context_awareness():
+def test_context_awareness(tmp_path):
     """测试情境感知系统"""
     print("\n" + "=" * 60)
     print("🎯 测试3: 情境感知系统")
     print("=" * 60)
 
     # 准备依赖
-    behavior_mon = BehaviorMonitor(db_path="config/test_behavior.db")
+    behavior_mon = BehaviorMonitor(db_path=str(tmp_path / "behavior.db"))
 
     # 模拟一些用户行为
     print("\n➤ 模拟用户行为...")
@@ -190,7 +192,7 @@ def test_context_awareness():
     print("  ✓ 已记录4个学习相关操作")
 
     system = ContextAwarenessSystem(
-        db_path="config/test_context.db", behavior_monitor=behavior_mon
+        db_path=str(tmp_path / "context.db"), behavior_monitor=behavior_mon
     )
 
     user_id = "test_user"
@@ -246,15 +248,15 @@ def test_context_awareness():
     print("\n✅ 情境感知测试完成！")
 
 
-def test_auto_execution():
+def test_auto_execution(tmp_path):
     """测试自动执行引擎"""
     print("\n" + "=" * 60)
     print("⚙️  测试4: 自动执行引擎")
     print("=" * 60)
 
-    notif_mgr = NotificationManager(db_path="config/test_notifications.db")
+    notif_mgr = NotificationManager(db_path=str(tmp_path / "notifications.db"))
     engine = AutoExecutionEngine(
-        db_path="config/test_execution.db",
+        db_path=str(tmp_path / "execution.db"),
         workspace_root="workspace",
         notification_manager=notif_mgr,
     )
@@ -342,28 +344,28 @@ def test_auto_execution():
     print("\n✅ 自动执行测试完成！")
 
 
-def test_trigger_system():
+def test_trigger_system(tmp_path):
     """测试主动交互触发系统"""
     print("\n" + "=" * 60)
     print("🧠 测试5: 主动交互触发系统")
     print("=" * 60)
 
     # 准备依赖
-    notif_mgr = NotificationManager(db_path="config/test_notifications.db")
-    behavior_mon = BehaviorMonitor(db_path="config/test_behavior.db")
-    suggestion_eng = SuggestionEngine(db_path="config/test_suggestions.db")
+    notif_mgr = NotificationManager(db_path=str(tmp_path / "notifications.db"))
+    behavior_mon = BehaviorMonitor(db_path=str(tmp_path / "behavior.db"))
+    suggestion_eng = SuggestionEngine(db_path=str(tmp_path / "suggestions.db"))
     context_sys = ContextAwarenessSystem(
-        db_path="config/test_context.db", behavior_monitor=behavior_mon
+        db_path=str(tmp_path / "context.db"), behavior_monitor=behavior_mon
     )
     dialogue_eng = ProactiveDialogueEngine(
-        db_path="config/test_dialogue.db",
+        db_path=str(tmp_path / "dialogue.db"),
         notification_manager=notif_mgr,
         behavior_monitor=behavior_mon,
         suggestion_engine=suggestion_eng,
     )
 
     trigger_system = ProactiveTriggerSystem(
-        db_path="config/test_triggers.db",
+        db_path=str(tmp_path / "triggers.db"),
         behavior_monitor=behavior_mon,
         context_awareness=context_sys,
         suggestion_engine=suggestion_eng,
@@ -395,7 +397,7 @@ def test_trigger_system():
     print("\n✅ 主动交互触发系统测试完成！")
 
 
-def test_integration():
+def test_integration(tmp_path):
     """测试模块集成"""
     print("\n" + "=" * 60)
     print("🔗 测试6: 模块集成")
@@ -403,23 +405,23 @@ def test_integration():
 
     # 1. 创建完整系统
     print("\n➤ 初始化完整系统...")
-    notif_mgr = NotificationManager(db_path="config/test_notifications.db")
-    behavior_mon = BehaviorMonitor(db_path="config/test_behavior.db")
-    suggestion_eng = SuggestionEngine(db_path="config/test_suggestions.db")
+    notif_mgr = NotificationManager(db_path=str(tmp_path / "notifications.db"))
+    behavior_mon = BehaviorMonitor(db_path=str(tmp_path / "behavior.db"))
+    suggestion_eng = SuggestionEngine(db_path=str(tmp_path / "suggestions.db"))
 
     dialogue_eng = ProactiveDialogueEngine(
-        db_path="config/test_dialogue.db",
+        db_path=str(tmp_path / "dialogue.db"),
         notification_manager=notif_mgr,
         behavior_monitor=behavior_mon,
         suggestion_engine=suggestion_eng,
     )
 
     context_sys = ContextAwarenessSystem(
-        db_path="config/test_context.db", behavior_monitor=behavior_mon
+        db_path=str(tmp_path / "context.db"), behavior_monitor=behavior_mon
     )
 
     auto_exec = AutoExecutionEngine(
-        db_path="config/test_execution.db", notification_manager=notif_mgr
+        db_path=str(tmp_path / "execution.db"), notification_manager=notif_mgr
     )
 
     print("  ✓ 所有模块已初始化")
@@ -442,7 +444,7 @@ def test_integration():
     print(f"  ✓ 应用场景配置: {behavior_config['suggestion_frequency']}")
 
     # 生成建议
-    sugg_engine = SuggestionEngine(db_path="config/test_suggestions.db")
+    sugg_engine = SuggestionEngine(db_path=str(tmp_path / "suggestions.db"))
     suggestions = sugg_engine.generate_suggestions()
     print(f"  ✓ 生成了 {len(suggestions)} 条建议")
 
@@ -479,12 +481,14 @@ def main():
 
     try:
         # 运行所有测试
-        test_notification_system()
-        test_proactive_dialogue()
-        test_context_awareness()
-        test_auto_execution()
-        test_trigger_system()
-        test_integration()
+        with TemporaryDirectory(prefix="koto-proactive-tests-") as temp_dir:
+            tmp_path = Path(temp_dir)
+            test_notification_system(tmp_path)
+            test_proactive_dialogue(tmp_path)
+            test_context_awareness(tmp_path)
+            test_auto_execution(tmp_path)
+            test_trigger_system(tmp_path)
+            test_integration(tmp_path)
 
         # 总结
         print("\n" + "=" * 60)
