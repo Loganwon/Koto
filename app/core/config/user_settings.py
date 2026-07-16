@@ -5,13 +5,19 @@ Koto Settings Manager
 ???????? - ??????????????
 """
 
-import atexit
-import json
+import copy
 import logging
 import os
 import sys
-import tempfile
 import threading
+from collections.abc import Iterable, Mapping
+
+from app.core.config.settings_store import (
+    SettingsStoreError,
+    atomic_update_settings,
+    deep_merge,
+    load_settings_document,
+)
 
 # ????????
 # ?????config/ ?? Koto.exe??????config/ ? web/ ???
@@ -29,7 +35,10 @@ else:
     PROJECT_ROOT = os.path.abspath(
         os.path.join(SCRIPT_DIR, os.pardir, os.pardir, os.pardir)
     )
-SETTINGS_FILE = os.path.join(PROJECT_ROOT, "config", "user_settings.json")
+SETTINGS_FILE = os.environ.get(
+    "KOTO_USER_SETTINGS_PATH",
+    os.path.join(PROJECT_ROOT, "config", "user_settings.json"),
+)
 
 # ????
 DEFAULT_SETTINGS = {
@@ -79,23 +88,34 @@ class SettingsManager:
     _instance = None
     _settings = None
     _dirty = False
+    _dirty_patch = None
+    _dirty_replace_keys = frozenset()
     _flush_timer: "threading.Timer | None" = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
+    _instance_lock = threading.Lock()
+    _file_signature = None
     _FLUSH_DELAY = 2.0  # seconds to wait before flushing dirty writes to disk
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super().__new__(cls)
-            cls._instance._load_settings()
+            with cls._instance_lock:
+                if cls._instance is None:
+                    instance = super().__new__(cls)
+                    instance._load_settings()
+                    cls._instance = instance
         return cls._instance
 
     def flush(self):
-        """Write to disk now (kept for backwards compatibility)."""
+        """Write only genuinely pending changes.
+
+        Public mutators already persist atomically. Rewriting a clean in-memory
+        snapshot during shutdown can clobber settings changed by another Koto
+        helper or process after this instance loaded.
+        """
         with self._lock:
-            result = self._save_settings()
-            if result:
-                self._dirty = False
-            return result
+            if not self._dirty:
+                return True
+            return self._save_settings()
 
     def reload(self):
         """Force re-read settings from disk."""
@@ -105,46 +125,41 @@ class SettingsManager:
 
     def _load_settings(self):
         """????"""
-        import copy
-
-        if os.path.exists(SETTINGS_FILE):
-            try:
-                # utf-8-sig handles both plain UTF-8 and UTF-8 with BOM (PowerShell default)
-                with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:
-                    raw = json.load(f)
-                # ????????????????
-                self._settings = self._merge_settings(DEFAULT_SETTINGS, raw)
-                # ?????????????????????? ai ????
-                # ????????????????????????????
-                if self._has_missing_defaults(raw):
-                    self._save_settings()
-            except Exception as e:
-                logger.error(f"??????: {e}")
-                self._settings = copy.deepcopy(DEFAULT_SETTINGS)
-        else:
+        try:
+            raw = load_settings_document(SETTINGS_FILE, defaults=DEFAULT_SETTINGS)
+            self._settings = self._merge_settings(DEFAULT_SETTINGS, raw)
+        except SettingsStoreError as exc:
+            logger.error("Settings load lock failed: %s", exc)
             self._settings = copy.deepcopy(DEFAULT_SETTINGS)
-            self._save_settings()
-
-        # ?????????????????
         self._normalize_storage()
+        self._file_signature = self._get_file_signature()
+        self._dirty = False
+        self._dirty_patch = {}
+        self._dirty_replace_keys = frozenset()
 
-    def _has_missing_defaults(self, raw: dict) -> bool:
-        """?? raw ?????? DEFAULT_SETTINGS ?????????"""
+    @staticmethod
+    def _get_file_signature():
+        try:
+            stat = os.stat(SETTINGS_FILE)
+            return (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            return None
 
-        def _missing(default: dict, current: dict) -> bool:
-            for k, v in default.items():
-                if k not in current:
-                    return True
-                if isinstance(v, dict) and isinstance(current.get(k), dict):
-                    if _missing(v, current[k]):
-                        return True
-            return False
-
-        return _missing(DEFAULT_SETTINGS, raw)
+    def _reload_if_changed_locked(self):
+        """Refresh a clean singleton when another process updated the file."""
+        current_signature = self._get_file_signature()
+        if (
+            not self._dirty
+            and current_signature is not None
+            and current_signature != self._file_signature
+        ):
+            self._load_settings()
 
     def _normalize_storage(self):
         """???????????????????????????"""
         storage = self._settings.get("storage", {})
+        if not isinstance(storage, dict):
+            storage = {}
         for key, default_value in DEFAULT_SETTINGS.get("storage", {}).items():
             if not storage.get(key) or (
                 isinstance(storage.get(key), str) and not storage.get(key).strip()
@@ -172,8 +187,37 @@ class SettingsManager:
                     result[key] = value
         return result
 
-    # SkillManager ???? "skills" ??SettingsManager ???????
+    # SkillManager owns "skills"; fallback full writes must not replace it.
     _EXTERNAL_KEYS = frozenset({"skills"})
+
+    def _mark_dirty(
+        self,
+        patch: Mapping[str, object],
+        *,
+        replace_top_level: Iterable[str] = (),
+    ) -> None:
+        self._dirty_patch = deep_merge(self._dirty_patch or {}, patch)
+        self._dirty_replace_keys = frozenset(
+            set(self._dirty_replace_keys) | set(replace_top_level)
+        )
+        self._dirty = True
+
+    def patch(
+        self,
+        values: Mapping[str, object],
+        *,
+        replace_top_level: Iterable[str] = (),
+    ) -> bool:
+        """Persist a multi-section change as one cross-process transaction."""
+        with self._lock:
+            self._reload_if_changed_locked()
+            self._settings = deep_merge(self._settings, values)
+            for key in replace_top_level:
+                if key in values:
+                    self._settings[key] = copy.deepcopy(values[key])
+            self._normalize_storage()
+            self._mark_dirty(values, replace_top_level=replace_top_level)
+            return self._save_settings()
 
     def _save_settings(self):
         """???? ? read-modify-write???????????????
@@ -182,116 +226,98 @@ class SettingsManager:
         Uses atomic write (temp file + os.replace) to prevent corruption.
         """
         try:
-            settings_dir = os.path.dirname(SETTINGS_FILE)
-            os.makedirs(settings_dir, exist_ok=True)
-            # ?????????????????????? SkillManager ? "skills"?
-            on_disk = {}
-            if os.path.exists(SETTINGS_FILE):
-                try:
-                    with open(SETTINGS_FILE, "r", encoding="utf-8-sig") as f:
-                        on_disk = json.load(f)
-                except Exception:
-                    pass
-            # ?? SettingsManager ????? key???????????? key
-            for key, value in self._settings.items():
-                if key not in self._EXTERNAL_KEYS:
-                    on_disk[key] = value
-            # ????????????? os.replace ?????
-            fd, tmp_path = tempfile.mkstemp(
-                dir=settings_dir, suffix=".tmp", prefix=".user_settings_"
+            patch = self._dirty_patch or {
+                key: value
+                for key, value in self._settings.items()
+                if key not in self._EXTERNAL_KEYS
+            }
+            persisted = atomic_update_settings(
+                SETTINGS_FILE,
+                patch,
+                defaults=DEFAULT_SETTINGS,
+                replace_top_level=self._dirty_replace_keys,
             )
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as f:
-                    json.dump(on_disk, f, indent=2, ensure_ascii=False)
-                    f.flush()
-                    os.fsync(f.fileno())
-                os.replace(tmp_path, SETTINGS_FILE)
-            except BaseException:
-                # ??????
-                try:
-                    os.unlink(tmp_path)
-                except OSError:
-                    pass
-                raise
+            self._settings = self._merge_settings(DEFAULT_SETTINGS, persisted)
+            self._normalize_storage()
+            self._file_signature = self._get_file_signature()
+            self._dirty = False
+            self._dirty_patch = {}
+            self._dirty_replace_keys = frozenset()
             return True
         except Exception as e:
-            logger.error(f"??????: {e}")
+            logger.error("Settings save failed: %s", e)
             return False
 
     def get(self, category, key=None):
         """????"""
-        if category in self._settings:
-            if key is None:
-                return self._settings[category]
-            value = self._settings[category].get(key)
-            # ??????????????????????????/????
-            if (
-                category == "storage"
-                and key in DEFAULT_SETTINGS.get("storage", {})
-                and isinstance(value, str)
-                and not value.strip()
-            ):
-                return DEFAULT_SETTINGS["storage"].get(key)
-            return value
-        return None
+        with self._lock:
+            self._reload_if_changed_locked()
+            if category in self._settings:
+                if key is None:
+                    return copy.deepcopy(self._settings[category])
+                category_settings = self._settings[category]
+                if not isinstance(category_settings, Mapping):
+                    return None
+                value = category_settings.get(key)
+                # ??????????????????????????/????
+                if (
+                    category == "storage"
+                    and key in DEFAULT_SETTINGS.get("storage", {})
+                    and isinstance(value, str)
+                    and not value.strip()
+                ):
+                    return DEFAULT_SETTINGS["storage"].get(key)
+                return copy.deepcopy(value)
+            return None
 
     def set(self, category, key, value):
         """????? ? immediately flushes to disk."""
-        with self._lock:
-            if category not in self._settings:
-                self._settings[category] = {}
-
-            # ?????????????????????????????
-            if (
-                category == "storage"
-                and key in DEFAULT_SETTINGS.get("storage", {})
-                and isinstance(value, str)
-                and not value.strip()
-            ):
-                value = DEFAULT_SETTINGS["storage"].get(key)
-
-            self._settings[category][key] = value
-            self._normalize_storage()
-            self._dirty = True
-            return self._save_settings()
+        # ?????????????????????????????
+        if (
+            category == "storage"
+            and key in DEFAULT_SETTINGS.get("storage", {})
+            and isinstance(value, str)
+            and not value.strip()
+        ):
+            value = DEFAULT_SETTINGS["storage"].get(key)
+        return self.patch({category: {key: value}})
 
     def update(self, category, values):
         """?????????? ? immediately flushes to disk."""
-        with self._lock:
-            if category not in self._settings:
-                self._settings[category] = {}
-
-            # ?? storage ???????????????
-            if category == "storage":
-                for k, v in values.items():
-                    if (
-                        k in DEFAULT_SETTINGS.get("storage", {})
-                        and isinstance(v, str)
-                        and not v.strip()
-                    ):
-                        values[k] = DEFAULT_SETTINGS["storage"].get(k)
-
-            self._settings[category].update(values)
-            self._normalize_storage()
-            return self._save_settings()
+        normalized_values = dict(values)
+        # ?? storage ???????????????
+        if category == "storage":
+            for k, v in normalized_values.items():
+                if (
+                    k in DEFAULT_SETTINGS.get("storage", {})
+                    and isinstance(v, str)
+                    and not v.strip()
+                ):
+                    normalized_values[k] = DEFAULT_SETTINGS["storage"].get(k)
+        return self.patch({category: normalized_values})
 
     def get_all(self):
         """??????"""
-        import copy
-
-        return copy.deepcopy(self._settings)
+        with self._lock:
+            self._reload_if_changed_locked()
+            return copy.deepcopy(self._settings)
 
     def reset(self, category=None):
         """????"""
-        import copy
-
         with self._lock:
+            self._reload_if_changed_locked()
             if category:
                 if category in DEFAULT_SETTINGS:
-                    self._settings[category] = copy.deepcopy(DEFAULT_SETTINGS[category])
+                    return self.patch(
+                        {category: copy.deepcopy(DEFAULT_SETTINGS[category])},
+                        replace_top_level={category},
+                    )
             else:
-                self._settings = copy.deepcopy(DEFAULT_SETTINGS)
-            return self._save_settings()
+                return self.patch(
+                    copy.deepcopy(DEFAULT_SETTINGS),
+                    replace_top_level=DEFAULT_SETTINGS.keys(),
+                )
+            return True
 
     def ensure_directories(self):
         """??????????"""
