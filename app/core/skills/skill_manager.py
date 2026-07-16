@@ -212,26 +212,20 @@ class SkillManager:
     @classmethod
     def _settings_path(cls) -> Path:
         """返回 config/user_settings.json 的绝对路径"""
-        import sys
+        from app.core.config.user_settings import SETTINGS_FILE
 
-        if getattr(sys, "frozen", False):
-            # 打包模式：config/ 紧邻 Koto.exe，不在 _internal/ 里
-            project_root = Path(sys.executable).parent
-        else:
-            here = Path(__file__).resolve()
-            # app/core/skills/skill_manager.py → project_root/config/user_settings.json
-            project_root = here.parents[3]
-        return project_root / "config" / "user_settings.json"
+        return Path(SETTINGS_FILE)
 
     @classmethod
     def _load_states_from_settings(cls):
         """从 user_settings.json 读取持久化的启用状态"""
         try:
+            from app.core.config.settings_store import load_settings_document
+
             p = cls._settings_path()
             if not p.exists():
                 return
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = load_settings_document(p)
             skills_state = data.get("skills", {})
             for skill_id, state in skills_state.items():
                 if not isinstance(state, dict):
@@ -250,12 +244,8 @@ class SkillManager:
     def _save_states_to_settings(cls):
         """将当前启用状态写回 user_settings.json"""
         try:
-            p = cls._settings_path()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            data = {}
-            if p.exists():
-                with open(p, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+            from app.core.config.settings_store import atomic_update_settings
+
             skills_state = {}
             all_skill_ids = set(cls._registry) | set(cls._def_registry)
             for skill_id in all_skill_ids:
@@ -267,9 +257,11 @@ class SkillManager:
                 if prompt != builtin_prompt:
                     state["prompt_override"] = prompt
                 skills_state[skill_id] = state
-            data["skills"] = skills_state
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            atomic_update_settings(
+                cls._settings_path(),
+                {"skills": skills_state},
+                replace_top_level={"skills"},
+            )
         except Exception as e:
             print(f"[SkillManager] 保存设置失败: {e}")
 

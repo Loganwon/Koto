@@ -361,17 +361,16 @@ def save_setup_result(model_tag: str, mode: str = "local"):
     with open(SETUP_FLAG, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # 同步写入 user_settings.json
-    settings_path = APP_ROOT / "config" / "user_settings.json"
+    # 同步写入统一设置存储，避免安装器与运行中的 Koto 相互覆盖。
     try:
-        settings = {}
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-        settings["local_model"] = model_tag
-        settings["model_mode"] = mode
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
+        from app.core.config.settings_store import atomic_update_settings
+        from app.core.config.user_settings import DEFAULT_SETTINGS, SETTINGS_FILE
+
+        atomic_update_settings(
+            SETTINGS_FILE,
+            {"local_model": model_tag, "model_mode": mode},
+            defaults=DEFAULT_SETTINGS,
+        )
     except Exception:
         pass
 
