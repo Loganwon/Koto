@@ -309,6 +309,8 @@ def test_windows_release_build_tools_are_pinned_once():
     assert "PyInstaller==" in build_tools
     assert "scripts\\verify_build_requirements.py" in local_release
     assert "config\\build-requirements.lock" in local_release
+    assert '$env:KOTO_USER_SETTINGS_PATH = Join-Path $buildRuntimeStateDir' in local_release
+    assert 'Join-Path $LOG_DIR "build_runtime_state"' in local_release
     for workflow in workflows:
         assert "pip install -r config\\build-requirements.lock" in workflow
         assert "pip install pyinstaller" not in workflow.lower()

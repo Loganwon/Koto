@@ -387,6 +387,14 @@ if (-not (Test-Path $PYTHON)) {
 }
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
 
+# PyInstaller analysis imports application modules. Keep any import-time
+# settings initialization out of source config/ and out of the packaged user
+# data boundary. Child build processes inherit this isolated path.
+$buildRuntimeStateDir = Join-Path $LOG_DIR "build_runtime_state"
+New-Item -ItemType Directory -Path $buildRuntimeStateDir -Force | Out-Null
+$env:KOTO_USER_SETTINGS_PATH = Join-Path $buildRuntimeStateDir "user_settings.json"
+Write-OK "构建期用户设置已隔离到 logs\build_runtime_state"
+
 & $PYTHON $BUILD_REQUIREMENTS_VERIFY $BUILD_REQUIREMENTS_LOCK
 if ($LASTEXITCODE -ne 0) {
     Write-Fail "Windows 构建工具版本与 config\build-requirements.lock 不一致。"
