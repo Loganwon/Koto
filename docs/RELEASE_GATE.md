@@ -68,6 +68,23 @@ Both tests launch the real desktop path, require the WebView window shown
 callback, and remove Python/Node/Java/virtual-environment paths from the child
 process. A backend-only health check is not sufficient release evidence.
 
+For a genuinely clean Windows image, run the generated Windows Sandbox test on
+Windows Pro/Enterprise with the optional Sandbox feature enabled:
+
+```powershell
+tests\installer\New-KotoReleaseSandbox.ps1 `
+  -SetupExe dist\Koto_Setup_1.0.0.exe `
+  -Launch
+```
+
+The Sandbox maps the release and test scripts read-only, launches the same real
+installer E2E, performs an in-place upgrade over a deliberately stale
+`_internal` marker, refuses an upgrade while Koto is running, preserves a
+user-data sentinel, and writes a transcript, JSON result, and desktop
+screenshot to `dist/windows-sandbox-results`. The
+restricted-PATH local E2E is useful compatibility evidence, but it is not a
+substitute for OS-level isolation when Windows Sandbox is unavailable.
+
 If the build stops partway through, inspect `logs/` and verify ZIP, manifest,
 and installer outputs individually before retrying. Do not release with
 `-AllowPrebuiltFrontend`, `-AllowNoInstaller`, or `-AllowDirtyWorktree` unless

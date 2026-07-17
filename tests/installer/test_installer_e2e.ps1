@@ -37,7 +37,9 @@ param(
     [int]$Port              = 5099,
     [int]$HealthTimeoutSec  = 45,
     [bool]$RequireHealth    = $true,
-    [bool]$RequireDesktopWindow = $true
+    [bool]$RequireDesktopWindow = $true,
+    [string]$EvidenceDir = "",
+    [int]$DesktopHoldSec = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -82,6 +84,85 @@ if ($existingRegistration) {
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+function Save-KotoWindowEvidence([string]$OutputDirectory, [System.Diagnostics.Process]$Process) {
+    if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { return }
+    try {
+        Add-Type -AssemblyName System.Drawing
+        if (-not ("KotoWindowCaptureNative" -as [type])) {
+            Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public static class KotoWindowCaptureNative {
+    public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left, Top, Right, Bottom; }
+    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT rect);
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int command);
+    [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+    [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+    [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr insertAfter, int x, int y, int width, int height, uint flags);
+
+    public static IntPtr FindVisibleWindow(uint processId) {
+        IntPtr found = IntPtr.Zero;
+        EnumWindows(delegate(IntPtr hWnd, IntPtr _) {
+            uint owner;
+            GetWindowThreadProcessId(hWnd, out owner);
+            if (owner == processId && IsWindowVisible(hWnd)) {
+                found = hWnd;
+                return false;
+            }
+            return true;
+        }, IntPtr.Zero);
+        return found;
+    }
+}
+"@
+        }
+        New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
+        $Process.Refresh()
+        $handle = $Process.MainWindowHandle
+        if ($handle -eq [IntPtr]::Zero) {
+            $handle = [KotoWindowCaptureNative]::FindVisibleWindow([uint32]$Process.Id)
+        }
+        if ($handle -eq [IntPtr]::Zero) { throw "No visible window belongs to Koto PID $($Process.Id)" }
+        $rect = New-Object KotoWindowCaptureNative+RECT
+        if (-not [KotoWindowCaptureNative]::GetWindowRect($handle, [ref]$rect)) {
+            throw "GetWindowRect failed for Koto PID $($Process.Id)"
+        }
+        $width = $rect.Right - $rect.Left
+        $height = $rect.Bottom - $rect.Top
+        if ($width -le 0 -or $height -le 0) { throw "Koto window has invalid bounds ${width}x${height}" }
+        $bitmap = New-Object System.Drawing.Bitmap $width, $height
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        try {
+            # WebView2's GPU surface commonly renders blank through PrintWindow.
+            # Briefly raise the test window and capture its exact screen bounds.
+            [KotoWindowCaptureNative]::ShowWindow($handle, 9) | Out-Null
+            [KotoWindowCaptureNative]::SetWindowPos($handle, [IntPtr](-1), 0, 0, 0, 0, 0x43) | Out-Null
+            [KotoWindowCaptureNative]::SetForegroundWindow($handle) | Out-Null
+            Start-Sleep -Milliseconds 1500
+            if ([KotoWindowCaptureNative]::GetForegroundWindow() -ne $handle) {
+                throw "Koto could not become the foreground window; screenshot would capture another application"
+            }
+            $graphics.CopyFromScreen($rect.Left, $rect.Top, 0, 0, $bitmap.Size)
+            [KotoWindowCaptureNative]::SetWindowPos($handle, [IntPtr](-2), 0, 0, 0, 0, 0x43) | Out-Null
+            $path = Join-Path $OutputDirectory "koto-installed-desktop.png"
+            $bitmap.Save($path, [System.Drawing.Imaging.ImageFormat]::Png)
+            Pass "Koto window evidence saved: $path"
+        }
+        finally {
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+    }
+    catch {
+        Fail "Could not capture desktop evidence: $($_.Exception.Message)"
+    }
+}
 function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
     Write-Host "::group::Koto startup diagnostics"
     Write-Host "Process PID: $($kotoProc.Id); exited: $($kotoProc.HasExited); expected port: $HealthPort"
@@ -314,6 +395,14 @@ if (-not $desktopReady) {
     Show-KotoStartupDiagnostics -InstallDir $TestInstallDir -HealthPort $Port
     if ($RequireDesktopWindow) { Fail "Desktop window was not shown within ${HealthTimeoutSec}s" }
     else { Write-Host "::warning::Desktop window callback was not observed" }
+}
+else {
+    Start-Sleep -Seconds 3
+    Save-KotoWindowEvidence -OutputDirectory $EvidenceDir -Process $kotoProc
+    if ($DesktopHoldSec -gt 0) {
+        Write-Host "  Holding the installed desktop open for ${DesktopHoldSec}s..."
+        Start-Sleep -Seconds $DesktopHoldSec
+    }
 }
 
 # /api/ping endpoint check

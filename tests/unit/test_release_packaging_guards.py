@@ -363,6 +363,29 @@ def test_release_e2e_runs_the_real_desktop_startup_path():
     assert "Refusing to replace an existing Koto registration" in installer_e2e
 
 
+def test_windows_sandbox_release_requires_desktop_evidence():
+    generator = Path("tests/installer/New-KotoReleaseSandbox.ps1").read_text(
+        encoding="utf-8"
+    )
+    runner = Path("tests/installer/run_windows_sandbox_release.ps1").read_text(
+        encoding="utf-8"
+    )
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+    release_gate = Path("docs/RELEASE_GATE.md").read_text(encoding="utf-8")
+
+    assert "<ClipboardRedirection>Disable</ClipboardRedirection>" in generator
+    assert generator.count("<ReadOnly>true</ReadOnly>") == 2
+    assert "run_windows_sandbox_release.ps1" in generator
+    assert "test_installer_e2e.ps1" in runner
+    assert "-EvidenceDir $ResultsDir" in runner
+    assert "windows-sandbox-result.json" in runner
+    assert "Save-KotoWindowEvidence" in installer_e2e
+    assert 'Fail "Could not capture desktop evidence:' in installer_e2e
+    assert "New-KotoReleaseSandbox.ps1" in release_gate
+
+
 def test_release_carries_and_verifies_offline_webview2_runtime():
     build = Path("Build_Release.ps1").read_text(encoding="utf-8")
     deploy = Path("src/deploy_portable.py").read_text(encoding="utf-8")
