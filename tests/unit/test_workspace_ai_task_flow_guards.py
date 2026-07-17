@@ -99,72 +99,18 @@ def test_workspace_static_js_only_task_renderer_calls_file_task_stream():
     assert offenders == []
 
 
-def test_workspace_notebook_tools_are_split_from_assistant_shell():
-    assistant_js = _read("web/src/workspace/ai-review.ts")
-    notebook_js = _read("web/src/workspace/notebook.ts")
-    asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
-    workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
-
-    assert "WA.installWorkspaceNotebookTools" in notebook_js
-    assert "WA.doSourceSearch" in notebook_js
-    assert "WA.closeAudioModal = closeAudioModal" in notebook_js
-    assert "WA.closeNotebookGuide = closeNotebookGuide" in notebook_js
-    assert "installWorkspaceNotebookTools({" in _read("web/src/bundles/workspace.ts")
-    assert "window.WA.openAudioOverview = async" not in assistant_js
-    assert "window.WA.openNotebookGuide = async" not in assistant_js
-    assert "window.WA.doSourceSearch = " not in assistant_js
-    assert "workspace-bundle.js" in asset_scripts
-    assert "workspace-assistant.js" not in asset_scripts
-    assert "import '../workspace/notebook';" in workspace_bundle_entry
-
-
-def test_unified_workspace_mounts_notebook_source_and_audio_surfaces():
+def test_workspace_attachment_context_excludes_retired_notebook_and_audio_ui():
     index_template = _read("web/templates/index.html")
-    notebook_ts = _read("web/src/workspace/notebook.ts")
     ai_context_ts = _read("web/src/workspace/ai-context.ts")
-    workspace_css = "\n".join(
-        [
-            _read("web/static/css/workspace.css"),
-            _read("web/static/css/workspace-ai-panel.css"),
-        ]
-    )
+    workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
-    for dom_id in [
-        'id="wa-source-preview"',
-        'id="wa-source-preview-label"',
-        'id="wa-source-preview-body"',
-        'id="wa-audio-modal"',
-        'id="wa-audio-modal-body"',
-        'id="wa-notebook-guide"',
-        'id="wa-source-search-input"',
-        'id="wa-source-search-results"',
-        'id="wa-source-clear-btn"',
-        'id="wa-notebook-body"',
-    ]:
-        assert dom_id in index_template
-
-    assert 'id="wa-notebook-guide"' in index_template
-    assert 'id="wa-audio-modal"' in index_template
-    assert "学习包" in index_template
-    assert "有声概览" in index_template
-    assert ".wa-multidoc-actions" in workspace_css
-    assert "WA.closeSourcePreview = closeSourcePreview" in notebook_ts
-    assert "WA.closeAudioModal = closeAudioModal" in notebook_ts
-    assert "WA.closeNotebookGuide = closeNotebookGuide" in notebook_ts
-    assert "WA.doSourceSearch = doSourceSearch" in notebook_ts
-    assert "WA.clearSourceSearch = clearSourceSearch" in notebook_ts
-    assert "fetch('/api/v1/workspace/notebook_guide'" not in notebook_ts
-    assert "fetch('/api/v1/workspace/audio_overview'" not in notebook_ts
-
-    for symbol in [
-        "doSourceSearch",
-        "closeSourcePreview",
-        "closeAudioModal",
-        "closeNotebookGuide",
-        "clearSourceSearch",
-    ]:
-        assert symbol in workspace_bundle
+    assert not (_repo_root() / "web/src/workspace/notebook.ts").exists()
+    assert not (_repo_root() / "web/templates/notebook_lm.html").exists()
+    _assert_excludes_all(index_template, ("wa-notebook", "wa-audio", "学习包", "有声概览"))
+    _assert_excludes_all(ai_context_ts, ("notebook", "audio", "学习包", "有声概览"))
+    assert "import '../workspace/notebook';" not in workspace_bundle_entry
+    _assert_excludes_all(workspace_bundle, ("学习包", "有声概览", "notebook_guide"))
 
 
 def test_unified_workspace_restores_pdf_annotation_toolbar_and_ai_bridge():

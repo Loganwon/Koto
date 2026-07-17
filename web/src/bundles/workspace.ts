@@ -11,7 +11,7 @@ import { installFrontendObserver } from '../mcp/frontend-observer';
 installFrontendObserver();
 
 // Core infrastructure (must load first)
-import { $, showToast, _escHtml, _fileIcon, _CHAT_SVG, _PIN_SVG, _CLIPBOARD_SVG } from '../workspace/infrastructure';
+import { showToast } from '../workspace/infrastructure';
 import { state } from '../workspace/state';
 
 // Shared entrypoint for welcome cards, skills, and other cross-feature input.
@@ -41,7 +41,6 @@ import '../workspace/conversation-list';
 
 // Utilities
 import '../workspace/file-utils';
-import '../workspace/notebook';
 import '../workspace/find-replace';
 
 // UI
@@ -86,26 +85,6 @@ function _autoInitEmbedded(): void {
     });
   }
 
-  if (typeof workspaceApi.installWorkspaceNotebookTools === 'function') {
-    workspaceApi.installWorkspaceNotebookTools({
-      $,
-      getFiles: () => (state as any)._aiFileContext || [],
-      getSessionId: () => {
-        const waSession = (window as any)._waSession;
-        return typeof waSession === 'function' ? waSession() : null;
-      },
-      escHtml: _escHtml,
-      sanitizeRenderedHtml: (html: string) => {
-        const sanitizer = (window as any)._sanitizeRenderedHtml;
-        return typeof sanitizer === 'function' ? sanitizer(html) : html;
-      },
-      fileIcon: _fileIcon,
-      showToast,
-      chatSvg: _CHAT_SVG,
-      pinSvg: _PIN_SVG,
-      clipboardSvg: _CLIPBOARD_SVG,
-    });
-  }
 }
 
 if (document.readyState === 'loading') {

@@ -15,7 +15,6 @@ Routes:
   GET /mini                    — mini_page
   GET /m                       — mobile_page
   GET /mobile                  — mobile_page
-  GET /notebook                — notebook_ui
   GET /workspace               — unified_workspace_redirect
   GET /workspace-assistant     — unified_workspace_redirect
 """
@@ -126,12 +125,6 @@ def mini_page() -> str:
 def mobile_page() -> str:
     """移动端优化页面"""
     return render_template("mobile.html")
-
-
-@pages_bp.route("/notebook")
-def notebook_ui() -> str:
-    """NotebookLM 风格界面"""
-    return render_template("notebook_lm.html")
 
 
 @pages_bp.route("/workspace")

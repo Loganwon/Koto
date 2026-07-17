@@ -1197,42 +1197,6 @@
                             {% set wa_pdf_tooltip_show_pdf_annotation_actions = false %}
                             {% include '_workspace_selection_toolbar.html' %}
 
-              <!-- Source preview drawer, audio overview, and Notebook guide are kept in the unified shell. -->
-              <div id="wa-source-preview" style="display:none">
-                <div class="wa-source-preview-header">
-                  <span id="wa-source-preview-label"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:middle"><path d="M5 2.5l6 0 0 4.5-1.5 1.5V11H6.5V8.5L5 7z"/><path d="M8 11v3.5"/></svg> 来源预览</span>
-                  <button onclick="WA.closeSourcePreview()" title="关闭">×</button>
-                </div>
-                <div id="wa-source-preview-body"></div>
-              </div>
-
-              <div id="wa-audio-modal" style="display:none" class="wa-dlg-overlay" onclick="if(event.target===this)WA.closeAudioModal()">
-                <div class="wa-audio-modal-box">
-                  <div class="wa-audio-modal-header">
-                    <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5.5" y="2" width="5" height="8" rx="2.5"/><path d="M3 9a5 5 0 0 0 10 0"/><path d="M8 14v1.5"/></svg> 有声概览</span>
-                    <button class="wa-dlg-close" onclick="WA.closeAudioModal()" title="关闭">×</button>
-                  </div>
-                  <div id="wa-audio-modal-body">
-                    <div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成脚本…</div>
-                  </div>
-                </div>
-              </div>
-
-              <div id="wa-notebook-guide" style="display:none">
-                <div class="wa-notebook-header">
-                  <span><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h3v10H2zM5 3h3v10H5zM8.5 3.5l3-.8 2.6 9.8-3 .8z"/></svg> 学习包</span>
-                  <button class="wa-nb-close" onclick="WA.closeNotebookGuide()" title="关闭">×</button>
-                </div>
-                <div class="wa-source-search-box">
-                  <div class="wa-source-search-row">
-                    <input id="wa-source-search-input" type="search" placeholder="搜索已附加文档内容…" oninput="WA.doSourceSearch(this.value)">
-                    <button id="wa-source-clear-btn" style="display:none" onclick="WA.clearSourceSearch()" title="清除搜索">×</button>
-                  </div>
-                  <div id="wa-source-search-results" style="display:none"></div>
-                </div>
-                <div id="wa-notebook-body"><div class="wa-audio-loading"><span class="wa-spinner"></span> 正在生成学习包…</div></div>
-              </div>
-
               <div id="wa-docx-ctx"></div>
 
               <!-- DOCX floating format hover bar -->

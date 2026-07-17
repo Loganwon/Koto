@@ -4769,7 +4769,6 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         quick_actions = _read_frontend_source("web/src/workspace/quick-actions.ts")
         conversation = _read_frontend_source("web/src/workspace/conversation.ts")
         runtime_init = _read_frontend_source("web/src/workspace/runtime-init.ts")
-        notebook = _read_frontend_source("web/src/workspace/notebook.ts")
         find_replace = _read_frontend_source("web/src/workspace/find-replace.ts")
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
         standalone = _read_frontend_source("web/templates/index.html")
@@ -4794,11 +4793,6 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         )
         assert "publishWorkspaceApi({ createWorkspaceAiConversation })" in conversation
         assert "model' || value === 'ai'" in conversation
-        assert "export function installWorkspaceNotebookTools" in notebook
-        assert (
-            "WA.installWorkspaceNotebookTools = installWorkspaceNotebookTools"
-            in notebook
-        )
         assert "export function installWorkspaceFindReplace" in find_replace
         assert "publishWorkspaceApi({ installWorkspaceFindReplace })" in find_replace
         assert "publishWorkspaceApi({ createTaskDispatcher })" in dispatcher
@@ -4841,7 +4835,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "import '../workspace/results';" in workspace_bundle_entry
         assert "import '../workspace/quick-actions';" in workspace_bundle_entry
         assert "import '../workspace/conversation';" in workspace_bundle_entry
-        assert "import '../workspace/notebook';" in workspace_bundle_entry
+        assert "import '../workspace/notebook';" not in workspace_bundle_entry
         assert "import '../workspace/find-replace';" in workspace_bundle_entry
         assert "import '../workspace/task-dispatcher';" in workspace_bundle_entry
         assert "doc-agent-ui.js" not in standalone

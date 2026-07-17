@@ -517,8 +517,6 @@ export function _renderAIFileChips(): void {
         `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>` +
         `<span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div>` +
         `<div class="wa-multidoc-actions">` +
-        `<button type="button" data-wa-context-action="notebook" title="根据附加文档生成摘要、要点、问答和词汇表">学习包</button>` +
-        `<button type="button" data-wa-context-action="audio" title="根据附加文档生成双人有声概览">有声概览</button>` +
         `<button type="button" data-wa-context-action="clear" title="清除全部附加文件">全部移除</button>` +
         `</div>`;
     }
@@ -598,8 +596,6 @@ function _installAIContextActionDelegation(): void {
     else if (action === 'retry') retryAIFileContext(index);
     else if (action === 'remove') removeAIFileContext(index);
     else if (action === 'clear') clearAIFileContext();
-    else if (action === 'notebook' && typeof workspaceApi.openNotebookGuide === 'function') workspaceApi.openNotebookGuide();
-    else if (action === 'audio' && typeof workspaceApi.openAudioOverview === 'function') workspaceApi.openAudioOverview();
   });
 }
 
