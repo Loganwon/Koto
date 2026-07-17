@@ -789,3 +789,33 @@ def test_web_build_aliases_have_single_source_of_truth():
         assert "'@skills'" not in source
         assert "'@review'" not in source
         assert "'@shared'" not in source
+
+
+def test_web_build_sourcemaps_are_line_ending_stable():
+    build_script = Path("web/scripts/build-bundles.mjs").read_text(encoding="utf-8")
+    normalizer = Path("web/scripts/normalize-sourcemap.mjs").read_text(encoding="utf-8")
+    tiptap_package = json.loads(
+        Path("web/tiptap-editor/package.json").read_text(encoding="utf-8")
+    )
+    source_maps = sorted(Path("web/static/js/build").glob("*.js.map"))
+
+    assert "normalizeSourceMapLineEndings" in build_script
+    assert "const sourceMap = JSON.parse(raw)" in normalizer
+    assert "content.replace(/\\r\\n?/g, '\\n')" in normalizer
+    assert "normalize-sourcemap.mjs" in tiptap_package["scripts"]["build"]
+    assert source_maps
+    for path in source_maps:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert all(
+            "\r" not in content
+            for content in payload.get("sourcesContent", [])
+            if isinstance(content, str)
+        ), path
+
+    app_map = json.loads(
+        Path("web/static/js/build/app-bundle.js.map").read_text(encoding="utf-8")
+    )
+    marketplace_source = app_map["sourcesContent"][
+        app_map["sources"].index("../../../src/app/marketplace.ts")
+    ]
+    assert "/\\r?\\n/g" in marketplace_source

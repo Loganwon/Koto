@@ -1,8 +1,10 @@
 import { build } from 'vite';
 import { resolve, dirname } from 'path';
+import { existsSync, readFileSync } from 'fs';
 import { mkdir } from 'fs/promises';
 import { fileURLToPath } from 'url';
 import { createAliases } from '../build-aliases.mjs';
+import { normalizeSourceMapLineEndings } from './normalize-sourcemap.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
@@ -62,6 +64,7 @@ for (const [name, entry] of Object.entries(entries)) {
       },
     },
   });
+  await normalizeSourceMapLineEndings(resolve(OUT, `${name}.js.map`));
 }
 console.log('All bundles built successfully.');
 // ?? Bundle Size Budget Check ??
@@ -87,7 +90,6 @@ const BUDGETS = {
   'skill-community-bundle': 30 * 1024,
 };
 
-import { readFileSync, existsSync } from 'fs';
 let budgetFailures = 0;
 for (const [name, maxBytes] of Object.entries(BUDGETS)) {
   const filePath = resolve(OUT, `${name}.js`);

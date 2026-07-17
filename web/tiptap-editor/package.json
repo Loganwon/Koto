@@ -5,7 +5,7 @@
   "description": "Koto DOCX editor built on TipTap (ProseMirror) for native table support",
   "type": "module",
   "scripts": {
-    "build": "esbuild koto-docx-editor.js --bundle --outfile=../static/js/tiptap-docx-bundle.js --format=iife --global-name=KotoDocxEditorLib --minify --sourcemap"
+    "build": "esbuild koto-docx-editor.js --bundle --outfile=../static/js/tiptap-docx-bundle.js --format=iife --global-name=KotoDocxEditorLib --minify --sourcemap && node ../scripts/normalize-sourcemap.mjs ../static/js/tiptap-docx-bundle.js.map"
   },
   "dependencies": {
     "@tiptap/core": "2.27.2",
