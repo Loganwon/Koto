@@ -9,10 +9,10 @@
       4. Seed config (bypass first-run wizard) + launch the real desktop path
       5. Poll /api/health + verify that the WebView window was shown
       6. Stop Koto process
-      7. Silent uninstall
-      8. Verify cleanup (files + registry key removed)
-      9. Reinstall (upgrade scenario)
-     10. Second uninstall + verify cleanup
+      7. Perform an in-place upgrade over stale managed runtime files
+      8. Verify stale runtime removal + user data preservation
+      9. Silent uninstall
+     10. Verify cleanup (files + registry key removed)
 
     Exit 0 on success, 1 on any failure.
 
@@ -340,6 +340,21 @@ if ($healthy) {
     }
 }
 
+# The setup and application share an exact AppMutex. An upgrade must never
+# replace Python/DLL files while the installed desktop is still running.
+Write-Host "`n[Step 5b] Verifying running-app upgrade protection..."
+$blockedUpgrade = Start-Process -FilePath $SetupExe `
+    -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=`"$TestInstallDir`"" `
+    -Wait -PassThru
+if ($blockedUpgrade.ExitCode -ne 0) {
+    Pass "Installer refused to overwrite a running Koto instance"
+}
+else {
+    Fail "Installer accepted an upgrade while Koto was still running"
+}
+if (-not $kotoProc.HasExited) { Pass "Running Koto instance remained alive" }
+else                          { Fail "Koto exited during the blocked upgrade check" }
+
 # ══════════════════════════════════════════════════════════════════════════
 # STEP 6 — Stop Koto
 # ══════════════════════════════════════════════════════════════════════════
@@ -351,9 +366,34 @@ if (-not $kotoProc.HasExited) {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# STEP 7 — Silent uninstall
+# STEP 7 — True in-place upgrade with a stale runtime marker
 # ══════════════════════════════════════════════════════════════════════════
-Write-Host "`n[Step 7] Silent uninstall..."
+Write-Host "`n[Step 7] Running a true in-place upgrade..."
+$staleRuntimeMarker = Join-Path $internalDir "e2e-obsolete-runtime-marker.txt"
+$userDataSentinel = Join-Path $TestInstallDir "config\e2e-user-data-sentinel.txt"
+Set-Content -LiteralPath $staleRuntimeMarker -Value "must be removed by InstallDelete" -Encoding UTF8
+Set-Content -LiteralPath $userDataSentinel -Value "must survive an in-place upgrade" -Encoding UTF8
+$upgrade = Start-Process -FilePath $SetupExe `
+    -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=`"$TestInstallDir`"" `
+    -Wait -PassThru
+if ($upgrade.ExitCode -eq 0) { Pass "In-place upgrade exited 0" }
+else                         { Fail "In-place upgrade exited $($upgrade.ExitCode)" }
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 8 — Verify managed-runtime cleanup and user-data preservation
+# ══════════════════════════════════════════════════════════════════════════
+Write-Host "`n[Step 8] Verifying in-place upgrade boundaries..."
+if (Test-Path $staleRuntimeMarker) { Fail "Stale _internal marker survived upgrade" }
+else                               { Pass "Stale _internal runtime removed before upgrade" }
+if (Test-Path $userDataSentinel) { Pass "User config survived in-place upgrade" }
+else                              { Fail "User config was deleted during in-place upgrade" }
+if (Test-Path $exePath) { Pass "Koto.exe present after in-place upgrade" }
+else                    { Fail "Koto.exe missing after in-place upgrade" }
+
+# ══════════════════════════════════════════════════════════════════════════
+# STEP 9 — Silent uninstall
+# ══════════════════════════════════════════════════════════════════════════
+Write-Host "`n[Step 9] Silent uninstall..."
 $uninsExe = Join-Path $TestInstallDir "unins000.exe"
 if (Test-Path $uninsExe) {
     $u = Start-Process -FilePath $uninsExe `
@@ -366,50 +406,14 @@ if (Test-Path $uninsExe) {
 }
 
 # ══════════════════════════════════════════════════════════════════════════
-# STEP 8 — Verify cleanup
+# STEP 10 — Verify cleanup
 # ══════════════════════════════════════════════════════════════════════════
-Write-Host "`n[Step 8] Verifying uninstall cleaned up..."
+Write-Host "`n[Step 10] Verifying uninstall cleanup..."
 Start-Sleep -Seconds 2
 if (Test-Path $exePath) { Fail "Koto.exe still present after uninstall" }
 else                    { Pass "Koto.exe removed" }
-
 if (-not (Test-Path $regPath)) { Pass "Registry key removed after uninstall" }
 else                           { Fail "Registry key still present after uninstall" }
-
-# ══════════════════════════════════════════════════════════════════════════
-# STEP 9 — Reinstall (upgrade scenario test)
-# ══════════════════════════════════════════════════════════════════════════
-Write-Host "`n[Step 9] Reinstalling (upgrade scenario)..."
-$p2 = Start-Process -FilePath $SetupExe `
-    -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART","/DIR=`"$TestInstallDir`"" `
-    -Wait -PassThru
-if ($p2.ExitCode -ne 0) { Fail "Reinstall exited with code $($p2.ExitCode)" }
-else                     { Pass "Reinstall exited 0" }
-
-# Verify files are present again
-if (Test-Path $exePath) { Pass "Koto.exe present after reinstall" }
-else                    { Fail "Koto.exe missing after reinstall" }
-if (Test-Path (Join-Path $TestInstallDir "unins000.exe")) { Pass "unins000.exe present after reinstall" }
-else                                                       { Fail "unins000.exe missing after reinstall" }
-
-# ══════════════════════════════════════════════════════════════════════════
-# STEP 10 — Second uninstall + verify cleanup
-# ══════════════════════════════════════════════════════════════════════════
-Write-Host "`n[Step 10] Second silent uninstall..."
-$uninsExe2 = Join-Path $TestInstallDir "unins000.exe"
-if (Test-Path $uninsExe2) {
-    $u2 = Start-Process -FilePath $uninsExe2 `
-        -ArgumentList "/VERYSILENT","/SUPPRESSMSGBOXES","/NORESTART" `
-        -Wait -PassThru
-    if ($u2.ExitCode -eq 0) { Pass "Second uninstaller exited 0" }
-    else                     { Fail "Second uninstaller exited $($u2.ExitCode)" }
-} else {
-    Fail "unins000.exe not found for second uninstall"
-}
-
-Start-Sleep -Seconds 2
-if (Test-Path $exePath) { Fail "Koto.exe still present after second uninstall" }
-else                    { Pass "Koto.exe removed after second uninstall" }
 
 # ══════════════════════════════════════════════════════════════════════════
 # RESULT

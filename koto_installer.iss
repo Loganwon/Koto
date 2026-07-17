@@ -68,7 +68,11 @@ UninstallDisplayName={#AppName} v{#AppVersion}
 
 ; ── 升级时自动关闭正在运行的实例 ───────────────────────────────────
 CloseApplications=yes
-CloseApplicationsFilter=Koto.exe
+CloseApplicationsFilter=*.exe,*.dll,*.pyd
+RestartApplications=no
+; 与 Koto.exe 创建的命名 Mutex 完全一致。升级/卸载时先要求退出旧实例，
+; 避免一边运行旧 Python/DLL，一边替换 _internal。
+AppMutex=Local\KotoMainWindowMutex_v2
 
 [Languages]
 ; ChineseSimplified.isl 放在 build\ 目录，本地和 CI 均可引用，无需依赖系统语言包
@@ -82,6 +86,22 @@ Name: "localmodel"; Description: "安装本地 AI 模型助手（可选，加速
 [Files]
 ; 将 dist\Koto_Portable\ 下全部文件（含 _internal\ 子目录）复制到安装目录
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; 原位升级必须先移除上一版的受管运行时。仅覆盖新文件会留下已删除的
+; Python 模块、DLL 和前端资产，造成新旧代码混跑。用户数据目录
+; config/chats/logs/workspace 与 .webview2_profile 不在清理范围内。
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\Koto.exe"
+Type: files; Name: "{app}\LocalModelInstaller.exe"
+Type: files; Name: "{app}\Start_Koto.bat"
+Type: files; Name: "{app}\Stop_Koto.bat"
+Type: files; Name: "{app}\Install_Local_Model.bat"
+Type: files; Name: "{app}\Install_WebView2_Runtime.bat"
+Type: files; Name: "{app}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+Type: files; Name: "{app}\webview2-runtime.json"
+Type: files; Name: "{app}\README_便携版.txt"
+Type: files; Name: "{app}\PORTABLE_RELEASE_GUIDE.md"
 
 [Icons]
 ; 开始菜单快捷方式

@@ -951,7 +951,7 @@ if __name__ == "__main__":
 
     multiprocessing.freeze_support()
 
-    # ── Step 2: Windows 全局 Mutex 单实例锁 ──────────────────────────────────
+    # ── Step 2: Windows 会话级 Mutex 单实例锁 ────────────────────────────────
     # freeze_support() 处理 multiprocessing 工作进程，但无法拦截所有子进程类型。
     # 这里再加一道保险：用命名 Mutex 确保只有一个 Koto 主窗口实例在运行。
     # 这对所有子进程（包括 pystray、pythonnet/WebView2 产生的子进程）都有效。
@@ -964,7 +964,9 @@ if __name__ == "__main__":
             import ctypes.wintypes
 
             # 创建全局命名互斥量（不拥有它，只检测是否已存在）
-            _MUTEX_NAME = "Global\\KotoMainWindowMutex_v1"
+            # Local\ avoids global-object privilege failures for the normal
+            # per-user install and must match koto_installer.iss AppMutex.
+            _MUTEX_NAME = "Local\\KotoMainWindowMutex_v2"
             _mutex_handle = ctypes.windll.kernel32.CreateMutexW(None, True, _MUTEX_NAME)
             _last_err = ctypes.windll.kernel32.GetLastError()
             if _last_err == 183:  # ERROR_ALREADY_EXISTS

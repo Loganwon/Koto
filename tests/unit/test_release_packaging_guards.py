@@ -350,6 +350,29 @@ def test_release_carries_and_verifies_offline_webview2_runtime():
         assert ".\\scripts\\prepare_webview2_runtime.ps1" in workflow
 
 
+def test_installer_cleans_managed_runtime_and_blocks_live_upgrade_conflicts():
+    installer = Path("koto_installer.iss").read_text(encoding="utf-8")
+    setup = Path("src/koto_setup.py").read_text(encoding="utf-8")
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+
+    mutex = "Local\\KotoMainWindowMutex_v2"
+    assert f"AppMutex={mutex}" in installer
+    assert f'_MUTEX_NAME = "{mutex.replace(chr(92), chr(92) * 2)}"' in setup
+    assert "RestartApplications=no" in installer
+    assert "CloseApplicationsFilter=*.exe,*.dll,*.pyd" in installer
+    assert "[InstallDelete]" in installer
+    assert 'Type: filesandordirs; Name: "{app}\\_internal"' in installer
+    for user_data in ("config", "chats", "logs", "workspace", ".webview2_profile"):
+        assert f'Name: "{{app}}\\{user_data}"' not in installer.split(
+            "[InstallDelete]", 1
+        )[1].split("[Icons]", 1)[0]
+    assert "$blockedUpgrade" in installer_e2e
+    assert "e2e-obsolete-runtime-marker.txt" in installer_e2e
+    assert "e2e-user-data-sentinel.txt" in installer_e2e
+
+
 def test_release_e2e_uses_available_loopback_ports():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
