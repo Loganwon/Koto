@@ -2,7 +2,6 @@
 """
 Integration tests for file-related endpoints in web/app.py:
 - POST /api/chat/file — file upload with chat
-- POST /api/notebook/upload — notebook file upload
 - GET  /api/files/download — file download proxy
 - POST /api/file-editor/read — read file content
 - POST /api/file-editor/write — write file content
@@ -84,44 +83,23 @@ class TestChatFileUpload:
         assert resp.content_type is not None
 
 
-# ── POST /api/notebook/upload ────────────────────────────────────────────────
+# ── Retired Notebook endpoints ───────────────────────────────────────────────
 
 
 @pytest.mark.integration
-class TestNotebookUpload:
-    def test_no_file_part_returns_400(self, client):
-        resp = client.post("/api/notebook/upload", data={})
-        assert resp.status_code == 400
-        data = resp.get_json()
-        assert data["success"] is False
-
-    def test_empty_filename_returns_400(self, client):
-        data = {"file": (io.BytesIO(b""), "")}
-        resp = client.post(
-            "/api/notebook/upload", data=data, content_type="multipart/form-data"
-        )
-        assert resp.status_code == 400
-        body = resp.get_json()
-        assert body["success"] is False
-
-    def test_upload_txt_file_succeeds(self, client):
-        """A simple .txt file should be parsed successfully."""
-        content = b"This is a test document for notebook upload."
-        data = {"file": (io.BytesIO(content), "test_notebook.txt")}
-        resp = client.post(
-            "/api/notebook/upload", data=data, content_type="multipart/form-data"
-        )
-        # txt parsing should succeed
-        body = resp.get_json()
-        if resp.status_code == 200:
-            assert body["success"] is True
-            assert body["filename"] == "test_notebook.txt"
-            assert body["char_count"] > 0
-
-    def test_method_not_allowed_get(self, client):
-        """GET /api/notebook/upload should return 405."""
-        resp = client.get("/api/notebook/upload")
-        assert resp.status_code == 405
+class TestRetiredNotebookRoutes:
+    @pytest.mark.parametrize(
+        "path",
+        (
+            "/api/notebook/overview",
+            "/api/notebook/qa",
+            "/api/notebook/study_guide",
+            "/api/notebook/upload",
+        ),
+    )
+    def test_notebook_routes_are_not_registered(self, client, path):
+        resp = client.post(path, json={})
+        assert resp.status_code == 404
 
 
 # ── GET /api/files/download ──────────────────────────────────────────────────

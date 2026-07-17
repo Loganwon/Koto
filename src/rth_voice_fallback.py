@@ -16,7 +16,6 @@ _real_import = builtins.__import__
 # 可选依赖列表：缺失时返回空 stub 而非抛异常。
 _OPTIONAL_MODULES = {
     "audioop",
-    "edge_tts",
     "pytesseract",
 }
 

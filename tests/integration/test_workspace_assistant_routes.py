@@ -114,6 +114,20 @@ def _fake_docx_bytes() -> bytes:
         return b""
 
 
+class TestRetiredNotebookAndAudioRoutes:
+    @pytest.mark.parametrize(
+        "path",
+        (
+            "/api/v1/workspace/audio_overview",
+            "/api/v1/workspace/notebook_guide",
+        ),
+    )
+    def test_retired_routes_are_not_registered(self, wa_client, path):
+        client, _, _ = wa_client
+        resp = client.post(path, json={})
+        assert resp.status_code == 404
+
+
 # ── 1. GET /api/v1/workspace/raw/<file_id> ───────────────────────────────────
 
 

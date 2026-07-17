@@ -252,7 +252,6 @@ hiddenimports = [
     'pywintypes', 'pythoncom',
 
     # ── 上传音频 STT（Whisper）──
-    'edge_tts',
     'wave', 'audioop',
     'win32com', 'win32com.client',
 
@@ -389,7 +388,7 @@ hiddenimports = [
     'model_downloader',
 
         # ── web/ 全部模块 ──
-    'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
+    'web', 'web.app', 'web.audit_logger',
     'web.auth_manager', 'web.auto_catalog_scheduler',
     'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
     'web.behavior_monitor', 'web.calendar_manager',

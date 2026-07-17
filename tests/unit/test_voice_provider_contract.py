@@ -83,9 +83,3 @@ def test_meeting_extraction_uses_active_text_provider(monkeypatch):
     assert payload["success"] is True
     assert payload["decisions"] == ["周五上线"]
     assert payload["action_items"][0]["task"] == "完成回归测试"
-
-
-def test_audio_overview_dependency_is_part_of_runtime():
-    from web.audio_overview import AudioOverviewGenerator
-
-    assert AudioOverviewGenerator.VOICE_HOST_A.startswith("zh-CN-")

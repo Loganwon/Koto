@@ -65,8 +65,6 @@ distro==1.9.0
     # via google-genai
 docx2txt==0.9
     # via -r config/requirements.txt
-edge-tts==7.2.8
-    # via -r config/requirements.txt
 et-xmlfile==2.0.0
     # via openpyxl
 filetype==1.2.0

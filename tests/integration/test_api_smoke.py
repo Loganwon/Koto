@@ -136,23 +136,6 @@ class TestMiniChatSmoke:
         _smoke(full_client.post("/api/mini/chat", json={}))
 
 
-# ── Notebook endpoints ───────────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestNotebookSmoke:
-    """Smoke tests for /api/notebook/* endpoints."""
-
-    def test_notebook_overview(self, full_client):
-        _smoke(full_client.post("/api/notebook/overview", json={}))
-
-    def test_notebook_qa(self, full_client):
-        _smoke(full_client.post("/api/notebook/qa", json={"question": "test"}))
-
-    def test_notebook_study_guide(self, full_client):
-        _smoke(full_client.post("/api/notebook/study_guide", json={}))
-
-
 # ── Voice endpoints ──────────────────────────────────────────────────────────
 
 
