@@ -128,7 +128,7 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\pip install --upgrade pip wheel
-          .\.venv\Scripts\pip install pyinstaller
+          .\.venv\Scripts\pip install -r config\build-requirements.lock
 
           # Use lockfile for reproducible builds; excludes voice/gunicorn for packaging
           $lockContent = Get-Content config\requirements.lock
@@ -156,154 +156,6 @@ jobs:
           }
           Write-Host "Dependencies installed"
 
-      - name: Install frontend dependencies
-        shell: pwsh
-        run: |
-          npm ci --prefix web
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend npm ci failed"; exit 1 }
-          npm ci --prefix web/tiptap-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend npm ci failed"; exit 1 }
-          npm ci --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
-
-      - name: Build frontend assets
-        shell: pwsh
-        run: |
-          npm run build --prefix web
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
-          npm run build --prefix web/tiptap-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend build failed"; exit 1 }
-          npm run build --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend build failed"; exit 1 }
-
-      - name: Build with PyInstaller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          $cmd = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
-          $pyinstaller = Join-Path $PWD ".venv\Scripts\pyinstaller.exe"
-          $cmdLine = '"{0}" koto.spec --clean -y > "logs\build_latest.log" 2>&1' -f $pyinstaller
-          & $cmd /d /c $cmdLine
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::PyInstaller build failed. Last 60 lines:"
-            Get-Content logs\build_latest.log -Tail 60
-            exit 1
-          }
-          $exeMB = [math]::Round((Get-Item dist\Koto\Koto.exe).Length / 1MB, 1)
-          Write-Host "Build OK -> dist\Koto\Koto.exe ($exeMB MB)"
-
-      - name: Smoke-test built EXE (file existence check)
-        shell: pwsh
-        run: |
-          $internal = "dist\Koto\_internal"
-          $staticRoot = Join-Path $internal "web\static"
-          $configRoot = Join-Path $internal "config"
-          $requiredConfigDirs = @("context", "divination_data", "skills", "skill_packs", "tools", "workflows")
-          foreach ($dirName in $requiredConfigDirs) {
-            $dirPath = Join-Path $configRoot $dirName
-            if (-not (Test-Path $dirPath)) {
-              New-Item -ItemType Directory -Path $dirPath -Force | Out-Null
-              Write-Host "  NOTE: normalized empty config dir: $dirPath"
-            }
-          }
-          $runtimeDefaults = @(
-            @{ Name = "macro_suggestions.json"; Content = "{`"suggestions`": [], `"seen_fingerprints`": []}" },
-            @{ Name = "personality_matrix.json"; Content = "{`"cognitive`": {`"exploratory`": 0.5, `"executor`": 0.5, `"analytical`": 0.5, `"creative`": 0.5}, `"expertise`": {}, `"goals`": [], `"recent_themes`": [], `"values`": {`"efficiency`": 0.5, `"depth`": 0.5, `"formality`": 0.5}, `"last_updated`": null}" }
-          )
-          foreach ($default in $runtimeDefaults) {
-            $path = Join-Path $configRoot $default.Name
-            if (-not (Test-Path $path)) {
-              Set-Content -Path $path -Value $default.Content -Encoding UTF8
-              Write-Host "  NOTE: seeded runtime default: $($default.Name)"
-            }
-          }
-          $checks = @(
-            "dist\Koto\Koto.exe",
-            "$internal\base_library.zip",
-            "$internal\psutil",
-            "$internal\app",
-            "$internal\web",
-            "$internal\config",
-            "$staticRoot\js\build\workspace-bundle.js",
-            "$staticRoot\jszip.min.js",
-            "$staticRoot\univer-dist\assets\sheets-main.js",
-            "$staticRoot\univer-dist\assets\sheets-main.css",
-            "$configRoot\.builtin_key",
-            "$configRoot\deepseek_config.env.example",
-            "$configRoot\macro_suggestions.json",
-            "$configRoot\personality_matrix.json",
-            "$configRoot\skill_affinity.json",
-            "$configRoot\context",
-            "$configRoot\divination_data",
-            "$configRoot\skills",
-            "$configRoot\skill_packs",
-            "$configRoot\tools",
-            "$configRoot\workflows"
-          )
-          $failed = @()
-          foreach ($p in $checks) {
-            if (Test-Path $p) { Write-Host "  OK: $p" }
-            else              { $failed += $p; Write-Host "::error::MISSING: $p" }
-          }
-          # Also verify psutil .pyd is present (the C extension that was missing in v1.0.2)
-          $pyd = Get-ChildItem "$internal\psutil" -Filter "_psutil_windows*.pyd" -ErrorAction SilentlyContinue
-          if ($pyd) { Write-Host "  OK: psutil C extension: $($pyd.Name)" }
-          else       { $failed += "psutil/_psutil_windows.pyd"; Write-Host "::error::MISSING: psutil C extension .pyd" }
-
-          $legacyIndex = Join-Path $staticRoot "univer-dist\index.html"
-          if (Test-Path $legacyIndex) {
-            $failed += $legacyIndex
-            Write-Host "::error::UNEXPECTED legacy Univer index: $legacyIndex"
-          }
-
-          if ($failed.Count -gt 0) {
-            Write-Host "::error::Smoke test failed: $($failed.Count) item(s) missing"
-            exit 1
-          }
-          Write-Host "Smoke test passed: all critical bundle files present"
-
-      - name: Upload build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-log
-          path: logs\build_latest.log
-          retention-days: 7
-
-      - name: Build LocalModelInstaller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          $cmd = if ($env:ComSpec) { $env:ComSpec } else { "cmd.exe" }
-          $pyinstaller = Join-Path $PWD ".venv\Scripts\pyinstaller.exe"
-          $cmdLine = '"{0}" local_model_installer.spec --clean -y > "logs\local_model_installer_build_latest.log" 2>&1' -f $pyinstaller
-          & $cmd /d /c $cmdLine
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::LocalModelInstaller build failed. Last 30 lines:"
-            Get-Content logs\local_model_installer_build_latest.log -Tail 30
-            exit 1
-          }
-          Write-Host "LocalModelInstaller OK -> dist\LocalModelInstaller.exe"
-
-      - name: Upload LocalModelInstaller build log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: local-model-installer-build-log
-          path: logs\local_model_installer_build_latest.log
-          retention-days: 7
-
-      - name: Assemble portable bundle
-        shell: pwsh
-        env:
-          PYTHONIOENCODING: utf-8
-        run: |
-          .\scripts\prepare_webview2_runtime.ps1
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::WebView2 prerequisite preparation failed"; exit 1 }
-          .\.venv\Scripts\python.exe src\deploy_portable.py
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::deploy_portable.py failed"; exit 1 }
-          Write-Host "Portable bundle ready -> dist\Koto_Portable\"
-
       - name: Install Inno Setup (if missing)
         shell: pwsh
         run: |
@@ -313,37 +165,19 @@ jobs:
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
 
-      - name: Build installer (Inno Setup)
+      - name: Build Windows artifacts through canonical pipeline
         shell: pwsh
         run: |
-          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
-          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
-          & $iscc /DAppVersion=$env:VERSION koto_installer.iss
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Inno Setup build failed"; exit 1 }
-          $setupName = "Koto_v$($env:VERSION)_Setup.exe"
-          "SETUP_NAME=$setupName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $sizeMB = [math]::Round((Get-Item "dist\$setupName").Length / 1MB, 1)
-          Write-Host "Installer: $setupName ($sizeMB MB)"
+          .\Build_Release.ps1 -Version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Canonical Windows release build failed"; exit 1 }
 
-      - name: Compress portable to zip
-        shell: pwsh
-        run: |
-          $zipName = "Koto_v$($env:VERSION)_Windows.zip"
-          Compress-Archive -Path "dist\Koto_Portable\*" -DestinationPath "dist\$zipName" -CompressionLevel Optimal
-          "ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          $sizeMB = [math]::Round((Get-Item "dist\$zipName").Length / 1MB, 1)
-          Write-Host "Zip: $zipName ($sizeMB MB)"
-
-      - name: Generate release manifest and SHA-256 checksums
-        shell: pwsh
-        run: |
-          .\.venv\Scripts\python.exe scripts\write_release_manifest.py `
-            --version $env:VERSION `
-            --output "dist\Koto_v$($env:VERSION)_release-manifest.json" `
-            --hash-output "dist\Koto_v$($env:VERSION)_SHA256SUMS.txt" `
-            "dist\Koto_v$($env:VERSION)_Setup.exe" `
-            "dist\Koto_v$($env:VERSION)_Windows.zip"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release manifest generation failed"; exit 1 }
+      - name: Upload release build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-windows-release-logs
+          path: logs/*.log
+          retention-days: 7
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4

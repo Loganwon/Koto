@@ -44,6 +44,8 @@ $LOCAL_INSTALLER_SPEC = Join-Path $REPO_ROOT "local_model_installer.spec"
 $MANIFEST_WRITER = Join-Path $REPO_ROOT "scripts\write_release_manifest.py"
 $CYTHON_CLEANUP = Join-Path $REPO_ROOT "scripts\clean_inplace_cython_artifacts.py"
 $WEBVIEW2_PREPARE = Join-Path $REPO_ROOT "scripts\prepare_webview2_runtime.ps1"
+$BUILD_REQUIREMENTS_LOCK = Join-Path $REPO_ROOT "config\build-requirements.lock"
+$BUILD_REQUIREMENTS_VERIFY = Join-Path $REPO_ROOT "scripts\verify_build_requirements.py"
 
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
@@ -383,6 +385,13 @@ if (-not (Test-Path $PYTHON)) {
     exit 1
 }
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
+
+& $PYTHON $BUILD_REQUIREMENTS_VERIFY $BUILD_REQUIREMENTS_LOCK
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "Windows 构建工具版本与 config\build-requirements.lock 不一致。"
+    exit 1
+}
+Write-OK "构建工具版本与锁文件一致"
 
 # The Cython step emits in-place extensions that the PyInstaller step consumes.
 # A second build can otherwise finish first and delete those extensions during

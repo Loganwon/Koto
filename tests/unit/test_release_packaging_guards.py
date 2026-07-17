@@ -100,7 +100,10 @@ def test_univer_build_clears_stale_source_maps_before_esbuild_runs():
 
 
 def test_release_checks_deepseek_configuration_not_archived_gemini_example():
-    release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    workflows = (
+        Path(".github/workflows/build.yml").read_text(encoding="utf-8"),
+        Path(".github/workflows/release.yml").read_text(encoding="utf-8"),
+    )
     installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
         encoding="utf-8"
     )
@@ -108,9 +111,11 @@ def test_release_checks_deepseek_configuration_not_archived_gemini_example():
         encoding="utf-8"
     )
 
-    for source in (release, installer_e2e, portable_e2e):
+    for source in (installer_e2e, portable_e2e):
         assert "deepseek_config.env.example" in source
         assert "gemini_config.env.example" not in source
+    for workflow in workflows:
+        assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
 
 
 def test_runtime_requirements_exclude_dev_only_tools():
@@ -197,7 +202,7 @@ def test_release_workflow_job_comments_match_job_order():
     assert "# Job 4: Sync VERSION file" not in release
 
 
-def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
+def test_windows_release_pipelines_use_one_canonical_builder_and_require_health():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     build = Path(".github/workflows/build.yml").read_text(encoding="utf-8")
     local_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
@@ -210,18 +215,20 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "python scripts/run_ai_assistant_flow_tests.py release" in release
     assert "python -m playwright install --with-deps chromium" in release
     assert "pip-audit --requirement config/requirements.lock --desc" in release
-    assert "scripts\\write_release_manifest.py" in release
+    assert "scripts\\write_release_manifest.py" in local_release
 
     for pipeline in (release, build):
         assert "npm ci --prefix web" in pipeline
         assert "npm audit --prefix web --audit-level=high" in pipeline
-        assert "npm run build --prefix web" in pipeline
         assert "npm ci --prefix web/tiptap-editor" in pipeline
         assert "npm audit --prefix web/tiptap-editor --audit-level=high" in pipeline
-        assert "npm run build --prefix web/tiptap-editor" in pipeline
         assert "npm ci --prefix web/univer-editor" in pipeline
         assert "npm audit --prefix web/univer-editor --audit-level=high" in pipeline
-        assert "npm run build --prefix web/univer-editor" in pipeline
+        assert ".\\Build_Release.ps1 -Version $env:VERSION" in pipeline
+        assert "pyinstaller.exe koto.spec" not in pipeline
+        assert "src\\deploy_portable.py" not in pipeline
+        assert "Compress-Archive" not in pipeline
+        assert "scripts\\write_release_manifest.py" not in pipeline
         assert "-RequireHealth:$false" not in pipeline
         assert "::warning::ZIP not found, skipping portable test" not in pipeline
         assert "::error::ZIP not found; portable E2E is required" in pipeline
@@ -264,11 +271,28 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "Cython 编译前清理源码覆盖产物" in local_release
     assert "发布收尾：清理源码覆盖产物" in local_release
     assert "版本号仅可包含字母、数字、点、下划线、加号和连字符" in local_release
-    assert "$staticRoot\\js\\build\\workspace-bundle.js" in release
-    assert "$staticRoot\\js\\workspace-assistant.js" not in release
-    assert "$staticRoot\\docx-preview.min.js" not in release
-    assert 'Name = "macro_suggestions.json"' in release
-    assert 'Name = "personality_matrix.json"' in release
+    assert 'Join-Path $StaticRoot "js\\build\\workspace-bundle.js"' in local_release
+    assert "$staticRoot\\js\\workspace-assistant.js" not in local_release
+    assert "$staticRoot\\docx-preview.min.js" not in local_release
+    assert 'Name = "macro_suggestions.json"' in local_release
+    assert 'Name = "personality_matrix.json"' in local_release
+
+
+def test_windows_release_build_tools_are_pinned_once():
+    build_tools = Path("config/build-requirements.lock").read_text(encoding="utf-8")
+    local_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    workflows = (
+        Path(".github/workflows/build.yml").read_text(encoding="utf-8"),
+        Path(".github/workflows/release.yml").read_text(encoding="utf-8"),
+    )
+
+    assert "Cython==" in build_tools
+    assert "PyInstaller==" in build_tools
+    assert "scripts\\verify_build_requirements.py" in local_release
+    assert "config\\build-requirements.lock" in local_release
+    for workflow in workflows:
+        assert "pip install -r config\\build-requirements.lock" in workflow
+        assert "pip install pyinstaller" not in workflow.lower()
 
 
 def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
@@ -416,7 +440,7 @@ def test_release_carries_and_verifies_offline_webview2_runtime():
     assert 'Parameters: "/silent /install"' in installer
     assert "Test-PackagedRuntimePrerequisites" in build
     for workflow in workflows:
-        assert ".\\scripts\\prepare_webview2_runtime.ps1" in workflow
+        assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
 
 
 def test_installer_cleans_managed_runtime_and_blocks_live_upgrade_conflicts():
@@ -495,9 +519,9 @@ def test_release_pipelines_publish_manifest_and_sha256_checksums():
     assert "构建期间 Git revision 或工作区内容发生变化" in local_release
     assert "--worktree-changed-during-build" in local_release
     for workflow in (release, build):
-        assert "Generate release manifest and SHA-256 checksums" in workflow
-        assert "Koto_v$($env:VERSION)_SHA256SUMS.txt" in workflow
-        assert "Koto_v$($env:VERSION)_release-manifest.json" in workflow
+        assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
+        assert "dist/Koto_v*_SHA256SUMS.txt" in workflow
+        assert "dist/Koto_v*_release-manifest.json" in workflow
 
 
 def test_inno_setup_path_resolution_is_shared():
