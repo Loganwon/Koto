@@ -29,26 +29,11 @@ ROOTS = resolve_runtime_roots(__file__)
 APP_ROOT = ROOTS.app_root
 BUNDLE_DIR = ROOTS.bundle_dir
 
-if getattr(sys, "frozen", False):
-    # PyInstaller 环境
-    # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
-    # This must be set before any import of webview or clr
-    _internal_py = APP_ROOT / "internal" / "py"
-    if _internal_py.exists():
-        os.environ.setdefault(
-            "PYTHONNET_PYDLL",
-            str(
-                _internal_py
-                / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
-            ),
-        )
-    os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
-
-
 configure_process_environment(
     ROOTS,
     prepend_paths=(APP_ROOT, BUNDLE_DIR),
     required_dirs=("logs", "chats", "config", "workspace"),
+    desktop_runtime=True,
 )
 
 

@@ -6,11 +6,16 @@ the [documentation index](DOCUMENTATION_INDEX.md).
 ## Runtime shape
 
 ```text
-launcher/entry.py
-  -> web/app.py (Flask app assembly)
+Installed/portable desktop:
+  Koto.exe -> src/koto_setup.py -> src/koto_app.py
+    -> web/app.py (Flask app assembly)
        -> web/app_blueprints.py and web/blueprints/* (HTTP boundaries)
        -> web/services/* (web-facing orchestration)
        -> app/core/* (agents, files, LLMs, skills, domain services)
+
+Source launcher:
+  python -m launcher -> src/koto_setup.py (desktop)
+  python -m launcher --server -> web/app.py (development server)
 
 Browser / desktop shell
   -> web/templates/index.html

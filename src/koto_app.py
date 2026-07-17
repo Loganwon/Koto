@@ -49,25 +49,6 @@ ROOTS = resolve_runtime_roots(__file__)
 APP_ROOT = ROOTS.app_root
 BUNDLE_DIR = ROOTS.bundle_dir
 
-if getattr(sys, "frozen", False):
-    # PyInstaller打包后：
-    # - APP_ROOT: exe所在目录（用于持久化数据：chats/、config/、workspace/等）
-    # - BUNDLE_DIR: 临时解压目录（用于bundled资源：web/、assets/等）
-    # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
-    # pythonnet needs to know where the Python runtime is located
-    _internal_py = APP_ROOT / "internal" / "py"
-    if _internal_py.exists():
-        os.environ.setdefault(
-            "PYTHONNET_PYDLL",
-            str(
-                _internal_py
-                / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
-            ),
-        )
-    # Alternative: Force pywebview to use EdgeChromium without pythonnet initialization issues
-    os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
-
-
 # 图标资源目录：打包模式下在 _MEIPASS/assets/，源码模式下在 src/assets/
 ASSETS_DIR = (
     BUNDLE_DIR if getattr(sys, "frozen", False) else APP_ROOT / "src"
@@ -77,6 +58,7 @@ configure_process_environment(
     ROOTS,
     prepend_paths=(BUNDLE_DIR,),
     required_dirs=("logs", "chats", "workspace", "config"),
+    desktop_runtime=True,
 )
 
 LOG_FILE = APP_ROOT / "logs" / "startup.log"

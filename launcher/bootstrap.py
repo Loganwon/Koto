@@ -85,10 +85,13 @@ def find_entry_script(mode: str = "desktop") -> str | None:
 
     candidates: dict[str, list[str]] = {
         "desktop": [
-            "src/koto_app.py",
-            "koto_app.py",
             "src/koto_setup.py",
             "koto_setup.py",
+            # Direct koto_app.py execution bypasses the same prerequisite and
+            # first-run checks used by the frozen Koto.exe. Keep it only as a
+            # compatibility fallback for incomplete source checkouts.
+            "src/koto_app.py",
+            "koto_app.py",
         ],
         "server": [
             "web/app.py",
