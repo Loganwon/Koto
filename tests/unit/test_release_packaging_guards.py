@@ -705,6 +705,40 @@ def test_koto_spec_deduplicates_hiddenimports_after_auto_discovery():
     assert spec.index(app_discovery) < spec.index(dedupe_call)
     assert spec.index(web_discovery) < spec.index(dedupe_call)
     assert spec.index(dedupe_call) < spec.index(analysis_call)
+    assert "_INTERNAL_DISCOVERY_EXCLUDES" in spec
+    assert "'app.core.llm.gemini'" in spec
+    assert "'app.core.llm.gemini_config'" in spec
+
+
+def test_koto_spec_auto_discovers_internal_modules_and_skips_archived_gemini():
+    source = Path("koto.spec").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    selected_nodes = []
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and any(
+            isinstance(target, ast.Name)
+            and target.id == "_INTERNAL_DISCOVERY_EXCLUDES"
+            for target in node.targets
+        ):
+            selected_nodes.append(node)
+        elif (
+            isinstance(node, ast.FunctionDef)
+            and node.name == "_discover_hidden_imports"
+        ):
+            selected_nodes.append(node)
+
+    namespace = {}
+    module = ast.fix_missing_locations(ast.Module(body=selected_nodes, type_ignores=[]))
+    exec(compile(module, "koto.spec", "exec"), namespace)
+    discover = namespace["_discover_hidden_imports"]
+    app_imports = discover("app", "app")
+    web_imports = discover("web", "web")
+
+    assert "app.core.llm.deepseek_provider" in app_imports
+    assert "app.core.llm.gemini" not in app_imports
+    assert "app.core.llm.gemini_config" not in app_imports
+    assert "web.routes.health" in web_imports
+    assert len(app_imports + web_imports) == len(set(app_imports + web_imports))
 
 
 def test_explicit_internal_hiddenimports_resolve():
@@ -733,6 +767,7 @@ def test_explicit_internal_hiddenimports_resolve():
     ]
 
     assert missing == []
+    assert not any(name.startswith(("app.", "web.")) for name in internal_modules)
 
 
 def test_web_build_aliases_have_single_source_of_truth():

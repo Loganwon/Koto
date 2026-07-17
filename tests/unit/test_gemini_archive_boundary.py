@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 from app.core.llm.model_mode import normalize_model_mode
@@ -146,11 +147,38 @@ def test_ppt_research_does_not_keep_a_direct_interactions_api_escape_hatch() -> 
 
 
 def test_release_manifest_does_not_collect_archived_provider() -> None:
-    spec = _read("koto.spec").lower()
+    spec_source = _read("koto.spec")
+    spec = spec_source.lower()
     requirements = _read("config/requirements.txt").lower()
+    tree = ast.parse(spec_source)
+
+    def assigned_strings(name: str) -> set[str]:
+        assignment = next(
+            node
+            for node in tree.body
+            if isinstance(node, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in node.targets
+            )
+        )
+        return {
+            element.value
+            for element in assignment.value.elts
+            if isinstance(element, ast.Constant)
+            and isinstance(element.value, str)
+        }
+
+    archived_modules = {
+        "app.core.llm.gemini",
+        "app.core.llm.gemini_config",
+    }
+    explicit_hiddenimports = assigned_strings("hiddenimports")
+    discovery_excludes = assigned_strings("_INTERNAL_DISCOVERY_EXCLUDES")
 
     assert "    'gemini_config.env'," not in spec
-    assert "app.core.llm.gemini" not in spec
+    assert archived_modules.isdisjoint(explicit_hiddenimports)
+    assert archived_modules <= discovery_excludes
     assert "google-genai" not in requirements
     assert "('gemini.py', 'gemini_config.py')" in spec
 

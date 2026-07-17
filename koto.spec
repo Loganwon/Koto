@@ -234,10 +234,8 @@ _add(os.path.join(ROOT, 'README.md'), '.')
 # ═══════════════════════════════════════════════
 # 隐式导入
 # ═══════════════════════════════════════════════
-# NOTE: 此列表与下方 _discover_hidden_imports() 自动发现存在大量重叠。
-# 后续清理时可删除已被 auto-discovery 覆盖的条目（预计可缩减 200+ 行）。
-# 标准库模块（subprocess, socket, threading 等）通常无需手动列举。
-# 保留期：2026-Q3 — 待通过完整构建验证后安全移除。
+# 这里只保留第三方库、少量懒加载标准库和 src/ 动态入口。app/ 与 web/
+# 的内部模块由下方 _discover_hidden_imports() 单源发现，避免手写清单长期漂移。
 
 hiddenimports = [
     # ── 标准库 tkinter（模型下载器 GUI）──
@@ -314,168 +312,13 @@ hiddenimports = [
     # transformers / peft / trl / accelerate / datasets 属于 LoRA 训练依赖，
     # 全部在函数体内懒加载，不打包进发行版（节省数 GB 体积）。
 
-    # ── App 路由模块 ──
-    'app', 'app.core', 'app.api',
-    'app.core.routing',
-    'app.core.routing.smart_dispatcher',
-    'app.core.routing.local_model_router',
-    'app.core.routing.ai_router',
-    'app.core.routing.intent_analyzer',
-    'app.core.agent', 'app.core.agent.factory',
-    'app.core.agent.base', 'app.core.agent.types',
-    'app.core.agent.unified_agent',
-    'app.core.agent.langgraph_agent',
-    'app.core.agent.multi_agent',
-    'app.core.agent.koto_supervision',
-    'app.core.agent.mcp_adapter',
-    'app.core.agent.mcp_manager',
-    'app.core.agent.tool_registry',
-    'app.core.agent.checkpoint_manager',
-    'app.core.agent.plugins',
-    'app.core.agent.plugins.basic_tools_plugin',
-    'app.core.agent.plugins.file_editor_plugin',
-    'app.core.agent.plugins.search_plugin',
-    'app.core.agent.plugins.system_tools_plugin',
-    'app.core.agent.plugins.data_process_plugin',
-    'app.core.agent.plugins.image_process_plugin',
-    'app.core.agent.plugins.network_plugin',
-    'app.core.agent.plugins.performance_analysis_plugin',
-    'app.core.agent.plugins.trend_analysis_plugin',
-    'app.core.agent.plugins.configuration_plugin',
-    'app.core.agent.plugins.alerting_plugin',
-    'app.core.agent.plugins.auto_remediation_plugin',
-    'app.core.agent.plugins.system_event_monitoring_plugin',
-    'app.core.agent.plugins.system_info_plugin',
-    'app.core.agent.plugins.annotation_plugin',
-    'app.core.agent.plugins.chart_vision_plugin',
-    'app.core.agent.plugins.file_converter_plugin',
-    'app.core.agent.plugins.memory_tools_plugin',
-    'app.core.agent.plugins.ppt_plugin',
-    'app.core.agent.plugins.productivity_plugin',
-    'app.core.agent.plugins.skill_tools_plugin',
-    'app.core.agent.plugins.template_fill_plugin',
-    'app.core.analytics', 'app.core.analytics.trend_analyzer',
-    'app.core.config', 'app.core.config.configuration_manager',
-    'app.core.learning', 'app.core.learning.distill_manager',
-    'app.core.learning.lora_pipeline',
-    'app.core.learning.shadow_tracer',
-    'app.core.learning.training_data_builder',
-    'app.core.llm', 'app.core.llm.base',
-    'app.core.llm.langchain_adapter',
-    'app.core.llm.openai_provider',
-    'app.core.llm.deepseek_config',
-    'app.core.llm.deepseek_provider',
-    'app.core.llm.model_selection',
-    'app.core.llm.ollama_provider',
-    'app.core.monitoring',
-    'app.core.monitoring.alert_manager',
-    'app.core.monitoring.event_database',
-    'app.core.monitoring.system_event_monitor',
-    'app.core.remediation', 'app.core.remediation.remediation_manager',
-    'app.core.security',
-    'app.core.security.output_validator',
-    'app.core.security.pii_filter',
-    'app.core.services',
-    'app.core.services.file_service',
-    'app.core.services.rag_service',
-    'app.core.services.search_service',
-    'app.core.skills',
-    'app.core.skills.skill_manager',
-    'app.core.skills.skill_auto_builder',
-    'app.core.skills.skill_recorder',
-    'app.core.skills.skill_schema',
-    'app.core.workflow',
-    'app.core.workflow.langgraph_workflow',
-    'app.core.workflows',
-    'app.core.workflows.action_item_extractor',
-    'app.core.workflows.cross_format_extractor',
-    'app.core.workflows.data_format_cleaner',
-    'app.core.workflows.doc_deep_compare',
-    'app.core.workflows.questionnaire_filler',
-    'app.api.agent_routes',
-    'app.api.skill_routes',
-    'app.api.skill_marketplace_routes',
-    'app.api.task_routes',
-    'app.api.job_routes',
-    'app.api.goal_routes',
-    'app.api.file_hub_routes',
-    'app.api.ops_routes',
-    'app.api.shadow_routes',
-    'app.api.macro_routes',
-    'app.api.mcp_routes',
-    'app.api.telegram_bot_routes',
-    'app.api.distill_routes',
-    'app.api.bg_agent_routes',
-
-    # ── web/blueprints/ 分层蓝图（动态 import_module，PyInstaller 不自动发现）──
-    'web.blueprints',
-    'web.blueprints.chat',
-    'web.blueprints.voice',
-    'web.blueprints.pages',
-    'web.blueprints.sessions',
-    'web.blueprints.settings',
-    'web.blueprints.workspace',
-    'web.blueprints.document',
-    'web.blueprints.knowledge',
-    'web.blueprints.misc_api',
-    'web.blueprints.analytics',
-    'web.blueprints.proactive',
-    'web.blueprints.execution',
-    'web.blueprints.file_editor',
-    'web.blueprints.file_organize',
-    'web.blueprints.dev',
-    'web.blueprints.editor_ai',
-    'web.blueprints.pptx_editor',
-    'web.blueprints.parallel_api',
-    'web.blueprints.memory_api',
-    'web.blueprints.workflow_api',
-    'web.blueprints.workspace_assistant',
-
-    # ── web/routes/ ──
-    'web.routes',
-    'web.routes.health',
-
+    # app/ and web/ internal packages are discovered from the source tree below.
     # ── 模型下载器 ──
     'model_downloader',
-    'src.runtime_bootstrap',
-    'src.startup_diagnostics',
-    'src.startup_recovery',
-    'src.webview2_runtime',
+    'src.koto_app', 'src.runtime_bootstrap',
+    'src.startup_diagnostics', 'src.startup_recovery', 'src.webview2_runtime',
 
-        # ── web/ 全部模块 ──
-    'web', 'web.app', 'web.audit_logger',
-    'web.auth_manager', 'web.auto_catalog_scheduler',
-    'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
-    'web.behavior_monitor', 'web.calendar_manager',
-    'web.clipboard_ocr_assistant', 'web.code_generator',
-    'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
-    'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_annotation', 'web.doc_planner', 'web.document_batch_annotator',
-    'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
-    'web.document_feedback', 'web.document_generator', 'web.document_reader',
-    'web.document_validator',
-    'web.file_analyzer', 'web.file_converter',
-    'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
-    'web.file_organizer', 'web.file_parser', 'web.file_processor',
-    'web.file_qa', 'web.file_quality_checker', 'web.file_scanner',
-    'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
-    'web.insight_reporter',
-    'web.knowledge_graph', 'web.local_executor',
-    'web.note_manager',
-    'web.operation_history', 'web.organize_cleanup',
-    'web.parallel_executor', 'web.ppt_api_routes',
-    
-    'web.ppt_session_manager', 
-    'web.proactive_dialogue', 'web.proactive_trigger',
-    'web.processed_file_network', 'web.prompt_adapter', 
-    'web.reminder_manager',
-    'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
-    'web.suggestion_engine',
-    'web.task_dispatcher', 'web.task_scheduler', 'web.template_library',
-    'web.track_changes_editor',
-    'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
-    
-    'web.pdf_annotator',
+    # Do not duplicate auto-discovered app/web modules here.
 ]
 
 # ═══════════════════════════════════════════════
@@ -556,6 +399,12 @@ datas = _filter_datas(datas)
 
 
 # ── Dynamic Auto-discovery for hiddenimports ──
+_INTERNAL_DISCOVERY_EXCLUDES = {
+    'app.core.llm.gemini',
+    'app.core.llm.gemini_config',
+}
+
+
 def _discover_hidden_imports(base_dir, base_pkg):
     import os
     imports = []
@@ -568,7 +417,9 @@ def _discover_hidden_imports(base_dir, base_pkg):
                 if rel_path != '.':
                     pkg = f"{base_pkg}.{rel_path.replace(os.sep, '.')}"
                 mod = f[:-3]
-                imports.append(f"{pkg}.{mod}")
+                module_name = f"{pkg}.{mod}"
+                if module_name not in _INTERNAL_DISCOVERY_EXCLUDES:
+                    imports.append(module_name)
             elif f == '__init__.py':
                 rel_path = os.path.relpath(root, base_dir)
                 pkg = base_pkg
