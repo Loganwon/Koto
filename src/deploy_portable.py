@@ -43,10 +43,10 @@ PORTABLE_README = """Koto Windows 便携版
 ====================
 
 使用步骤：
-1. 双击 Install_Local_Model.bat，按提示安装 Ollama 和推荐本地模型。
-2. 本地模型安装完成后，双击 Start_Koto.bat 或 Koto.exe。
-3. 首次启动时按向导填写 DeepSeek API Key。
-4. 后续直接双击 Start_Koto.bat 即可使用。
+1. 双击 Start_Koto.bat 或 Koto.exe。
+2. 首次启动时选择一种 AI 方式：填写 DeepSeek API Key，或下载本地模型。
+3. 选择本地模型时，Koto 会引导安装 Ollama 并下载推荐模型（约 1–8 GB）。
+4. 后续直接双击 Start_Koto.bat 即可使用；Install_Local_Model.bat 可用于以后更换模型。
 
 目录说明：
 - Koto.exe: 主程序

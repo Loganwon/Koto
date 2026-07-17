@@ -81,7 +81,7 @@ Name: "english";     MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "在桌面创建 Koto 快捷方式"; GroupDescription: "附加图标:"; Flags: unchecked
-Name: "localmodel"; Description: "安装本地 AI 模型助手（可选，加速离线任务分类，需额外下载约 2–8 GB）"; GroupDescription: "本地 AI 模型:"; Flags: unchecked
+Name: "localmodel"; Description: "立即打开 AI 初始化设置（也可在首次启动时选择云端 API 或本地模型）"; GroupDescription: "AI 初始化:"; Flags: unchecked
 
 [Files]
 ; 将 dist\Koto_Portable\ 下全部文件（含 _internal\ 子目录）复制到安装目录
@@ -110,8 +110,9 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
-; Windows 10 clean images may not carry the Evergreen Runtime. The portable
-; payload contains Microsoft's signed offline installer, so setup can repair it.
+; Windows 10 clean images may not carry the Evergreen Runtime.  The portable
+; payload contains Microsoft's signed offline installer, so setup can repair
+; the prerequisite without Python, a browser download, or administrator input.
 Filename: "{app}\{#WebView2Installer}"; Parameters: "/silent /install"; StatusMsg: "正在准备 Koto 桌面界面运行时…"; Flags: runhidden waituntilterminated; Check: WebView2RuntimeMissing
 ; 安装完成后可选"立即启动 Koto"
 Filename: "{app}\{#AppExeName}"; Description: "立即启动 Koto"; Flags: nowait postinstall skipifsilent

@@ -725,5 +725,5 @@ Write-Host "================================================================" -F
 Write-Host "  打包完成！发布文件：dist\$zipName" -ForegroundColor Green
 if (Test-Path $setupPath) { Write-Host "  安装包：dist\$setupName" -ForegroundColor Green }
 Write-Host "  校验文件：dist\$(Split-Path $checksumPath -Leaf)" -ForegroundColor Green
-Write-Host "  用户使用方法：解压 → 填写 API Key → 双击 Start_Koto.bat" -ForegroundColor Green
+Write-Host "  用户使用方法：解压 → 双击 Start_Koto.bat → 首次选择云端 API 或本地模型" -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Green
