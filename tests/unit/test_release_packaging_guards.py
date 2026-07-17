@@ -330,10 +330,19 @@ def test_release_e2e_uses_available_loopback_ports():
 def test_release_pipelines_publish_manifest_and_sha256_checksums():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     build = Path(".github/workflows/build.yml").read_text(encoding="utf-8")
+    local_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
     writer = Path("scripts/write_release_manifest.py").read_text(encoding="utf-8")
 
     assert "hashlib.sha256" in writer
     assert '"schema_version": 1' in writer
+    assert '"git_dirty": parse_optional_bool(' in writer
+    assert '"worktree_changed_during_build": parse_optional_bool(' in writer
+    assert "function Get-GitWorktreeFingerprint" in local_release
+    assert "git -C $Root diff --no-ext-diff --binary HEAD --" in local_release
+    assert "git -C $Root ls-files --others --exclude-standard" in local_release
+    assert "$gitFingerprintAtStart -ne $gitFingerprintAtEnd" in local_release
+    assert "构建期间 Git revision 或工作区内容发生变化" in local_release
+    assert "--worktree-changed-during-build" in local_release
     for workflow in (release, build):
         assert "Generate release manifest and SHA-256 checksums" in workflow
         assert "Koto_v$($env:VERSION)_SHA256SUMS.txt" in workflow

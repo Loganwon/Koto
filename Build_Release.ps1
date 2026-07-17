@@ -49,6 +49,41 @@ function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg"
 function Write-OK    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Fail  { param([string]$msg) Write-Host "  [!!] $msg" -ForegroundColor Red }
 
+function Get-GitWorktreeFingerprint {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $trackedDiffLines = @(& git -C $Root diff --no-ext-diff --binary HEAD --)
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法读取 Git tracked diff，不能验证构建期间漂移。"
+    }
+    $untrackedPaths = @(& git -C $Root ls-files --others --exclude-standard | Sort-Object)
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法读取 Git untracked 文件，不能验证构建期间漂移。"
+    }
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add("tracked-diff")
+    $parts.Add([string]::Join("`n", $trackedDiffLines))
+    $parts.Add("untracked-files")
+    foreach ($relativePath in $untrackedPaths) {
+        $fullPath = Join-Path $Root $relativePath
+        $contentHash = if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        } else {
+            "missing"
+        }
+        $parts.Add("$relativePath`0$contentHash")
+    }
+
+    $payload = [System.Text.Encoding]::UTF8.GetBytes([string]::Join("`n", $parts))
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($payload))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
 function Invoke-CmdLogged {
     param(
         [Parameter(Mandatory = $true)][string]$CommandLine,
@@ -361,6 +396,9 @@ if ($gitStatus.Count -gt 0) {
     }
     Write-Host "  [--] 工作区存在 $($gitStatus.Count) 条未提交改动；本次仅为诊断构建，不得作为正式发布版本。" -ForegroundColor Yellow
 }
+$gitRevisionAtStart = (& git -C $REPO_ROOT rev-parse HEAD).Trim()
+$gitFingerprintAtStart = Get-GitWorktreeFingerprint -Root $REPO_ROOT
+$gitDirtyAtStart = if ($gitStatus.Count -gt 0) { "true" } else { "false" }
 
 # ─── 版本号（单一来源：根目录 VERSION 文件）──────────
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -544,11 +582,34 @@ Write-OK "zip 已生成 → dist\$zipName"
 
 # ─── 步骤 6：生成发布清单与校验和 ──────────────────────
 Write-Step "步骤 6/6  生成发布清单与 SHA-256 校验和"
+$gitRevisionAtEnd = (& git -C $REPO_ROOT rev-parse HEAD).Trim()
+$gitFingerprintAtEnd = Get-GitWorktreeFingerprint -Root $REPO_ROOT
+$worktreeChangedDuringBuild = (
+    $gitRevisionAtStart -ne $gitRevisionAtEnd -or
+    $gitFingerprintAtStart -ne $gitFingerprintAtEnd
+)
+if ($worktreeChangedDuringBuild -and -not $AllowDirtyWorktree) {
+    Write-Fail "构建期间 Git revision 或工作区内容发生变化；已拒绝生成正式发布清单，请从冻结提交重新构建。"
+    exit 1
+}
+$worktreeChangedState = if ($worktreeChangedDuringBuild) { "true" } else { "false" }
+if ($worktreeChangedDuringBuild) {
+    Write-Host "  [--] 构建期间工作区发生漂移；manifest 将标记为诊断产物，不得发布。" -ForegroundColor Yellow
+}
 $manifestPath = Join-Path $DIST_DIR "Koto_v${Version}_release-manifest.json"
 $checksumPath = Join-Path $DIST_DIR "Koto_v${Version}_SHA256SUMS.txt"
 $artifacts = @($zipPath)
 if (Test-Path $setupPath) { $artifacts += $setupPath }
-$manifestExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($MANIFEST_WRITER, '--version', $Version, '--output', $manifestPath, '--hash-output', $checksumPath, $artifacts) -WorkingDirectory $REPO_ROOT -LogPath (Join-Path $LOG_DIR 'release_manifest.log')
+$manifestArgs = @(
+    $MANIFEST_WRITER,
+    '--version', $Version,
+    '--output', $manifestPath,
+    '--hash-output', $checksumPath,
+    '--git-revision', $gitRevisionAtStart,
+    '--git-dirty', $gitDirtyAtStart,
+    '--worktree-changed-during-build', $worktreeChangedState
+) + $artifacts
+$manifestExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList $manifestArgs -WorkingDirectory $REPO_ROOT -LogPath (Join-Path $LOG_DIR 'release_manifest.log')
 if ($manifestExitCode -ne 0) {
     Write-Fail "生成发布清单失败，查看日志：logs\release_manifest.log"
     exit 1

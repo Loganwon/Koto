@@ -16,8 +16,11 @@ release-ready.
 
 `Build_Release.ps1` refuses a dirty worktree by default. Its
 `-AllowDirtyWorktree` switch exists only for local diagnostics; never publish
-an artifact built with that override, because the manifest can identify HEAD
-but cannot fully represent uncommitted content.
+an artifact built with that override. The manifest records the build-start
+revision, whether it started dirty, and whether the worktree changed while the
+build was running. The drift check fingerprints tracked diff content and every
+untracked file, so repeated edits to an already-modified file are detected. A
+clean formal build fails if that state drifts.
 
 ## 2. Validate source and frontend
 
