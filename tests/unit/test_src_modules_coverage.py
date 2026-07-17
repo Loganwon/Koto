@@ -808,43 +808,6 @@ class TestKotoApp:
         assert ok is False
         assert err is not None
 
-    # -- _auto_fix_syntax --------------------------------------------------
-
-    def test_auto_fix_syntax_no_match(self, tmp_path):
-        mod = self._import_module()
-        py_file = tmp_path / "test.py"
-        py_file.write_text("x = 1\n", encoding="utf-8")
-        result = mod._auto_fix_syntax(str(py_file), "some other error")
-        assert result is False
-
-    # -- _wait_for_port ----------------------------------------------------
-
-    def test_wait_for_port_immediate_success(self):
-        mod = self._import_module()
-        with patch("socket.socket") as mock_cls:
-            sock = MagicMock()
-            sock.connect_ex.return_value = 0
-            mock_cls.return_value = sock
-            with patch("time.time", side_effect=[0, 0, 1]):
-                with patch("time.sleep"):
-                    assert mod._wait_for_port("127.0.0.1", 5000, 5) is True
-
-    def test_wait_for_port_timeout(self):
-        mod = self._import_module()
-        call_count = [0]
-
-        def advancing_time():
-            call_count[0] += 1
-            return call_count[0] * 2
-
-        with patch("socket.socket") as mock_cls:
-            sock = MagicMock()
-            sock.connect_ex.return_value = 1  # not connected
-            mock_cls.return_value = sock
-            with patch("time.time", side_effect=advancing_time):
-                with patch("time.sleep"):
-                    assert mod._wait_for_port("127.0.0.1", 5000, 3) is False
-
     def test_start_flask_server_avoids_reusing_healthy_backend(self):
         mod = self._import_module()
         original_port = mod.KOTO_PORT
@@ -856,10 +819,11 @@ class TestKotoApp:
 
             sock = MagicMock()
             sock.connect_ex.return_value = 0
+            sock.__enter__.return_value = sock
             mock_thread = MagicMock()
 
             with patch("socket.socket", return_value=sock), patch.object(
-                mod, "_check_http_ok", return_value=True
+                mod, "_check_koto_health", return_value=True
             ), patch.object(mod, "_find_available_port", return_value=5001), patch.dict(
                 os.environ, {"KOTO_REUSE_HEALTHY_BACKEND": "0"}, clear=False
             ), patch.object(
@@ -876,6 +840,56 @@ class TestKotoApp:
         finally:
             mod.KOTO_PORT = original_port
             mod.FALLBACK_PORT = original_fallback
+
+    def test_startup_status_provider_reports_real_backend_error(self):
+        mod = self._import_module()
+        thread = MagicMock()
+        thread.is_alive.return_value = False
+        info = {
+            "started": True,
+            "thread": thread,
+            "phase": "backend startup failed",
+            "error": "ModuleNotFoundError: missing_runtime",
+            "started_at": 0.0,
+        }
+        with patch.object(mod, "_check_koto_health", return_value=False):
+            status = mod._startup_status_provider(
+                info, "http://127.0.0.1:5000"
+            )()
+
+        assert status["status"] == "error"
+        assert "ModuleNotFoundError" in status["error"]
+
+    def test_startup_status_provider_redirects_only_after_health(self):
+        mod = self._import_module()
+        info = {"started": True, "phase": "importing", "started_at": 0.0}
+        with patch.object(mod, "_check_koto_health", return_value=True):
+            status = mod._startup_status_provider(
+                info, "http://127.0.0.1:5000"
+            )()
+
+        assert status == {
+            "status": "ready",
+            "phase": "ready",
+            "target_url": "http://127.0.0.1:5000",
+        }
+
+    def test_restart_current_process_preserves_source_entrypoint(self):
+        mod = self._import_module()
+        executable = r"C:\Python311\python.exe"
+        argv = [r"C:\Koto\src\koto_app.py", "--diagnose"]
+        with patch.object(mod.sys, "executable", executable), patch.object(
+            mod.sys, "argv", argv
+        ), patch.object(mod.sys, "frozen", False, create=True), patch.object(
+            mod.os, "execve"
+        ) as mock_execve:
+            mod._restart_current_process()
+
+        mock_execve.assert_called_once()
+        assert mock_execve.call_args.args[:2] == (
+            executable,
+            [executable, *argv],
+        )
 
     # -- _check_http_ok ----------------------------------------------------
 
@@ -894,6 +908,53 @@ class TestKotoApp:
         mod = self._import_module()
         with patch("urllib.request.build_opener", side_effect=OSError):
             assert mod._check_http_ok("http://bad") is False
+
+    def test_check_koto_health_rejects_html_200(self):
+        mod = self._import_module()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b"<html>startup page</html>"
+        mock_resp.__enter__ = Mock(return_value=mock_resp)
+        mock_resp.__exit__ = Mock(return_value=False)
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_resp
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            assert mod._check_koto_health("http://127.0.0.1:5000/api/health") is False
+
+    def test_check_koto_health_accepts_structured_contract(self):
+        mod = self._import_module()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = b'{"status":"healthy"}'
+        mock_resp.__enter__ = Mock(return_value=mock_resp)
+        mock_resp.__exit__ = Mock(return_value=False)
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_resp
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            assert mod._check_koto_health("http://127.0.0.1:5000/api/health") is True
+
+    def test_stale_port_cleanup_never_kills_unrelated_pythonw(self, tmp_path):
+        mod = self._import_module()
+        original_root = mod.APP_ROOT
+        conn = MagicMock()
+        conn.laddr.port = 5000
+        conn.status = mod.psutil.CONN_LISTEN
+        conn.pid = 1234
+        proc = MagicMock()
+        proc.name.return_value = "pythonw.exe"
+        proc.exe.return_value = str(tmp_path / "unrelated" / "pythonw.exe")
+        proc.cmdline.return_value = ["pythonw.exe", "other_app.py"]
+        sock = MagicMock()
+        sock.connect_ex.return_value = 0
+        try:
+            mod.APP_ROOT = tmp_path / "Koto"
+            with patch("socket.socket", return_value=sock), patch.object(
+                mod.psutil, "net_connections", return_value=[conn]
+            ), patch.object(mod.psutil, "Process", return_value=proc):
+                assert mod._terminate_stale_process_on_port(5000) is False
+        finally:
+            mod.APP_ROOT = original_root
+        proc.kill.assert_not_called()
 
     def test_wait_for_http_ok_respects_total_deadline(self):
         mod = self._import_module()
@@ -1034,7 +1095,7 @@ class TestKotoApp:
         ), patch.object(
             mod, "_get_app_shutdown_reason", return_value=None
         ), patch.object(
-            mod, "_check_http_ok", side_effect=[False, False]
+            mod, "_check_koto_health", side_effect=[False, False]
         ), patch.object(
             mod, "_dump_threads"
         ) as mock_dump, patch.object(
@@ -1082,7 +1143,7 @@ class TestKotoApp:
         ), patch.object(
             mod, "_get_app_shutdown_reason", side_effect=lambda: next(shutdown_states)
         ), patch.object(
-            mod, "_check_http_ok", side_effect=[False, True, False, True]
+            mod, "_check_koto_health", side_effect=[False, True, False, True]
         ), patch.object(
             mod, "_attempt_process_recovery"
         ) as mock_recover, patch(

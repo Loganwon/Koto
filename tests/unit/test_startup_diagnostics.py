@@ -98,3 +98,32 @@ def test_removing_source_shadowing_extensions_reports_locked_files(
 
     assert removed == []
     assert blocked == [(artifact, "locked")]
+
+
+def test_frozen_diagnostics_use_bundle_resources_without_pip_guidance(
+    monkeypatch, tmp_path
+):
+    import src.startup_diagnostics as diagnostics
+
+    app_root = tmp_path / "installed"
+    bundle_dir = tmp_path / "bundle"
+    for relative in diagnostics._FROZEN_CRITICAL_FILES:
+        path = bundle_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# packaged resource\n", encoding="utf-8")
+    for directory in ("logs", "chats", "workspace", "config"):
+        (app_root / directory).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(diagnostics.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(diagnostics, "_module_exists", lambda _name: True)
+    report = diagnostics.run_startup_diagnostics(
+        app_root,
+        bundle_dir=bundle_dir,
+        include_import_check=False,
+    )
+
+    checked_names = {check["name"] for check in report["checks"]}
+    assert set(diagnostics._FROZEN_CRITICAL_FILES) <= checked_names
+    assert all(
+        "pip install" not in check.get("action", "") for check in report["checks"]
+    )

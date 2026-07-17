@@ -163,7 +163,16 @@ def _add_runtime_config(src_dir):
 _add_runtime_config(os.path.join(ROOT, 'config'))
 
 # ── src/ 入口脚本（作为数据一同打包，供 runpy 兜底使用）──
-for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py', 'webview2_runtime.py']:
+for _script in [
+    'koto_app.py',
+    'model_downloader.py',
+    'koto_setup.py',
+    'runtime_bootstrap.py',
+    'server.py',
+    'startup_diagnostics.py',
+    'startup_recovery.py',
+    'webview2_runtime.py',
+]:
     _add(os.path.join(ROOT, 'src', _script), '.')
 
 # ── web/*.py 全部作为数据文件（动态 import 兜底，含子包 blueprints/ routes/）──
@@ -389,6 +398,9 @@ hiddenimports = [
 
     # ── 模型下载器 ──
     'model_downloader',
+    'src.runtime_bootstrap',
+    'src.startup_diagnostics',
+    'src.startup_recovery',
     'src.webview2_runtime',
 
         # ── web/ 全部模块 ──

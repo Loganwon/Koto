@@ -17,11 +17,19 @@ from pathlib import Path
 from typing import Any
 from urllib.request import ProxyHandler, Request, build_opener
 
-_CRITICAL_FILES = (
+_SOURCE_CRITICAL_FILES = (
     "web/app.py",
     "src/koto_app.py",
     "src/runtime_bootstrap.py",
     "config/requirements.txt",
+)
+
+_FROZEN_CRITICAL_FILES = (
+    "web/app.py",
+    "web/templates/index.html",
+    "web/static/js/build/app-bundle.js",
+    "config/deepseek_config.env.example",
+    "assets/koto_icon.png",
 )
 
 _REQUIRED_MODULES = {
@@ -142,6 +150,7 @@ def _check_web_app_import(root: Path) -> tuple[bool, str]:
 def run_startup_diagnostics(
     app_root: Path | str,
     *,
+    bundle_dir: Path | str | None = None,
     port: int | None = None,
     include_import_check: bool = True,
 ) -> dict[str, Any]:
@@ -151,10 +160,14 @@ def run_startup_diagnostics(
     block a restart attempt; warnings describe optional or degraded features.
     """
     root = Path(app_root).resolve()
+    frozen = bool(getattr(sys, "frozen", False))
+    resources = Path(bundle_dir).resolve() if bundle_dir is not None else root
     checks: list[dict[str, str]] = []
 
-    for relative in _CRITICAL_FILES:
-        path = root / relative
+    critical_files = _FROZEN_CRITICAL_FILES if frozen else _SOURCE_CRITICAL_FILES
+    critical_root = resources if frozen else root
+    for relative in critical_files:
+        path = critical_root / relative
         if path.is_file():
             checks.append(_check(relative, "ok", "found"))
         else:
@@ -163,7 +176,11 @@ def run_startup_diagnostics(
                     relative,
                     "error",
                     "missing",
-                    action="restore this file from the release package",
+                    action=(
+                        "reinstall Koto from a verified release package"
+                        if frozen
+                        else "restore this file from the source checkout"
+                    ),
                 )
             )
 
@@ -208,7 +225,11 @@ def run_startup_diagnostics(
                     if _module_exists(module)
                     else f"missing Python module: {module}"
                 ),
-                action="run the packaged installer or pip install -r config/requirements.txt",
+                action=(
+                    "reinstall Koto from a verified release package"
+                    if frozen
+                    else "pip install -r config/requirements.txt"
+                ),
             )
         )
 
@@ -242,7 +263,7 @@ def run_startup_diagnostics(
         if not _module_exists(module):
             checks.append(_check(module, "warning", message))
 
-    app_file = root / "web" / "app.py"
+    app_file = resources / "web" / "app.py"
     if app_file.is_file():
         try:
             compile(app_file.read_text(encoding="utf-8-sig"), str(app_file), "exec")
@@ -257,7 +278,16 @@ def run_startup_diagnostics(
                 )
             )
 
-    if include_import_check and app_file.is_file():
+    if include_import_check and frozen:
+        checks.append(
+            _check(
+                "web application import",
+                "warning",
+                "separate import probe is skipped inside the packaged executable",
+                action="inspect logs/startup.log for the captured packaged import error",
+            )
+        )
+    elif include_import_check and app_file.is_file():
         imported, detail = _check_web_app_import(root)
         checks.append(
             _check(

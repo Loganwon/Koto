@@ -436,6 +436,19 @@ def test_installer_cleans_managed_runtime_and_blocks_live_upgrade_conflicts():
     assert "e2e-user-data-sentinel.txt" in installer_e2e
 
 
+def test_frozen_startup_never_attempts_to_install_python_packages():
+    desktop = Path("src/koto_app.py").read_text(encoding="utf-8")
+    recovery = Path("src/startup_recovery.py").read_text(encoding="utf-8")
+    spec = Path("koto.spec").read_text(encoding="utf-8")
+
+    assert "KOTO_AUTO_INSTALL_DEPS" not in desktop
+    assert "-m pip install" not in desktop
+    assert "不需要运行 pip" in recovery
+    assert "RunSource.bat" not in recovery
+    assert "'startup_recovery.py'" in spec
+    assert "'src.startup_recovery'" in spec
+
+
 def test_release_e2e_uses_available_loopback_ports():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
