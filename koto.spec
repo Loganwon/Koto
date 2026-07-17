@@ -405,7 +405,7 @@ hiddenimports = [
     'web.file_organizer', 'web.file_parser', 'web.file_processor',
     'web.file_qa', 'web.file_quality_checker', 'web.file_scanner',
     'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
-    'web.image_manager', 'web.insight_reporter', 
+    'web.insight_reporter',
     'web.knowledge_graph', 'web.local_executor',
     'web.note_manager',
     'web.operation_history', 'web.organize_cleanup',

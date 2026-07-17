@@ -206,6 +206,20 @@ def test_system_info_service_is_core_owned_without_web_compatibility_alias():
     assert not (ROOT / "web" / "system_info.py").exists()
 
 
+def test_ppt_image_management_is_core_owned():
+    pipeline_source = _read(ROOT / "app" / "core" / "services" / "ppt_pipeline.py")
+    core_image_manager = _read(
+        ROOT / "app" / "core" / "services" / "image_manager.py"
+    )
+
+    assert "from app.core.services.image_manager import ImageManager" in pipeline_source
+    assert "web.runtime_context" not in pipeline_source
+    assert "from web.image_manager import" not in pipeline_source
+    assert "class ImageManager:" in core_image_manager
+    assert "from web.web_searcher import" not in core_image_manager
+    assert not (ROOT / "web" / "image_manager.py").exists()
+
+
 def test_web_app_keeps_executable_lifecycle_outside_application_factory():
     """Importing the Flask module must not also own process lifecycle code."""
     source = _read(WEB_APP)

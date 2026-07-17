@@ -3,7 +3,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-图像管理器 - 统一处理图像搜索与生成
+Core 图像管理器 - 统一处理图像搜索与生成
 为 PPT 制作提供 "生辰大哥" (AI生成) 或 "网上找图" (Web Search) 的能力
 """
 
@@ -12,15 +12,7 @@ import os
 import time
 from typing import Optional
 
-
-# 尝试导入 web_searcher，如果失败则在方法内部导入
-
 logger = logging.getLogger(__name__)
-
-try:
-    from web.web_searcher import search_with_grounding
-except ImportError:
-    search_with_grounding = None
 
 
 class ImageManager:
