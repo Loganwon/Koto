@@ -27,6 +27,20 @@ def git_revision(root: Path) -> str | None:
         return None
 
 
+def git_dirty(root: Path) -> bool | None:
+    """Report whether artifact inputs differ from the recorded revision."""
+    try:
+        output = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return bool(output.strip())
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def validate_version(value: str) -> str:
     version = str(value or "").strip()
     if not version or not version[0].isalnum():
@@ -36,11 +50,30 @@ def validate_version(value: str) -> str:
     return version
 
 
+def parse_optional_bool(value: str | None, *, fallback: bool | None) -> bool | None:
+    if value is None:
+        return fallback
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    if normalized == "unknown":
+        return None
+    raise ValueError(f"invalid boolean state: {value}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--hash-output", type=Path, required=True)
+    parser.add_argument("--git-revision", default=None)
+    parser.add_argument("--git-dirty", choices=("true", "false", "unknown"))
+    parser.add_argument(
+        "--worktree-changed-during-build",
+        choices=("true", "false", "unknown"),
+    )
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args()
     version = validate_version(args.version)
@@ -66,7 +99,15 @@ def main() -> int:
         "schema_version": 1,
         "version": version,
         "generated_at": datetime.now(UTC).isoformat(),
-        "git_revision": git_revision(root),
+        "git_revision": args.git_revision or git_revision(root),
+        "git_dirty": parse_optional_bool(
+            args.git_dirty,
+            fallback=git_dirty(root),
+        ),
+        "worktree_changed_during_build": parse_optional_bool(
+            args.worktree_changed_during_build,
+            fallback=None,
+        ),
         "artifacts": entries,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
