@@ -285,13 +285,16 @@ def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     ) < release_build.index("Test-PackagedConfigDefaults -ConfigRoot")
 
 
-def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
+def test_release_e2e_runs_the_real_desktop_startup_path():
     setup = Path("src/koto_setup.py").read_text(encoding="utf-8")
     desktop_entry = Path("src/koto_app.py").read_text(encoding="utf-8")
     installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
         encoding="utf-8"
     )
     portable_e2e = Path("tests/installer/test_portable_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+    helpers = Path("tests/installer/release_e2e_helpers.ps1").read_text(
         encoding="utf-8"
     )
 
@@ -304,8 +307,20 @@ def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
         < desktop_entry.index("import webview")
     )
     for source in (installer_e2e, portable_e2e):
-        assert '$env:KOTO_SERVER_ONLY = "1"' in source
-        assert "server-only mode" in source
+        assert 'Remove-Item Env:KOTO_SERVER_ONLY' in source
+        assert "Desktop mode (WebView2 path enabled)" in source
+        assert "窗口已显示，应用正常运行中" in source
+        assert "RequireDesktopWindow" in source
+        assert "Start-KotoWithoutDeveloperEnvironment" in source
+        assert "release_e2e_helpers.ps1" in source
+        assert "Developer runtimes removed from child PATH/environment" in source
+
+    assert '"PYTHONHOME"' in helpers
+    assert '"PYTHONPATH"' in helpers
+    assert '"VIRTUAL_ENV"' in helpers
+    assert '"NODE_PATH"' in helpers
+    assert '"JAVA_HOME"' in helpers
+    assert "Refusing to replace an existing Koto registration" in installer_e2e
 
 
 def test_release_carries_and_verifies_offline_webview2_runtime():

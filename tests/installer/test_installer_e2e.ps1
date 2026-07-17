@@ -6,8 +6,8 @@
       1. Silent install to $TestInstallDir
       2. Verify critical files + file size + Start Menu shortcut
       3. Verify Windows registry key written by Inno Setup
-      4. Seed config (bypass first-run wizard) + launch Koto.exe
-      5. Poll /api/health + /api/ping
+      4. Seed config (bypass first-run wizard) + launch the real desktop path
+      5. Poll /api/health + verify that the WebView window was shown
       6. Stop Koto process
       7. Silent uninstall
       8. Verify cleanup (files + registry key removed)
@@ -36,12 +36,15 @@ param(
     [string]$TestInstallDir = "$env:LOCALAPPDATA\KotoE2ETest",
     [int]$Port              = 5099,
     [int]$HealthTimeoutSec  = 45,
-    [bool]$RequireHealth    = $true   # set to $false in headless/CI to treat as warning
+    [bool]$RequireHealth    = $true,
+    [bool]$RequireDesktopWindow = $true
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..\..")
+. (Join-Path $ScriptDir "release_e2e_helpers.ps1")
+$regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A3F8E291-7C44-4B2A-9D6E-8C5F1A347B90}_is1"
 
 # ── Locate installer ────────────────────────────────────────────────────
 if (-not $SetupExe) {
@@ -62,6 +65,19 @@ Write-Host "[E2E] Installer: $SetupExe"
 Write-Host "[E2E] Install dir: $TestInstallDir"
 Write-Host "[E2E] Port: $Port"
 
+# The production AppId is intentionally stable. Refuse to overwrite another
+# real Koto registration when this test runs outside a disposable machine.
+$existingRegistration = Get-ItemProperty -Path $regPath -ErrorAction SilentlyContinue
+if ($existingRegistration) {
+    $existingInstallDir = [string]$existingRegistration.InstallLocation
+    $expectedInstallDir = [System.IO.Path]::GetFullPath($TestInstallDir).TrimEnd('\')
+    if ([string]::IsNullOrWhiteSpace($existingInstallDir) -or
+        [System.IO.Path]::GetFullPath($existingInstallDir).TrimEnd('\') -ne $expectedInstallDir) {
+        Write-Error "Refusing to replace an existing Koto registration at: $existingInstallDir"
+        exit 1
+    }
+}
+
 # ── Helper ──────────────────────────────────────────────────────────────
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
@@ -75,7 +91,7 @@ function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
     } catch {
         Write-Host "No listener found on port $HealthPort"
     }
-    foreach ($logName in @("startup.log", "runtime.log")) {
+    foreach ($logName in @("startup.log", "startup_prerequisites.log", "runtime.log")) {
         $logPath = Join-Path $InstallDir "logs\$logName"
         if (Test-Path $logPath) {
             Write-Host "--- $logPath (last 200 lines) ---"
@@ -174,6 +190,12 @@ $requiredPaths = @(
     (Join-Path $configRoot "tools"),
     (Join-Path $configRoot "workflows"),
     (Join-Path $TestInstallDir "Start_Koto.bat"),
+    (Join-Path $TestInstallDir "Install_WebView2_Runtime.bat"),
+    (Join-Path $TestInstallDir "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
+    (Join-Path $internalDir "python311.dll"),
+    (Join-Path $internalDir "VCRUNTIME140.dll"),
+    (Join-Path $internalDir "webview\lib\runtimes\win-x64\native\WebView2Loader.dll"),
+    (Join-Path $TestInstallDir "LocalModelInstaller.exe"),
     (Join-Path $TestInstallDir "unins000.exe")
 )
 foreach ($path in $requiredPaths) {
@@ -210,7 +232,6 @@ else { Fail "Start Menu shortcut missing: $startMenu\Koto.lnk" }
 # STEP 3 — Verify registry key (Inno Setup writes under HKCU)
 # ══════════════════════════════════════════════════════════════════════════
 Write-Host "`n[Step 3] Checking registry..."
-$regPath = "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{A3F8E291-7C44-4B2A-9D6E-8C5F1A347B90}_is1"
 if (Test-Path $regPath) { Pass "Uninstall registry key exists" }
 else                     { Fail "Uninstall registry key missing at $regPath" }
 
@@ -221,11 +242,12 @@ Write-Host "`n[Step 4] Seeding config and launching Koto.exe..."
 & (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $TestInstallDir
 
 $env:KOTO_PORT = $Port
-$env:KOTO_SERVER_ONLY = "1"
-Write-Host "  KOTO_SERVER_ONLY=1 (server-only mode)"
-$kotoProc = Start-Process -FilePath $exePath `
-    -WorkingDirectory $TestInstallDir `
-    -PassThru
+Remove-Item Env:KOTO_SERVER_ONLY -ErrorAction SilentlyContinue
+Write-Host "  Desktop mode (WebView2 path enabled)"
+$kotoProc = Start-KotoWithoutDeveloperEnvironment `
+    -ExePath $exePath `
+    -WorkingDirectory $TestInstallDir
+Write-Host "  Developer runtimes removed from child PATH/environment"
 
 Write-Host "  Koto.exe PID: $($kotoProc.Id)"
 
@@ -273,6 +295,28 @@ if (-not $healthy) {
     } else {
         Write-Host "::warning::Health endpoint did not respond within ${HealthTimeoutSec}s (best-effort in CI — pywebview may not init headless)"
     }
+}
+
+# A backend-only check used to hide desktop failures. Require the callback
+# emitted only after pywebview has created and shown the real native window.
+$desktopReady = $false
+$desktopDeadline = (Get-Date).AddSeconds($HealthTimeoutSec)
+$startupLog = Join-Path $TestInstallDir "logs\startup.log"
+while ((Get-Date) -lt $desktopDeadline -and -not $kotoProc.HasExited) {
+    if (Test-Path $startupLog) {
+        $startupText = Get-Content -LiteralPath $startupLog -Raw -ErrorAction SilentlyContinue
+        if ($startupText -match "窗口已显示，应用正常运行中") {
+            $desktopReady = $true
+            Pass "WebView2 desktop window reached the shown callback"
+            break
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
+if (-not $desktopReady) {
+    Show-KotoStartupDiagnostics -InstallDir $TestInstallDir -HealthPort $Port
+    if ($RequireDesktopWindow) { Fail "Desktop window was not shown within ${HealthTimeoutSec}s" }
+    else { Write-Host "::warning::Desktop window callback was not observed" }
 }
 
 # /api/ping endpoint check

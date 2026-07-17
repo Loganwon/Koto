@@ -53,7 +53,8 @@ The script builds the frontend, PyInstaller application, portable package,
 release manifest, and installer. It also downloads Microsoft's x64 Evergreen
 WebView2 standalone installer, accepts it only with a valid Microsoft
 Authenticode signature, and carries it in both Windows artifacts. This lets a
-clean Windows 10/11 x64 account start without a preinstalled WebView2 Runtime.
+clean Windows 10/11 x64 account start without Python, Node.js, a VC++
+redistributable install, or a preinstalled WebView2 Runtime.
 
 Run the installer and portable E2E checks against the generated artifacts when
 they are not already supplied by CI:
@@ -62,6 +63,10 @@ they are not already supplied by CI:
 tests\installer\test_installer_e2e.ps1
 tests\installer\test_portable_e2e.ps1
 ```
+
+Both tests launch the real desktop path, require the WebView window shown
+callback, and remove Python/Node/Java/virtual-environment paths from the child
+process. A backend-only health check is not sufficient release evidence.
 
 If the build stops partway through, inspect `logs/` and verify ZIP, manifest,
 and installer outputs individually before retrying. Do not release with
