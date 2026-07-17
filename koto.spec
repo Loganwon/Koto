@@ -15,7 +15,13 @@ ROOT = os.path.abspath('.')
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from build_config import protected_dir_paths
+from build_config import (
+    PROTECTED_DIRS,
+    cython_build_root,
+    has_staged_cython_extension,
+    protected_dir_paths,
+    staged_cython_extensions,
+)
 
 # ═══════════════════════════════════════════════
 # 数据文件（资源 + Python 源码）
@@ -23,23 +29,21 @@ from build_config import protected_dir_paths
 
 datas = []
 
-# ── Protected 模式：检测是否存在 Cython 编译产物 ──────────────────────────────
-# 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
-# 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
+# ── Protected 模式：从隔离目录收集 Cython 编译产物 ───────────────────────────
+# build_cython.py 将扩展写入 build/cython_lib。源码树不再出现 .pyd，避免
+# 开发和测试进程在失败构建后意外加载旧二进制模块。
 _PROTECTED_DIRS = protected_dir_paths(ROOT)
+_CYTHON_BUILD_ROOT = str(cython_build_root(ROOT))
+_STAGED_APP_ROOT = os.path.join(_CYTHON_BUILD_ROOT, 'app')
+_STAGED_APP_READY = os.path.isfile(os.path.join(_STAGED_APP_ROOT, '__init__.py'))
 _ARCHIVED_RUNTIME_FILES = {
     os.path.normcase(os.path.abspath(os.path.join(ROOT, 'app', 'core', 'llm', name)))
     for name in ('gemini.py', 'gemini_config.py')
 }
 
 def _protected_pyd_exists(py_path):
-    """检查对应的 .pyd / .so 是否已编译"""
-    stem = os.path.splitext(py_path)[0]
-    d = os.path.dirname(py_path)
-    for f in os.listdir(d) if os.path.isdir(d) else []:
-        if f.startswith(os.path.basename(stem)) and (f.endswith('.pyd') or f.endswith('.so')):
-            return True
-    return False
+    """检查隔离目录中是否存在对应的 .pyd / .so。"""
+    return has_staged_cython_extension(ROOT, py_path)
 
 def _add(src, dst):
     """安全添加数据文件/目录，仅在存在时加入"""
@@ -67,6 +71,8 @@ def _add_dir_filtered(src_dir, dst_dir):
         else:
             if os.path.normcase(os.path.abspath(fpath)) in _ARCHIVED_RUNTIME_FILES:
                 continue
+            if is_protected and fname.endswith(('.pyd', '.so')):
+                continue  # 源码目录中的旧编译残留永不进入发布包
             if is_protected and fname.endswith('.py') and fname != '__init__.py':
                 if _protected_pyd_exists(fpath):
                     continue  # 有 .pyd，跳过 .py
@@ -79,8 +85,41 @@ _add(os.path.join(ROOT, 'web', 'static'),                     os.path.join('web'
 _add(os.path.join(ROOT, 'web', 'uploads', '.gitkeep'),        os.path.join('web', 'uploads'))
 
 # ── Python 包 ──
-# 使用 _add_dir_filtered 而非简单的 _add(dir)，以便在 Protected 模式下过滤 .py 源码
-_add_dir_filtered(os.path.join(ROOT, 'app'),      'app')
+# 有隔离 overlay 时，分析和数据收集都使用同一棵 app 树。该树不包含受保护
+# 模块的 .py，因此 PyInstaller 不会把旧源码再次编入 PYZ。
+_PACKAGE_APP_ROOT = _STAGED_APP_ROOT if _STAGED_APP_READY else os.path.join(ROOT, 'app')
+_add_dir_filtered(_PACKAGE_APP_ROOT, 'app')
+
+
+def _add_staged_cython_extensions():
+    """Copy only compiled protected modules from the isolated build tree."""
+    artifacts = staged_cython_extensions(ROOT)
+    if not _STAGED_APP_READY:
+        for artifact in artifacts:
+            destination = os.path.normpath(
+                os.path.relpath(str(artifact.parent), _CYTHON_BUILD_ROOT)
+            )
+            datas.append((str(artifact), destination))
+    return len(artifacts)
+
+
+_STAGED_CYTHON_COUNT = _add_staged_cython_extensions()
+_STAGED_PROTECTED_SOURCES = [
+    source_file
+    for relative_dir in PROTECTED_DIRS
+    for source_file in (Path(_CYTHON_BUILD_ROOT) / relative_dir).rglob('*.py')
+    if source_file.name != '__init__.py'
+]
+if os.environ.get('KOTO_REQUIRE_STAGED_CYTHON') == '1' and (
+    _STAGED_CYTHON_COUNT == 0
+    or not _STAGED_APP_READY
+    or _STAGED_PROTECTED_SOURCES
+):
+    raise RuntimeError(
+        'Formal release requires a complete Cython app overlay in build/cython_lib; '
+        'run build_cython.py build_ext first.'
+    )
+print(f'[koto.spec] Staged Cython extensions: {_STAGED_CYTHON_COUNT}')
 
 
 # ── 图标资源 ──
@@ -555,7 +594,7 @@ hiddenimports = _dedupe_hiddenimports(hiddenimports)
 
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
-    pathex=[ROOT],
+    pathex=[_CYTHON_BUILD_ROOT, ROOT] if _STAGED_APP_READY else [ROOT],
     binaries=_all_binaries,
     datas=datas,
     hiddenimports=hiddenimports,

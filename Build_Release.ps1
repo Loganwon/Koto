@@ -43,6 +43,7 @@ $SPEC_FILE  = Join-Path $REPO_ROOT "koto.spec"
 $LOCAL_INSTALLER_SPEC = Join-Path $REPO_ROOT "local_model_installer.spec"
 $MANIFEST_WRITER = Join-Path $REPO_ROOT "scripts\write_release_manifest.py"
 $CYTHON_CLEANUP = Join-Path $REPO_ROOT "scripts\clean_inplace_cython_artifacts.py"
+$CYTHON_BUILD_ROOT = Join-Path $REPO_ROOT "build\cython_lib"
 $WEBVIEW2_PREPARE = Join-Path $REPO_ROOT "scripts\prepare_webview2_runtime.ps1"
 $BUILD_REQUIREMENTS_LOCK = Join-Path $REPO_ROOT "config\build-requirements.lock"
 $BUILD_REQUIREMENTS_VERIFY = Join-Path $REPO_ROOT "scripts\verify_build_requirements.py"
@@ -470,15 +471,44 @@ if ($SkipCython) {
         exit 1
     }
 
-    Write-Step "步骤 0/5  Cython 编译核心模块 → .pyd（保护源码 + 内嵌 Key）"
+    $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $REPO_ROOT "build"))
+    $cythonBuildTarget = [System.IO.Path]::GetFullPath($CYTHON_BUILD_ROOT)
+    if (-not $cythonBuildTarget.StartsWith($buildRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Fail "拒绝清理不在 build 目录内的 Cython 输出路径: $cythonBuildTarget"
+        exit 1
+    }
+    if (Test-Path -LiteralPath $cythonBuildTarget) {
+        Remove-Item -LiteralPath $cythonBuildTarget -Recurse -Force
+    }
+
+    Write-Step "步骤 0/5  Cython 编译核心模块 → build\cython_lib（保护源码 + 内嵌 Key）"
     $cythonLog = Join-Path $LOG_DIR "cython_build.log"
-    $cythonExitCode = Invoke-CmdLogged -CommandLine ('{0} {1} build_ext --inplace' -f (Format-CmdArg $PYTHON), (Format-CmdArg (Join-Path $REPO_ROOT "build_cython.py"))) -LogPath $cythonLog
+    $cythonExitCode = Invoke-CmdLogged -CommandLine ('{0} {1} build_ext --build-lib {2}' -f (Format-CmdArg $PYTHON), (Format-CmdArg (Join-Path $REPO_ROOT "build_cython.py")), (Format-CmdArg $CYTHON_BUILD_ROOT)) -LogPath $cythonLog
     if ($cythonExitCode -ne 0) {
         Write-Fail "Cython 编译失败，查看日志：$cythonLog"
         Get-Content $cythonLog -Tail 20
         exit 1
     }
-    Write-OK "Cython 编译完成（_license.pyd 及核心模块 .pyd 已生成）"
+    $stagedCythonArtifacts = @(
+        Get-ChildItem -LiteralPath $CYTHON_BUILD_ROOT -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @('.pyd', '.so') }
+    )
+    if ($stagedCythonArtifacts.Count -eq 0) {
+        Write-Fail "Cython 命令成功但隔离目录中没有扩展模块: $CYTHON_BUILD_ROOT"
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $CYTHON_BUILD_ROOT "app\__init__.py") -PathType Leaf)) {
+        Write-Fail "Cython 隔离目录缺少完整 app overlay；已拒绝继续打包。"
+        exit 1
+    }
+    $cythonIsolationLog = Join-Path $LOG_DIR "cython_source_isolation.log"
+    $cythonIsolationExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--check') -WorkingDirectory $REPO_ROOT -LogPath $cythonIsolationLog
+    if ($cythonIsolationExitCode -ne 0) {
+        Write-Fail "Cython 编译污染了源码目录；已拒绝继续打包。日志：$cythonIsolationLog"
+        Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonIsolationLog | Out-Null
+        exit 1
+    }
+    Write-OK "Cython 编译完成：$($stagedCythonArtifacts.Count) 个扩展位于隔离目录，源码目录保持纯净"
 }
 
 # ─── 步骤 0.5：前端资产构建（Vite + esbuild） ──────────
@@ -541,6 +571,7 @@ Test-WorkspaceStaticAssets -StaticRoot $staticRoot -Label "源代码前端产物
 
 # ─── 步骤 1：PyInstaller 构建 ─────────────────
 if (-not $SkipBuild) {
+    $env:KOTO_REQUIRE_STAGED_CYTHON = if ($SkipCython) { "0" } else { "1" }
     $buildLog = Join-Path $LOG_DIR "build_latest.log"
     if ($Incremental) {
         Write-Step "步骤 1/5  PyInstaller 增量构建（无 --clean，输出日志至 logs\build_latest.log）"
@@ -628,6 +659,21 @@ if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path "$portableDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
 Write-OK "zip 已生成 → dist\$zipName"
 
+if (-not $SkipCython) {
+    Write-Step "发布收尾：在漂移校验前清理源码覆盖产物"
+    $cythonCleanupLog = Join-Path $LOG_DIR "cython_cleanup_postbuild.log"
+    $cythonCleanupExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonCleanupLog
+    if ($cythonCleanupExitCode -ne 0) {
+        if (-not $AllowDirtyWorktree) {
+            Write-Fail "源码目录仍有被锁定的 .pyd，无法证明正式构建期间工作区稳定。日志：$cythonCleanupLog"
+            exit 1
+        }
+        Write-Host "  [--] 诊断构建仍有被锁定的 .pyd；最终指纹会如实记录漂移。日志：$cythonCleanupLog" -ForegroundColor Yellow
+    } else {
+        Write-OK "源码覆盖产物已清理，最终指纹只反映真实源码变化"
+    }
+}
+
 # ─── 步骤 6：生成发布清单与校验和 ──────────────────────
 Write-Step "步骤 6/6  生成发布清单与 SHA-256 校验和"
 $gitRevisionAtEnd = (& git -C $REPO_ROOT rev-parse HEAD).Trim()
@@ -664,17 +710,6 @@ if ($manifestExitCode -ne 0) {
 }
 Write-OK "发布清单 → dist\$(Split-Path $manifestPath -Leaf)"
 Write-OK "SHA-256 → dist\$(Split-Path $checksumPath -Leaf)"
-
-if (-not $SkipCython) {
-    Write-Step "发布收尾：清理源码覆盖产物"
-    $cythonCleanupLog = Join-Path $LOG_DIR "cython_cleanup_postbuild.log"
-    $cythonCleanupExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonCleanupLog
-    if ($cythonCleanupExitCode -ne 0) {
-        Write-Host "  [--] 发布包已完成，但源码目录仍有被锁定的 .pyd；关闭源码实例后运行清理工具。日志：$cythonCleanupLog" -ForegroundColor Yellow
-    } else {
-        Write-OK "源码覆盖产物已清理，开发启动将使用当前 Python 源码"
-    }
-}
 
 # ─── 完成 ─────────────────────────────────────
 Write-Host ""

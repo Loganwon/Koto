@@ -15,7 +15,6 @@ import argparse
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -30,7 +29,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description="Remove in-place .pyd files that shadow Koto source modules."
     )
-    parser.add_argument("--apply", action="store_true", help="Delete the listed artifacts")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
+        "--apply", action="store_true", help="Delete the listed artifacts"
+    )
+    mode.add_argument(
+        "--check",
+        action="store_true",
+        help="Return a failing exit code when risky artifacts exist",
+    )
     args = parser.parse_args()
 
     artifacts = _source_shadowing_extensions(ROOT)
@@ -42,8 +49,10 @@ def main() -> int:
         print(f"Found {len(artifacts)} source-shadowing artifact(s):")
         for artifact in artifacts:
             print(f"  {artifact.relative_to(ROOT)}")
-        print("\nPreview only. Close source-mode Koto processes, then rerun with --apply.")
-        return 0
+        print(
+            "\nPreview only. Close source-mode Koto processes, then rerun with --apply."
+        )
+        return 1 if args.check else 0
 
     removed, blocked = remove_source_shadowing_extensions(ROOT)
     for artifact in removed:
@@ -52,7 +61,10 @@ def main() -> int:
         print(f"Locked:  {artifact.relative_to(ROOT)} ({error})", file=sys.stderr)
 
     if blocked:
-        print("Stop the listed source-mode processes and rerun this command.", file=sys.stderr)
+        print(
+            "Stop the listed source-mode processes and rerun this command.",
+            file=sys.stderr,
+        )
         return 1
     print(f"Removed {len(removed)} source-shadowing artifact(s).")
     return 0

@@ -5,7 +5,19 @@ import json
 import re
 from pathlib import Path
 
-from build_config import PROTECTED_DIRS
+import pytest
+
+from build_config import (
+    PROTECTED_DIRS,
+    cython_build_root,
+    has_staged_cython_extension,
+    staged_cython_extensions,
+)
+from build_cython import (
+    build_lib_from_argv,
+    normalize_build_argv,
+    prepare_staged_app_overlay,
+)
 
 
 def test_release_metadata_uses_one_valid_semantic_version():
@@ -269,7 +281,14 @@ def test_windows_release_pipelines_use_one_canonical_builder_and_require_health(
         in local_release
     )
     assert "Cython 编译前清理源码覆盖产物" in local_release
-    assert "发布收尾：清理源码覆盖产物" in local_release
+    assert "发布收尾：在漂移校验前清理源码覆盖产物" in local_release
+    assert local_release.index("cython_cleanup_postbuild.log") < local_release.index(
+        "$gitFingerprintAtEnd = Get-GitWorktreeFingerprint"
+    )
+    assert "无法证明正式构建期间工作区稳定" in local_release
+    assert "build\\cython_lib" in local_release
+    assert "build_ext --inplace" not in local_release
+    assert "KOTO_REQUIRE_STAGED_CYTHON" in local_release
     assert "版本号仅可包含字母、数字、点、下划线、加号和连字符" in local_release
     assert 'Join-Path $StaticRoot "js\\build\\workspace-bundle.js"' in local_release
     assert "$staticRoot\\js\\workspace-assistant.js" not in local_release
@@ -570,7 +589,7 @@ def test_protected_build_dirs_have_single_source_of_truth():
 
     assert PROTECTED_DIRS
     assert "from build_config import PROTECTED_DIRS" in build_cython
-    assert "from build_config import protected_dir_paths" in spec
+    assert "cython_build_root" in spec
     assert "_PROTECTED_DIRS = protected_dir_paths(ROOT)" in spec
     assert "app/core/agent" in build_config
 
@@ -583,6 +602,93 @@ def test_protected_build_dirs_have_single_source_of_truth():
     for literal in duplicated_literals:
         assert literal not in build_cython
         assert literal not in spec
+
+
+def test_cython_build_is_staged_and_rejects_inplace_output():
+    build_root = cython_build_root(Path.cwd())
+
+    normalized = normalize_build_argv(["build_cython.py", "build_ext"])
+    assert normalized[-2:] == ["--build-lib", str(build_root)]
+    assert build_lib_from_argv(normalized) == build_root
+
+    custom_root = Path.cwd() / "build" / "custom_cython"
+    custom = normalize_build_argv(
+        ["build_cython.py", "build_ext", "--build-lib", str(custom_root)]
+    )
+    assert build_lib_from_argv(custom) == custom_root.resolve()
+
+    with pytest.raises(ValueError, match="--inplace is disabled"):
+        normalize_build_argv(["build_cython.py", "build_ext", "--inplace"])
+
+    spec = Path("koto.spec").read_text(encoding="utf-8")
+    assert "_add_staged_cython_extensions" in spec
+    assert "KOTO_REQUIRE_STAGED_CYTHON" in spec
+    assert "pathex=[_CYTHON_BUILD_ROOT, ROOT]" in spec
+
+
+def test_staged_cython_inventory_matches_protected_source_modules(tmp_path):
+    source = tmp_path / "app" / "core" / "agent" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("VALUE = 1\n", encoding="utf-8")
+    staged = (
+        cython_build_root(tmp_path)
+        / "app"
+        / "core"
+        / "agent"
+        / "example.cp311-win_amd64.pyd"
+    )
+    staged.parent.mkdir(parents=True)
+    staged.write_bytes(b"compiled")
+    unrelated = cython_build_root(tmp_path) / "unrelated.cp311-win_amd64.pyd"
+    unrelated.write_bytes(b"ignore")
+
+    assert has_staged_cython_extension(tmp_path, source) is True
+    assert has_staged_cython_extension(tmp_path, tmp_path / "outside.py") is False
+    assert staged_cython_extensions(tmp_path) == [staged]
+
+
+def test_staged_app_overlay_excludes_protected_source_but_keeps_packages(tmp_path):
+    source_app = tmp_path / "app"
+    protected = source_app / "core" / "agent"
+    protected.mkdir(parents=True)
+    (source_app / "__init__.py").write_text("", encoding="utf-8")
+    (source_app / "public.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (protected / "__init__.py").write_text("", encoding="utf-8")
+    (protected / "secret.py").write_text("SECRET = 1\n", encoding="utf-8")
+    nested = protected / "plugins"
+    nested.mkdir()
+    (nested / "__init__.py").write_text("", encoding="utf-8")
+    (nested / "runtime.py").write_text("RUNTIME = 1\n", encoding="utf-8")
+
+    build_root = cython_build_root(tmp_path)
+    compiled = protected.relative_to(source_app)
+    staged_extension = build_root / "app" / compiled / "secret.cp311-win_amd64.pyd"
+    staged_extension.parent.mkdir(parents=True)
+    staged_extension.write_bytes(b"compiled")
+    nested_extension = (
+        staged_extension.parent
+        / "plugins"
+        / "runtime.cp311-win_amd64.pyd"
+    )
+    nested_extension.parent.mkdir()
+    nested_extension.write_bytes(b"compiled")
+
+    overlay = prepare_staged_app_overlay(
+        tmp_path,
+        build_root,
+        protected_dirs=("app/core/agent",),
+    )
+
+    assert (overlay / "__init__.py").is_file()
+    assert (overlay / "public.py").is_file()
+    assert (overlay / "core" / "agent" / "__init__.py").is_file()
+    assert not (overlay / "core" / "agent" / "secret.py").exists()
+    assert (overlay / "core" / "agent" / staged_extension.name).is_file()
+    assert (overlay / "core" / "agent" / "plugins" / "__init__.py").is_file()
+    assert not (overlay / "core" / "agent" / "plugins" / "runtime.py").exists()
+    assert (
+        overlay / "core" / "agent" / "plugins" / nested_extension.name
+    ).is_file()
 
 
 def test_koto_spec_deduplicates_hiddenimports_after_auto_discovery():
