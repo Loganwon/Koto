@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -86,6 +87,29 @@ class TestHealthHappyPath:
         # VERSION file exists in the repo; should not be "unknown"
         assert data["version"] != ""
         assert isinstance(data["version"], str)
+
+    @patch("web.routes.health._check_ollama", return_value={"status": "ok"})
+    @patch(
+        "web.routes.health._check_disk",
+        return_value={"status": "ok", "free_mb": 5000.0},
+    )
+    def test_launch_token_is_returned_only_to_owning_launcher(
+        self, _disk, _ollama, client
+    ):
+        with patch.dict(os.environ, {"KOTO_LAUNCH_TOKEN": "attempt-token"}):
+            ordinary = client.get("/api/health").get_json()
+            wrong = client.get(
+                "/api/health",
+                headers={"X-Koto-Launch-Token": "stale-token"},
+            ).get_json()
+            matching = client.get(
+                "/api/health",
+                headers={"X-Koto-Launch-Token": "attempt-token"},
+            ).get_json()
+
+        assert "launch_token" not in ordinary
+        assert "launch_token" not in wrong
+        assert matching["launch_token"] == "attempt-token"
 
 
 # ---------------------------------------------------------------------------

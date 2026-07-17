@@ -9,6 +9,7 @@ Koto 桌面应用 - 独立窗口版本
 """
 
 import faulthandler
+import hmac
 import logging
 import os
 import socket
@@ -279,6 +280,7 @@ def _start_backend_health_watchdog(
     expect_server_thread: bool = False,
     interval_sec: float | None = None,
     max_failures: int | None = None,
+    expected_launch_token: str | None = None,
 ):
     if not health_url:
         return None
@@ -316,7 +318,11 @@ def _start_backend_health_watchdog(
                 except Exception:
                     thread_alive = False
 
-            health_ok = _check_koto_health(health_url, timeout=min(interval, 0.5))
+            health_ok = _check_koto_health(
+                health_url,
+                timeout=min(interval, 0.5),
+                expected_launch_token=expected_launch_token,
+            )
             if health_ok and thread_alive:
                 consecutive_failures = 0
             else:
@@ -430,25 +436,41 @@ def _check_http_ok(url: str, timeout: float = 2.0) -> bool:
         return False
 
 
-def _check_koto_health(url: str, timeout: float = 2.0) -> bool:
+def _check_koto_health(
+    url: str,
+    timeout: float = 2.0,
+    *,
+    expected_launch_token: str | None = None,
+) -> bool:
     """Validate Koto's JSON health contract, not merely an HTTP 200 page."""
     try:
         import json
-        from urllib.request import ProxyHandler, build_opener
+        from urllib.request import ProxyHandler, Request, build_opener
 
         opener = build_opener(ProxyHandler({}))
-        with opener.open(url, timeout=max(float(timeout or 0), 0.05)) as resp:
+        request = (
+            Request(url, headers={"X-Koto-Launch-Token": expected_launch_token})
+            if expected_launch_token
+            else url
+        )
+        with opener.open(request, timeout=max(float(timeout or 0), 0.05)) as resp:
             if resp.status != 200:
                 return False
             payload = json.loads(resp.read().decode("utf-8"))
         if not isinstance(payload, dict):
             return False
         status = str(payload.get("status") or "").strip().lower()
-        return payload.get("success") is True or status in {
+        healthy = payload.get("success") is True or status in {
             "ok",
             "healthy",
             "degraded",
         }
+        if not healthy:
+            return False
+        if expected_launch_token:
+            actual_token = str(payload.get("launch_token") or "")
+            return hmac.compare_digest(actual_token, expected_launch_token)
+        return True
     except (OSError, ValueError, TypeError):
         return False
 
@@ -486,6 +508,7 @@ def _wait_for_koto_health(
     *,
     request_timeout: float = 0.5,
     poll_interval: float = 0.25,
+    expected_launch_token: str | None = None,
 ) -> bool:
     """Wait for the structured Koto health contract."""
     deadline = time.monotonic() + max(float(timeout_sec or 0), 0.0)
@@ -493,7 +516,11 @@ def _wait_for_koto_health(
     poll_interval = max(float(poll_interval or 0), 0.05)
     while time.monotonic() < deadline:
         remaining = deadline - time.monotonic()
-        if _check_koto_health(url, timeout=min(request_timeout, remaining)):
+        if _check_koto_health(
+            url,
+            timeout=min(request_timeout, remaining),
+            expected_launch_token=expected_launch_token,
+        ):
             return True
         time.sleep(min(poll_interval, max(deadline - time.monotonic(), 0.0)))
     return False
@@ -510,6 +537,31 @@ def _find_available_port(host: str, start_port: int, max_tries: int = 20) -> int
         except Exception:
             continue
     return None
+
+
+def _find_startup_status_port(backend_port: int) -> int | None:
+    """Pick a status-page port that can never race the pending backend bind."""
+    return _find_available_port(KOTO_HOST, max(FALLBACK_PORT, backend_port + 1))
+
+
+def _publish_startup_port(port: int) -> None:
+    """Atomically report the effective backend port to the outer launcher."""
+    raw_path = os.environ.get("KOTO_STARTUP_PORT_FILE", "").strip()
+    if not raw_path:
+        return
+    port_file = Path(raw_path)
+    temp_file = port_file.with_name(f"{port_file.name}.{os.getpid()}.tmp")
+    try:
+        port_file.parent.mkdir(parents=True, exist_ok=True)
+        temp_file.write_text(str(port), encoding="ascii")
+        os.replace(temp_file, port_file)
+        _write_log(f"ℹ️ 已向启动器报告实际后端端口: {port}")
+    except Exception as exc:
+        _write_log(f"⚠️ 无法向启动器报告实际端口: {exc}")
+        try:
+            temp_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def ensure_directories():
@@ -914,6 +966,8 @@ def start_flask_server():
     except Exception as exc:
         _write_log(f"⚠️ 检查端口状态失败，继续尝试启动: {exc}")
 
+    _publish_startup_port(KOTO_PORT)
+
     server_info = {
         "started": True,
         "already_running": False,
@@ -985,13 +1039,21 @@ def start_flask_server():
     return server_info
 
 
-def _startup_status_provider(server_info: dict, backend_url: str):
+def _startup_status_provider(
+    server_info: dict,
+    backend_url: str,
+    expected_launch_token: str | None = None,
+):
     """Build a pollable status provider for the startup window."""
     health_url = f"{backend_url}/api/health"
     started_at = float(server_info.get("started_at") or time.monotonic())
 
     def provide():
-        if _check_koto_health(health_url, timeout=0.4):
+        if _check_koto_health(
+            health_url,
+            timeout=0.4,
+            expected_launch_token=expected_launch_token,
+        ):
             server_info["phase"] = "ready"
             return {"status": "ready", "phase": "ready", "target_url": backend_url}
 
@@ -1051,6 +1113,7 @@ def _start_startup_status_server(
     *,
     backend_url: str,
     server_info: dict,
+    expected_launch_token: str | None = None,
 ):
     try:
         try:
@@ -1064,7 +1127,11 @@ def _start_startup_status_server(
             app_root=APP_ROOT,
             bundle_dir=BUNDLE_DIR,
             backend_url=backend_url,
-            status_provider=_startup_status_provider(server_info, backend_url),
+            status_provider=_startup_status_provider(
+                server_info,
+                backend_url,
+                expected_launch_token,
+            ),
             restart=_restart_current_process,
             log=_write_log,
         )
@@ -1265,11 +1332,13 @@ def main():
 
     backend_app_url = f"http://{KOTO_HOST}:{KOTO_PORT}"
     health_url = f"{backend_app_url}/api/health"
+    launch_token = os.environ.get("KOTO_LAUNCH_TOKEN", "").strip() or None
     backend_ready = _wait_for_koto_health(
         health_url,
         STARTUP_FAST_READY_SEC,
         request_timeout=0.4,
         poll_interval=0.2,
+        expected_launch_token=launch_token,
     )
     app_url = backend_app_url
 
@@ -1278,7 +1347,7 @@ def main():
     else:
         # Slow clean machines should see a live loading page instead of a false
         # 25-second failure. The page keeps polling and redirects when healthy.
-        status_port = _find_available_port(KOTO_HOST, FALLBACK_PORT)
+        status_port = _find_startup_status_port(KOTO_PORT)
         if status_port is not None:
             status_url = f"http://{KOTO_HOST}:{status_port}"
             threading.Thread(
@@ -1287,6 +1356,7 @@ def main():
                     "port": status_port,
                     "backend_url": backend_app_url,
                     "server_info": server_info,
+                    "expected_launch_token": launch_token,
                 },
                 name="KotoStartupStatus",
                 daemon=True,
@@ -1404,22 +1474,26 @@ def main():
             health_url,
             server_thread=server_info.get("thread"),
             expect_server_thread=bool(server_info.get("started")),
+            expected_launch_token=launch_token,
         )
         _write_log("✔ 后端健康守护已启动")
     elif backend_ready:
         _write_log("ℹ️ 后端健康守护默认关闭，避免任务流期间误判自恢复")
     elif _backend_watchdog_enabled():
+
         def _deferred_watchdog():
             if _wait_for_koto_health(
                 health_url,
                 STARTUP_HARD_TIMEOUT_SEC + 60.0,
                 request_timeout=0.5,
                 poll_interval=0.5,
+                expected_launch_token=launch_token,
             ):
                 _start_backend_health_watchdog(
                     health_url,
                     server_thread=server_info.get("thread"),
                     expect_server_thread=bool(server_info.get("started")),
+                    expected_launch_token=launch_token,
                 )
                 _write_log("✔ 延迟后端健康守护已启动")
 

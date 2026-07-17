@@ -136,20 +136,37 @@ function Test-PortFree {
 }
 
 function Test-KotoHealth {
-    param([int]$Port)
+    param(
+        [int]$Port,
+        [string]$LaunchToken = ""
+    )
 
     try {
-        $response = Invoke-RestMethod `
-            -Uri "http://127.0.0.1:$Port/api/health" `
-            -TimeoutSec 2 `
-            -ErrorAction Stop
+        $request = @{
+            Uri = "http://127.0.0.1:$Port/api/health"
+            TimeoutSec = 2
+            ErrorAction = "Stop"
+        }
+        if (-not [string]::IsNullOrWhiteSpace($LaunchToken)) {
+            $request.Headers = @{ "X-Koto-Launch-Token" = $LaunchToken }
+        }
+        $response = Invoke-RestMethod @request
         # A recovery page can also return HTTP 200.  Treat startup as healthy
         # only when the endpoint responds with Koto's expected JSON contract.
         if ($response -is [string] -or $null -eq $response) {
             return $false
         }
         $status = [string]$response.status
-        return $status -in @("healthy", "degraded")
+        if ($status -notin @("healthy", "degraded")) {
+            return $false
+        }
+        if (-not [string]::IsNullOrWhiteSpace($LaunchToken)) {
+            if ($response.PSObject.Properties.Name -notcontains "launch_token") {
+                return $false
+            }
+            return [string]$response.launch_token -eq $LaunchToken
+        }
+        return $true
     } catch {
         return $false
     }
@@ -443,6 +460,10 @@ function Start-KotoApp {
     $backoffSec  = 3
 
     while ($true) {
+        $launchToken = [Guid]::NewGuid().ToString("N")
+        $startupPortFile = Join-Path $LOG_DIR "startup-port-$launchToken.txt"
+        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
+
         Write-Log "INFO" "============================================"
         $entryKind = if ($Mode -eq "server") { "开发调试服务器" } else { "统一桌面入口" }
         Write-Log "INFO" "启动 Koto  入口=$entryKind  模式=$Mode  端口=$Port  重试=$retryCount"
@@ -462,6 +483,8 @@ function Start-KotoApp {
 
         # 环境变量透传
         $env:KOTO_PORT = "$Port"
+        $env:KOTO_LAUNCH_TOKEN = $launchToken
+        $env:KOTO_STARTUP_PORT_FILE = $startupPortFile
         $env:KOTO_DISABLE_LEGACY_VOICE = "1"
         $env:KOTO_DISABLE_BROWSER_AUTOMATION = "1"
         if ($Mode -eq "server") { $env:KOTO_DEPLOY_MODE = "local" }
@@ -518,8 +541,26 @@ function Start-KotoApp {
                     # unusable and used to be reported as a successful startup.
                     $healthDeadline = (Get-Date).AddSeconds(15)
                     $backendHealthy = $false
+                    $probePort = $Port
                     while ((Get-Date) -lt $healthDeadline -and -not $proc.HasExited) {
-                        if (Test-KotoHealth -Port $Port) {
+                        if ($Mode -eq "desktop" -and (Test-Path $startupPortFile)) {
+                            try {
+                                $reportedText = (Get-Content -Path $startupPortFile -Raw -ErrorAction Stop).Trim()
+                                $reportedPort = 0
+                                if (
+                                    [int]::TryParse($reportedText, [ref]$reportedPort) -and
+                                    $reportedPort -ge 1 -and
+                                    $reportedPort -le 65535
+                                ) {
+                                    if ($probePort -ne $reportedPort) {
+                                        Write-Log "INFO" "桌面进程将实际后端端口调整为 $reportedPort；启动器同步探测目标。"
+                                    }
+                                    $probePort = $reportedPort
+                                    $Port = $reportedPort
+                                }
+                            } catch { }
+                        }
+                        if (Test-KotoHealth -Port $probePort -LaunchToken $launchToken) {
                             $backendHealthy = $true
                             break
                         }
@@ -527,12 +568,13 @@ function Start-KotoApp {
                     }
 
                     if (-not $backendHealthy) {
-                        Write-Log "WARN" "桌面进程仍在运行，但 /api/health 在 15 秒内未就绪；按启动失败处理。"
+                        Write-Log "WARN" "桌面进程仍在运行，但本次实例的 /api/health 在端口 $probePort 上 15 秒内未就绪；按启动失败处理。"
                         Stop-KotoProcessTree -ProcessId $proc.Id
                         $proc.WaitForExit(2000) | Out-Null
                     }
 
                     if ($backendHealthy) {
+                        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
                         # 桌面模式：窗口进程与后端健康，启动器立即退出（Koto 继续运行）
                         Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
                         Set-Content -Path $LOCK_FILE -Value "$($proc.Id)" -Encoding ASCII
@@ -558,6 +600,7 @@ function Start-KotoApp {
 
         # 清理锁文件
         Remove-Item $LOCK_FILE -Force -ErrorAction SilentlyContinue
+        Remove-Item $startupPortFile -Force -ErrorAction SilentlyContinue
 
         # 重试判断
         if ($NoAutoRestart) {

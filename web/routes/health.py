@@ -8,6 +8,7 @@ used by Docker healthchecks and container orchestrators.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import shutil
@@ -16,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger(__name__)
 
@@ -150,6 +151,17 @@ def health():
             "checks": checks,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        launch_token = os.getenv("KOTO_LAUNCH_TOKEN", "").strip()
+        presented_token = request.headers.get("X-Koto-Launch-Token", "").strip()
+        if (
+            launch_token
+            and presented_token
+            and hmac.compare_digest(launch_token, presented_token)
+        ):
+            # Return the token only to the launcher that already knows it. This
+            # proves the response belongs to the process started in this launch
+            # attempt without exposing the token to ordinary health clients.
+            payload["launch_token"] = launch_token
         code = 200 if status != "unhealthy" else 503
         return jsonify(payload), code
     except Exception:

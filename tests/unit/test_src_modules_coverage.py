@@ -933,6 +933,37 @@ class TestKotoApp:
         with patch("urllib.request.build_opener", return_value=mock_opener):
             assert mod._check_koto_health("http://127.0.0.1:5000/api/health") is True
 
+    def test_check_koto_health_requires_matching_launch_proof(self):
+        mod = self._import_module()
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = (
+            b'{"status":"healthy","launch_token":"attempt-token"}'
+        )
+        mock_resp.__enter__ = Mock(return_value=mock_resp)
+        mock_resp.__exit__ = Mock(return_value=False)
+        mock_opener = MagicMock()
+        mock_opener.open.return_value = mock_resp
+
+        with patch("urllib.request.build_opener", return_value=mock_opener):
+            assert (
+                mod._check_koto_health(
+                    "http://127.0.0.1:5000/api/health",
+                    expected_launch_token="attempt-token",
+                )
+                is True
+            )
+            assert (
+                mod._check_koto_health(
+                    "http://127.0.0.1:5000/api/health",
+                    expected_launch_token="stale-token",
+                )
+                is False
+            )
+
+        request = mock_opener.open.call_args_list[0].args[0]
+        assert request.get_header("X-koto-launch-token") == "attempt-token"
+
     def test_stale_port_cleanup_never_kills_unrelated_pythonw(self, tmp_path):
         mod = self._import_module()
         original_root = mod.APP_ROOT
@@ -1181,6 +1212,30 @@ class TestKotoApp:
             sock.connect_ex.return_value = 0  # all in use
             mock_cls.return_value = sock
             assert mod._find_available_port("127.0.0.1", 5000, max_tries=3) is None
+
+    def test_startup_status_port_never_reuses_pending_backend_port(self):
+        mod = self._import_module()
+        original_fallback = mod.FALLBACK_PORT
+        try:
+            mod.FALLBACK_PORT = 5001
+            with patch.object(mod, "_find_available_port", return_value=5002) as find:
+                assert mod._find_startup_status_port(5001) == 5002
+            find.assert_called_once_with("127.0.0.1", 5002)
+        finally:
+            mod.FALLBACK_PORT = original_fallback
+
+    def test_publish_startup_port_reports_effective_port_atomically(self, tmp_path):
+        mod = self._import_module()
+        port_file = tmp_path / "startup-port.txt"
+        with patch.dict(
+            os.environ,
+            {"KOTO_STARTUP_PORT_FILE": str(port_file)},
+            clear=False,
+        ), patch.object(mod, "_write_log"):
+            mod._publish_startup_port(5007)
+
+        assert port_file.read_text(encoding="ascii") == "5007"
+        assert list(tmp_path.glob("*.tmp")) == []
 
     # -- ensure_directories ------------------------------------------------
 
