@@ -1,5 +1,13 @@
 # Shared process helpers for installer and portable release validation.
 
+function Test-KotoHealthResponse {
+    param([Parameter(Mandatory = $true)]$Response)
+
+    if ($Response.success -eq $true) { return $true }
+    $status = [string]$Response.status
+    return $status.Trim().ToLowerInvariant() -in @("ok", "healthy", "degraded")
+}
+
 function Start-KotoWithoutDeveloperEnvironment {
     param(
         [Parameter(Mandatory = $true)][string]$ExePath,

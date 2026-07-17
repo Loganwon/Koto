@@ -344,7 +344,7 @@ while ((Get-Date) -lt $deadline) {
     }
     try {
         $resp = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3 -ErrorAction Stop
-        if ($resp.success -eq $true -or $resp.status -eq "ok" -or $resp.status -eq "healthy") {
+        if (Test-KotoHealthResponse -Response $resp) {
             $healthy = $true
             Pass "/api/health returned success"
             break
@@ -353,17 +353,6 @@ while ((Get-Date) -lt $deadline) {
         # Not up yet — keep polling
     }
     Start-Sleep -Milliseconds 1000
-}
-
-if (-not $healthy -and -not $kotoProc.HasExited) {
-    # Try raw status code as a fallback (health endpoint may return 200 without 'success' key)
-    try {
-        $raw = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
-        if ($raw.StatusCode -eq 200) {
-            $healthy = $true
-            Pass "/api/health returned HTTP 200 (raw)"
-        }
-    } catch {}
 }
 
 if (-not $healthy) {

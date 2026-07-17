@@ -360,7 +360,13 @@ def test_release_e2e_runs_the_real_desktop_startup_path():
     assert '"VIRTUAL_ENV"' in helpers
     assert '"NODE_PATH"' in helpers
     assert '"JAVA_HOME"' in helpers
+    assert "function Test-KotoHealthResponse" in helpers
+    assert '"ok", "healthy", "degraded"' in helpers
     assert "Refusing to replace an existing Koto registration" in installer_e2e
+    for source in (installer_e2e, portable_e2e):
+        assert "Test-KotoHealthResponse -Response $resp" in source
+        assert "accept any 200" not in source
+        assert "returned HTTP 200 (raw)" not in source
 
 
 def test_windows_sandbox_release_requires_desktop_evidence():

@@ -201,15 +201,8 @@ while ((Get-Date) -lt $deadline) {
     }
     try {
         $resp = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3 -ErrorAction Stop
-        if ($resp.success -eq $true -or $resp.status -eq "ok" -or $resp.status -eq "healthy") {
+        if (Test-KotoHealthResponse -Response $resp) {
             $healthy = $true; Pass "/api/health returned success"; break
-        }
-    } catch {}
-    # Fallback: accept any 200
-    try {
-        $raw = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
-        if ($raw.StatusCode -eq 200) {
-            $healthy = $true; Pass "/api/health HTTP 200"; break
         }
     } catch {}
     Start-Sleep -Milliseconds 1000
