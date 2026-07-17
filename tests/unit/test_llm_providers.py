@@ -205,13 +205,13 @@ class TestDeepSeekProvider:
     def test_cloud_provider_defaults_to_deepseek_for_text_tasks(self, monkeypatch):
         monkeypatch.delenv("KOTO_CLOUD_PROVIDER", raising=False)
         monkeypatch.delenv("KOTO_LLM_PROVIDER", raising=False)
-        import web.settings as web_settings
+        import app.core.config.user_settings as user_settings
 
         class FakeSettings:
             def get(self, *_args, **_kwargs):
                 return ""
 
-        monkeypatch.setattr(web_settings, "SettingsManager", lambda: FakeSettings())
+        monkeypatch.setattr(user_settings, "SettingsManager", lambda: FakeSettings())
         from app.core.llm.model_selection import (
             get_configured_cloud_model,
             get_provider_for_model_mode,

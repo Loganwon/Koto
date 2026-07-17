@@ -414,7 +414,7 @@ hiddenimports = [
     'web.ppt_session_manager', 
     'web.proactive_dialogue', 'web.proactive_trigger',
     'web.processed_file_network', 'web.prompt_adapter', 
-    'web.reminder_manager', 'web.settings',
+    'web.reminder_manager',
     'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
     'web.suggestion_engine',
     'web.task_dispatcher', 'web.task_scheduler', 'web.template_library',

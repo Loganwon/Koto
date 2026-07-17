@@ -243,7 +243,7 @@ class EditorQuickActionExecutor:
         if normalized_mode == "cloud":
             return False
         try:
-            from web.settings import SettingsManager
+            from app.core.config.user_settings import SettingsManager
 
             return bool(SettingsManager().get("ai", "use_local_only"))
         except Exception:

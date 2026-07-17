@@ -35,7 +35,7 @@ _COMPATIBILITY_MODULES = (
     "app.core.services.model_manager",
     "app.core.analytics.token_tracker",
     "app.core.services.notification_manager",
-    "web.settings",
+    "app.core.config.user_settings",
     "app.core.services.knowledge_base",
 )
 

@@ -46,7 +46,7 @@ def get_configured_cloud_provider(default: str = DEFAULT_CLOUD_PROVIDER) -> str:
     if env_provider:
         return normalize_cloud_provider(env_provider, default=default)
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
 
         configured = SettingsManager().get("ai", "cloud_provider")
         return normalize_cloud_provider(configured, default=default)
@@ -83,7 +83,7 @@ def get_configured_cloud_model(
         return env_model.strip()
 
     try:
-        from web.settings import SettingsManager
+        from app.core.config.user_settings import SettingsManager
 
         settings = SettingsManager()
         configured = settings.get("ai", f"{provider_name}_model") or settings.get(

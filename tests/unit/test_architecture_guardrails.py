@@ -220,6 +220,20 @@ def test_ppt_image_management_is_core_owned():
     assert not (ROOT / "web" / "image_manager.py").exists()
 
 
+def test_settings_manager_is_core_owned_without_web_import_alias():
+    model_selection = _read(ROOT / "app" / "core" / "llm" / "model_selection.py")
+    server = _read(ROOT / "src" / "server.py")
+    diagnostics = _read(ROOT / "src" / "startup_diagnostics.py")
+    spec = _read(ROOT / "koto.spec")
+
+    expected_import = "from app.core.config.user_settings import SettingsManager"
+    assert expected_import in model_selection
+    assert expected_import in server
+    assert '"app.core.config.user_settings",' in diagnostics
+    assert "'web.settings'" not in spec
+    assert not (ROOT / "web" / "settings.py").exists()
+
+
 def test_web_app_keeps_executable_lifecycle_outside_application_factory():
     """Importing the Flask module must not also own process lifecycle code."""
     source = _read(WEB_APP)
