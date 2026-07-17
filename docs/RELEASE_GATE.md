@@ -50,8 +50,13 @@ the UI, observe progress, and verify the produced artifact.
 ```
 
 The script builds the frontend, PyInstaller application, portable package,
-release manifest, and installer. Run the installer and portable E2E checks
-against the generated artifacts when they are not already supplied by CI:
+release manifest, and installer. It also downloads Microsoft's x64 Evergreen
+WebView2 standalone installer, accepts it only with a valid Microsoft
+Authenticode signature, and carries it in both Windows artifacts. This lets a
+clean Windows 10/11 x64 account start without a preinstalled WebView2 Runtime.
+
+Run the installer and portable E2E checks against the generated artifacts when
+they are not already supplied by CI:
 
 ```powershell
 tests\installer\test_installer_e2e.ps1

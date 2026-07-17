@@ -854,15 +854,60 @@ def _prompt_local_model_if_needed():
         pass
 
 
+def _write_prerequisite_log(message: str) -> None:
+    try:
+        log_path = APP_ROOT / "logs" / "startup_prerequisites.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        with log_path.open("a", encoding="utf-8") as handle:
+            handle.write(message.rstrip() + "\n")
+    except OSError:
+        pass
+
+
+def _ensure_desktop_runtime() -> bool:
+    """Install packaged desktop prerequisites before pywebview is imported."""
+    try:
+        from src.webview2_runtime import ensure_webview2_runtime
+    except ImportError:
+        from webview2_runtime import ensure_webview2_runtime
+
+    ok, detail = ensure_webview2_runtime(APP_ROOT, log=_write_prerequisite_log)
+    if ok:
+        return True
+
+    message = (
+        "Koto 需要 Microsoft WebView2 Runtime 来显示桌面界面。\n\n"
+        f"自动安装未完成：{detail}\n\n"
+        "请重新运行安装包，或双击安装目录中的 "
+        "Install_WebView2_Runtime.bat 后再启动 Koto。\n\n"
+        f"诊断日志：{APP_ROOT / 'logs' / 'startup_prerequisites.log'}"
+    )
+    _write_prerequisite_log("ERROR: " + detail)
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror("Koto 启动依赖缺失", message)
+        root.destroy()
+    except Exception:
+        pass
+    return False
+
+
 # ── 主程序入口 ────────────────────────────────────────
 def main():
     # In server-only mode, skip all interactive setup and go straight to app
     if os.environ.get("KOTO_SERVER_ONLY") != "1":
-        # Step 1: 首次必须选择云端 API 或本地模型；未完成则不启动空壳应用。
+        # Step 1: 安装版/便携版自行补齐界面运行时，不依赖用户环境。
+        if not _ensure_desktop_runtime():
+            return
+        # Step 2: 首次必须选择云端 API 或本地模型；未完成则不启动空壳应用。
         if not _run_setup_if_needed():
             return
 
-    # Step 2: 启动 Koto 桌面程序
+    # Step 3: 启动 Koto 桌面程序
     # 兼容 src/ 布局：先找项目根，再找 src/ 子目录
     koto_main_path = BUNDLE_DIR / "koto_app.py"
     if not koto_main_path.exists():

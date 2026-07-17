@@ -17,6 +17,7 @@
 #define AppURL       "https://github.com/Loganwon/Koto"
 #define AppExeName   "Koto.exe"
 #define SourceDir    "dist\Koto_Portable"
+#define WebView2Installer "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 
 [Setup]
 ; ── AppId 必须固定，Inno Setup 用它识别"同一个程序"以支持升级覆盖安装 ──
@@ -89,6 +90,9 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
+; Windows 10 clean images may not carry the Evergreen Runtime. The portable
+; payload contains Microsoft's signed offline installer, so setup can repair it.
+Filename: "{app}\{#WebView2Installer}"; Parameters: "/silent /install"; StatusMsg: "正在准备 Koto 桌面界面运行时…"; Flags: runhidden waituntilterminated; Check: WebView2RuntimeMissing
 ; 安装完成后可选"立即启动 Koto"
 Filename: "{app}\{#AppExeName}"; Description: "立即启动 Koto"; Flags: nowait postinstall skipifsilent
 ; 如勾选"安装本地 AI 模型助手"则在安装完成后自动打开模型安装向导
@@ -97,3 +101,28 @@ Filename: "{app}\LocalModelInstaller.exe"; Description: "正在启动本地模�
 [UninstallDelete]
 ; 卸载时删除日志（config/ workspace/ chats/ 等用户数据保留）
 Type: filesandordirs; Name: "{app}\logs"
+
+[Code]
+const
+  WebView2ClientKey = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function IsUsableWebView2Version(const Version: String): Boolean;
+begin
+  Result := (Trim(Version) <> '') and (Trim(Version) <> '0.0.0.0');
+end;
+
+function WebView2RuntimeMissing: Boolean;
+var
+  Version: String;
+begin
+  Result := True;
+  if RegQueryStringValue(HKLM32, WebView2ClientKey, 'pv', Version) and
+     IsUsableWebView2Version(Version) then
+  begin
+    Result := False;
+    exit;
+  end;
+  if RegQueryStringValue(HKCU, WebView2ClientKey, 'pv', Version) and
+     IsUsableWebView2Version(Version) then
+    Result := False;
+end;

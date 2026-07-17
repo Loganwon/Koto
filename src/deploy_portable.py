@@ -20,6 +20,9 @@ RELEASE_ROOT_ENTRIES = (
     "Koto.exe",
     "_internal",
 )
+WEBVIEW2_INSTALLER_NAME = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+WEBVIEW2_METADATA_NAME = "webview2-runtime.json"
+WEBVIEW2_PREREQUISITE_DIR = ROOT / "build" / "prerequisites"
 REQUIRED_CONFIG_DIRS = (
     "context",
     "divination_data",
@@ -49,6 +52,8 @@ PORTABLE_README = """Koto Windows 便携版
 - Koto.exe: 主程序
 - Start_Koto.bat: 推荐启动入口
 - Stop_Koto.bat: 关闭 Koto
+- MicrosoftEdgeWebView2RuntimeInstallerX64.exe: 微软官方离线界面运行时（缺失时自动安装）
+- Install_WebView2_Runtime.bat: 手动修复界面运行时
 - Install_Local_Model.bat: 本地模型安装入口
 - LocalModelInstaller.exe: 独立本地模型安装器
 
@@ -64,6 +69,11 @@ def find_local_installer() -> Path | None:
         if candidate.exists():
             return candidate
     return None
+
+
+def find_webview2_installer() -> Path | None:
+    candidate = WEBVIEW2_PREREQUISITE_DIR / WEBVIEW2_INSTALLER_NAME
+    return candidate if candidate.is_file() else None
 
 
 def _handle_remove_error(func, path, exc_info) -> None:
@@ -98,7 +108,11 @@ def ensure_required_config_dirs(config_root: Path) -> None:
         (config_root / dir_name).mkdir(parents=True, exist_ok=True)
 
 
-def create_launchers(output_dir: Path, include_installer: bool) -> None:
+def create_launchers(
+    output_dir: Path,
+    include_installer: bool,
+    include_webview2_installer: bool,
+) -> None:
     write_text(
         output_dir / "Start_Koto.bat",
         "@echo off\n"
@@ -140,8 +154,32 @@ def create_launchers(output_dir: Path, include_installer: bool) -> None:
         )
     write_text(output_dir / "Install_Local_Model.bat", install_content)
 
+    if include_webview2_installer:
+        webview2_content = (
+            "@echo off\n"
+            "setlocal\n"
+            'cd /d "%~dp0"\n'
+            f'"%~dp0{WEBVIEW2_INSTALLER_NAME}" /silent /install\n'
+            "if errorlevel 1 (\n"
+            "  echo [ERROR] WebView2 Runtime installation failed.\n"
+            "  pause\n"
+            ")\n"
+            "endlocal\n"
+        )
+    else:
+        webview2_content = (
+            "@echo off\n"
+            "echo [ERROR] This development bundle does not include the WebView2 Runtime installer.\n"
+            "pause\n"
+        )
+    write_text(output_dir / "Install_WebView2_Runtime.bat", webview2_content)
 
-def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
+
+def build_portable_bundle(
+    output_dir: Path,
+    strict_installer: bool,
+    strict_webview2: bool,
+) -> None:
     if not APP_BUILD_DIR.exists():
         raise FileNotFoundError(f"未找到主程序构建目录: {APP_BUILD_DIR}")
 
@@ -149,6 +187,12 @@ def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
     if strict_installer and installer_path is None:
         raise FileNotFoundError(
             "未找到 LocalModelInstaller.exe，请先构建本地模型安装器"
+        )
+    webview2_installer = find_webview2_installer()
+    if strict_webview2 and webview2_installer is None:
+        raise FileNotFoundError(
+            "未找到微软 WebView2 离线运行时；请先运行 "
+            "scripts/prepare_webview2_runtime.ps1"
         )
 
     ensure_clean_output(output_dir)
@@ -168,7 +212,17 @@ def build_portable_bundle(output_dir: Path, strict_installer: bool) -> None:
     if installer_path is not None:
         shutil.copy2(installer_path, output_dir / "LocalModelInstaller.exe")
 
-    create_launchers(output_dir, installer_path is not None)
+    if webview2_installer is not None:
+        shutil.copy2(webview2_installer, output_dir / WEBVIEW2_INSTALLER_NAME)
+        metadata = WEBVIEW2_PREREQUISITE_DIR / WEBVIEW2_METADATA_NAME
+        if metadata.is_file():
+            shutil.copy2(metadata, output_dir / WEBVIEW2_METADATA_NAME)
+
+    create_launchers(
+        output_dir,
+        installer_path is not None,
+        webview2_installer is not None,
+    )
     write_text(output_dir / "README_便携版.txt", PORTABLE_README)
 
     docs_src = ROOT / "docs" / "PORTABLE_RELEASE_GUIDE.md"
@@ -188,10 +242,19 @@ def main() -> None:
         action="store_true",
         help="允许在缺少 LocalModelInstaller.exe 时继续组装",
     )
+    parser.add_argument(
+        "--allow-missing-webview2-runtime",
+        action="store_true",
+        help="仅开发诊断：允许缺少微软 WebView2 离线运行时",
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output).resolve()
-    build_portable_bundle(output_dir, strict_installer=not args.allow_missing_installer)
+    build_portable_bundle(
+        output_dir,
+        strict_installer=not args.allow_missing_installer,
+        strict_webview2=not args.allow_missing_webview2_runtime,
+    )
 
     print(f"✅ 便携包已生成: {output_dir}")
     print("建议将该目录压缩为 zip 后发送给 Windows 用户。")

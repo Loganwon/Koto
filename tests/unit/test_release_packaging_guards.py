@@ -308,6 +308,33 @@ def test_installer_smoke_runs_without_competing_for_desktop_instance_lock():
         assert "server-only mode" in source
 
 
+def test_release_carries_and_verifies_offline_webview2_runtime():
+    build = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    deploy = Path("src/deploy_portable.py").read_text(encoding="utf-8")
+    installer = Path("koto_installer.iss").read_text(encoding="utf-8")
+    prepare = Path("scripts/prepare_webview2_runtime.ps1").read_text(
+        encoding="utf-8"
+    )
+    workflows = (
+        Path(".github/workflows/build.yml").read_text(encoding="utf-8"),
+        Path(".github/workflows/release.yml").read_text(encoding="utf-8"),
+    )
+
+    runtime_name = "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+    assert runtime_name in build
+    assert runtime_name in deploy
+    assert runtime_name in installer
+    assert runtime_name in prepare
+    assert "Get-AuthenticodeSignature" in prepare
+    assert "Microsoft Corporation" in prepare
+    assert "linkid=2124701" in prepare
+    assert "WebView2RuntimeMissing" in installer
+    assert 'Parameters: "/silent /install"' in installer
+    assert "Test-PackagedRuntimePrerequisites" in build
+    for workflow in workflows:
+        assert ".\\scripts\\prepare_webview2_runtime.ps1" in workflow
+
+
 def test_release_e2e_uses_available_loopback_ports():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(

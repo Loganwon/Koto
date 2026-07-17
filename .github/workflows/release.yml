@@ -301,6 +301,8 @@ jobs:
         env:
           PYTHONIOENCODING: utf-8
         run: |
+          .\scripts\prepare_webview2_runtime.ps1
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::WebView2 prerequisite preparation failed"; exit 1 }
           .\.venv\Scripts\python.exe src\deploy_portable.py
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::deploy_portable.py failed"; exit 1 }
           Write-Host "Portable bundle ready -> dist\Koto_Portable\"

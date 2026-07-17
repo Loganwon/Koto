@@ -43,6 +43,7 @@ $SPEC_FILE  = Join-Path $REPO_ROOT "koto.spec"
 $LOCAL_INSTALLER_SPEC = Join-Path $REPO_ROOT "local_model_installer.spec"
 $MANIFEST_WRITER = Join-Path $REPO_ROOT "scripts\write_release_manifest.py"
 $CYTHON_CLEANUP = Join-Path $REPO_ROOT "scripts\clean_inplace_cython_artifacts.py"
+$WEBVIEW2_PREPARE = Join-Path $REPO_ROOT "scripts\prepare_webview2_runtime.ps1"
 
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
@@ -82,6 +83,33 @@ function Get-GitWorktreeFingerprint {
     } finally {
         $sha.Dispose()
     }
+}
+
+function Test-PackagedRuntimePrerequisites {
+    param([Parameter(Mandatory = $true)][string]$PackageRoot)
+
+    $required = @(
+        (Join-Path $PackageRoot "Koto.exe"),
+        (Join-Path $PackageRoot "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
+        (Join-Path $PackageRoot "Install_WebView2_Runtime.bat"),
+        (Join-Path $PackageRoot "_internal\python311.dll"),
+        (Join-Path $PackageRoot "_internal\VCRUNTIME140.dll")
+    )
+    $missing = @($required | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($missing.Count -gt 0) {
+        Write-Fail "便携包缺少零环境启动依赖：$($missing -join ', ')"
+        exit 1
+    }
+
+    $runtimeInstaller = Join-Path $PackageRoot "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+    $signature = Get-AuthenticodeSignature -LiteralPath $runtimeInstaller
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+        Write-Fail "包内 WebView2 离线安装器未通过 Microsoft Authenticode 校验。"
+        exit 1
+    }
+    Write-OK "零环境启动依赖完整（Python、VC Runtime、Microsoft WebView2）"
 }
 
 function Invoke-CmdLogged {
@@ -414,6 +442,15 @@ if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+\-]*$') {
 }
 Write-OK "版本号: $Version"
 
+# 发布包携带微软官方 x64 Evergreen 离线运行时。已有且签名有效时不会重复下载。
+Write-Step "准备零环境桌面运行时（Microsoft WebView2）"
+$webView2Installer = & $WEBVIEW2_PREPARE | Select-Object -Last 1
+if (-not $webView2Installer -or -not (Test-Path -LiteralPath $webView2Installer)) {
+    Write-Fail "WebView2 离线运行时准备失败。"
+    exit 1
+}
+Write-OK "WebView2 离线运行时已验证"
+
 # ─── 步骤 0：Cython 编译（保护核心模块 + _license key）────
 if ($SkipCython) {
     Write-Step "步骤 0/5  跳过 Cython 编译（-SkipCython）"
@@ -549,6 +586,7 @@ Test-PackagedFrontendParity -SourceWebRoot $webDir -PackagedWebRoot (Join-Path $
 Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
+Test-PackagedRuntimePrerequisites -PackageRoot (Join-Path $DIST_DIR "Koto_Portable")
 
 # ─── 步骤 4：构建 Inno Setup 安装包 ─────────────────────
 Write-Step "步骤 4/5  构建安装包（Inno Setup）"
