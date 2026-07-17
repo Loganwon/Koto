@@ -43,7 +43,10 @@ def get_chat_system_instruction(question: str = None):
     # 获取系统信息（如果可用）
     system_info_section = ""
     try:
-        from web.system_info import get_formatted_system_info, get_system_warnings
+        from app.core.services.system_info import (
+            get_formatted_system_info,
+            get_system_warnings,
+        )
 
         formatted_info = get_formatted_system_info(include_processes=False)
         warnings = get_system_warnings()

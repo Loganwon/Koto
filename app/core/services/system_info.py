@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-🖥️ Koto 系统信息收集器
+🖥️ Koto Core 系统信息收集器
 
 这个模块负责收集和管理主机系统的各种信息，
 使 Koto 能够像真正的本地助手一样，理解用户的计算环境。

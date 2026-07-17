@@ -416,7 +416,7 @@ hiddenimports = [
     'web.processed_file_network', 'web.prompt_adapter', 
     'web.reminder_manager', 'web.settings',
     'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
-    'web.suggestion_engine', 'web.system_info',
+    'web.suggestion_engine',
     'web.task_dispatcher', 'web.task_scheduler', 'web.template_library',
     'web.track_changes_editor',
     'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',

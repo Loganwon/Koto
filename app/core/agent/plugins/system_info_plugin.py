@@ -11,7 +11,7 @@ import json
 from typing import Any, Dict, List
 
 from app.core.agent.base import AgentPlugin
-from web.system_info import get_system_info_collector
+from app.core.services.system_info import get_system_info_collector
 
 
 class SystemInfoPlugin(AgentPlugin):

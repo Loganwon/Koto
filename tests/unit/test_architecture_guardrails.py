@@ -177,6 +177,35 @@ def test_memory_tools_plugin_uses_the_application_context_owner_directly():
     assert "EnhancedMemoryManager()" not in source
 
 
+def test_system_info_service_is_core_owned_without_web_compatibility_alias():
+    performance_plugin = _read(
+        ROOT
+        / "app"
+        / "core"
+        / "agent"
+        / "plugins"
+        / "performance_analysis_plugin.py"
+    )
+    system_info_plugin = _read(
+        ROOT / "app" / "core" / "agent" / "plugins" / "system_info_plugin.py"
+    )
+    core_service = _read(ROOT / "app" / "core" / "services" / "system_info.py")
+    context_injector = _read(ROOT / "web" / "context_injector.py")
+    system_instruction = _read(ROOT / "web" / "chat_system_instruction.py")
+
+    expected_import = (
+        "from app.core.services.system_info import get_system_info_collector"
+    )
+    assert expected_import in performance_plugin
+    assert expected_import in system_info_plugin
+    assert "from web.system_info import" not in performance_plugin
+    assert "from web.system_info import" not in system_info_plugin
+    assert "class SystemInfoCollector:" in core_service
+    assert expected_import in context_injector
+    assert "from app.core.services.system_info import (" in system_instruction
+    assert not (ROOT / "web" / "system_info.py").exists()
+
+
 def test_web_app_keeps_executable_lifecycle_outside_application_factory():
     """Importing the Flask module must not also own process lifecycle code."""
     source = _read(WEB_APP)

@@ -541,12 +541,12 @@ class TestTokenTracker:
 
 @pytest.mark.unit
 class TestSystemInfoCollector:
-    """Tests for web.system_info.SystemInfoCollector with mocked psutil."""
+    """Tests for the Core-owned SystemInfoCollector with mocked psutil."""
 
     @pytest.fixture()
     def collector(self):
-        with patch("web.system_info.HAS_WMI", False):
-            from web.system_info import SystemInfoCollector
+        with patch("app.core.services.system_info.HAS_WMI", False):
+            from app.core.services.system_info import SystemInfoCollector
 
             return SystemInfoCollector(cache_timeout=5.0)
 
@@ -577,10 +577,14 @@ class TestSystemInfoCollector:
     def test_get_cpu_info(self, collector):
         mock_freq = MagicMock()
         mock_freq.current = 3600.0
-        with patch("web.system_info.psutil.cpu_percent", return_value=25.5), patch(
-            "web.system_info.psutil.cpu_count", side_effect=[4, 8]
-        ), patch("web.system_info.platform.processor", return_value="Intel i7"), patch(
-            "web.system_info.psutil.cpu_freq", return_value=mock_freq
+        with patch(
+            "app.core.services.system_info.psutil.cpu_percent", return_value=25.5
+        ), patch(
+            "app.core.services.system_info.psutil.cpu_count", side_effect=[4, 8]
+        ), patch(
+            "app.core.services.system_info.platform.processor", return_value="Intel i7"
+        ), patch(
+            "app.core.services.system_info.psutil.cpu_freq", return_value=mock_freq
         ):
             info = collector.get_cpu_info()
         assert info["usage_percent"] == 25.5
@@ -591,7 +595,8 @@ class TestSystemInfoCollector:
 
     def test_get_cpu_info_error_fallback(self, collector):
         with patch(
-            "web.system_info.psutil.cpu_percent", side_effect=RuntimeError("fail")
+            "app.core.services.system_info.psutil.cpu_percent",
+            side_effect=RuntimeError("fail"),
         ):
             info = collector.get_cpu_info()
         assert info["usage_percent"] == 0
@@ -612,8 +617,12 @@ class TestSystemInfoCollector:
         mock_swap.percent = 25.0
 
         with patch(
-            "web.system_info.psutil.virtual_memory", return_value=mock_mem
-        ), patch("web.system_info.psutil.swap_memory", return_value=mock_swap):
+            "app.core.services.system_info.psutil.virtual_memory",
+            return_value=mock_mem,
+        ), patch(
+            "app.core.services.system_info.psutil.swap_memory",
+            return_value=mock_swap,
+        ):
             info = collector.get_memory_info()
         assert info["total_gb"] == 16.0
         assert info["used_gb"] == 8.0
@@ -622,7 +631,8 @@ class TestSystemInfoCollector:
 
     def test_get_memory_info_error_fallback(self, collector):
         with patch(
-            "web.system_info.psutil.virtual_memory", side_effect=OSError("fail")
+            "app.core.services.system_info.psutil.virtual_memory",
+            side_effect=OSError("fail"),
         ):
             info = collector.get_memory_info()
         assert info["total_gb"] == 0
@@ -643,8 +653,12 @@ class TestSystemInfoCollector:
         mock_usage.percent = 40.0
 
         with patch(
-            "web.system_info.psutil.disk_partitions", return_value=[mock_partition]
-        ), patch("web.system_info.psutil.disk_usage", return_value=mock_usage):
+            "app.core.services.system_info.psutil.disk_partitions",
+            return_value=[mock_partition],
+        ), patch(
+            "app.core.services.system_info.psutil.disk_usage",
+            return_value=mock_usage,
+        ):
             info = collector.get_disk_info()
         assert "C:" in info["drives"]
         assert info["total_gb"] == 500.0
@@ -654,13 +668,17 @@ class TestSystemInfoCollector:
         mock_p = MagicMock()
         mock_p.fstype = ""
         mock_p.device = "X:\\"
-        with patch("web.system_info.psutil.disk_partitions", return_value=[mock_p]):
+        with patch(
+            "app.core.services.system_info.psutil.disk_partitions",
+            return_value=[mock_p],
+        ):
             info = collector.get_disk_info()
         assert info["drives"] == {}
 
     def test_get_disk_info_error_fallback(self, collector):
         with patch(
-            "web.system_info.psutil.disk_partitions", side_effect=RuntimeError("fail")
+            "app.core.services.system_info.psutil.disk_partitions",
+            side_effect=RuntimeError("fail"),
         ):
             info = collector.get_disk_info()
         assert info["drives"] == {}
@@ -673,11 +691,13 @@ class TestSystemInfoCollector:
         mock_addr.family = 2  # AF_INET
         mock_addr.address = "192.168.1.100"
         with patch(
-            "web.system_info.socket.gethostname", return_value="test-host"
+            "app.core.services.system_info.socket.gethostname",
+            return_value="test-host",
         ), patch(
-            "web.system_info.psutil.net_if_addrs", return_value={"eth0": [mock_addr]}
+            "app.core.services.system_info.psutil.net_if_addrs",
+            return_value={"eth0": [mock_addr]},
         ), patch(
-            "web.system_info.psutil.net_if_stats", return_value={}
+            "app.core.services.system_info.psutil.net_if_stats", return_value={}
         ):
             info = collector.get_network_info()
         assert info["hostname"] == "test-host"

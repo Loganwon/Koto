@@ -253,7 +253,7 @@ class ContextBuilder:
     def build_cpu_memory_context() -> str:
         """构建 CPU/内存上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             cpu_info = collector.get_cpu_info()
@@ -286,7 +286,7 @@ class ContextBuilder:
     def build_disk_context() -> str:
         """构建磁盘上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             disk_info = collector.get_disk_info()
@@ -317,7 +317,7 @@ class ContextBuilder:
     def build_processes_context() -> str:
         """构建进程上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             processes = collector.get_top_processes(limit=5)
@@ -342,7 +342,7 @@ class ContextBuilder:
     def build_python_env_context() -> str:
         """构建 Python 环境上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             python_info = collector.get_python_environment()
@@ -365,7 +365,7 @@ class ContextBuilder:
     def build_installed_apps_context() -> str:
         """构建已安装应用上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             apps = collector.get_installed_apps()
@@ -394,7 +394,7 @@ class ContextBuilder:
     def build_filesystem_context() -> str:
         """构建文件系统上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             disk_info = collector.get_disk_info()
@@ -409,7 +409,7 @@ class ContextBuilder:
     def build_network_context() -> str:
         """构建网络上下文"""
         try:
-            from web.system_info import get_system_info_collector
+            from app.core.services.system_info import get_system_info_collector
 
             collector = get_system_info_collector()
             network_info = collector.get_network_info()
@@ -429,7 +429,7 @@ class ContextBuilder:
     def build_warnings_context() -> str:
         """构建系统警告上下文"""
         try:
-            from web.system_info import get_system_warnings
+            from app.core.services.system_info import get_system_warnings
 
             warnings = get_system_warnings()
             if not warnings:
