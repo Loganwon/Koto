@@ -134,7 +134,7 @@ class TestStreamInterruptManager:
 @pytest.mark.unit
 class TestLoadUserSettings:
     def test_returns_dict_from_file(self, tmp_path):
-        import web.config as webcfg
+        import web.shared as webcfg
         from web import app as webapp
 
         settings_path = tmp_path / "config" / "user_settings.json"
@@ -150,7 +150,7 @@ class TestLoadUserSettings:
         webcfg._user_settings_cache.clear()
 
     def test_returns_empty_dict_on_missing_file(self, tmp_path):
-        import web.config as webcfg
+        import web.shared as webcfg
         from web import app as webapp
 
         settings_path = tmp_path / "config" / "user_settings.json"
@@ -161,7 +161,7 @@ class TestLoadUserSettings:
         webcfg._user_settings_cache.clear()
 
     def test_caches_result(self, tmp_path):
-        import web.config as webcfg
+        import web.shared as webcfg
         from web import app as webapp
 
         webcfg._user_settings_cache.clear()
@@ -177,7 +177,7 @@ class TestLoadUserSettings:
 @pytest.mark.unit
 class TestStorageHelpers:
     def _with_settings(self, settings_dict):
-        import web.config as webcfg
+        import web.shared as webcfg
         from web import app as webapp
 
         webcfg._user_settings_cache.clear()
@@ -185,7 +185,7 @@ class TestStorageHelpers:
         return webapp
 
     def teardown_method(self):
-        import web.config as webcfg
+        import web.shared as webcfg
 
         webcfg._user_settings_cache.clear()
 

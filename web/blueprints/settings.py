@@ -16,7 +16,7 @@ from math import isfinite
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from web.blueprints.auth import require_auth
-from web.config import invalidate_settings_cache
+from web.shared import invalidate_settings_cache
 from web.settings_runtime_services import (
     get_api_key,
     get_app_version,

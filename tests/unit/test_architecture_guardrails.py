@@ -234,6 +234,19 @@ def test_settings_manager_is_core_owned_without_web_import_alias():
     assert not (ROOT / "web" / "settings.py").exists()
 
 
+def test_web_configuration_helpers_have_one_shared_owner():
+    app_source = _read(ROOT / "web" / "app.py")
+    settings_route = _read(ROOT / "web" / "blueprints" / "settings.py")
+    file_services = _read(ROOT / "web" / "lazy_loaders" / "file_services.py")
+    runtime_services = _read(ROOT / "web" / "runtime_services.py")
+
+    assert "from web.shared import (" in app_source
+    assert "from web.shared import invalidate_settings_cache" in settings_route
+    assert "from web.shared import get_organize_root" in file_services
+    assert "from web.shared import get_organize_root as _get_service" in runtime_services
+    assert not (ROOT / "web" / "config" / "__init__.py").exists()
+
+
 def test_web_app_keeps_executable_lifecycle_outside_application_factory():
     """Importing the Flask module must not also own process lifecycle code."""
     source = _read(WEB_APP)

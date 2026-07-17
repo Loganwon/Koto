@@ -11,6 +11,7 @@ Usage:
     from web.shared import get_app, settings_manager, session_manager, ...
 """
 
+import copy
 import logging
 import os
 import sys
@@ -35,25 +36,45 @@ from app.core.config.workspace_runtime import (
 
 settings_manager = SettingsManager()
 
-# ─── User settings helpers (delegate to SettingsManager) ─────────────────────
-_user_settings_cache: dict = {}  # legacy empty cache
-_user_settings_lock = threading.Lock()  # kept for backward compatibility
+
+# Signature-aware compatibility cache. It never trusts data after the backing
+# file changes and always returns a defensive copy.
+_user_settings_cache: dict = {}
+_user_settings_lock = threading.Lock()
 
 
 def _load_user_settings() -> dict:
-    """Return all user settings — checks module cache first, reads from env-configurable path."""
-    import json as _json
+    """Return a defensive snapshot, invalidating cache when disk changes."""
+    settings_path = get_user_settings_path()
+    try:
+        stat = os.stat(settings_path)
+        signature = (stat.st_mtime_ns, stat.st_size)
+    except OSError:
+        signature = None
+
     with _user_settings_lock:
-        if "data" in _user_settings_cache:
-            return _user_settings_cache["data"]
-        settings_path = get_user_settings_path()
-        try:
-            with open(settings_path, "r", encoding="utf-8-sig") as _f:
-                data = _json.load(_f)
-        except Exception:
-            data = {}
-        _user_settings_cache["data"] = data
-        return data
+        cached = _user_settings_cache.get("data")
+        cached_path = _user_settings_cache.get("path")
+        cached_signature = _user_settings_cache.get("signature")
+        if cached is not None and (
+            (cached_path == settings_path and cached_signature == signature)
+            # Backward-compatible explicit injection used by older tests.
+            or (cached_path is None and "signature" not in _user_settings_cache)
+        ):
+            return copy.deepcopy(cached)
+
+        from app.core.config.settings_store import load_settings_document
+        from app.core.config.user_settings import SETTINGS_FILE
+
+        if os.path.abspath(settings_path) == os.path.abspath(SETTINGS_FILE):
+            data = settings_manager.get_all()
+        else:
+            data = load_settings_document(settings_path)
+        _user_settings_cache.clear()
+        _user_settings_cache.update(
+            {"data": data, "path": settings_path, "signature": signature}
+        )
+        return copy.deepcopy(data)
 
 
 def get_user_settings_path() -> str:

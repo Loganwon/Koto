@@ -167,7 +167,7 @@ try:
 except Exception as _cfg_val_err:
     _app_logger.debug("Config validation skipped: %s", _cfg_val_err)
 
-from web.config import (
+from web.shared import (
     _load_user_settings,
     get_default_wechat_files_dir,
     get_organize_root,
