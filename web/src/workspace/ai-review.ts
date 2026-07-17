@@ -7,58 +7,33 @@
 import {
   resizeWorkspaceAiComposer,
   setWorkspaceAiComposerValue,
+  syncWorkspaceAiComposerSendState,
+  workspaceAiComposerMode,
 } from './ai-composer';
 import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { setLastSelectionText } from '../shared/selection-runtime';
+import { compactTaskContract } from './task-contract-codec';
+import { resumePersistedFileTask } from './task-runner';
+import {
+  $,
+  _CHAT_SVG,
+  _CLIPBOARD_SVG,
+  _PAUSE_SVG,
+  _PIN_SVG,
+  _SEND_SVG,
+  _csrfFetch,
+  _escHtml,
+  showToast as showWorkspaceToast,
+} from './infrastructure';
+import { _renderMyWorkspace, state as workspaceState } from './state';
+import { _expandWAPanel } from '../ui/panel-layout';
+import { sanitizeRenderedHtml } from './markdown-rendering';
 
 const workspaceApi = getWorkspaceApi();
+const state: any = workspaceState;
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let _LIGHTBULB_SVG: string;
-declare let _CLIPBOARD_SVG: string;
-declare let _PIN_SVG: string;
-declare let _CHAT_SVG: string;
-declare let _PENCIL_SVG: string;
-declare let _PAUSE_SVG: string;
-declare let _SEND_SVG: string;
-
-declare function _escHtml(s: any): string;
-declare function showToast(message: string, kind?: string, duration?: number): void;
-declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-declare function _expandWAPanel(): void;
-declare function _findProposalEntry(id: string): { proposal: any; tab?: any };
-declare function _switchToTab(path: string): Promise<void>;
-declare function _setProposalReviewStatus(id: string, status: string): void;
-declare function _syncProposalDomState(id: string, status: string): void;
-declare function _syncReviewStateForActiveFile(): Promise<void>;
-declare function _ensureTabReviewState(tab: any): any;
-declare function _visibleReviewProposals(state: any): any[];
-declare function _renderMyWorkspace(): void;
-declare function _cloneSerializable(val: any, fallback: any): any;
-declare function _relayoutDocxReviewRailAndScrollNode(node: HTMLElement, opts: any): void;
-
-function _runtimeRef(name: string): any {
-  return (window as any)[name] || null;
-}
-
-function _sanitizeRenderedHtml(html: string): string {
-  const template = document.createElement('template');
-  template.innerHTML = String(html || '');
-  template.content.querySelectorAll('script, style, iframe, object, embed, link, meta, base').forEach((node) => node.remove());
-  template.content.querySelectorAll('*').forEach((node) => {
-    Array.from((node as Element).attributes || []).forEach((attr) => {
-      const name = String(attr.name || '').toLowerCase();
-      const value = String(attr.value || '').trim().toLowerCase();
-      if (name.startsWith('on')) {
-        (node as Element).removeAttribute(attr.name);
-        return;
-      }
-      if ((name === 'href' || name === 'src') && value && !/^(https?:|mailto:|\/|#|data:image\/)/i.test(value)) {
-        (node as Element).removeAttribute(attr.name);
-      }
-    });
-  });
-  return template.innerHTML;
+function showToast(message: string, kind?: string, duration?: number): void {
+  showWorkspaceToast(message, kind === 'warn' ? 'warning' : kind as any, duration);
 }
 
 export function _getPinnedSelectionSourceMeta(): any {
@@ -135,13 +110,15 @@ function _saveEditorRange(): void {
 export function _setStreamBtn(streaming: boolean): void {
   const sendBtn = $('wa-send-btn') as HTMLButtonElement | null;
   if (!sendBtn) return;
+  if (streaming) sendBtn.disabled = false;
   sendBtn.classList.toggle('is-streaming', !!streaming);
   sendBtn.title = streaming ? '停止当前任务' : '发送';
   sendBtn.setAttribute('aria-label', streaming ? '停止当前任务' : '发送');
   sendBtn.innerHTML = streaming ? _PAUSE_SVG : _SEND_SVG;
   sendBtn.onclick = streaming
-    ? () => workspaceApi.stopStream?.()
-    : () => workspaceApi.sendMessage?.();
+    ? () => stopStream()
+    : () => sendMessage();
+  if (!streaming) syncWorkspaceAiComposerSendState(workspaceAiComposerMode());
 }
 
 export function stopStream(): boolean {
@@ -247,20 +224,6 @@ export function _normalizeProposalText(text: string): string {
     .toLowerCase();
 }
 
-export function _getProposalRationaleText(proposal: ProposalData): string {
-  const runtime = _runtimeRef('_waAiResultsRuntime');
-  if (runtime && typeof runtime.getProposalRationaleText === 'function') {
-    return runtime.getProposalRationaleText(proposal);
-  }
-  const raw = (proposal?.rationale || '').replace(/<[^>]+>/g, '').trim();
-  if (!raw) return '';
-  const rationaleKey = _normalizeProposalText(raw);
-  const originalKey = _normalizeProposalText(proposal?.original_text || '');
-  const proposedKey = _normalizeProposalText(proposal?.proposed_text || '');
-  if (!rationaleKey || rationaleKey === originalKey || rationaleKey === proposedKey) return '';
-  return raw;
-}
-
 export function _isImportedDocxRevisionProposal(proposal: ProposalData): boolean {
   if (!proposal) return false;
   const source = String(proposal.source || '').trim();
@@ -277,269 +240,6 @@ export function _proposalCanApply(proposal: ProposalData): boolean {
   const actionType = String(proposal.action || proposal.action_type || '').trim();
   if (/\u7ffb\u8bd1/.test(rationale) || /translate/i.test(actionType)) return false;
   return !!(proposal.tool_call || (proposal.original_text && proposal.proposed_text));
-}
-
-export function _makeProposalCard(proposal: ProposalData, index: number, total: number): HTMLElement {
-  const card = document.createElement('div');
-  card.className = 'wa-proposal-card';
-  card.dataset.proposalId = proposal.id;
-  card.dataset.index = String(index);
-  const canApply = _proposalCanApply(proposal);
-  card.dataset.canApply = canApply ? '1' : '0';
-
-  const header = document.createElement('div');
-  header.className = 'wa-proposal-header';
-  header.innerHTML = `<span class="wa-proposal-badge">\u4fee\u6539\u5efa\u8bae ${index + 1}${total > 1 ? '/' + total : ''}</span>`;
-
-  const diffView = document.createElement('div');
-  diffView.className = 'wa-proposal-diff';
-  diffView.innerHTML = _computeInlineDiff(proposal.original_text, proposal.proposed_text);
-
-  const rationale = document.createElement('div');
-  rationale.className = 'wa-proposal-rationale';
-  const rText = _getProposalRationaleText(proposal);
-  if (rText && rText.length > 5) {
-    rationale.innerHTML = `${_LIGHTBULB_SVG} ` + _escHtml(rText.length > 150 ? rText.substring(0, 150) + '\u2026' : rText);
-  }
-
-  const actions = document.createElement('div');
-  actions.className = 'wa-proposal-actions';
-  actions.innerHTML = canApply
-    ? `<button type="button" class="wa-proposal-btn accept" data-wa-review-action="accept" data-proposal-id="${_escHtml(proposal.id)}">\u63a5\u53d7</button>` +
-      `<button type="button" class="wa-proposal-btn reject" data-wa-review-action="reject" data-proposal-id="${_escHtml(proposal.id)}">\u62d2\u7edd</button>`
-    : `<button type="button" class="wa-proposal-btn reject" data-wa-review-action="reject" data-proposal-id="${_escHtml(proposal.id)}">\u5173\u95ed</button>`;
-
-  card.appendChild(header);
-  card.appendChild(diffView);
-  if (rText && rText.length > 5) card.appendChild(rationale);
-  card.appendChild(actions);
-  return card;
-}
-
-export function _makeProposalBatchBar(proposals: ProposalData[]): HTMLElement {
-  const bar = document.createElement('div');
-  bar.className = 'wa-proposal-batch-bar';
-  const actionableCount = proposals.filter(_proposalCanApply).length;
-  const tIdx = state._aiTargetFileIdx;
-  const targetFile = (tIdx >= 0 && tIdx < state._aiFileContext.length) ? state._aiFileContext[tIdx] : null;
-  const canDownload = actionableCount > 0 && targetFile && /\.(docx|txt|md)$/i.test(targetFile.name);
-  const downloadBtn = canDownload
-    ? `<button type="button" class="wa-proposal-btn download small" data-wa-review-action="download" title="\u5c06\u5168\u90e8\u4fee\u6539\u5e94\u7528\u5230\u76ee\u6807\u6587\u4ef6\u5e76\u4e0b\u8f7d">\u5e94\u7528\u5e76\u4e0b\u8f7d ${_escHtml(targetFile.name)}</button>`
-    : '';
-  bar.innerHTML =
-    `<span class="wa-proposal-batch-label">\u5171 ${proposals.length} \u6761\u4fee\u6539\u5efa\u8bae</span>` +
-    '<span class="wa-proposal-batch-counter" id="wa-proposal-counter">0/' + actionableCount + ' \u5df2\u5904\u7406</span>' +
-    (actionableCount > 0 ? '<button type="button" class="wa-proposal-btn accept small" data-wa-review-action="batch-accept">\u5168\u90e8\u63a5\u53d7</button>' : '') +
-    '<button type="button" class="wa-proposal-btn reject small" data-wa-review-action="batch-reject">\u5168\u90e8\u62d2\u7edd</button>' +
-    downloadBtn;
-  return bar;
-}
-
-export function _updateProposalCounter(): void {
-  const counter = document.getElementById('wa-proposal-counter');
-  if (!counter) return;
-  const all = document.querySelectorAll('.wa-proposal-card[data-can-apply="1"]');
-  const done = document.querySelectorAll('.wa-proposal-card[data-can-apply="1"].accepted, .wa-proposal-card[data-can-apply="1"].rejected');
-  counter.textContent = `${done.length}/${all.length} \u5df2\u5904\u7406`;
-}
-
-// ── Public WA proposal operations ──
-
-export async function acceptProposal(proposalId: string, btn?: HTMLElement): Promise<void> {
-  const entry = _findProposalEntry(proposalId);
-  const proposal = entry.proposal;
-  if (!proposal) return;
-  if (proposal._reviewStatus === 'accepted' || proposal._reviewStatus === 'rejected') return;
-  if (!_proposalCanApply(proposal)) {
-    showToast('\u8be5\u7ed3\u679c\u4ec5\u4f9b\u67e5\u770b\uff0c\u4e0d\u652f\u6301\u76f4\u63a5\u5199\u5165\u6587\u6863', 'info');
-    return;
-  }
-
-  if (entry.tab && entry.tab.path && entry.tab.path !== state.activeTabPath) {
-    await _switchToTab(entry.tab.path);
-  }
-
-  if (state.activeEditor) {
-    try {
-      if (_isImportedDocxRevisionProposal(proposal) && typeof state.activeEditor.applyImportedReviewDecision === 'function') {
-        state.activeEditor.applyImportedReviewDecision(proposal, 'accept');
-      } else if (proposal.tool_call) {
-        const handled = workspaceApi.applyStructuredDocToolCall?.(proposal.tool_call, { notify: false });
-        if (!handled) state.activeEditor.applyToolCall(proposal.tool_call);
-      } else if (proposal.original_text && proposal.proposed_text) {
-        const proposedPlain = (proposal.proposed_text || '').replace(/<[^>]+>/g, '').trim();
-        state.activeEditor.applyToolCall({
-          type: 'replace_text',
-          original: proposal.original_text,
-          value: proposedPlain || proposal.proposed_text,
-        });
-      }
-    } catch(e) {
-      console.warn('acceptProposal applyToolCall failed:', e);
-    }
-  }
-
-  _setProposalReviewStatus(proposalId, 'accepted');
-  _syncProposalDomState(proposalId, 'accepted');
-  showToast('\u5df2\u63a5\u53d7\u4fee\u6539', 'success');
-  workspaceApi.scheduleAutoSave?.();
-  _updateProposalCounter();
-  _syncReviewStateForActiveFile().catch(() => {});
-}
-
-export function rejectProposal(proposalId: string, btn?: HTMLElement): void {
-  const entry = _findProposalEntry(proposalId);
-  if (!entry.proposal) return;
-  if (entry.proposal._reviewStatus === 'accepted' || entry.proposal._reviewStatus === 'rejected') return;
-  if (_isImportedDocxRevisionProposal(entry.proposal) && state.activeEditor && typeof state.activeEditor.applyImportedReviewDecision === 'function') {
-    try {
-      state.activeEditor.applyImportedReviewDecision(entry.proposal, 'reject');
-    } catch (e) {
-      console.warn('rejectProposal imported revision failed:', e);
-    }
-  }
-  _setProposalReviewStatus(proposalId, 'rejected');
-  _syncProposalDomState(proposalId, 'rejected');
-  showToast('\u5df2\u62d2\u7edd\u4fee\u6539', 'info');
-  _updateProposalCounter();
-  _syncReviewStateForActiveFile().catch(() => {});
-}
-
-export async function modifyProposal(proposalId: string, btn?: HTMLElement): Promise<void> {
-  const entry = _findProposalEntry(proposalId);
-  const proposal = entry.proposal;
-  if (!proposal) return;
-  if (entry.tab && entry.tab.path && entry.tab.path !== state.activeTabPath) {
-    await _switchToTab(entry.tab.path);
-  }
-  const card = btn && (btn as HTMLElement).closest
-    ? (btn as HTMLElement).closest('.wa-proposal-card') as HTMLElement
-    : (document.querySelector(`[data-proposal-id="${CSS.escape(String(proposalId || ''))}"]`) as HTMLElement || null);
-  if (!card) return;
-  const existingInput = card.querySelector('.wa-proposal-modify-input');
-  if (existingInput) {
-    const textarea = existingInput.querySelector('.wa-proposal-modify-textarea') as HTMLTextAreaElement;
-    if (textarea && typeof textarea.focus === 'function') {
-      try { textarea.focus({ preventScroll: true }); } catch (_) { textarea.focus(); }
-    }
-    _relayoutDocxReviewRailAndScrollNode(existingInput as HTMLElement, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
-    return;
-  }
-
-  if (!_proposalCanApply(proposal)) {
-    showToast('\u8be5\u7ed3\u679c\u4ec5\u4f9b\u67e5\u770b\uff0c\u4e0d\u652f\u6301\u7ee7\u7eed\u4fee\u6539\u5e76\u5199\u56de\u6587\u6863', 'info');
-    return;
-  }
-
-  const inputWrap = document.createElement('div');
-  inputWrap.className = 'wa-proposal-modify-input';
-  inputWrap.innerHTML =
-    '<textarea class="wa-proposal-modify-textarea" placeholder="\u8f93\u5165\u4fee\u6539\u610f\u89c1\uff0c\u5982\uff1a\u8bed\u6c14\u518d\u6b63\u5f0f\u4e00\u4e9b\u2026" rows="2"></textarea>' +
-    '<div class="wa-proposal-modify-actions">' +
-    `<button type="button" class="wa-proposal-btn accept small" data-wa-review-action="submit-modify" data-proposal-id="${_escHtml(proposalId)}">\u53d1\u9001</button>` +
-    `<button type="button" class="wa-proposal-btn reject small" data-wa-review-action="cancel-modify" data-proposal-id="${_escHtml(proposalId)}">\u53d6\u6d88</button>` +
-    '</div>';
-  card.appendChild(inputWrap);
-  const textarea = inputWrap.querySelector('textarea') as HTMLTextAreaElement;
-  if (textarea && typeof textarea.focus === 'function') {
-    try { textarea.focus({ preventScroll: true }); } catch (_) { textarea.focus(); }
-  }
-  _relayoutDocxReviewRailAndScrollNode(inputWrap, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
-}
-
-export function cancelModifyProposal(proposalId: string, btn?: HTMLElement): void {
-  const card = btn && (btn as HTMLElement).closest
-    ? (btn as HTMLElement).closest('.wa-proposal-card') as HTMLElement
-    : (document.querySelector(`[data-proposal-id="${CSS.escape(String(proposalId || ''))}"]`) as HTMLElement || null);
-  const inputWrap = btn && (btn as HTMLElement).closest
-    ? (btn as HTMLElement).closest('.wa-proposal-modify-input') as HTMLElement
-    : (card ? card.querySelector('.wa-proposal-modify-input') as HTMLElement : null);
-  if (inputWrap) inputWrap.remove();
-  if (card) {
-    _relayoutDocxReviewRailAndScrollNode(card, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
-  }
-}
-
-export function _submitModify(proposalId: string, btn: HTMLElement): void {
-  const card = btn.closest('.wa-proposal-card');
-  if (!card) return;
-  const textarea = card.querySelector('.wa-proposal-modify-textarea') as HTMLTextAreaElement;
-  const feedback = textarea ? textarea.value.trim() : '';
-  if (!feedback) return;
-
-  const entry = _findProposalEntry(proposalId);
-  const proposal = entry.proposal;
-  if (!proposal) return;
-
-  const inputWrap = card.querySelector('.wa-proposal-modify-input');
-  if (inputWrap) inputWrap.remove();
-  _relayoutDocxReviewRailAndScrollNode(card as HTMLElement, { behavior: 'auto', topMargin: 12, bottomMargin: 16 });
-  _setProposalReviewStatus(proposalId, 'rejected');
-  _syncProposalDomState(proposalId, 'rejected');
-  _updateProposalCounter();
-  _syncReviewStateForActiveFile().catch(() => {});
-
-  const input = $('wa-user-input') as HTMLTextAreaElement;
-  if (!input) return;
-  const modifyPrompt = `\u8bf7\u91cd\u65b0\u4fee\u6539\u4ee5\u4e0b\u5185\u5bb9\u3002\n\u539f\u6587\uff1a\u300c${proposal.original_text.substring(0, 200)}\u300d\n\u4e0a\u6b21\u4fee\u6539\u4e3a\uff1a\u300c${(proposal.proposed_text || '').replace(/<[^>]+>/g, '').substring(0, 200)}\u300d\n\u7528\u6237\u53cd\u9988\uff1a${feedback}`;
-  input.value = modifyPrompt;
-
-  state.pinnedSelection = _createPinnedSelectionContext(proposal.original_text);
-  workspaceApi.sendMessage?.();
-}
-
-export function batchAcceptAll(): void {
-  const reviewState = _ensureTabReviewState(_activeReviewTab());
-  const proposalIds = _visibleReviewProposals(reviewState)
-    .filter(_proposalCanApply)
-    .map((proposal: any) => String((proposal && (proposal.id || proposal.review_id)) || '').replace(/^proposal:/, '').trim())
-    .filter(Boolean);
-  proposalIds.reduce((chain: Promise<any>, proposalId: string) => {
-    return chain.then(() => acceptProposal(proposalId));
-  }, Promise.resolve()).catch((error: any) => {
-    console.warn('batchAcceptAll failed:', error);
-  });
-}
-
-function _activeReviewTab(): any {
-  return state.openTabs.find((t: any) => t.path === state.activeTabPath) || null;
-}
-
-export function batchRejectAll(): void {
-  const reviewState = _ensureTabReviewState(_activeReviewTab());
-  const proposalIds = _visibleReviewProposals(reviewState)
-    .map((proposal: any) => String((proposal && (proposal.id || proposal.review_id)) || '').replace(/^proposal:/, '').trim())
-    .filter(Boolean);
-  proposalIds.forEach((proposalId: string) => {
-    rejectProposal(proposalId);
-  });
-}
-
-let reviewActionDelegationInstalled = false;
-
-function _installReviewActionDelegation(): void {
-  if (reviewActionDelegationInstalled) return;
-  reviewActionDelegationInstalled = true;
-  document.addEventListener('click', (event) => {
-    const target = event.target instanceof Element ? event.target : null;
-    const button = target?.closest<HTMLElement>('[data-wa-review-action]');
-    if (!button) return;
-    const action = String(button.dataset.waReviewAction || '').trim();
-    const proposalId = String(button.dataset.proposalId || '').trim();
-    event.preventDefault();
-    event.stopPropagation();
-    try {
-      if (action === 'accept' && proposalId) void acceptProposal(proposalId, button);
-      else if (action === 'reject' && proposalId) rejectProposal(proposalId, button);
-      else if (action === 'download') void downloadPatchedFile();
-      else if (action === 'batch-accept') batchAcceptAll();
-      else if (action === 'batch-reject') batchRejectAll();
-      else if (action === 'submit-modify' && proposalId) _submitModify(proposalId, button);
-      else if (action === 'cancel-modify' && proposalId) cancelModifyProposal(proposalId, button);
-    } catch (error) {
-      console.warn('[WA] review action failed:', error);
-    }
-  }, true);
 }
 
 export async function downloadPatchedFile(specificProposals?: ProposalData[]): Promise<void> {
@@ -602,7 +302,7 @@ export async function downloadPatchedFile(specificProposals?: ProposalData[]): P
 
 // ── AI Response Action Bar ──
 export function _makeAIActionBar(snapshot: ActionBarSnapshot): HTMLElement {
-  const runtime = _runtimeRef('_waAiResultsRuntime');
+  const runtime = workspaceApi.getWorkspaceAiResultsRuntime?.();
   if (runtime && typeof runtime.makeAIActionBar === 'function') {
     return runtime.makeAIActionBar(snapshot);
   }
@@ -668,7 +368,7 @@ function _execWriteToDoc(mode: string, snapshot: ActionBarSnapshot, bar: HTMLEle
       navigator.clipboard && navigator.clipboard.writeText(rawText).catch(() => {});
     } else if (editor) {
       if (mode === 'replace') {
-        const htmlVal = (window as any).marked ? _sanitizeRenderedHtml((window as any).marked.parse(rawText)) : ('<p>' + _escHtml(rawText).replace(/\n/g, '</p><p>') + '</p>');
+        const htmlVal = (window as any).marked ? sanitizeRenderedHtml((window as any).marked.parse(rawText)) : ('<p>' + _escHtml(rawText).replace(/\n/g, '</p><p>') + '</p>');
         editor.applyToolCall({ type: 'replace_all', value: htmlVal });
       } else {
         editor.applyToolCall({ type: 'insert_text', value: '\n' + rawText });
@@ -699,55 +399,12 @@ export function handleInputKeydown(event: KeyboardEvent): void {
   const target = event.target as HTMLTextAreaElement | null;
   if (event.key === 'Enter' && !event.shiftKey) {
     event.preventDefault();
-    if (typeof workspaceApi.sendMessage === 'function') {
-      workspaceApi.sendMessage();
-    }
+    void sendMessage();
     return;
   }
   if (target && target.tagName === 'TEXTAREA') {
     window.setTimeout(() => autoResize(target), 0);
   }
-}
-
-function _syncReviewModeButtons(): void {
-  document.querySelectorAll('#wa-review-mode-group .wa-review-mode-btn').forEach((button) => {
-    (button as HTMLElement).classList.toggle('is-active', (button as HTMLElement).dataset.mode === state._reviewMode);
-  });
-}
-
-function _refreshReviewShell(): void {
-  const renderReviewShell = (window as any)._renderReviewShell;
-  if (typeof renderReviewShell === 'function') {
-    try { renderReviewShell(); } catch (e) { console.warn("[Koto]", e) }
-  }
-  const layoutReviewRail = (window as any)._positionDocxReviewRail || (window as any)._layoutReviewShellInDocx;
-  if (typeof layoutReviewRail === 'function') {
-    try { layoutReviewRail(); } catch (e) { console.warn("[Koto]", e) }
-  }
-}
-
-export function closeReviewCenter(): void {
-  state._reviewCenterOpen = false;
-  try { localStorage.setItem('wa_review_center_open', '0'); } catch (_) { /* allowed to fail */ }
-  const shell = $('wa-review-shell');
-  if (shell) shell.style.display = 'none';
-  const host = $('wa-docx-editor');
-  if (host) host.classList.remove('has-review-shell');
-  _refreshReviewShell();
-}
-
-export function setReviewMode(mode: string): void {
-  state._reviewMode = ['all', 'comments', 'proposals'].includes(mode) ? mode : 'all';
-  state._reviewCenterOpen = true;
-  try {
-    localStorage.setItem('wa_review_mode', state._reviewMode);
-    localStorage.setItem('wa_review_center_open', '1');
-  } catch (e) { console.warn("[Koto]", e) }
-  _syncReviewModeButtons();
-  const shell = $('wa-review-shell');
-  if (shell) shell.style.display = '';
-  _syncReviewStateForActiveFile().catch(() => {});
-  _refreshReviewShell();
 }
 
 // ── Task artifact resume ──
@@ -840,9 +497,7 @@ export function beginTaskResultFollowup(details: any): void {
         .map((item: any) => Object.assign({}, item));
     }
   }
-  const previousTaskContract = typeof workspaceApi.compactTaskContract === 'function'
-    ? workspaceApi.compactTaskContract(payload.task_contract)
-    : null;
+  const previousTaskContract = compactTaskContract(payload.task_contract);
   const previousTaskContext = typeof workspaceApi.compactTaskContext === 'function'
     ? workspaceApi.compactTaskContext(payload.task_context)
     : null;
@@ -937,17 +592,17 @@ export function resumeTaskArtifact(details: ArtifactResumePayload): boolean {
     input.value = actionLabel;
     autoResize(input);
   }
-  workspaceApi.sendMessage?.();
+  void sendMessage();
   return true;
 }
 
 export async function resumePersistedTaskArtifact(details: ArtifactResumePayload): Promise<boolean> {
   const resolved = _resolveTaskArtifactResume(details || {});
-  if (!resolved.valid) return workspaceApi.resumeTaskArtifact(details);
+  if (!resolved.valid) return resumeTaskArtifact(details);
 
   const taskId = String(details.taskId || (resolved.taskPayload && resolved.taskPayload.task_id) || '').trim();
   if (!taskId || resolved.skipPersistedApi) {
-    return workspaceApi.resumeTaskArtifact(details);
+    return resumeTaskArtifact(details);
   }
 
   let response: Response | null = null;
@@ -967,20 +622,18 @@ export async function resumePersistedTaskArtifact(details: ArtifactResumePayload
     }
   } catch (error) {
     console.debug('[WA] persisted task resume request unavailable; falling back to local resume payload:', error);
-    return workspaceApi.resumeTaskArtifact(details);
+    return resumeTaskArtifact(details);
   }
 
-  if (typeof workspaceApi.resumePersistedFileTask === 'function') {
-    Promise.resolve(workspaceApi.resumePersistedFileTask({
-      taskId,
-      loadingEl: details.loadingEl,
-      replay: false,
-      initialStatus: 'running',
-    })).catch((error: any) => {
-      console.warn('[WA] persisted task stream reattach failed:', error);
-      showToast('\u4efb\u52a1\u6d41\u6062\u590d\u5931\u8d25', 'warning');
-    });
-  }
+  Promise.resolve(resumePersistedFileTask({
+    taskId,
+    loadingEl: details.loadingEl,
+    replay: false,
+    initialStatus: 'running',
+  })).catch((error: any) => {
+    console.warn('[WA] persisted task stream reattach failed:', error);
+    showToast('\u4efb\u52a1\u6d41\u6062\u590d\u5931\u8d25', 'warning');
+  });
   return true;
 }
 
@@ -1024,7 +677,7 @@ export function sendMessage(): void {
     return (state._aiFileContext || []).filter((f: any) => !f.error && !f.loading);
   }
 
-  const conversationRuntime = _runtimeRef('_waConversationRuntime');
+  const conversationRuntime = workspaceApi.getWorkspaceConversationRuntime?.();
   const turnUi = conversationRuntime && typeof conversationRuntime.appendUserMessageWithLoading === 'function'
     ? conversationRuntime.appendUserMessageWithLoading({
         content: text,
@@ -1050,6 +703,7 @@ export function sendMessage(): void {
 
   input.value = '';
   autoResize(input);
+  syncWorkspaceAiComposerSendState(workspaceAiComposerMode());
 
   state.isLoading = true;
   let pendingTaskPayload = state._pendingTaskPayload && typeof state._pendingTaskPayload === 'object'
@@ -1070,7 +724,7 @@ export function sendMessage(): void {
   if (typeof workspaceApi._initWorkspaceAiRuntimes === 'function') {
     workspaceApi._initWorkspaceAiRuntimes();
   }
-  const taskDispatcher = _runtimeRef('_waTaskDispatcher');
+  const taskDispatcher = workspaceApi.getWorkspaceTaskDispatcher?.();
   if (!taskDispatcher || typeof taskDispatcher.dispatchMessage !== 'function') {
     loadingEl.classList.remove('streaming');
     loadingEl.textContent = '\u6587\u4ef6\u4efb\u52a1\u8fd0\u884c\u65f6\u672a\u52a0\u8f7d\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002';
@@ -1139,7 +793,7 @@ export function sendQuickAction(action: string): void {
   }
 
   const WA_FULL_DOC_QUICK_ACTIONS = new Set(['\u6da6\u8272', '\u7ffb\u8bd1', '\u603b\u7ed3', '\u7eed\u5199', '\u68c0\u67e5']);
-  const quickActionRuntime = _runtimeRef('_waQuickActionRuntime');
+  const quickActionRuntime = workspaceApi.getWorkspaceQuickActionRuntime?.();
   const canUseFullDocument = (quickActionRuntime && typeof quickActionRuntime.canUseFullDocument === 'function')
     ? quickActionRuntime.canUseFullDocument(action, state.fileType)
     : (WA_FULL_DOC_QUICK_ACTIONS.has(action) || (action === '\u53ef\u89c6\u5316' && state.fileType === 'xlsx'));
@@ -1153,7 +807,7 @@ export function sendQuickAction(action: string): void {
   }
 
   _hideWelcome();
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (tt) tt.style.display = 'none';
   if (hasSelection) {
     _saveEditorRange();
@@ -1163,7 +817,7 @@ export function sendQuickAction(action: string): void {
   } else {
     state.pinnedSelection = null;
   }
-  (window as any).lastSelectionText = '';
+  setLastSelectionText('');
   try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
 
   const msgs = $('wa-ai-messages');
@@ -1174,7 +828,7 @@ export function sendQuickAction(action: string): void {
         : (sel.length > 60 ? sel.substring(0, 60) + '\u2026' : sel))
     : (action === '\u53ef\u89c6\u5316' ? '\u5f53\u524d\u8868\u683c\u6570\u636e' : '\u5168\u6587');
   const userText = `${action}\uff1a${preview}`;
-  const conversationRuntime = _runtimeRef('_waConversationRuntime');
+  const conversationRuntime = workspaceApi.getWorkspaceConversationRuntime?.();
   const turnUi = conversationRuntime && typeof conversationRuntime.appendUserMessageWithLoading === 'function'
     ? conversationRuntime.appendUserMessageWithLoading({
         content: userText,
@@ -1200,7 +854,7 @@ export function sendQuickAction(action: string): void {
   if (typeof workspaceApi._initWorkspaceAiRuntimes === 'function') {
     workspaceApi._initWorkspaceAiRuntimes();
   }
-  const taskDispatcher = _runtimeRef('_waTaskDispatcher');
+  const taskDispatcher = workspaceApi.getWorkspaceTaskDispatcher?.();
   if (!taskDispatcher || typeof taskDispatcher.dispatchQuickAction !== 'function') {
     loadingEl.classList.remove('streaming');
     loadingEl.textContent = '\u5feb\u6377\u52a8\u4f5c\u8fd0\u884c\u65f6\u672a\u52a0\u8f7d\uff0c\u8bf7\u5237\u65b0\u540e\u91cd\u8bd5\u3002';
@@ -1234,16 +888,7 @@ export function sendQuickAction(action: string): void {
   });
 }
 
-_installReviewActionDelegation();
-
 publishWorkspaceApi({
-  acceptProposal,
-  rejectProposal,
-  modifyProposal,
-  cancelModifyProposal,
-  _submitModify,
-  batchAcceptAll,
-  batchRejectAll,
   downloadPatchedFile,
   useScenario,
   resumeTaskArtifact,
@@ -1252,21 +897,9 @@ publishWorkspaceApi({
   sendCustomMessage,
   stopStream,
   handleInputKeydown,
-  closeReviewCenter,
-  setReviewMode,
   sendQuickAction,
   beginTaskResultFollowup,
+  _setStreamBtn,
   _makeAIActionBar,
   _hideWelcome,
 });
-
-// Kept as short-lived compatibility hooks for review extensions that are not
-// part of the Workspace API contract yet.
-if (typeof window !== 'undefined') {
-  (window as any)._sanitizeRenderedHtml = _sanitizeRenderedHtml;
-  (window as any)._getPinnedSelectionSourceMeta = _getPinnedSelectionSourceMeta;
-  (window as any)._selectionContextText = _selectionContextText;
-  (window as any)._selectionContextSourceLabel = _selectionContextSourceLabel;
-  (window as any)._createPinnedSelectionContext = _createPinnedSelectionContext;
-  (window as any)._setStreamBtn = _setStreamBtn;
-}

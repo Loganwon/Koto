@@ -165,7 +165,7 @@ except Exception:
 
 ### 测试代码
 ```python
-from web.system_info import get_formatted_system_info, get_system_warnings
+from app.core.services.system_info import get_formatted_system_info, get_system_warnings
 
 # 获取格式化信息
 print(get_formatted_system_info())

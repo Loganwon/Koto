@@ -6,9 +6,19 @@ Shared pytest fixtures for Koto test suite.
 
 from __future__ import annotations
 
-# phase2_smoke_test.py is a standalone script (calls sys.exit at module level)
-# and must not be collected by pytest.
-collect_ignore = ["phase2_smoke_test.py"]
+# These files are manual/live validation scripts rather than hermetic pytest
+# modules.  Several of them read local credentials or call ``sys.exit`` while
+# being imported, which used to abort a repository-wide pytest collection.
+# They remain directly executable through the commands documented in each
+# file, but are deliberately outside the automatic test suite boundary.
+collect_ignore = [
+    "phase2_smoke_test.py",
+    "test_annotation.py",
+    "test_e2e_agent.py",
+    "test_editor_pipeline.py",
+    "test_model_calls_live.py",
+    "test_workflows_integration.py",
+]
 
 import os
 import shutil
@@ -79,6 +89,23 @@ def _root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _assert_source_mode_imports_are_unshadowed(root: Path) -> None:
+    """Stop source-mode tests before stale compiled modules mask current code."""
+    from src.startup_diagnostics import _source_shadowing_extensions
+
+    artifacts = _source_shadowing_extensions(root)
+    if not artifacts:
+        return
+    preview = ", ".join(str(path.relative_to(root)) for path in artifacts[:3])
+    remainder = len(artifacts) - 3
+    suffix = f" (+{remainder} more)" if remainder > 0 else ""
+    raise pytest.UsageError(
+        f"Found {len(artifacts)} in-place .pyd file(s) shadowing source modules: "
+        f"{preview}{suffix}. Run `.venv\\Scripts\\python.exe "
+        "scripts\\clean_inplace_cython_artifacts.py --apply` before pytest."
+    )
+
+
 def _cleanup_test_artifacts() -> None:
     root = _root()
     for rel in (".hypothesis", ".pytest_cache_local"):
@@ -96,6 +123,8 @@ def pytest_configure(config):
     sessions can delete each other's tmp_path roots during startup.
     """
     global _CURRENT_PYTEST_TMP
+
+    _assert_source_mode_imports_are_unshadowed(_root())
 
     pytest_tmp = _root() / ".pytest_tmp"
     pytest_tmp.mkdir(exist_ok=True)
@@ -218,7 +247,6 @@ def full_app(_koto_tmp_db):
     from app.api.macro_routes import macro_bp
     from app.api.mcp_routes import mcp_bp
     from app.api.ops_routes import ops_bp
-    from app.api.shadow_routes import shadow_bp
     from app.api.skill_marketplace_routes import marketplace_bp
     from app.api.skill_routes import skill_bp
     from app.api.task_routes import task_bp
@@ -230,7 +258,6 @@ def full_app(_koto_tmp_db):
     application.register_blueprint(marketplace_bp)
     application.register_blueprint(macro_bp)
     application.register_blueprint(mcp_bp)
-    application.register_blueprint(shadow_bp)
     # Blueprints without built-in url_prefix need it provided here
     application.register_blueprint(task_bp, url_prefix="/api/tasks")
     application.register_blueprint(goal_bp, url_prefix="/api/goals")
@@ -340,24 +367,24 @@ def _isolate_shadow_watcher(monkeypatch, tmp_path):
 
 @pytest.fixture(scope="session", autouse=True)
 def _protect_user_settings():
-    """Back up config/user_settings.json before the test session and restore it
-    afterwards.  Integration tests that call /api/settings/reset or
-    /api/skillmarket/toggle must not permanently modify the developer's
-    production settings file."""
+    """Protect the primary settings file and its recovery backup."""
     settings_path = _root() / "config" / "user_settings.json"
-    backup: bytes | None = None
-    if settings_path.exists():
+    protected_paths = (
+        settings_path,
+        settings_path.with_name(f"{settings_path.name}.bak"),
+    )
+    snapshots: dict[Path, bytes | None] = {}
+    for path in protected_paths:
         try:
-            backup = settings_path.read_bytes()
+            snapshots[path] = path.read_bytes() if path.exists() else None
         except Exception:
-            pass
+            snapshots[path] = None
     yield
-    if backup is not None:
+    for path, snapshot in snapshots.items():
         try:
-            settings_path.write_bytes(backup)
+            if snapshot is None:
+                path.unlink(missing_ok=True)
+            else:
+                path.write_bytes(snapshot)
         except Exception:
             pass
-    elif settings_path.exists():
-        # File was created during the session but didn't exist before — remove it
-        # only if created by tests (i.e. it existed before = backup would be set).
-        pass

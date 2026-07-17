@@ -488,11 +488,15 @@ _reg_lock = threading.Lock()
 
 
 def get_trigger_registry() -> TriggerRegistry:
-    """获取全局 TriggerRegistry 单例，首次调用时自动启动调度器。"""
+    """Return legacy trigger data without starting a background scheduler.
+
+    Scheduled triggers have been retired from the product surface.  Keeping
+    the registry inert preserves safe reads of old configuration while making
+    sure a stale config/triggers.json can never resume background work.
+    """
     global _registry
     if _registry is None:
         with _reg_lock:
             if _registry is None:
                 _registry = TriggerRegistry()
-                _registry.start()
     return _registry

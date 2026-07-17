@@ -31,12 +31,13 @@ export function _injectCSS(href: string) {
 }
 
 export function _loadScript(src: string, timeout: number = 20000): Promise<void> {
-  const inFlight = _scriptLoadPromises.get(src);
+  const srcBase = src.split('?')[0];
+  const inFlight = _scriptLoadPromises.get(srcBase);
   if (inFlight) return inFlight;
 
   const existingScripts = Array.from(
     document.querySelectorAll<HTMLScriptElement>('script[data-koto-loader-src]')
-  ).filter((script) => script.dataset.kotoLoaderSrc === src);
+  ).filter((script) => script.dataset.kotoLoaderSrc === srcBase);
   if (existingScripts.some((script) => script.dataset.kotoLoaderState === 'loaded')) {
     return Promise.resolve();
   }
@@ -48,7 +49,7 @@ export function _loadScript(src: string, timeout: number = 20000): Promise<void>
   const pending = new Promise<void>((resolve, reject) => {
     const s = document.createElement('script');
     s.src = src;
-    s.dataset.kotoLoaderSrc = src;
+    s.dataset.kotoLoaderSrc = srcBase;
     s.dataset.kotoLoaderState = 'loading';
     let settled = false;
     let timer: number | null = null;
@@ -84,8 +85,8 @@ export function _loadScript(src: string, timeout: number = 20000): Promise<void>
     document.head.appendChild(s);
   });
 
-  const tracked = pending.finally(() => _scriptLoadPromises.delete(src));
-  _scriptLoadPromises.set(src, tracked);
+  const tracked = pending.finally(() => _scriptLoadPromises.delete(srcBase));
+  _scriptLoadPromises.set(srcBase, tracked);
   return tracked;
 }
 
@@ -124,6 +125,13 @@ export async function _ensureTipTap(): Promise<void> {
 }
 
 export async function _ensureUniverSheets(): Promise<void> {
+  // Univer registers dependency identifiers globally while evaluating its
+  // bundle. Re-evaluating the script produces duplicate-component warnings
+  // even if the previous workbook instance was correctly disposed.
+  if (window.KotoSheetsAPI) {
+    _libsLoaded.sheets = true;
+    return;
+  }
   if (_libsLoaded.sheets) return;
   if (_libLoadPromises.sheets) return _libLoadPromises.sheets;
   _libLoadPromises.sheets = (async () => {

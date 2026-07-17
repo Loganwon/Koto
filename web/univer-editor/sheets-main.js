@@ -32,6 +32,39 @@ import SheetsUIZhCN from '@univerjs/sheets-ui/locale/zh-CN';
 import SheetsFormulaZhCN from '@univerjs/sheets-formula/locale/zh-CN';
 import SheetsFormulaUIZhCN from '@univerjs/sheets-formula-ui/locale/zh-CN';
 
+const LEGACY_HEADER_FOOTER_DUPLICATE_WARNING =
+  'Component COMPONENT_DOC_HEADER_FOOTER_PANEL already exists.';
+
+function initializeLegacyUniverRuntime(callback) {
+  // Univer 0.5.x registers the document header/footer panel once per internal
+  // rich-text render unit. A sheet creates more than one such unit, so the
+  // upstream component manager emits a benign duplicate warning even during a
+  // single, correct workbook initialization. Keep the compatibility filter
+  // synchronous and exact so every other Univer warning remains observable.
+  const originalWarn = console.warn;
+  let restored = false;
+  const restoreWarn = () => {
+    if (restored) return;
+    restored = true;
+    console.warn = originalWarn;
+  };
+  console.warn = (...args) => {
+    if (args.length === 1 && args[0] === LEGACY_HEADER_FOOTER_DUPLICATE_WARNING) return;
+    originalWarn.apply(console, args);
+  };
+  try {
+    const runtime = callback();
+    // Plugin startup schedules internal rich-text render modules after
+    // createUnit() returns. The known duplicate is emitted during this short
+    // bootstrap window; the exact-match filter is then removed.
+    setTimeout(restoreWarn, 1000);
+    return runtime;
+  } catch (error) {
+    restoreWarn();
+    throw error;
+  }
+}
+
 // ─── KotoSheetsAPI ───────────────────────────────────────────────────────────
 /**
  * Manages a single Univer Sheets instance inside a given DOM container.
@@ -42,6 +75,10 @@ class KotoSheetsAPIClass {
     this._univer = null;
     this._api = null;
     this._disposed = true;
+    this._subscriptions = [];
+    this._cellChangeHandlers = new Set();
+    this._activeCellSubscription = null;
+    this._activeCellSheet = null;
   }
 
   /**
@@ -72,36 +109,39 @@ class KotoSheetsAPIClass {
     const rect = el.getBoundingClientRect();
     console.log('[KotoSheets] 容器:', el.id || '(no id)', 'rect=', rect.width.toFixed(0) + 'x' + rect.height.toFixed(0));
 
-    const univer = new Univer({
-      theme: defaultTheme,
-      locale: LocaleType.ZH_CN,
-      locales: {
-        [LocaleType.ZH_CN]: {
-          ...DesignZhCN,
-          ...UIZhCN,
-          ...DocsUIZhCN,
-          ...SheetsZhCN,
-          ...SheetsUIZhCN,
-          ...SheetsFormulaZhCN,
-          ...SheetsFormulaUIZhCN,
+    const univer = initializeLegacyUniverRuntime(() => {
+      const runtime = new Univer({
+        theme: defaultTheme,
+        locale: LocaleType.ZH_CN,
+        locales: {
+          [LocaleType.ZH_CN]: {
+            ...DesignZhCN,
+            ...UIZhCN,
+            ...DocsUIZhCN,
+            ...SheetsZhCN,
+            ...SheetsUIZhCN,
+            ...SheetsFormulaZhCN,
+            ...SheetsFormulaUIZhCN,
+          },
         },
-      },
+      });
+
+      runtime.registerPlugin(UniverRenderEnginePlugin);
+      runtime.registerPlugin(UniverFormulaEnginePlugin);
+      // Pass the *actual element* — not a string — to avoid Univer's fallback to
+      // a detached div when its internal getElementById fails.
+      runtime.registerPlugin(UniverUIPlugin, { container: el });
+      runtime.registerPlugin(UniverDocsPlugin);
+      runtime.registerPlugin(UniverDocsUIPlugin);
+      runtime.registerPlugin(UniverSheetsPlugin);
+      runtime.registerPlugin(UniverSheetsUIPlugin);
+      runtime.registerPlugin(UniverSheetsFormulaPlugin);
+      runtime.registerPlugin(UniverSheetsFormulaUIPlugin);
+
+      // Use createUnit directly — api.createUniverSheet is deprecated in v0.5.x.
+      runtime.createUnit(UniverInstanceType.UNIVER_SHEET, workbookData);
+      return runtime;
     });
-
-    univer.registerPlugin(UniverRenderEnginePlugin);
-    univer.registerPlugin(UniverFormulaEnginePlugin);
-    // Pass the *actual element* — not a string — to avoid Univer's fallback to
-    // a detached div when its internal getElementById fails.
-    univer.registerPlugin(UniverUIPlugin, { container: el });
-    univer.registerPlugin(UniverDocsPlugin);
-    univer.registerPlugin(UniverDocsUIPlugin);
-    univer.registerPlugin(UniverSheetsPlugin);
-    univer.registerPlugin(UniverSheetsUIPlugin);
-    univer.registerPlugin(UniverSheetsFormulaPlugin);
-    univer.registerPlugin(UniverSheetsFormulaUIPlugin);
-
-    // Use univer.createUnit directly — api.createUniverSheet is deprecated in v0.5.x
-    univer.createUnit(UniverInstanceType.UNIVER_SHEET, workbookData);
 
     const api = FUniver.newAPI(univer);
 
@@ -111,27 +151,17 @@ class KotoSheetsAPIClass {
 
     console.log('[KotoSheets] Univer Sheets 引擎初始化完成');
 
-    // Coordinate debug: log offsetX/Y and resulting cell on click
-    setTimeout(() => {
-      const canvases = el.querySelectorAll('canvas');
-      console.log('[KotoSheets] canvas count:', canvases.length);
-      canvases.forEach((c, idx) => {
-        const r = c.getBoundingClientRect();
-        console.log(`[KotoSheets] canvas[${idx}] rect: ${r.left.toFixed(1)},${r.top.toFixed(1)} size: ${r.width.toFixed(0)}x${r.height.toFixed(0)} cssSize: ${c.style.width}x${c.style.height} bufferSize: ${c.width}x${c.height}`);
-      });
-      const mainCanvas = canvases[canvases.length - 1];
-      if (mainCanvas) {
-        mainCanvas.addEventListener('pointerdown', (e) => {
-          const rect = mainCanvas.getBoundingClientRect();
-          console.log(`[KotoSheets] click: clientX=${e.clientX.toFixed(1)},clientY=${e.clientY.toFixed(1)} offsetX=${e.offsetX.toFixed(1)},offsetY=${e.offsetY.toFixed(1)} canvasRect=${rect.left.toFixed(1)},${rect.top.toFixed(1)} computed=(${(e.clientX-rect.left).toFixed(1)},${(e.clientY-rect.top).toFixed(1)}) dpr=${window.devicePixelRatio}`);
-        }, true);
-      }
-    }, 1000);
-
     return api;
   }
 
   dispose() {
+    this._disposeActiveCellSubscription();
+    for (const subscription of this._subscriptions.splice(0)) {
+      try {
+        if (subscription && typeof subscription.dispose === 'function') subscription.dispose();
+        else if (typeof subscription === 'function') subscription();
+      } catch (_) {}
+    }
     if (this._univer && !this._disposed) {
       try { this._univer.dispose(); } catch (e) {
         console.warn('[KotoSheets] dispose error', e);
@@ -140,6 +170,7 @@ class KotoSheetsAPIClass {
     this._univer = null;
     this._api = null;
     this._disposed = true;
+    this._cellChangeHandlers.clear();
   }
 
   isReady() {
@@ -315,11 +346,64 @@ class KotoSheetsAPIClass {
       if (this._api && this._api.getActiveWorkbook) {
         const wb = this._api.getActiveWorkbook();
         if (wb && wb.onSelectionChange) {
-          wb.onSelectionChange(handler);
+          const subscription = wb.onSelectionChange((event) => {
+            // Switching worksheets replaces the facade sheet object. Rebind
+            // the edit listener before notifying consumers so edits on every
+            // sheet participate in dirty-state and auto-save handling.
+            this._bindActiveCellSubscription();
+            handler(event);
+          });
+          if (subscription) this._subscriptions.push(subscription);
+          return subscription;
         }
       }
     } catch (e) {
       // Selection event API may vary across Univer versions
+    }
+    return null;
+  }
+
+  /** Register a callback fired after users edit, clear, paste, or delete cells. */
+  onCellDataChange(handler) {
+    if (typeof handler !== 'function') return null;
+    this._cellChangeHandlers.add(handler);
+    this._bindActiveCellSubscription();
+    return {
+      dispose: () => {
+        this._cellChangeHandlers.delete(handler);
+        if (!this._cellChangeHandlers.size) this._disposeActiveCellSubscription();
+      },
+    };
+  }
+
+  _disposeActiveCellSubscription() {
+    const subscription = this._activeCellSubscription;
+    this._activeCellSubscription = null;
+    this._activeCellSheet = null;
+    try {
+      if (subscription && typeof subscription.dispose === 'function') subscription.dispose();
+      else if (typeof subscription === 'function') subscription();
+    } catch (_) {}
+  }
+
+  _bindActiveCellSubscription() {
+    try {
+      if (!this._api || !this._api.getActiveWorkbook || !this._cellChangeHandlers.size) return;
+      const wb = this._api.getActiveWorkbook();
+      const sheet = wb && wb.getActiveSheet ? wb.getActiveSheet() : null;
+      if (!sheet || typeof sheet.onCellDataChange !== 'function') return;
+      if (sheet === this._activeCellSheet && this._activeCellSubscription) return;
+      this._disposeActiveCellSubscription();
+      this._activeCellSheet = sheet;
+      this._activeCellSubscription = sheet.onCellDataChange((event) => {
+        for (const callback of this._cellChangeHandlers) {
+          try { callback(event); } catch (error) {
+            console.warn('[KotoSheets] cell data change handler error', error);
+          }
+        }
+      });
+    } catch (e) {
+      console.warn('[KotoSheets] cell data change subscription error', e);
     }
   }
 }

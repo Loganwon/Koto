@@ -46,6 +46,7 @@ class FileTaskFinalizationPhase:
         final_summary: str,
         completed_task: bool,
         model_failed: bool,
+        execution_failure: Optional[Dict[str, Any]],
         readonly_fallback_used: bool,
         planner_runtime_payload: Dict[str, Any],
         last_check_payload: Optional[Dict[str, Any]],
@@ -99,6 +100,7 @@ class FileTaskFinalizationPhase:
                 tool_runtime_outcome,
                 tool_gap,
                 next_action_artifact,
+                execution_failure=execution_failure,
             )
         )
         missing_read_refs = runtime._unsatisfied_explicit_read_file_references(
@@ -153,11 +155,14 @@ class FileTaskFinalizationPhase:
             terminal_status=str(check_payload.get("status") or "").strip(),
             readonly_fallback_used=readonly_fallback_used,
             model_failed=model_failed,
+            execution_failure=execution_failure,
             planner_payload=planner_runtime_payload,
         )
         terminal_runtime["performance"] = performance_snapshot(total=True)
         check_payload["runtime"] = terminal_runtime
         check_payload["performance"] = terminal_runtime["performance"]
+        if isinstance(execution_failure, dict) and execution_failure:
+            check_payload["failure"] = dict(execution_failure)
 
         yield ledger.event("check.finished", check_payload, step_id=check_step_id)
         terminal_completed_steps = list(verification_completed_steps)
@@ -272,6 +277,8 @@ class FileTaskFinalizationPhase:
             "performance": terminal_runtime["performance"],
             "quick_action_mode": quick_action_mode,
         }
+        if isinstance(execution_failure, dict) and execution_failure:
+            run_payload["failure"] = dict(execution_failure)
         if not is_text_quick_action:
             run_payload.update(
                 {

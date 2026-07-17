@@ -321,7 +321,7 @@ print(f"内存: {info['memory']['used_gb']}GB / {info['memory']['total_gb']}GB")
 def _get_chat_system_instruction_with_context():
     """生成包含完整系统上下文的系统指令"""
     from datetime import datetime
-    from web.system_info import SystemInfoCollector
+    from app.core.services.system_info import SystemInfoCollector
     
     now = datetime.now()
     collector = SystemInfoCollector()

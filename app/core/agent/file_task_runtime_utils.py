@@ -38,6 +38,15 @@ def _is_error_result(value: Any) -> bool:
     payload = _json_payload(value)
     if payload.get("error"):
         return True
+    stderr = str(payload.get("stderr") or "").strip()
+    if stderr and (
+        re.search(r"(?m)^\s*Traceback \(most recent call last\):", stderr)
+        or re.search(
+            r"(?m)^\s*(?:[A-Za-z_][\w.]*)?(?:Error|Exception):(?:\s|$)",
+            stderr,
+        )
+    ):
+        return True
     text = str(value or "").strip()
     return (
         text.startswith(("Error:", "Sandbox error:", "[error]")) or "\n[error]" in text

@@ -52,6 +52,41 @@ from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
 
+
+class EmbeddingBackendUnavailable(RuntimeError):
+    """No optional local embedding backend is currently usable."""
+
+
+class _OllamaLocalEmbeddings:
+    """Small LangChain-compatible adapter over Ollama's local HTTP API."""
+
+    def __init__(self, model: str, base_url: str = "http://127.0.0.1:11434"):
+        self.model = model
+        self.base_url = base_url.rstrip("/")
+
+    def _request(self, texts: List[str]) -> List[List[float]]:
+        from urllib.request import Request, urlopen
+
+        payload = json.dumps({"model": self.model, "input": texts}).encode("utf-8")
+        request = Request(
+            f"{self.base_url}/api/embed",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=5) as response:
+            data = json.loads(response.read().decode("utf-8"))
+        embeddings = data.get("embeddings") or []
+        if len(embeddings) != len(texts):
+            raise RuntimeError(f"Ollama/{self.model} 未返回完整 embeddings")
+        return [[float(value) for value in row] for row in embeddings]
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        return self._request([str(text) for text in texts])
+
+    def embed_query(self, text: str) -> List[float]:
+        return self._request([str(text)])[0]
+
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 _DEFAULT_INDEX_DIR = str(
     Path(
@@ -87,6 +122,7 @@ def _tokenize(text: str) -> List[str]:
     try:
         import jieba
 
+        jieba.setLogLevel(logging.WARNING)
         words = list(jieba.cut_for_search(text))
         return [w for w in words if w.strip()]
     except ImportError:
@@ -110,23 +146,38 @@ def _get_embeddings(prefer_local: bool = False):
     参数:
         prefer_local: 保留的兼容参数；嵌入始终在本地运行。
     """
-    # 本地模型优先顺序：BGE-M3（多语言 SOTA）→ MiniLM（兜底）
+    # HuggingFaceEmbeddings emits a deprecation warning before it discovers
+    # that sentence-transformers is absent. Preflight the optional dependency
+    # so a normal lexical-only installation stays quiet.
+    has_sentence_transformers = False
     try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
+        import sentence_transformers  # noqa: F401
 
-        # BGE-M3: 多语言 SOTA，1024 维，中英双语质量远超 MiniLM
-        # 首次使用自动下载 (~570MB)；之后从本地缓存加载
-        emb = HuggingFaceEmbeddings(
-            model_name="BAAI/bge-m3",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
+        has_sentence_transformers = True
+    except ImportError:
+        logger.info(
+            "[RAGService] sentence-transformers 未安装，将尝试 Ollama；"
+            "不可用时自动使用本地词法检索"
         )
-        logger.info("[RAGService] 嵌入模型: BAAI/bge-m3 (本地, 多语言 SOTA)")
-        return emb
-    except Exception as bge_exc:
-        logger.warning(
-            f"[RAGService] BGE-M3 加载失败: {bge_exc}，尝试 Ollama Embeddings"
-        )
+
+    # 本地模型优先顺序：BGE-M3（多语言 SOTA）→ MiniLM（兜底）
+    if has_sentence_transformers:
+        try:
+            from langchain_community.embeddings import HuggingFaceEmbeddings
+
+            # BGE-M3: 多语言 SOTA，1024 维，中英双语质量远超 MiniLM
+            # 首次使用自动下载 (~570MB)；之后从本地缓存加载
+            emb = HuggingFaceEmbeddings(
+                model_name="BAAI/bge-m3",
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
+            )
+            logger.info("[RAGService] 嵌入模型: BAAI/bge-m3 (本地, 多语言 SOTA)")
+            return emb
+        except Exception as bge_exc:
+            logger.warning(
+                f"[RAGService] BGE-M3 加载失败: {bge_exc}，尝试 Ollama Embeddings"
+            )
 
     # 本地模型优先顺序第三层：Ollama 原生 Embeddings API（sentence-transformers 未安装时备用）
     try:
@@ -137,8 +188,6 @@ def _get_embeddings(prefer_local: bool = False):
         _ollama_up = _s.connect_ex(("127.0.0.1", 11434)) == 0
         _s.close()
         if _ollama_up:
-            from langchain_community.embeddings import OllamaEmbeddings  # type: ignore
-
             _OLLAMA_EMBED_MODELS = [
                 "nomic-embed-text",  # 768 维，多语言，体积小
                 "mxbai-embed-large",  # 1024 维，英文 SOTA
@@ -146,7 +195,7 @@ def _get_embeddings(prefer_local: bool = False):
             ]
             for _em in _OLLAMA_EMBED_MODELS:
                 try:
-                    emb = OllamaEmbeddings(model=_em)
+                    emb = _OllamaLocalEmbeddings(model=_em)
                     emb.embed_query("test")  # 快速验活
                     logger.info(f"[RAGService] 嵌入模型: Ollama/{_em} (本地，API)")
                     return emb
@@ -155,23 +204,25 @@ def _get_embeddings(prefer_local: bool = False):
     except Exception as _oe:
         logger.debug(f"[RAGService] Ollama Embeddings 跳过: {_oe}")
 
-    try:
-        from langchain_community.embeddings import HuggingFaceEmbeddings
+    if has_sentence_transformers:
+        try:
+            from langchain_community.embeddings import HuggingFaceEmbeddings
 
-        emb = HuggingFaceEmbeddings(
-            model_name="all-MiniLM-L6-v2",
-            model_kwargs={"device": "cpu"},
-            encode_kwargs={"normalize_embeddings": True},
-        )
-        logger.info("[RAGService] 嵌入模型: HuggingFace all-MiniLM-L6-v2 (兜底)")
-        return emb
-    except Exception as exc:
-        raise RuntimeError(
-            f"[RAGService] 无法加载嵌入模型。\n"
-            f"请安装：pip install sentence-transformers（本地，含 BGE-M3）\n"
-            f"或启动 Ollama 并安装 nomic-embed-text / mxbai-embed-large。\n"
-            f"错误: {exc}"
-        ) from exc
+            emb = HuggingFaceEmbeddings(
+                model_name="all-MiniLM-L6-v2",
+                model_kwargs={"device": "cpu"},
+                encode_kwargs={"normalize_embeddings": True},
+            )
+            logger.info("[RAGService] 嵌入模型: HuggingFace all-MiniLM-L6-v2 (兜底)")
+            return emb
+        except Exception as exc:
+            raise EmbeddingBackendUnavailable(
+                f"本地嵌入模型不可用: {exc}"
+            ) from exc
+
+    raise EmbeddingBackendUnavailable(
+        "未安装 sentence-transformers，且 Ollama embeddings 不可用"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -216,7 +267,10 @@ class RAGService:
             in ("1", "true", "yes")
         )
         self._metadata_path = self.index_dir / "metadata.json"
+        self._lexical_path = self.index_dir / "lexical_docs.json"
         self._index_path = str(self.index_dir / "faiss_index")
+        self._lexical_docs: List[Any] = []
+        self._embedding_unavailable = False
         self._bm25_cache: Optional[Tuple] = (
             None  # (BM25Okapi, docs_list)，文档变动时失效
         )
@@ -383,9 +437,13 @@ class RAGService:
         return results
 
     def _add_documents(self, docs: List[Any]) -> int:
-        """将 Document 列表添加到向量库。"""
+        """Add documents, retaining a lexical index when vectors are optional."""
         if not docs:
             return 0
+
+        self._lexical_docs.extend(docs)
+        self._doc_count += len(docs)
+        self._bm25_cache = None
         try:
             from langchain_community.vectorstores import FAISS
 
@@ -393,13 +451,16 @@ class RAGService:
                 self._vectorstore = FAISS.from_documents(docs, self.embeddings)
             else:
                 self._vectorstore.add_documents(docs)
-            self._doc_count += len(docs)
-            self._bm25_cache = None  # 文档变更 → 失效 BM25 缓存
-            self.save()  # 自动持久化
-            return len(docs)
+        except EmbeddingBackendUnavailable as exc:
+            if not self._embedding_unavailable:
+                logger.info("[RAGService] 向量后端不可用，已降级为本地词法检索: %s", exc)
+            self._embedding_unavailable = True
         except Exception as exc:
-            logger.error(f"[RAGService] _add_documents 失败: {exc}", exc_info=True)
-            raise
+            logger.warning("[RAGService] 向量索引不可用，已保留词法索引: %s", exc)
+            self._embedding_unavailable = True
+
+        self.save()
+        return len(docs)
 
     # ── BM25 支持（懒加载，从 FAISS docstore 重建）─────────────────────────────
 
@@ -412,8 +473,12 @@ class RAGService:
         if self._bm25_cache is not None:
             return self._bm25_cache
 
-        if self._vectorstore is None:
+        if self._lexical_docs:
+            docs = list(self._lexical_docs)
+        elif self._vectorstore is None:
             return None, []
+        else:
+            docs = []
 
         try:
             from rank_bm25 import BM25Okapi  # type: ignore
@@ -425,17 +490,17 @@ class RAGService:
             return None, []
 
         try:
-            id_map: Dict = getattr(self._vectorstore, "index_to_docstore_id", {})
-            docstore = getattr(self._vectorstore, "docstore", None)
-            if not id_map or docstore is None:
-                self._bm25_cache = (None, [])
-                return None, []
-
-            docs = [
-                docstore._dict[id_map[i]]
-                for i in range(len(id_map))
-                if id_map.get(i) in (docstore._dict or {})
-            ]
+            if not docs:
+                id_map: Dict = getattr(self._vectorstore, "index_to_docstore_id", {})
+                docstore = getattr(self._vectorstore, "docstore", None)
+                if not id_map or docstore is None:
+                    self._bm25_cache = (None, [])
+                    return None, []
+                docs = [
+                    docstore._dict[id_map[i]]
+                    for i in range(len(id_map))
+                    if id_map.get(i) in (docstore._dict or {})
+                ]
             if not docs:
                 self._bm25_cache = (None, [])
                 return None, []
@@ -470,7 +535,7 @@ class RAGService:
         返回:
             同 retrieve()：[{"content", "source", "score", "chunk_index"}, ...]
         """
-        if self._vectorstore is None:
+        if self._vectorstore is None and not self._lexical_docs:
             return []
 
         fetch_k = min(k * 4, max(k + 10, 20))
@@ -546,12 +611,8 @@ class RAGService:
                     candidates.sort(key=lambda d: d.get("_ce", 0.0), reverse=True)
                     for doc in candidates:
                         doc.pop("_ce", None)
-        except Exception:
-            import logging
-
-            logging.getLogger(__name__).warning(
-                "Silenced exception caught", exc_info=True
-            )  # Cross-Encoder 不可用：维持 RRF 顺序
+        except Exception as exc:
+            logger.debug("[RAGService] Cross-Encoder 不可用: %s", exc)
 
         result = candidates[:k]
         logger.info(
@@ -580,6 +641,8 @@ class RAGService:
             [{"content": str, "source": str, "score": float, "chunk_index": int}, ...]
         """
         if self._vectorstore is None:
+            if self._lexical_docs:
+                return self._lexical_retrieve(query, k=k, score_threshold=score_threshold)
             logger.info("[RAGService] 索引为空，返回空结果")
             return []
 
@@ -602,6 +665,38 @@ class RAGService:
         except Exception as exc:
             logger.error(f"[RAGService] 检索失败: {exc}")
             return []
+
+    def _lexical_retrieve(
+        self,
+        query: str,
+        k: int = DEFAULT_K,
+        score_threshold: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Deterministic token-overlap fallback when embeddings are unavailable."""
+        query_tokens = set(_tokenize(query.lower()))
+        if not query_tokens:
+            return []
+        ranked: List[Tuple[float, Any]] = []
+        for doc in self._lexical_docs:
+            doc_tokens = set(_tokenize(str(doc.page_content).lower()))
+            if not doc_tokens:
+                continue
+            overlap = len(query_tokens & doc_tokens)
+            if not overlap:
+                continue
+            score = overlap / max(len(query_tokens), 1)
+            ranked.append((score, doc))
+        ranked.sort(key=lambda item: item[0], reverse=True)
+        return [
+            {
+                "content": doc.page_content,
+                "source": doc.metadata.get("source", "unknown"),
+                "score": round(float(score), 4),
+                "chunk_index": doc.metadata.get("chunk_index", 0),
+            }
+            for score, doc in ranked[:k]
+            if score >= score_threshold
+        ]
 
     def rag_answer(
         self,
@@ -677,11 +772,18 @@ class RAGService:
     # ── 持久化 ────────────────────────────────────────────────────────────────
 
     def save(self) -> bool:
-        """将当前 FAISS 索引保存到磁盘。"""
-        if self._vectorstore is None:
-            return True
+        """Persist the vector index and the always-available lexical mirror."""
         try:
-            self._vectorstore.save_local(self._index_path)
+            if self._vectorstore is not None:
+                self._vectorstore.save_local(self._index_path)
+            lexical_payload = [
+                {"page_content": doc.page_content, "metadata": dict(doc.metadata or {})}
+                for doc in self._lexical_docs
+            ]
+            self._lexical_path.write_text(
+                json.dumps(lexical_payload, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
             # 保存元数据
             meta = {
                 "doc_count": self._doc_count,
@@ -700,9 +802,28 @@ class RAGService:
             return False
 
     def load(self) -> bool:
-        """从磁盘加载 FAISS 索引（若存在）。"""
+        """Load lexical data first, then use FAISS when its backend is available."""
+        loaded = False
+        if self._lexical_path.exists():
+            try:
+                from langchain_core.documents import Document
+
+                lexical_payload = json.loads(self._lexical_path.read_text(encoding="utf-8"))
+                self._lexical_docs = [
+                    Document(
+                        page_content=str(item.get("page_content", "")),
+                        metadata=dict(item.get("metadata") or {}),
+                    )
+                    for item in lexical_payload
+                    if str(item.get("page_content", "")).strip()
+                ]
+                loaded = bool(self._lexical_docs)
+            except Exception as exc:
+                logger.warning("[RAGService] 词法索引加载失败: %s", exc)
+
         if not Path(self._index_path + ".faiss").exists():
-            return False
+            self._doc_count = len(self._lexical_docs)
+            return loaded
         try:
             from langchain_community.vectorstores import FAISS
 
@@ -715,22 +836,40 @@ class RAGService:
                 meta = json.loads(self._metadata_path.read_text())
                 self._doc_count = meta.get("doc_count", 0)
             self._bm25_cache = None  # 新索引加载 → 失效旧缓存
+            if not self._lexical_docs:
+                id_map: Dict = getattr(self._vectorstore, "index_to_docstore_id", {})
+                docstore = getattr(self._vectorstore, "docstore", None)
+                if id_map and docstore is not None:
+                    self._lexical_docs = [
+                        docstore._dict[id_map[i]]
+                        for i in range(len(id_map))
+                        if id_map.get(i) in (docstore._dict or {})
+                    ]
+                    self.save()
             logger.info(f"[RAGService] ✅ 索引已加载 ({self._doc_count} chunks)")
             return True
+        except EmbeddingBackendUnavailable as exc:
+            self._embedding_unavailable = True
+            logger.info("[RAGService] FAISS 暂不可用，使用已保存的词法索引: %s", exc)
+            self._doc_count = len(self._lexical_docs)
+            return loaded
         except Exception as exc:
             logger.warning(f"[RAGService] 加载索引失败（将从空库开始）: {exc}")
             self._vectorstore = None
-            return False
+            self._doc_count = len(self._lexical_docs)
+            return loaded
 
     def clear(self) -> bool:
         """清空向量索引（删除磁盘文件 + 内存）。"""
         try:
             self._vectorstore = None
+            self._lexical_docs = []
             self._doc_count = 0
             self._bm25_cache = None
             for f in self.index_dir.glob("faiss_index*"):
                 f.unlink(missing_ok=True)
             self._metadata_path.unlink(missing_ok=True)
+            self._lexical_path.unlink(missing_ok=True)
             logger.info("[RAGService] 索引已清空")
             return True
         except Exception as exc:
@@ -754,11 +893,15 @@ class RAGService:
             )
 
         return {
-            "initialized": self._vectorstore is not None,
+            "initialized": self._vectorstore is not None or bool(self._lexical_docs),
             "doc_count": self._doc_count,
             "index_dir": str(self.index_dir),
             "index_size_mb": index_size_mb,
             "embedding_model": (
                 type(self._embeddings).__name__ if self._embeddings else "not_loaded"
+            ),
+            "retrieval_backend": (
+                "hybrid" if self._vectorstore is not None else "lexical"
+                if self._lexical_docs else "none"
             ),
         }

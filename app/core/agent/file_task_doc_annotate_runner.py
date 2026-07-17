@@ -73,14 +73,6 @@ class FileTaskDocAnnotateRunner:
                     step_id=bridge_event.step_id,
                 )
                 continue
-            if bridge_event.type == "run.error":
-                payload.setdefault("execution_mode", "doc_annotate_bridge")
-                terminal_event = ledger.event(
-                    "run.error",
-                    payload,
-                    step_id=bridge_event.step_id,
-                )
-                continue
             yield ledger.event(
                 bridge_event.type,
                 payload,

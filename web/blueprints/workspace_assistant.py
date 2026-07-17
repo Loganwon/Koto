@@ -89,7 +89,6 @@ _CRITICAL_ASSETS = [
     _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.js",
     _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.css",
     _STATIC_ROOT / "js" / "build" / "workspace-bundle.js",
-    _STATIC_ROOT / "js" / "build" / "review-bundle.js",
 ]
 
 
@@ -437,6 +436,51 @@ def get_current_workspace_dir():
     return jsonify({"path": str(p), "name": p.name})
 
 
+def _recent_file_status_target(raw_path: str, workspace_root: Path) -> Path | None:
+    """Resolve a caller-supplied recent path without exposing or opening it."""
+    candidate = Path(raw_path).expanduser()
+    if candidate.is_absolute():
+        target = candidate.resolve()
+    else:
+        target = (workspace_root / candidate).resolve()
+        try:
+            target.relative_to(workspace_root)
+        except ValueError:
+            return None
+    if not _fs_guard(target):
+        return None
+    return target
+
+
+@workspace_assistant_bp.route(
+    "/api/v1/workspace/recent_files/status", methods=["POST"]
+)
+def recent_file_status():
+    """Return existence status for the small recent-file list before rendering it."""
+    body = request.get_json(force=True, silent=True) or {}
+    raw_paths = body.get("paths")
+    if not isinstance(raw_paths, list):
+        return jsonify({"error": "paths 必须是数组"}), 400
+    if len(raw_paths) > 50:
+        return jsonify({"error": "单次最多检查 50 个路径"}), 400
+
+    from web.shared import WORKSPACE_DIR
+
+    workspace_root = Path(WORKSPACE_DIR).resolve()
+    statuses = []
+    seen = set()
+    for value in raw_paths:
+        raw_path = str(value or "").strip()
+        if not raw_path or raw_path in seen:
+            continue
+        seen.add(raw_path)
+        target = _recent_file_status_target(raw_path, workspace_root)
+        statuses.append(
+            {"path": raw_path, "exists": bool(target and target.is_file())}
+        )
+    return jsonify({"files": statuses})
+
+
 @workspace_assistant_bp.route("/api/v1/workspace/list_files")
 def list_workspace_files():
     """
@@ -767,6 +811,61 @@ def ai_context_preview():
             "preview_error": preview.preview_error,
         }
     )
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/import_for_ai_context", methods=["POST"])
+def import_for_ai_context():
+    """Copy a file selected from the filesystem browser into the workspace.
+
+    File-task previews and the agent runtime intentionally operate on workspace
+    paths.  The filesystem browser, however, exposes absolute paths outside the
+    workspace.  Stage those user-selected files first so the preview, chat, and
+    file-task contracts share one safe, readable path.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    raw_path = str(body.get("path") or "").strip()
+    if not raw_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    from web.shared import WORKSPACE_DIR
+
+    workspace_root = Path(WORKSPACE_DIR).resolve()
+    try:
+        source = _OPEN_FILE_BY_PATH.resolve_target(
+            raw_path=raw_path,
+            workspace_dir=workspace_root,
+            app_config_dir=_APP_CONFIG_DIR,
+            fs_guard=_fs_guard,
+            allow_external_absolute=True,
+        )
+    except OpenFileInConfigError:
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except OpenFilePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not source.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+    if source.suffix.lower() not in _ALLOWED_EXT:
+        return jsonify({"error": f"不支持的格式: {source.suffix.lower()}"}), 400
+    if source.stat().st_size > 50 * 1024 * 1024:
+        return jsonify({"error": "文件大小超过 50 MB"}), 413
+
+    try:
+        ws_path = source.relative_to(workspace_root)
+        imported = False
+    except ValueError:
+        import shutil
+
+        destination_dir = workspace_root / "attachments"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination = _unique_path(destination_dir, source.name)
+        shutil.copy2(source, destination)
+        ws_path = destination.relative_to(workspace_root)
+        imported = True
+
+    normalized_path = str(ws_path).replace("\\", "/")
+    logger.info("[import_for_ai_context] %s -> %s", source, normalized_path)
+    return jsonify({"ok": True, "ws_path": normalized_path, "imported": imported})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1578,9 +1677,13 @@ def set_workspace_dir_endpoint():
 
 @workspace_assistant_bp.route("/api/v1/workspace/ollama-status")
 def ollama_status():
-    """Return {running: bool, model: str|null, models: [str]}."""
+    """Return local runtime state plus the selected model's tool capability."""
     try:
         import requests as _req
+
+        from app.core.llm.local_model_capabilities import (
+            local_model_supports_tools,
+        )
 
         r = _req.get(
             "http://127.0.0.1:11434/api/tags",
@@ -1590,25 +1693,40 @@ def ollama_status():
         data = r.json()
         models = [m["name"] for m in data.get("models", [])]
         if not models:
-            return jsonify({"running": True, "model": None, "models": []})
+            return jsonify(
+                {
+                    "running": True,
+                    "model": None,
+                    "models": [],
+                    "configured_model": None,
+                    "configured_model_installed": False,
+                    "configured_model_supports_tools": None,
+                }
+            )
 
-        # 1. Prefer the model configured in user_settings.json
+        def _status_payload(selected_model: str, configured_model: str = ""):
+            resolved_configured = str(configured_model or selected_model or "").strip()
+            return {
+                "running": True,
+                "model": selected_model,
+                "models": models,
+                "configured_model": resolved_configured or None,
+                "configured_model_installed": resolved_configured in models,
+                "configured_model_supports_tools": local_model_supports_tools(
+                    resolved_configured
+                ),
+            }
+
+        # 1. Prefer the model configured in the canonical settings manager.
         try:
-            import json as _js
-            import os as _os
+            from app.core.config.user_settings import SettingsManager
 
-            from web.shared import PROJECT_ROOT as _PR
-
-            _cfg_path = _os.path.join(_PR, "config", "user_settings.json")
-            with open(_cfg_path, "r", encoding="utf-8") as _f:
-                _cfg = _js.load(_f)
+            _cfg = SettingsManager().get_all()
             _configured = (
                 _cfg.get("local_model") or _cfg.get("ai", {}).get("local_model") or ""
             ).strip()
             if _configured and _configured in models:
-                return jsonify(
-                    {"running": True, "model": _configured, "models": models}
-                )
+                return jsonify(_status_payload(_configured, _configured))
         except Exception:
             pass
 
@@ -1624,9 +1742,18 @@ def ollama_status():
             ),
             models[0],
         )
-        return jsonify({"running": True, "model": preferred, "models": models})
+        return jsonify(_status_payload(preferred))
     except Exception:
-        return jsonify({"running": False, "model": None, "models": []})
+        return jsonify(
+            {
+                "running": False,
+                "model": None,
+                "models": [],
+                "configured_model": None,
+                "configured_model_installed": False,
+                "configured_model_supports_tools": None,
+            }
+        )
 
 
 # ─── Browse local filesystem (lazy) ──────────────────────────────────────────
@@ -2424,13 +2551,12 @@ def pdf_convert():
 )
 def pdf_remove_watermark():
     """
-    AI-assisted watermark removal.
+    Local structural watermark removal for documents the user is authorized to edit.
     Body: {"file_id": str, "use_ai": bool}
     Returns the cleaned PDF as an attachment.
     """
     body = request.get_json(silent=True) or {}
     file_id = str(body.get("file_id", ""))
-    use_ai = bool(body.get("use_ai", True))
 
     # Validate file_id: must be alphanumeric/hyphen/underscore only (prevents path traversal)
     if not file_id or not file_id.replace("-", "").replace("_", "").isalnum():
@@ -2443,17 +2569,10 @@ def pdf_remove_watermark():
 
     pdf_path = str(matches[0])
 
-    # Cloud vision cleanup was tied to the archived provider. Keep the
-    # deterministic local cleanup path until a provider-neutral vision backend exists.
-    api_key = None
-    use_ai = False
-
     try:
         from web.pdf_annotator import remove_watermark
 
-        pdf_bytes, removed_count, method_used = remove_watermark(
-            pdf_path, use_ai=use_ai, api_key=api_key
-        )
+        pdf_bytes, removed_count, method_used = remove_watermark(pdf_path)
     except Exception as exc:
         logger.error("[pdf_remove_watermark] 失败: %s", exc, exc_info=True)
         return jsonify({"error": f"去水印失败: {str(exc)}"}), 500

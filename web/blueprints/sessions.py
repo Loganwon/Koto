@@ -379,6 +379,10 @@ def _is_mock_workspace_history(history: list[object]) -> bool:
 
 def _task_status_label(status: object) -> str:
     normalized = str(status or "").strip().lower()
+    if normalized == "no_file_change":
+        normalized = "write_not_performed"
+    if normalized == "needs_attention":
+        normalized = "quality_gate_failed"
     if normalized in {"done", "completed", "verified", "success", "succeeded"}:
         return "completed"
     if normalized in {"streaming", "running", "pending", "queued", "processing"}:
@@ -395,9 +399,12 @@ def _task_status_label(status: object) -> str:
         "blocked",
         "write_blocked",
         "tool_gap",
-        "no_file_change",
+        "write_not_performed",
         "model_unavailable",
+        "model_timeout",
+        "model_error",
         "quality_gate_failed",
+        "context_summary_fallback",
     }:
         return "failed"
     return normalized

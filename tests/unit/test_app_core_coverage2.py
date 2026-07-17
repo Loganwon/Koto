@@ -1066,6 +1066,54 @@ class TestRAGService:
         results = svc.hybrid_retrieve("query")
         assert results == []
 
+    def test_missing_embedding_backend_falls_back_to_persisted_lexical_search(
+        self, tmp_path, monkeypatch
+    ):
+        import app.core.services.rag_service as rag_module
+
+        def unavailable(*args, **kwargs):
+            raise rag_module.EmbeddingBackendUnavailable("test backend unavailable")
+
+        monkeypatch.setattr(rag_module, "_get_embeddings", unavailable)
+        index_dir = tmp_path / "lexical_rag"
+        svc = rag_module.RAGService(index_dir=str(index_dir), auto_load=False)
+
+        assert svc.index_text("Koto 支持真实前端文件测试", source="memory_1") == 1
+        assert svc.stats()["retrieval_backend"] == "lexical"
+        assert svc.retrieve("前端文件", k=3)[0]["source"] == "memory_1"
+
+        restored = rag_module.RAGService(index_dir=str(index_dir), auto_load=True)
+        assert restored.stats()["initialized"] is True
+        assert restored.retrieve("Koto 测试", k=3)[0]["source"] == "memory_1"
+
+    def test_ollama_embedding_adapter_uses_current_local_api(self, monkeypatch):
+        import app.core.services.rag_service as rag_module
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"embeddings":[[0.1,0.2]]}'
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = request.data
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        adapter = rag_module._OllamaLocalEmbeddings("nomic-embed-text")
+
+        assert adapter.embed_query("Koto") == [0.1, 0.2]
+        assert captured["url"].endswith("/api/embed")
+        assert b'"input": ["Koto"]' in captured["body"]
+
     def test_tokenize_function(self):
         from app.core.services.rag_service import _tokenize
 

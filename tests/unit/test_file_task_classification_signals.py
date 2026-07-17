@@ -33,6 +33,32 @@ def test_classification_signals_collects_intent_and_semantic_markers():
     assert signals.docx_report_request is True
 
 
+def test_classification_signals_infers_new_docx_output_without_a_target_file():
+    request = FileTaskRequest(
+        task="分析这个财务预测，找出数据问题并将数据做成图，然后创建一个docx将问题和图加入docx",
+        files=[
+            FileTaskFile(
+                path="financial_model_clean.xlsx",
+                name="financial_model_clean.xlsx",
+                type="xlsx",
+            ),
+            FileTaskFile(path="supporting_data.xlsx", name="supporting_data.xlsx", type="xlsx"),
+        ],
+    )
+
+    signals = build_classification_signals(
+        classification_task=request.task,
+        classification_request=request,
+        files=request.files,
+        is_docx_annotation_request=lambda _request: False,
+        is_docx_clear_review_request=lambda _request: False,
+    )
+
+    assert signals.target_file_type == "docx"
+    assert signals.write_intent is True
+    assert signals.docx_report_request is True
+
+
 def test_classification_signals_compare_annotation_strips_generic_annotation(
     monkeypatch,
 ):

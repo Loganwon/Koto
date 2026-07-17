@@ -22,6 +22,8 @@ import { _escHtml } from './infrastructure';
 import { _ensurePdfJS, _ensureTipTap, _ensureUniverSheets, _ensureWorkbookDefaults } from '../editors/cdn-loaders';
 import { KotoTextEditor, _setupDocOutline, loadPptxEditor, loadPdfViewer, loadXlsxEditor, loadImageViewer } from '../editors/lazy-loaders';
 import { getWorkspaceApi } from '../shared/workspace-api';
+import { syncReviewStateForActiveFile } from './docx-review-runtime';
+import { loadDocxReviewEngine } from './docx-review-loader';
 
 function _fileExt(fileName: string): string {
   return (String(fileName || '').split('.').pop() || '').toLowerCase();
@@ -119,17 +121,14 @@ export function _rememberSavedSnapshotForTab(tab: TabInfo | null, editor: any = 
 }
 
 async function _mountDocx(tab: TabInfo, data: any): Promise<void> {
-  await _ensureTipTap();
+  await Promise.all([_ensureTipTap(), loadDocxReviewEngine()]);
   const html = typeof tab.cache === 'string' && (tab.cache as string).trim()
     ? tab.cache
     : (data && data.html) || '';
   state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor() as any;
   state.activeEditor!.render(html, _toDocxRenderOptions(data));
   setTimeout(() => _setupDocOutline((data && data.headings) || []), 0);
-  setTimeout(() => {
-    const syncReviewState = (window as any)._syncReviewStateForActiveFile;
-    if (typeof syncReviewState === 'function') syncReviewState();
-  }, 0);
+  setTimeout(() => { void syncReviewStateForActiveFile(); }, 0);
 }
 
 async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
@@ -140,7 +139,8 @@ async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
     await _mountDocx(tab, data);
   } else if (tab.fileType === 'xlsx') {
     await _ensureUniverSheets();
-    state.activeEditor = new (window as any).KotoXlsxEditor() as any;
+    const { XlsxEditor } = await loadXlsxEditor();
+    state.activeEditor = new XlsxEditor() as any;
     const workbook = tab.cache && tab.cache.snapshot ? tab.cache.snapshot : data;
     state.activeEditor!.render(_ensureWorkbookDefaults(workbook));
   } else if (tab.fileType === 'pptx') {
@@ -275,14 +275,7 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
 _registerSwitchToTab(_switchToTabImpl);
 
 const wa = getWorkspaceApi();
-(window as any)._serializeEditorForTab = _serializeEditorForTab;
 wa._applyFileJson = _applyFileJson;
 wa._syncPrimarySaveButtons = _syncPrimarySaveButtons;
 wa._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
 wa._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
-
-// Keeps old inline templates that call global helpers from breaking in the TS bundle.
-(window as any)._serializeEditorForTab = _serializeEditorForTab;
-(window as any)._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
-(window as any)._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
-(window as any)._escHtml = (window as any)._escHtml || _escHtml;

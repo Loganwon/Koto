@@ -6,14 +6,13 @@
 
 import { _initSplit } from './panel-layout';
 import { _addLocalFilesToAIContext, _attachFilesToTask } from '../workspace/ai-context';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { $, showToast } from '../workspace/infrastructure';
+import { state as workspaceState } from '../workspace/state';
+import { ensureFileBrowserLoaded } from '../workspace/fs-tree';
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let WA: any;
-declare function showToast(message: string, kind?: string, duration?: number): void;
-declare function loadFiles(files: FileList | File[]): void;
-declare function loadFileBrowser(): void;
-declare function _openFilePicker(opts?: any): void;
+const state: any = workspaceState;
+const WA = getWorkspaceApi();
 
 export interface DragDropConfig {
   files: File[];
@@ -312,11 +311,7 @@ export function openInMainView(): void {
       _initSplit();
     });
   });
-  if ((window as any).WA && typeof (window as any).WA.loadFileBrowser === 'function' && !(window as any)._WA_fileBrowserLoaded) {
-    (window as any)._WA_fileBrowserLoaded = true;
-    (window as any).WA.loadFileBrowser();
-    if (typeof (window as any).WA.refreshRecent === 'function') (window as any).WA.refreshRecent();
-  }
+  void ensureFileBrowserLoaded();
 
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
@@ -433,16 +428,18 @@ document.addEventListener('keydown', (e) => {
     (focused as HTMLElement).classList.contains('wa-rename-input')
   )) return;
 
-  const { path, isFolder } = _fsBrowserCtxTarget || {};
+  const { path, isFolder, supported } = _fsBrowserCtxTarget || {};
 
   if (e.key === 'Enter' && path && !isFolder) {
     e.preventDefault();
-    WA._fsBrowserOpen();
+    if (typeof WA.openBrowserFile === 'function') WA.openBrowserFile(path, supported);
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C' && path) {
     e.preventDefault();
-    WA._fsBrowserCopyPath();
+    navigator.clipboard.writeText(path)
+      .then(() => showToast('路径已复制', 'success'))
+      .catch(() => showToast(path, 'info'));
     return;
   }
 });
@@ -477,25 +474,20 @@ if (document.getElementById('workspaceView')) {
   });
 } else if (!document.getElementById('workspaceView')) {
   requestAnimationFrame(() => {
-    if ((window as any).WA && typeof (window as any).WA.loadFileBrowser === 'function' && !(window as any)._WA_fileBrowserLoaded) {
-      (window as any)._WA_fileBrowserLoaded = true;
-      (window as any).WA.loadFileBrowser();
-      if ((window as any).WA && typeof (window as any).WA.refreshRecent === 'function') {
-        (window as any).WA.refreshRecent();
-      }
-    }
+    void ensureFileBrowserLoaded();
   });
 }
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.toggleFileMenu = toggleFileMenu;
-  (window as any).WA._closeFileMenu = _closeFileMenu;
-  (window as any).WA.openInMainView = openInMainView;
-  (window as any).WA.closeInMainView = closeInMainView;
-  (window as any).WA.toggleMainView = toggleMainView;
-  (window as any).WA.showFileWorkspace = showFileWorkspace;
-  (window as any).WA.showAiWorkspace = showAiWorkspace;
+  publishWorkspaceApi({
+    toggleFileMenu,
+    _closeFileMenu,
+    openInMainView,
+    closeInMainView,
+    toggleMainView,
+    showFileWorkspace,
+    showAiWorkspace,
+  });
   (window as any).switchToChatView = switchToChatView;
 }

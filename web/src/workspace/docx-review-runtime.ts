@@ -8,40 +8,41 @@ import { _switchToTab, state } from './state';
 import { getWorkspaceApi } from '../shared/workspace-api';
 
 type ReviewItem = Record<string, any>;
+type DocxReviewEngineModule = {
+  createDocxReviewLayout: (_deps: Record<string, any>) => any;
+  createReviewState: (_deps: Record<string, any>) => any;
+};
 
-let reviewStateRuntime: any = null;
 let reviewLayoutRuntime: any = null;
+let reviewEngineModule: DocxReviewEngineModule | null = null;
+let reviewStateRuntime: any = null;
+// The review module intentionally consumes only a narrow structural subset of
+// WorkspaceState; keep that adapter at this boundary instead of widening both
+// state models to each other's internal fields.
+export function installDocxReviewEngine(engine: DocxReviewEngineModule): void {
+  if (
+    !engine
+    || typeof engine.createReviewState !== 'function'
+    || typeof engine.createDocxReviewLayout !== 'function'
+  ) {
+    throw new Error('Invalid DOCX review engine module');
+  }
+  if (reviewEngineModule === engine && reviewStateRuntime) return;
+  reviewEngineModule = engine;
+  reviewStateRuntime = engine.createReviewState({ state: state as any });
+  reviewLayoutRuntime = null;
+}
 
 function _clean(value: any): string {
   return String(value == null ? '' : value).trim();
 }
 
 function _activeReviewTab(): any {
-  const tabs = Array.isArray(state.openTabs) ? state.openTabs : [];
-  const activePath = _clean(state.activeTabPath || state.wsSourcePath);
-  return tabs.find((tab: any) => tab && tab.path === activePath)
-    || tabs.find((tab: any) => tab && tab.fileType === 'docx' && (tab.path === state.wsSourcePath || tab.name === state.fileName))
-    || (state.fileType === 'docx' ? tabs.find((tab: any) => tab && tab.fileType === 'docx') : null)
-    || null;
-}
-
-function _getReviewStateRuntime(): any {
-  if (reviewStateRuntime) return reviewStateRuntime;
-  const factory = (window as any).KotoDocxReviewState;
-  if (factory && typeof factory.create === 'function') {
-    reviewStateRuntime = factory.create({ state });
-  }
-  return reviewStateRuntime;
+  return reviewStateRuntime?.activeReviewTab?.() || null;
 }
 
 function _ensureTabReviewState(tab: any = _activeReviewTab()): any {
-  const runtime = _getReviewStateRuntime();
-  if (runtime && typeof runtime.ensureTabReviewState === 'function') return runtime.ensureTabReviewState(tab);
-  if (!tab) return null;
-  if (!tab.reviewState) tab.reviewState = { comments: [], proposals: [], focusedId: '', expandedId: '' };
-  tab.reviewState.comments = Array.isArray(tab.reviewState.comments) ? tab.reviewState.comments : [];
-  tab.reviewState.proposals = Array.isArray(tab.reviewState.proposals) ? tab.reviewState.proposals : [];
-  return tab.reviewState;
+  return reviewStateRuntime?.ensureTabReviewState?.(tab) || null;
 }
 
 function _clone(value: any, fallback: any = null): any {
@@ -49,68 +50,16 @@ function _clone(value: any, fallback: any = null): any {
 }
 
 function _normalizeReviewComment(comment: any, index = 0): any {
-  const runtime = _getReviewStateRuntime();
-  if (runtime && typeof runtime.normalizeReviewComment === 'function') return runtime.normalizeReviewComment(comment, index);
-  const raw = _clone(comment, {}) || {};
-  const rawId = _clean(raw.id || raw.review_id || raw.comment_id).replace(/^comment:/, '');
-  const id = rawId || `comment-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 7)}`;
-  return {
-    ...raw,
-    id,
-    review_id: _clean(raw.review_id) || `comment:${id}`,
-    author: _clean(raw.author || raw.user || raw.initials) || '批注',
-    initials: _clean(raw.initials || raw.author).slice(0, 2),
-    text: _clean(raw.text || raw.content || raw.body || raw.comment),
-    anchor_text: _clean(raw.anchor_text || raw.anchorText || raw.quote || raw.selection_text || raw.original_text),
-    date: _clean(raw.date || raw.created_at || raw.createdAt || raw.time) || new Date().toISOString(),
-  };
+  return reviewStateRuntime?.normalizeReviewComment?.(comment, index) || comment || {};
 }
 
 function _normalizeReviewProposal(proposal: any, index = 0): any {
-  const runtime = _getReviewStateRuntime();
-  if (runtime && typeof runtime.normalizeReviewProposal === 'function') return runtime.normalizeReviewProposal(proposal, index);
-  const raw = _clone(proposal, {}) || {};
-  const rawId = _clean(raw.id || raw.review_id || raw.proposal_id).replace(/^proposal:/, '');
-  const id = rawId || `proposal-${Date.now().toString(36)}-${index}-${Math.random().toString(36).slice(2, 7)}`;
-  const action = _clean(raw.action || raw.action_type || raw.type) || 'replace';
-  const originalText = _clean(raw.original_text || raw.anchor_text || raw.old_text || raw.from || raw.text);
-  const proposedText = _clean(raw.proposed_text || raw.replacement_text || raw.new_text || raw.value || raw.to);
-  return {
-    ...raw,
-    id,
-    review_id: _clean(raw.review_id) || `proposal:${id}`,
-    source: _clean(raw.source) || 'ai_proposal',
-    action,
-    action_type: _clean(raw.action_type || action) || 'replace',
-    original_text: originalText,
-    anchor_text: _clean(raw.anchor_text || originalText),
-    proposed_text: proposedText,
-    rationale: _clean(raw.rationale || raw.reason || raw.comment || raw.explanation),
-    _reviewStatus: _clean(raw._reviewStatus || raw.review_status || raw.status),
-  };
+  return reviewStateRuntime?.normalizeReviewProposal?.(proposal, index) || proposal || {};
 }
 
 function _mergeReviewProposals(existing: any[], incoming: any[]): any[] {
-  const runtime = _getReviewStateRuntime();
-  if (runtime && typeof runtime.mergeReviewProposals === 'function') return runtime.mergeReviewProposals(existing, incoming);
-  const merged: any[] = [];
-  const seen = new Map<string, number>();
-  function add(item: any, index: number): void {
-    const normalized = _normalizeReviewProposal(item, index);
-    const key = _clean(normalized.id || normalized.review_id).replace(/^proposal:/, '')
-      || `${normalized.original_text}\n${normalized.proposed_text}\n${normalized.rationale}`;
-    if (!key) return;
-    if (seen.has(key)) {
-      const existingIndex = seen.get(key) as number;
-      merged[existingIndex] = { ...merged[existingIndex], ...normalized, _reviewStatus: normalized._reviewStatus || merged[existingIndex]._reviewStatus };
-      return;
-    }
-    seen.set(key, merged.length);
-    merged.push(normalized);
-  }
-  (Array.isArray(existing) ? existing : []).forEach(add);
-  (Array.isArray(incoming) ? incoming : []).forEach(add);
-  return merged;
+  return reviewStateRuntime?.mergeReviewProposals?.(existing, incoming)
+    || [...(Array.isArray(existing) ? existing : []), ...(Array.isArray(incoming) ? incoming : [])];
 }
 
 function _syncReviewProposalServerData(tab: any, reviewState: any): void {
@@ -130,8 +79,9 @@ function _syncDocCommentServerData(tab: any, reviewState: any): void {
 }
 
 function _visibleProposals(reviewState: any): ReviewItem[] {
-  const runtime = _getReviewStateRuntime();
-  if (runtime && typeof runtime.visibleReviewProposals === 'function') return runtime.visibleReviewProposals(reviewState);
+  if (reviewStateRuntime?.visibleReviewProposals) {
+    return reviewStateRuntime.visibleReviewProposals(reviewState);
+  }
   return Array.isArray(reviewState?.proposals) ? reviewState.proposals : [];
 }
 
@@ -243,10 +193,9 @@ function _getReviewCommentSelectionState(): any {
 
 function _getReviewLayout(): any {
   if (reviewLayoutRuntime) return reviewLayoutRuntime;
-  const factory = (window as any).KotoDocxReviewLayout;
-  if (!factory || typeof factory.create !== 'function') return null;
-  reviewLayoutRuntime = factory.create({
-    state,
+  if (!reviewEngineModule) return null;
+  reviewLayoutRuntime = reviewEngineModule.createDocxReviewLayout({
+    state: state as any,
     $,
     _findReviewEntry,
     _findDocxReviewAnchorElement,
@@ -256,6 +205,9 @@ function _getReviewLayout(): any {
     _isReviewEditorFocused,
     _getSelectionViewportBounds,
     _previewReviewText,
+    captureReviewSelection: _captureReviewSelection,
+    createReviewComment: _createReviewComment,
+    createReviewRevision: _createReviewRevision,
   });
   return reviewLayoutRuntime;
 }
@@ -269,6 +221,7 @@ function _ensureReviewShellHost(): HTMLElement | null {
 function _scheduleReviewLayout(): void {
   const layout = _getReviewLayout();
   if (layout && typeof layout.ensureReviewShellViewportSync === 'function') layout.ensureReviewShellViewportSync();
+  if (layout && typeof layout.layoutReviewShellInDocx === 'function') layout.layoutReviewShellInDocx();
   if (layout && typeof layout.scheduleReviewShellLayout === 'function') layout.scheduleReviewShellLayout();
   if (layout && typeof layout.renderReviewSelectionLauncher === 'function') layout.renderReviewSelectionLauncher();
 }
@@ -277,6 +230,12 @@ function _setStoredReviewMode(mode: string): void {
   const normalized = ['all', 'comments', 'proposals'].includes(mode) ? mode : 'all';
   state._reviewMode = normalized;
   try { localStorage.setItem('wa_review_mode', normalized); } catch (_) { /* allowed to fail */ }
+}
+
+function _syncReviewModeButtons(): void {
+  document.querySelectorAll<HTMLElement>('.wa-review-mode-btn[data-mode]').forEach((button) => {
+    button.classList.toggle('is-active', button.dataset.mode === state._reviewMode);
+  });
 }
 
 function _setReviewCenterOpen(open: boolean): void {
@@ -387,17 +346,20 @@ function _renderReviewShell(): void {
   if (state.fileType !== 'docx') return;
   const shell = _ensureReviewShellHost();
   if (!shell) return;
-  const reviewState = _ensureTabReviewState();
   const list = shell.querySelector('#wa-review-list') as HTMLElement | null;
-  const summary = shell.querySelector('#wa-review-summary') as HTMLElement | null;
-  if (summary) summary.textContent = _summaryText(reviewState);
+  const entries = _allReviewEntries();
+  const hasEntries = entries.length > 0;
   if (list) {
-    const entries = _allReviewEntries();
-    list.innerHTML = entries.length
-      ? entries.map(_cardHtml).join('')
-      : '<div class="koto-docx-comment-card koto-docx-comment-empty"><div class="koto-docx-comment-body">选中文档正文后添加批注，或让 Koto 生成修订建议。</div></div>';
+    if (hasEntries) {
+      list.innerHTML = entries.map(_cardHtml).join('');
+    } else {
+      // The DOCX shell is an absolutely positioned review rail. Rendering its
+      // empty-state copy as a comment card makes the layout engine treat the
+      // helper text as an anchored review and float it over the document.
+      list.replaceChildren();
+    }
   }
-  shell.style.display = state._reviewCenterOpen === false ? 'none' : 'flex';
+  shell.style.display = state._reviewCenterOpen === false || !hasEntries ? 'none' : 'flex';
   _syncDocxReviewToolbar();
   _scheduleReviewLayout();
 }
@@ -418,7 +380,7 @@ function _syncReviewStateForActiveFile(): Promise<any> {
 
 function _syncDocCommentStateForActiveFile(nextComments?: any[], targetTab: any = _activeReviewTab()): any[] {
   const activeTab = _activeReviewTab();
-  const runtime = _getReviewStateRuntime();
+  const runtime = reviewStateRuntime;
   if (targetTab && targetTab === activeTab && runtime && typeof runtime.syncDocCommentStateForActiveFile === 'function') {
     const comments = runtime.syncDocCommentStateForActiveFile(nextComments);
     const reviewState = _ensureTabReviewState(targetTab);
@@ -567,7 +529,7 @@ function _buildStructuredReviewComment(item: any, index: number, options: { auth
 }
 
 function _coerceReviewModeForVisibleContent(reviewState: any, preferredKind = ''): void {
-  const runtime = _getReviewStateRuntime();
+  const runtime = reviewStateRuntime;
   if (runtime && typeof runtime.coerceReviewModeForVisibleContent === 'function') {
     runtime.coerceReviewModeForVisibleContent(reviewState, preferredKind);
     return;
@@ -648,7 +610,7 @@ async function _applyStructuredReviewProgressPayload(payload: any, options: any 
   const activeTab = _activeReviewTab();
   const activePath = _clean(activeTab?.path || activeTab?.wsSourcePath);
   if (targetPath && (!_reviewPathsMatch(targetPath, activePath))) {
-    const reload = (window as any).WA && (window as any).WA.reloadFileByPath;
+    const reload = getWorkspaceApi().reloadFileByPath;
     if (typeof reload !== 'function') return false;
     try { await reload(targetPath, true); } catch (error) { console.warn('[WA review progress] target open failed:', error); }
   }
@@ -839,7 +801,7 @@ document.addEventListener('click', (event) => {
   const toolbarAction = target?.closest('[data-review-toolbar-action]') as HTMLElement | null;
   if (toolbarAction) {
     const action = _clean(toolbarAction.dataset.reviewToolbarAction);
-    if (action === 'comment') (window as any).WA.toggleReviewCommentMode();
+    if (action === 'comment') toggleReviewCommentMode();
     if (action === 'revision') {
       _setReviewCenterOpen(true);
       _setStoredReviewMode('proposals');
@@ -871,24 +833,30 @@ document.addEventListener('selectionchange', () => {
   if (layout && typeof layout.renderReviewSelectionLauncher === 'function') layout.renderReviewSelectionLauncher();
 });
 
-(window as any)._ensureTabReviewState = _ensureTabReviewState;
-(window as any)._syncReviewStateForActiveFile = _syncReviewStateForActiveFile;
-(window as any)._syncDocCommentStateForActiveFile = _syncDocCommentStateForActiveFile;
-(window as any)._syncDocxReviewToolbar = _syncDocxReviewToolbar;
-(window as any)._renderReviewShell = _renderReviewShell;
-(window as any)._syncReviewSelectionSnapshot = _captureReviewSelection;
-(window as any)._renderReviewSelectionLauncher = () => _getReviewLayout()?.renderReviewSelectionLauncher?.();
-(window as any)._hideReviewSelectionLauncher = () => _getReviewLayout()?.hideReviewSelectionLauncher?.();
-(window as any)._isReviewCommentModeEnabled = _isReviewCommentModeEnabled;
-(window as any)._isReviewEditorFocused = _isReviewEditorFocused;
-(window as any)._isReviewShellFocused = () => !!document.activeElement?.closest?.('#wa-review-shell');
+export const ensureTabReviewState = _ensureTabReviewState;
+export const syncReviewStateForActiveFile = _syncReviewStateForActiveFile;
+export const syncDocCommentStateForActiveFile = _syncDocCommentStateForActiveFile;
+export const syncDocxReviewToolbar = _syncDocxReviewToolbar;
+export const renderReviewShell = _renderReviewShell;
+export const captureReviewSelection = _captureReviewSelection;
+export const createReviewComment = _createReviewComment;
+export const createReviewRevision = _createReviewRevision;
+export const isReviewCommentModeEnabled = _isReviewCommentModeEnabled;
+export const isReviewEditorFocused = _isReviewEditorFocused;
+export const isReviewShellFocused = (): boolean => !!document.activeElement?.closest?.('#wa-review-shell');
+export const renderReviewSelectionLauncher = (): void => _getReviewLayout()?.renderReviewSelectionLauncher?.();
+export const hideReviewSelectionLauncher = (): void => _getReviewLayout()?.hideReviewSelectionLauncher?.();
+export const normalizeWorkspaceFilePath = _normalizeWorkspaceFilePath;
+export const applyStructuredDocToolCall = (toolCall: any, options: any = {}): boolean => _appendStructuredReviewComments(toolCall, options);
+export const applyStructuredReviewChangePayload = (payload: any, options: any = {}): boolean => {
+  const operation = _clean(payload?.operation || payload?.change_type).toLowerCase();
+  const annotationsAdded = Number(payload?.annotations_added || 0);
+  if (!Array.isArray(payload?.changes) && operation !== 'annotate_file' && operation !== 'annotate' && !annotationsAdded) return false;
+  return _appendStructuredReviewComments(payload, options);
+};
+export const applyStructuredReviewProgressPayload = (payload: any, options: any = {}): Promise<boolean> => _applyStructuredReviewProgressPayload(payload, options);
 
-(window as any).WA = (window as any).WA || {};
-(window as any).WA.captureReviewSelection = _captureReviewSelection;
-(window as any).WA.createReviewComment = _createReviewComment;
-(window as any).WA.createReviewRevision = _createReviewRevision;
-(window as any).WA.openReviewCenter = () => { _setReviewCenterOpen(true); _renderReviewShell(); };
-(window as any).WA.toggleReviewCommentMode = (forceOpen?: boolean) => {
+export function toggleReviewCommentMode(forceOpen?: boolean): void {
   if (state.fileType !== 'docx') {
     showToast('当前仅 DOCX 文档支持批注模式', 'info');
     return;
@@ -897,8 +865,9 @@ document.addEventListener('selectionchange', () => {
   _setReviewCenterOpen(nextOpen);
   _setStoredReviewMode('comments');
   _renderReviewShell();
-};
-(window as any).WA.openRevisionReviewCenter = () => {
+}
+
+export function openRevisionReviewCenter(): void {
   if (state.fileType !== 'docx') {
     showToast('修订栏当前仅支持 DOCX 文档', 'info');
     return;
@@ -922,8 +891,9 @@ document.addEventListener('selectionchange', () => {
     _scrollReviewCardIntoView(reviewState.focusedId);
     _scrollProposalCardIntoView(reviewState.focusedId);
   });
-};
-(window as any).WA.focusReviewThread = async (reviewId: string) => {
+}
+
+export async function focusReviewThread(reviewId: string): Promise<void> {
   const entry = _findReviewEntry(reviewId);
   if (!entry || !entry.item) return;
   if (entry.tab && entry.tab.path && entry.tab.path !== state.activeTabPath) {
@@ -942,8 +912,9 @@ document.addEventListener('selectionchange', () => {
     const layout = _getReviewLayout();
     if (layout && typeof layout.scrollReviewAnchorIntoView === 'function') layout.scrollReviewAnchorIntoView(entry.item);
   });
-};
-(window as any).WA.onDocxCommentsChanged = (comments: any[], tabPath?: string) => {
+}
+
+export function onDocxCommentsChanged(comments: any[], tabPath?: string): void {
   const targetTab = tabPath
     ? (Array.isArray(state.openTabs) ? state.openTabs.find((tab: any) => tab && tab.path === tabPath) : null)
     : _activeReviewTab();
@@ -951,13 +922,8 @@ document.addEventListener('selectionchange', () => {
   if (!targetTab || !reviewState) return;
   _syncDocCommentStateForActiveFile(Array.isArray(comments) ? comments : [], targetTab);
   if (targetTab.path === state.activeTabPath) _syncReviewStateForActiveFile().catch(() => {});
-};
-(window as any).WA.normalizeWorkspaceFilePath = _normalizeWorkspaceFilePath;
-(window as any).WA.applyStructuredDocToolCall = (toolCall: any, options: any = {}) => _appendStructuredReviewComments(toolCall, options);
-(window as any).WA.applyStructuredReviewChangePayload = (payload: any, options: any = {}) => {
-  const operation = _clean(payload?.operation || payload?.change_type).toLowerCase();
-  const annotationsAdded = Number(payload?.annotations_added || 0);
-  if (!Array.isArray(payload?.changes) && operation !== 'annotate_file' && operation !== 'annotate' && !annotationsAdded) return false;
-  return _appendStructuredReviewComments(payload, options);
-};
-(window as any).WA.applyStructuredReviewProgressPayload = (payload: any, options: any = {}) => _applyStructuredReviewProgressPayload(payload, options);
+}
+
+export function relayoutDocxReviewRail(): void {
+  _getReviewLayout()?.scheduleReviewShellLayout?.();
+}

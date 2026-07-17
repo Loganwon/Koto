@@ -3,6 +3,7 @@
  */
 
 import {
+  getActiveKotoComposer,
   getActiveKotoMessageContainer,
   submitActiveKotoComposerText,
 } from '../shared/active-composer';
@@ -210,8 +211,29 @@ let _currentPool: TarotCard[] = [];
 let _autoConfirmTimer: number | null = null;
 let _allowReversed = true;
 
-let _origOnKeyDown: ((this: any, e: KeyboardEvent) => any) | null = null;
-let _origOnSubmit: ((this: any, e: Event) => any) | null = null;
+let _tarotInput: HTMLElement | null = null;
+let _tarotSendButton: HTMLElement | null = null;
+
+function _interceptTarotPrompt(event: Event): void {
+  if (!_active) return;
+  const input = getActiveKotoComposer();
+  if (!input) return;
+  const msg = input.value.trim();
+  if (!msg) return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  _pendingMsg = msg;
+  input.value = '';
+  input.dispatchEvent(new Event('input', { bubbles: true }));
+  showPicker(msg);
+}
+
+function _handleTarotKeydown(event: Event): void {
+  const keyboardEvent = event as KeyboardEvent;
+  if (keyboardEvent.key === 'Enter' && !keyboardEvent.shiftKey && !keyboardEvent.isComposing && keyboardEvent.keyCode !== 229) {
+    _interceptTarotPrompt(event);
+  }
+}
 
 function detectSpread(msg: string): TarotSpread {
   if (/每日|今日.*牌|日牌|晨牌/.test(msg)) return SPREADS.daily;
@@ -703,44 +725,25 @@ function hasPersistentTarotUI(): boolean {
 }
 
 function hookSendMessage(): void {
-  const input = document.getElementById('messageInput');
-  const form = document.querySelector('.chat-input-form') as HTMLFormElement;
-
-  if (input && !(input as any).dataset?.['tarotHooked']) {
-    _origOnKeyDown = (input as any).onkeydown;
-    (input as any).onkeydown = function (this: any, e: KeyboardEvent) {
-      if (_active && e.key === 'Enter' && !e.shiftKey && !(e as any).isComposing && (e as any).keyCode !== 229) {
-        const msg = (input as HTMLInputElement).value.trim();
-        if (msg) {
-          e.preventDefault(); _pendingMsg = msg; (input as HTMLInputElement).value = ''; showPicker(msg); return false;
-        }
-      }
-      return _origOnKeyDown ? _origOnKeyDown.call(this, e) : undefined;
-    };
-    (input as any).dataset['tarotHooked'] = '1';
+  const input = getActiveKotoComposer();
+  const sendButton = document.getElementById('wa-send-btn');
+  if (input && input !== _tarotInput) {
+    _tarotInput?.removeEventListener('keydown', _handleTarotKeydown, true);
+    input.addEventListener('keydown', _handleTarotKeydown, true);
+    _tarotInput = input;
   }
-
-  if (form && !(form as any).dataset?.['tarotHooked']) {
-    _origOnSubmit = (form as any).onsubmit;
-    (form as any).onsubmit = function (this: any, e: Event) {
-      if (_active) {
-        const inp = document.getElementById('messageInput') as HTMLInputElement;
-        const msg = inp ? inp.value.trim() : '';
-        if (msg) {
-          e?.preventDefault(); _pendingMsg = msg; if (inp) inp.value = ''; showPicker(msg); return false;
-        }
-      }
-      return _origOnSubmit ? _origOnSubmit.call(this, e) : undefined;
-    };
-    (form as any).dataset['tarotHooked'] = '1';
+  if (sendButton && sendButton !== _tarotSendButton) {
+    _tarotSendButton?.removeEventListener('click', _interceptTarotPrompt, true);
+    sendButton.addEventListener('click', _interceptTarotPrompt, true);
+    _tarotSendButton = sendButton;
   }
 }
 
 function unhookSendMessage(): void {
-  const input = document.getElementById('messageInput');
-  const form = document.querySelector('.chat-input-form') as HTMLFormElement;
-  if (input && (input as any).dataset?.['tarotHooked']) { (input as any).onkeydown = _origOnKeyDown; delete (input as any).dataset['tarotHooked']; }
-  if (form && (form as any).dataset?.['tarotHooked']) { (form as any).onsubmit = _origOnSubmit; delete (form as any).dataset['tarotHooked']; }
+  _tarotInput?.removeEventListener('keydown', _handleTarotKeydown, true);
+  _tarotSendButton?.removeEventListener('click', _interceptTarotPrompt, true);
+  _tarotInput = null;
+  _tarotSendButton = null;
 }
 
 export function setTarotActive(active: boolean): void {

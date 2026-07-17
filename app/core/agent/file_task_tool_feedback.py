@@ -266,7 +266,7 @@ def extract_tool_runtime_outcome(result: Any) -> Optional[Dict[str, Any]]:
         return None
 
     outcome: Dict[str, Any] = {
-        "status": status or "needs_attention",
+        "status": status or "failed",
         "summary": summary,
     }
     if suggested_next_step:

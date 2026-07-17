@@ -63,6 +63,10 @@ def test_process_environment_applies_desktop_runtime_once_requested(
         configured.append,
     )
 
-    runtime_bootstrap.configure_process_environment(roots, desktop_runtime=True)
+    original_cwd = Path.cwd()
+    try:
+        runtime_bootstrap.configure_process_environment(roots, desktop_runtime=True)
+    finally:
+        os.chdir(original_cwd)
 
     assert configured == [roots]

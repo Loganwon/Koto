@@ -77,11 +77,10 @@
 ## 📁 文件结构
 
 ```
+app/core/services/
+└── memory_manager.py             # 增强记忆管理器
 web/
-├── enhanced_memory_manager.py    # 增强记忆管理器
-├── memory_integration.py          # 集成模块
-├── memory_api_routes.py           # API端点
-└── app.py                         # 主应用（已修改）
+└── app.py                        # 主应用
 
 config/
 ├── memory.json                    # 记忆存储
@@ -166,8 +165,7 @@ GET /api/memory/stats
 
 运行测试脚本：
 ```bash
-python web/enhanced_memory_manager.py
-python web/memory_integration.py
+python app/core/services/memory_manager.py
 ```
 
 ## 🚀 使用方法
@@ -240,10 +238,9 @@ memory_mgr.add_memory(
 [INIT] ⚠️  使用基础记忆管理器      # 降级到基础版
 ```
 
-如果降级，检查文件是否存在：
-- `web/enhanced_memory_manager.py`
-- `web/memory_integration.py`
-- `web/memory_api_routes.py`
+如果记忆服务加载失败，检查文件是否存在：
+- `app/core/services/memory_manager.py`
+- `web/blueprints/memory_api.py`
 
 ### API端点404
 确保 `memory_api_routes.py` 被正确导入：

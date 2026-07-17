@@ -2,6 +2,14 @@
  * Koto Router Module — navigation, view switching, welcome screen, workspace, projects
  */
 
+import {
+  getCurrentProject,
+  getProjectOptions,
+  initProjectSelector,
+  saveProjectOptions,
+  setCurrentProject,
+} from './session-bridge';
+
 export function goToWelcome(): void {
   if (typeof (window as any).switchToChatView === 'function') (window as any).switchToChatView();
   const currentSession = (window as any).currentSession;
@@ -16,13 +24,6 @@ export function goToWelcome(): void {
     }
     const sessionDomCache = (window as any).sessionDomCache;
     if (sessionDomCache) sessionDomCache.delete(currentSession);
-  }
-
-  const sendBtn = document.getElementById('sendBtn');
-  if (sendBtn) {
-    sendBtn.classList.remove('generating');
-    (sendBtn as HTMLButtonElement).disabled = false;
-    sendBtn.title = '发送';
   }
 
   (window as any).currentSession = null;
@@ -73,19 +74,6 @@ export async function selectSession(sessionName: string): Promise<void> {
   if (typeof (window as any)._syncSessionSelectionUi === 'function') (window as any)._syncSessionSelectionUi(sessionName);
   if (workspaceOpen && (window as any).WA && typeof (window as any).WA.useHostSession === 'function') {
     (window as any).WA.useHostSession(sessionName, { force: true });
-  }
-
-  const sb = document.getElementById('sendBtn') as HTMLButtonElement | null;
-  if (sb) {
-    if (typeof (window as any).isSessionGenerating === 'function' && (window as any).isSessionGenerating(sessionName)) {
-      sb.classList.add('generating');
-      sb.disabled = false;
-      sb.title = '停止生成';
-    } else {
-      sb.classList.remove('generating');
-      sb.disabled = false;
-      sb.title = '发送';
-    }
   }
 
   const chatContainer = document.getElementById('chatMessages');
@@ -155,97 +143,97 @@ export function updateBackToBottomBtn(): void {
 // ── Projects Manager ──
 export function openProjectsManager(): void {
   const panel = document.getElementById('projectsManagerModal');
-  if (panel) panel.style.display = 'flex';
+  if (!panel) return;
+  panel.classList.add('active');
+  panel.setAttribute('aria-hidden', 'false');
   _renderProjectsList();
+  requestAnimationFrame(() => {
+    (document.getElementById('newProjectNameInput') as HTMLInputElement | null)?.focus();
+  });
 }
 
 export function closeProjectsManager(): void {
   const panel = document.getElementById('projectsManagerModal');
-  if (panel) panel.style.display = 'none';
+  if (!panel) return;
+  panel.classList.remove('active');
+  panel.setAttribute('aria-hidden', 'true');
 }
 
 function _renderProjectsList(): void {
-  const list = document.getElementById('projectsList');
+  const list = document.getElementById('projectsManagerList');
   if (!list) return;
-  const options = typeof (window as any).getProjectOptions === 'function' ? (window as any).getProjectOptions() : [];
-  const currentProject = (window as any).currentProject || 'default';
-  list.innerHTML = options.map((p: { key: string; label: string }) => `
-    <div class="project-entry">
-      <input type="text" value="${(window as any).escapeHtml?.(p.label) || p.label}" data-key="${(window as any).escapeHtml?.(p.key) || p.key}" onchange="_saveProjectLabel(this)" placeholder="项目名称">
-      ${p.key !== 'default' ? `<button onclick="deleteProjectEntry('${(window as any).escapeHtml?.(p.key) || p.key}')" class="ghost-btn" title="删除项目">✕</button>` : '<span style="font-size:11px;opacity:.5;">默认</span>'}
-    </div>`).join('');
+  const options = getProjectOptions();
+  list.replaceChildren();
+
+  options.forEach((project) => {
+    const row = document.createElement('div');
+    row.className = 'proj-mgr-item';
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'proj-mgr-name';
+    input.value = project.label;
+    input.dataset.key = project.key;
+    input.placeholder = '项目名称';
+    input.setAttribute('aria-label', `${project.label}项目名称`);
+    input.addEventListener('change', () => _saveProjectLabel(input));
+    row.appendChild(input);
+
+    if (project.key === 'default') {
+      const marker = document.createElement('span');
+      marker.className = 'proj-mgr-default';
+      marker.textContent = '默认';
+      row.appendChild(marker);
+    } else {
+      const removeButton = document.createElement('button');
+      removeButton.type = 'button';
+      removeButton.className = 'proj-mgr-del';
+      removeButton.title = '删除项目';
+      removeButton.setAttribute('aria-label', `删除项目 ${project.label}`);
+      removeButton.textContent = '×';
+      removeButton.addEventListener('click', () => deleteProjectEntry(project.key));
+      row.appendChild(removeButton);
+    }
+
+    list.appendChild(row);
+  });
 }
 
 function _saveProjectLabel(input: HTMLInputElement): void {
   const key = input.dataset.key;
   const label = input.value.trim();
   if (!key || !label) return;
-  const options = typeof (window as any).getProjectOptions === 'function' ? (window as any).getProjectOptions() : [];
+  const options = getProjectOptions();
   const entry = options.find((p: { key: string }) => p.key === key);
   if (entry) entry.label = label;
-  if (typeof (window as any).saveProjectOptions === 'function') (window as any).saveProjectOptions(options);
-  if (typeof (window as any).initProjectSelector === 'function') (window as any).initProjectSelector();
+  saveProjectOptions(options);
+  initProjectSelector();
 }
 
 export function deleteProjectEntry(key: string): void {
   if (key === 'default') return;
-  const options = typeof (window as any).getProjectOptions === 'function' ? (window as any).getProjectOptions() : [];
+  const options = getProjectOptions();
   const filtered = options.filter((p: { key: string }) => p.key !== key);
-  if (typeof (window as any).saveProjectOptions === 'function') (window as any).saveProjectOptions(filtered);
-  const currentProject = (window as any).currentProject;
+  saveProjectOptions(filtered);
+  const currentProject = getCurrentProject();
   if (currentProject === key) {
-    (window as any).currentProject = 'default';
-    localStorage.setItem('koto.currentProject', 'default');
+    setCurrentProject('default');
   }
-  if (typeof (window as any).initProjectSelector === 'function') (window as any).initProjectSelector();
+  initProjectSelector();
   _renderProjectsList();
 }
 
 export function addProjectEntry(): void {
+  const input = document.getElementById('newProjectNameInput') as HTMLInputElement | null;
+  const label = input?.value.trim() || '新项目';
   const newKey = 'proj_' + Date.now().toString(36);
-  const options = typeof (window as any).getProjectOptions === 'function' ? (window as any).getProjectOptions() : [];
-  options.push({ key: newKey, label: '新项目' });
-  if (typeof (window as any).saveProjectOptions === 'function') (window as any).saveProjectOptions(options);
-  if (typeof (window as any).initProjectSelector === 'function') (window as any).initProjectSelector();
+  const options = getProjectOptions();
+  options.push({ key: newKey, label });
+  saveProjectOptions(options);
+  initProjectSelector();
+  if (input) input.value = '';
   _renderProjectsList();
-}
-
-// ── Workspace ──
-export function openWorkspaceFolder(): void {
-  toggleWorkspace();
-  if (typeof (window as any).showNotification === 'function') (window as any).showNotification('已展开 Koto 工作区', 'info', 2000);
-}
-
-export function toggleWorkspace(): void {
-  const panel = document.getElementById('workspacePanel');
-  if (!panel) return;
-  panel.classList.toggle('active');
-  if (panel.classList.contains('active')) {
-    loadWorkspaceFiles();
-  }
-}
-
-export async function loadWorkspaceFiles(): Promise<void> {
-  try {
-    const response = await fetch('/api/workspace');
-    const data = await response.json();
-    const container = document.getElementById('workspaceFiles');
-    if (!container) return;
-    if (data.files.length === 0) {
-      container.innerHTML = `<div style="text-align: center; padding: 20px; color: var(--text-muted);"><p>No files yet</p></div>`;
-      return;
-    }
-    container.innerHTML = data.files.map((file: string) => `
-      <a href="/api/workspace/${file}" target="_blank" class="workspace-file">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-          <polyline points="14 2 14 8 20 8"></polyline>
-        </svg>
-        <span>${(window as any).escapeHtml?.(file) || file}</span>
-      </a>`).join('');
-  } catch (error) {
-    console.error('Failed to load workspace files:', error);
-  }
+  input?.focus();
 }
 
 // ── Backward compat ──
@@ -260,6 +248,3 @@ export async function loadWorkspaceFiles(): Promise<void> {
 (window as any).closeProjectsManager = closeProjectsManager;
 (window as any).deleteProjectEntry = deleteProjectEntry;
 (window as any).addProjectEntry = addProjectEntry;
-(window as any).openWorkspaceFolder = openWorkspaceFolder;
-(window as any).toggleWorkspace = toggleWorkspace;
-(window as any).loadWorkspaceFiles = loadWorkspaceFiles;

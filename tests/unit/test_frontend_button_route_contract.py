@@ -315,7 +315,16 @@ def _reachable_frontend_sources() -> set[Path]:
         "bundles/skills-ui.ts",
         "skills/skills-panel.ts",
         "bundles/workspace.ts",
-        "bundles/review.ts",
+        "bundles/find-replace.ts",
+        "bundles/task-workbench.ts",
+        "bundles/conversation-list.ts",
+        "bundles/fs-context-menu.ts",
+        "bundles/docx-review-engine.ts",
+        "bundles/frontend-observer.ts",
+        "bundles/image-viewer.ts",
+        "bundles/pdf-viewer.ts",
+        "bundles/pptx-editor.ts",
+        "bundles/xlsx-editor.ts",
         "skills/skill-marketplace.ts",
         "skills/skill-community.ts",
     ]
@@ -360,19 +369,6 @@ def test_frontend_exposed_button_routes_are_registered(app_factory):
         ("GET", "/skill-marketplace"),
         ("GET", "/api/token-stats"),
         ("POST", "/api/token-stats/reset"),
-        ("GET", "/api/shadow/status"),
-        ("GET", "/api/shadow/observations"),
-        ("GET", "/api/shadow/memories"),
-        ("POST", "/api/shadow/memories"),
-        ("DELETE", "/api/shadow/memories/mem_1"),
-        ("GET", "/api/shadow/pending"),
-        ("POST", "/api/shadow/dismiss/msg_1"),
-        ("POST", "/api/shadow/dismiss-all"),
-        ("POST", "/api/shadow/toggle"),
-        ("POST", "/api/shadow/tick"),
-        ("GET", "/api/shadow/open-tasks"),
-        ("POST", "/api/shadow/dismiss-task/task_1"),
-        ("GET", "/api/shadow/retry-context/task_1"),
         ("GET", "/api/macro/pending"),
         ("POST", "/api/macro/dismiss/"),
         ("POST", "/api/macro/dismiss/suggestion_1"),
@@ -387,12 +383,6 @@ def test_frontend_exposed_button_routes_are_registered(app_factory):
         ("POST", "/api/bg-agent/task_1/approve"),
         ("POST", "/api/bg-agent/task_1/reject"),
         ("POST", "/api/bg-agent/task_1/cancel"),
-        ("GET", "/api/jobs/triggers"),
-        ("POST", "/api/jobs/triggers"),
-        ("POST", "/api/jobs/triggers/bootstrap"),
-        ("PATCH", "/api/jobs/triggers/trigger_1"),
-        ("DELETE", "/api/jobs/triggers/trigger_1"),
-        ("POST", "/api/jobs/triggers/trigger_1/fire"),
         ("GET", "/api/memories"),
         ("POST", "/api/memories"),
         ("POST", "/api/memories/import-profile"),
@@ -486,7 +476,7 @@ def test_skills_panel_lazy_loader_installs_global_bridges_before_first_click():
     assert "['openSkillsPanel','closeSkillsPanel','toggleSkillsPanel']" in html
     assert "window[name]=stubs[name]" in html
     assert "callAfterLoad(name, arguments)" in html
-    assert "#navSkillsBtn,#csbToggleBtn,#skillsPanel .close-panel" in html
+    assert "#navSkillsBtn,#csbToggleBtn,#skillsPanel .ui-close-button" in html
     assert '[data-action="open-skills"]' in html
 
 
@@ -545,21 +535,20 @@ def test_frontend_button_sources_keep_matching_backend_clusters():
         ]
     )
     job_routes = Path("app/api/job_routes.py").read_text(encoding="utf-8")
+    app_runtime = Path("web/app_runtime.py").read_text(encoding="utf-8")
     app_blueprints = Path("web/app_blueprints.py").read_text(encoding="utf-8")
     blueprint_loader = Path("web/services/blueprint_loader.py").read_text(
         encoding="utf-8"
     )
 
-    assert "/api/shadow/" in frontend_sources
-    assert "from app.api.shadow_routes import shadow_bp" in app_blueprints
+    assert "/api/shadow/" not in frontend_sources
+    assert "app.api.shadow_routes" not in app_blueprints
     assert '"web.blueprints.token_stats", "token_stats_bp"' in app_blueprints
-    assert '@job_bp.get("/triggers")' in job_routes
-    assert '@job_bp.post("/triggers/bootstrap")' in job_routes
-    assert '# @job_bp.get("/triggers")' not in job_routes
+    assert '"/triggers"' not in job_routes
+    assert "get_trigger_registry" not in app_runtime
     assert "register_memory_routes" in app_blueprints
     assert "from web.blueprints.auth import register_auth_routes" in app_blueprints
     assert "from web.app_http import configure_http_wiring" in app_blueprints
     assert "from app.api.response_routes import response_bp" in app_blueprints
     assert "register_blueprints_deferred" in blueprint_loader
-    assert "from app.api.shadow_routes import shadow_bp" not in blueprint_loader
     assert "_WEB_BLUEPRINT_CONFIGS" not in blueprint_loader

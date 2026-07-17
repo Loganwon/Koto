@@ -45,6 +45,12 @@ _TASK_TEXT_NAMED_OUTPUT_PATTERN = re.compile(
     r"\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))",
     re.IGNORECASE,
 )
+_TASK_TEXT_SAVE_AS_OUTPUT_PATTERN = re.compile(
+    r"(?:另存为|保存为|输出为|导出为|save\s+as|export\s+as)\s*(?:[《「“\"'])?"
+    r"(?P<path>[^\s\"'<>|:：,，。；;、!?！？()（）\[\]【】《》「」“”]+?"
+    r"\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))",
+    re.IGNORECASE,
+)
 
 
 def request_with_target_path(
@@ -110,6 +116,32 @@ def target_path_with_file_alias(request: FileTaskRequest, target_path: str) -> s
     return clean_target
 
 
+def resolve_explicit_output_against_request_target(
+    request_target: str,
+    explicit_output: str,
+) -> str:
+    """Keep an authoritative target directory when the prompt repeats its name.
+
+    Workspace requests often carry the full output path while the visible task
+    text mentions only ``report.docx``. Treating that basename as a different
+    target silently moved artifacts to the workspace root and let verification
+    check the wrong file. A prompt path with its own directory remains an
+    explicit override; only a matching basename inherits the request directory.
+    """
+    clean_output = str(explicit_output or "").strip()
+    clean_target = str(request_target or "").strip()
+    if not clean_output or not clean_target:
+        return clean_output
+    normalized_output = clean_output.replace("\\", "/").strip()
+    if "/" in normalized_output.strip("/"):
+        return clean_output
+    if Path(clean_target.replace("\\", "/")).name.casefold() == Path(
+        normalized_output
+    ).name.casefold():
+        return clean_target
+    return clean_output
+
+
 def request_target_points_to_source(
     request: FileTaskRequest,
     target_path: str,
@@ -139,9 +171,9 @@ def explicit_output_path_from_task(
     task_text = str(task or "").strip()
     if not task_text or not has_artifact_creation_intent(task_text):
         return ""
-    named_outputs = _explicitly_named_output_paths(task_text)
-    if named_outputs:
-        return named_outputs[-1][1]
+    declared_outputs = _explicitly_declared_output_paths(task_text)
+    if declared_outputs:
+        return declared_outputs[-1][1]
     candidates: List[tuple[int, int, str]] = []
     for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
@@ -190,9 +222,9 @@ def explicit_output_paths_from_task(
     task_text = str(task or "").strip()
     if not task_text or not has_artifact_creation_intent(task_text):
         return []
-    named_outputs = _explicitly_named_output_paths(task_text)
-    if named_outputs:
-        return _unique_output_paths(named_outputs)
+    declared_outputs = _explicitly_declared_output_paths(task_text)
+    if declared_outputs:
+        return _unique_output_paths(declared_outputs)
     candidates: List[tuple[int, int, str]] = []
     for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
@@ -253,6 +285,23 @@ def _explicitly_named_output_paths(task_text: str) -> List[tuple[int, str]]:
     return candidates
 
 
+def _explicitly_declared_output_paths(task_text: str) -> List[tuple[int, str]]:
+    candidates = _explicitly_named_output_paths(task_text)
+    for match in _TASK_TEXT_SAVE_AS_OUTPUT_PATTERN.finditer(task_text):
+        raw_path = match.group("path").strip()
+        suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
+        if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
+            continue
+        start, end = match.span("path")
+        candidate_path = _path_with_split_output_directory(
+            task_text, raw_path, start, end
+        )
+        if candidate_path:
+            candidates.append((start, candidate_path))
+    candidates.sort(key=lambda item: item[0])
+    return candidates
+
+
 def _unique_output_paths(candidates: List[tuple[Any, ...]]) -> List[str]:
     seen: set[str] = set()
     outputs: List[str] = []
@@ -270,6 +319,9 @@ def explicit_write_target_path_from_task(task: str) -> str:
     task_text = str(task or "").strip()
     if not task_text:
         return ""
+    declared_outputs = _explicitly_declared_output_paths(task_text)
+    if declared_outputs:
+        return declared_outputs[-1][1]
     candidates: List[tuple[int, int, str]] = []
     for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
         raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
@@ -361,6 +413,21 @@ def _candidate_path_is_immediate_source_reference(
         re.IGNORECASE,
     ):
         return True
+    source_list_match = re.search(
+        r"(?:读取|阅读|查看|分析|综合读取|基于|来自|打开|导入|read|source|from|input)"
+        r".{0,96}(?:和|与|及|以及|、|,|，|and)\s*$",
+        local_before,
+        re.IGNORECASE,
+    )
+    output_clause_after_source = re.search(
+        r"(?:生成|创建|输出|导出|产出|保存|写入|制作|"
+        r"generate|create|export|produce|save|write)"
+        r".{0,96}(?:和|与|及|以及|、|,|，|and)\s*$",
+        local_before,
+        re.IGNORECASE,
+    )
+    if source_list_match and not output_clause_after_source:
+        return True
     if suffix in {"xls", "xlsx", "csv"} and re.match(
         r"\s*(?:的|中|里|内|里的|中的|sheet|worksheet).{0,40}"
         r"(?:工作表|sheet|worksheet|数据|表格|rows?|cells?)",
@@ -440,7 +507,7 @@ def _strong_output_reference_file_names(task_text: str) -> set[str]:
         return names
     # Named outputs are unambiguous. Seed these first so the broad matcher
     # cannot turn “生成一份名为《报告.docx》” into a fake source-file path.
-    for _start, output_path in _explicitly_named_output_paths(source):
+    for _start, output_path in _explicitly_declared_output_paths(source):
         name = Path(output_path.replace("\\", "/")).name.casefold()
         if name:
             names.add(name)
@@ -530,8 +597,6 @@ def should_skip_uncreated_target_context(
     has_artifact_creation_intent: BoolPredicate,
     resolve_task_file_path: PathResolver,
 ) -> bool:
-    if not getattr(file_info, "target", False):
-        return False
     path_text = str(file_info.path or file_info.name or "").strip()
     if not path_text or not same_path(path_text, request.target_path):
         return False

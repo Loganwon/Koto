@@ -222,14 +222,7 @@ class TestMemoryApiRoutes:
     """memory_api_routes CRUD and utility endpoints."""
 
     def setup_method(self):
-        self._sw_patcher = patch(
-            "web.blueprints.memory_api._get_shadow_watcher", return_value=None
-        )
-        self._sw_patcher.start()
         self.client, self.mgr = _make_memory_app()
-
-    def teardown_method(self):
-        self._sw_patcher.stop()
 
     def test_get_all_memories_returns_list(self):
         r = self.client.get("/api/memories")
@@ -257,8 +250,7 @@ class TestMemoryApiRoutes:
         assert r.status_code == 400
 
     def test_delete_memory_returns_200(self):
-        with patch("web.blueprints.memory_api._get_shadow_watcher", return_value=None):
-            r = self.client.delete("/api/memories/1")
+        r = self.client.delete("/api/memories/1")
         assert r.status_code == 200
         data = r.get_json()
         assert data["success"] is True
@@ -282,8 +274,7 @@ class TestMemoryApiRoutes:
 
     def test_manager_exception_returns_500(self):
         self.mgr.get_all_memories.side_effect = RuntimeError("db error")
-        with patch("web.blueprints.memory_api._get_shadow_watcher", return_value=None):
-            r = self.client.get("/api/memories")
+        r = self.client.get("/api/memories")
         assert r.status_code == 500
 
 

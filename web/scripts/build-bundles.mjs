@@ -11,6 +11,9 @@ const OUT = resolve(ROOT, 'static/js/build');
 const shared = {
   root: ROOT,
   publicDir: false,
+  esbuild: {
+    pure: ['console.debug'],
+  },
   resolve: {
     alias: createAliases(ROOT),
   },
@@ -22,7 +25,16 @@ const entries = {
   'skills-ui-bundle': 'src/bundles/skills-ui.ts',
   'skills-panel-bundle': 'src/skills/skills-panel.ts',
   'workspace-bundle': 'src/bundles/workspace.ts',
-  'review-bundle': 'src/bundles/review.ts',
+  'find-replace-bundle': 'src/bundles/find-replace.ts',
+  'task-workbench-bundle': 'src/bundles/task-workbench.ts',
+  'conversation-list-bundle': 'src/bundles/conversation-list.ts',
+  'fs-context-menu-bundle': 'src/bundles/fs-context-menu.ts',
+  'frontend-observer-bundle': 'src/bundles/frontend-observer.ts',
+  'docx-review-engine-bundle': 'src/bundles/docx-review-engine.ts',
+  'pptx-editor-bundle': 'src/bundles/pptx-editor.ts',
+  'pdf-viewer-bundle': 'src/bundles/pdf-viewer.ts',
+  'xlsx-editor-bundle': 'src/bundles/xlsx-editor.ts',
+  'image-viewer-bundle': 'src/bundles/image-viewer.ts',
   'skill-marketplace-bundle': 'src/skills/skill-marketplace.ts',
   'skill-community-bundle': 'src/skills/skill-community.ts',
 };
@@ -40,6 +52,7 @@ for (const [name, entry] of Object.entries(entries)) {
       sourcemap: true,
       target: 'es2020',
       minify: 'esbuild',
+      chunkSizeWarningLimit: 700,
       rollupOptions: {
         input: resolve(ROOT, entry),
         output: {
@@ -57,8 +70,19 @@ const BUDGETS = {
   'app-bundle': 200 * 1024,
   'skills-ui-bundle': 80 * 1024,
   'skills-panel-bundle': 70 * 1024,
-  'workspace-bundle': 700 * 1024,
-  'review-bundle': 50 * 1024,
+  // Ratcheted down after extracting the file-type editors and frontend
+  // observer while retaining enough headroom for normal workspace work.
+  'workspace-bundle': 520 * 1024,
+  'find-replace-bundle': 30 * 1024,
+  'task-workbench-bundle': 60 * 1024,
+  'conversation-list-bundle': 50 * 1024,
+  'fs-context-menu-bundle': 60 * 1024,
+  'frontend-observer-bundle': 80 * 1024,
+  'docx-review-engine-bundle': 60 * 1024,
+  'pptx-editor-bundle': 180 * 1024,
+  'pdf-viewer-bundle': 150 * 1024,
+  'xlsx-editor-bundle': 35 * 1024,
+  'image-viewer-bundle': 15 * 1024,
   'skill-marketplace-bundle': 60 * 1024,
   'skill-community-bundle': 30 * 1024,
 };

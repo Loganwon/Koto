@@ -3086,6 +3086,77 @@ export class KotoTipTapEditor {
     }
   }
 
+  _buildLinearTextMap() {
+    const doc = this.editor && this.editor.state && this.editor.state.doc;
+    const chars = [];
+    let sawTextBlock = false;
+    if (!doc || typeof doc.descendants !== 'function') return { text: '', chars };
+    doc.descendants((node, pos) => {
+      if (node && node.isTextblock) {
+        if (sawTextBlock) chars.push({ ch: '\n', pos: null });
+        sawTextBlock = true;
+        return true;
+      }
+      if (!node || !node.isText || typeof node.text !== 'string') return true;
+      for (let index = 0; index < node.text.length; index += 1) {
+        chars.push({ ch: node.text[index], pos: pos + index });
+      }
+      return true;
+    });
+    return { text: chars.map((item) => item.ch).join(''), chars };
+  }
+
+  _resolveAnchoredTextRange(cmd) {
+    const anchorText = String(cmd.anchor_text || cmd.original || '');
+    if (!anchorText) return null;
+    const linear = this._buildLinearTextMap();
+    if (!linear.text) return null;
+    const wantedOccurrence = Number.isFinite(Number(cmd.anchor_occurrence)) ? Number(cmd.anchor_occurrence) : null;
+    const wantedStart = Number.isFinite(Number(cmd.anchor_start_offset)) ? Number(cmd.anchor_start_offset) : null;
+    const normalize = (value) => String(value || '').replace(/\s+/g, ' ').trim();
+    const beforeNeedle = normalize(cmd.anchor_context_before).slice(-80);
+    const afterNeedle = normalize(cmd.anchor_context_after).slice(0, 80);
+    const contextMatches = (actual, expected, side) => {
+      if (!expected) return true;
+      const normalized = normalize(actual);
+      return side === 'before'
+        ? normalized.endsWith(expected) || normalized.includes(expected)
+        : normalized.startsWith(expected) || normalized.includes(expected);
+    };
+    const candidates = [];
+    let cursor = 0;
+    let occurrence = 0;
+    while (cursor <= linear.text.length) {
+      const start = linear.text.indexOf(anchorText, cursor);
+      if (start < 0) break;
+      const slice = linear.chars.slice(start, start + anchorText.length);
+      const first = slice.find((item) => Number.isFinite(item.pos));
+      const last = [...slice].reverse().find((item) => Number.isFinite(item.pos));
+      if (first && last && !slice.some((item) => item.pos === null)) {
+        const contextBefore = linear.text.slice(Math.max(0, start - 160), start);
+        const contextAfter = linear.text.slice(start + anchorText.length, start + anchorText.length + 160);
+        if ((wantedOccurrence === null || occurrence === wantedOccurrence)
+            && contextMatches(contextBefore, beforeNeedle, 'before')
+            && contextMatches(contextAfter, afterNeedle, 'after')) {
+          let score = 10;
+          if (wantedOccurrence !== null && occurrence === wantedOccurrence) score += 100;
+          if (wantedStart !== null) score += Math.max(0, 30 - Math.abs(start - wantedStart));
+          if (beforeNeedle) score += 20;
+          if (afterNeedle) score += 20;
+          candidates.push({ from: Number(first.pos), to: Number(last.pos) + 1, score });
+        }
+      }
+      occurrence += 1;
+      cursor = start + Math.max(anchorText.length, 1);
+    }
+    candidates.sort((a, b) => b.score - a.score);
+    if (!candidates.length) return null;
+    if (candidates.length > 1 && candidates[0].score === candidates[1].score && wantedOccurrence === null && wantedStart === null) {
+      return null;
+    }
+    return candidates[0];
+  }
+
   // ── applyToolCall ─────────────────────────────────────────────────────────
   applyToolCall(cmd) {
     if (!this.editor) return;
@@ -3152,7 +3223,25 @@ export class KotoTipTapEditor {
         }
       }
 
-      // Strategy 2: Full-HTML string replacement
+      // Strategy 2: Resolve the pinned selection against current document positions.
+      if (!replaced) {
+        try {
+          const anchoredRange = this._resolveAnchoredTextRange(cmd);
+          if (anchoredRange) {
+            this.editor.chain()
+              .focus()
+              .setTextSelection({ from: anchoredRange.from, to: anchoredRange.to })
+              .insertContent(_toInsertContent(proposed))
+              .run();
+            this._savedSel = null;
+            replaced = true;
+          }
+        } catch (e) {
+          console.warn('[KotoTipTapEditor] replace_text anchor path failed:', e);
+        }
+      }
+
+      // Strategy 3: Full-HTML string replacement
       if (!replaced) {
         try {
           const currentHtml = this.serialize();

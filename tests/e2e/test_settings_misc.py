@@ -5,6 +5,8 @@ Covers theme toggling, settings panel, model selector, sidebar navigation,
 notification/skills buttons, and keyboard shortcuts.
 """
 
+import time
+
 import pytest
 
 # Known benign console errors that may appear during normal operation
@@ -50,6 +52,25 @@ def _settings_json(page, base_url: str) -> dict:
     resp = page.request.get(f"{base_url}/api/settings")
     assert resp.ok, f"GET /api/settings failed: {resp.status}"
     return resp.json()
+
+
+def _wait_for_setting(page, base_url: str, category: str, key: str, expected):
+    deadline = time.time() + 8
+    last_value = None
+    while time.time() < deadline:
+        last_value = _settings_json(page, base_url).get(category, {}).get(key)
+        if isinstance(expected, float):
+            try:
+                if float(last_value) == pytest.approx(expected):
+                    return last_value
+            except (TypeError, ValueError):
+                pass
+        elif last_value == expected:
+            return last_value
+        page.wait_for_timeout(150)
+    pytest.fail(
+        f"{category}.{key} did not persist {expected!r}; last value was {last_value!r}"
+    )
 
 
 def _toggle_setting_checkbox(page, checkbox_id: str, checked: bool) -> None:
@@ -114,6 +135,29 @@ def test_theme_toggle(e2e_page, e2e_base_url, console_errors):
 
 
 @pytest.mark.e2e
+def test_colored_theme_reaches_unified_workspace(e2e_page, e2e_base_url, console_errors):
+    """A palette selected in Settings must also recolor the workspace shell."""
+    _navigate_and_wait(e2e_page, e2e_base_url)
+    original_theme = _settings_json(e2e_page, e2e_base_url).get("appearance", {}).get("theme", "light")
+    target_theme = "ocean" if original_theme != "ocean" else "forest"
+    _open_settings(e2e_page)
+    try:
+        e2e_page.locator(f".theme-option[data-theme='{target_theme}']").click()
+        e2e_page.wait_for_timeout(350)
+        assert e2e_page.evaluate("document.documentElement.dataset.theme") == target_theme
+        accent = e2e_page.evaluate(
+            "getComputedStyle(document.querySelector('#workspaceView')).getPropertyValue('--accent').trim()"
+        )
+        expected = "#38a0ff" if target_theme == "ocean" else "#22c55e"
+        assert accent.lower() == expected
+    finally:
+        e2e_page.evaluate("theme => window.selectTheme(theme)", original_theme)
+        e2e_page.wait_for_timeout(350)
+
+    assert _filter_errors(console_errors) == [], f"JS errors: {_filter_errors(console_errors)}"
+
+
+@pytest.mark.e2e
 def test_settings_panel_opens(e2e_page, e2e_base_url, console_errors):
     """Click the settings button and verify the panel becomes visible."""
     _navigate_and_wait(e2e_page, e2e_base_url)
@@ -129,7 +173,7 @@ def test_settings_panel_opens(e2e_page, e2e_base_url, console_errors):
     assert has_active, "Settings panel did not receive 'active' class"
 
     # Close it
-    close_btn = panel.locator("button.close-panel")
+    close_btn = panel.locator("button.ui-close-button")
     if close_btn.count():
         close_btn.first.click()
         e2e_page.wait_for_timeout(300)
@@ -161,10 +205,27 @@ def test_settings_persist_to_backend_from_ui(e2e_page, e2e_base_url, console_err
 
         zoom_target = "110%" if original_zoom in {"1", "1.0", "1.00"} else "100%"
         e2e_page.locator(".fs-preset-btn", has_text=zoom_target).click()
-        e2e_page.wait_for_timeout(500)
-        zoomed = _settings_json(e2e_page, e2e_base_url)
         expected_zoom = "1.1" if zoom_target == "110%" else "1"
-        assert str(zoomed.get("appearance", {}).get("ui_zoom")) == expected_zoom
+        persisted_zoom = _wait_for_setting(
+            e2e_page,
+            e2e_base_url,
+            "appearance",
+            "ui_zoom",
+            float(expected_zoom),
+        )
+        assert float(persisted_zoom) == pytest.approx(float(expected_zoom))
+
+        # Rapid user clicks must be persisted in order so the last visible
+        # choice wins even when earlier requests are still in flight.
+        for rapid_target in ("80%", "130%", "110%"):
+            e2e_page.locator(".fs-preset-btn", has_text=rapid_target).click()
+        _wait_for_setting(
+            e2e_page,
+            e2e_base_url,
+            "appearance",
+            "ui_zoom",
+            1.1,
+        )
     finally:
         _toggle_setting_checkbox(e2e_page, "settingShowTaskType", original_task_type)
         restore_zoom = (
@@ -175,14 +236,19 @@ def test_settings_persist_to_backend_from_ui(e2e_page, e2e_base_url, console_err
         preset = e2e_page.locator(".fs-preset-btn", has_text=restore_zoom)
         if preset.count():
             preset.click()
-            e2e_page.wait_for_timeout(500)
+            _wait_for_setting(
+                e2e_page,
+                e2e_base_url,
+                "appearance",
+                "ui_zoom",
+                float(original_zoom),
+            )
 
     restored = _settings_json(e2e_page, e2e_base_url)
     assert restored.get("ai", {}).get("show_task_type") is original_task_type
-    assert str(restored.get("appearance", {}).get("ui_zoom")) in {
-        original_zoom,
-        original_zoom.rstrip(".0") or "1",
-    }
+    assert float(restored.get("appearance", {}).get("ui_zoom")) == pytest.approx(
+        float(original_zoom)
+    )
     assert (
         _filter_errors(console_errors) == []
     ), f"JS errors: {_filter_errors(console_errors)}"

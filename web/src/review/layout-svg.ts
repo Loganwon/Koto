@@ -125,6 +125,9 @@ export interface ReviewLayoutDeps {
   _isReviewEditorFocused: () => boolean;
   _getSelectionViewportBounds: () => any;
   _previewReviewText: (text: string, maxLength: number) => string;
+  captureReviewSelection: (event?: Event) => any;
+  createReviewComment: () => void;
+  createReviewRevision: () => void;
 }
 
 export interface ReviewSvgApi {

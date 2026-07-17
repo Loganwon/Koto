@@ -1056,6 +1056,70 @@ class TestJobRunner:
         assert calls
         assert calls[0]["record_task"] is False
 
+    def test_proactive_llm_uses_core_provider_boundary(self, monkeypatch):
+        import app.core.llm.model_selection as model_selection
+        import app.core.llm.provider_factory as provider_factory
+        from app.core.jobs.job_runner import _create_proactive_llm
+
+        captured = {}
+
+        class FakeProvider:
+            def generate_content(self, **kwargs):
+                captured.update(kwargs)
+                return {"content": "主动提醒内容"}
+
+        monkeypatch.setattr(
+            model_selection,
+            "get_configured_cloud_model",
+            lambda **kwargs: "deepseek-chat",
+        )
+        monkeypatch.setattr(
+            provider_factory,
+            "get_llm_provider",
+            lambda **kwargs: FakeProvider(),
+        )
+
+        llm_fn = _create_proactive_llm()
+
+        assert llm_fn("生成一句提醒") == "主动提醒内容"
+        assert captured["model"] == "deepseek-chat"
+        assert captured["stream"] is False
+        assert captured["max_tokens"] == 80
+
+    def test_proactive_tick_continues_without_cloud_provider(self):
+        from app.core.jobs.job_runner import JobContext, _handle_proactive_tick
+
+        captured = {}
+
+        class FakeAgent:
+            def tick(self, llm_fn=None):
+                captured["llm_fn"] = llm_fn
+
+            def pending(self):
+                return []
+
+        ctx = JobContext(
+            task_id="proactive-task",
+            session_id="system",
+            payload={},
+            ledger=MagicMock(),
+            bus=MagicMock(),
+        )
+        with (
+            patch(
+                "app.core.jobs.job_runner._create_proactive_llm",
+                side_effect=RuntimeError("cloud unavailable"),
+            ),
+            patch(
+                "app.core.agent.proactive_agent.get_proactive_agent",
+                return_value=FakeAgent(),
+            ),
+        ):
+            result = _handle_proactive_tick(ctx)
+
+        assert result == "巡检完成，待推送消息 0 条"
+        assert captured["llm_fn"] is None
+
     def test_recover_stale_tasks_cleans_startup_health_orphans(self, runner):
         """Startup recovery should cancel old health-check leftovers first."""
         from app.core.tasks.task_ledger import TaskStatus

@@ -502,6 +502,53 @@ def _handle_skill_exec(ctx: JobContext) -> Optional[str]:
         raise RuntimeError(f"skill_exec 失败: {exc}") from exc
 
 
+def _create_proactive_llm() -> Callable[[str], str]:
+    """Create the optional short-form LLM used by proactive background checks."""
+    from app.core.llm.model_selection import get_configured_cloud_model
+    from app.core.llm.provider_factory import get_llm_provider
+
+    model_id = get_configured_cloud_model(
+        task_type="CHAT",
+        fallback_model="deepseek-chat",
+    )
+    provider = get_llm_provider(
+        model=model_id,
+        allow_local_fallback=False,
+    )
+
+    def _llm(prompt: str) -> str:
+        response = provider.generate_content(
+            prompt=prompt,
+            model=model_id,
+            stream=False,
+            temperature=0.7,
+            max_tokens=80,
+            timeout=15,
+        )
+        if isinstance(response, dict):
+            text = str(response.get("content") or response.get("text") or "")
+        elif isinstance(response, str):
+            text = response
+        else:
+            text = ""
+
+        try:
+            from app.core.security.output_validator import OutputValidator
+
+            validated = OutputValidator.validate(text=text)
+            if validated.is_blocked:
+                logger.warning(
+                    "[proactive_tick] llm 输出被拦截: %s",
+                    validated.reasons,
+                )
+                return ""
+            return validated.text
+        except Exception:
+            return text
+
+    return _llm
+
+
 def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
     """触发主动交互巡检：检查是否有需要主动推送的消息。"""
     ctx.step("THOUGHT", "开始主动交互巡检", progress=10)
@@ -509,39 +556,7 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         # 尝试获取 LLM 函数（非必须）
         llm_fn = None
         try:
-            from app.core.llm.provider_compat import types as _types
-            from web.runtime_context import get_client_proxy
-
-            client = get_client_proxy()
-            if client is None:
-                raise RuntimeError("Active LLM client unavailable")
-
-            def _llm(prompt: str) -> str:
-                resp = client.models.generate_content(
-                    model="deepseek-chat",
-                    contents=prompt,
-                    config=_types.GenerateContentConfig(
-                        temperature=0.7, max_output_tokens=80
-                    ),
-                )
-                text = resp.text or ""
-                # 有害内容检测
-                try:
-                    from app.core.security.output_validator import OutputValidator
-
-                    _v = OutputValidator.validate(text=text)
-                    if _v.is_blocked:
-                        import logging as _log
-
-                        _log.getLogger(__name__).warning(
-                            "[proactive_tick] llm 输出被拦截: %s", _v.reasons
-                        )
-                        return ""
-                    return _v.text
-                except Exception:
-                    return text
-
-            llm_fn = _llm
+            llm_fn = _create_proactive_llm()
         except Exception as _e:
             logger.warning("[JobRunner] proactive_tick LLM 初始化失败: %s", _e)
 

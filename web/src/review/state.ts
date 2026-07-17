@@ -262,7 +262,7 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     return out;
   }
 
-  function syncDocCommentStateForActiveFile(nextComments: ReviewComment[]): ReviewComment[] {
+  function syncDocCommentStateForActiveFile(nextComments?: ReviewComment[]): ReviewComment[] {
     const tab = activeReviewTab();
     const reviewState = ensureTabReviewState(tab);
     if (!reviewState) return [];
@@ -330,5 +330,3 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     visibleReviewProposals,
   };
 }
-
-(window as any).KotoDocxReviewState = { create: createReviewState };

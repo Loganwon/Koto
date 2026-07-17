@@ -627,7 +627,9 @@ def test_file_task_runtime_preserves_reasoning_content_in_followup_model_turn():
                 path="notes.txt",
                 name="notes.txt",
                 type="txt",
-                content="这是一段文件内容。",
+                # Keep context absent so the first model turn genuinely needs
+                # the read tool before the follow-up model call.
+                content="",
             )
         ],
     )
@@ -643,7 +645,7 @@ def test_file_task_runtime_preserves_reasoning_content_in_followup_model_turn():
     model_turns = [
         msg
         for msg in second_messages
-        if msg.get("role") == "model" and msg.get("tool_calls")
+        if msg.get("role") == "model" and msg.get("reasoning_content")
     ]
     assert model_turns
     assert model_turns[-1]["reasoning_content"] == "reasoning token"

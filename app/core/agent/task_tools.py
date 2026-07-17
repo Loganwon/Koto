@@ -73,6 +73,13 @@ from app.core.agent.task_tools_docx_minimal import (
     _normalize_docx_paragraphs,
     _plain_text_to_docx_paragraphs,
 )
+from app.core.agent.task_tools_docx_table_helpers import (
+    _compact_financial_table_rows,
+    _match_header_index,
+    _normalize_table_columns,
+    _style_compact_financial_docx_table,
+    _table_sort_value,
+)
 from app.core.agent.task_tools_docx_review_cleanup import (
     DOCX_COMMENT_MARKUP_TAGS as _DOCX_COMMENT_MARKUP_TAGS,
 )
@@ -1199,6 +1206,7 @@ def _prepend_task_file_context(
     staged_entries: List[Dict[str, str]],
     *,
     output_dir: str = "",
+    sandbox_target_path: str = "",
 ) -> str:
     """Expose task file paths to sandbox code and keep basename access working."""
     absolute_paths = {
@@ -1220,11 +1228,17 @@ def _prepend_task_file_context(
         "# Attached task files are mirrored into the sandbox working directory.\n"
         f"TASK_WORKSPACE_ROOT = {json.dumps(workspace_root, ensure_ascii=False)}\n"
         f"TASK_OUTPUT_DIR = {json.dumps(output_dir_abs, ensure_ascii=False)}\n"
+        f"TASK_TARGET_PATH = {json.dumps(sandbox_target_path, ensure_ascii=False)}\n"
+        "import os as _koto_task_os\n"
+        "_koto_task_os.environ['TASK_TARGET_PATH'] = TASK_TARGET_PATH\n"
+        "_koto_task_os.environ['TASK_OUTPUT_DIR'] = TASK_OUTPUT_DIR\n"
         f"TASK_SANDBOX_FILE_PATHS = {json.dumps(staged_paths, ensure_ascii=False)}\n"
         f"TASK_FILE_PATHS = {json.dumps(absolute_paths, ensure_ascii=False)}\n"
         f"TASK_SANDBOX_FILES = {json.dumps(staged_names, ensure_ascii=False)}\n"
         "# Prefer TASK_SANDBOX_FILE_PATHS[...] for opening and editing attached files.\n"
         "# If TASK_OUTPUT_DIR is not empty, create new relative output files there.\n"
+        "# If TASK_TARGET_PATH is not empty, create or modify the requested target there.\n"
+        "# Koto will verify and sync TASK_TARGET_PATH back to the real workspace target.\n"
         "# After modifying an attached file, print: KOTO_MODIFIED:<sandbox_absolute_path>\n"
         "# Koto will sync the staged edit back to the source file automatically.\n"
         "# After creating a file in the workspace, print: KOTO_CREATED:<absolute_path>\n"
@@ -1291,12 +1305,23 @@ def _workspace_target_path(target_path: str) -> Optional[Path]:
     return real_target
 
 
-def _prepare_sandbox_target_paths(sandbox_dir: str, target_path: str) -> None:
-    for candidate in _target_output_candidates(sandbox_dir, target_path):
+def _prepare_sandbox_target_paths(sandbox_dir: str, target_path: str) -> str:
+    candidates = _target_output_candidates(sandbox_dir, target_path)
+    for candidate in candidates:
         try:
             candidate.parent.mkdir(parents=True, exist_ok=True)
         except OSError:
             continue
+    if not candidates:
+        return ""
+    preferred = candidates[0]
+    real_target = _workspace_target_path(target_path)
+    if real_target is not None and real_target.is_file():
+        try:
+            shutil.copy2(real_target, preferred)
+        except OSError:
+            return ""
+    return str(preferred)
 
 
 def _sync_target_outputs_from_sandbox(
@@ -1352,6 +1377,61 @@ def _sync_target_outputs_from_sandbox(
             stdout += "\n"
         stdout += f"{marker_name}:{real_target}"
         updated["stdout"] = stdout
+    return updated
+
+
+def _mark_direct_target_mutation(
+    result: Dict[str, Any],
+    *,
+    target: Optional[Path],
+    target_existed: bool,
+    initial_fingerprint: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Track a requested target written directly outside the sandbox.
+
+    Generated code sometimes writes to ``TASK_OUTPUT_DIR`` or an absolute target
+    path but omits the KOTO_CREATED/KOTO_MODIFIED print marker. The target path is
+    authoritative, so a real filesystem mutation there must still enter the
+    normal file-change and verification pipeline.
+    """
+    if target is None:
+        return result
+    marker_kind = "modified" if target_existed else "created"
+    marker_name = "KOTO_MODIFIED" if target_existed else "KOTO_CREATED"
+    updated = dict(result)
+    stdout = str(updated.get("stdout") or "")
+    norm_target = os.path.normcase(os.path.abspath(str(target)))
+    existing = {
+        os.path.normcase(os.path.abspath(path))
+        for path in _parse_koto_file_markers(stdout).get(marker_kind, [])
+    }
+    mutation_verified = target.is_file() and (
+        not target_existed
+        or _fingerprint_changed(str(target), initial_fingerprint)
+    )
+    if not mutation_verified:
+        if norm_target not in existing:
+            return result
+        kept_lines = []
+        for line in stdout.splitlines():
+            stripped = line.strip()
+            prefix = f"{marker_name}:"
+            candidate = stripped[len(prefix) :].strip() if stripped.startswith(prefix) else ""
+            if candidate and os.path.isabs(candidate):
+                if os.path.normcase(os.path.abspath(candidate)) == norm_target:
+                    continue
+            kept_lines.append(line)
+        updated["stdout"] = "\n".join(kept_lines)
+        updated["error"] = (
+            str(updated.get("error") or "").strip()
+            or f"{marker_name} was emitted, but the requested target did not change"
+        )
+        return updated
+    if norm_target in existing:
+        return result
+    if stdout and not stdout.endswith("\n"):
+        stdout += "\n"
+    updated["stdout"] = stdout + f"{marker_name}:{target}"
     return updated
 
 
@@ -1751,11 +1831,15 @@ def run_python_in_sandbox(
             staged_entries = _stage_task_files_for_sandbox(resolved_task_files, tmpdir)
         resolved_target = _workspace_target_path(target_path)
         target_existed = bool(resolved_target and resolved_target.is_file())
-        _prepare_sandbox_target_paths(tmpdir, target_path)
+        target_fingerprint_initial = (
+            _fingerprint_file(str(resolved_target)) if target_existed else {}
+        )
+        sandbox_target_path = _prepare_sandbox_target_paths(tmpdir, target_path)
         prepared_code = _prepend_task_file_context(
             code,
             staged_entries,
             output_dir=output_dir,
+            sandbox_target_path=sandbox_target_path,
         )
         result = run_python(prepared_code, timeout=normalized_timeout, work_dir=tmpdir)
         result = _sync_target_outputs_from_sandbox(
@@ -1763,6 +1847,12 @@ def run_python_in_sandbox(
             result,
             target_path=target_path,
             target_existed=target_existed,
+        )
+        result = _mark_direct_target_mutation(
+            result,
+            target=resolved_target,
+            target_existed=target_existed,
+            initial_fingerprint=target_fingerprint_initial,
         )
         result = _sync_created_workspace_files_from_sandbox(tmpdir, result)
         result = _relocate_root_created_files_to_output_dir(
@@ -3082,53 +3172,6 @@ def clear_docx_review_marks(path: str, scope: str = "comments") -> str:
     )
 
 
-def _normalize_table_columns(columns: Any) -> List[str]:
-    if not columns:
-        return []
-    value = columns
-    if isinstance(columns, str):
-        text = columns.strip()
-        if not text:
-            return []
-        try:
-            value = json.loads(text)
-        except Exception:
-            value = re.split(r"[,，、|]", text)
-    if not isinstance(value, list):
-        return []
-    normalized: List[str] = []
-    for item in value:
-        text = str(item or "").strip()
-        if text and text not in normalized:
-            normalized.append(text)
-    return normalized
-
-
-def _match_header_index(headers: List[str], wanted: str) -> Optional[int]:
-    wanted_text = str(wanted or "").strip().casefold()
-    if not wanted_text:
-        return None
-    normalized_headers = [str(header or "").strip().casefold() for header in headers]
-    for index, header in enumerate(normalized_headers):
-        if header == wanted_text:
-            return index
-    for index, header in enumerate(normalized_headers):
-        if wanted_text in header or header in wanted_text:
-            return index
-    return None
-
-
-def _table_sort_value(value: Any) -> tuple[int, Any]:
-    text = str(value or "").strip()
-    if not text:
-        return (0, 0)
-    numeric_text = re.sub(r"[,$%￥¥\s]", "", text)
-    try:
-        return (1, float(numeric_text))
-    except ValueError:
-        return (1, text.casefold())
-
-
 def insert_excel_as_docx_table(
     source_path: str,
     target_path: str,
@@ -3138,6 +3181,7 @@ def insert_excel_as_docx_table(
     sort_by: str = "",
     sort_order: str = "desc",
     columns: Any = "",
+    financial_compact: bool = False,
 ) -> str:
     """Insert spreadsheet data into a DOCX file as a real Word table."""
     max_rows = _normalize_positive_int(max_rows, default=200, upper=5_000)
@@ -3187,7 +3231,7 @@ def insert_excel_as_docx_table(
 
         worksheet = workbook[target_sheet]
         raw_rows: List[List[str]] = []
-        read_row_limit = 5_000 if sort_by_text else max_rows + 1
+        read_row_limit = 5_000 if (sort_by_text or financial_compact) else max_rows + 1
         for row in worksheet.iter_rows(values_only=True):
             if len(raw_rows) >= read_row_limit + 1:
                 break
@@ -3200,6 +3244,11 @@ def insert_excel_as_docx_table(
             return json.dumps(
                 {"error": f"Sheet '{target_sheet}' has no data"}, ensure_ascii=False
             )
+
+        if financial_compact:
+            compact_rows = _compact_financial_table_rows(raw_rows, max_rows)
+            if compact_rows:
+                raw_rows = compact_rows
 
         column_count = max(len(row) for row in raw_rows)
         normalized_rows = [row + [""] * (column_count - len(row)) for row in raw_rows]
@@ -3288,6 +3337,8 @@ def insert_excel_as_docx_table(
         for row_index, row_values in enumerate(normalized_rows):
             for column_index, value in enumerate(row_values):
                 table.cell(row_index, column_index).text = value
+        if financial_compact:
+            _style_compact_financial_docx_table(table, document)
 
         preview_lines = []
         if headers:
@@ -3346,6 +3397,7 @@ def insert_excel_as_docx_table(
                 sort_by=sort_by_text,
                 sort_order="desc" if sort_descending else "asc",
                 selected_columns=selected_columns,
+                financial_compact=bool(financial_compact),
                 original_target_path=_result_path(target_path, target_resolved),
                 blocked_target=True,
                 blocked_reason=locked_message,
@@ -3381,6 +3433,7 @@ def insert_excel_as_docx_table(
             sort_by=sort_by_text,
             sort_order="desc" if sort_descending else "asc",
             selected_columns=selected_columns,
+            financial_compact=bool(financial_compact),
         )
     except ImportError as exc:
         return json.dumps({"error": f"Missing dependency: {exc}"}, ensure_ascii=False)
@@ -3731,7 +3784,10 @@ def replace_file_selection(
 
 
 def write_docx_content(path: str, paragraphs: str = "[]") -> str:
-    """Write paragraphs to a DOCX file.
+    """Create a DOCX or append paragraphs to an existing DOCX.
+
+    This function never replaces existing paragraphs. Use a targeted editor or
+    a single precise python-docx operation for localized replacements.
 
     Args:
         path: Path to the DOCX file (will be created if not exists).

@@ -77,28 +77,24 @@ def _get_settings_manager():
 
 def _save_model_runtime(sm, *, mode: str, model_tag=None) -> tuple[bool, str]:
     """Persist the one shared model-mode/model-tag runtime contract."""
-    with sm._lock:
-        sm._settings["model_mode"] = mode
-        ai_settings = sm._settings.setdefault("ai", {})
-        if not isinstance(ai_settings, dict):
-            ai_settings = {}
-            sm._settings["ai"] = ai_settings
-        # model_mode is the canonical global inference mode.  Keep this older
-        # compatibility flag derived from it so socket and editor paths cannot
-        # retain a contradictory local-only mode.
-        ai_settings["use_local_only"] = mode == "local"
-        if mode == "deepseek":
-            ai_settings["cloud_provider"] = mode
-        elif mode == "cloud":
-            ai_settings.setdefault("cloud_provider", "deepseek")
-        normalized_model_tag = str(model_tag or "").strip()
-        if normalized_model_tag:
-            # Older UI code still reads ai.local_model, while all model
-            # providers read the top-level value.  They must never diverge.
-            sm._settings["local_model"] = normalized_model_tag
-            ai_settings["local_model"] = normalized_model_tag
-        active_model = str(sm._settings.get("local_model") or "").strip()
-        saved = sm._save_settings()
+    canonical_mode = "local" if str(mode or "").strip().lower() in {"local", "ollama"} else "cloud"
+    # model_mode is the canonical global inference mode. Keep the older
+    # compatibility fields derived from it, but persist everything through one
+    # cross-process transaction instead of mutating SettingsManager internals.
+    ai_patch = {
+        "use_local_only": canonical_mode == "local",
+        "cloud_provider": "deepseek",
+    }
+    settings_patch = {
+        "model_mode": canonical_mode,
+        "ai": ai_patch,
+    }
+    normalized_model_tag = str(model_tag or "").strip()
+    if normalized_model_tag:
+        settings_patch["local_model"] = normalized_model_tag
+        ai_patch["local_model"] = normalized_model_tag
+    saved = sm.patch(settings_patch)
+    active_model = str(sm.get_all().get("local_model") or "").strip()
     if saved:
         # LocalModelRouter has a separate response cache for legacy fast
         # paths.  Clear it here so it cannot keep answering with the model
@@ -116,6 +112,35 @@ def _save_model_runtime(sm, *, mode: str, model_tag=None) -> tuple[bool, str]:
         except Exception:
             pass
     return saved, active_model
+
+
+def _model_runtime_payload(sm) -> dict:
+    """Expose the only supported model-selection contract to every UI entry."""
+    from app.core.llm.local_model_runtime import (
+        get_configured_local_model_tag,
+        get_configured_model_mode,
+    )
+    from app.core.llm.model_selection import (
+        get_configured_cloud_model,
+        get_configured_cloud_provider,
+    )
+
+    mode = get_configured_model_mode()
+    cloud_provider = get_configured_cloud_provider()
+    cloud_model = get_configured_cloud_model(provider=cloud_provider)
+    local_model = get_configured_local_model_tag()
+    active_model = local_model if mode == "local" else cloud_model
+    return {
+        "mode": mode,
+        "cloud_provider": cloud_provider,
+        "cloud_model": cloud_model,
+        "local_model": local_model,
+        "active_model": {
+            "mode": mode,
+            "provider": "ollama" if mode == "local" else cloud_provider,
+            "id": active_model,
+        },
+    }
 
 
 def _augment_models_for_cloud_provider(payload: dict) -> dict:
@@ -290,8 +315,8 @@ def local_model_status() -> Response:
         if info.get("mode") in {"cloud", "gemini", "deepseek"}:
             provider = get_configured_cloud_provider()
             info["cloud_provider"] = provider
-            info["mode"] = provider
-        return jsonify({"success": True, **info})
+            info["mode"] = "cloud"
+        return jsonify({"success": True, **info, **_model_runtime_payload(_get_settings_manager())})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -361,7 +386,7 @@ def local_model_switch() -> Response:
                     "code": "provider_archived",
                 }
             ), 410
-        mode = raw_mode if raw_mode in {"local", "cloud", "deepseek"} else "cloud"
+        mode = "local" if raw_mode in {"local", "ollama"} else "cloud"
         model_tag = data.get("model_tag")  # 本地模式时可指定模型
 
         save_ok, active_model = _save_model_runtime(sm, mode=mode, model_tag=model_tag)
@@ -375,7 +400,7 @@ def local_model_switch() -> Response:
         return jsonify(
             {
                 "success": True,
-                "mode": mode,
+                **_model_runtime_payload(sm),
                 "model": active_model,
                 "use_local_only": mode == "local",
             }
@@ -439,7 +464,9 @@ def get_settings() -> Response:
     # 合并 appearance 主题（如有 cookie/参数可在此合并）
     from app.core.llm.provider_boundary import sanitize_public_settings
 
-    return jsonify(sanitize_public_settings(_get_settings_manager().get_all()))
+    response = jsonify(sanitize_public_settings(_get_settings_manager().get_all()))
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 @settings_bp.route("/api/settings", methods=["POST"])
@@ -516,6 +543,10 @@ def update_settings() -> Response:
         # 代理设置变更时立即重新检测
         if category == "proxy":
             reset_proxy_detection()
+            # The old client may already hold a transport created with the
+            # previous proxy.  Rebuild it lazily for the next request so this
+            # setting takes effect now rather than after an application restart.
+            reset_client_cache()
         return jsonify({"success": success})
     return jsonify({"success": False, "error": "Missing category or key"})
 
@@ -528,6 +559,7 @@ def reset_settings() -> Response:
     # 同样清除缓存
     invalidate_settings_cache()
     reset_proxy_detection()
+    reset_client_cache()
     return jsonify({"success": success})
 
 

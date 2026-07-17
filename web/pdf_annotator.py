@@ -152,17 +152,109 @@ def apply_page_ops(pdf_path: str, pages: list[dict]) -> bytes:
 
 def pdf_to_docx(pdf_path: str) -> tuple[bytes, str]:
     """
-    Convert PDF to DOCX.  Returns (docx_bytes, warning_message).
-    Uses doc_converter which tries LibreOffice first, then pypdf text extraction.
+    Convert PDF to an editable DOCX while retaining page boundaries, basic text
+    styling, alignment, and embedded images. Scanned pages fall back to a page
+    image instead of failing with an empty document.
     """
-    import tempfile, os, shutil
-    from web.doc_converter import convert_to_docx  # type: ignore
+    try:
+        import pymupdf as fitz  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("PyMuPDF is required for PDF→DOCX conversion") from exc
+    try:
+        from docx import Document  # type: ignore
+        from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
+        from docx.shared import Inches, Pt, RGBColor  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("python-docx is required for PDF→DOCX conversion") from exc
 
-    with tempfile.TemporaryDirectory() as tmp:
-        out_path, warning = convert_to_docx(pdf_path, output_dir=tmp)
-        with open(out_path, "rb") as fh:
-            data = fh.read()
-    return data, warning
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = Pt(36)
+    section.bottom_margin = Pt(36)
+    section.left_margin = Pt(36)
+    section.right_margin = Pt(36)
+    image_fallback_pages = 0
+
+    with fitz.open(pdf_path) as pdf:
+        if len(pdf):
+            first_rect = pdf[0].rect
+            section.page_width = Pt(float(first_rect.width))
+            section.page_height = Pt(float(first_rect.height))
+
+        for page_index, page in enumerate(pdf):
+            blocks = sorted(
+                page.get_text("dict", flags=fitz.TEXT_PRESERVE_WHITESPACE).get("blocks", []),
+                key=lambda block: (round(float(block.get("bbox", (0, 0, 0, 0))[1]), 1),
+                                   float(block.get("bbox", (0, 0, 0, 0))[0])),
+            )
+            emitted = False
+            for block in blocks:
+                block_type = block.get("type")
+                if block_type == 0:
+                    for line in block.get("lines", []):
+                        spans = line.get("spans", [])
+                        text = "".join(str(span.get("text", "")) for span in spans)
+                        if not text.strip():
+                            continue
+                        paragraph = document.add_paragraph()
+                        bbox = line.get("bbox", block.get("bbox", (0, 0, 0, 0)))
+                        page_width = max(float(page.rect.width), 1.0)
+                        left_gap = float(bbox[0])
+                        right_gap = page_width - float(bbox[2])
+                        if abs(left_gap - right_gap) < page_width * 0.06:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                        elif left_gap > page_width * 0.55:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                        else:
+                            paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
+                        for span in spans:
+                            value = str(span.get("text", ""))
+                            if not value:
+                                continue
+                            run = paragraph.add_run(value)
+                            font_name = str(span.get("font", ""))
+                            run.bold = "bold" in font_name.lower()
+                            run.italic = any(token in font_name.lower() for token in ("italic", "oblique"))
+                            size = float(span.get("size", 0) or 0)
+                            if size:
+                                run.font.size = Pt(max(1.0, min(size, 200.0)))
+                            if font_name:
+                                run.font.name = font_name
+                            color = int(span.get("color", 0) or 0)
+                            run.font.color.rgb = RGBColor(
+                                (color >> 16) & 0xFF,
+                                (color >> 8) & 0xFF,
+                                color & 0xFF,
+                            )
+                        emitted = True
+                elif block_type == 1 and block.get("image"):
+                    try:
+                        available_width = max(float(section.page_width - section.left_margin - section.right_margin), 1)
+                        document.add_picture(
+                            BytesIO(block["image"]),
+                            width=Inches(min(available_width / 914400.0, 7.5)),
+                        )
+                        emitted = True
+                    except Exception:
+                        logger.debug("Could not embed PDF image block", exc_info=True)
+
+            if not emitted:
+                pix = page.get_pixmap(matrix=fitz.Matrix(1.5, 1.5), alpha=False)
+                available_width = max(float(section.page_width - section.left_margin - section.right_margin), 1)
+                document.add_picture(
+                    BytesIO(pix.tobytes("png")),
+                    width=Inches(min(available_width / 914400.0, 7.5)),
+                )
+                image_fallback_pages += 1
+            if page_index < len(pdf) - 1:
+                document.add_page_break()
+
+    output = BytesIO()
+    document.save(output)
+    warning = ""
+    if image_fallback_pages:
+        warning = f"{image_fallback_pages} 页未检测到可编辑文字，已按页面图像保留。"
+    return output.getvalue(), warning
 
 
 def pdf_to_xlsx(pdf_path: str) -> bytes:
@@ -180,25 +272,55 @@ def pdf_to_xlsx(pdf_path: str) -> bytes:
     except ImportError as exc:
         raise RuntimeError("openpyxl is required for PDF→XLSX conversion") from exc
 
+    from openpyxl.styles import Alignment, Font, PatternFill  # type: ignore
+    from openpyxl.utils import get_column_letter  # type: ignore
+
     wb = Workbook()
-    ws = wb.active
-    ws.title = "内容"
+    wb.remove(wb.active)
 
     with pdfplumber.open(pdf_path) as pdf:
         for page_num, page in enumerate(pdf.pages, start=1):
+            ws = wb.create_sheet(title=f"第{page_num}页")
+            current_row = 1
             tables = page.extract_tables() or []
             if tables:
-                for table in tables:
-                    for row in table:
-                        ws.append([str(cell or "") for cell in row])
-                    ws.append([])  # blank spacer row between tables
+                for table_index, table in enumerate(tables, start=1):
+                    if len(tables) > 1:
+                        ws.cell(current_row, 1, f"表格 {table_index}").font = Font(bold=True)
+                        current_row += 1
+                    for row_index, row in enumerate(table):
+                        for col_index, value in enumerate(row or [], start=1):
+                            cell = ws.cell(current_row, col_index, "" if value is None else str(value))
+                            cell.alignment = Alignment(
+                                horizontal="center" if row_index == 0 else "left",
+                                vertical="top",
+                                wrap_text=True,
+                            )
+                            if row_index == 0:
+                                cell.font = Font(bold=True)
+                                cell.fill = PatternFill("solid", fgColor="E8EEF7")
+                        current_row += 1
+                    current_row += 1
             else:
                 text = page.extract_text() or ""
                 if text.strip():
-                    ws.append([f"=== 第 {page_num} 页 ==="])
-                    for line in text.splitlines():
-                        ws.append([line])
-                    ws.append([])
+                    for line_number, line in enumerate(text.splitlines(), start=1):
+                        ws.cell(current_row, 1, line_number)
+                        content_cell = ws.cell(current_row, 2, line)
+                        content_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+                        current_row += 1
+                    ws.column_dimensions["A"].width = 8
+
+            for column in range(1, ws.max_column + 1):
+                max_length = max(
+                    (len(str(ws.cell(row, column).value or "")) for row in range(1, ws.max_row + 1)),
+                    default=0,
+                )
+                ws.column_dimensions[get_column_letter(column)].width = min(max(max_length + 2, 8), 60)
+            ws.freeze_panes = "A2" if ws.max_row > 1 else None
+
+    if not wb.worksheets:
+        wb.create_sheet("内容")
 
     buf = BytesIO()
     wb.save(buf)
@@ -216,24 +338,43 @@ def pdf_to_pptx(pdf_path: str) -> bytes:
         raise RuntimeError("PyMuPDF is required for PDF→PPTX conversion") from exc
     try:
         from pptx import Presentation  # type: ignore
+        from pptx.dml.color import RGBColor  # type: ignore
         from pptx.util import Inches  # type: ignore
     except ImportError as exc:
         raise RuntimeError("python-pptx is required for PDF→PPTX conversion") from exc
 
-    doc = fitz.open(pdf_path)
     prs = Presentation()
-    prs.slide_width = Inches(10)
-    prs.slide_height = Inches(7.5)
-    blank_layout = prs.slide_layouts[6]  # completely blank layout
+    blank_layout = prs.slide_layouts[6]
 
-    for page_obj in doc:
-        mat = fitz.Matrix(2.0, 2.0)  # 2× scale → ~144 DPI
-        pix = page_obj.get_pixmap(matrix=mat)
-        img_bytes = pix.tobytes("png")
-        slide = prs.slides.add_slide(blank_layout)
-        slide.shapes.add_picture(BytesIO(img_bytes), 0, 0, prs.slide_width, prs.slide_height)
+    with fitz.open(pdf_path) as doc:
+        if len(doc):
+            first = doc[0].rect
+            ratio = max(float(first.width), 1.0) / max(float(first.height), 1.0)
+            if ratio >= 1:
+                prs.slide_width = Inches(13.333)
+                prs.slide_height = Inches(13.333 / ratio)
+            else:
+                prs.slide_height = Inches(13.333)
+                prs.slide_width = Inches(13.333 * ratio)
 
-    doc.close()
+        for page_obj in doc:
+            pix = page_obj.get_pixmap(matrix=fitz.Matrix(2.0, 2.0), alpha=False)
+            img_bytes = pix.tobytes("png")
+            slide = prs.slides.add_slide(blank_layout)
+            page_ratio = max(float(page_obj.rect.width), 1.0) / max(float(page_obj.rect.height), 1.0)
+            slide_ratio = float(prs.slide_width) / max(float(prs.slide_height), 1.0)
+            if page_ratio >= slide_ratio:
+                width = prs.slide_width
+                height = int(width / page_ratio)
+                left, top = 0, int((prs.slide_height - height) / 2)
+            else:
+                height = prs.slide_height
+                width = int(height * page_ratio)
+                left, top = int((prs.slide_width - width) / 2), 0
+            slide.background.fill.solid()
+            slide.background.fill.fore_color.rgb = RGBColor(255, 255, 255)
+            slide.shapes.add_picture(BytesIO(img_bytes), left, top, width, height)
+
     buf = BytesIO()
     prs.save(buf)
     return buf.getvalue()
@@ -244,9 +385,13 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
     """
     Attempt to remove watermarks from a PDF.
 
-    Strategy 1: Structural detection — find repeated light-coloured or
-    keyword-matched text that appears on multiple pages and redact it.
-    Cloud-vision fallback is disabled; structural detection is deterministic.
+    Deterministic local strategies:
+      1. remove PDF watermark annotations;
+      2. redact repeated, light, large, diagonal, or keyword-matched text;
+      3. remove repeated central image XObjects used as image watermarks.
+
+    ``use_ai`` and ``api_key`` remain as compatibility parameters only. The
+    implementation intentionally does not send document content to a cloud API.
 
     Returns (pdf_bytes, n_regions_removed, method_used).
     """
@@ -255,24 +400,38 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
     except ImportError as exc:
         raise RuntimeError("PyMuPDF is required for watermark removal") from exc
 
-    use_ai = False
+    import re
 
     doc = fitz.open(pdf_path)
     page_count = len(doc)
     removed = 0
-    method = "structural"
 
     if page_count == 0:
-        return doc.tobytes(), 0, "none"
+        data = doc.tobytes()
+        doc.close()
+        return data, 0, "none"
 
     WATERMARK_KEYWORDS = [
         "confidential", "机密", "draft", "草稿", "internal", "内部",
         "sample", "watermark", "水印", "copyright", "版权",
         "do not copy", "禁止复制", "仅供内部", "for internal use",
     ]
-    # ── Strategy 1: structural detection ─────────────────────────────────────
-    sample_pages = min(5, page_count)
-    candidate_map: dict[str, dict] = {}
+    def _normalized_text(value: str) -> str:
+        return re.sub(r"\s+", " ", value).strip().casefold()
+
+    # ── Strategy 1: explicit watermark annotations ───────────────────────────
+    for page in doc:
+        annotations = list(page.annots() or [])
+        for annotation in annotations:
+            type_name = str((annotation.type or (None, ""))[1] or "").casefold()
+            content = _normalized_text((annotation.info or {}).get("content", ""))
+            if "watermark" in type_name or "水印" in content:
+                page.delete_annot(annotation)
+                removed += 1
+
+    # ── Strategy 2: structural text detection ────────────────────────────────
+    sample_pages = min(20, page_count)
+    candidate_map: dict[str, dict[str, Any]] = {}
 
     for pg_idx in range(sample_pages):
         page = doc[pg_idx]
@@ -284,6 +443,8 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
             if block.get("type") != 0:
                 continue
             for line in block.get("lines", []):
+                direction = line.get("dir", (1.0, 0.0))
+                is_diagonal = abs(float(direction[1] or 0.0)) > 0.15
                 for span in line.get("spans", []):
                     txt = span.get("text", "").strip()
                     if not txt:
@@ -293,19 +454,30 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
                     r_ch = (c >> 16) & 0xFF
                     g_ch = (c >> 8) & 0xFF
                     b_ch = c & 0xFF
+                    alpha = int(span.get("alpha", 255) or 255)
+                    font_size = float(span.get("size", 0) or 0)
                     is_light = r_ch > 170 and g_ch > 170 and b_ch > 170
-                    txt_lower = txt.lower()
+                    txt_lower = _normalized_text(txt)
                     is_keyword = any(kw in txt_lower for kw in WATERMARK_KEYWORDS)
-                    if is_light or is_keyword:
-                        key = txt_lower[:50]
-                        if key not in candidate_map:
-                            candidate_map[key] = {"text": txt, "pages": []}
-                        candidate_map[key]["pages"].append(pg_idx)
+                    looks_like_watermark = (
+                        is_keyword
+                        or (is_light and (font_size >= 14 or alpha < 220))
+                        or (is_diagonal and font_size >= 18)
+                    )
+                    if looks_like_watermark:
+                        key = txt_lower[:120]
+                        entry = candidate_map.setdefault(
+                            key, {"text": txt, "pages": set(), "keyword": False}
+                        )
+                        entry["pages"].add(pg_idx)
+                        entry["keyword"] = bool(entry["keyword"] or is_keyword)
 
-    # Text appearing on ≥2 sample pages is a watermark candidate
-    threshold = max(2, sample_pages // 2)
+    threshold = 1 if sample_pages == 1 else max(2, (sample_pages + 1) // 2)
     watermark_texts = {
-        v["text"] for v in candidate_map.values() if len(v["pages"]) >= threshold
+        value["text"]
+        for value in candidate_map.values()
+        if len(value["pages"]) >= threshold
+        or (sample_pages == 1 and value["keyword"])
     }
 
     if watermark_texts:
@@ -317,56 +489,55 @@ def remove_watermark(pdf_path: str, use_ai: bool = True,
             for area in areas:
                 page.add_redact_annot(area, fill=(1, 1, 1))
             if areas:
-                page.apply_redactions()
+                try:
+                    page.apply_redactions(images=0, graphics=0)
+                except TypeError:
+                    page.apply_redactions()
                 removed += len(areas)
 
-    # ── Strategy 2: AI-assisted detection ────────────────────────────────────
-    if removed == 0 and use_ai and api_key:
-        method = "ai"
-        try:
-            page = doc[0]
-            mat = fitz.Matrix(2.0, 2.0)
-            pix = page.get_pixmap(matrix=mat)
-            import base64
-            img_b64 = base64.b64encode(pix.tobytes("png")).decode()
-
-            raise RuntimeError("Cloud vision watermark detection is archived")
-            import PIL.Image
-            import io as _io
-            import json
-            import re
-
-            genai.configure(api_key=api_key)
-            model = genai.GenerativeModel("gemini-2.5-flash")
-            pil_img = PIL.Image.open(_io.BytesIO(pix.tobytes("png")))
-            prompt = (
-                "请识别这个PDF页面上的水印内容。水印通常是半透明文字或图案，重复出现在页面上。"
-                "请返回JSON格式（只返回JSON，不要其他文字）：\n"
-                "{\"has_watermark\": bool, \"watermark_texts\": [\"文字1\"], \"description\": \"描述\"}"
+    # ── Strategy 3: repeated central image XObjects ──────────────────────────
+    image_candidates: dict[int, dict[str, Any]] = {}
+    for pg_idx in range(sample_pages):
+        page = doc[pg_idx]
+        page_area = max(float(page.rect.width * page.rect.height), 1.0)
+        for info in page.get_image_info(xrefs=True):
+            xref = int(info.get("xref", 0) or 0)
+            bbox = fitz.Rect(info.get("bbox", (0, 0, 0, 0)))
+            ratio = float(bbox.get_area()) / page_area
+            center = (bbox.x0 + bbox.x1) / 2.0, (bbox.y0 + bbox.y1) / 2.0
+            is_central = (
+                page.rect.width * 0.2 <= center[0] <= page.rect.width * 0.8
+                and page.rect.height * 0.2 <= center[1] <= page.rect.height * 0.8
             )
-            response = model.generate_content([prompt, pil_img])
-            json_match = re.search(r'\{.*\}', response.text, re.DOTALL)
-            if json_match:
-                ai_result = json.loads(json_match.group())
-                if ai_result.get("has_watermark") and ai_result.get("watermark_texts"):
-                    for pg_idx in range(page_count):
-                        page = doc[pg_idx]
-                        areas = []
-                        for wt in ai_result["watermark_texts"]:
-                            areas.extend(page.search_for(wt, quads=False))
-                        for area in areas:
-                            page.add_redact_annot(area, fill=(1, 1, 1))
-                        if areas:
-                            page.apply_redactions()
-                            removed += len(areas)
-        except Exception as ai_err:
-            logger.warning("[remove_watermark] AI 检测失败: %s", ai_err)
-            method = "structural_only"
+            if xref > 0 and is_central and 0.05 <= ratio <= 0.8:
+                entry = image_candidates.setdefault(xref, {"pages": set(), "count": 0})
+                entry["pages"].add(pg_idx)
+                entry["count"] += 1
+
+    image_threshold = 1 if sample_pages == 1 else max(2, (sample_pages + 1) // 2)
+    for xref, candidate in image_candidates.items():
+        # For a single-page document, only remove an image with a soft mask;
+        # otherwise a central photo would be indistinguishable from a watermark.
+        has_soft_mask = any(
+            image[0] == xref and int(image[1] or 0) > 0
+            for page in doc
+            for image in page.get_images(full=True)
+        )
+        if len(candidate["pages"]) < image_threshold:
+            continue
+        if sample_pages == 1 and not has_soft_mask:
+            continue
+        try:
+            for page in doc:
+                page.delete_image(xref)
+            removed += int(candidate["count"])
+        except Exception:
+            logger.debug("Could not remove repeated PDF image xref=%s", xref, exc_info=True)
 
     buf = BytesIO()
-    doc.save(buf)
+    doc.save(buf, garbage=4, deflate=True)
     doc.close()
-    return buf.getvalue(), removed, method
+    return buf.getvalue(), removed, "structural" if removed else "none"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

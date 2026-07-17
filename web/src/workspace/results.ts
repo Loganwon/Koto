@@ -5,6 +5,8 @@
 import { fileTaskStatusLabel } from './file-task-status';
 import { _escHtml } from './infrastructure';
 import { publishWorkspaceApi } from '../shared/workspace-api';
+import { applyStructuredDocToolCall } from './docx-review-runtime';
+import type { EditorInstance } from './state';
 
 interface Proposal {
   id?: string;
@@ -17,7 +19,6 @@ interface Proposal {
   rationale?: string;
   tool_call?: ToolCall;
 }
-
 interface ToolCall {
   type: string;
   original?: string;
@@ -75,11 +76,7 @@ interface ResultsState {
   _activeProposals?: Proposal[];
   _aiTargetFileIdx?: number;
   _aiFileContext?: Array<{ name: string }>;
-  activeEditor?: {
-    applyToolCall: (tc: ToolCall) => void;
-    appendToolCall?: (tc: ToolCall) => void;
-    replaceSelectionWith?: (mode: string, selection: any, rawText: string) => void;
-  };
+  activeEditor?: EditorInstance | null;
   pinnedSelection?: any;
   lastPinnedSel?: any;
   pendingToolCall?: ToolCall | null;
@@ -91,7 +88,10 @@ interface ResultsDeps {
   getMessagesElement?: () => HTMLElement | null;
   selectionContextText?: (ctx: any) => string;
   createPinnedSelectionContext?: (text: string) => any;
-  showToast?: (message: string, type?: string) => void;
+  showToast?: (
+    message: string,
+    type?: 'success' | 'error' | 'info' | 'warning',
+  ) => void;
   scheduleAutoSave?: () => void;
   getUserInputElement?: () => HTMLInputElement | HTMLTextAreaElement | null;
   sendMessage?: () => void;
@@ -326,12 +326,10 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
       return;
     }
 
-    if (state.activeEditor) {
+    if (state.activeEditor && typeof state.activeEditor.applyToolCall === 'function') {
       try {
         if (proposal.tool_call) {
-          const handled = window.WA && typeof window.WA.applyStructuredDocToolCall === 'function'
-            ? window.WA.applyStructuredDocToolCall(proposal.tool_call, { notify: false })
-            : false;
+          const handled = applyStructuredDocToolCall(proposal.tool_call, { notify: false });
           if (!handled) state.activeEditor.applyToolCall(proposal.tool_call);
         } else if (proposal.original_text && proposal.proposed_text) {
           const proposedPlain = (proposal.proposed_text || '').replace(/<[^>]+>/g, '').trim();
@@ -477,10 +475,8 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
       const toolCall = snapshot.toolCall;
       const selection = selectionContextText(snapshot.pinnedSel);
 
-      if (toolCall && editor) {
-        const handled = window.WA && typeof window.WA.applyStructuredDocToolCall === 'function'
-          ? window.WA.applyStructuredDocToolCall(toolCall)
-          : false;
+      if (toolCall && editor && typeof editor.applyToolCall === 'function') {
+        const handled = applyStructuredDocToolCall(toolCall);
         if (mode === 'replace') {
           if (!handled) editor.applyToolCall(toolCall);
         } else if (mode === 'append') {
@@ -494,7 +490,7 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
       } else if (selection) {
         showToast('无法定位原始选区，已复制到剪贴板', 'info');
         if (navigator.clipboard) navigator.clipboard.writeText(rawText).catch(() => {});
-      } else if (editor) {
+      } else if (editor && typeof editor.applyToolCall === 'function') {
         if (mode === 'replace') {
           const htmlVal = window.marked
             ? window.marked.parse(rawText)
@@ -774,6 +770,3 @@ export function createWorkspaceAiResultsRuntime(deps: ResultsDeps = {}): Results
     loadBackgroundArtifactResult,
   };
 }
-
-// Cross-bundle compatibility boundary.
-publishWorkspaceApi({ createWorkspaceAiResultsRuntime });

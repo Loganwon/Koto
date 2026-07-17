@@ -34,10 +34,6 @@ def __getattr__(name):
         from .ops_routes import ops_bp
 
         return ops_bp
-    if name == "shadow_bp":
-        from .shadow_routes import shadow_bp
-
-        return shadow_bp
     if name == "macro_bp":
         from .macro_routes import macro_bp
 

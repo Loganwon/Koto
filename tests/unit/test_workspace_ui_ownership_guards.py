@@ -42,4 +42,5 @@ def test_workspace_compatibility_exports_use_the_single_api_boundary() -> None:
         "publishWorkspaceApi({ renderArtifactResult, loadBackgroundArtifactResult });"
         in results
     )
-    assert "publishWorkspaceApi({ createWorkspaceAiResultsRuntime });" in results
+    assert "export function createWorkspaceAiResultsRuntime(" in results
+    assert "publishWorkspaceApi({ createWorkspaceAiResultsRuntime })" not in results

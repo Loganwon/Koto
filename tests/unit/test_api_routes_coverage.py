@@ -781,43 +781,22 @@ class TestJobRoutes:
         resp = full_client.post("/api/jobs/nonexistent-task-id/retry")
         assert resp.status_code in _ANY_VALID
 
-    def test_list_triggers(self, full_client):
-        resp = full_client.get("/api/jobs/triggers")
-        assert resp.status_code in _ANY_VALID
-
-    def test_list_trigger_templates(self, full_client):
-        resp = full_client.get("/api/jobs/triggers/templates")
-        assert resp.status_code in _ANY_VALID
-
-    def test_bootstrap_triggers(self, full_client):
-        resp = full_client.post("/api/jobs/triggers/bootstrap", json={"force": False})
-        assert resp.status_code in _ANY_VALID
-
-    def test_create_trigger(self, full_client):
-        resp = full_client.post(
-            "/api/jobs/triggers",
-            json={
-                "name": "test_trigger",
-                "trigger_type": "cron",
-                "job_type": "chat",
-                "job_payload": {"message": "ping"},
-            },
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_update_trigger_nonexistent(self, full_client):
-        resp = full_client.patch(
+    def test_retired_job_trigger_routes_stay_unavailable(self, full_client):
+        assert full_client.get("/api/jobs/triggers").status_code == 404
+        assert full_client.get("/api/jobs/triggers/templates").status_code == 404
+        assert full_client.post(
+            "/api/jobs/triggers/bootstrap", json={"force": False}
+        ).status_code == 404
+        assert full_client.post("/api/jobs/triggers", json={}).status_code in (404, 405)
+        assert full_client.patch(
             "/api/jobs/triggers/fake-trigger-id", json={"enabled": False}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_delete_trigger_nonexistent(self, full_client):
-        resp = full_client.delete("/api/jobs/triggers/fake-trigger-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_fire_trigger_nonexistent(self, full_client):
-        resp = full_client.post("/api/jobs/triggers/fake-trigger-id/fire")
-        assert resp.status_code in _ANY_VALID
+        ).status_code == 404
+        assert full_client.delete(
+            "/api/jobs/triggers/fake-trigger-id"
+        ).status_code == 404
+        assert full_client.post(
+            "/api/jobs/triggers/fake-trigger-id/fire"
+        ).status_code == 404
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1031,66 +1010,4 @@ class TestMacroRoutes:
 
     def test_dismiss_nonexistent(self, full_client):
         resp = full_client.post("/api/macro/dismiss/fake-suggestion-id")
-        assert resp.status_code in _ANY_VALID
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 10. Shadow Routes  (/api/shadow/…)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestShadowRoutes:
-    """Tests for app.api.shadow_routes endpoints."""
-
-    @pytest.fixture(autouse=True)
-    def _isolate_shadow(self, tmp_path, monkeypatch):
-        """Redirect ShadowWatcher file I/O to tmp_path and reset singleton so
-        that these tests never touch the production shadow_observations.json."""
-        from app.core.monitoring import shadow_watcher as sw_module
-
-        sw_module.ShadowWatcher._instance = None
-        obs_file = tmp_path / "shadow_observations.json"
-        monkeypatch.setattr(sw_module, "_OBS_FILE", obs_file)
-        yield
-        sw_module.ShadowWatcher._instance = None
-
-    def test_shadow_status(self, full_client):
-        resp = full_client.get("/api/shadow/status")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_toggle(self, full_client):
-        resp = full_client.post("/api/shadow/toggle", json={"enabled": True})
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_observations(self, full_client):
-        resp = full_client.get("/api/shadow/observations")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_pending(self, full_client):
-        resp = full_client.get("/api/shadow/pending")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_dismiss_nonexistent(self, full_client):
-        resp = full_client.post("/api/shadow/dismiss/fake-msg-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_dismiss_all(self, full_client):
-        resp = full_client.post("/api/shadow/dismiss-all")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_tick(self, full_client):
-        resp = full_client.post("/api/shadow/tick", json={"force": True})
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_open_tasks(self, full_client):
-        resp = full_client.get("/api/shadow/open-tasks")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_dismiss_task(self, full_client):
-        resp = full_client.post("/api/shadow/dismiss-task/fake-task-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_reset(self, full_client):
-        resp = full_client.post("/api/shadow/reset")
         assert resp.status_code in _ANY_VALID

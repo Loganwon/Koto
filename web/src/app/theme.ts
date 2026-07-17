@@ -4,10 +4,20 @@
 
 export function applyTheme(theme: string): void {
   const root = document.documentElement;
-  const isDark = theme === 'dark' || (theme === 'auto' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-  root.setAttribute('data-theme', isDark ? 'dark' : 'light');
+  const requestedTheme = String(theme || 'light');
+  // `auto` is a preference rather than a CSS palette.  Resolve it only for
+  // the DOM attribute so the stylesheet still receives a concrete palette.
+  // All named palettes must be preserved: reducing them to light/dark made
+  // the Settings selection disagree with the workspace's actual colours.
+  const resolvedTheme = requestedTheme === 'auto'
+    ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+    : requestedTheme;
+  const isDark = ['dark', 'ocean', 'forest', 'sunset', 'midnight'].includes(resolvedTheme);
+  root.setAttribute('data-theme', resolvedTheme);
+  root.dataset.kotoTheme = requestedTheme;
   document.body.classList.toggle('theme-dark', isDark);
   document.body.classList.toggle('theme-light', !isDark);
+  document.body.dataset.kotoTheme = requestedTheme;
 }
 
 export function updateThemeSelector(theme: string): void {
@@ -40,6 +50,23 @@ function _syncZoomViewportHeight(zoom: number): void {
   document.documentElement.style.setProperty('--viewport-h', `${window.innerHeight / zoom}px`);
 }
 
+/**
+ * CSS zoom scales pixels after layout.  The unified workspace is fixed to the
+ * viewport, so without compensating its logical dimensions a 130% zoom still
+ * lays out at 100vw and is then painted 30% wider than the window.
+ */
+function _syncZoomLayoutViewport(zoom: number): void {
+  const root = document.documentElement;
+  root.style.setProperty('--koto-layout-width', `${window.innerWidth / zoom}px`);
+  root.style.setProperty('--koto-layout-height', `${window.innerHeight / zoom}px`);
+
+  // The compensated layout width is the single responsive input.  This covers
+  // both a physically narrow window and a large UI scale without maintaining
+  // parallel media-query and zoom-only layout branches.
+  document.body?.classList.toggle('koto-layout-compact', (window.innerWidth / zoom) < 1100);
+  window.dispatchEvent(new CustomEvent('koto-ui-zoom-change'));
+}
+
 function _reflowWorkspaceAfterZoom(): void {
   const WA = (window as any).WA || {};
   if (typeof WA.refreshWorkspaceLayout === 'function') {
@@ -57,15 +84,15 @@ export function setUIZoom(zoomStr: string, suppressSave: boolean = false): void 
   // Slider previews can already have changed the DOM.  The last acknowledged
   // backend value is the only safe rollback target when the final save fails.
   const previousZoom = String((window as any).currentSettings?.appearance?.ui_zoom || root.dataset.kotoUiZoom || '1');
-  // `html.style.zoom` used to be set by an inline bootstrap script while this
-  // function only changed the root font size.  That left px-based workspace
-  // panels at a stale scale.  Body zoom is the single owner for all UI sizing.
+  // Body zoom is the single owner for visual scaling.  Its post-layout nature
+  // requires the logical viewport compensation below for fixed workspace UI.
   root.style.zoom = '';
   root.style.fontSize = '16px';
   root.dataset.kotoUiZoom = normalizedZoom;
   if (document.body) document.body.style.zoom = normalizedZoom;
   delete (window as any)._waZoomMinSize;
   _syncZoomViewportHeight(zoom);
+  _syncZoomLayoutViewport(zoom);
   // Update number-only display beside "Koto" logo
   const display = document.getElementById('uiZoomDisplay');
   if (display) display.textContent = pct + '%';
@@ -101,7 +128,9 @@ export function changeUIScale(delta: number): void {
 
 window.addEventListener('resize', () => {
   const zoom = parseFloat(document.documentElement.dataset.kotoUiZoom || '1');
-  _syncZoomViewportHeight(Number.isFinite(zoom) && zoom > 0 ? zoom : 1);
+  const normalizedZoom = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  _syncZoomViewportHeight(normalizedZoom);
+  _syncZoomLayoutViewport(normalizedZoom);
 });
 
 const _systemThemeQuery = window.matchMedia('(prefers-color-scheme: dark)');

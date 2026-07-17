@@ -59,7 +59,7 @@ SUITES = OrderedDict(
                     "tests/unit/test_file_task_runtime.py::test_file_task_runtime_parses_native_tool_design_protocol_from_model_text",
                     "tests/unit/test_file_task_runtime.py::test_file_task_model_client_passes_file_task_timeout_to_local_provider",
                     "tests/unit/test_file_task_runtime.py::test_file_task_model_client_routes_local_and_cloud",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_model_client_prefers_file_task_model_route",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_model_client_uses_core_model_selection",
                     "tests/unit/test_file_task_runtime.py::test_file_task_runtime_execution_brief_ignores_legacy_delegated_planner_and_stays_native",
                     "tests/unit/test_file_task_runtime.py::test_file_task_runtime_classification_defers_planner_without_explicit_override",
                     "tests/unit/test_file_task_runtime.py::test_file_task_runtime_does_not_external_fallback_after_tool_gap",

@@ -12,12 +12,12 @@ def financial_chart_docx_guidance(enabled: bool) -> str:
         return ""
     return (
         "Excel 财务预测图表写入 DOCX 任务规则：\n"
-        "- 目标不是把原始 Excel 表格塞进 Word，而是生成“问题清单/分析结论 + 真实图表图片”。\n"
+        "- 报告必须同时具备“结构化问题清单/分析结论 + 一张可核验的关键数据表 + 至少两张互补的真实图表图片”；任一项缺失都不能结束。数据表应优先选择 P&L 或其他关键指标页，不要机械塞入整本工作簿。\n"
         "- 必须先审计 Excel：inspect_workbook_structure 或 audit_financial_workbook；必要时读取 P&L、产品线、Expenses、资本折旧等关键工作表。\n"
         "- 如果 pandas 读出的列名是 Unnamed，不要用 df.columns 找年份列；应扫描每一行，定位包含 2025E/2026E/2027E/2028E 等年份标签的 header row，再按这些列抽取指标。\n"
         "- 优先用 openpyxl/data_only=True 读取公式结果，并通过行标签匹配“收入合计、毛利合计、费用合计、净利润、销量”等指标；不要猜空列名。\n"
         "- 用 run_python_code 生成真实 PNG/JPG 图表，stdout 必须包含 KOTO_CREATED: <图片路径>；仅打印数据或错误栈不算完成。\n"
-        "- 随后调用 write_docx_content 写入问题清单/分析结论，再调用 insert_image_into_docx 插入真实图片；没有 file.changed 不能结束。\n"
+        "- 随后调用 write_docx_content 写入问题清单/分析结论，调用 insert_excel_as_docx_table 写入关键数据表，再调用 insert_image_into_docx 插入至少两张真实图片；没有 file.changed 不能结束。\n"
         "任务完成后请按系统汇报格式（①②③）输出，重点说明各图表内容和发现的问题。\n"
     )
 

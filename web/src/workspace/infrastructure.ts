@@ -3,6 +3,8 @@
  * Workspace infrastructure helpers.
  */
 
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+
 export interface CsrfOptions {
   url?: string;
   method?: string;
@@ -424,8 +426,8 @@ export function _shouldIgnorePptxGlobalKeydown(target: EventTarget | null): bool
 // _saveEditorRange — preserve editor selection before focus leaves
 // Called by the quick-action / selection-toolbar path so the editor can
 // restore the selection later when applying AI replacements.
-(window as any).WA = (window as any).WA || {};
-(window as any).WA._saveEditorRange = () => {
+const workspaceApi = getWorkspaceApi();
+workspaceApi._saveEditorRange = () => {
   const editor = (window as any).state?.activeEditor;
   if (editor && typeof editor.saveSelection === 'function') {
     try { editor.saveSelection(); } catch (_) { /* noop */ }
@@ -461,8 +463,7 @@ export function _shouldIgnorePptxGlobalKeydown(target: EventTarget | null): bool
 (window as any)._IMAGE_SVG = _IMAGE_SVG;
 (window as any)._EXT_ICON = _EXT_ICON;
 (window as any).showToast = showToast;
-(window as any).WA = (window as any).WA || {};
-const wa = (window as any).WA;
+const wa = workspaceApi;
 wa._csrfToken = _csrfToken;
 wa._setCsrfToken = _setCsrfToken;
 wa._refreshCsrfToken = _refreshCsrfToken;
@@ -471,3 +472,16 @@ wa._needsCsrf = _needsCsrf;
 wa._csrfFetch = _csrfFetch;
 wa._cleanupDocumentListeners = _cleanupDocumentListeners;
 wa.showToast = showToast;
+publishWorkspaceApi({
+  $,
+  _csrfFetch,
+  _escHtml,
+  _hexLuma,
+  _safeTextColor,
+  _shouldIgnorePptxGlobalKeydown,
+  _runTextDecoration,
+  showToast,
+  _PENCIL_SVG,
+  _TRASH_SVG,
+  _CLIPBOARD_SVG,
+});

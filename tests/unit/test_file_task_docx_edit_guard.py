@@ -33,6 +33,21 @@ def test_local_docx_edit_block_message_blocks_multi_paragraph_rewrite():
     assert "insert_docx_paragraph" in block
 
 
+def test_local_docx_edit_block_message_routes_targeted_replace_to_selection_tool():
+    block = local_docx_edit_block_message(
+        task_text=(
+            "把当前 DOCX 第二段的‘需要优化的句子’替换为‘已经完成优化的句子’，"
+            "只替换前文乙那一处，前文甲保持不变，并保存文件。"
+        ),
+        tool_name="write_docx_content",
+        tool_args={"paragraphs": json.dumps([{"text": "完整文档正文"}])},
+    )
+
+    assert "DOCX 定位替换" in block
+    assert "run_python_code" in block
+    assert "write_docx_content" in block
+
+
 def test_local_docx_edit_block_message_allows_non_matching_or_single_paragraph():
     assert (
         local_docx_edit_block_message(

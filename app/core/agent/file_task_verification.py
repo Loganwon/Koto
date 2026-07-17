@@ -15,6 +15,7 @@ def verification_precheck(
     file_changes: List[Dict[str, Any]],
     write_intent: bool,
     model_failed: bool,
+    execution_failure: Optional[Dict[str, Any]],
     readonly_fallback_used: bool,
     runtime_status: str,
     tool_runtime_outcome: Optional[Dict[str, Any]],
@@ -50,7 +51,7 @@ def verification_precheck(
     ):
         return {
             "passed": False,
-            "status": "no_file_change",
+            "status": "write_not_performed",
             "summary": "任务请求分步写入并等待确认，但本步骤尚未产生任何文件变更。",
             "remaining": ["先调用真实写入工具更新目标文件，再进入等待确认状态"],
             "next_action_artifact": next_action_artifact,
@@ -102,17 +103,44 @@ def verification_precheck(
             "next_action_artifact": next_action_artifact,
         }
 
+    if isinstance(execution_failure, dict) and execution_failure and not file_changes:
+        status = str(execution_failure.get("status") or "model_error").strip()
+        summary = str(
+            execution_failure.get("summary")
+            or "文件任务模型调用失败，执行未完成文件写入。"
+        ).strip()
+        remaining = [
+            str(item).strip()
+            for item in execution_failure.get("remaining") or []
+            if str(item).strip()
+        ]
+        return {
+            "passed": False,
+            "status": status,
+            "summary": summary,
+            "remaining": remaining or ["恢复模型后重新执行文件任务。"],
+            "failure": dict(execution_failure),
+            "criteria_results": [
+                {
+                    "criterion": "model_execution_completed",
+                    "passed": False,
+                    "detail": str(execution_failure.get("detail") or summary),
+                    "priority": "critical",
+                }
+            ],
+        }
+
     if write_intent and not file_changes:
         return {
-            "status": "no_file_change",
-            "summary": "任务包含写入意图，但没有任何工具报告文件变更。",
+            "status": "write_not_performed",
+            "summary": "模型已完成响应，但没有调用任何成功的文件写入工具。",
             "passed": False,
-            "remaining": ["调用真实写入工具并确保产出 file.changed 事件"],
+            "remaining": ["重新执行并确保写入工具成功产生 file.changed 事件。"],
             "criteria_results": [
                 {
                     "criterion": "file_change_emitted",
                     "passed": False,
-                    "detail": "任务包含写入意图，但没有任何工具报告文件变更。",
+                    "detail": "模型调用已返回，但本轮没有成功的文件写入工具结果。",
                     "priority": "critical",
                 }
             ],
@@ -129,7 +157,7 @@ def verification_precheck(
     if not write_intent and readonly_fallback_used:
         return {
             "passed": False,
-            "status": "needs_attention",
+            "status": "context_summary_fallback",
             "summary": "模型未返回完整自然语言答案，已基于显式上下文生成临时摘要，但仍需重新生成完整回答。",
             "remaining": ["恢复模型后重新生成完整 AI 分析，而不是仅使用上下文摘要"],
         }

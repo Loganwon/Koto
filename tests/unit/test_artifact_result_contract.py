@@ -303,7 +303,7 @@ def test_file_task_artifact_status_preserves_attention_diagnostics():
     for status in [
         "context_summary_fallback",
         "blocked",
-        "no_file_change",
+        "write_not_performed",
         "model_unavailable",
         "quality_gate_failed",
     ]:
@@ -317,6 +317,58 @@ def test_file_task_artifact_status_preserves_attention_diagnostics():
             )
             == status
         )
+
+
+def test_file_task_artifact_result_maps_review_and_failure_terminal_states():
+    from app.core.artifacts import build_file_task_artifact_result
+
+    review = build_file_task_artifact_result(
+        task_id="task-review",
+        task="总结文件",
+        status="context_summary_fallback",
+        summary="临时摘要",
+    ).to_dict()
+    failed = build_file_task_artifact_result(
+        task_id="task-failed",
+        task="写入文件",
+        status="quality_gate_failed",
+        summary="质量检查未通过",
+    ).to_dict()
+
+    assert review["status"] == "needs_review"
+    assert review["metadata"]["terminal_status"] == "context_summary_fallback"
+    assert failed["status"] == "failed"
+    assert failed["metadata"]["terminal_status"] == "quality_gate_failed"
+
+
+def test_file_task_stream_maps_context_fallback_to_waiting_ledger_state():
+    from web.file_task_stream import _file_task_terminal_status
+
+    assert (
+        _file_task_terminal_status(
+            "run.finished",
+            {
+                "completed_task": False,
+                "runtime": {"terminal_status": "context_summary_fallback"},
+            },
+        )
+        == "waiting"
+    )
+
+
+def test_file_task_artifact_status_translates_retired_no_file_change_status():
+    from web.file_task_stream import _file_task_artifact_status
+
+    assert (
+        _file_task_artifact_status(
+            "run.finished",
+            {
+                "completed_task": False,
+                "runtime": {"terminal_status": "no_file_change"},
+            },
+        )
+        == "write_not_performed"
+    )
 
 
 def test_task_route_serializer_extracts_artifact_result_from_metadata():

@@ -11,6 +11,7 @@ def build_runtime_metadata(
     readonly_fallback_used: bool,
     model_failed: bool,
     planner_payload: dict[str, Any] | None = None,
+    execution_failure: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     planner_payload = planner_payload if isinstance(planner_payload, dict) else {}
 
@@ -37,13 +38,16 @@ def build_runtime_metadata(
     round_index = planner_payload.get("round")
     if round_index:
         planner_runtime["round"] = round_index
-    return {
+    payload = {
         "execution_path": execution_path,
         "terminal_status": str(terminal_status or ""),
         "model_unavailable": bool(model_failed or readonly_fallback_used),
         "readonly_fallback_used": bool(readonly_fallback_used),
         "planner": planner_runtime,
     }
+    if isinstance(execution_failure, dict) and execution_failure:
+        payload["failure"] = dict(execution_failure)
+    return payload
 
 
 def with_runtime_context(
@@ -199,16 +203,16 @@ def execute_step_result_status(
     runtime_status: str,
 ) -> str:
     if runtime_status == "awaiting_confirmation":
-        return "needs_attention"
+        return "awaiting_confirmation"
     if runtime_status in {"blocked", "write_blocked"}:
         return "failed"
     if model_failed or (isinstance(tool_gap, dict) and tool_gap):
         return "failed"
-    return "completed" if completed else "needs_attention"
+    return "completed" if completed else "failed"
 
 
 def check_step_result_status(check_payload: dict[str, Any]) -> str:
     status = str(check_payload.get("status") or "").strip().lower()
     if status == "awaiting_confirmation":
-        return "needs_attention"
+        return "awaiting_confirmation"
     return "completed" if check_payload.get("passed") else "failed"

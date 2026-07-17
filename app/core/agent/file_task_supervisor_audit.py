@@ -2,7 +2,6 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from app.core.agent.file_task_contract import (
@@ -16,37 +15,11 @@ from app.core.agent.file_task_contract import (
 )
 
 _LOW_CONFIDENCE_THRESHOLD = 0.58
-_OFFICE_TARGET_TYPES = {"doc", "docx", "ppt", "pptx", "xls", "xlsx", "xlsm", "pdf"}
-
-
 def _clean(value: Any, limit: int = 180) -> str:
     text = str(value or "").strip()
     if limit and len(text) > limit:
         return text[: limit - 3] + "..."
     return text
-
-
-def _file_type(file_info: FileTaskFile) -> str:
-    from app.core.agent.file_task_recipes import file_type_from_file_info
-
-    return file_type_from_file_info(file_info)
-
-
-def _target_candidates(
-    files: Sequence[FileTaskFile],
-    target_type: str,
-) -> list[FileTaskFile]:
-    if not target_type:
-        return []
-    return [file_info for file_info in files if _file_type(file_info) == target_type]
-
-
-def _has_explicit_target(
-    request: FileTaskRequest, files: Sequence[FileTaskFile]
-) -> bool:
-    if str(request.target_path or "").strip():
-        return True
-    return any(bool(getattr(file_info, "target", False)) for file_info in files)
 
 
 def _risk_level(status: str, warnings: Sequence[str]) -> str:
@@ -101,39 +74,8 @@ def build_supervisor_audit(
     if conflicts:
         blocked = True
         warnings.append("任务边界存在冲突：" + "；".join(conflicts[:4]))
-        user_actions.append("澄清目标文件、输出方式或允许的写入范围。")
+        user_actions.extend(_user_actions_for_conflicts(conflicts))
         reason_codes.extend(f"constraint_conflict:{item}" for item in conflicts[:6])
-
-    target_type = (
-        str(requirements.target_file_type or classification.target_file_type or "")
-        .strip()
-        .lower()
-    )
-    target_candidates = _target_candidates(files, target_type)
-    if (
-        requirements.write_required
-        and target_type in _OFFICE_TARGET_TYPES
-        and len(target_candidates) > 1
-        and not _has_explicit_target(request, files)
-    ):
-        blocked = True
-        warnings.append(
-            f"发现多个 {target_type.upper()} 候选文件，但没有明确写入目标。"
-        )
-        user_actions.append("指定要修改或生成的目标文件。")
-        reason_codes.append(f"ambiguous_write_target:{target_type}")
-
-    if requirements.write_required and str(classification.output_mode or "") != "write":
-        warnings.append("任务要求写入，但当前产出模式不是直接写入。")
-        execution_constraints.append("写入前重新校验用户意图和输出模式。")
-        reason_codes.append("write_requirement_output_mode_mismatch")
-
-    if not requirements.write_required and bool(classification.write_intent):
-        blocked = True
-        warnings.append("只读要求被升级为写入，已阻止执行。")
-        user_actions.append("如需写入，请明确授权修改目标文件。")
-        execution_constraints.append("保持只读答复，不得自动升级为写入。")
-        reason_codes.append("readonly_escalated_to_write")
 
     if intent_plan.requires_confirmation:
         warnings.append("当前计划是先分析后应用，写入需单独授权。")
@@ -169,6 +111,17 @@ def build_supervisor_audit(
         user_actions=list(dict.fromkeys(user_actions)),
         reason_codes=list(dict.fromkeys(reason_codes)),
     )
+
+
+def _user_actions_for_conflicts(conflicts: Sequence[str]) -> list[str]:
+    actions: list[str] = []
+    if any(str(item).startswith("ambiguous_target:") for item in conflicts):
+        actions.append("指定要修改或生成的目标文件。")
+    if any(str(item).startswith("readonly_request_") for item in conflicts):
+        actions.append("如需写入，请明确授权修改目标文件。")
+    if any(str(item).startswith("write_required_") for item in conflicts):
+        actions.append("重新校验写入意图与输出方式后再继续。")
+    return actions or ["澄清目标文件、输出方式或允许的写入范围。"]
 
 
 __all__ = ["build_supervisor_audit"]

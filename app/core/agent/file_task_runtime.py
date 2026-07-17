@@ -128,6 +128,12 @@ from app.core.agent.file_task_execution_brief import (
     normalize_execution_brief as _brief_normalize_execution_brief,
 )
 from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop
+from app.core.agent.file_task_financial_report_recovery import (
+    financial_chart_recovery_code,
+    financial_chart_recovery_tool_args,
+    insert_pending_generated_docx_images_native,
+    pending_generated_docx_images,
+)
 from app.core.agent.file_task_execution_messaging import (
     execution_brief_continue_message as _execution_messaging_brief_continue_message,
 )
@@ -266,7 +272,11 @@ from app.core.agent.file_task_readonly_summary import (
 from app.core.agent.file_task_readonly_summary import (
     readonly_tool_source_label as _readonly_tool_source_label,
 )
-from app.core.agent.file_task_recipes import select_task_recipe
+from app.core.agent.file_task_recipes import (
+    request_file_types,
+    select_task_recipe,
+    semantic_markers,
+)
 from app.core.agent.file_task_result_markers import (
     KOTO_CREATED_RESULT_MARKER,
     KOTO_MODIFIED_RESULT_MARKER,
@@ -343,6 +353,7 @@ from app.core.agent.file_task_targeting import (  # isort: skip
     protected_source_write_block_message as _targeting_protected_source_write_block_message,
     request_target_points_to_source as _targeting_request_target_points_to_source,
     request_with_target_path as _targeting_request_with_target_path,
+    resolve_explicit_output_against_request_target as _targeting_resolve_explicit_output_against_request_target,
     resolved_workspace_root as _targeting_resolved_workspace_root,
     same_task_path as _targeting_same_task_path,
     should_skip_uncreated_target_context as _targeting_should_skip_uncreated_target_context,
@@ -428,7 +439,6 @@ def is_cancel_requested(run_id: str) -> bool:
 
 _MAX_VERIFY_REPAIR_ATTEMPTS = 2
 _MAX_WRITE_OPS_PER_FILE = 1
-_IMAGE_ARTIFACT_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "bmp", "gif"}
 
 
 class FileTaskRuntime:
@@ -605,6 +615,7 @@ class FileTaskRuntime:
         final_summary = execution_result.final_summary
         completed_task = execution_result.completed_task
         model_failed = execution_result.model_failed
+        execution_failure = execution_result.execution_failure
         readonly_fallback_used = execution_result.readonly_fallback_used
         planner_runtime_payload = execution_result.planner_runtime_payload
         last_check_payload = execution_result.last_check_payload
@@ -631,6 +642,7 @@ class FileTaskRuntime:
             final_summary=final_summary,
             completed_task=completed_task,
             model_failed=model_failed,
+            execution_failure=execution_failure,
             readonly_fallback_used=readonly_fallback_used,
             planner_runtime_payload=planner_runtime_payload,
             last_check_payload=last_check_payload,
@@ -672,12 +684,14 @@ class FileTaskRuntime:
         readonly_fallback_used: bool,
         model_failed: bool,
         planner_payload: Optional[Dict[str, Any]] = None,
+        execution_failure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         return _step_payload_build_runtime_metadata(
             terminal_status=terminal_status,
             readonly_fallback_used=readonly_fallback_used,
             model_failed=model_failed,
             planner_payload=planner_payload,
+            execution_failure=execution_failure,
         )
 
     def _with_runtime_context(
@@ -773,7 +787,10 @@ class FileTaskRuntime:
         if aliased_target and aliased_target != str(request.target_path or "").strip():
             request = self._request_with_target_path(request, aliased_target)
 
-        explicit_output = self._explicit_output_path_from_task(request.task)
+        explicit_output = _targeting_resolve_explicit_output_against_request_target(
+            str(request.target_path or "").strip(),
+            self._explicit_output_path_from_task(request.task),
+        )
         if explicit_output:
             current_target = str(request.target_path or "").strip()
             if not current_target or not self._same_task_path(
@@ -783,6 +800,8 @@ class FileTaskRuntime:
             return request
 
         inferred = self._explicit_write_target_path_from_task(request.task)
+        if not inferred:
+            inferred = self._new_financial_docx_target_path(request)
         if not inferred:
             return request
         current_target = str(request.target_path or "").strip()
@@ -795,6 +814,68 @@ class FileTaskRuntime:
             ):
                 return request
         return self._request_with_target_path(request, inferred)
+
+    def _new_financial_docx_target_path(self, request: FileTaskRequest) -> str:
+        """Choose a real DOCX target before exposing tools for a new financial report.
+
+        The model cannot insert a chart into a Word document when the only
+        known file is the source XLSX.  In that situation the tool gateway
+        filters out DOCX tools, even though the request clearly asks for a new
+        DOCX.  Materialising the intended path up front makes the target type,
+        Word tool definitions, argument repair and deterministic chart fallback
+        agree from the first model round.  A previous failed task may have left
+        a partial report at the default path, so inferred "new document" targets
+        must avoid existing files instead of appending another report body.
+        """
+        if str(request.target_path or "").strip():
+            return ""
+        file_types = request_file_types(request.files or [])
+        markers = semantic_markers(
+            request.task,
+            file_types=file_types,
+            target_file_type="docx",
+        )
+        if not markers.get("financial_xlsx_docx_chart_report", False):
+            return ""
+
+        for file_info in request.files or []:
+            file_type = str(file_info.type or "").strip().lower().lstrip(".")
+            source_path = str(file_info.path or file_info.name or "").strip()
+            if file_type not in {"xlsx", "xlsm", "xls"} or not source_path:
+                continue
+            source_name = str(file_info.name or source_path).strip()
+            stem = Path(source_name).stem or "财务预测"
+            parent = Path(source_path).parent
+            candidate = parent / f"{stem}_财务预测分析报告.docx"
+            return self._next_available_inferred_output_path(candidate)
+        return ""
+
+    def _next_available_inferred_output_path(self, candidate: Path) -> str:
+        workspace_root = self._resolved_workspace_root()
+
+        def exists(path: Path) -> bool:
+            if path.is_absolute():
+                return path.exists()
+            if workspace_root is not None:
+                return (workspace_root / path).exists()
+            resolved = self._resolve_task_file_path(str(path))
+            return bool(resolved and os.path.exists(resolved))
+
+        if not exists(candidate):
+            return str(candidate)
+
+        for index in range(2, 1000):
+            alternate = candidate.with_name(
+                f"{candidate.stem}_{index}{candidate.suffix}"
+            )
+            if not exists(alternate):
+                return str(alternate)
+
+        return str(
+            candidate.with_name(
+                f"{candidate.stem}_{uuid.uuid4().hex[:8]}{candidate.suffix}"
+            )
+        )
 
     def _request_with_target_path(
         self, request: FileTaskRequest, target_path: str
@@ -1566,68 +1647,18 @@ class FileTaskRuntime:
         requirements: FileTaskRequirementSet,
         recipe_skeleton: Dict[str, Any],
     ) -> Dict[str, Any]:
-        hard: List[str] = ["allowlist_tools_only"]
-        soft: List[str] = []
-        conflicts: List[str] = []
-
-        recipe_id = str(recipe_skeleton.get("recipe_id") or "").strip()
-        if recipe_id and recipe_id != "generic_file_task":
-            hard.append(f"recipe:{recipe_id}")
-        if bool(requirements.write_required):
-            hard.append("write_requires_file_changed")
-        if bool(recipe_skeleton.get("quality_gates")):
-            hard.append("quality_gates_enforced")
-        if recipe_id == "financial_xlsx_docx_report":
-            hard.append("financial_whitebox_workflow")
-
-        target_type = (
-            str(requirements.target_file_type or classification.target_file_type or "")
-            .strip()
-            .lower()
+        from app.core.agent.file_task_preflight_policy import (
+            build_preflight_constraint_audit,
         )
-        if target_type in {"docx", "doc", "pptx", "ppt", "xlsx", "xlsm"}:
-            hard.append("explicit_or_unambiguous_target_required")
 
-        if classification.output_mode == "hybrid":
-            soft.append("hybrid_mode_default_no_write_without_apply")
-        if intent_plan.requires_confirmation:
-            soft.append("confirmation_required_before_apply")
-        if recipe_id == "generic_file_task":
-            soft.append("model_guided_generic_loop")
-
-        if requirements.write_required and classification.output_mode != "write":
-            conflicts.append("write_required_output_mode_mismatch")
-        if requirements.write_required and intent_plan.write_intent is False:
-            conflicts.append("write_required_intent_plan_mismatch")
-        if not requirements.write_required and classification.output_mode == "write":
-            conflicts.append("readonly_request_escalated_to_write")
-
-        same_type_files = (
-            self._context_files_by_type(files, {target_type}) if target_type else []
+        return build_preflight_constraint_audit(
+            request=request,
+            files=files,
+            classification=classification,
+            intent_plan=intent_plan,
+            requirements=requirements,
+            recipe_skeleton=recipe_skeleton,
         )
-        write_target_required = (
-            bool(requirements.write_required)
-            or bool(classification.write_intent)
-            or str(classification.output_mode or "").strip().lower() == "write"
-            or bool(intent_plan.write_intent)
-            or str(intent_plan.output_mode or "").strip().lower() == "write"
-        )
-        if (
-            write_target_required
-            and target_type
-            and len(same_type_files) > 1
-            and not str(request.target_path or "").strip()
-        ):
-            conflicts.append(f"ambiguous_target:{target_type}")
-
-        return {
-            "version": "file_task_constraint_audit_v1",
-            "hard_constraints": sorted(set(hard)),
-            "soft_constraints": sorted(set(soft)),
-            "ignored_deprecated_options": [],
-            "conflicts": sorted(set(conflicts)),
-            "status": "conflict" if conflicts else "clear",
-        }
 
     def _planner_classification(self, request: FileTaskRequest) -> tuple[str, str, str]:
         return "native_only", "file_task_native_only", "native"
@@ -2284,6 +2315,38 @@ class FileTaskRuntime:
                 )
                 if source:
                     args["source_path"] = source
+            financial_report_table = (
+                self._looks_like_financial_xlsx_docx_chart_report_task(
+                    request, files
+                )
+                or (
+                    bool(
+                        re.search(
+                            r"(?:财务|预测|收入|利润|financial|forecast)",
+                            str(request.task or ""),
+                            re.I,
+                        )
+                    )
+                    and bool(
+                        re.search(
+                            r"(?:图表|做成图|绘图|可视化|chart|plot)",
+                            str(request.task or ""),
+                            re.I,
+                        )
+                    )
+                    and Path(
+                        str(request.target_path or args.get("target_path") or "")
+                    ).suffix.lower()
+                    in {".docx", ".doc"}
+                )
+            )
+            if financial_report_table:
+                args["financial_compact"] = True
+                try:
+                    requested_rows = int(args.get("max_rows") or 18)
+                except (TypeError, ValueError):
+                    requested_rows = 18
+                args["max_rows"] = max(1, min(18, requested_rows))
         if tool_name == "write_docx_content" and "paragraphs" not in args:
             for key in ("content", "text", "markdown", "body"):
                 value = args.get(key)
@@ -2342,8 +2405,10 @@ class FileTaskRuntime:
         self, tool_name: str, tool_args: Dict[str, Any]
     ) -> str:
         target = write_target_for_tool(tool_name, tool_args)
+        target_key = self._write_dedupe_key_for_target(target)
+        tool_key = f"{target_key or 'target::unknown'}::tool::{tool_name}"
         if tool_name != "insert_image_into_docx":
-            return f"{tool_name}::{target}"
+            return tool_key
         image_path = str(tool_args.get("image_path") or "").strip()
         resolved_image = self._resolve_task_file_path(image_path) or image_path
         image_key = (
@@ -2351,7 +2416,19 @@ class FileTaskRuntime:
         )
         if not image_key:
             image_key = Path(image_path.replace("\\", "/")).name.lower()
-        return f"{tool_name}::{target}::{image_key}"
+        return f"{tool_key}::image::{image_key}"
+
+    def _write_dedupe_key_for_target(self, target: str) -> str:
+        raw_target = str(target or "").strip()
+        if not raw_target:
+            return ""
+        resolved_target = self._resolve_task_file_path(raw_target) or raw_target
+        if not os.path.isabs(resolved_target):
+            workspace_root = self._resolved_workspace_root() or self._workspace_root
+            if workspace_root:
+                resolved_target = os.path.join(workspace_root, resolved_target)
+        normalized = os.path.normcase(os.path.normpath(resolved_target))
+        return f"target::{normalized}"
 
     def _is_docx_chart_write_request(
         self, request: FileTaskRequest, files: List[FileTaskFile]
@@ -2387,56 +2464,10 @@ class FileTaskRuntime:
         path = str(artifact.get("path") or "").strip()
         return Path(path.replace("\\", "/")).name if path else "图表图片"
 
-    def _pending_generated_docx_images(
-        self,
-        request: FileTaskRequest,
-        files: List[FileTaskFile],
-        generated_artifacts: List[Dict[str, Any]],
-        file_changes: List[Dict[str, Any]],
-    ) -> List[Dict[str, Any]]:
-        if not generated_artifacts or not self._is_docx_chart_write_request(
-            request, files
-        ):
-            return []
-
-        inserted_keys: set[str] = set()
-        inserted_names: set[str] = set()
-        for change in file_changes or []:
-            if not isinstance(change, dict):
-                continue
-            if str(change.get("operation") or "").strip() != "insert_image_into_docx":
-                continue
-            image_path = str(change.get("image_path") or "").strip()
-            image_name = str(change.get("image_name") or "").strip()
-            if image_path:
-                inserted_keys.add(self._generated_image_artifact_key(image_path))
-                inserted_names.add(Path(image_path.replace("\\", "/")).name.lower())
-            if image_name:
-                inserted_names.add(image_name.lower())
-
-        pending: List[Dict[str, Any]] = []
-        seen: set[str] = set()
-        for artifact in generated_artifacts or []:
-            if not isinstance(artifact, dict):
-                continue
-            kind = str(artifact.get("kind") or "").strip().lower()
-            path = str(artifact.get("path") or "").strip()
-            name = self._generated_image_artifact_name(artifact)
-            ext = Path(name or path).suffix.lstrip(".").lower()
-            if kind != "image" or ext not in _IMAGE_ARTIFACT_EXTENSIONS:
-                continue
-            if path and not os.path.exists(path):
-                continue
-            key = self._generated_image_artifact_key(path or name)
-            name_key = name.lower()
-            if key in inserted_keys or name_key in inserted_names:
-                continue
-            if key in seen or name_key in seen:
-                continue
-            seen.add(key or name_key)
-            pending.append(dict(artifact))
-        return pending
-
+    _pending_generated_docx_images = pending_generated_docx_images
+    _financial_chart_recovery_tool_args = financial_chart_recovery_tool_args
+    _financial_chart_recovery_code = staticmethod(financial_chart_recovery_code)
+    _insert_pending_generated_docx_images_native = insert_pending_generated_docx_images_native
     def _generated_docx_image_insert_guard_message(
         self,
         request: FileTaskRequest,
@@ -2575,7 +2606,10 @@ class FileTaskRuntime:
     def _plan_summary(
         self, request: FileTaskRequest, files: List[FileTaskFile], write_intent: bool
     ) -> str:
-        explicit_output = self._explicit_output_path_from_task(request.task)
+        explicit_output = _targeting_resolve_explicit_output_against_request_target(
+            str(request.target_path or "").strip(),
+            self._explicit_output_path_from_task(request.task),
+        )
         if write_intent and explicit_output:
             suffix = "，并引用 1 段选区" if request.selection else ""
             return f"准备生成 {Path(explicit_output).name}{suffix}。"
@@ -2595,7 +2629,10 @@ class FileTaskRuntime:
     def _verification_target_path(
         self, request: FileTaskRequest, file_changes: List[Dict[str, Any]]
     ) -> str:
-        explicit_output = self._explicit_output_path_from_task(request.task)
+        explicit_output = _targeting_resolve_explicit_output_against_request_target(
+            str(request.target_path or "").strip(),
+            self._explicit_output_path_from_task(request.task),
+        )
         if explicit_output:
             for change in file_changes:
                 if not isinstance(change, dict):
@@ -3187,6 +3224,7 @@ class FileTaskRuntime:
         tool_runtime_outcome: Optional[Dict[str, Any]] = None,
         tool_gap: Optional[Dict[str, Any]] = None,
         next_action_artifact: Optional[Dict[str, Any]] = None,
+        execution_failure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         runtime_status = self._tool_runtime_status(tool_runtime_outcome)
         precheck = _verification_precheck(
@@ -3194,6 +3232,7 @@ class FileTaskRuntime:
             file_changes=file_changes,
             write_intent=write_intent,
             model_failed=model_failed,
+            execution_failure=execution_failure,
             readonly_fallback_used=readonly_fallback_used,
             runtime_status=runtime_status,
             tool_runtime_outcome=tool_runtime_outcome,
@@ -3282,7 +3321,7 @@ class FileTaskRuntime:
                 }
             return {
                 "passed": passed,
-                "status": "verified" if passed else "needs_attention",
+                "status": "verified" if passed else "quality_gate_failed",
                 "summary": str(
                     payload.get("summary")
                     or ("文件变更已记录。" if passed else "核验未通过。")

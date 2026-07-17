@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_diagnostics_reports_source_readiness_without_importing_app():
     import src.startup_diagnostics as diagnostics
@@ -127,3 +129,20 @@ def test_frozen_diagnostics_use_bundle_resources_without_pip_guidance(
     assert all(
         "pip install" not in check.get("action", "") for check in report["checks"]
     )
+
+
+def test_pytest_guard_rejects_source_shadowing_extensions(monkeypatch, tmp_path):
+    import src.startup_diagnostics as diagnostics
+    import tests.conftest as shared_fixtures
+
+    artifact = tmp_path / "app" / "example.cp311-win_amd64.pyd"
+    monkeypatch.setattr(
+        diagnostics,
+        "_source_shadowing_extensions",
+        lambda root: [artifact],
+    )
+
+    with pytest.raises(pytest.UsageError, match="shadowing source modules") as error:
+        shared_fixtures._assert_source_mode_imports_are_unshadowed(tmp_path)
+
+    assert "clean_inplace_cython_artifacts.py --apply" in str(error.value)

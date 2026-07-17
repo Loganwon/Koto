@@ -335,6 +335,7 @@ _SYSTEM_PROMPT = """你是 Koto 文件任务助手。用户会描述一个涉及
 **代码执行:**
 - `run_python_code(code, timeout?)` — 在沙盒中执行 Python 代码
 - 当前任务文件会自动复制到沙盒当前目录，可直接按文件名访问；绝对路径见 `TASK_FILE_PATHS`
+- 当任务有目标文件时，必须用 `TASK_TARGET_PATH` 创建或修改沙盒目标；Koto 会核验并同步回真实工作区，不要直接写宿主绝对目标路径
 
 ## 规则
 

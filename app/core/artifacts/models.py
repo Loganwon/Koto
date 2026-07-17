@@ -518,8 +518,8 @@ def _file_task_result_status(status: str) -> str:
     if value in {
         "waiting",
         "awaiting_confirmation",
+        "context_summary_fallback",
         "needs_review",
-        "needs_attention",
         "pending",
     }:
         return "needs_review"
@@ -530,6 +530,12 @@ def _file_task_result_status(status: str) -> str:
         "canceled",
         "write_blocked",
         "tool_gap",
+        "write_not_performed",
+        "model_unavailable",
+        "model_timeout",
+        "model_error",
+        "quality_gate_failed",
+        "blocked",
     }:
         return "failed"
     return "running"

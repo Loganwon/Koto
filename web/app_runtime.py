@@ -16,18 +16,16 @@ def initialize_background_runtime(
     logger: Logger,
     get_workspace_root,
 ) -> None:
-    """Warm up long-running subsystems so jobs, triggers, and ops are live after startup."""
+    """Warm up supported long-running subsystems after startup."""
     try:
         time.sleep(1)
 
         from app.core.jobs.job_runner import get_job_runner
-        from app.core.jobs.trigger_registry import get_trigger_registry
         from app.core.ops.ops_event_bus import get_ops_bus
         from app.core.skills.skill_trigger_binding import get_skill_binding_manager
 
         get_ops_bus()
         runner = get_job_runner()
-        registry = get_trigger_registry()
         bindings = get_skill_binding_manager()
 
         try:
@@ -93,7 +91,6 @@ def initialize_background_runtime(
         logger.info(
             "[Runtime] ✅ 后台运行时已启动: "
             f"job_runner={runner is not None}, "
-            f"triggers={len(registry.list_all())}, "
             f"bindings={len(bindings.list_bindings())}"
         )
 

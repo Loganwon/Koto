@@ -1,23 +1,24 @@
 // @ts-nocheck
 import type { WorkspaceEditor, PptxSlide, SlideShape, ParaRun, TextRun, TableCell } from './types';
+import { getWorkspaceApi } from '../shared/workspace-api';
+import { setLastSelectionText } from '../shared/selection-runtime';
 
-declare const WA: any;
-declare const state: any;
-declare const _PENCIL_SVG: string;
-declare const _TRASH_SVG: string;
-declare const _CLIPBOARD_SVG: string;
-declare let lastSelectionText: string;
-declare function showToast(msg: string, type?: string, duration?: number): void;
-declare function $(id: string): any;
-declare function _hexLuma(hex: string): number;
-declare function _safeTextColor(fgHex: string, bgHex: string): string | null;
-declare function _runTextDecoration(run: TextRun): string;
-declare function _shouldIgnorePptxGlobalKeydown(target: EventTarget | null): boolean;
-declare function _normalizePptxTableSelection(sel: any, rows: number, cols: number): any;
-declare function _extractPptxTableText(shape: SlideShape, sel?: any): string;
-declare function _positionSelectionToolbar(): void;
-declare function _pinSelectionChip(text: string): void;
-declare function _updateContextBar(ctx: any): void;
+const WA = getWorkspaceApi();
+const state: any = (window as any).state || {};
+const $ = (id: string): HTMLElement | null => document.getElementById(id);
+const showToast = (...args: any[]): void => WA.showToast?.(...args);
+const _hexLuma = (...args: any[]): any => WA._hexLuma?.(...args);
+const _runTextDecoration = (...args: any[]): any => WA._runTextDecoration?.(...args);
+const _safeTextColor = (...args: any[]): any => WA._safeTextColor?.(...args);
+const _shouldIgnorePptxGlobalKeydown = (...args: any[]): boolean => Boolean(WA._shouldIgnorePptxGlobalKeydown?.(...args));
+const _extractPptxTableText = (...args: any[]): string => String(WA._extractPptxTableText?.(...args) || '');
+const _normalizePptxTableSelection = (...args: any[]): any => WA._normalizePptxTableSelection?.(...args) || null;
+const _pinSelectionChip = (...args: any[]): void => WA._pinSelectionChip?.(...args);
+const _positionSelectionToolbar = (...args: any[]): void => WA._positionSelectionToolbar?.(...args);
+const _updateContextBar = (...args: any[]): void => WA._updateContextBar?.(...args);
+const _PENCIL_SVG = String(WA._PENCIL_SVG || '');
+const _TRASH_SVG = String(WA._TRASH_SVG || '');
+const _CLIPBOARD_SVG = String(WA._CLIPBOARD_SVG || '');
 
 export class KotoPptxEditor implements WorkspaceEditor {
     constructor() {
@@ -98,6 +99,79 @@ export class KotoPptxEditor implements WorkspaceEditor {
       return lines.length
         ? `[PPT幻灯片${this._curIdx + 1}内容, slide_index=${this._curIdx}]\n${lines.join('\n')}`
         : `[幻灯片${this._curIdx + 1}无文字内容, slide_index=${this._curIdx}]`;
+    }
+
+    getSelectionPayload() {
+      const sel = window.getSelection();
+      let range = sel && !sel.isCollapsed && sel.rangeCount ? sel.getRangeAt(0) : null;
+      if ((!range || !range.toString().trim()) && this._savedRange) range = this._savedRange;
+      if (!range) return null;
+      const text = range.toString().trim();
+      if (!text) return null;
+      const ancestor = range.commonAncestorContainer.nodeType === Node.TEXT_NODE
+        ? range.commonAncestorContainer.parentElement
+        : range.commonAncestorContainer;
+      const shapeEl = ancestor && ancestor.closest ? ancestor.closest('.wa-pptx-shape') : this._selShape;
+      if (!shapeEl || !shapeEl.closest('#wa-pptx-editor')) return null;
+      const slide = this.data && this.data.slides[this._curIdx];
+      const shapeId = Number(shapeEl.dataset.shapeId || 0);
+      const shape = slide && (slide.shapes || []).find((item) => Number(item.id) === shapeId);
+      return {
+        kind: 'pptx-text',
+        text,
+        aiText: `[PPT 第 ${this._curIdx + 1} 页选中文字，shape_id=${shapeId}]:\n${text}\n`,
+        previewText: `第 ${this._curIdx + 1} 页 · ${text.length} 字`,
+        countLabel: `${text.replace(/\s/g, '').length}字`,
+        slideIndex: this._curIdx,
+        shapeId,
+        shapeName: shape && shape.name ? String(shape.name) : '',
+      };
+    }
+
+    _syncShapeTextFromDom(shape, inner) {
+      const previousParagraphs = Array.isArray(shape.paragraphs) ? shape.paragraphs : [];
+      const paragraphEls = Array.from(inner.querySelectorAll(':scope > .wa-pptx-para'));
+      if (!paragraphEls.length) {
+        const previousParagraph = previousParagraphs[0] || { align: 'LEFT', runs: [] };
+        const previousRun = Array.isArray(previousParagraph.runs) && previousParagraph.runs[0]
+          ? previousParagraph.runs[0]
+          : {};
+        shape.paragraphs = [{
+          ...previousParagraph,
+          runs: [{ ...previousRun, text: String(inner.textContent || '') }],
+        }];
+        return;
+      }
+      const nextParagraphs = paragraphEls.map((paragraphEl, paragraphIndex) => {
+        const previousParagraph = previousParagraphs[paragraphIndex] || previousParagraphs[0] || { align: 'LEFT', runs: [] };
+        const previousRuns = Array.isArray(previousParagraph.runs) ? previousParagraph.runs : [];
+        const nextRuns = [];
+        const pushText = (text, template) => {
+          const value = String(text == null ? '' : text);
+          if (!value && nextRuns.length) return;
+          nextRuns.push({ ...(template || previousRuns[0] || {}), text: value });
+        };
+        Array.from(paragraphEl.childNodes).forEach((node) => {
+          if (node.nodeType === Node.TEXT_NODE) {
+            if (String(node.nodeValue || '')) pushText(node.nodeValue, previousRuns[nextRuns.length]);
+            return;
+          }
+          if (!(node instanceof HTMLElement)) return;
+          if (node.tagName === 'BR') return;
+          const oldIndex = Number(node.dataset && node.dataset.ri);
+          const template = Number.isFinite(oldIndex) ? previousRuns[oldIndex] : previousRuns[nextRuns.length];
+          pushText(node.textContent || '', template);
+        });
+        if (!nextRuns.length) pushText(paragraphEl.textContent || '', previousRuns[0]);
+        return { ...previousParagraph, runs: nextRuns };
+      });
+      shape.paragraphs = nextParagraphs;
+      paragraphEls.forEach((paragraphEl, paragraphIndex) => {
+        paragraphEl.querySelectorAll('.wa-pptx-run').forEach((span, runIndex) => {
+          span.dataset.pi = String(paragraphIndex);
+          span.dataset.ri = String(runIndex);
+        });
+      });
     }
 
     applyToolCall(cmd) {
@@ -658,7 +732,7 @@ export class KotoPptxEditor implements WorkspaceEditor {
             }
             // ── Also ensure the floating AI quick-action toolbar appears BELOW ──
             // (format bar = above selection, AI bar = below — both coexist without overlap)
-            lastSelectionText = text;
+            setLastSelectionText(text);
             _positionSelectionToolbar();
             const countEl = $('wa-tooltip-count');
             if (countEl) countEl.textContent = `${text.replace(/\s/g, '').length}字`;
@@ -973,12 +1047,10 @@ export class KotoPptxEditor implements WorkspaceEditor {
           });
           // Sync all run text to data model when inner (the contentEditable container) fires input.
           inner.addEventListener('input', () => {
-            inner.querySelectorAll('.wa-pptx-run').forEach(span => {
-              const pi = parseInt(span.dataset.pi), ri = parseInt(span.dataset.ri);
-              if (shape.paragraphs[pi] && shape.paragraphs[pi].runs && shape.paragraphs[pi].runs[ri]) {
-                shape.paragraphs[pi].runs[ri].text = span.textContent;
-              }
-            });
+            // Browser deletion may remove or merge complete run spans.  Rebuild
+            // the paragraph/run model from the surviving DOM so deleted text
+            // cannot reappear after save, rerender, or reopen.
+            this._syncShapeTextFromDom(shape, inner);
             this._redrawThumb(idx);
             WA.scheduleAutoSave();
           });

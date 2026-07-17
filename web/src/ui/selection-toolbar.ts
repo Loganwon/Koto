@@ -6,31 +6,33 @@
 
 // ── External dependencies (provided by workspace-assistant IIFE scope) ──
 import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { $, _escHtml } from '../workspace/infrastructure';
+import { state as workspaceState } from '../workspace/state';
+import { _getPinnedSelectionSourceMeta } from '../workspace/ai-review';
+import {
+  getLastSelectionText,
+  setDocxHoverForceHiddenText,
+  setDocxNativeSelectionBottom,
+  setLastSelectionText,
+} from '../shared/selection-runtime';
+import {
+  captureReviewSelection,
+  hideReviewSelectionLauncher,
+  isReviewEditorFocused,
+  isReviewShellFocused,
+  renderReviewSelectionLauncher,
+  renderReviewShell,
+  syncDocxReviewToolbar,
+} from '../workspace/docx-review-runtime';
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let lastSelectionText: string;
-declare let _docxMouseIsDown: boolean;
-declare let _docxMouseUpY: number;
-declare let _docxHbEl: HTMLElement | null;
-declare let _docxCpEl: HTMLElement | null;
-declare let _docxSelTimer: any;
-declare function _cloneSerializable(val: any, fallback: any): any;
-declare function _escHtml(s: any): string;
-declare function _getPinnedSelectionSourceMeta(): { sourcePath: string; sourceName: string; sourceType: string };
-declare function _getDocxHdrFtrSelectionInfo(): any;
-declare function _saveEditorRange(): void;
-declare function _showDocxHoverBar(): void;
-declare function _syncDocxHoverBar(): void;
-declare function _syncDocxReviewToolbar(): void;
-declare function _renderReviewShell(): void;
-declare function _renderReviewSelectionLauncher(): void;
-declare function _hideReviewSelectionLauncher(): void;
-declare function _isReviewEditorFocused(): boolean;
-declare function _isReviewShellFocused(): boolean;
-declare function _syncReviewSelectionSnapshot(): void;
-declare function _updateSubjectBar(fileName: string, fileType: string): void;
-declare function _expandWAPanel(): void;
+const workspaceApi = getWorkspaceApi();
+// Editor implementations expose format-specific dynamic protocols. Keep that
+// boundary explicit while sourcing the state object from its canonical module.
+const state: any = workspaceState;
+
+function _cloneSerializable(val: any, fallback: any): any {
+  try { return JSON.parse(JSON.stringify(val)); } catch (_) { return fallback; }
+}
 
 const _WA_EXPLICIT_CONTEXT_RULE = '只处理用户明确提供的选中文本和分析文档';
 
@@ -73,6 +75,17 @@ export interface PinnedSelectionContext {
   rangeA1?: string;
   rows?: number;
   cols?: number;
+  anchor_text?: string;
+  anchor_start_offset?: number;
+  anchor_end_offset?: number;
+  anchor_occurrence?: number;
+  anchor_context_before?: string;
+  anchor_context_after?: string;
+  slideIndex?: number;
+  shapeId?: number;
+  shapeName?: string;
+  pageStart?: number;
+  pageEnd?: number;
 }
 
 export interface DocxSelectionPayload {
@@ -193,7 +206,7 @@ export function _createPinnedSelectionContext(text: any, sourceMeta?: any): Pinn
     const sourcePath = String(text.sourcePath || text.source_path || '').trim();
     const sourceName = String(text.sourceName || text.source_name || '').trim();
     const sourceType = String(text.sourceType || text.source_type || '').trim();
-    return {
+    const context: PinnedSelectionContext = {
       text: normalizedText,
       previewText,
       sourcePath,
@@ -206,6 +219,16 @@ export function _createPinnedSelectionContext(text: any, sourceMeta?: any): Pinn
       rows: Number(text.rows || 0) || 0,
       cols: Number(text.cols || 0) || 0,
     };
+    for (const key of [
+      'anchor_text', 'anchor_start_offset', 'anchor_end_offset', 'anchor_occurrence',
+      'anchor_context_before', 'anchor_context_after', 'slideIndex', 'shapeId',
+      'shapeName', 'pageStart', 'pageEnd',
+    ]) {
+      if (text[key] !== undefined && text[key] !== null && text[key] !== '') {
+        (context as any)[key] = text[key];
+      }
+    }
+    return context;
   }
 
   const normalizedText = String(text || '').trim();
@@ -257,31 +280,30 @@ export function _updateContextBar(opts?: { selection?: string; files?: number; t
   if (parts.length) {
     bar.innerHTML = parts.join('<span class="ctx-bar-sep">\u00b7</span>');
     bar.style.display = 'flex';
+    const clearFiles = bar.querySelector<HTMLButtonElement>('.ctx-bar-clear-files');
+    if (clearFiles) {
+      clearFiles.addEventListener('click', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        getWorkspaceApi().clearAIFileContext?.();
+      });
+    }
   } else {
     bar.innerHTML = '';
     bar.style.display = 'none';
   }
 
   if (state.fileType === 'docx') {
-    const syncReviewSelectionSnapshot = (window as any)._syncReviewSelectionSnapshot;
-    const syncDocxReviewToolbar = (window as any)._syncDocxReviewToolbar;
-    const renderReviewShell = (window as any)._renderReviewShell;
-    const renderReviewSelectionLauncher = (window as any)._renderReviewSelectionLauncher;
-    if (typeof syncReviewSelectionSnapshot === 'function') syncReviewSelectionSnapshot();
-    if (typeof syncDocxReviewToolbar === 'function') syncDocxReviewToolbar();
-    const reviewEditorFocused = typeof (window as any)._isReviewEditorFocused === 'function'
-      ? (window as any)._isReviewEditorFocused()
-      : false;
-    const reviewShellFocused = typeof (window as any)._isReviewShellFocused === 'function'
-      ? (window as any)._isReviewShellFocused()
-      : false;
-    if (state._reviewCenterOpen && !state._editingReviewCommentId && !reviewEditorFocused && !reviewShellFocused && typeof renderReviewShell === 'function') {
+    captureReviewSelection();
+    syncDocxReviewToolbar();
+    const reviewEditorFocused = isReviewEditorFocused();
+    const reviewShellFocused = isReviewShellFocused();
+    if (state._reviewCenterOpen && !state._editingReviewCommentId && !reviewEditorFocused && !reviewShellFocused) {
       renderReviewShell();
     }
-    if (typeof renderReviewSelectionLauncher === 'function') renderReviewSelectionLauncher();
+    renderReviewSelectionLauncher();
   } else {
-    const hideReviewSelectionLauncher = (window as any)._hideReviewSelectionLauncher;
-    if (typeof hideReviewSelectionLauncher === 'function') hideReviewSelectionLauncher();
+    hideReviewSelectionLauncher();
   }
 }
 
@@ -484,7 +506,7 @@ export function _getDocxSelectionPayload(options?: { includeOverlay?: boolean; a
   }
 
   if (allowStaleFallback) {
-    const fallbackText = String(lastSelectionText || '').trim();
+    const fallbackText = getLastSelectionText().trim();
     if (fallbackText) {
       return _makePayload('text', fallbackText, {
         countLabel: `${fallbackText.replace(/\s/g, '').length}\u5b57`,
@@ -509,14 +531,14 @@ export function _getActiveTextEditorSelectionForAI(): string {
   const end = Math.max(start, Number(textarea.selectionEnd) || 0);
   if (end <= start) return '';
   const liveText = String(textarea.value || '').slice(start, end).trim();
-  if (liveText) lastSelectionText = liveText;
+  if (liveText) setLastSelectionText(liveText);
   return liveText;
 }
 
 export function _getLiveEditorSelectionForAI(options?: { allowStaleFallback?: boolean }): any {
   const allowStaleFallback = !options || options.allowStaleFallback !== false;
   if (state.fileType === 'docx') {
-    const docxSelection = _getDocxSelectionPayload({ allowStaleFallback });
+    const docxSelection = _getDocxSelectionPayload({ allowStaleFallback, includeAnchorMeta: true });
     return docxSelection
       ? Object.assign({}, docxSelection, {
           text: docxSelection.aiText,
@@ -535,8 +557,20 @@ export function _getLiveEditorSelectionForAI(options?: { allowStaleFallback?: bo
       });
     }
   }
+  if ((state.fileType === 'pptx' || state.fileType === 'pdf')
+      && state.activeEditor
+      && typeof state.activeEditor.getSelectionPayload === 'function') {
+    const payload = state.activeEditor.getSelectionPayload();
+    if (payload && String(payload.aiText || payload.text || '').trim()) {
+      return Object.assign({}, payload, {
+        text: String(payload.aiText || payload.text || '').trim(),
+        sourceType: state.fileType,
+        selectionKind: payload.kind || `${state.fileType}-text`,
+      });
+    }
+  }
   let sel: string = _getActiveTextEditorSelectionForAI();
-  if (!sel && allowStaleFallback) sel = lastSelectionText;
+  if (!sel && allowStaleFallback) sel = getLastSelectionText();
   if (!sel && state.fileType === 'xlsx' && state.activeEditor) {
     const rangeText = state.activeEditor.getContent();
     if (rangeText && !rangeText.includes('\u672a\u9009\u4e2d\u533a\u57df')) sel = rangeText;
@@ -600,7 +634,7 @@ export function _extractHtmlTableText(tblEl: HTMLTableElement): string {
 
 // ── Show tooltip near a DOM element ──
 export function _showTableTooltipNear(el: HTMLElement): void {
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (!tt || !el) return;
   const rect = el.getBoundingClientRect();
   const GAP = 10;
@@ -664,7 +698,7 @@ export function _getSelectionViewportBounds(): SelectionBounds | null {
 
 // ── Position the AI quick-action toolbar ──
 export function _positionSelectionToolbar(overrideRect?: ToolbarConfig | null): void {
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (!tt) return;
 
   if (tt.parentElement !== document.body) {
@@ -739,7 +773,7 @@ function _setSelectionToolbarCount(label: string): void {
 }
 
 function _isSelectionToolbarTarget(el: Element | null): boolean {
-  return !!(el && (el.id === 'wa-pdf-tooltip' || (el.closest && el.closest('#wa-pdf-tooltip'))));
+  return !!(el && (el.id === 'wa-selection-toolbar' || (el.closest && el.closest('#wa-selection-toolbar'))));
 }
 
 function _isAIInputTarget(el: Element | null): boolean {
@@ -756,6 +790,7 @@ function _isInsideWorkspaceEditor(el: Element | null): boolean {
     el.closest('#wa-text-editor') ||
     el.closest('#wa-text-content') ||
     el.closest('#wa-docx-editor') ||
+    el.closest('#wa-xlsx-editor') ||
     el.closest('#wa-pptx-editor') ||
     el.closest('#wa-pptx-stage') ||
     el.closest('#wa-pdf-viewer') ||
@@ -768,13 +803,13 @@ function _isInsideWorkspaceEditor(el: Element | null): boolean {
 function _clearSelectionInjectionIfIdle(): void {
   const activeEl = document.activeElement as Element | null;
   if (_isSelectionToolbarTarget(activeEl) || _isAIInputTarget(activeEl)) return;
-  if (!state.pinnedSelection && !lastSelectionText) return;
+  if (!state.pinnedSelection && !getLastSelectionText()) return;
   clearSelection();
 }
 
 function _showSelectionToolbarForPayload(payload: { text: string; previewText: string; countLabel: string; raw: any }): void {
   state._selectionDismissed = false;
-  lastSelectionText = payload.text;
+  setLastSelectionText(payload.text);
   _setSelectionToolbarCount(payload.countLabel);
   const activeEl = document.activeElement as HTMLElement | null;
   const textEditor = $('wa-text-content') as HTMLTextAreaElement | null;
@@ -806,7 +841,7 @@ function _showSelectionToolbarForPayload(payload: { text: string; previewText: s
 export function _showSelectionToolbarForCurrentSelection(): boolean {
   const payload = _selectionPayloadForToolbar({ allowStaleFallback: false });
   if (!payload) {
-    const tt = $('wa-pdf-tooltip');
+    const tt = $('wa-selection-toolbar');
     if (tt) tt.style.display = 'none';
     _clearSelectionInjectionIfIdle();
     return false;
@@ -818,12 +853,12 @@ export function _showSelectionToolbarForCurrentSelection(): boolean {
 export function sendSelectionToAI(): void {
   const payload = _selectionPayloadForToolbar();
   if (!payload) return;
-  _saveEditorRange();
+  if (typeof workspaceApi._saveEditorRange === 'function') workspaceApi._saveEditorRange();
   _applyPinnedHighlight();
   _pinSelectionChip(payload.raw);
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (tt) tt.style.display = 'none';
-  _expandWAPanel();
+  if (typeof workspaceApi._expandWAPanel === 'function') workspaceApi._expandWAPanel();
   const input = $('wa-user-input') as HTMLTextAreaElement | null;
   if (input) input.focus();
 }
@@ -834,10 +869,10 @@ export function closeSelectionToolbar(): void {
     // This is the sole WA.closeSelectionToolbar implementation.  Preserve the
     // DOCX hover-bar dismissal contract here instead of relying on the DOCX
     // toolbar module to overwrite the global entry point later in the bundle.
-    (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
+    setDocxHoverForceHiddenText(getLastSelectionText() || (window.getSelection()?.toString().trim() || ''));
     _resetDocxSelection();
   }
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (tt) tt.style.display = 'none';
   try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
 }
@@ -846,7 +881,7 @@ export function clearSelection(): void {
   state.pinnedSelection = null;
   state.lastPinnedSel = null;
   state._selectionDismissed = true;
-  lastSelectionText = '';
+  setLastSelectionText('');
   try { window.getSelection()?.removeAllRanges(); } catch (_) { /* allowed to fail */ }
   try {
     if (state.activeEditor) {
@@ -857,7 +892,7 @@ export function clearSelection(): void {
       state.activeEditor._lastTableCols = 0;
     }
   } catch (e) { console.warn("[Koto]", e) }
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (tt) tt.style.display = 'none';
   _updateContextBar();
   _clearPinnedHighlight();
@@ -878,15 +913,12 @@ export function _hideDocxHoverBar(): void {
 }
 
 export function _resetDocxSelection(): void {
-  (window as any)._docxNativeSelBottom = 0;
+  setDocxNativeSelectionBottom(0);
   _hideDocxHoverBar();
-  const hideLauncher = (window as any)._hideReviewSelectionLauncher;
-  if (typeof hideLauncher === 'function') {
-    try { hideLauncher(); } catch (_) { /* noop */ }
-  }
-  const tooltip = $('wa-pdf-tooltip');
+  hideReviewSelectionLauncher();
+  const tooltip = $('wa-selection-toolbar');
   if (tooltip) tooltip.style.display = 'none';
-  lastSelectionText = '';
+  setLastSelectionText('');
   _updateContextBar();
   if (!state._aiFileContext || !state._aiFileContext.length) {
     const updateSubject = (window as any)._updateSubjectBar;
@@ -917,7 +949,7 @@ function _installSelectionToolbarEvents(): void {
     const el = _evtEl(event.target);
     if (event.button === 2 || _isSelectionToolbarTarget(el)) return;
     if (!_isInsideWorkspaceEditor(el)) {
-      const tt = $('wa-pdf-tooltip');
+      const tt = $('wa-selection-toolbar');
       if (tt) tt.style.display = 'none';
       if (!_isAIInputTarget(el)) {
         _clearSelectionInjectionIfIdle();
@@ -935,7 +967,7 @@ function _installSelectionToolbarEvents(): void {
   document.addEventListener('mousedown', (event: MouseEvent) => {
     const el = _evtEl(event.target);
     if (!_isSelectionToolbarTarget(el)) {
-      const tt = $('wa-pdf-tooltip');
+      const tt = $('wa-selection-toolbar');
       if (tt) tt.style.display = 'none';
     }
   });
@@ -961,10 +993,10 @@ function _installSelectionToolbarEvents(): void {
       if (state._selectionDismissed) return;
       const payload = _selectionPayloadForToolbar();
       if (!payload) return;
-      _saveEditorRange();
+      if (typeof workspaceApi._saveEditorRange === 'function') workspaceApi._saveEditorRange();
       _applyPinnedHighlight();
       _pinSelectionChip(payload.raw);
-      const tt = $('wa-pdf-tooltip');
+      const tt = $('wa-selection-toolbar');
       if (tt) tt.style.display = 'none';
     });
   }
@@ -977,7 +1009,9 @@ if (typeof window !== 'undefined') {
     _getDocxSelectionPayload,
     _getDocxSelectionTextForAI,
     _extractPptxTableText,
+    _normalizePptxTableSelection,
     _extractHtmlTableText,
+    _showTableTooltipNear,
     _positionSelectionToolbar,
     _getSelectionViewportBounds,
     _getLiveEditorSelectionForAI,
@@ -988,6 +1022,7 @@ if (typeof window !== 'undefined') {
     sendSelectionToAI,
     closeSelectionToolbar,
     clearSelection,
+    _pinSelectionChip,
   });
   (window as any)._hideDocxHoverBar = _hideDocxHoverBar;
   (window as any)._resetDocxSelection = _resetDocxSelection;

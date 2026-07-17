@@ -1,10 +1,37 @@
-<div id="wa-model-mode-toggle" class="wa-model-mode-toggle wa-footer-model-mode-select" role="group" aria-label="AI 模型选择">
-  <button id="wa-model-mode-deepseek-btn" type="button" class="wa-model-mode-toggle-btn active" data-model-mode="deepseek" title="DeepSeek 云端模型">
-    <span class="wa-model-mode-main">DeepSeek</span>
-    <span id="wa-model-mode-deepseek-model" class="wa-model-mode-sub">V4 Pro</span>
+<div id="wa-model-mode-toggle" class="wa-model-mode-toggle wa-footer-model-mode-select" aria-label="AI 模型选择">
+  <button id="wa-model-menu-trigger" type="button" class="wa-model-menu-trigger" aria-haspopup="listbox" aria-expanded="false" aria-controls="wa-model-mode-menu" title="选择 AI 模型">
+    <svg class="wa-model-trigger-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3a6 6 0 0 0-6 6v2a4 4 0 0 0-2 3.46V17a2 2 0 0 0 2 2h2v-6H6v-2a6 6 0 0 1 12 0v2h-2v6h2a2 2 0 0 0 2-2v-2.54A4 4 0 0 0 18 11V9a6 6 0 0 0-6-6Z"/></svg>
+    <span class="wa-model-trigger-copy">
+      <span id="wa-model-current-provider" class="wa-model-mode-main">DeepSeek</span>
+      <span id="wa-model-current-model" class="wa-model-mode-sub">DeepSeek Chat</span>
+    </span>
+    <svg class="wa-model-trigger-chevron" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m7 15 5-5 5 5"/></svg>
   </button>
-  <button id="wa-model-mode-local-btn" type="button" class="wa-model-mode-toggle-btn" data-model-mode="local" title="本地模型">
-    <span class="wa-model-mode-main">本地</span>
-    <span id="wa-model-mode-local-model" class="wa-model-mode-sub">未启动</span>
-  </button>
+
+  <div id="wa-model-mode-menu" class="wa-model-mode-menu" role="listbox" aria-label="可用 AI 模型" hidden>
+    <div class="wa-model-menu-heading">选择 AI 模型</div>
+    <div class="wa-model-menu-group" role="group" aria-label="云端模型">
+      <div class="wa-model-menu-group-label">云端模型</div>
+      <button id="wa-model-mode-deepseek-btn" type="button" class="wa-model-mode-toggle-btn wa-model-menu-option active" data-model-mode="deepseek" role="option" aria-selected="true" title="DeepSeek 云端模型">
+        <span class="wa-model-option-icon" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17.5 19H7a5 5 0 1 1 1.46-9.78A7 7 0 0 1 22 11.5 4.5 4.5 0 0 1 17.5 19Z"/></svg></span>
+        <span class="wa-model-option-copy">
+          <span class="wa-model-mode-main">DeepSeek</span>
+          <span id="wa-model-mode-deepseek-model" class="wa-model-mode-sub">DeepSeek Chat</span>
+        </span>
+        <svg class="wa-model-option-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+      </button>
+    </div>
+    <div class="wa-model-menu-separator" role="separator"></div>
+    <div class="wa-model-menu-group" role="group" aria-label="本地模型">
+      <div class="wa-model-menu-group-label">本地模型</div>
+      <button id="wa-model-mode-local-btn" type="button" class="wa-model-mode-toggle-btn wa-model-menu-option" data-model-mode="local" role="option" aria-selected="false" title="本地模型">
+        <span class="wa-model-option-icon" aria-hidden="true"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg></span>
+        <span class="wa-model-option-copy">
+          <span class="wa-model-mode-main">本地</span>
+          <span id="wa-model-mode-local-model" class="wa-model-mode-sub">未启动</span>
+        </span>
+        <svg class="wa-model-option-check" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+      </button>
+    </div>
+  </div>
 </div>

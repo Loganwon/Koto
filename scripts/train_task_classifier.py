@@ -30,7 +30,17 @@ os.environ.setdefault("TRANSFORMERS_SAFETENSORS_DISABLE_AUTO_CONVERSION", "1")
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 MODEL_DIR = os.path.join(REPO_ROOT, "models", "task_classifier")
-DATA_PATH = os.path.join(MODEL_DIR, "training_data.json")
+DATA_PATH = next(
+    (
+        path
+        for path in (
+            os.path.join(MODEL_DIR, "training_data_v2.json"),
+            os.path.join(MODEL_DIR, "training_data.json"),
+        )
+        if os.path.exists(path)
+    ),
+    os.path.join(MODEL_DIR, "training_data.json"),
+)
 
 # 已缓存模型优先级列表
 CANDIDATE_MODELS = [
@@ -127,6 +137,7 @@ def main():
     # 0. 依赖检查
     _ensure_sklearn()
 
+    import sklearn
     from sklearn.linear_model import LogisticRegression
     from sklearn.preprocessing import LabelEncoder
     from sklearn.model_selection import StratifiedKFold, cross_val_score
@@ -211,6 +222,7 @@ def main():
         "n_samples":      len(texts),
         "classes":        list(le.classes_),
         "train_accuracy": round(float(train_acc), 4),
+        "sklearn_version": sklearn.__version__,
         "version":        "1.1",
     }
     with open(config_path, "w", encoding="utf-8") as f:
@@ -223,23 +235,18 @@ def main():
     # 7. 快速健壮性测试
     print("\n[Train] 健壮性抽查:")
     test_cases = [
-        ("打开微信",                         "SYSTEM"),
-        ("启动vscode",                       "SYSTEM"),
-        ("今天北京天气怎么样",                 "WEB_SEARCH"),
-        ("比特币现在价格",                     "WEB_SEARCH"),
-        ("帮我写一个Python排序函数",           "CODER"),
-        ("用matplotlib画折线图",             "CODER"),
+        ("打开微信",                         "DESKTOP"),
+        ("启动vscode",                       "DESKTOP"),
+        ("今天北京天气怎么样",                 "SEARCH"),
+        ("比特币现在价格",                     "SEARCH"),
         ("你好",                              "CHAT"),
         ("什么是量子计算",                     "CHAT"),
-        ("生成一份项目报告Word文档",            "FILE_GEN"),
-        ("做一个产品介绍PPT",                 "FILE_GEN"),
-        ("画一张宇宙飞船图片",                 "PAINTER"),
-        ("提醒我下午3点开会",                  "AGENT"),
-        ("给张三发微信",                       "AGENT"),
-        ("深入分析新能源汽车市场",              "RESEARCH"),
-        ("[FILE_ATTACHED:.docx] 润色这篇报告", "DOC_ANNOTATE"),
-        ("如何写一个排序算法",                 "CHAT"),
-        ("帮我画一个柱状图",                   "CODER"),
+        ("帮我写一个Python排序函数",           "CHAT"),
+        ("生成一份项目报告Word文档",            "FILE"),
+        ("[FILE_ATTACHED:.docx] 润色这篇报告", "FILE"),
+        ("画一张宇宙飞船图片",                 "CREATE"),
+        ("用matplotlib画折线图",             "CREATE"),
+        ("帮我画一个柱状图",                   "CREATE"),
     ]
 
     test_texts  = [t for t, _ in test_cases]

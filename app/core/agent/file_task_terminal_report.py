@@ -19,11 +19,23 @@ def apply_terminal_check_overrides(
     missing_read_refs: List[str],
 ) -> Dict[str, Any]:
     payload = dict(check_payload)
+    terminal_status = str(payload.get("status") or "").strip().lower()
+    # A concrete execution failure is more specific than the generic
+    # "context was not read" fallback.  The old ordering replaced model
+    # timeouts and successful-but-unwritten runs with a generic failure, which
+    # is exactly how the UI lost the real reason for the failed task.
+    if isinstance(payload.get("failure"), dict) or terminal_status in {
+        "model_timeout",
+        "model_unavailable",
+        "model_error",
+        "write_not_performed",
+    }:
+        return payload
     no_read_context = not snippets and not readonly_tool_outputs
 
     if not file_changes and no_read_context and requires_file_context and not tool_gap:
         payload["passed"] = False
-        payload["status"] = "needs_attention"
+        payload["status"] = "quality_gate_failed"
         payload["summary"] = "任务明确要求读取文件，但没有成功读取任何显式文件上下文。"
         payload["remaining"] = [
             "确认文件位于工作区内，或将目标文件加入临时工作区后重试。"
@@ -41,7 +53,7 @@ def apply_terminal_check_overrides(
     if not file_changes and missing_read_refs and not tool_gap:
         refs_text = "、".join(missing_read_refs[:3])
         payload["passed"] = False
-        payload["status"] = "needs_attention"
+        payload["status"] = "quality_gate_failed"
         payload["summary"] = (
             f"任务明确要求读取文件，但没有成功读取目标文件：{refs_text}。"
         )

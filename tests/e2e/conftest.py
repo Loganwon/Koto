@@ -6,8 +6,10 @@ browser fixtures with automatic JS console error collection.
 """
 
 import importlib.util
+import json
 import os
 import signal
+import socket
 import subprocess
 import sys
 import time
@@ -18,7 +20,17 @@ import requests
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
-E2E_PORT = int(os.environ.get("KOTO_E2E_PORT", 9876))
+def _select_e2e_port() -> int:
+    """Use the requested port, otherwise reserve an unused local test port."""
+    configured_port = os.environ.get("KOTO_E2E_PORT")
+    if configured_port:
+        return int(configured_port)
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+E2E_PORT = _select_e2e_port()
 E2E_BASE_URL = f"http://127.0.0.1:{E2E_PORT}"
 APP_STARTUP_TIMEOUT = 60  # seconds
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -32,10 +44,12 @@ def _has_playwright_pytest_plugin() -> bool:
     return importlib.util.find_spec("pytest_playwright") is not None
 
 
-def _wait_for_server(base_url: str, timeout: int) -> bool:
+def _wait_for_server(base_url: str, timeout: int, proc: subprocess.Popen) -> bool:
     """Poll the health endpoint until the server is ready."""
     deadline = time.time() + timeout
     while time.time() < deadline:
+        if proc.poll() is not None:
+            return False
         try:
             r = requests.get(f"{base_url}/api/ping", timeout=5)
             if r.status_code == 200:
@@ -56,8 +70,20 @@ def e2e_base_url():
 
 
 @pytest.fixture(scope="session")
-def _flask_server(e2e_base_url):
+def _flask_server(e2e_base_url, _protect_user_settings, tmp_path_factory):
     """Start Flask in a child process, wait for readiness, then tear down."""
+    source_settings_path = os.path.join(REPO_ROOT, "config", "user_settings.json")
+    try:
+        with open(source_settings_path, encoding="utf-8-sig") as handle:
+            settings_before_start = json.load(handle)
+    except Exception:
+        settings_before_start = {}
+    settings_path = tmp_path_factory.mktemp("koto-e2e-settings") / "user_settings.json"
+    if settings_before_start:
+        settings_path.write_text(
+            json.dumps(settings_before_start, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
     env = os.environ.copy()
     env.update(
         {
@@ -68,6 +94,7 @@ def _flask_server(e2e_base_url):
             "GEMINI_API_KEY": env.get("GEMINI_API_KEY", ""),
             "PYTHONIOENCODING": "utf-8",
             "PYTHONPATH": os.pathsep.join([REPO_ROOT, os.path.join(REPO_ROOT, "src")]),
+            "KOTO_USER_SETTINGS_PATH": str(settings_path),
         }
     )
     stderr_path = os.path.join(REPO_ROOT, "logs", "e2e_server.log")
@@ -82,8 +109,12 @@ def _flask_server(e2e_base_url):
         stderr=stderr_file,
     )
 
-    if not _wait_for_server(e2e_base_url, APP_STARTUP_TIMEOUT):
+    if not _wait_for_server(e2e_base_url, APP_STARTUP_TIMEOUT, proc):
         proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         try:
             stderr_file.close()
             err_text = open(stderr_path, encoding="utf-8", errors="replace").read()[
@@ -95,6 +126,35 @@ def _flask_server(e2e_base_url):
             f"Flask server did not become ready within {APP_STARTUP_TIMEOUT}s "
             f"on {e2e_base_url}\n\nServer stderr:\n{err_text}"
         )
+
+    try:
+        settings_after_start = requests.get(
+            f"{e2e_base_url}/api/settings", timeout=10
+        ).json()
+        stable_paths = (
+            ("appearance", "theme"),
+            ("appearance", "ui_zoom"),
+            ("ai", "show_thinking"),
+            ("ai", "show_task_type"),
+            ("ai", "auto_save_files"),
+            ("proxy", "enabled"),
+        )
+        for section, key in stable_paths:
+            before_section = settings_before_start.get(section)
+            if isinstance(before_section, dict) and key in before_section:
+                assert settings_after_start.get(section, {}).get(key) == before_section[key], (
+                    f"Server startup rewrote {section}.{key}: "
+                    f"{before_section[key]!r} -> "
+                    f"{settings_after_start.get(section, {}).get(key)!r}"
+                )
+    except AssertionError:
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        stderr_file.close()
+        raise
 
     yield proc
 

@@ -1,6 +1,6 @@
 """
-Unit tests for web modules: SettingsManager, MemoryManager, token_tracker,
-SystemInfoCollector, WorkFileLibrary.
+Unit tests for web modules: SettingsManager, token_tracker, SystemInfoCollector,
+and WorkFileLibrary.
 
 Covers constructors, getters/setters, and core logic with mocked I/O.
 """
@@ -13,7 +13,6 @@ import os
 import sqlite3
 import time
 from datetime import date
-from pathlib import Path
 from unittest.mock import MagicMock, Mock, mock_open, patch
 
 import pytest
@@ -41,6 +40,7 @@ class TestSettingsManager:
         mod.SettingsManager._settings = None
         mod.SettingsManager._dirty = False
         mod.SettingsManager._flush_timer = None
+        mod.SettingsManager._file_signature = None
         yield
         # Restore after test
         mod.DEFAULT_SETTINGS.clear()
@@ -143,7 +143,7 @@ class TestSettingsManager:
             result = mgr.set("appearance", "theme", "light")
             assert result is True
             assert mgr.get("appearance", "theme") == "light"
-            assert mgr._dirty is True
+            assert mgr._dirty is False
 
     def test_update_values(self):
         with patch(
@@ -239,127 +239,6 @@ class TestSettingsManager:
             assert mgr.images_dir is not None
             assert mgr.chats_dir is not None
             assert mgr.theme == "light"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# MemoryManager
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestMemoryManager:
-    """Tests for web.memory_manager.MemoryManager."""
-
-    @pytest.fixture()
-    def manager(self, tmp_path):
-        """Create a MemoryManager backed by a temp file."""
-        from web.memory_manager import MemoryManager
-
-        mem_path = str(tmp_path / "memory.json")
-        return MemoryManager(memory_path=mem_path)
-
-    # -- init / loading --------------------------------------------------------
-
-    def test_init_creates_empty_list(self, manager):
-        assert manager.memories == []
-
-    def test_load_existing_file(self, tmp_path):
-        mem_file = tmp_path / "memory.json"
-        data = [
-            {
-                "id": 1,
-                "content": "hello",
-                "category": "fact",
-                "source": "user",
-                "created_at": "2024-01-01 00:00:00",
-                "use_count": 0,
-            }
-        ]
-        mem_file.write_text(json.dumps(data), encoding="utf-8")
-        from web.memory_manager import MemoryManager
-
-        mgr = MemoryManager(memory_path=str(mem_file))
-        assert len(mgr.memories) == 1
-        assert mgr.memories[0]["content"] == "hello"
-
-    def test_load_corrupt_file(self, tmp_path):
-        mem_file = tmp_path / "memory.json"
-        mem_file.write_text("{bad", encoding="utf-8")
-        from web.memory_manager import MemoryManager
-
-        mgr = MemoryManager(memory_path=str(mem_file))
-        assert mgr.memories == []
-
-    # -- add / delete ----------------------------------------------------------
-
-    def test_add_memory(self, manager):
-        item = manager.add_memory("likes cats", category="user_preference")
-        assert item["content"] == "likes cats"
-        assert item["category"] == "user_preference"
-        assert item["source"] == "user"
-        assert item["use_count"] == 0
-        assert len(manager.memories) == 1
-
-    def test_add_memory_persists(self, manager):
-        manager.add_memory("fact one")
-        raw = json.loads(Path(manager.memory_path).read_text(encoding="utf-8"))
-        assert len(raw) == 1
-
-    def test_delete_memory(self, manager):
-        item = manager.add_memory("delete me")
-        assert manager.delete_memory(item["id"]) is True
-        assert len(manager.memories) == 0
-
-    def test_delete_nonexistent(self, manager):
-        assert manager.delete_memory(99999) is False
-
-    # -- listing / searching ---------------------------------------------------
-
-    def test_get_all_memories_sorted(self, manager):
-        manager.add_memory("first")
-        # created_at uses strftime with second precision, so wait >1s
-        time.sleep(1.1)
-        manager.add_memory("second")
-        result = manager.get_all_memories()
-        # newest first
-        assert result[0]["content"] == "second"
-
-    def test_list_memories_alias(self, manager):
-        manager.add_memory("test")
-        assert manager.list_memories() == manager.get_all_memories()
-
-    def test_search_empty_query(self, manager):
-        manager.add_memory("hello world")
-        assert manager.search_memories("") == []
-
-    def test_search_exact_phrase(self, manager):
-        manager.add_memory("I love Python programming")
-        manager.add_memory("Java is fine too")
-        results = manager.search_memories("Python programming")
-        assert len(results) >= 1
-        assert results[0]["content"] == "I love Python programming"
-
-    def test_search_keyword_match(self, manager):
-        manager.add_memory("dark mode preferred")
-        results = manager.search_memories("dark")
-        assert len(results) == 1
-
-    def test_search_respects_limit(self, manager):
-        for i in range(10):
-            manager.add_memory(f"memory about topic {i}")
-        results = manager.search_memories("topic", limit=3)
-        assert len(results) <= 3
-
-    # -- context string --------------------------------------------------------
-
-    def test_get_context_string_empty(self, manager):
-        assert manager.get_context_string("random") == ""
-
-    def test_get_context_string_with_matches(self, manager):
-        manager.add_memory("user prefers dark theme")
-        ctx = manager.get_context_string("dark theme")
-        assert "dark theme" in ctx
-        assert "[User Memory" in ctx
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

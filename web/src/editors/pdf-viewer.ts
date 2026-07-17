@@ -1,23 +1,32 @@
 // @ts-nocheck
 import type { WorkspaceEditor, PdfViewerOptions, PdfOutlineItem, PdfAnnotation, PdfSearchMatch } from './types';
-import { _updatePdfZoomUI } from './cdn-loaders';
 import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
-declare const state: any;
-declare let lastSelectionText: string;
-declare function showToast(msg: string, type?: string, duration?: number): void;
-declare function $(id: string): any;
-declare function _csrfFetch(url: string, opts?: RequestInit): Promise<Response>;
-declare function _positionSelectionToolbar(): void;
-declare function _expandWAPanel(): void;
-declare function _initWorkspaceAiRuntimes(): void;
-declare function _hideWelcome(): void;
-declare function _setStreamBtn(isLoading: boolean): void;
-declare let _waTaskDispatcher: any;
-declare let _waConversationRuntime: any;
-declare let pdfjsLib: any;
-
 const workspaceApi = getWorkspaceApi();
+const state: any = (window as any).state || {};
+const $ = (id: string): any => document.getElementById(id);
+const showToast = (...args: any[]): void => workspaceApi.showToast?.(...args);
+const _csrfFetch = (url: string, opts?: RequestInit): Promise<Response> => workspaceApi._csrfFetch(url, opts);
+const _updatePdfZoomUI = (pct: number): void => workspaceApi._updatePdfZoomUI?.(pct);
+const _hideWelcome = (): void => workspaceApi._hideWelcome?.();
+const _setStreamBtn = (loading: boolean): void => workspaceApi._setStreamBtn?.(loading);
+const _initWorkspaceAiRuntimes = (): void => workspaceApi._initWorkspaceAiRuntimes?.();
+const getWorkspaceConversationRuntime = (): any => workspaceApi.getWorkspaceConversationRuntime?.();
+const getWorkspaceTaskDispatcher = (): any => workspaceApi.getWorkspaceTaskDispatcher?.();
+
+function _pdfRuntime(): any {
+  return (window as any).pdfjsLib;
+}
+
+function _positionSelectionToolbar(): void {
+  if (typeof workspaceApi._positionSelectionToolbar === 'function') {
+    workspaceApi._positionSelectionToolbar();
+  }
+}
+
+function _expandWAPanel(): void {
+  if (typeof workspaceApi._expandWAPanel === 'function') workspaceApi._expandWAPanel();
+}
 
 export class KotoPdfViewer implements WorkspaceEditor {
     constructor() {
@@ -87,8 +96,8 @@ export class KotoPdfViewer implements WorkspaceEditor {
       container.addEventListener('scroll', this._onScroll.bind(this), { passive: true });
 
       document.addEventListener('mousedown', (e) => {
-        if (!e.target.closest('#wa-pdf-tooltip')) {
-          $('wa-pdf-tooltip').style.display = 'none';
+        if (!e.target.closest('#wa-selection-toolbar')) {
+          $('wa-selection-toolbar').style.display = 'none';
         }
       });
 
@@ -120,14 +129,15 @@ export class KotoPdfViewer implements WorkspaceEditor {
       const c = $(this.containerId);
       c.innerHTML = '';
 
-      if (typeof pdfjsLib === 'undefined') {
+      const pdfjsLib = _pdfRuntime();
+      if (!pdfjsLib) {
         c.innerHTML = '<div style="color:var(--danger);padding:16px">PDF.js 加载失败</div>';
         return;
       }
 
       try {
         if (!this._pdfDoc || this._pdfDoc._url !== pdfUrl) {
-          const loadingTask = pdfjsLib.getDocument(pdfUrl);
+        const loadingTask = pdfjsLib.getDocument(pdfUrl);
           this._pdfDoc = await loadingTask.promise;
           this._pdfDoc._url = pdfUrl;
         }
@@ -321,7 +331,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         // "textContentSource" is the 4.x stream API — passing it to 3.x causes an error,
         // which triggers the catch block and sets pointerEvents:none on the layer,
         // making all text unselectable.
-        const renderTask = pdfjsLib.renderTextLayer({
+        const renderTask = _pdfRuntime().renderTextLayer({
           textContent: textContent,
           container: div,
           viewport: textViewport,
@@ -756,7 +766,10 @@ export class KotoPdfViewer implements WorkspaceEditor {
       if (bar) bar.style.display = 'flex';
       // Show annotation buttons in floating toolbar when PDF is open
       const annotBtns = document.querySelectorAll('.wa-pdf-annot-btn, .wa-pdf-annot-sep');
-      annotBtns.forEach((el: HTMLElement) => { el.style.display = ''; });
+      annotBtns.forEach((el: HTMLElement) => {
+        el.classList.remove('wa-hidden');
+        el.style.display = '';
+      });
     }
 
     annotClose() {
@@ -1357,7 +1370,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
       } else {
         this._createTextAnnotation(type);
       }
-      $('wa-pdf-tooltip').style.display = 'none';
+      $('wa-selection-toolbar').style.display = 'none';
     }
 
     // ─── Save/load annotations via backend ───────────────────────────────────
@@ -1588,7 +1601,9 @@ export class KotoPdfViewer implements WorkspaceEditor {
       }
       _expandWAPanel();
       _initWorkspaceAiRuntimes();
-      if (!_waTaskDispatcher || typeof _waTaskDispatcher.dispatchMessage !== 'function') {
+      const taskDispatcher = getWorkspaceTaskDispatcher();
+      const conversationRuntime = getWorkspaceConversationRuntime();
+      if (!taskDispatcher || typeof taskDispatcher.dispatchMessage !== 'function') {
         showToast('任务流程运行时未加载，请刷新后重试。', 'error');
         return;
       }
@@ -1605,8 +1620,8 @@ export class KotoPdfViewer implements WorkspaceEditor {
         'quote 必须尽量短，必须来自原文，便于前端定位；最多 8 条。'
       ].join('\n');
       const msgs = $('wa-ai-messages');
-      const turnUi = _waConversationRuntime && typeof _waConversationRuntime.appendUserMessageWithLoading === 'function'
-        ? _waConversationRuntime.appendUserMessageWithLoading({
+      const turnUi = conversationRuntime && typeof conversationRuntime.appendUserMessageWithLoading === 'function'
+        ? conversationRuntime.appendUserMessageWithLoading({
             content: 'AI 标注当前 PDF',
             files: [currentFile],
             task_kind: 'file_task',
@@ -1625,7 +1640,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
 
       state.isLoading = true;
       _setStreamBtn(true);
-      _waTaskDispatcher.dispatchMessage({
+      taskDispatcher.dispatchMessage({
         text: taskText,
         pinnedSelText: '',
         pinnedSelSource: '',
@@ -1665,7 +1680,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
       });
     }
 
-    // ─── AI Watermark removal ─────────────────────────────────────────────────
+    // ─── Local structural watermark removal ───────────────────────────────────
     async pdfRemoveWatermark() {
       if (!state.fileId) { showToast('请先打开一个 PDF 文件', 'warning'); return; }
       const overlay  = document.getElementById('wa-pdf-watermark-overlay');
@@ -1682,7 +1697,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         const res = await _csrfFetch('/api/v1/workspace/pdf/remove_watermark', {
           method:  'POST',
           headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({ file_id: state.fileId, use_ai: true }),
+          body:    JSON.stringify({ file_id: state.fileId }),
         });
         if (barEl) barEl.style.width = '80%';
         if (!res.ok) {
@@ -1698,7 +1713,7 @@ export class KotoPdfViewer implements WorkspaceEditor {
         const method  = res.headers.get('X-Koto-Method') || '';
         if (statusEl) statusEl.textContent = `去水印完成！共处理 ${removed} 处。`;
         if (resultEl) resultEl.textContent = method ? `检测方法：${method}` : '';
-        showToast('AI 去水印完成', 'success');
+        showToast(removed === '0' ? '未检测到可安全清理的水印' : '水印清理完成', removed === '0' ? 'info' : 'success');
       } catch (err) {
         if (statusEl) statusEl.textContent = '去水印失败：' + err.message;
         if (barEl)    barEl.style.width = '0%';
@@ -1712,8 +1727,8 @@ export class KotoPdfViewer implements WorkspaceEditor {
     }
 
     hideTooltip(e) {
-      if (!e.target.closest('#wa-pdf-tooltip')) {
-        $('wa-pdf-tooltip').style.display = 'none';
+      if (!e.target.closest('#wa-selection-toolbar')) {
+        $('wa-selection-toolbar').style.display = 'none';
       }
     }
 
@@ -1726,6 +1741,36 @@ export class KotoPdfViewer implements WorkspaceEditor {
         if (this._textContent[pg]) texts.push(`[第${pg}页]\n` + this._textContent[pg].slice(0, 2000));
       }
       return texts.length > 0 ? texts.join('\n\n') : '[PDF 正在加载，暂无文本]';
+    }
+
+    getSelectionPayload() {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+      const text = sel.toString().trim();
+      if (!text) return null;
+      const range = sel.getRangeAt(0);
+      const startEl = range.startContainer.nodeType === Node.TEXT_NODE
+        ? range.startContainer.parentElement
+        : range.startContainer;
+      const endEl = range.endContainer.nodeType === Node.TEXT_NODE
+        ? range.endContainer.parentElement
+        : range.endContainer;
+      const startWrap = startEl && startEl.closest ? startEl.closest('.wa-pdf-page-wrap') : null;
+      const endWrap = endEl && endEl.closest ? endEl.closest('.wa-pdf-page-wrap') : null;
+      const container = $(this.containerId);
+      if (!startWrap || !container || !container.contains(startWrap)) return null;
+      const pageStart = Number(startWrap.dataset.page || 0) || 0;
+      const pageEnd = Number((endWrap && endWrap.dataset.page) || pageStart) || pageStart;
+      const pageLabel = pageStart === pageEnd ? `第 ${pageStart} 页` : `第 ${pageStart}-${pageEnd} 页`;
+      return {
+        kind: 'pdf-text',
+        text,
+        aiText: `[选中的 PDF 文本，${pageLabel}]:\n${text}\n`,
+        previewText: `${pageLabel} · ${text.length} 字`,
+        countLabel: `${text.replace(/\s/g, '').length}字`,
+        pageStart,
+        pageEnd,
+      };
     }
 
     serialize() { return null; } // PDF not directly editable
@@ -1775,7 +1820,10 @@ export class KotoPdfViewer implements WorkspaceEditor {
 
       // Hide annotation buttons in floating toolbar
       const annotBtns = document.querySelectorAll('.wa-pdf-annot-btn, .wa-pdf-annot-sep');
-      annotBtns.forEach((el: HTMLElement) => { el.style.display = 'none'; });
+      annotBtns.forEach((el: HTMLElement) => {
+        el.classList.add('wa-hidden');
+        el.style.display = 'none';
+      });
     }
   }
 function _pdfActiveEditor(): any {

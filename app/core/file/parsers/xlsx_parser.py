@@ -16,8 +16,9 @@ _ALIGN_H_MAP = {
     "left": 1,
     "center": 2,
     "right": 3,
-    "justify": 6,
-    "distributed": 7,
+    "justify": 4,
+    "centerContinuous": 5,
+    "distributed": 6,
 }
 
 _ALIGN_V_MAP = {
@@ -53,11 +54,16 @@ def xlsx_contains_formula_fast(path: str) -> bool:
 
 def openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
     v = cell.value
-    if v is None:
+    if v is None and getattr(cell, "has_style", False) is not True:
         return None
-
     cell_data: dict[str, Any] = {}
-    if isinstance(v, bool):
+    if v is None:
+        pass
+    elif getattr(cell, "data_type", None) == "f":
+        formula = str(v)
+        cell_data["f"] = formula if formula.startswith("=") else f"={formula}"
+        cell_data["t"] = _UNIVER_TYPE_NUMBER
+    elif isinstance(v, bool):
         cell_data["v"] = int(v)
         cell_data["t"] = _UNIVER_TYPE_BOOLEAN
     elif isinstance(v, (int, float)):
@@ -100,12 +106,21 @@ def openpyxl_cell_to_univer(cell: Any) -> dict[str, Any] | None:
                 style["ht"] = _ALIGN_H_MAP[alignment.horizontal]
             if alignment.vertical and alignment.vertical in _ALIGN_V_MAP:
                 style["vt"] = _ALIGN_V_MAP[alignment.vertical]
+            if alignment.wrap_text is True:
+                style["tb"] = 3
+        number_format = cell.number_format
+        if (
+            isinstance(number_format, str)
+            and number_format
+            and number_format != "General"
+        ):
+            style["n"] = {"pattern": number_format}
     except Exception:
         pass
 
     if style:
         cell_data["s"] = style
-    return cell_data
+    return cell_data or None
 
 
 def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, Any]:
@@ -117,11 +132,13 @@ def parse_xlsx(file_path: str, original_name: str | None = None) -> dict[str, An
     warnings: list[str] = []
     if xlsx_contains_formula_fast(file_path):
         warnings.append(
-            "此表格包含公式（如 =SUM(...)）。Koto 目前以「静态值」模式读取 Excel，"
-            "公式已转换为计算结果，保存导出后公式将永久丢失。如需保留公式，请下载原始文件。"
+            "此表格包含公式（如 =SUM(...)）。Koto 会保留并重新计算常用公式；"
+            "外部链接、宏与部分 Excel 专有函数仍可能需要在 Excel 中刷新。"
         )
 
-    wb = openpyxl.load_workbook(file_path, data_only=True)
+    # Keep formulas editable. Univer's formula engine consumes the ``f`` field;
+    # loading with data_only=True silently discarded every formula on save.
+    wb = openpyxl.load_workbook(file_path, data_only=False)
 
     workbook_id = str(uuid.uuid4())
     if original_name:

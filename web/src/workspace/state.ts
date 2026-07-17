@@ -3,7 +3,7 @@
  * Workspace state.
  */
 
-import { _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
+import { _csrfFetch, _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
 import { logger } from '../shared/logger';
 import { getWorkspaceApi } from '../shared/workspace-api';
 
@@ -134,6 +134,9 @@ export interface EditorInstance {
   getContent?: () => unknown;
   setContent?: (data: unknown) => void;
   render: (...args: unknown[]) => unknown;
+  applyToolCall?: (command: any) => unknown;
+  appendToolCall?: (command: any) => unknown;
+  replaceSelectionWith?: (mode: string, selection: any, rawText: string) => unknown;
   editor?: unknown;
   [key: string]: unknown;
 }
@@ -195,8 +198,10 @@ export interface WorkspaceState {
   _activeRoute: Record<string, unknown> | null;
   _activeTaskReconnectors: Map<string, any>;
   _localRuntimeModel: string;
+  _localModelSupportsTools: boolean | null;
   _modelChoicePendingMode?: string;
   _modelChoiceUpdatedAt?: number;
+  _modelChoicePromise?: Promise<any> | null;
   useAgentMode: boolean;
   _aiFileContext: AiFileContext[];
   _aiTargetFileIdx: number;
@@ -214,7 +219,7 @@ const _WA_EMPTY_WORKSPACE_LAYOUT = {
 
 const _WA_MODEL_MODES = new Set(['cloud', 'deepseek', 'local']);
 
-function _normalizeWorkspaceModelMode(value: string, fallback: string = 'deepseek'): string {
+export function _normalizeWorkspaceModelMode(value: string, fallback: string = 'deepseek'): string {
   const normalized = String(value || '').trim().toLowerCase();
   return _WA_MODEL_MODES.has(normalized) ? normalized : fallback;
 }
@@ -281,6 +286,8 @@ export const state: WorkspaceState = {
   _activeRoute: null,
   _activeTaskReconnectors: new Map(),
   _localRuntimeModel: '',
+  _localModelSupportsTools: null,
+  _modelChoicePromise: null,
   useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',
   _aiFileContext: [],
   _aiTargetFileIdx: -1,
@@ -812,6 +819,33 @@ function _mergeRecentFiles(localRecent: RecentFileEntry[], apiRecent: RecentFile
     .slice(0, 20);
 }
 
+async function _filterAvailableRecentFiles(files: RecentFileEntry[]): Promise<RecentFileEntry[]> {
+  if (!files.length) return files;
+  try {
+    const response = await _csrfFetch('/api/v1/workspace/recent_files/status', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ paths: files.map((file) => file.path).slice(0, 50) }),
+    });
+    if (!response.ok) return files;
+    const data = await response.json();
+    const statuses = Array.isArray(data.files) ? data.files : [];
+    const missing = new Set(
+      statuses
+        .filter((entry: any) => entry && entry.exists === false)
+        .map((entry: any) => _normalizeRecentPath(entry.path)),
+    );
+    if (!missing.size) return files;
+    statuses.forEach((entry: any) => {
+      if (entry && entry.exists === false) _forgetRecentPath(String(entry.path || ''));
+    });
+    return files.filter((file) => !missing.has(_normalizeRecentPath(file.path)));
+  } catch (error) {
+    logger.debug('state', 'Recent-file availability check skipped', error);
+    return files;
+  }
+}
+
 export async function loadRecentFiles(): Promise<void> {
   const list = document.getElementById('wa-recent-list');
   if (!list) return;
@@ -833,7 +867,9 @@ export async function loadRecentFiles(): Promise<void> {
     apiRecent = [];
   }
 
-  const userRecent = _mergeRecentFiles(localRecent, apiRecent);
+  const userRecent = await _filterAvailableRecentFiles(
+    _mergeRecentFiles(localRecent, apiRecent),
+  );
   if (!userRecent.length) {
     list.innerHTML = '<div class="wa-empty-row">暂无最近文件</div>';
     return;
@@ -1034,19 +1070,11 @@ function _installWorkspaceRowActionDelegation(): void {
 
 _installWorkspaceRowActionDelegation();
 
-// ── Placeholder helpers (implemented in other modules) ──
+// ── Cross-module status bridge ──
 
 function _updateStatusBar(): void {
-  /* placeholder - actual impl in another section */
-}
-function _updateSubjectBar(_name?: string | null, _type?: string | null): void {
-  /* placeholder */
-}
-function _syncReviewStateForActiveFile(): Promise<void> {
-  return Promise.resolve();
-}
-function _updateContextBar(_ctx?: any): void {
-  /* placeholder */
+  const update = getWorkspaceApi()._updateStatusBar;
+  if (typeof update === 'function') update();
 }
 
 // ── Register with window.WA ──
@@ -1056,8 +1084,7 @@ const wa = getWorkspaceApi();
 function _syncMobileFilesA11y(): void {
   const left = document.getElementById('wa-left') as HTMLElement | null;
   if (!left) return;
-  const isNarrow = typeof window.matchMedia === 'function'
-    && window.matchMedia('(max-width: 760px)').matches;
+  const isNarrow = document.body.classList.contains('koto-layout-compact');
   const isOpen = document.body.classList.contains('wa-mobile-files-open');
   const hidden = isNarrow && !isOpen;
   left.setAttribute('aria-hidden', hidden ? 'true' : 'false');
@@ -1087,6 +1114,7 @@ if (document.readyState === 'loading') {
   _syncMobileFilesA11y();
 }
 window.addEventListener('resize', _syncMobileFilesA11y);
+window.addEventListener('koto-ui-zoom-change', _syncMobileFilesA11y);
 (window as any).state = state;
 (window as any)._WA_RUNTIME_SESSION_ID = _WA_RUNTIME_SESSION_ID;
 (window as any)._fsHandleMap = _fsHandleMap;

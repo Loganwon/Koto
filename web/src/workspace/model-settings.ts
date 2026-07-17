@@ -4,17 +4,10 @@
  */
 
 import { publishWorkspaceApi } from '../shared/workspace-api';
+import { $, _csrfFetch } from './infrastructure';
+import { _normalizeWorkspaceModelMode, state as workspaceState } from './state';
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let _waAiResultsRuntime: any;
-declare let _waQuickActionRuntime: any;
-declare let _waConversationRuntime: any;
-declare let _waTaskDispatcher: any;
-
-declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-declare function _normalizeWorkspaceModelMode(mode: string, fallback: string): string;
-declare function _setStreamBtn(streaming: boolean): void;
+const state: any = workspaceState;
 
 const _SUN_SVG = String((window as any)._SUN_SVG || '');
 const _MOON_SVG = String((window as any)._MOON_SVG || '');
@@ -48,12 +41,111 @@ export interface SettingsState {
 }
 
 export function toggleSettings(): void {
-  const active = _modelControlsRoot()?.querySelector('.wa-model-mode-toggle-btn.active') as HTMLElement | null;
-  if (active) active.focus();
+  const trigger = _modelControlsRoot()?.querySelector<HTMLButtonElement>('#wa-model-menu-trigger') || null;
+  if (trigger) trigger.focus();
 }
 
 function _modelControlsRoot(): HTMLElement | null {
   return document.getElementById('wa-ai-input-area');
+}
+
+function _modelMenuElements(): { wrapper: HTMLElement | null; trigger: HTMLButtonElement | null; menu: HTMLElement | null } {
+  const controlsRoot = _modelControlsRoot();
+  return {
+    wrapper: controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-toggle') || null,
+    trigger: controlsRoot?.querySelector<HTMLButtonElement>('#wa-model-menu-trigger') || null,
+    menu: controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-menu') || null,
+  };
+}
+
+function _positionModelModeMenu(): void {
+  const { trigger, menu } = _modelMenuElements();
+  if (!trigger || !menu || menu.hidden) return;
+
+  const viewportPadding = 8;
+  const gap = 8;
+  menu.style.removeProperty('max-height');
+  const triggerRect = trigger.getBoundingClientRect();
+  let menuRect = menu.getBoundingClientRect();
+  const visualViewport = window.visualViewport;
+  const viewportLeft = visualViewport?.offsetLeft || 0;
+  const viewportTop = visualViewport?.offsetTop || 0;
+  const viewportWidth = visualViewport?.width || window.innerWidth;
+  const viewportHeight = visualViewport?.height || window.innerHeight;
+  const viewportRight = viewportLeft + viewportWidth;
+  const viewportBottom = viewportTop + viewportHeight;
+  // Koto applies UI scaling with CSS `zoom`. DOM rectangles are already in
+  // visual pixels, while fixed-position left/top values are zoomed again.
+  // Convert the desired visual position back into the menu's CSS coordinate
+  // space so 110%/120% zoom cannot throw the popover out of the viewport.
+  const scaleX = menu.offsetWidth > 0 ? menuRect.width / menu.offsetWidth : 1;
+  const scaleY = menu.offsetHeight > 0 ? menuRect.height / menu.offsetHeight : scaleX;
+  const availableAbove = Math.max(0, triggerRect.top - viewportTop - gap - viewportPadding);
+  const availableBelow = Math.max(0, viewportBottom - triggerRect.bottom - gap - viewportPadding);
+  const opensAbove = availableAbove >= menuRect.height
+    || (availableBelow < menuRect.height && availableAbove > availableBelow);
+  const availableHeight = opensAbove ? availableAbove : availableBelow;
+  if (menuRect.height > availableHeight && availableHeight > 0) {
+    menu.style.maxHeight = `${Math.floor(availableHeight / (scaleY || 1))}px`;
+    menuRect = menu.getBoundingClientRect();
+  }
+
+  const left = Math.min(
+    Math.max(viewportLeft + viewportPadding, triggerRect.left),
+    Math.max(viewportLeft + viewportPadding, viewportRight - menuRect.width - viewportPadding),
+  );
+  const top = opensAbove
+    ? triggerRect.top - menuRect.height - gap
+    : triggerRect.bottom + gap;
+  const clampedTop = Math.min(
+    Math.max(viewportTop + viewportPadding, top),
+    Math.max(viewportTop + viewportPadding, viewportBottom - menuRect.height - viewportPadding),
+  );
+
+  menu.style.left = `${Math.round(left / (scaleX || 1))}px`;
+  menu.style.top = `${Math.round(clampedTop / (scaleY || 1))}px`;
+  menu.dataset.placement = opensAbove ? 'top' : 'bottom';
+}
+
+function _setModelModeMenuOpen(open: boolean, focusActive: boolean = false): void {
+  const { wrapper, trigger, menu } = _modelMenuElements();
+  if (!wrapper || !trigger || !menu) return;
+
+  wrapper.classList.toggle('is-open', open);
+  trigger.setAttribute('aria-expanded', String(open));
+  menu.hidden = !open;
+  if (!open) {
+    menu.style.removeProperty('left');
+    menu.style.removeProperty('top');
+    menu.style.removeProperty('max-height');
+    menu.removeAttribute('data-placement');
+    return;
+  }
+
+  _positionModelModeMenu();
+  if (focusActive) {
+    const active = menu.querySelector<HTMLButtonElement>('.wa-model-mode-toggle-btn.active:not(:disabled)')
+      || menu.querySelector<HTMLButtonElement>('.wa-model-mode-toggle-btn:not(:disabled)');
+    active?.focus();
+  }
+}
+
+function _focusAdjacentModelOption(current: HTMLButtonElement, direction: number): void {
+  const { menu } = _modelMenuElements();
+  if (!menu) return;
+  const options = Array.from(menu.querySelectorAll<HTMLButtonElement>('.wa-model-mode-toggle-btn:not(:disabled)'));
+  if (!options.length) return;
+  if (direction < -1) {
+    options[0].focus();
+    return;
+  }
+  if (direction > 1) {
+    options[options.length - 1].focus();
+    return;
+  }
+  const currentIndex = options.indexOf(current);
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + direction + options.length) % options.length;
+  options[nextIndex].focus();
 }
 
 function _bindModelModeControls(): void {
@@ -64,14 +156,53 @@ function _bindModelModeControls(): void {
   root.addEventListener('click', (event) => {
     const target = event.target;
     if (!(target instanceof Element)) return;
+    const trigger = target.closest<HTMLButtonElement>('#wa-model-menu-trigger');
+    if (trigger && root.contains(trigger)) {
+      event.preventDefault();
+      _setModelModeMenuOpen(trigger.getAttribute('aria-expanded') !== 'true');
+      return;
+    }
     const button = target.closest<HTMLButtonElement>('.wa-model-mode-toggle-btn[data-model-mode]');
     if (!button || !root.contains(button) || button.disabled) return;
 
     const mode = String(button.dataset.modelMode || '').trim();
     if (!mode) return;
     event.preventDefault();
+    _setModelModeMenuOpen(false);
+    _modelMenuElements().trigger?.focus();
     setLockedModel(mode);
   });
+  root.addEventListener('keydown', (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const trigger = target.closest<HTMLButtonElement>('#wa-model-menu-trigger');
+    if (trigger && root.contains(trigger) && ['ArrowUp', 'ArrowDown'].includes(event.key)) {
+      event.preventDefault();
+      _setModelModeMenuOpen(true, true);
+      return;
+    }
+    const option = target.closest<HTMLButtonElement>('.wa-model-mode-toggle-btn[data-model-mode]');
+    if (!option || !root.contains(option)) return;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      _focusAdjacentModelOption(option, event.key === 'ArrowDown' ? 1 : -1);
+    } else if (event.key === 'Home' || event.key === 'End') {
+      event.preventDefault();
+      _focusAdjacentModelOption(option, event.key === 'Home' ? -1000 : 1000);
+    } else if (event.key === 'Escape') {
+      event.preventDefault();
+      _setModelModeMenuOpen(false);
+      _modelMenuElements().trigger?.focus();
+    } else if (event.key === 'Tab') {
+      _setModelModeMenuOpen(false);
+    }
+  });
+  document.addEventListener('pointerdown', (event) => {
+    const { wrapper } = _modelMenuElements();
+    if (wrapper && !wrapper.contains(event.target as Node)) _setModelModeMenuOpen(false);
+  });
+  window.addEventListener('resize', () => _setModelModeMenuOpen(false));
+  document.addEventListener('scroll', () => _setModelModeMenuOpen(false), true);
 }
 
 // ── Skill Library compatibility ──────────────────────────────────
@@ -193,11 +324,17 @@ export function _syncModelStatusUi(): void {
   const badge = $('wa-ai-model-badge');
   const deepseekModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-deepseek-model') || null;
   const localModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-mode-local-model') || null;
+  const currentProviderEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-current-provider') || null;
+  const currentModelEl = controlsRoot?.querySelector<HTMLElement>('#wa-model-current-model') || null;
+  const menuTrigger = controlsRoot?.querySelector<HTMLButtonElement>('#wa-model-menu-trigger') || null;
   const routeInfo = $('wa-ai-route-info');
   const explicitCloudModel = _selectedCloudModelId();
   const activeRoute = state._activeRoute || null;
   const deepseekModelHint = _modelDisplayName('deepseek-chat', 'DeepSeek Chat');
   const localModelHint = state._localRuntimeModel || '\u672a\u542f\u52a8';
+  const localCapabilityHint = state._localModelSupportsTools === false
+    ? `${localModelHint}\uff08\u4ec5\u9605\u8bfb/\u95ee\u7b54\uff09`
+    : localModelHint;
   const lockedMode = _normalizeWorkspaceModelMode(state.lockedModel, 'deepseek');
   const rawActiveMode = lockedMode === 'cloud'
     ? _normalizeWorkspaceModelMode(state._cloudProvider, 'deepseek')
@@ -221,21 +358,35 @@ export function _syncModelStatusUi(): void {
     deepseekModelEl.hidden = false;
   }
   if (localModelEl) {
-    localModelEl.textContent = localModelHint;
-    localModelEl.title = `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}`;
+    localModelEl.textContent = localCapabilityHint;
+    localModelEl.title = state._localModelSupportsTools === false
+      ? `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}\u3002\u53ef\u7528\u4e8e\u9605\u8bfb\u548c\u95ee\u7b54\uff0c\u5199\u6587\u4ef6\u4efb\u52a1\u9700\u5207\u6362\u5230\u652f\u6301 tools \u7684\u6a21\u578b\u3002`
+      : `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}`;
     localModelEl.hidden = false;
+  }
+  const currentProviderLabel = activeMode === 'local' ? '\u672c\u5730' : 'DeepSeek';
+  const currentModelLabel = activeMode === 'local' ? localCapabilityHint : deepseekModelHint;
+  if (currentProviderEl) currentProviderEl.textContent = currentProviderLabel;
+  if (currentModelEl) currentModelEl.textContent = currentModelLabel;
+  if (menuTrigger) {
+    const triggerLabel = `${currentProviderLabel}\uff1a${currentModelLabel}`;
+    menuTrigger.title = `\u5f53\u524d\u6a21\u578b\uff1a${triggerLabel}`;
+    menuTrigger.setAttribute('aria-label', `\u9009\u62e9 AI \u6a21\u578b\uff0c\u5f53\u524d\u4e3a ${triggerLabel}`);
   }
   controlsRoot?.querySelectorAll('.wa-model-mode-toggle-btn[data-model-mode]').forEach((button) => {
     const btn = button as HTMLElement;
     const isActive = btn.dataset.modelMode === activeMode;
     btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', String(isActive));
     const buttonTitle = btn.dataset.modelMode === 'local'
-      ? `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}`
+      ? (state._localModelSupportsTools === false
+        ? `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}\u3002\u4ec5\u652f\u6301\u9605\u8bfb/\u95ee\u7b54\u6587\u4ef6\u4efb\u52a1\u3002`
+        : `\u672c\u5730\u6a21\u578b\uff1a${localModelHint}`)
       : `DeepSeek \u6587\u4ef6\u4efb\u52a1\u6a21\u578b\uff1a${deepseekModelHint}`;
     btn.title = buttonTitle;
     const sub = btn.querySelector('.wa-model-mode-sub') as HTMLElement | null;
     if (sub && sub !== deepseekModelEl && sub !== localModelEl) {
-      sub.textContent = btn.dataset.modelMode === 'local' ? localModelHint : deepseekModelHint;
+      sub.textContent = btn.dataset.modelMode === 'local' ? localCapabilityHint : deepseekModelHint;
       sub.hidden = false;
     }
   });
@@ -328,6 +479,9 @@ export function _checkOllamaStatus(): void {
         (data && (data.configured_model || data.model)) || state._localRuntimeModel
       );
       const configuredInstalled = !!(!data || data.configured_model_installed !== false);
+      state._localModelSupportsTools = data && typeof data.configured_model_supports_tools === 'boolean'
+        ? data.configured_model_supports_tools
+        : null;
       if (data && data.running) {
         state._localRuntimeModel = _formatLocalRuntimeModelLabel(
           configuredModel || data.model || 'Ollama',
@@ -358,16 +512,12 @@ function _bindSettingsModelBridge(): void {
   if ((window as any)[bridgeKey]) return;
   (window as any)[bridgeKey] = true;
 
-  window.addEventListener('koto:local-model-changed', (event: Event) => {
-    const model = _normalizeLocalRuntimeModelLabel((event as CustomEvent<any>).detail?.model);
-    if (!model) return;
-    state._localRuntimeModel = model;
-    _syncModelStatusUi();
-  });
-
-  window.addEventListener('koto:model-mode-changed', (event: Event) => {
-    const mode = String((event as CustomEvent<any>).detail?.mode || '').trim();
+  window.addEventListener('koto:model-runtime-changed', (event: Event) => {
+    const detail = (event as CustomEvent<any>).detail || {};
+    const mode = String(detail.mode || '').trim();
     if (!mode) return;
+    const model = _normalizeLocalRuntimeModelLabel(detail.localModel || detail.local_model);
+    if (model) state._localRuntimeModel = model;
     _applyWorkspaceModelMode(mode);
     _checkOllamaStatus();
   });
@@ -443,7 +593,7 @@ function _setWorkspaceModelMode(mode: string): void {
   state._modelChoiceUpdatedAt = Date.now();
   _checkOllamaStatus();
 
-  _csrfFetch('/api/local-model/switch', {
+  const switchPromise = _csrfFetch('/api/local-model/switch', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ mode: newModel }),
@@ -452,11 +602,8 @@ function _setWorkspaceModelMode(mode: string): void {
     if (!response.ok || data.success === false) throw new Error(data.error || '模型模式切换失败');
     state._modelChoicePendingMode = '';
     if (data.model) state._localRuntimeModel = _normalizeLocalRuntimeModelLabel(data.model);
-    window.dispatchEvent(new CustomEvent('koto:model-mode-changed', {
-      detail: { mode: data.mode || newModel, source: 'workspace' },
-    }));
-    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
-      detail: { model: data.model || '', source: 'workspace' },
+    window.dispatchEvent(new CustomEvent('koto:model-runtime-changed', {
+      detail: { ...(data.active_model || {}), mode: data.mode || newModel, cloudModel: data.cloud_model || 'deepseek-chat', localModel: data.local_model || data.model || '', source: 'workspace' },
     }));
     return _refreshModelCatalog(true);
   }).catch((error: any) => {
@@ -466,6 +613,11 @@ function _setWorkspaceModelMode(mode: string): void {
       (window as any).showNotification(error?.message || '模型模式切换失败', 'error', 3000);
     }
   });
+  let trackedPromise: Promise<any>;
+  trackedPromise = switchPromise.finally(() => {
+    if (state._modelChoicePromise === trackedPromise) state._modelChoicePromise = null;
+  });
+  state._modelChoicePromise = trackedPromise;
 }
 
 // ── Backward compat ──

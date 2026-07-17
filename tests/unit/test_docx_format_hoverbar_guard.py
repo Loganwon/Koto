@@ -26,7 +26,7 @@ def test_docx_tooltip_buttons_keep_editor_focus():
         _repo_root() / "web" / "templates" / "_workspace_selection_toolbar.html"
     ).read_text(encoding="utf-8")
     assert "{% include '_workspace_selection_toolbar.html' %}" in shell_html
-    assert re.search(r'<div\s+id="wa-pdf-tooltip"', tooltip_html)
+    assert re.search(r'<div\s+id="wa-selection-toolbar"', tooltip_html)
     assert tooltip_html.count('onmousedown="event.preventDefault()"') >= 6
 
 
@@ -341,7 +341,7 @@ def test_docx_review_mode_keeps_native_selection_for_comment_launcher():
     show_end = js.index("export function _kotoDocxSelectionChanged", show_start)
     show_fn = js[show_start:show_end]
 
-    assert show_fn.index("if (_isReviewCommentModeEnabled())") < show_fn.index(
+    assert show_fn.index("if (isReviewCommentModeEnabled())") < show_fn.index(
         "_getDocxSelectionPayload({ includeOverlay: false, allowStaleFallback: false })"
     )
     assert "_syncDocxHoverBarFromRibbon" in js

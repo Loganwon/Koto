@@ -8,6 +8,7 @@ export const TASK_REPORT_STAGE_DEFS = [
   { id: 'plan', title: '制定计划', hint: '确定处理路线、工具选择和质量要求' },
   { id: 'execute', title: '正在处理', hint: '读取、分析、生成、写入或调用模型' },
   { id: 'check', title: '检查结果', hint: '检查结果、变更和可继续处理项' },
+  { id: 'deliver', title: '交付结果', hint: '整理最终答复、文件产物和后续操作' },
 ];
 
 export const TASK_REPORT_STAGE_DONE_TEXT: Record<string, string> = {
@@ -15,6 +16,7 @@ export const TASK_REPORT_STAGE_DONE_TEXT: Record<string, string> = {
   plan: '已完成',
   execute: '已完成',
   check: '核验已结束，结论已同步到任务结果。',
+  deliver: '结果和产物已整理完成。',
 };
 
 export const TASK_REPORT_STAGE_RUNNING_TEXT: Record<string, string> = {
@@ -22,6 +24,7 @@ export const TASK_REPORT_STAGE_RUNNING_TEXT: Record<string, string> = {
   plan: '规划中',
   execute: '处理中',
   check: '核验中',
+  deliver: '整理结果中',
 };
 
 export const TASK_REPORT_STAGE_PENDING_TEXT: Record<string, string> = {
@@ -29,6 +32,7 @@ export const TASK_REPORT_STAGE_PENDING_TEXT: Record<string, string> = {
   plan: '等待中',
   execute: '等待中',
   check: '等待中',
+  deliver: '等待中',
 };
 
 export const TASK_REPORT_STAGE_BY_STEP_ID: Record<string, string> = {
@@ -40,6 +44,11 @@ export const TASK_REPORT_STAGE_BY_STEP_ID: Record<string, string> = {
   execute: 'execute',
   run: 'execute',
   check: 'check',
+  deliver: 'deliver',
+  done: 'deliver',
+  result: 'deliver',
+  'run.finished': 'deliver',
+  'run.cancelled': 'deliver',
 };
 
 export function taskReportStageDef(stageId: string): { id: string; title: string; hint: string } {
@@ -82,7 +91,9 @@ export function taskReportStageFromStep(step: any, fallbackStage = ''): string {
   const title = String(step && (step.title || step.label || '') || '').trim();
   if (/识别|路由|模型|上下文|读取文件/.test(title)) return 'route';
   if (/方案|计划|规划|监管/.test(title)) return 'plan';
-  if (/核验|检查|完成|结果/.test(title)) return 'check';
+  if (/交付|产物|最终答复/.test(title)) return 'deliver';
+  if (/核验|检查/.test(title)) return 'check';
+  if (/完成|结果/.test(title) && /任务|最终|产物|交付/.test(title)) return 'deliver';
   return fallbackStage || 'execute';
 }
 

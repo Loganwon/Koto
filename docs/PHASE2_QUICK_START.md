@@ -298,7 +298,7 @@ Koto: "看一下当前状态：
 
 3. **检查系统信息收集**:
    ```python
-   from web.system_info import get_system_info_collector
+   from app.core.services.system_info import get_system_info_collector
    collector = get_system_info_collector()
    print(collector.get_cpu_info())
    print(collector.get_memory_info())

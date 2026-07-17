@@ -61,7 +61,7 @@ function applyCSS(cssVars: Record<string, string> | undefined, theme: string): v
 
   if (cssVars && cssVars['--text-primary']) {
     const c = cssVars['--text-primary'];
-    rules.push(`#wa-user-input, #messageInput { color: ${c} !important; caret-color: ${c}; }`);
+    rules.push(`#wa-user-input { color: ${c} !important; caret-color: ${c}; }`);
   }
 
   styleEl.textContent = rules.join('\n');
@@ -97,7 +97,7 @@ function applyFont(fontStyle: string): void {
   const family = fontMap[fontStyle] || fontStyle;
   if (family) {
     styleEl.textContent = `body { font-family: ${family} !important; }`;
-    styleEl.textContent += `\n#wa-user-input, #messageInput, .message-content, .tp-heading, .tp-subheading, .tp-face-name-zh { font-family: ${family} !important; }`;
+    styleEl.textContent += `\n#wa-user-input, .message-content, .tp-heading, .tp-subheading, .tp-face-name-zh { font-family: ${family} !important; }`;
   }
 }
 

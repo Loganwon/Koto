@@ -6,7 +6,8 @@
 import { _csrfFetch, $, showToast } from './infrastructure';
 import { _fsHandleMap, _renderTabs, loadRecentFiles, state, type TabInfo } from './state';
 import { _serializeEditorForTab, _stableWorkspaceSnapshot } from './file-open';
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { publishWorkspaceApi } from '../shared/workspace-api';
+import { normalizeWorkspaceFilePath } from './docx-review-runtime';
 
 const _MIME: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -38,16 +39,10 @@ function _activeTab(): TabInfo | null {
 function _normalizeWorkspaceSavePath(path: string): string {
   const raw = String(path || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (!raw) return '';
-  const sharedNormalizer = getWorkspaceApi().normalizeWorkspaceFilePath;
-  if (typeof sharedNormalizer === 'function') {
-    try {
-      const normalized = String(sharedNormalizer(raw) || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
-      if (normalized) return normalized;
-    } catch (_) {
-      /* fallback below */
-    }
-  }
-  return raw.replace(/^workspace\//i, '');
+  return String(normalizeWorkspaceFilePath(raw) || raw)
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
 }
 
 function markExternalFileChange(path: string): void {
@@ -76,7 +71,7 @@ function _isReadonlyType(): boolean {
   return !state.fileType || state.fileType === 'pdf' || state.fileType === 'image';
 }
 
-function _notifyPyModified(tab: TabInfo | null, modified: boolean): void {
+export function _notifyPyModified(tab: TabInfo | null, modified: boolean): void {
   if (!tab) return;
   try {
     const api = (window as any).pywebview?.api;
@@ -212,7 +207,7 @@ async function saveAs(): Promise<void> {
   }
 }
 
-function scheduleAutoSave(options?: { skipDiskWrite?: boolean }): void {
+export function scheduleAutoSave(options?: { skipDiskWrite?: boolean }): void {
   if (!state.fileId || _isReadonlyType()) return;
   const tab = _activeTab();
   if (tab && !tab.modified) {

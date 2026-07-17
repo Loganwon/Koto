@@ -8,6 +8,7 @@ import { state, _forgetRecentPath, _trackUserOpen, loadRecentFiles, BrowserNode 
 import { getWorkspaceApi } from '../shared/workspace-api';
 
 const workspaceApi = getWorkspaceApi();
+let fileBrowserLoadPromise: Promise<void> | null = null;
 
 
 export interface SortConfig {
@@ -832,14 +833,23 @@ function _bindLocalFilePickers(): void {
   });
 }
 
+export function ensureFileBrowserLoaded(): Promise<void> {
+  if (!fileBrowserLoadPromise) {
+    fileBrowserLoadPromise = Promise.all([loadFileBrowser(), loadRecentFiles()])
+      .then(() => undefined)
+      .catch((error) => {
+        fileBrowserLoadPromise = null;
+        throw error;
+      });
+  }
+  return fileBrowserLoadPromise;
+}
+
 function _autoLoadStandaloneFileBrowser(): void {
   if (!document.getElementById('wa-files-list')) return;
   const embeddedWorkspace = document.getElementById('workspaceView');
   if (embeddedWorkspace && getComputedStyle(embeddedWorkspace).display === 'none') return;
-  if ((window as any)._WA_fileBrowserLoaded) return;
-  (window as any)._WA_fileBrowserLoaded = true;
-  void loadFileBrowser();
-  void loadRecentFiles();
+  void ensureFileBrowserLoaded();
 }
 
 async function _softRefreshBrowser(): Promise<void> {
@@ -862,6 +872,18 @@ async function _softRefreshBrowser(): Promise<void> {
     requestAnimationFrame(() => {
       list.scrollTop = savedScroll;
     });
+}
+
+let _externalFileBrowserRefreshTimer: number | null = null;
+
+function requestFileBrowserRefreshAfterExternalChange(): void {
+  if (_externalFileBrowserRefreshTimer !== null) {
+    window.clearTimeout(_externalFileBrowserRefreshTimer);
+  }
+  _externalFileBrowserRefreshTimer = window.setTimeout(() => {
+    _externalFileBrowserRefreshTimer = null;
+    void _softRefreshBrowser();
+  }, 160);
 }
 
 // ── Live Polling ──
@@ -1120,6 +1142,7 @@ function _createFallbackWorkspaceFileLoader(): any {
       return null;
     }
     setLoadingFn(true, '正在打开文件...');
+    let missingWorkspaceFile = false;
     try {
       const res = await _csrfFetch('/api/v1/workspace/open_file_by_path', {
         method: 'POST',
@@ -1127,11 +1150,22 @@ function _createFallbackWorkspaceFileLoader(): any {
         body: JSON.stringify({ path: requestPath }),
       });
       const data = await _safeJson(res);
-      if (!res.ok) throw new Error(data.error || '打开文件失败');
+      if (!res.ok) {
+        missingWorkspaceFile = res.status === 404;
+        if (missingWorkspaceFile) {
+          _forgetRecentPath(path);
+          _forgetRecentPath(requestPath);
+          await loadRecentFiles().catch(() => {});
+        }
+        throw new Error(data.error || '打开文件失败');
+      }
       return await openParsedFile(data, requestPath, null);
     } catch (error: any) {
-      console.error('[WA] openWorkspaceFile failed:', error);
-      showToast(error.message || '打开文件失败', 'error');
+      if (!missingWorkspaceFile) console.error('[WA] openWorkspaceFile failed:', error);
+      showToast(
+        missingWorkspaceFile ? '文件已不存在，已从最近文件移除' : (error.message || '打开文件失败'),
+        missingWorkspaceFile ? 'info' : 'error',
+      );
       return null;
     } finally {
       setLoadingFn(false);
@@ -1163,9 +1197,11 @@ function _createFallbackWorkspaceFileLoader(): any {
         }
         return await openParsedFile(data, absPath, null);
       } catch (error: any) {
-        if (missingExternalFile) console.warn('[WA] openBrowserFile missing file:', error);
-        else console.error('[WA] openBrowserFile failed:', error);
-        showToast(error.message || '打开文件失败', 'error');
+        if (!missingExternalFile) console.error('[WA] openBrowserFile failed:', error);
+        showToast(
+          missingExternalFile ? '文件已不存在，已从最近文件移除' : (error.message || '打开文件失败'),
+          missingExternalFile ? 'info' : 'error',
+        );
         return null;
       } finally {
         setLoadingFn(false);
@@ -1236,6 +1272,7 @@ const wa = workspaceApi;
 
 wa._renderBrowserTree = _renderBrowserTree;
 wa._softRefreshBrowser = _softRefreshBrowser;
+wa.requestFileBrowserRefreshAfterExternalChange = requestFileBrowserRefreshAfterExternalChange;
 wa._doSearch = _doSearch;
 wa.toggleBrowserFolder = toggleBrowserFolder;
 wa.handleBrowserFolderClick = handleBrowserFolderClick;

@@ -3,46 +3,32 @@
  * Workspace panel layout.
  */
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let WA: any;
-declare let lastSelectionText: string;
-declare function _resetDocxSelection(): void;
+import { $ } from '../workspace/infrastructure';
+import { state } from '../workspace/state';
+import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { isDocxMouseDown, setLastSelectionText } from '../shared/selection-runtime';
+import {
+  _resetDocxSelection,
+  _showSelectionToolbarForCurrentSelection,
+} from './selection-toolbar';
 
-export interface SplitConfig {
-  sizes: number[];
-  minSize: number[];
-  gutterSize: number;
-  snapOffset: number;
-  onDragEnd: (sizes: number[]) => void;
-}
-
-export interface PanelLayout {
-  left?: HTMLElement | null;
-  canvas: HTMLElement | null;
-  ai: HTMLElement | null;
-  embedded: boolean;
-  splitKey: string;
-}
+const WA = getWorkspaceApi();
 
 // ── selectionchange: collapse detection ONLY ─────────────────────────
 let _selChangeTimer: any = null;
-
-function _isDocxMouseDown(): boolean {
-  return Boolean(
-    (state && state._docxMouseIsDown)
-    || (window as any)._docxMouseIsDown,
-  );
-}
 
 document.addEventListener('selectionchange', () => {
   if (state.fileType !== 'docx') return;
   clearTimeout(_selChangeTimer);
   _selChangeTimer = setTimeout(() => {
     const _ae = document.activeElement;
-    if (_ae && (_ae.closest('#wa-pdf-tooltip') || _ae.closest('#wa-docx-hoverbar') || _ae.closest('#wa-docx-cp') || _ae.closest('#wa-review-shell') || _ae.closest('#wa-review-selection-launcher'))) return;
-    if (_isDocxMouseDown() && document.querySelector('#wa-pdf-tooltip:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover')) return;
+    if (_ae && (_ae.closest('#wa-selection-toolbar') || _ae.closest('#wa-docx-hoverbar') || _ae.closest('#wa-docx-cp') || _ae.closest('#wa-review-shell') || _ae.closest('#wa-review-selection-launcher'))) return;
+    if (isDocxMouseDown(state) && document.querySelector('#wa-selection-toolbar:hover, #wa-docx-hoverbar:hover, #wa-review-shell:hover, #wa-review-selection-launcher:hover')) return;
     const _ws = window.getSelection();
+    if (_ws && !_ws.isCollapsed && _ws.rangeCount) {
+      _showSelectionToolbarForCurrentSelection();
+      return;
+    }
     if (!_ws || _ws.isCollapsed || !_ws.rangeCount) {
       _resetDocxSelection();
     }
@@ -51,51 +37,59 @@ document.addEventListener('selectionchange', () => {
 
 // Hide selection toolbar on scroll
 document.addEventListener('scroll', () => {
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (tt) tt.style.display = 'none';
   if (state.fileType === 'docx') _resetDocxSelection();
-  else lastSelectionText = '';
+  else setLastSelectionText('');
 }, true);
 
 const _waAiMsgs = $('wa-ai-messages');
 if (_waAiMsgs) {
   _waAiMsgs.addEventListener('wheel', () => {
-    const tt = $('wa-pdf-tooltip');
+    const tt = $('wa-selection-toolbar');
     if (tt && tt.style.display !== 'none') {
       tt.style.display = 'none';
-      lastSelectionText = '';
+      setLastSelectionText('');
     }
   }, { passive: true });
 }
 
 document.addEventListener('wheel', () => {
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   if (tt && tt.style.display !== 'none') {
     tt.style.display = 'none';
-    lastSelectionText = '';
+    setLastSelectionText('');
   }
 }, { passive: true, capture: true });
 
 // ── Split.js Init ────────────────────────────────────────────────────────────
-const _STANDALONE_SPLIT_DEFAULT = [15, 55, 30];
-const _EMBEDDED_SPLIT_DEFAULT = [68, 32];
+const _SPLIT_DEFAULT = [15, 53, 32];
 // The composer has model controls, attachment actions, and a task stream.  A
 // narrow persisted Split.js size turns it into an unusable clipped rail.
 const _EMBEDDED_AI_MIN_WIDTH = 420;
-const _SPLIT_LAYOUT_STORAGE = {
-  standalone: 'wa_split_sizes_v2',
-  embedded: 'wa_split_sizes_embedded_v2',
-} as const;
-const _LEGACY_SPLIT_LAYOUT_STORAGE = ['wa_split_sizes', 'wa_split_sizes_embedded'];
+const _SPLIT_MIN_WIDTHS = [150, 400, _EMBEDDED_AI_MIN_WIDTH] as const;
+const _SPLIT_LAYOUT_STORAGE = 'wa_split_sizes_embedded_v3';
+const _LEGACY_SPLIT_LAYOUT_STORAGE = [
+  'wa_split_sizes',
+  'wa_split_sizes_v2',
+  'wa_split_sizes_embedded',
+  'wa_split_sizes_embedded_v2',
+];
 
-function _retireLegacySplitLayouts(): void {
-  try {
-    _LEGACY_SPLIT_LAYOUT_STORAGE.forEach((key) => localStorage.removeItem(key));
-  } catch { /* Storage can be unavailable in private or embedded webviews. */ }
+function _readStorage(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
 }
 
-function _splitLayoutStorageKey(embedded: boolean): string {
-  return embedded ? _SPLIT_LAYOUT_STORAGE.embedded : _SPLIT_LAYOUT_STORAGE.standalone;
+function _writeStorage(key: string, value: string): void {
+  try { localStorage.setItem(key, value); } catch { /* Storage is optional. */ }
+}
+
+function _removeStorage(key: string): void {
+  try { localStorage.removeItem(key); } catch { /* Storage is optional. */ }
+}
+
+function _retireLegacySplitLayouts(): void {
+  _LEGACY_SPLIT_LAYOUT_STORAGE.forEach(_removeStorage);
 }
 
 function _isUsableSplitSizes(value: unknown, expectedLength: number): value is number[] {
@@ -105,50 +99,136 @@ function _isUsableSplitSizes(value: unknown, expectedLength: number): value is n
     && Math.abs(value.reduce((total, size) => total + size, 0) - 100) < 1;
 }
 
-function _enforceEmbeddedAiWidth(splitKey: string, canvas: HTMLElement, ai: HTMLElement): void {
+function _persistSplitSizes(sizes: unknown): void {
+  if (!_isUsableSplitSizes(sizes, 3)) return;
+  _writeStorage(_SPLIT_LAYOUT_STORAGE, JSON.stringify(sizes));
+}
+
+function _setSplitDragging(dragging: boolean): void {
+  document.body?.classList.toggle('wa-workspace-split-dragging', dragging);
+}
+
+function _clearSplitDragging(): void {
+  _setSplitDragging(false);
+}
+
+function _cancelActiveSplitDrag(): void {
+  const split = (window as any)._waSplit;
+  if (Array.isArray(split?.pairs)) {
+    split.pairs.forEach((pair: any) => {
+      if (pair?.dragging && typeof pair.stop === 'function') {
+        try { pair.stop(); } catch { /* Always clear the visual state below. */ }
+      }
+    });
+  }
+  _clearSplitDragging();
+}
+
+window.addEventListener('blur', _cancelActiveSplitDrag);
+window.addEventListener('mouseup', _clearSplitDragging, true);
+window.addEventListener('touchend', _clearSplitDragging, true);
+window.addEventListener('touchcancel', _cancelActiveSplitDrag, true);
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) _cancelActiveSplitDrag();
+});
+
+function _workspaceGutterCount(workspace: HTMLElement): number {
+  return Array.from(workspace.children).filter((child) => child.classList.contains('gutter')).length;
+}
+
+function _hasLiveSplitInstance(workspace: HTMLElement): boolean {
+  const split = (window as any)._waSplit;
+  return !!split
+    && typeof split.getSizes === 'function'
+    && typeof split.setSizes === 'function'
+    && split.parent === workspace
+    && _workspaceGutterCount(workspace) === 2;
+}
+
+function _discardStaleSplitInstance(workspace: HTMLElement): void {
+  const split = (window as any)._waSplit;
+  try { split?.destroy?.(); } catch { /* Remove orphan gutters below. */ }
+  Array.from(workspace.children).forEach((child) => {
+    if (child.classList.contains('gutter')) child.remove();
+  });
+  (window as any)._waSplit = null;
+  _clearSplitDragging();
+}
+
+function _enforceEmbeddedAiWidth(
+  left: HTMLElement,
+  canvas: HTMLElement,
+  ai: HTMLElement,
+): void {
   const split = (window as any)._waSplit;
   if (!split || ai.offsetWidth >= _EMBEDDED_AI_MIN_WIDTH) return;
-  const splitWidth = canvas.offsetWidth + ai.offsetWidth;
-  if (splitWidth <= 0) return;
+  const splitWidth = left.offsetWidth + canvas.offsetWidth + ai.offsetWidth;
+  const minimumWidth = _SPLIT_MIN_WIDTHS.reduce((total, width) => total + width, 0);
+  if (splitWidth < minimumWidth) return;
 
   const aiPercent = Math.min(50, Math.max(
-    _EMBEDDED_SPLIT_DEFAULT[1],
+    _SPLIT_DEFAULT[2],
     (_EMBEDDED_AI_MIN_WIDTH / splitWidth) * 100,
   ));
-  const sizes = [100 - aiPercent, aiPercent];
+  const currentSizes = typeof split.getSizes === 'function' ? split.getSizes() : null;
+  const requestedLeftPercent = _isUsableSplitSizes(currentSizes, 3)
+    ? currentSizes[0]
+    : _SPLIT_DEFAULT[0];
+  const leftMinPercent = (_SPLIT_MIN_WIDTHS[0] / splitWidth) * 100;
+  const canvasMinPercent = (_SPLIT_MIN_WIDTHS[1] / splitWidth) * 100;
+  const leftPercent = Math.min(
+    100 - aiPercent - canvasMinPercent,
+    Math.max(leftMinPercent, requestedLeftPercent),
+  );
+  const sizes = [leftPercent, 100 - leftPercent - aiPercent, aiPercent];
   try {
     split.setSizes(sizes);
-    localStorage.setItem(splitKey, JSON.stringify(sizes));
+    _persistSplitSizes(sizes);
   } catch (e) { console.warn('[Koto] unable to restore AI panel width', e); }
 }
 
 export function _initSplit(): void {
-  if ((window as any)._waSplit) return;
+  const workspace = $('wa-workspace');
   const left = $('wa-left'), canvas = $('wa-canvas'), ai = $('wa-ai');
-  const embedded = !!document.getElementById('workspaceView');
-  if (!canvas || !ai || (!embedded && !left)) return;
+  if (!document.getElementById('workspaceView') || !workspace || !left || !canvas || !ai) return;
+  if (_hasLiveSplitInstance(workspace)) return;
+  if ((window as any)._waSplit || _workspaceGutterCount(workspace) > 0) {
+    _discardStaleSplitInstance(workspace);
+  }
+  const splitFactory = (window as any).Split;
+  if (typeof splitFactory !== 'function') {
+    console.error('[Koto] workspace split runtime is unavailable');
+    return;
+  }
   _retireLegacySplitLayouts();
-  const splitKey = _splitLayoutStorageKey(embedded);
   let savedSizes: number[] | null = null;
   try {
-    const raw = localStorage.getItem(splitKey);
+    const raw = _readStorage(_SPLIT_LAYOUT_STORAGE);
     const parsed = raw ? JSON.parse(raw) : null;
-    savedSizes = _isUsableSplitSizes(parsed, embedded ? 2 : 3) ? parsed : null;
+    savedSizes = _isUsableSplitSizes(parsed, 3) ? parsed : null;
   } catch (e) { console.warn("[Koto]", e) }
 
-  const targets = embedded ? ['#wa-canvas', '#wa-ai'] : ['#wa-left', '#wa-canvas', '#wa-ai'];
-  (window as any)._waSplit = (window as any).Split(targets, {
-    sizes: savedSizes || (embedded ? _EMBEDDED_SPLIT_DEFAULT : _STANDALONE_SPLIT_DEFAULT),
-    minSize: embedded ? [420, _EMBEDDED_AI_MIN_WIDTH] : [150, 400, _EMBEDDED_AI_MIN_WIDTH],
+  const targets = ['#wa-left', '#wa-canvas', '#wa-ai'];
+  (window as any)._waSplit = splitFactory(targets, {
+    sizes: savedSizes || _SPLIT_DEFAULT,
+    // The canvas may shrink below the preferred 420px at high UI scales.
+    // The AI composer remains protected at 420px; keeping both floors at
+    // 420px made their combined minimum wider than a zoom-adjusted viewport.
+    minSize: [..._SPLIT_MIN_WIDTHS],
     gutterSize: 6,
     snapOffset: 0,
+    onDragStart() {
+      _setSplitDragging(true);
+    },
     onDragEnd(sizes: number[]) {
-      try { localStorage.setItem(splitKey, JSON.stringify(sizes)); } catch {}
+      _clearSplitDragging();
+      _persistSplitSizes(sizes);
     }
   });
-  if (embedded) {
-    requestAnimationFrame(() => _enforceEmbeddedAiWidth(splitKey, canvas, ai));
-  }
+  requestAnimationFrame(() => {
+    _enforceEmbeddedAiWidth(left, canvas, ai);
+    _applySavedAiPanelState();
+  });
 }
 
 export function refreshWorkspaceLayout(): void {
@@ -160,28 +240,21 @@ export function refreshWorkspaceLayout(): void {
       if (Array.isArray(sizes) && sizes.length) split.setSizes(sizes);
     } catch (error) { console.warn('[Koto] unable to reflow workspace layout', error); }
 
-    const embedded = !!document.getElementById('workspaceView');
+    const left = $('wa-left');
     const canvas = $('wa-canvas');
     const ai = $('wa-ai');
-    if (embedded && canvas && ai) {
-      _enforceEmbeddedAiWidth(_splitLayoutStorageKey(true), canvas, ai);
+    if (left && canvas && ai) {
+      _enforceEmbeddedAiWidth(left, canvas, ai);
     }
   });
 }
 
-// Standalone page: init immediately; embedded mode defers to openInMainView().
-if (!document.getElementById('workspaceView')) {
-  _initSplit();
-  // Apply saved AI panel state after a short delay for Split.js to initialize
-  setTimeout(() => _applySavedAiPanelState(), 50);
-}
-
 // ── Panel auto-reset setting ─────────────────────────────────────────────────
-let _panelAutoReset: boolean = localStorage.getItem('wa_panel_autoreset') !== 'off';
+let _panelAutoReset: boolean = _readStorage('wa_panel_autoreset') !== 'off';
 
 export function setPanelAutoReset(enabled: boolean): void {
   _panelAutoReset = enabled;
-  localStorage.setItem('wa_panel_autoreset', enabled ? 'on' : 'off');
+  _writeStorage('wa_panel_autoreset', enabled ? 'on' : 'off');
   const onEl = document.getElementById('wa-panel-autoreset-on');
   if (onEl) onEl.classList.toggle('active', enabled);
   const offEl = document.getElementById('wa-panel-autoreset-off');
@@ -210,7 +283,7 @@ export function _expandWAPanel(): void {
   if (gutter && gutter.classList.contains('gutter') && panel.offsetWidth < 80) {
     try {
       if ((window as any)._waSplit && typeof (window as any)._waSplit.setSizes === 'function') {
-        (window as any)._waSplit.setSizes(document.getElementById('workspaceView') ? _EMBEDDED_SPLIT_DEFAULT : _STANDALONE_SPLIT_DEFAULT);
+        (window as any)._waSplit.setSizes(_SPLIT_DEFAULT);
       }
     } catch (e) { console.warn("[Koto]", e) }
   }
@@ -221,7 +294,7 @@ export function _expandWAPanel(): void {
 let _aiPanelCollapsed = false;
 // Restore collapsed state from localStorage on init
 try {
-  const saved = localStorage.getItem('wa_ai_panel_collapsed');
+  const saved = _readStorage('wa_ai_panel_collapsed');
   if (saved === '1') _aiPanelCollapsed = true;
 } catch {}
 // Sync button active state with initial panel state
@@ -281,16 +354,14 @@ export function toggleAiPanel(): void {
     if (canvas) canvas.style.width = '';
 
     // Restore split sizes
-    const embedded = !!document.getElementById('workspaceView');
-    const defaultSizes = embedded ? _EMBEDDED_SPLIT_DEFAULT : _STANDALONE_SPLIT_DEFAULT;
     try {
-      if (_aiPanelPrevSizes && _aiPanelPrevSizes.length === (embedded ? 2 : 3)) {
+      if (_aiPanelPrevSizes && _aiPanelPrevSizes.length === 3) {
         split.setSizes(_aiPanelPrevSizes);
       } else {
-        split.setSizes(defaultSizes);
+        split.setSizes(_SPLIT_DEFAULT);
       }
     } catch (e) {
-      split.setSizes(defaultSizes);
+      split.setSizes(_SPLIT_DEFAULT);
     }
 
     // active class is handled below
@@ -314,11 +385,11 @@ export function toggleAiPanel(): void {
     closeBtn.setAttribute('aria-label', closeBtn.title);
   }
 
-  try { localStorage.setItem('wa_ai_panel_collapsed', _aiPanelCollapsed ? '1' : '0'); } catch {}
+  _writeStorage('wa_ai_panel_collapsed', _aiPanelCollapsed ? '1' : '0');
 }
 
 // Apply saved collapsed state on load (call after Split.js is ready)
-export function _applySavedAiPanelState(): void {
+function _applySavedAiPanelState(): void {
   if (!_aiPanelCollapsed) return;
   const split = (window as any)._waSplit;
   if (!split) return;
@@ -347,18 +418,12 @@ export function _applySavedAiPanelState(): void {
   }
 }
 
-export function isAiPanelCollapsed(): boolean {
-  return _aiPanelCollapsed;
-}
-
-// ── Backward compat ──
+// Publish only the cross-bundle UI actions that still have live callers.
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.setPanelAutoReset = setPanelAutoReset;
-  (window as any).WA._initSplit = _initSplit;
-  (window as any).WA.refreshWorkspaceLayout = refreshWorkspaceLayout;
-  (window as any).WA.toggleAiPanel = toggleAiPanel;
-  (window as any).WA.isAiPanelCollapsed = isAiPanelCollapsed;
-  (window as any)._expandWAPanel = _expandWAPanel;
-  (window as any)._applySavedAiPanelState = _applySavedAiPanelState;
+  publishWorkspaceApi({
+    setPanelAutoReset,
+    refreshWorkspaceLayout,
+    toggleAiPanel,
+    _expandWAPanel,
+  });
 }

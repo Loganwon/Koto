@@ -60,8 +60,10 @@ class TestGetSettings:
         assert resp.status_code == 200
 
     def test_returns_json_dict(self, client):
-        data = _check(client.get("/api/settings"))
+        response = client.get("/api/settings")
+        data = _check(response)
         assert isinstance(data, dict)
+        assert "no-store" in response.headers.get("Cache-Control", "")
 
     def test_contains_expected_categories(self, client):
         data = _check(client.get("/api/settings"))
@@ -169,9 +171,11 @@ class TestUpdateSettings:
         # provider as the UI-friendly "cloud" value.  Read the persisted
         # value here so the assertion covers the actual runtime mode.
         from app.core.config.user_settings import SettingsManager
-
         original = SettingsManager().get_all()
-        original_mode = str(original.get("model_mode") or "cloud")
+        raw_original_mode = str(original.get("model_mode") or "cloud").lower()
+        original_mode = (
+            "local" if raw_original_mode in {"local", "ollama"} else "cloud"
+        )
         original_model = str(
             original.get("local_model")
             or (original.get("ai") or {}).get("local_model")

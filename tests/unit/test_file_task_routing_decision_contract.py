@@ -199,16 +199,20 @@ def test_forced_ai_intent_adjudicator_bypasses_local_classifier_fast_path(
 
 def test_workspace_file_task_payload_exposes_top_level_routing_decision():
     source = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(encoding="utf-8")
+    routing = (ROOT / "web/src/workspace/task-routing-decision.ts").read_text(
+        encoding="utf-8"
+    )
 
-    assert "function normalizeFileTaskRoutingDecision(" in source
+    assert "export function normalizeFileTaskRoutingDecision(" in routing
     assert "routing_decision: routingDecision" in source
     assert "explicitTaskPayload.routing_decision = explicitRoutingDecision;" in source
-    assert "normalized.candidate_workflows = candidateWorkflows;" in source
+    assert "normalized.candidate_workflows = candidateWorkflows;" in routing
     assert (
-        "normalized.requires_adjudication = !!source.requires_adjudication;" in source
+        "normalized.requires_adjudication = !!source.requires_adjudication;"
+        in routing
     )
-    assert "normalized.frontend_label = frontendLabel;" in source
-    assert "normalized.plan_steps = planSteps;" in source
+    assert "normalized.frontend_label = frontendLabel;" in routing
+    assert "normalized.plan_steps = planSteps;" in routing
 
 
 def test_runtime_decision_context_groups_route_classification_and_plan():
@@ -258,8 +262,13 @@ def test_runtime_decision_context_groups_route_classification_and_plan():
     assert payload["effective_planner"]["policy"] == "native_only"
 
 
-def test_workspace_runner_expands_decision_context_for_legacy_consumers():
-    runner = (ROOT / "web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
+def test_workspace_lifecycle_payload_expands_decision_context_for_consumers():
+    run_context = (ROOT / "web/src/workspace/task-run-context.ts").read_text(
+        encoding="utf-8"
+    )
+    lifecycle_payload = (
+        ROOT / "web/src/workspace/task-lifecycle-payload.ts"
+    ).read_text(encoding="utf-8")
     dispatcher = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(
         encoding="utf-8"
     )
@@ -267,12 +276,17 @@ def test_workspace_runner_expands_decision_context_for_legacy_consumers():
         encoding="utf-8"
     )
 
-    assert "const decisionContext = data.decision_context" in runner
-    assert "decisionContext.classification" in runner
-    assert "normalized.routing_decision = routingDecision;" in runner
+    assert "const decisionContext = data.decision_context" in lifecycle_payload
+    assert "decisionContext?.classification" in lifecycle_payload
+    assert "'routing_decision'," in lifecycle_payload
     assert (
-        "card.dataset.taskRoutingDecision = encodeURIComponent(JSON.stringify(routingDecision));"
-        in runner
+        "normalizedTaskLifecyclePayload(payload)"
+        in run_context
     )
+    assert "card.dataset.taskRoutingDecision = encodeURIComponent(" in run_context
+    assert "JSON.stringify(routingDecision)," in run_context
     assert "metadata.route_intent = JSON.parse(decodeURIComponent" in dispatcher
-    assert "requestPayload.routing_decision" in workbench
+    assert (
+        "const routeIntent = data.route_intent"
+        in workbench
+    )

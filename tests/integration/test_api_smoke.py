@@ -186,20 +186,3 @@ class TestOpsSmoke:
 
     def test_ops_incidents(self, full_client):
         _smoke(full_client.get("/api/ops/incidents"))
-
-
-# ── Shadow watcher endpoints ─────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestShadowSmoke:
-    """Smoke tests for /api/shadow/* endpoints."""
-
-    def test_shadow_status(self, full_client):
-        _smoke(full_client.get("/api/shadow/status"))
-
-    def test_shadow_patterns(self, full_client):
-        _smoke(full_client.get("/api/shadow/patterns"))
-
-    def test_shadow_insights(self, full_client):
-        _smoke(full_client.get("/api/shadow/insights"))
