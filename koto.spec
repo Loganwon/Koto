@@ -116,7 +116,10 @@ _CONFIG_EXCLUDED_FILES = {
     'requirements.txt',
     'requirements_training.txt',
     'shadow_observations.json',
+    'skill_bindings.json',
+    'skill_ratings.json',
     'token_usage.json',
+    'triggers.json',
     'user_profile.json',
     'user_settings.json',
 }

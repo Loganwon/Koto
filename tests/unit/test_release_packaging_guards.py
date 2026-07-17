@@ -285,6 +285,46 @@ def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     ) < release_build.index("Test-PackagedConfigDefaults -ConfigRoot")
 
 
+def test_release_packages_exclude_personal_runtime_state():
+    runtime_files = (
+        "skill_bindings.json",
+        "skill_ratings.json",
+        "triggers.json",
+    )
+    release_checks = (
+        "Build_Release.ps1",
+        ".github/workflows/release.yml",
+        "tests/installer/test_portable_e2e.ps1",
+        "tests/installer/test_installer_e2e.ps1",
+    )
+
+    for relative_path in release_checks:
+        source = Path(relative_path).read_text(encoding="utf-8")
+        for runtime_file in runtime_files:
+            assert f'ConfigRoot "{runtime_file}"' not in source
+            assert f'configRoot "{runtime_file}"' not in source
+            assert f"configRoot\\{runtime_file}" not in source
+
+    spec_source = Path("koto.spec").read_text(encoding="utf-8")
+    spec_tree = ast.parse(spec_source, filename="koto.spec")
+    excluded_node = next(
+        node.value
+        for node in spec_tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name)
+            and target.id == "_CONFIG_EXCLUDED_FILES"
+            for target in node.targets
+        )
+    )
+    excluded_files = {
+        element.value
+        for element in excluded_node.elts
+        if isinstance(element, ast.Constant) and isinstance(element.value, str)
+    }
+    assert set(runtime_files) <= excluded_files
+
+
 def test_release_e2e_runs_the_real_desktop_startup_path():
     setup = Path("src/koto_setup.py").read_text(encoding="utf-8")
     desktop_entry = Path("src/koto_app.py").read_text(encoding="utf-8")
