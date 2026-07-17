@@ -33,7 +33,10 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: web/package-lock.json
+          cache-dependency-path: |
+            web/package-lock.json
+            web/tiptap-editor/package-lock.json
+            web/univer-editor/package-lock.json
 
       - name: Install Python test dependencies
         run: |
@@ -51,11 +54,14 @@ jobs:
         run: |
           npm ci --prefix web
           npm audit --prefix web --audit-level=high
+          npm ci --prefix web/tiptap-editor
+          npm audit --prefix web/tiptap-editor --audit-level=high
           npm ci --prefix web/univer-editor
           npm audit --prefix web/univer-editor --audit-level=high
           npm run lint --prefix web
           npm run typecheck --prefix web
           npm run build --prefix web
+          npm run build --prefix web/tiptap-editor
           npm run build --prefix web/univer-editor
 
       - name: Run release source regressions
@@ -93,6 +99,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             web/package-lock.json
+            web/tiptap-editor/package-lock.json
             web/univer-editor/package-lock.json
 
       - name: Determine version
@@ -154,6 +161,8 @@ jobs:
         run: |
           npm ci --prefix web
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend npm ci failed"; exit 1 }
+          npm ci --prefix web/tiptap-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend npm ci failed"; exit 1 }
           npm ci --prefix web/univer-editor
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
 
@@ -162,6 +171,8 @@ jobs:
         run: |
           npm run build --prefix web
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
+          npm run build --prefix web/tiptap-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend build failed"; exit 1 }
           npm run build --prefix web/univer-editor
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend build failed"; exit 1 }
 

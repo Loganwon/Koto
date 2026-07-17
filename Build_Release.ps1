@@ -439,12 +439,15 @@ if ($SkipCython) {
 }
 
 # ─── 步骤 0.5：前端资产构建（Vite + esbuild） ──────────
-Write-Step "步骤 0.5  前端资产构建（主界面 + 文件助手 + Univer Sheets）"
+Write-Step "步骤 0.5  前端资产构建（主界面 + DOCX 编辑器 + Univer Sheets）"
 $webDir = Join-Path $REPO_ROOT "web"
+$tiptapDir = Join-Path $REPO_ROOT "web\tiptap-editor"
 $univDir = Join-Path $REPO_ROOT "web\univer-editor"
 $staticRoot = Join-Path $REPO_ROOT "web\static"
 $webFrontendInstallLog = Join-Path $LOG_DIR "web_frontend_npm_ci.log"
 $webFrontendBuildLog = Join-Path $LOG_DIR "web_frontend_build.log"
+$tiptapFrontendInstallLog = Join-Path $LOG_DIR "tiptap_frontend_npm_ci.log"
+$tiptapFrontendBuildLog = Join-Path $LOG_DIR "tiptap_frontend_build.log"
 $univerFrontendInstallLog = Join-Path $LOG_DIR "univer_frontend_npm_ci.log"
 $univerFrontendBuildLog = Join-Path $LOG_DIR "univer_frontend_build.log"
 
@@ -462,6 +465,7 @@ if ($nodeCmd -and $npmCmd) {
 
     $frontendBuilds = @(
         [pscustomobject]@{ Label = "主 Web 前端"; Directory = $webDir; InstallLog = $webFrontendInstallLog; BuildLog = $webFrontendBuildLog },
+        [pscustomobject]@{ Label = "DOCX TipTap 编辑器"; Directory = $tiptapDir; InstallLog = $tiptapFrontendInstallLog; BuildLog = $tiptapFrontendBuildLog },
         [pscustomobject]@{ Label = "Univer 文件助手前端"; Directory = $univDir; InstallLog = $univerFrontendInstallLog; BuildLog = $univerFrontendBuildLog }
     )
     foreach ($frontend in $frontendBuilds) {

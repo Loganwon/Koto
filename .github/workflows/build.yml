@@ -32,6 +32,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             web/package-lock.json
+            web/tiptap-editor/package-lock.json
             web/univer-editor/package-lock.json
 
       - name: Cache pip dependencies
@@ -83,6 +84,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend dependency audit failed"; exit 1 }
           npm run build --prefix web
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
+          npm ci --prefix web/tiptap-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend npm ci failed"; exit 1 }
+          npm audit --prefix web/tiptap-editor --audit-level=high
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend dependency audit failed"; exit 1 }
+          npm run build --prefix web/tiptap-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend build failed"; exit 1 }
           npm ci --prefix web/univer-editor
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
           npm audit --prefix web/univer-editor --audit-level=high

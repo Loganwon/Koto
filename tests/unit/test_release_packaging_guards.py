@@ -216,6 +216,9 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
         assert "npm ci --prefix web" in pipeline
         assert "npm audit --prefix web --audit-level=high" in pipeline
         assert "npm run build --prefix web" in pipeline
+        assert "npm ci --prefix web/tiptap-editor" in pipeline
+        assert "npm audit --prefix web/tiptap-editor --audit-level=high" in pipeline
+        assert "npm run build --prefix web/tiptap-editor" in pipeline
         assert "npm ci --prefix web/univer-editor" in pipeline
         assert "npm audit --prefix web/univer-editor --audit-level=high" in pipeline
         assert "npm run build --prefix web/univer-editor" in pipeline
@@ -225,6 +228,7 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
 
     assert '$webDir = Join-Path $REPO_ROOT "web"' in local_release
     assert '[pscustomobject]@{ Label = "主 Web 前端"' in local_release
+    assert '[pscustomobject]@{ Label = "DOCX TipTap 编辑器"' in local_release
     assert '[pscustomobject]@{ Label = "Univer 文件助手前端"' in local_release
     assert "[switch]$AllowPrebuiltFrontend" in local_release
     assert "[switch]$AllowNoInstaller" in local_release
