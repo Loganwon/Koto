@@ -129,6 +129,81 @@ function Test-WorkspaceStaticAssets {
     Write-OK "$Label 关键静态资源齐全"
 }
 
+function Test-PackagedFrontendParity {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceWebRoot,
+        [Parameter(Mandatory = $true)][string]$PackagedWebRoot,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-Path $SourceWebRoot)) {
+        throw "找不到源码 Web 目录: $SourceWebRoot"
+    }
+    if (-not (Test-Path $PackagedWebRoot)) {
+        throw "$Label 缺少 Web 目录: $PackagedWebRoot"
+    }
+
+    # A release must be a byte-for-byte copy of the reviewed templates and
+    # static assets.  Presence-only checks miss exactly the stale bundle case
+    # where an old UI survives in a newly assembled installer.
+    $frontendRoots = @('templates', 'static')
+    $sourceFiles = @()
+    foreach ($frontendRoot in $frontendRoots) {
+        $sourceFrontendRoot = Join-Path $SourceWebRoot $frontendRoot
+        if (-not (Test-Path $sourceFrontendRoot -PathType Container)) {
+            throw "源码缺少前端目录: $sourceFrontendRoot"
+        }
+        $sourceFiles += @(Get-ChildItem -LiteralPath $sourceFrontendRoot -File -Recurse)
+    }
+    $sourceRoot = [System.IO.Path]::GetFullPath($SourceWebRoot).TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    $sourceRelativePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($sourceFile in $sourceFiles) {
+        $relativePath = $sourceFile.FullName.Substring($sourceRoot.Length)
+        [void]$sourceRelativePaths.Add($relativePath)
+        $packagedFile = Join-Path $PackagedWebRoot $relativePath
+        if (-not (Test-Path $packagedFile -PathType Leaf)) {
+            throw "$Label 缺少前端文件: $relativePath"
+        }
+        $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
+        $packagedHash = (Get-FileHash -LiteralPath $packagedFile -Algorithm SHA256).Hash
+        if ($sourceHash -ne $packagedHash) {
+            throw "$Label 前端文件与源码不一致: $relativePath"
+        }
+    }
+
+    $packagedRoot = [System.IO.Path]::GetFullPath($PackagedWebRoot).TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    foreach ($frontendRoot in $frontendRoots) {
+        $packagedFrontendRoot = Join-Path $PackagedWebRoot $frontendRoot
+        if (-not (Test-Path $packagedFrontendRoot -PathType Container)) {
+            throw "$Label 缺少前端目录: $packagedFrontendRoot"
+        }
+        foreach ($packagedFile in (Get-ChildItem -LiteralPath $packagedFrontendRoot -File -Recurse)) {
+            $relativePath = $packagedFile.FullName.Substring($packagedRoot.Length)
+            if (-not $sourceRelativePaths.Contains($relativePath)) {
+                throw "$Label 包含源码中不存在的旧前端文件: $relativePath"
+            }
+        }
+    }
+
+    $removedFeatureMarkers = @(
+        '学习包',
+        '有声概览',
+        'audio_overview',
+        'notebook_guide',
+        'openNotebookGuide',
+        'openAudioOverview'
+    )
+    $legacyHits = @(Get-ChildItem -LiteralPath $PackagedWebRoot -File -Recurse |
+        Select-String -Pattern $removedFeatureMarkers -SimpleMatch -List)
+    if ($legacyHits.Count -gt 0) {
+        $firstHit = $legacyHits[0]
+        throw "$Label 仍包含已移除功能标记: $($firstHit.Path):$($firstHit.LineNumber)"
+    }
+
+    Write-OK "$Label 与源码前端完全一致，且不含已移除功能"
+}
+
 function Test-PackagedConfigDefaults {
     param(
         [Parameter(Mandatory = $true)][string]$ConfigRoot,
@@ -397,6 +472,7 @@ if (-not $SkipBuild) {
     }
     Write-OK "构建完成 → dist\Koto\Koto.exe"
     Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto\_internal\web\static") -Label "PyInstaller 包内前端产物"
+    Test-PackagedFrontendParity -SourceWebRoot $webDir -PackagedWebRoot (Join-Path $DIST_DIR "Koto\_internal\web") -Label "PyInstaller 包内前端"
     Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
     Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
     Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
@@ -427,6 +503,7 @@ if ($portableExitCode -ne 0) {
 }
 Write-OK "便携包已组装 → dist\Koto_Portable\"
 Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\web\static") -Label "便携包内前端产物"
+Test-PackagedFrontendParity -SourceWebRoot $webDir -PackagedWebRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\web") -Label "便携包内前端"
 Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"

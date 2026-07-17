@@ -103,6 +103,26 @@ function Test-WorkspaceAssetBundle([string]$StaticRoot) {
     }
 }
 
+function Test-RemovedFeatureAssets([string]$WebRoot) {
+    $removedFeatureMarkers = @(
+        "学习包",
+        "有声概览",
+        "audio_overview",
+        "notebook_guide",
+        "openNotebookGuide",
+        "openAudioOverview"
+    )
+    $hits = @(Get-ChildItem -LiteralPath $WebRoot -File -Recurse |
+        Select-String -Pattern $removedFeatureMarkers -SimpleMatch -List)
+    if ($hits.Count -gt 0) {
+        $firstHit = $hits[0]
+        Fail "Removed feature marker still installed: $($firstHit.Path):$($firstHit.LineNumber)"
+    }
+    else {
+        Pass "Removed learning/audio features are absent from installed Web payload"
+    }
+}
+
 # ── Cleanup any leftover from previous run ───────────────────────────────
 if (Test-Path $TestInstallDir) {
     Write-Host "[E2E] Removing leftover install dir..."
@@ -179,6 +199,7 @@ if ($exeSize -lt 40) { Fail "Koto.exe is only $([math]::Round($exeSize,1))MB (ex
 else                  { Pass "Koto.exe size is $([math]::Round($exeSize,1))MB" }
 
 Test-WorkspaceAssetBundle -StaticRoot $staticRoot
+Test-RemovedFeatureAssets -WebRoot (Join-Path $internalDir "web")
 
 # Start Menu shortcut check
 $startMenu = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Koto"

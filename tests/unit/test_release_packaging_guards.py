@@ -201,6 +201,9 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
     build = Path(".github/workflows/build.yml").read_text(encoding="utf-8")
     local_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
 
     assert "quality-gate:" in release
     assert "needs: quality-gate" in release
@@ -234,7 +237,22 @@ def test_windows_release_pipelines_rebuild_main_frontend_and_require_health():
     assert "[System.IO.FileShare]::None" in local_release
     assert 'Join-Path $StaticRoot "univer-dist\\index.html"' in local_release
     assert "包含已废弃的 Univer index.html" in local_release
+    assert "function Test-PackagedFrontendParity" in local_release
+    assert "前端文件与源码不一致" in local_release
+    assert "仍包含已移除功能标记" in local_release
+    assert "Test-PackagedFrontendParity -SourceWebRoot $webDir" in local_release
+    for marker in (
+        "学习包",
+        "有声概览",
+        "audio_overview",
+        "notebook_guide",
+        "openNotebookGuide",
+        "openAudioOverview",
+    ):
+        assert marker in local_release
     assert "Get-UniverIndexAssetRefs" not in local_release
+    assert "function Test-RemovedFeatureAssets" in installer_e2e
+    assert "Removed feature marker still installed" in installer_e2e
     assert (
         'Join-Path $REPO_ROOT "scripts\\clean_inplace_cython_artifacts.py"'
         in local_release
