@@ -57,6 +57,47 @@ export function _normalizeAIContextPath(value: string): string {
   return String(value || '').trim().replace(/\\/g, '/').toLowerCase();
 }
 
+function _aiContextFileMatchesPath(value: any, removedPath: string): boolean {
+  const normalizedRemovedPath = _normalizeAIContextPath(removedPath);
+  if (!normalizedRemovedPath || value == null) return false;
+  if (typeof value === 'string') {
+    return _normalizeAIContextPath(value) === normalizedRemovedPath;
+  }
+  if (typeof value !== 'object') return false;
+  const candidatePath = String(value.path || value.file_path || value.target_path || '').trim();
+  if (candidatePath) return _normalizeAIContextPath(candidatePath) === normalizedRemovedPath;
+  const candidateName = String(value.name || value.file_name || '').trim();
+  const removedName = String(removedPath || '').split(/[\\/]/).pop() || '';
+  return !!candidateName && _normalizeAIContextPath(candidateName) === _normalizeAIContextPath(removedName);
+}
+
+function _prunePendingTaskPayloadFiles(removedFiles: AiFileContext[]): void {
+  const payload = state._pendingTaskPayload as Record<string, any> | null;
+  const removedPaths = (removedFiles || [])
+    .map((file) => String(file && (file.path || file.name) || '').trim())
+    .filter(Boolean);
+  if (!payload || !removedPaths.length) return;
+
+  const isRemoved = (value: any): boolean => removedPaths.some((path) => _aiContextFileMatchesPath(value, path));
+  if (Array.isArray(payload.files)) payload.files = payload.files.filter((file: any) => !isRemoved(file));
+  if (isRemoved(payload.target_path) || isRemoved(payload.target_file)) {
+    delete payload.target_path;
+    delete payload.target_file;
+    delete payload.file_name;
+    delete payload.file_type;
+  }
+  if (isRemoved(payload.current_file)) delete payload.current_file;
+
+  const taskContext = payload.task_context;
+  const taskFiles = taskContext && typeof taskContext === 'object' && taskContext.files && typeof taskContext.files === 'object'
+    ? taskContext.files
+    : null;
+  if (!taskFiles) return;
+  if (Array.isArray(taskFiles.sources)) taskFiles.sources = taskFiles.sources.filter((file: any) => !isRemoved(file));
+  if (isRemoved(taskFiles.target)) taskFiles.target = null;
+  if (isRemoved(taskFiles.current)) taskFiles.current = null;
+}
+
 function _findAIContextFileIndex(path: string): number {
   const normalizedPath = _normalizeAIContextPath(path);
   if (!normalizedPath) return -1;
@@ -196,6 +237,23 @@ async function _saveLocalFileToWorkspaceForAI(file: File): Promise<string> {
   return String(saveData.ws_path || file.name);
 }
 
+async function _stageBrowserFileForAI(path: string): Promise<string> {
+  const { res, data } = await _fetchJsonWithTimeout(
+    '/api/v1/workspace/import_for_ai_context',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path }),
+    },
+    _WA_AI_LOCAL_SAVE_TIMEOUT_MS,
+    '导入文件到工作区超时，请重试'
+  );
+  if (!res.ok || data.ok === false) throw new Error(data.error || `HTTP ${res.status}`);
+  const wsPath = String(data.ws_path || '').trim();
+  if (!wsPath) throw new Error('导入文件后未返回工作区路径');
+  return wsPath;
+}
+
 // ── Normalize Task File Paths ──
 
 function _normalizeTaskFilePaths(paths: string | string[]): string[] {
@@ -239,7 +297,9 @@ function _startAIContextWatchdog(path: string, requestId: string, timeoutMs: num
 
 async function _addFileToAIContext(absPath: string): Promise<void> {
   const name = absPath.split(/[\\/]/).pop() || absPath;
-  const existingIdx = state._aiFileContext.findIndex((f: AiFileContext) => f.path === absPath);
+  const existingIdx = state._aiFileContext.findIndex(
+    (f: AiFileContext) => f.path === absPath || (f as any).sourcePath === absPath
+  );
   if (existingIdx >= 0) {
     const existing = state._aiFileContext[existingIdx];
     if (existing && existing.error && !existing.loading) {
@@ -250,16 +310,29 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
     return;
   }
   const requestId = `ai_ctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  state._aiFileContext.push({ ext: _waInferFileType(absPath), path: absPath, name, content: null, loading: true, requestId } as unknown as AiFileContext);
+  state._aiFileContext.push({
+    ext: _waInferFileType(absPath), path: absPath, sourcePath: absPath, name,
+    content: null, loading: true, requestId,
+  } as unknown as AiFileContext);
   _renderAIFileChips();
   const watchdog = _startAIContextWatchdog(absPath, requestId, _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS);
   try {
+    // Browser entries can be absolute paths outside the workspace.  Importing
+    // them before previewing gives the task runtime the same safe path that
+    // local drag-and-drop attachments already use.
+    const taskPath = await _stageBrowserFileForAI(absPath);
+    const stagingPlaceholder = state._aiFileContext.find((f: AiFileContext) => (f as any).requestId === requestId);
+    if (stagingPlaceholder) {
+      stagingPlaceholder.path = taskPath;
+      stagingPlaceholder.name = taskPath.split(/[\\/]/).pop() || name;
+      (stagingPlaceholder as any).ext = _waInferFileType(taskPath);
+    }
     const { res: previewRes, data } = await _fetchJsonWithTimeout(
       '/api/v1/workspace/ai_context_preview',
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: absPath }),
+        body: JSON.stringify({ path: taskPath }),
       },
       _WA_AI_CONTEXT_PREVIEW_TIMEOUT_MS,
       '文件读取超时，请重试或选择较小文件'
@@ -270,7 +343,7 @@ async function _addFileToAIContext(absPath: string): Promise<void> {
     const originalChars = Number.isFinite(Number(data.original_chars))
       ? Number(data.original_chars)
       : content.replace(/\s/g, '').length;
-    const placeholder = state._aiFileContext.find((f: AiFileContext) => f.path === absPath);
+    const placeholder = state._aiFileContext.find((f: AiFileContext) => (f as any).requestId === requestId);
     if (placeholder && (placeholder as any).requestId === requestId) {
       placeholder.content = content;
       placeholder.originalChars = originalChars;
@@ -345,6 +418,7 @@ export async function _attachFilesToTask(paths: string | string[], options: File
   const filePaths = _normalizeTaskFilePaths(paths);
   const duplicateToast = options.duplicateToast !== false && filePaths.length === 1;
   if (options.replaceExisting && state._aiFileContext.length) {
+    _prunePendingTaskPayloadFiles(state._aiFileContext);
     state._aiFileContext = [];
     state._aiTargetFileIdx = -1;
     _renderAIFileChips();
@@ -358,14 +432,18 @@ export async function _attachFilesToTask(paths: string | string[], options: File
       skipped++;
       continue;
     }
-    const existing = state._aiFileContext.find((file: AiFileContext) => file.path === path);
+    const existing = state._aiFileContext.find(
+      (file: AiFileContext) => file.path === path || (file as any).sourcePath === path
+    );
     if (existing && !existing.error && !existing.loading) {
       skipped++;
       if (duplicateToast) showToast(`"${name}" 已在分析列表中`, 'info');
       continue;
     }
     await _addFileToAIContext(path);
-    const attached = state._aiFileContext.find((file: AiFileContext) => file.path === path);
+    const attached = state._aiFileContext.find(
+      (file: AiFileContext) => file.path === path || (file as any).sourcePath === path
+    );
     if (attached && !attached.error) added++;
     else skipped++;
   }
@@ -517,9 +595,7 @@ export function _renderAIFileChips(): void {
         `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>` +
         `<span>分析文档</span><span class="wa-multi-doc-badge">${n}</span>${targetHint}</div>` +
         `<div class="wa-multidoc-actions">` +
-        `<button type="button" data-wa-context-action="notebook" title="根据附加文档生成摘要、要点、问答和词汇表">学习包</button>` +
-        `<button type="button" data-wa-context-action="audio" title="根据附加文档生成双人有声概览">有声概览</button>` +
-        `<button type="button" data-wa-context-action="clear" title="清除全部附加文件">全部移除</button>` +
+        `<button type="button" data-wa-context-action="clear" title="清除全部附加文件">清除文件</button>` +
         `</div>`;
     }
     wrap.style.display = '';
@@ -547,6 +623,7 @@ export function removeAIFileContext(idx: number): boolean {
     return false;
   }
   const removed = state._aiFileContext.splice(index, 1)[0];
+  if (removed) _prunePendingTaskPayloadFiles([removed]);
   if (state._aiTargetFileIdx === index) state._aiTargetFileIdx = -1;
   else if (state._aiTargetFileIdx > index) state._aiTargetFileIdx--;
   _renderAIFileChips();
@@ -556,6 +633,7 @@ export function removeAIFileContext(idx: number): boolean {
 
 export function clearAIFileContext(): void {
   const hadFiles = !!(state._aiFileContext && state._aiFileContext.length);
+  _prunePendingTaskPayloadFiles(state._aiFileContext);
   state._aiFileContext = [];
   state._aiTargetFileIdx = -1;
   _renderAIFileChips();
@@ -598,8 +676,6 @@ function _installAIContextActionDelegation(): void {
     else if (action === 'retry') retryAIFileContext(index);
     else if (action === 'remove') removeAIFileContext(index);
     else if (action === 'clear') clearAIFileContext();
-    else if (action === 'notebook' && typeof workspaceApi.openNotebookGuide === 'function') workspaceApi.openNotebookGuide();
-    else if (action === 'audio' && typeof workspaceApi.openAudioOverview === 'function') workspaceApi.openAudioOverview();
   });
 }
 

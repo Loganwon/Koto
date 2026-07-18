@@ -7,6 +7,7 @@ from app.core.agent.file_task_contract import (
     FileTaskIntentPlan,
     FileTaskRequest,
 )
+from app.core.agent.file_task_preflight_policy import build_preflight_constraint_audit
 from app.core.agent.file_task_runtime import FileTaskRuntime
 from app.core.agent.file_task_supervisor_audit import build_supervisor_audit
 from app.core.agent.file_task_validation import (
@@ -243,6 +244,14 @@ def test_supervisor_audit_blocks_ambiguous_write_target():
         confidence=0.91,
     )
     requirements = build_file_task_requirements(request, classification)
+    constraint_audit = build_preflight_constraint_audit(
+        request=request,
+        files=request.files,
+        classification=classification,
+        intent_plan=intent_plan,
+        requirements=requirements,
+        recipe_skeleton={"recipe_id": "generic_file_task"},
+    )
 
     audit = build_supervisor_audit(
         request=request,
@@ -251,15 +260,65 @@ def test_supervisor_audit_blocks_ambiguous_write_target():
         intent_plan=intent_plan,
         requirements=requirements,
         plan_check=validate_file_task_plan(requirements, classification, intent_plan),
-        constraint_audit={"status": "clear", "conflicts": []},
+        constraint_audit=constraint_audit,
     ).public_dict()
 
     assert audit["status"] == "blocked"
     assert audit["execution_allowed"] is False
-    assert "ambiguous_write_target:docx" in audit["reason_codes"]
+    assert "ambiguous_target:docx" in constraint_audit["conflicts"]
+    assert "constraint_conflict:ambiguous_target:docx" in audit["reason_codes"]
     assert any("指定" in item for item in audit["required_actions"])
     assert any("指定" in item for item in audit["user_actions"])
     assert audit["execution_constraints"] == []
+
+
+def test_supervisor_audit_allows_new_docx_artifact_with_multiple_xlsx_sources():
+    request = FileTaskRequest(
+        task="分析这个财务预测，找出数据问题并将数据做成图，然后创建一个docx将问题和图加入docx",
+        files=[
+            FileTaskFile(path="financial_model_clean.xlsx", type="xlsx"),
+            FileTaskFile(path="supporting_data.xlsx", type="xlsx"),
+        ],
+    )
+    runtime = FileTaskRuntime()
+    classification = runtime._classify_request(request, request.files)
+    intent_plan = FileTaskIntentPlan(
+        intent_type="financial_report",
+        output_mode="write",
+        write_intent=True,
+        confidence=classification.confidence,
+    )
+    requirements = build_file_task_requirements(request, classification)
+    constraint_audit = runtime._constraint_audit(
+        request,
+        request.files,
+        classification,
+        intent_plan,
+        requirements,
+        {"recipe_id": "financial_xlsx_docx_report"},
+    )
+
+    audit = build_supervisor_audit(
+        request=request,
+        files=request.files,
+        classification=classification,
+        intent_plan=intent_plan,
+        requirements=requirements,
+        plan_check=validate_file_task_plan(requirements, classification, intent_plan),
+        constraint_audit=constraint_audit,
+    ).public_dict()
+
+    assert classification.target_file_type == "docx"
+    assert requirements.target_file_type == "docx"
+    assert constraint_audit["status"] == "clear"
+    assert "new_artifact_target_required" in constraint_audit["hard_constraints"]
+    assert (
+        "explicit_or_unambiguous_target_required"
+        not in constraint_audit["hard_constraints"]
+    )
+    assert "ambiguous_target:xlsx" not in constraint_audit["conflicts"]
+    assert audit["status"] == "clear"
+    assert audit["execution_allowed"] is True
 
 
 def test_supervisor_audit_allows_readonly_analysis_with_multiple_docx_contexts():

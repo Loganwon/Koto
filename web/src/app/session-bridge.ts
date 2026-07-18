@@ -49,6 +49,16 @@ export function saveProjectOptions(opts: Array<{ key: string; label: string }>):
   localStorage.setItem('koto.projectOptions', JSON.stringify(opts));
 }
 
+export function getCurrentProject(): string {
+  return currentProject;
+}
+
+export function setCurrentProject(projectKey: string): void {
+  currentProject = String(projectKey || 'default');
+  localStorage.setItem('koto.currentProject', currentProject);
+  (window as any).currentProject = currentProject;
+}
+
 export function getProjectSessionPrefix(projectKey: string = currentProject): string {
   return projectKey === 'default' ? '' : `proj_${projectKey}__`;
 }
@@ -384,16 +394,14 @@ export function initProjectSelector(): void {
   if (!select) return;
   const options = getProjectOptions();
   if (!options.some(p => p.key === currentProject)) {
-    currentProject = 'default';
-    localStorage.setItem('koto.currentProject', currentProject);
+    setCurrentProject('default');
   }
   select.innerHTML = options.map(project =>
     `<option value="${(window as any).escapeHtml(project.key)}">${(window as any).escapeHtml(project.label)}</option>`
   ).join('');
   select.value = currentProject;
   select.onchange = async (e: Event) => {
-    currentProject = (e.target as HTMLSelectElement).value || 'default';
-    localStorage.setItem('koto.currentProject', currentProject);
+    setCurrentProject((e.target as HTMLSelectElement).value || 'default');
     if (typeof (window as any).goToWelcome === 'function') (window as any).goToWelcome();
     await loadSessions();
   };
@@ -480,4 +488,6 @@ export const KotoSessionBridge: KotoSessionBridge = {
 (window as any).listProjectSessions = listProjectSessions;
 (window as any).getProjectOptions = getProjectOptions;
 (window as any).saveProjectOptions = saveProjectOptions;
+(window as any).getCurrentProject = getCurrentProject;
+(window as any).setCurrentProject = setCurrentProject;
 (window as any).currentProject = currentProject;

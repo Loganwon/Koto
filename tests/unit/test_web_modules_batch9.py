@@ -373,10 +373,10 @@ class TestAuthManager:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestImageManager:
-    """Tests for web.image_manager.ImageManager"""
+    """Tests for the Core-owned ImageManager."""
 
     def _make(self, tmp_path):
-        from web.image_manager import ImageManager
+        from app.core.services.image_manager import ImageManager
 
         return ImageManager(client=None, workspace_dir=str(tmp_path))
 

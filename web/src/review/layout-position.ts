@@ -2,8 +2,7 @@
  * Review rail positioning, card layout, and selection launcher for DOCX review.
  * Uses the SVG module for anchor resolution and connector drawing.
  *
- * Exports `createDocxReviewLayout()` as the main entry point — looks for
- * `window.KotoDocxReviewGeometry` for geometry computation, falls back to inline.
+ * Exports `createDocxReviewLayout()` as the main entry point.
  */
 import {
   createDocxReviewLayoutSvg,
@@ -14,6 +13,7 @@ import {
   ReviewLayoutDeps,
   ReviewSvgApi,
 } from './layout-svg';
+import { computeReviewGeometry } from './geometry';
 
 const DEFAULT_REVIEW_RAIL_LEFT_SHIFT = 0;
 const DEFAULT_REVIEW_RAIL_RIGHT_SHIFT = 0;
@@ -55,6 +55,7 @@ interface ReviewLayoutApi {
 
 export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi {
   const svg = createDocxReviewLayoutSvg(deps);
+  let reviewShellLayoutFrame = 0;
   const {
     state,
     $,
@@ -66,6 +67,9 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     _isReviewEditorFocused,
     _getSelectionViewportBounds,
     _previewReviewText,
+    captureReviewSelection,
+    createReviewComment,
+    createReviewRevision,
   } = deps;
 
   function _reviewRailLeftShift(host: HTMLElement | null): number {
@@ -187,26 +191,29 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
 
   function getDocxReviewRailMetrics(host: HTMLElement, viewport: HTMLElement): RailMetrics | null {
     if (!host || !viewport) return null;
-    if ((window as any).KotoDocxReviewGeometry) {
-      const geo = (window as any).KotoDocxReviewGeometry.computeReviewGeometry(host, viewport);
-      if (geo) {
-        return Object.assign(geo, {
-          edgeInset:          8,
-          laneLeft:           geo.cardColLeft,
-          pageContentLeft:    geo.scrollLeft,
-          pageContentTop:     geo.scrollTop,
-          pageEdgeRight:      geo.textColRight,
-          pageOffsetHeight:   geo.pageContentHeight,
-          pageOffsetWidth:    geo.pageRect ? Math.round(geo.pageRect.width) : 0,
-          scaleX:             geo.zoom ? geo.zoom.x : 1,
-          scaleY:             geo.zoom ? geo.zoom.y : 1,
-          viewportScrollLeft: geo.scrollLeft,
-          viewportScrollTop:  geo.scrollTop,
-          viewportRight:      Number.isFinite(geo.viewportRight)
-            ? geo.viewportRight
-            : Math.round(geo.scrollLeft + (geo.viewportWidth || 0)),
-        });
-      }
+    const geo = computeReviewGeometry(host, viewport);
+    if (geo) {
+      // Keep the rendered CSS width in the same unscaled coordinate system
+      // used by the geometry result. Otherwise a page-level UI zoom (for
+      // example 120%) expands the visible card beyond the intended rail.
+      _setDocxReviewRailWidth(host, geo.railWidth);
+      return Object.assign(geo, {
+        edgeInset:          8,
+        laneLeft:           geo.cardColLeft,
+        pageContentLeft:    geo.scrollLeft,
+        pageContentTop:     geo.scrollTop,
+        pageContentRight:   geo.pageRect ? geo.toContentX(geo.pageRect.right) : geo.viewportRight,
+        pageEdgeRight:      geo.textColRight,
+        pageOffsetHeight:   geo.pageContentHeight,
+        pageOffsetWidth:    geo.pageRect ? Math.round(geo.pageRect.width) : 0,
+        scaleX:             geo.zoom ? geo.zoom.x : 1,
+        scaleY:             geo.zoom ? geo.zoom.y : 1,
+        viewportScrollLeft: geo.scrollLeft,
+        viewportScrollTop:  geo.scrollTop,
+        viewportRight:      Number.isFinite(geo.viewportRight)
+          ? geo.viewportRight
+          : Math.round(geo.scrollLeft + (geo.viewportWidth || 0)),
+      });
     }
 
     const hostRect = host.getBoundingClientRect();
@@ -337,14 +344,22 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     if (!shell || !host || !viewport || !listEl || shell.style.display === 'none') {
       if (host) {
         host.classList.remove('has-review-shell');
+        host.classList.remove('has-review-toolbar-alignment');
         host.style.removeProperty('--wa-review-canvas-width');
+        host.style.removeProperty('--wa-review-toolbar-center');
       }
       return;
     }
     const cards = Array.from(listEl.querySelectorAll('.koto-docx-comment-card, .wa-proposal-card'));
     if (!cards.length) {
       host.classList.remove('has-review-shell');
+      host.classList.remove('has-review-toolbar-alignment');
       host.style.removeProperty('--wa-review-canvas-width');
+      host.style.removeProperty('--wa-review-toolbar-center');
+      // A previous comment-heavy document may have scrolled the shared DOCX
+      // viewport horizontally to reveal its review rail. Do not carry that
+      // offset into a document with no review cards, where it hides the page.
+      if (viewport.scrollLeft) viewport.scrollLeft = 0;
       return;
     }
     host.classList.add('has-review-shell');
@@ -459,15 +474,43 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     // origin than offsetLeft reports, so derive the correction from the live
     // rectangle after its final width has been applied.
     const listRectWithoutScroll = listEl.getBoundingClientRect();
+    // The rectangle delta is measured in screen pixels, while CSS transforms
+    // are applied before the workspace/page zoom. Convert the correction back
+    // to CSS pixels so a 120% UI zoom does not shift the rail 1.2x twice.
     const listTranslateX = Math.round(
-      viewportRect.left - (viewportScrollLeft * layoutScale.x) - listRectWithoutScroll.left
+      (viewportRect.left - (viewportScrollLeft * layoutScale.x) - listRectWithoutScroll.left)
+      / (layoutScale.x || 1)
     );
     const listTranslateY = Math.round(
-      viewportRect.top - (viewportScrollTop * layoutScale.y) - listRectWithoutScroll.top
+      (viewportRect.top - (viewportScrollTop * layoutScale.y) - listRectWithoutScroll.top)
+      / (layoutScale.y || 1)
     );
     listEl.style.transform = `translate(${listTranslateX}px, ${listTranslateY}px)`;
     if (connectorLayer) {
       connectorLayer.setAttribute('width', String(Math.max(160, Math.round(shellCoverWidth))));
+    }
+
+    cards.forEach((card) => {
+      (card as HTMLElement).style.left = cardColLeft + 'px';
+      (card as HTMLElement).style.right = 'auto';
+    });
+    const toolbar = host.querySelector('.koto-tt-toolbar') as HTMLElement | null;
+    const railCard = cards[0] as HTMLElement | undefined;
+    if (toolbar && railCard) {
+      const toolbarRect = toolbar.getBoundingClientRect();
+      const railCardRect = railCard.getBoundingClientRect();
+      const toolbarScaleX = toolbar.offsetWidth > 0
+        ? (toolbarRect.width / toolbar.offsetWidth)
+        : layoutScale.x;
+      const toolbarCenter = Math.round(
+        ((railCardRect.left + (railCardRect.width / 2)) - toolbarRect.left)
+        / (toolbarScaleX || 1)
+      );
+      host.style.setProperty('--wa-review-toolbar-center', `${toolbarCenter}px`);
+      host.classList.add('has-review-toolbar-alignment');
+    } else {
+      host.style.removeProperty('--wa-review-toolbar-center');
+      host.classList.remove('has-review-toolbar-alignment');
     }
 
     const layoutEntries: LayoutEntry[] = [];
@@ -612,8 +655,16 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
   }
 
   function scheduleReviewShellLayout(): void {
-    requestAnimationFrame(() => {
+    if (reviewShellLayoutFrame) return;
+    reviewShellLayoutFrame = requestAnimationFrame(() => {
       layoutReviewShellInDocx();
+      // The first pass can reveal the horizontal review rail and update
+      // scrollLeft. Re-measure on the next frame so cards never spend a frame
+      // positioned with the pre-scroll geometry over the document text.
+      reviewShellLayoutFrame = requestAnimationFrame(() => {
+        reviewShellLayoutFrame = 0;
+        layoutReviewShellInDocx();
+      });
     });
   }
 
@@ -772,23 +823,20 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
       launcher.addEventListener('mousedown', (event) => {
         if (event && typeof event.preventDefault === 'function') event.preventDefault();
         if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-        (window as any).WA.captureReviewSelection(event);
+        captureReviewSelection(event);
       });
       launcher.querySelectorAll('.wa-review-selection-add').forEach((button) => {
         button.addEventListener('mousedown', (event) => {
           if (event && typeof event.preventDefault === 'function') event.preventDefault();
           if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
-          (window as any).WA.captureReviewSelection(event);
+          captureReviewSelection(event);
         });
         button.addEventListener('click', (event) => {
           if (event && typeof event.preventDefault === 'function') event.preventDefault();
           if (event && typeof event.stopPropagation === 'function') event.stopPropagation();
           const createMode = String((button as HTMLElement).dataset.reviewCreate || '').trim();
-          if (createMode === 'revision' && (window as any).WA && typeof (window as any).WA.createReviewRevision === 'function') {
-            (window as any).WA.createReviewRevision();
-          } else if ((window as any).WA && typeof (window as any).WA.createReviewComment === 'function') {
-            (window as any).WA.createReviewComment();
-          }
+          if (createMode === 'revision') createReviewRevision();
+          else createReviewComment();
         });
       });
       host.appendChild(launcher);
@@ -815,9 +863,4 @@ export function createDocxReviewLayout(deps: ReviewLayoutDeps): ReviewLayoutApi 
     hideReviewSelectionLauncher,
     renderReviewSelectionLauncher,
   };
-}
-
-// Backward compat
-if (typeof window !== 'undefined') {
-  (window as any).KotoDocxReviewLayout = { create: createDocxReviewLayout };
 }

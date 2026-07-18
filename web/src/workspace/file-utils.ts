@@ -6,36 +6,25 @@
 
 import {
   fileTaskTerminalUiStatus,
-  isFileTaskAttentionStatus,
   isFileTaskConfirmationStatus,
   normalizeFileTaskTerminalStatus,
 } from './file-task-status';
-import { _renderTabs } from './state';
+import {
+  _renderMyWorkspace,
+  _renderTabs,
+  _switchToTab,
+  state,
+} from './state';
 import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
-
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let _DOWNLOAD_SVG: string;
-declare let _EXT_ICON: Record<string, string>;
-declare let _DEFAULT_FILE_SVG: string;
-declare let _FOLDER_PICK_SVG: string;
-declare let _waConversationRuntime: any;
-declare let _waTaskDispatcher: any;
-
-declare function _escHtml(s: any): string;
-declare function showToast(message: string, kind?: string, duration?: number): void;
-declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
-declare function _renderMyWorkspace(): void;
-declare function _notifyPyModified(tab: any, modified: boolean): void;
-declare function _initWorkspaceAiRuntimes(): void;
-declare function _waSession(): string;
-declare function _parseTaskMetadata(raw: any): any;
-declare function _conversationTaskTurn(taskId: string): any;
-declare function _findRenderedTaskCard(taskId: string): HTMLElement | null;
-declare function _replaceActiveTaskReconnector(taskId: string, reconnector: any): void;
-declare function _serializeEditorForTab(tab: any, editor: any): any;
-declare function _stableWorkspaceSnapshot(value: any): string;
-declare function _switchToTab(path: string): Promise<void>;
+import { $, _csrfFetch, _DOWNLOAD_SVG, _escHtml, showToast } from './infrastructure';
+import {
+  getWorkspaceConversationRuntime,
+  _initWorkspaceAiRuntimes,
+  _waSession,
+} from './runtime-init';
+import { resumePersistedFileTask } from './task-runner';
+import { _serializeEditorForTab, _stableWorkspaceSnapshot } from './file-open';
+import { _notifyPyModified } from './save';
 
 export interface RecoveryTask {
   task_id: string;
@@ -53,6 +42,35 @@ export interface ChartImageConfig {
 export interface UnsavedTab {
   path: string;
   name: string;
+}
+
+function _parseTaskMetadata(raw: any): any {
+  if (raw && typeof raw === 'object') return raw;
+  if (typeof raw !== 'string' || !raw.trim()) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) {
+    return {};
+  }
+}
+
+function _conversationTaskTurn(taskId: string): any {
+  const turns = Array.isArray(state.conversation) ? state.conversation : [];
+  return turns.find((turn: any) => String(turn && (turn.task_id || turn.taskId) || '').trim() === taskId) || null;
+}
+
+function _findRenderedTaskCard(taskId: string): HTMLElement | null {
+  return Array.from(document.querySelectorAll<HTMLElement>('[data-task-id]'))
+    .find((card) => String(card.dataset.taskId || '').trim() === taskId) || null;
+}
+
+function _replaceActiveTaskReconnector(taskId: string, reconnector: any): void {
+  const previous = state._activeTaskReconnectors.get(taskId);
+  if (previous && previous !== reconnector && typeof previous.close === 'function') {
+    try { previous.close(); } catch (e) { console.warn('[Koto]', e); }
+  }
+  state._activeTaskReconnectors.set(taskId, reconnector);
 }
 
 // ── Safe JSON ──────────────────────────────────────────────────────
@@ -94,9 +112,7 @@ function _notifyDesktopModified(tab: any, modified: boolean): void {
   if (typeof waNotify === 'function') {
     try { waNotify(tab, modified); return; } catch (e) { console.warn("[Koto]", e) }
   }
-  if (typeof _notifyPyModified === 'function') {
-    try { _notifyPyModified(tab, modified); } catch (e) { console.warn("[Koto]", e) }
-  }
+  try { _notifyPyModified(tab, modified); } catch (e) { console.warn("[Koto]", e) }
 }
 
 export function isTabActuallyUnsaved(tab: any): boolean {
@@ -145,6 +161,7 @@ export function showCloseWarning(unsavedTabs: UnsavedTab[]): Promise<string> {
     const dialogEl = $('wa-close-warn-dialog');
     const listEl = $('wa-close-warn-list');
     const countEl = $('wa-close-warn-count');
+    const statusEl = $('wa-close-warn-status');
     if (!overlay || !dialogEl || !listEl) {
       console.warn('[CloseWarn] Missing close-warning dialog DOM; cancelling close to protect unsaved edits.');
       showToast('关闭确认窗口未准备好，已取消关闭以保护未保存修改。', 'warning');
@@ -168,7 +185,9 @@ export function showCloseWarning(unsavedTabs: UnsavedTab[]): Promise<string> {
       });
     }
     if (countEl) countEl.textContent = `${actualUnsavedTabs.length} \u4e2a\u672a\u4fdd\u5b58\u6587\u4ef6`;
+    if (statusEl) statusEl.textContent = '\u4fdd\u5b58\u540e\u4f1a\u81ea\u52a8\u5173\u95ed Koto\u3002';
     listEl.innerHTML = actualUnsavedTabs.map(_renderCloseWarnItem).join('');
+    _setCloseWarnBusy(false);
     (overlay as any)._lastFocus = document.activeElement || null;
     overlay.style.display = 'flex';
     overlay.setAttribute('aria-hidden', 'false');
@@ -197,15 +216,19 @@ function _trapCloseWarnFocus(event: KeyboardEvent): void {
 }
 
 function _renderCloseWarnItem(tab: UnsavedTab): string {
-  const fileName = _escHtml(tab && tab.name ? tab.name : '\u672a\u547d\u540d\u6587\u4ef6');
+  const rawName = tab && tab.name ? String(tab.name) : '\u672a\u547d\u540d\u6587\u4ef6';
+  const fileName = _escHtml(rawName);
   const rawPath = tab && tab.path ? String(tab.path).replace(/\\/g, '/') : '\u5de5\u4f5c\u533a\u4e34\u65f6\u6587\u4ef6';
   const filePath = _escHtml(rawPath);
+  const normalizedName = rawName.replace(/\\/g, '/').trim().toLowerCase();
+  const normalizedPath = rawPath.trim().toLowerCase();
+  const showPath = normalizedPath !== normalizedName && !normalizedPath.endsWith(`/${normalizedName}`);
   return [
     '<div class="wa-close-warn-item">',
     '<span class="wa-close-warn-item-indicator" aria-hidden="true"></span>',
     '<div class="wa-close-warn-item-body">',
     `<div class="wa-close-warn-item-name">${fileName}</div>`,
-    `<div class="wa-close-warn-item-path">${filePath}</div>`,
+    showPath ? `<div class="wa-close-warn-item-path">${filePath}</div>` : '',
     '</div>',
     '</div>',
   ].join('');
@@ -236,10 +259,14 @@ function _setCloseWarnBusy(busy: boolean): void {
     button.disabled = !!busy;
   });
   const saveBtn = overlay.querySelector('.wa-close-warn-save') as HTMLButtonElement;
+  const statusEl = overlay.querySelector('#wa-close-warn-status') as HTMLElement | null;
   if (saveBtn) {
-    if (!saveBtn.dataset.defaultText) saveBtn.dataset.defaultText = saveBtn.textContent || '\u4fdd\u5b58\u5168\u90e8\u5e76\u9000\u51fa';
+    if (!saveBtn.dataset.defaultText) saveBtn.dataset.defaultText = saveBtn.textContent || '\u4fdd\u5b58\u5e76\u9000\u51fa';
     saveBtn.textContent = busy ? '\u4fdd\u5b58\u4e2d...' : saveBtn.dataset.defaultText;
   }
+  if (statusEl) statusEl.textContent = busy
+    ? '\u6b63\u5728\u4fdd\u5b58\u6240\u6709\u66f4\u6539\uff0c\u8bf7\u7a0d\u5019\u2026'
+    : '\u4fdd\u5b58\u540e\u4f1a\u81ea\u52a8\u5173\u95ed Koto\u3002';
 }
 
 export function _closeWarnCancel(): void { _settleCloseWarn('cancel'); }
@@ -312,11 +339,9 @@ export async function _listRecoverableFileTasks(status: string): Promise<Recover
 
 export async function _restoreActiveFileTasks(force: boolean = false): Promise<string[]> {
   _initWorkspaceAiRuntimes();
-  if (!_waConversationRuntime || typeof _waConversationRuntime.beginAssistantTaskTurn !== 'function') return [];
-  if (typeof _waConversationRuntime.syncAssistantTaskTurn !== 'function') return [];
-  const resumePersistedFileTask = getWorkspaceApi().resumePersistedFileTask;
-  if (typeof resumePersistedFileTask !== 'function') return [];
-
+  const conversationRuntime = getWorkspaceConversationRuntime();
+  if (!conversationRuntime || typeof conversationRuntime.beginAssistantTaskTurn !== 'function') return [];
+  if (typeof conversationRuntime.syncAssistantTaskTurn !== 'function') return [];
   const msgs = $('wa-ai-messages');
   if (!msgs) return [];
 
@@ -352,12 +377,11 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
     const taskStatus = normalizeFileTaskTerminalStatus(task.status || '');
     const terminalStatus = normalizeFileTaskTerminalStatus(metadata.task_terminal_status || metadata.terminal_status || metadata.status || taskStatus);
     const awaitingConfirmation = isFileTaskConfirmationStatus(terminalStatus);
-    const needsAttention = isFileTaskAttentionStatus(terminalStatus);
     const existingTurn = _conversationTaskTurn(taskId);
-    const turn = existingTurn || _waConversationRuntime.beginAssistantTaskTurn({
-      content: awaitingConfirmation ? '\u5df2\u6062\u590d\u7b49\u5f85\u786e\u8ba4\u7684\u540e\u53f0\u4efb\u52a1\u3002' : (needsAttention || taskStatus === 'waiting' ? '\u5df2\u6062\u590d\u5f85\u5904\u7406\u7684\u540e\u53f0\u4efb\u52a1\u3002' : '\u5df2\u6062\u590d\u540e\u53f0\u4efb\u52a1\u3002'),
+    const turn = existingTurn || conversationRuntime.beginAssistantTaskTurn({
+      content: awaitingConfirmation ? '\u5df2\u6062\u590d\u7b49\u5f85\u786e\u8ba4\u7684\u540e\u53f0\u4efb\u52a1\u3002' : (taskStatus === 'waiting' ? '\u5df2\u6062\u590d\u5f85\u5904\u7406\u7684\u540e\u53f0\u4efb\u52a1\u3002' : '\u5df2\u6062\u590d\u540e\u53f0\u4efb\u52a1\u3002'),
       task_kind: 'file_task',
-      status: needsAttention || awaitingConfirmation || taskStatus === 'waiting' ? 'pending' : 'streaming',
+      status: awaitingConfirmation || taskStatus === 'waiting' ? 'pending' : 'streaming',
       skip_model_context: true,
       render: false,
       task_id: taskId,
@@ -378,7 +402,7 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
         const terminalStatus = normalizeFileTaskTerminalStatus(card && card.dataset && card.dataset.taskTerminalStatus || '');
         const completedTask = String(card && card.dataset && card.dataset.taskCompleted || '').trim().toLowerCase() === 'true';
         const uiStatus = fileTaskTerminalUiStatus(terminalStatus, completedTask);
-        _waConversationRuntime.syncAssistantTaskTurn(turnId, {
+        conversationRuntime.syncAssistantTaskTurn(turnId, {
           loadingEl: card,
           task_kind: 'file_task',
           status: uiStatus === 'done' ? 'done' : (uiStatus === 'error' ? 'failed' : (uiStatus === 'cancelled' ? 'cancelled' : 'pending')),
@@ -394,7 +418,7 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
       if (state._activeTaskReconnectors.get(taskId) === reconnector) {
         state._activeTaskReconnectors.delete(taskId);
       }
-      _waConversationRuntime.syncAssistantTaskTurn(turnId, {
+      conversationRuntime.syncAssistantTaskTurn(turnId, {
         content: String(result && result.summary || '\u6587\u4ef6\u4efb\u52a1\u6d41\u5df2\u7ed3\u675f\u3002').trim() || '\u6587\u4ef6\u4efb\u52a1\u6d41\u5df2\u7ed3\u675f\u3002',
         loadingEl: result && result.loadingEl ? result.loadingEl : _findRenderedTaskCard(taskId),
         task_kind: 'file_task',
@@ -407,7 +431,7 @@ export async function _restoreActiveFileTasks(force: boolean = false): Promise<s
       if (state._activeTaskReconnectors.get(taskId) === reconnector) {
         state._activeTaskReconnectors.delete(taskId);
       }
-      _waConversationRuntime.syncAssistantTaskTurn(turnId, {
+      conversationRuntime.syncAssistantTaskTurn(turnId, {
         content: `\u4efb\u52a1\u6d41\u5931\u8d25\uff1a${error && error.message ? error.message : error}`,
         loadingEl: _findRenderedTaskCard(taskId),
         task_kind: 'file_task',

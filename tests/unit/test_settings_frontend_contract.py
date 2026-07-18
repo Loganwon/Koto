@@ -51,19 +51,26 @@ def test_settings_controls_have_one_persisted_runtime_path() -> None:
 
     assert 'oninput="previewUIZoom(this.value / 100)"' in panel
     assert 'onchange="setUIZoom(this.value / 100)"' in panel
-    assert "onBooleanSettingChange(this, 'ai', 'enable_mini_game')" in panel
+    # The unified workspace no longer exposes the legacy classic-chat game
+    # toggle, which had no live consumer on the current surface.
+    assert "onBooleanSettingChange(this, 'ai', 'enable_mini_game')" not in panel
     assert "export async function onBooleanSettingChange" in settings
-    assert (
-        "return false;"
-        in settings[settings.index("export async function updateSetting") :]
-    )
+    update_setting = settings[settings.index("export async function updateSetting") :]
+    assert "settingsWriteQueue = settingsWriteQueue.then" in update_setting
+    assert "resolveResult(false);" in update_setting
     local_model_change = settings[
         settings.index("export async function onLocalModelChange") :
     ]
-    assert "body: JSON.stringify({ model_tag: nextModel })" in local_model_change
+    assert (
+        "body: JSON.stringify({ mode: 'local', model_tag: nextModel })"
+        in local_model_change
+    )
     assert "if (localOnly)" not in local_model_change.split("// ── Setup Wizard", 1)[0]
     assert "export function previewUIZoom" in theme
     assert "currentSettings?.appearance?.ui_zoom" in theme
     assert "_systemThemeQuery.addEventListener('change'" in theme
     assert "const enableMiniGame" not in chat_ui
     assert "(window as any).enableMiniGame === false" in chat_ui
+    assert "applyWorkspacePresentationSettings" in settings
+    assert "data-koto-show-thinking" in _read("web/static/css/workspace.css")
+    assert "root.setAttribute('data-theme', resolvedTheme);" in theme

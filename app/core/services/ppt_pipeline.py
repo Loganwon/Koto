@@ -12,6 +12,7 @@ import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from app.core.services.image_manager import ImageManager
 from app.core.services.ppt_master import PPTBlueprint, PPTMasterOrchestrator
 from app.core.services.ppt_synthesizer import PPTQualityEnsurance, PPTSynthesizer
 
@@ -312,26 +313,13 @@ class PPTGenerationPipeline:
                 # Since this is a method of pipeline, we can use self._log for now.
                 pass
 
-            from web.image_manager import ImageManager
-
-            # 尝试获取 client，如果没有则无法生成
-            client = self.ai_client if self.ai_client else None
-
-            # 尝试懒加载 client 如果 self.ai_client 为空 (从 app 获取)
-            if not client:
-                try:
-                    from web.runtime_context import get_client
-
-                    client = get_client()
-                    logger.info("[PPT_Pipeline] 已懒加载 AI Client")
-                except Exception as e:
-                    logger.debug("Failed to initialize active image client: %s", e)
-
-            if not client:
-                self._log("⚠️ 无法初始化 ImageManager (无 AI Client)，跳过自动配图")
-                return
-
-            img_mgr = ImageManager(client=client, workspace_dir=self.workspace_dir)
+            # ImageManager owns its available acquisition strategies.  The
+            # optional client is retained for API compatibility, but the
+            # pipeline must not reach into the Web runtime to discover one.
+            img_mgr = ImageManager(
+                client=self.ai_client,
+                workspace_dir=self.workspace_dir,
+            )
 
             count = 0
             for slide in blueprint.slides:

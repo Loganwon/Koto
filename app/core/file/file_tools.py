@@ -994,17 +994,25 @@ class FileToolsPlugin(AgentPlugin):
             if depth > max_depth:
                 return
             try:
-                children = sorted(
-                    directory.iterdir(), key=lambda c: (c.is_file(), c.name.lower())
-                )
-            except PermissionError:
+                candidates = list(directory.iterdir())
+            except OSError:
                 return
-            for i, child in enumerate(children):
+            children: List[tuple[Path, bool]] = []
+            for child in candidates:
+                try:
+                    children.append((child, child.is_dir()))
+                except OSError:
+                    # Windows can enumerate stale or protected entries whose
+                    # metadata cannot be read. One bad child must not make the
+                    # complete workspace tree endpoint fail.
+                    continue
+            children.sort(key=lambda item: (not item[1], item[0].name.lower()))
+            for i, (child, is_directory) in enumerate(children):
                 connector = "└── " if i == len(children) - 1 else "├── "
                 lines.append(
-                    f"{prefix}{connector}{child.name}" + ("/" if child.is_dir() else "")
+                    f"{prefix}{connector}{child.name}" + ("/" if is_directory else "")
                 )
-                if child.is_dir():
+                if is_directory:
                     extension = "    " if i == len(children) - 1 else "│   "
                     _walk(child, prefix + extension, depth + 1)
 

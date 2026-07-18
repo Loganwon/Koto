@@ -1,27 +1,26 @@
         <!-- ==================== Settings Panel ==================== -->
         <aside class="settings-panel" id="settingsPanel" role="dialog" aria-label="设置" aria-modal="false" aria-hidden="true" tabindex="-1">
-            <div class="resize-handle resize-handle-skills" id="settingsResizeHandle"></div>
             <div class="panel-header">
                 <h3><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg> 设置</h3>
-                <button class="close-panel" onclick="closeSettings()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
+        <button class="ui-close-button" onclick="closeSettings()" title="关闭设置" aria-label="关闭设置"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>
             </div>
             <div class="settings-content">
                 <!-- ── API 配置 ── -->
                 <div class="settings-section">
                     <h4>🔑 API 配置</h4>
-                    <p class="setting-desc" id="settingsApiKeyDesc">更新 DeepSeek API 密钥。云端任务默认使用 DeepSeek V4 Pro。</p>
+                    <p class="setting-desc" id="settingsApiKeyDesc">配置并启用 DeepSeek API 密钥；对话与文件任务会使用同一云端模型。</p>
                     <div class="setting-item" style="margin-top:8px;">
-                        <label>云端供应商</label>
+                        <label>云端模型</label>
                         <select id="settingCloudProvider" class="form-select" onchange="onCloudProviderChange(this.value)">
                             <option value="deepseek">DeepSeek</option>
                         </select>
-                        <p class="setting-hint" id="settingCloudProviderHint">云端模式下使用 DeepSeek；需要完全本地时开启本地模型。</p>
+                        <p class="setting-hint" id="settingCloudProviderHint">DeepSeek Chat 用于云端对话和文件任务；需要完全本地时开启本地模型。</p>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
-                        <input type="password" id="settingsApiKeyInput" placeholder="粘贴新的 API Key…"
+                        <input type="password" id="settingsApiKeyInput" placeholder="粘贴 DeepSeek API Key…" autocomplete="off"
                                style="flex:1;padding:7px 10px;border:1px solid var(--border-color);border-radius:6px;background:var(--bg-secondary);color:var(--text-primary);font-size:13px;">
                         <button onclick="saveSettingsApiKey()"
-                                style="padding:7px 14px;background:var(--accent-primary);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;">保存</button>
+                                style="padding:7px 14px;background:var(--accent-primary);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;white-space:nowrap;">保存并启用</button>
                     </div>
                     <div id="settingsApiKeyStatus" style="font-size:12px;margin-top:6px;color:var(--text-secondary);"></div>
                 </div>
@@ -61,8 +60,6 @@
                         </div>
                     </div>
                 </div>
-
-                <!-- Memory Section removed: memories are now managed by Shadow Watcher (影子追踪 · 主动交互 section above) -->
 
                 <div class="settings-section">
                     <h4>
@@ -178,7 +175,7 @@
                                 <span class="toggle-slider"></span>
                             </label>
                         </div>
-                        <p class="setting-hint">开启后所有请求只走本地模型（Ollama），不调用云端 API，保证完全本地隐私。</p>
+                        <p class="setting-hint">选择一个本地模型会自动开启此模式；开启后所有请求只走 Ollama，不调用云端 API。</p>
                     </div>
                     <!-- 本地模型选择 -->
                     <div class="setting-item" id="localModelPickerRow">
@@ -195,7 +192,7 @@
                             </select>
                             <button class="btn-secondary btn-sm" onclick="detectLocalModels()" title="扫描 Ollama 可用模型">🔍 检测</button>
                         </div>
-                        <p class="setting-hint" id="localModelHint">点击“检测”扫描本地 Ollama 已安装的模型</p>
+                        <p class="setting-hint" id="localModelHint">点击“检测”扫描 Ollama；选择模型后会立即同步到对话和文件任务</p>
                     <div style="margin-top:10px;padding:10px;background:var(--bg-tertiary, rgba(59,130,246,0.08));border-radius:8px;font-size:12px;color:var(--text-secondary);line-height:1.6;" id="ollamaGuideBox">
                         <strong>如何启用本地模型？</strong><br>
                         <span>1. 安装 Ollama：<a href="https://ollama.com/download" target="_blank" style="color:var(--accent-primary);">ollama.com/download</a></span><br>
@@ -234,16 +231,6 @@
                             </label>
                         </div>
                         <p class="setting-hint">开启后每条回复旁会显示任务类型（如 CHAT、CODER、RESEARCH 等）</p>
-                    </div>
-                    <div class="setting-item">
-                        <div class="toggle-row">
-                            <span class="toggle-label">等待时启用小游戏</span>
-                            <label class="toggle">
-                                <input type="checkbox" id="settingEnableMiniGame" checked onchange="onBooleanSettingChange(this, 'ai', 'enable_mini_game')">
-                                <span class="toggle-slider"></span>
-                            </label>
-                        </div>
-                        <p class="setting-hint">等待回复时显示小恐龙游戏</p>
                     </div>
                 </div>
 
@@ -289,65 +276,6 @@
                     </div>
                 </div>
 
-                <!-- Shadow Watcher Section -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                            <circle cx="12" cy="12" r="3"></circle>
-                        </svg>
-                        影子追踪 · 主动交互
-                    </h4>
-                    <p class="setting-desc">长期观察您的常用话题、活跃时段和未完成任务，由 Koto 主动进行问候、跨日跟进和智能提醒。记忆由影子追踪自动管理，无需手动维护。</p>
-                    <div class="bindings-toolbar">
-                        <label class="toggle" title="开关影子追踪">
-                            <input type="checkbox" id="shadowWatcherToggle" onchange="toggleShadowWatcher(this.checked)">
-                            <span class="toggle-slider"></span>
-                        </label>
-                        <span id="shadowWatcherLabel" style="font-size:13px;color:var(--text-secondary);flex:1;">加载中...</span>
-                        <button class="btn-secondary btn-sm" onclick="shadowForceTick()">✨ 立即检查</button>
-                        <button class="btn-secondary btn-sm" onclick="shadowOpenObservations()">&#128202; 观察统计</button>
-                    </div>
-                    <!-- 观察摘要卡片区 -->
-                    <div id="shadowSummaryCards" style="display:none;margin-top:8px;"></div>
-                    <!-- 待处理任务列表 -->
-                    <div id="shadowOpenTasksList" style="margin-top:6px;"></div>
-
-                    <!-- 影子记忆（长期记忆，由影子追踪自动管理） -->
-                    <div style="margin-top:14px;border-top:1px solid var(--border-color);padding-top:12px;">
-                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">
-                            <span style="font-size:13px;font-weight:500;color:var(--text-primary);">🧠 影子记忆</span>
-                            <span style="font-size:11px;color:var(--text-muted);">自动从对话中学习，也可手动添加</span>
-                        </div>
-                        <div class="memory-input-group" style="margin-bottom:8px;">
-                            <input type="text" id="shadowMemoryInput" placeholder="输入你想让 Koto 记住的事实或偏好...">
-                            <button class="btn-primary btn-sm" onclick="addShadowMemory()">添加</button>
-                        </div>
-                        <div id="shadowMemoryList" style="max-height:200px;overflow-y:auto;">
-                            <div class="memory-empty" style="font-size:12px;color:var(--text-muted);">正在加载影子记忆...</div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Scheduled Triggers Section -->
-                <div class="settings-section">
-                    <h4>
-                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <circle cx="12" cy="12" r="10"></circle>
-                            <polyline points="12 6 12 12 16 14"></polyline>
-                        </svg>
-                        定时触发器
-                    </h4>
-                    <p class="setting-desc">后台自动化任务，支持 interval / cron / startup 类型。启用后按计划自动执行。</p>
-                    <div class="bindings-toolbar">
-                        <button class="btn-secondary btn-sm" onclick="openCreateTriggerModal()">＋ 新建</button>
-                        <button class="btn-secondary btn-sm" onclick="bootstrapTriggers(false)">✨ 初始化推荐</button>
-                        <button class="btn-secondary btn-sm" onclick="bootstrapTriggers(true)" style="color:var(--accent-warning)">🔄 重建</button>
-                    </div>
-                    <div id="triggersList" class="triggers-list">
-                        <div class="memory-empty">正在加载触发器...</div>
-                    </div>
-                </div>
                 <div class="settings-actions">
                     <button class="btn-secondary" onclick="resetSettings()">重置默认</button>
                     <button class="btn-primary" onclick="closeSettings()">完成</button>

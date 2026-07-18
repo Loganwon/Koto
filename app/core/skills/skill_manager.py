@@ -42,6 +42,14 @@ from app.core.skills.builtin_skills import BUILTIN_SKILLS  # noqa: E402 — data
 _SKILL_STATE_UNSET = object()
 
 
+def _get_long_term_memory_context(user_input: str) -> str:
+    """Read prompt memory from the application-owned manager instance."""
+    from app.core.app_context import ctx
+
+    manager = ctx.memory_manager
+    return str(manager.get_context_string(user_input or "") or "")
+
+
 class SkillManager:
     """
     Skills 管理器 v2
@@ -212,26 +220,20 @@ class SkillManager:
     @classmethod
     def _settings_path(cls) -> Path:
         """返回 config/user_settings.json 的绝对路径"""
-        import sys
+        from app.core.config.user_settings import SETTINGS_FILE
 
-        if getattr(sys, "frozen", False):
-            # 打包模式：config/ 紧邻 Koto.exe，不在 _internal/ 里
-            project_root = Path(sys.executable).parent
-        else:
-            here = Path(__file__).resolve()
-            # app/core/skills/skill_manager.py → project_root/config/user_settings.json
-            project_root = here.parents[3]
-        return project_root / "config" / "user_settings.json"
+        return Path(SETTINGS_FILE)
 
     @classmethod
     def _load_states_from_settings(cls):
         """从 user_settings.json 读取持久化的启用状态"""
         try:
+            from app.core.config.settings_store import load_settings_document
+
             p = cls._settings_path()
             if not p.exists():
                 return
-            with open(p, "r", encoding="utf-8") as f:
-                data = json.load(f)
+            data = load_settings_document(p)
             skills_state = data.get("skills", {})
             for skill_id, state in skills_state.items():
                 if not isinstance(state, dict):
@@ -250,12 +252,8 @@ class SkillManager:
     def _save_states_to_settings(cls):
         """将当前启用状态写回 user_settings.json"""
         try:
-            p = cls._settings_path()
-            p.parent.mkdir(parents=True, exist_ok=True)
-            data = {}
-            if p.exists():
-                with open(p, "r", encoding="utf-8") as f:
-                    data = json.load(f)
+            from app.core.config.settings_store import atomic_update_settings
+
             skills_state = {}
             all_skill_ids = set(cls._registry) | set(cls._def_registry)
             for skill_id in all_skill_ids:
@@ -267,9 +265,11 @@ class SkillManager:
                 if prompt != builtin_prompt:
                     state["prompt_override"] = prompt
                 skills_state[skill_id] = state
-            data["skills"] = skills_state
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            atomic_update_settings(
+                cls._settings_path(),
+                {"skills": skills_state},
+                replace_top_level={"skills"},
+            )
         except Exception as e:
             print(f"[SkillManager] 保存设置失败: {e}")
 
@@ -704,28 +704,14 @@ class SkillManager:
             if not cls._task_type_matches(task_type, applicable_types):
                 continue
 
-            # ── 长期记忆 skill：优先从 ShadowWatcher 检索记忆并注入 ────────────
+            # ── 长期记忆 skill：从当前 MemoryManager 检索并注入 ──────────────
             if skill_id == "long_term_memory":
                 try:
-                    from app.core.monitoring.shadow_watcher import get_shadow_watcher
-
-                    ctx = get_shadow_watcher().get_memories_context_string(
-                        user_input or ""
-                    )
-                    if ctx.strip():
-                        memory_block = ctx
+                    memory_context = _get_long_term_memory_context(user_input or "")
+                    if memory_context.strip():
+                        memory_block = memory_context
                 except Exception as _me:
-                    logger.debug(f"[SkillManager] 影子记忆注入跳过: {_me}")
-                    # 回退：旧 MemoryManager
-                    try:
-                        from web.memory_manager import MemoryManager
-
-                        _mm = MemoryManager()
-                        ctx = _mm.get_context_string(user_input or "")
-                        if ctx.strip():
-                            memory_block = ctx
-                    except Exception:
-                        pass
+                    logger.debug(f"[SkillManager] 长期记忆注入跳过: {_me}")
                 continue  # 长期记忆不走普通 prompt 通道
 
             # ── 注入上限检测（长期记忆走了 continue，不计入此计数）─────────────

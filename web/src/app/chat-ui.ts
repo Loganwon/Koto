@@ -3,6 +3,11 @@
  */
 
 import { csrfFetch } from '../shared/csrf';
+import {
+  getActiveKotoComposer,
+  setActiveKotoComposerText,
+  submitActiveKotoComposerText,
+} from '../shared/active-composer';
 
 // ── State ──
 let selectedFiles: File[] = [];
@@ -358,16 +363,14 @@ export function resendMessage(btn: HTMLElement): void {
   if (!msgBody) return;
   const text = (msgBody as HTMLElement).innerText.trim();
   if (!text) return;
-  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
-  if (input) { input.value = text; autoResize(input); input.focus(); }
+  setActiveKotoComposerText(text);
 }
 
 export function editUserMessage(btn: HTMLElement): void {
   const msgBody = btn.closest('.message')?.querySelector('.message-body');
   if (!msgBody) return;
   const text = (msgBody as HTMLElement).innerText.trim();
-  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
-  if (input) { input.value = text; autoResize(input); input.focus(); input.setSelectionRange(input.value.length, input.value.length); }
+  setActiveKotoComposerText(text);
 }
 
 export function regenMessage(btn: HTMLElement): void {
@@ -383,10 +386,7 @@ export function regenMessage(btn: HTMLElement): void {
   if (!prev || !prev.classList.contains('user')) { if (typeof (window as any).showNotification === 'function') (window as any).showNotification('找不到对应的用户消息', 'warning'); return; }
   const text = (prev.querySelector('.message-body') as HTMLElement | null)?.innerText?.trim();
   if (!text) return;
-  const input = document.getElementById('messageInput') as HTMLTextAreaElement | null;
-  if (input) { input.value = text; autoResize(input); }
-  const form = document.querySelector('.chat-input-form');
-  if (form) form.dispatchEvent(new Event('submit', { cancelable: true }));
+  submitActiveKotoComposerText(text);
 }
 
 // ── File Handling ──
@@ -476,7 +476,7 @@ export function handleDrop(event: DragEvent): void {
   const files = Array.from(event.dataTransfer?.files || []);
   if (files.length > 0) {
     setSelectedFiles(files, true);
-    const inputEl = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+    const inputEl = getActiveKotoComposer();
     if (inputEl) inputEl.focus();
   }
 }
@@ -629,7 +629,7 @@ let _atSuggestSelectedIdx = -1;
 
 export function handleAtMention(textarea: HTMLTextAreaElement): void {
   const val = textarea.value;
-  const cursor = textarea.selectionStart;
+  const cursor = textarea.selectionStart ?? val.length;
   const before = val.slice(0, cursor);
   const atIdx = before.lastIndexOf('@');
   if (atIdx === -1) { hideAtSuggest(); return; }
@@ -763,10 +763,10 @@ function hideSlashPalette(): void {
 export function selectSlashCommand(idx: number): void {
   if (idx < 0 || idx >= _slashMatchedCmds.length) return;
   const cmd = _slashMatchedCmds[idx];
-  const textarea = document.getElementById('messageInput') as HTMLTextAreaElement | null;
+  const textarea = getActiveKotoComposer();
   if (!textarea) return;
   const val = textarea.value;
-  const cursor = textarea.selectionStart;
+  const cursor = textarea.selectionStart ?? val.length;
   const before = val.slice(0, cursor);
   const slashIdx = before.lastIndexOf('/');
   if (slashIdx === -1) return;
@@ -1046,8 +1046,24 @@ function highlightCode(): void {
 }
 
 // ── Hotkey Sheet ──
-export function toggleHotkeySheet(): void { const el = document.getElementById('hotkeySheet'); if (el) el.classList.toggle('active'); }
-export function closeHotkeySheet(): void { const el = document.getElementById('hotkeySheet'); if (el) el.classList.remove('active'); }
+export function toggleHotkeySheet(): void {
+  const overlay = document.getElementById('hotkeySheetModal');
+  if (!overlay) return;
+  const isOpen = overlay.classList.toggle('active');
+  overlay.setAttribute('aria-hidden', isOpen ? 'false' : 'true');
+  if (isOpen) {
+    requestAnimationFrame(() => {
+      (overlay.querySelector('.ui-dialog-button') as HTMLElement | null)?.focus();
+    });
+  }
+}
+
+export function closeHotkeySheet(): void {
+  const overlay = document.getElementById('hotkeySheetModal');
+  if (!overlay) return;
+  overlay.classList.remove('active');
+  overlay.setAttribute('aria-hidden', 'true');
+}
 
 // ── Input meta ──
 export function updateInputMeta(textarea: HTMLTextAreaElement): void {

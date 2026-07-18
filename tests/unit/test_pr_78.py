@@ -32,15 +32,12 @@ for _m in [
     "google.genai.types",
     "sentence_transformers",
     "cv2",
-    "pdfplumber",
     "docx",
     "PIL",
     "PIL.Image",
     "pynput",
     "pynput.keyboard",
     "pynput.mouse",
-    "scipy",
-    "scipy.io",
 ]:
     _stub(_m)
 

@@ -32,6 +32,9 @@ def configure_settings_runtime_services_from_app_globals(
 
     def update_storage_dir(kind: str, path: str) -> None:
         if kind == "workspace":
+            from web.shared import update_workspace_root
+
+            path = update_workspace_root(path)
             state["WORKSPACE_DIR"] = path
         elif kind == "chat":
             state["CHAT_DIR"] = path

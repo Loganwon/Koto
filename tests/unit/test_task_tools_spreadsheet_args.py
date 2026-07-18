@@ -129,6 +129,60 @@ def test_insert_excel_as_docx_table_accepts_string_max_rows(tmp_path):
     assert saved.tables[0].cell(1, 0).text == "杭州新汇鑫光电有限公司"
 
 
+def test_insert_excel_as_docx_table_compacts_financial_model_for_report(tmp_path):
+    import openpyxl
+    from docx import Document
+
+    from app.core.agent.task_tools import insert_excel_as_docx_table
+
+    workbook_path = tmp_path / "financial.xlsx"
+    target_path = tmp_path / "report.docx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "P&L"
+    sheet.append([None] * 12)
+    sheet.append([None, "利润表", *([None] * 10)])
+    sheet.append([None, "单位：人民币万元", *([None] * 10)])
+    sheet.append([None, None, "2025E", "2026E", "2027E", "2028E", *([None] * 6)])
+    sheet.append(
+        [None, "收入合计", 22327.432, 54884.056, 113756.697, 181242.989, *([None] * 6)]
+    )
+    sheet.append([None, "增速%", None, 1.4581445, 1.0726729, 0.5932512, *([None] * 6)])
+    sheet.append([None, "净利润", -11738, -2041, 952, 13362, *([None] * 6)])
+    sheet.append([None, "备注行", "skip", "skip", "skip", "skip", *([None] * 6)])
+    workbook.save(workbook_path)
+
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="关键财务预测数据",
+            max_rows=18,
+            financial_compact=True,
+        )
+    )
+    table = Document(target_path).tables[0]
+
+    assert payload["financial_compact"] is True
+    assert payload["columns_written"] == 5
+    assert payload["rows_written"] == 3
+    assert [cell.text for cell in table.rows[0].cells] == [
+        "指标",
+        "2025E",
+        "2026E",
+        "2027E",
+        "2028E",
+    ]
+    assert [cell.text for cell in table.rows[2].cells] == [
+        "增速%",
+        "—",
+        "145.8%",
+        "107.3%",
+        "59.3%",
+    ]
+
+
 def test_insert_excel_as_docx_table_sorts_and_selects_columns_for_top_n(tmp_path):
     import openpyxl
     from docx import Document

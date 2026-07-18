@@ -29,20 +29,6 @@ _LOCAL_FILE_TASK_MAX_OUTPUT_TOKENS = max(
 )
 
 
-def _runtime_model_map() -> Dict[str, Any]:
-    try:
-        from web import runtime_context
-    except Exception:
-        return {}
-    try:
-        model_map = runtime_context.get_model_map()
-    except Exception:
-        return {}
-    if isinstance(model_map, dict) and model_map:
-        return model_map
-    return {}
-
-
 class FileTaskModelClient:
     """Small adapter for file-task model calls across cloud and local providers."""
 
@@ -229,11 +215,6 @@ class FileTaskModelClient:
         ignored = {"auto", "cloud", "local", "deepseek", "ollama"}
         if requested and requested.lower() not in ignored:
             return requested
-        model_map = _runtime_model_map()
-        for task_key in ("FILE_TASK", "CHAT"):
-            model_from_app = str(model_map.get(task_key) or "").strip()
-            if model_from_app:
-                return model_from_app
         return get_configured_cloud_model(
             task_type="FILE_TASK",
             fallback_model=self._default_model,

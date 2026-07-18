@@ -691,7 +691,8 @@ def test_file_task_runtime_stepwise_docx_write_falls_back_when_model_fails():
         == "long_pdf_stepwise_docx_summary"
     )
     assert len(model_calls) == 1
-    assert run_finished.payload["runtime"]["model_unavailable"] is True
+    assert run_finished.payload["runtime"]["model_unavailable"] is False
+    assert "failure" not in run_finished.payload
     assert run_finished.payload["runtime"]["terminal_status"] == "awaiting_confirmation"
     assert any(
         event.type == "file.changed"
@@ -943,7 +944,7 @@ def test_file_task_runtime_blocks_stepwise_docx_write_when_pdf_text_is_watermark
 
     assert "文本质量不足" in guard.payload["result_preview"]
     assert not any(event.type == "file.changed" for event in events)
-    assert check_finished.payload["status"] == "no_file_change"
+    assert check_finished.payload["status"] == "write_not_performed"
 
 
 def test_native_stepwise_pdf_text_quality_guard_payload_is_centralized():

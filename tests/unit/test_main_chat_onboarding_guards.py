@@ -33,7 +33,8 @@ def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_
     html = _read("web/templates/index.html")
     router_ts = _read("web/src/app/router.ts")
 
-    assert "直接告诉我你想完成什么，或拖入文件开始分析…" in html
+    assert "输入问题，或让 Koto 处理当前文件" in html
+    assert 'id="messageInput"' not in html
     assert 'id="welcomeGreeting"' in html
     assert "选择或创建对话" not in html
     assert "选择或创建对话" not in router_ts
@@ -41,18 +42,17 @@ def test_main_chat_onboarding_placeholder_and_greeting_logic_match_prompt_first_
     assert "早上好，有什么需要帮忙？☀️" in router_ts
 
 
-def test_hidden_legacy_composer_delegates_to_workspace_sender():
+def test_desktop_ai_composer_has_one_send_owner():
     main_ts = _read("web/src/app/main.ts")
     html = _read("web/templates/index.html")
 
-    assert "function delegateHiddenLegacySendToWorkspace(event?: Event)" in main_ts
-    assert "const workspaceSender = (window as any).WA?.sendMessage" in main_ts
-    assert (
-        "if (legacyMessage || workspaceInput.value.trim()) workspaceSender();"
-        in main_ts
-    )
-    assert "Double-click / rapid-submit prevention" not in html
-    assert "_kotoResetSending" not in html
+    assert 'id="wa-user-input"' in html
+    assert 'id="wa-send-btn"' in html
+    assert 'id="messageInput"' not in html
+    assert 'id="sendBtn"' not in html
+    assert "delegateHiddenLegacySendToWorkspace" not in main_ts
+    assert "window as any).sendMessage" not in main_ts
+    assert "export async function sendMessage" not in main_ts
     assert 'target: "#wa-chat-panel, #wa-user-input"' in html
 
 
@@ -66,7 +66,9 @@ def test_cross_feature_composer_access_has_one_workspace_first_boundary():
     assert "export function setActiveKotoComposerText" in boundary
     assert "export function submitActiveKotoComposerText" in boundary
     assert "export function getActiveKotoMessageContainer" in boundary
-    assert boundary.index("wa-user-input") < boundary.index("messageInput")
+    assert "wa-user-input" in boundary
+    assert "messageInput" not in boundary
+    assert "#sendBtn" not in boundary
     assert "from '../shared/active-composer';" in skill_ui
     assert "getActiveKotoComposer" in skill_ui
     assert (

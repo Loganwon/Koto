@@ -572,25 +572,70 @@ def save_result(tag: str):
             encoding="utf-8",
         )
 
-        settings_path = config_dir / "user_settings.json"
-        settings = {}
-        if settings_path.exists():
-            try:
-                settings = json.loads(settings_path.read_text(encoding="utf-8-sig"))
-            except Exception:
-                settings = {}
-        if not isinstance(settings, dict):
-            settings = {}
-        settings["model_mode"] = "local"
-        settings["local_model"] = tag
-        ai_settings = settings.setdefault("ai", {})
-        if isinstance(ai_settings, dict):
-            ai_settings["use_local_only"] = False
-        settings_path.write_text(
-            json.dumps(settings, ensure_ascii=False, indent=2), encoding="utf-8"
+        from app.core.config.settings_store import atomic_update_settings
+
+        atomic_update_settings(
+            config_dir / "user_settings.json",
+            {
+                "model_mode": "local",
+                "local_model": tag,
+                "ai": {
+                    "local_model": tag,
+                    "use_local_only": True,
+                },
+            },
         )
     except Exception:
         pass
+
+
+def save_cloud_setup(api_key: str, api_base: str = "") -> None:
+    """Persist the cloud path chosen during first-run setup.
+
+    The standalone initializer lives beside Koto.exe, so it must write the
+    same files as the desktop and web settings flows instead of assuming that
+    a cloud key already exists.
+    """
+    api_key = str(api_key or "").strip()
+    if len(api_key) < 10:
+        raise ValueError("请输入有效的 DeepSeek API Key")
+
+    config_dir = APP_DIR / "config"
+    config_dir.mkdir(parents=True, exist_ok=True)
+    base_url = str(api_base or "").strip() or "https://api.deepseek.com"
+    (config_dir / "deepseek_config.env").write_text(
+        "# Koto DeepSeek 配置文件（由初始化器生成）\n"
+        f"DEEPSEEK_API_KEY={api_key}\n"
+        f"DEEPSEEK_BASE_URL={base_url}\n",
+        encoding="utf-8",
+    )
+
+    from app.core.config.settings_store import atomic_update_settings
+
+    atomic_update_settings(
+        config_dir / "user_settings.json",
+        {
+            "model_mode": "cloud",
+            "local_model": "",
+            "ai": {
+                "cloud_provider": "deepseek",
+                "deepseek_model": "deepseek-chat",
+                "use_local_only": False,
+            },
+        },
+    )
+    (config_dir / "model_setup_done.json").write_text(
+        json.dumps(
+            {
+                "done": True,
+                "mode": "cloud",
+                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
 
 
 # ─────────────────────────────────────────────────────────────
@@ -614,7 +659,7 @@ def run_gui():
     WIN_W, WIN_H = 900, 640
 
     root = tk.Tk()
-    root.title("本地 AI 模型安装器")
+    root.title("Koto AI 初始化设置")
     root.geometry(f"{WIN_W}x{WIN_H}")
     root.configure(bg=BG)
     root.resizable(False, False)
@@ -646,13 +691,13 @@ def run_gui():
     header.pack_propagate(False)
     tk.Label(
         header,
-        text="⚡  本地 AI 模型安装器",
+        text="⚡  Koto AI 初始化设置",
         font=("Segoe UI", 14, "bold"),
         bg=PANEL,
         fg=TEXT,
     ).pack(side="left", padx=24, pady=0)
     version_lbl = tk.Label(
-        header, text="v2.0  ·  零依赖独立版", font=F_SMALL, bg=PANEL, fg=MUTED
+        header, text="选择云端 API 或本地模型", font=F_SMALL, bg=PANEL, fg=MUTED
     )
     version_lbl.pack(side="right", padx=24)
 
@@ -664,7 +709,13 @@ def run_gui():
     steps_frame.pack(fill="x")
     steps_frame.pack_propagate(False)
 
-    STEP_LABELS = ["①  检测硬件", "②  选择模型", "③  安装下载", "④  完成"]
+    STEP_LABELS = [
+        "①  选择方式",
+        "②  检测硬件",
+        "③  选择模型",
+        "④  安装下载",
+        "⑤  完成",
+    ]
     step_lbls: List[tk.Label] = []
     for i, txt in enumerate(STEP_LABELS):
         lbl = tk.Label(steps_frame, text=txt, font=F_SMALL, bg=BG, fg=MUTED, padx=18)
@@ -697,6 +748,203 @@ def run_gui():
         for p in pages.values():
             p.pack_forget()
         pages[name].pack(fill="both", expand=True)
+
+    # ═══════════════════════════════════════════
+    #  PAGE 0 ── 选择运行方式
+    # ═══════════════════════════════════════════
+    p0 = tk.Frame(content, bg=BG)
+    pages["mode"] = p0
+    p0_inner = tk.Frame(p0, bg=BG)
+    p0_inner.place(relx=0.5, rely=0.45, anchor="center")
+    tk.Label(
+        p0_inner,
+        text="先选择 Koto 的 AI 方式",
+        font=("Segoe UI", 22, "bold"),
+        bg=BG,
+        fg=TEXT,
+    ).pack(pady=(0, 8))
+    tk.Label(
+        p0_inner,
+        text="请选择一种方式继续。后续可随时在设置中切换。",
+        font=F_NORMAL,
+        bg=BG,
+        fg=MUTED,
+    ).pack(pady=(0, 24))
+
+    choice_row = tk.Frame(p0_inner, bg=BG)
+    choice_row.pack()
+
+    cloud_choice = tk.Frame(choice_row, bg=PANEL, width=360, height=260)
+    cloud_choice.pack(side="left", padx=(0, 10))
+    cloud_choice.pack_propagate(False)
+    tk.Label(
+        cloud_choice, text="☁️", font=("Segoe UI Emoji", 30), bg=PANEL, fg=ACCENT2
+    ).pack(pady=(24, 4))
+    tk.Label(
+        cloud_choice, text="使用云端 DeepSeek", font=F_HEAD, bg=PANEL, fg=TEXT
+    ).pack()
+    tk.Label(
+        cloud_choice,
+        text="填写自己的 API Key 即可开始。\n无需下载模型，适合多数用户。",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        justify="center",
+    ).pack(pady=(10, 18))
+    cloud_choice_btn = tk.Button(
+        cloud_choice,
+        text="填写 API Key  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT2,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=8,
+        cursor="hand2",
+    )
+    cloud_choice_btn.pack()
+
+    local_choice = tk.Frame(choice_row, bg=PANEL, width=360, height=260)
+    local_choice.pack(side="left", padx=(10, 0))
+    local_choice.pack_propagate(False)
+    tk.Label(
+        local_choice, text="🖥️", font=("Segoe UI Emoji", 30), bg=PANEL, fg=ACCENT
+    ).pack(pady=(24, 4))
+    tk.Label(local_choice, text="下载本地模型", font=F_HEAD, bg=PANEL, fg=TEXT).pack()
+    tk.Label(
+        local_choice,
+        text="自动安装 Ollama 并下载推荐模型。\n无需 API Key，首次约下载 1–8 GB。",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        justify="center",
+    ).pack(pady=(10, 18))
+    local_choice_btn = tk.Button(
+        local_choice,
+        text="选择本地模型  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=8,
+        cursor="hand2",
+    )
+    local_choice_btn.pack()
+
+    # ═══════════════════════════════════════════
+    #  PAGE 0B ── 填写云端 API Key
+    # ═══════════════════════════════════════════
+    p_cloud = tk.Frame(content, bg=BG)
+    pages["cloud"] = p_cloud
+    cloud_inner = tk.Frame(p_cloud, bg=BG, width=600)
+    cloud_inner.place(relx=0.5, rely=0.45, anchor="center")
+    tk.Label(
+        cloud_inner,
+        text="使用 DeepSeek 云端服务",
+        font=("Segoe UI", 20, "bold"),
+        bg=BG,
+        fg=TEXT,
+    ).pack(anchor="w")
+    tk.Label(
+        cloud_inner,
+        text="请输入你的 DeepSeek API Key。密钥仅保存在本机配置目录中。",
+        font=F_NORMAL,
+        bg=BG,
+        fg=MUTED,
+    ).pack(anchor="w", pady=(6, 20))
+    tk.Label(cloud_inner, text="DeepSeek API Key", font=F_HEAD, bg=BG, fg=TEXT).pack(
+        anchor="w"
+    )
+    cloud_key_var = tk.StringVar()
+    cloud_key_entry = tk.Entry(
+        cloud_inner,
+        textvariable=cloud_key_var,
+        font=("Consolas", 11),
+        bg=PANEL,
+        fg=TEXT,
+        insertbackground=TEXT,
+        relief="flat",
+        show="•",
+        width=64,
+    )
+    cloud_key_entry.pack(fill="x", pady=(6, 10), ipady=9)
+    cloud_show_var = tk.BooleanVar(value=False)
+    tk.Checkbutton(
+        cloud_inner,
+        text="显示密钥",
+        variable=cloud_show_var,
+        command=lambda: cloud_key_entry.config(
+            show="" if cloud_show_var.get() else "•"
+        ),
+        font=F_SMALL,
+        bg=BG,
+        fg=MUTED,
+        activebackground=BG,
+        activeforeground=TEXT,
+        selectcolor=PANEL,
+    ).pack(anchor="w")
+    tk.Label(
+        cloud_inner, text="自定义 API 地址（可选）", font=F_SMALL, bg=BG, fg=MUTED
+    ).pack(anchor="w", pady=(16, 0))
+    cloud_base_var = tk.StringVar(value="https://api.deepseek.com")
+    tk.Entry(
+        cloud_inner,
+        textvariable=cloud_base_var,
+        font=("Consolas", 10),
+        bg=PANEL,
+        fg=TEXT,
+        insertbackground=TEXT,
+        relief="flat",
+        width=64,
+    ).pack(fill="x", pady=(6, 12), ipady=8)
+    cloud_status = tk.Label(
+        cloud_inner,
+        text="",
+        font=F_SMALL,
+        bg=BG,
+        fg=RED,
+        wraplength=590,
+        justify="left",
+    )
+    cloud_status.pack(anchor="w", pady=(0, 12))
+    cloud_buttons = tk.Frame(cloud_inner, bg=BG)
+    cloud_buttons.pack(fill="x")
+    tk.Button(
+        cloud_buttons,
+        text="← 返回",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        relief="flat",
+        padx=16,
+        pady=8,
+        cursor="hand2",
+        command=lambda: (set_step(0), show_page("mode")),
+    ).pack(side="left")
+
+    def save_cloud_choice():
+        try:
+            save_cloud_setup(cloud_key_var.get(), cloud_base_var.get())
+        except ValueError as exc:
+            cloud_status.config(text=f"❌ {exc}", fg=RED)
+            cloud_key_entry.focus_set()
+            return
+        cloud_status.config(text="✅ API Key 已保存，正在返回 Koto…", fg=ACCENT)
+        root.after(450, root.destroy)
+
+    tk.Button(
+        cloud_buttons,
+        text="保存并继续  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT2,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=8,
+        cursor="hand2",
+        command=save_cloud_choice,
+    ).pack(side="right")
 
     # ═══════════════════════════════════════════
     #  PAGE 1 ── 检测硬件
@@ -1269,12 +1517,12 @@ def run_gui():
     p1_next_btn.config(state="disabled")
 
     def go_to_select():
-        set_step(1)
+        set_step(2)
         build_model_list(_candidates, _sys_info.get("installed_models", []))
         show_page("select")
 
     p1_next_btn.config(command=go_to_select)
-    p2_back_btn.config(command=lambda: (set_step(0), show_page("detect")))
+    p2_back_btn.config(command=lambda: (set_step(1), show_page("detect")))
 
     # ─────────────────────────────────────────────────────────
     #  安装线程
@@ -1287,7 +1535,7 @@ def run_gui():
                 log("⛔ 用户已取消")
                 root.after(0, lambda: p2_install_btn.config(state="normal"))
                 root.after(0, lambda: p2_back_btn.config(state="normal"))
-                root.after(0, lambda: (set_step(0), show_page("detect")))
+                root.after(0, lambda: (set_step(1), show_page("detect")))
                 return True
             return False
 
@@ -1476,7 +1724,7 @@ PARAMETER num_ctx 4096
         log(f"👉 使用方式： ollama run {tag}")
 
         # 进入完成页
-        root.after(500, lambda: (set_step(3), set_done_info(tag), show_page("done")))
+        root.after(500, lambda: (set_step(4), set_done_info(tag), show_page("done")))
 
     def start_install():
         tag = selected_model.get()
@@ -1493,7 +1741,7 @@ PARAMETER num_ctx 4096
                 f"当前可用：{free:.1f} GB。\n\n请释放磁盘空间后重试。",
             )
             return
-        set_step(2)
+        set_step(3)
         show_page("install")
         p2_install_btn.config(state="disabled")
         p2_back_btn.config(state="disabled")
@@ -1502,7 +1750,7 @@ PARAMETER num_ctx 4096
     p2_install_btn.config(command=start_install)
     p4_more_btn.config(
         command=lambda: (
-            set_step(1),
+            set_step(2),
             build_model_list(_candidates, _sys_info.get("installed_models", [])),
             show_page("select"),
         )
@@ -1511,8 +1759,17 @@ PARAMETER num_ctx 4096
     # ─────────────────────────────────────────────────────────
     #  启动
     # ─────────────────────────────────────────────────────────
-    show_page("detect")
-    start_detect()
+    def start_local_setup():
+        set_step(1)
+        show_page("detect")
+        start_detect()
+
+    cloud_choice_btn.config(
+        command=lambda: (set_step(0), show_page("cloud"), cloud_key_entry.focus_set())
+    )
+    local_choice_btn.config(command=start_local_setup)
+
+    show_page("mode")
 
     root.mainloop()
 

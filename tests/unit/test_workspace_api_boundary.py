@@ -18,15 +18,9 @@ def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods
     publishers = {
         "web/src/editors/cdn-loaders.ts": "_ensurePdfJS",
         "web/src/editors/docx-outline.ts": "_setupDocOutline",
-        "web/src/workspace/transport.ts": "createWorkspaceAiTransport",
-        "web/src/workspace/task-refresh.ts": "createFileTaskRefreshController",
-        "web/src/workspace/task-dispatcher.ts": "createTaskDispatcher",
-        "web/src/workspace/quick-actions.ts": "createQuickActionDispatcher",
-        "web/src/workspace/task-runner.ts": "streamTaskFlow",
         "web/src/workspace/ai-review.ts": "sendMessage",
         "web/src/workspace/runtime-init.ts": "hydrateAiHistory",
         "web/src/editors/pdf-viewer.ts": "pdfAIAnnotate",
-        "web/src/workspace/conversation.ts": "createWorkspaceAiConversation",
         "web/src/workspace/conversation-list.ts": "openAiSession",
         "web/src/workspace/task-workbench.ts": "openTaskWorkbenchForCurrentRun",
         "web/src/workspace/ai-context.ts": "attachFilesToTask",
@@ -42,6 +36,93 @@ def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods
         assert "publishWorkspaceApi" in source
         assert public_method in source
         assert "publishWorkspaceApi({" in source
+
+
+def test_workspace_runtime_factories_are_direct_module_dependencies():
+    root = _repo_root()
+    runtime = (root / "web/src/workspace/runtime-init.ts").read_text(encoding="utf-8")
+    owners = {
+        "web/src/workspace/conversation.ts": "createWorkspaceAiConversation",
+        "web/src/workspace/task-dispatcher.ts": "createTaskDispatcher",
+        "web/src/workspace/results.ts": "createWorkspaceAiResultsRuntime",
+        "web/src/workspace/quick-actions.ts": "createQuickActionDispatcher",
+    }
+
+    for relative_path, factory in owners.items():
+        source = (root / relative_path).read_text(encoding="utf-8")
+        assert f"import {{ {factory} }} from './" in runtime
+        assert f"workspaceApi.{factory}" not in runtime
+        assert f"publishWorkspaceApi({{ {factory} }})" not in source
+
+    quick_actions = (root / "web/src/workspace/quick-actions.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "createWorkspaceQuickActionRuntime" not in quick_actions
+    assert "createWorkspaceQuickActionRuntime" not in runtime
+    assert (
+        "state,"
+        not in runtime.split(
+            "_waQuickActionRuntime = createQuickActionDispatcher({", 1
+        )[1].split("});", 1)[0]
+    )
+
+
+def test_task_flow_runtime_has_no_same_bundle_window_bus_or_raw_runtime_aliases():
+    root = _repo_root()
+    runtime = (root / "web/src/workspace/runtime-init.ts").read_text(encoding="utf-8")
+    review = (root / "web/src/workspace/ai-review.ts").read_text(encoding="utf-8")
+    dispatcher = (root / "web/src/workspace/task-dispatcher.ts").read_text(
+        encoding="utf-8"
+    )
+    direct_chat = (root / "web/src/workspace/task-direct-chat.ts").read_text(
+        encoding="utf-8"
+    )
+    final_report = (root / "web/src/workspace/task-final-report.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert "publishWorkspaceApi({ taskCardTestStructure });" not in dispatcher
+    assert "taskCardPersistenceStructure," in dispatcher
+    assert "_waTaskDispatcher.taskCardPersistenceStructure(card)" in runtime
+
+    for source in (runtime, review, direct_chat, final_report):
+        assert "(window as any)._waRenderMarkdown" not in source
+        assert "(window as any)._sanitizeRenderedHtml" not in source
+
+    for alias in (
+        "_waAiResultsRuntime",
+        "_waQuickActionRuntime",
+        "_waConversationRuntime",
+        "_waTaskDispatcher",
+        "_waQuickActionDispatcherAttached",
+        "_initWorkspaceAiRuntimes",
+        "_hydrateAiConversation",
+        "_waSession",
+        "_waQuickActionModelMode",
+        "_waSampleTaskContext",
+        "_persistWorkspaceConversationTurn",
+        "_persistTerminalTaskRunCard",
+        "_retryWorkspaceConversationPersistence",
+    ):
+        assert f"(window as any).{alias} =" not in runtime
+
+    assert "getWorkspaceConversationRuntime?.()" in review
+    assert "getWorkspaceTaskDispatcher?.()" in review
+    assert "getWorkspaceQuickActionRuntime?.()" in review
+    assert "getWorkspaceAiResultsRuntime?.()" in review
+    assert "_setStreamBtn," in review.split("publishWorkspaceApi({", 1)[1]
+    assert "getWorkspaceSessionId: _waSession," in runtime
+
+
+def test_retired_generic_workspace_transport_stays_removed():
+    root = _repo_root()
+    bundle = (root / "web/src/bundles/workspace.ts").read_text(encoding="utf-8")
+    retained = (root / "docs/WORKSPACE_RETAINED_LEGACY.md").read_text(encoding="utf-8")
+
+    assert not (root / "web/src/workspace/transport.ts").exists()
+    assert "import '../workspace/transport';" not in bundle
+    assert "task-stream-transport.ts" in retained
+    assert "task-direct-chat.ts" in retained
 
 
 def test_workspace_file_and_context_modules_read_the_compatibility_boundary_only():

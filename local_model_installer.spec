@@ -7,8 +7,7 @@ local_model_installer.spec
     pyinstaller local_model_installer.spec
 
 输出位置：
-    dist\LocalModelInstaller\LocalModelInstaller.exe
-    （或单文件版，见下方 onefile 注释）
+    dist\LocalModelInstaller.exe
 """
 
 import sys
@@ -42,13 +41,14 @@ a = Analysis(
         "socket",
         "json",
         "pathlib",
+        "app.core.config.settings_store",
     ],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
     excludes=[
         # 排除 Koto 业务逻辑，严格精简
-        "web", "app", "google", "flask",
+        "web", "google", "flask",
         "torch", "transformers", "faiss",
         "langchain", "langgraph",
         "pandas", "numpy", "PIL",
@@ -59,7 +59,6 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
-
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 # ── 单文件 EXE（推荐：方便分发，解压稍慢） ──
@@ -86,16 +85,3 @@ exe = EXE(
     icon=_icon,
     onefile=True,           # ← 单文件
 )
-
-# ── 如需目录版（启动更快，取消下方注释并注释掉上面 onefile EXE） ──
-# exe = EXE(
-#     pyz, a.scripts, [],
-#     name="LocalModelInstaller",
-#     debug=False, bootloader_ignore_signals=False,
-#     strip=False, upx=True, console=False,
-#     icon=_icon,
-# )
-# coll = COLLECT(
-#     exe, a.binaries, a.zipfiles, a.datas, [],
-#     name="LocalModelInstaller",
-# )

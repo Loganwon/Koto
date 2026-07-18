@@ -6,6 +6,7 @@ All tests use the Flask test client with no real LLM or file I/O outside tmp dir
 from __future__ import annotations
 
 import json
+import shutil
 
 import pytest
 
@@ -18,6 +19,22 @@ import pytest
 def market_client(full_client):
     """Reuse the full-app test client (marketplace_bp is registered in full_app)."""
     return full_client
+
+
+@pytest.fixture(scope="module", autouse=True)
+def isolated_skill_ratings(tmp_path_factory):
+    """Keep rating-route tests from mutating the packaged default config."""
+    import app.api.skill_marketplace_routes as marketplace_routes
+
+    original_path = marketplace_routes._RATINGS_FILE
+    isolated_path = tmp_path_factory.mktemp("skill-marketplace") / "skill_ratings.json"
+    if original_path.exists():
+        shutil.copy2(original_path, isolated_path)
+    marketplace_routes._RATINGS_FILE = isolated_path
+    try:
+        yield
+    finally:
+        marketplace_routes._RATINGS_FILE = original_path
 
 
 # ---------------------------------------------------------------------------

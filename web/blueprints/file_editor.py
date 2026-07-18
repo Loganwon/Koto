@@ -1,13 +1,9 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 """
-File-editor, file-search, notebook, scan, and concepts blueprint.
+File-editor, file-search, scan, and concepts blueprint.
 
 Routes:
-  POST /api/notebook/overview         — Generate audio overview (podcast)
-  POST /api/notebook/qa               — Source-grounded Q&A
-  POST /api/notebook/study_guide      — Generate study guide / briefing
-  POST /api/notebook/upload           — Upload and parse file (PDF/Docx/Txt)
   POST /api/file-editor/read          — Read file contents
   POST /api/file-editor/write         — Write file contents
   POST /api/file-editor/replace       — Replace text in file
@@ -26,21 +22,15 @@ Routes:
   GET  /api/concepts/stats            — Concept extraction statistics
 """
 
-import asyncio
 import logging
-import os
-import tempfile
-import time
 
 from flask import Blueprint, Response, jsonify, request
 
-from app.core.llm.provider_factory import get_llm_provider
 from web.runtime_services import (
     get_concept_extractor,
     get_file_editor,
     get_file_indexer,
 )
-from web.runtime_context import service_registry
 
 _logger = logging.getLogger("koto.routes.file_editor")
 
@@ -60,217 +50,6 @@ def _get_file_indexer():
 
 def _get_concept_extractor():
     return get_concept_extractor()
-
-
-def _get_settings_manager():
-    return service_registry.settings_manager
-
-
-def _active_cloud_provider():
-    return get_llm_provider(provider="deepseek", allow_local_fallback=False)
-
-
-def _provider_text(response) -> str:
-    if isinstance(response, dict):
-        return str(response.get("content") or response.get("text") or "")
-    return str(getattr(response, "text", response) or "")
-
-
-# ═══════════════════════════════════════════════════
-# Notebook routes
-# ═══════════════════════════════════════════════════
-
-
-@file_editor_bp.route("/api/notebook/overview", methods=["POST"])
-def notebook_overview() -> Response:
-    """生成音频概览 (Podcast)"""
-    data = request.json
-    content = data.get("content", "")
-    if not content:
-        return jsonify({"success": False, "error": "内容不能为空"}), 400
-
-    try:
-        from web.audio_overview import AudioOverviewGenerator
-
-        settings_manager = _get_settings_manager()
-        generator = AudioOverviewGenerator(
-            output_dir=os.path.join(settings_manager.workspace_dir, "audio_cache")
-        )
-
-        import requests as _requests
-
-        provider = _active_cloud_provider()
-
-        class _ModelAdapter:
-            def generate_content(self, prompt):
-                text = _provider_text(provider.generate_content(prompt=prompt))
-                return type("ProviderResponse", (), {"text": text})()
-
-        script = asyncio.run(generator.generate_script(content, _ModelAdapter()))
-        if not script:
-            return jsonify({"success": False, "error": "剧本生成失败"}), 500
-
-        session_id = f"overview_{int(time.time())}"
-        audio_path = asyncio.run(generator.synthesize_audio(script, session_id))
-
-        if audio_path:
-            rel_path = os.path.relpath(audio_path, settings_manager.workspace_dir)
-            audio_url = f"/api/files/download?path={_requests.utils.quote(audio_path)}"
-
-            return jsonify({"success": True, "audio_url": audio_url, "script": script})
-        else:
-            return jsonify({"success": False, "error": "音频合成失败"}), 500
-
-    except Exception as e:
-        _logger.error(f"Error processing audio overview: {e}")
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@file_editor_bp.route("/api/notebook/qa", methods=["POST"])
-def notebook_qa() -> Response:
-    """源文档深度问答 (Source-Grounded Q&A)"""
-    data = request.json
-    question = data.get("question")
-    file_ids = data.get("file_ids", [])
-    context_content = data.get("context", "")
-
-    if not question or not context_content:
-        return jsonify({"success": False, "error": "缺少问题或上下文"}), 400
-
-    prompt = f"""
-    Answer the user's question mostly based on the provided source context.
-    
-    [Source Context]
-    {context_content[:30000]} 
-
-    [User Question]
-    {question}
-
-    [Rules]
-    1. You must cite your sources. When you use information from the context, append [Source] at the end of the sentence.
-    2. If the answer is not in the context, state that clearly.
-    3. Be precise and concise.
-    """
-
-    try:
-        response = _active_cloud_provider().generate_content(prompt=prompt)
-        return jsonify({"success": True, "answer": _provider_text(response)})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@file_editor_bp.route("/api/notebook/study_guide", methods=["POST"])
-def notebook_study_guide() -> Response:
-    """生成学习指南/简报"""
-    data = request.json
-    content = data.get("content", "")
-    type_ = data.get("type", "summary")  # summary, quiz, timeline, faq
-
-    prompts = {
-        "summary": "Create a comprehensive briefing document summarizing the key points, key people, and timeline from the text.",
-        "quiz": "Create 5 multiple-choice questions based on the text to test understanding. Include the correct answer key at the end.",
-        "timeline": "Extract a chronological timeline of events mentioned in the text.",
-        "faq": "Create a FAQ section based on the text, anticipating what a reader might ask.",
-    }
-
-    selected_prompt = prompts.get(type_, prompts["summary"])
-    full_prompt = f"{selected_prompt}\n\n[Source Text]\n{content[:20000]}"
-
-    try:
-        response = _active_cloud_provider().generate_content(prompt=full_prompt)
-        return jsonify({"success": True, "result": _provider_text(response)})
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
-
-
-@file_editor_bp.route("/api/notebook/upload", methods=["POST"])
-def notebook_upload() -> Response:
-    """Upload and parse a file (PDF, Docx, or Txt).
-    ---
-    tags:
-      - Notebook
-    consumes:
-      - multipart/form-data
-    parameters:
-      - in: formData
-        name: file
-        type: file
-        required: true
-        description: The file to upload (PDF, Docx, or Txt)
-    responses:
-      200:
-        description: File parsed successfully
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-            filename:
-              type: string
-              description: Original filename
-            content:
-              type: string
-              description: Extracted text content
-            char_count:
-              type: integer
-              description: Number of characters in extracted content
-      400:
-        description: No file provided or empty filename
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: false
-            error:
-              type: string
-      500:
-        description: File parsing error
-        schema:
-          type: object
-          properties:
-            success:
-              type: boolean
-              example: false
-            error:
-              type: string
-    """
-    if "file" not in request.files:
-        return jsonify({"success": False, "error": "No file part"}), 400
-    file = request.files["file"]
-    if file.filename == "":
-        return jsonify({"success": False, "error": "No selected file"}), 400
-
-    try:
-        filename = file.filename
-        temp_path = os.path.join(
-            tempfile.gettempdir(), f"koto_{int(time.time())}_{filename}"
-        )
-        file.save(temp_path)
-
-        from web.file_parser import FileParser
-
-        result = FileParser.parse_file(temp_path)
-
-        try:
-            os.remove(temp_path)
-        except OSError:
-            pass
-
-        if result.get("success"):
-            return jsonify(
-                {
-                    "success": True,
-                    "filename": filename,
-                    "content": result.get("content", ""),
-                    "char_count": result.get("char_count", 0),
-                }
-            )
-        else:
-            return jsonify({"success": False, "error": result.get("error")}), 500
-
-    except Exception as e:
-        return jsonify({"success": False, "error": str(e)}), 500
 
 
 # ═══════════════════════════════════════════════════

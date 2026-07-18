@@ -469,7 +469,10 @@ _NATIVE_CAPABILITY_MATRIX: tuple[NativeCapabilitySpec, ...] = (
         tool_name="run_python_code",
         summary="当前缺少用于复杂数据处理、图表生成和批量转换的 Koto 沙盒 Python 工具。",
         why_missing="任务要求通过代码做计算、可视化或批量处理；没有沙盒执行能力时，模型无法稳定完成真实数据处理和产物生成。",
-        description="在 Koto 沙盒中运行 Python 代码处理数据、生成图表或派生文件，并返回标准 file-change payload/图像产物。",
+        description=(
+            "在 Koto 沙盒中运行 Python 代码处理数据、生成图表或派生文件，并返回标准 file-change payload/图像产物。"
+            "有目标文件时使用 TASK_TARGET_PATH 创建或修改沙盒目标，由 Koto 核验并同步回工作区。"
+        ),
         rationale="这类任务本质上依赖受控代码执行，而不是单轮文本生成。",
         parameters={
             "type": "object",

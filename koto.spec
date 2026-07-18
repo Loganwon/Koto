@@ -15,7 +15,13 @@ ROOT = os.path.abspath('.')
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 
-from build_config import protected_dir_paths
+from build_config import (
+    PROTECTED_DIRS,
+    cython_build_root,
+    has_staged_cython_extension,
+    protected_dir_paths,
+    staged_cython_extensions,
+)
 
 # ═══════════════════════════════════════════════
 # 数据文件（资源 + Python 源码）
@@ -23,23 +29,21 @@ from build_config import protected_dir_paths
 
 datas = []
 
-# ── Protected 模式：检测是否存在 Cython 编译产物 ──────────────────────────────
-# 当 build_cython.py --inplace 已运行时，核心模块的 .pyd 与 .py 并存，
-# 此时将受保护目录的文件逐个过滤：有 .pyd 的跳过 .py，只复制 .pyd。
+# ── Protected 模式：从隔离目录收集 Cython 编译产物 ───────────────────────────
+# build_cython.py 将扩展写入 build/cython_lib。源码树不再出现 .pyd，避免
+# 开发和测试进程在失败构建后意外加载旧二进制模块。
 _PROTECTED_DIRS = protected_dir_paths(ROOT)
+_CYTHON_BUILD_ROOT = str(cython_build_root(ROOT))
+_STAGED_APP_ROOT = os.path.join(_CYTHON_BUILD_ROOT, 'app')
+_STAGED_APP_READY = os.path.isfile(os.path.join(_STAGED_APP_ROOT, '__init__.py'))
 _ARCHIVED_RUNTIME_FILES = {
     os.path.normcase(os.path.abspath(os.path.join(ROOT, 'app', 'core', 'llm', name)))
     for name in ('gemini.py', 'gemini_config.py')
 }
 
 def _protected_pyd_exists(py_path):
-    """检查对应的 .pyd / .so 是否已编译"""
-    stem = os.path.splitext(py_path)[0]
-    d = os.path.dirname(py_path)
-    for f in os.listdir(d) if os.path.isdir(d) else []:
-        if f.startswith(os.path.basename(stem)) and (f.endswith('.pyd') or f.endswith('.so')):
-            return True
-    return False
+    """检查隔离目录中是否存在对应的 .pyd / .so。"""
+    return has_staged_cython_extension(ROOT, py_path)
 
 def _add(src, dst):
     """安全添加数据文件/目录，仅在存在时加入"""
@@ -67,6 +71,8 @@ def _add_dir_filtered(src_dir, dst_dir):
         else:
             if os.path.normcase(os.path.abspath(fpath)) in _ARCHIVED_RUNTIME_FILES:
                 continue
+            if is_protected and fname.endswith(('.pyd', '.so')):
+                continue  # 源码目录中的旧编译残留永不进入发布包
             if is_protected and fname.endswith('.py') and fname != '__init__.py':
                 if _protected_pyd_exists(fpath):
                     continue  # 有 .pyd，跳过 .py
@@ -79,8 +85,41 @@ _add(os.path.join(ROOT, 'web', 'static'),                     os.path.join('web'
 _add(os.path.join(ROOT, 'web', 'uploads', '.gitkeep'),        os.path.join('web', 'uploads'))
 
 # ── Python 包 ──
-# 使用 _add_dir_filtered 而非简单的 _add(dir)，以便在 Protected 模式下过滤 .py 源码
-_add_dir_filtered(os.path.join(ROOT, 'app'),      'app')
+# 有隔离 overlay 时，分析和数据收集都使用同一棵 app 树。该树不包含受保护
+# 模块的 .py，因此 PyInstaller 不会把旧源码再次编入 PYZ。
+_PACKAGE_APP_ROOT = _STAGED_APP_ROOT if _STAGED_APP_READY else os.path.join(ROOT, 'app')
+_add_dir_filtered(_PACKAGE_APP_ROOT, 'app')
+
+
+def _add_staged_cython_extensions():
+    """Copy only compiled protected modules from the isolated build tree."""
+    artifacts = staged_cython_extensions(ROOT)
+    if not _STAGED_APP_READY:
+        for artifact in artifacts:
+            destination = os.path.normpath(
+                os.path.relpath(str(artifact.parent), _CYTHON_BUILD_ROOT)
+            )
+            datas.append((str(artifact), destination))
+    return len(artifacts)
+
+
+_STAGED_CYTHON_COUNT = _add_staged_cython_extensions()
+_STAGED_PROTECTED_SOURCES = [
+    source_file
+    for relative_dir in PROTECTED_DIRS
+    for source_file in (Path(_CYTHON_BUILD_ROOT) / relative_dir).rglob('*.py')
+    if source_file.name != '__init__.py'
+]
+if os.environ.get('KOTO_REQUIRE_STAGED_CYTHON') == '1' and (
+    _STAGED_CYTHON_COUNT == 0
+    or not _STAGED_APP_READY
+    or _STAGED_PROTECTED_SOURCES
+):
+    raise RuntimeError(
+        'Formal release requires a complete Cython app overlay in build/cython_lib; '
+        'run build_cython.py build_ext first.'
+    )
+print(f'[koto.spec] Staged Cython extensions: {_STAGED_CYTHON_COUNT}')
 
 
 # ── 图标资源 ──
@@ -116,7 +155,10 @@ _CONFIG_EXCLUDED_FILES = {
     'requirements.txt',
     'requirements_training.txt',
     'shadow_observations.json',
+    'skill_bindings.json',
+    'skill_ratings.json',
     'token_usage.json',
+    'triggers.json',
     'user_profile.json',
     'user_settings.json',
 }
@@ -160,7 +202,16 @@ def _add_runtime_config(src_dir):
 _add_runtime_config(os.path.join(ROOT, 'config'))
 
 # ── src/ 入口脚本（作为数据一同打包，供 runpy 兜底使用）──
-for _script in ['koto_app.py', 'model_downloader.py', 'koto_setup.py', 'server.py']:
+for _script in [
+    'koto_app.py',
+    'model_downloader.py',
+    'koto_setup.py',
+    'runtime_bootstrap.py',
+    'server.py',
+    'startup_diagnostics.py',
+    'startup_recovery.py',
+    'webview2_runtime.py',
+]:
     _add(os.path.join(ROOT, 'src', _script), '.')
 
 # ── web/*.py 全部作为数据文件（动态 import 兜底，含子包 blueprints/ routes/）──
@@ -183,10 +234,8 @@ _add(os.path.join(ROOT, 'README.md'), '.')
 # ═══════════════════════════════════════════════
 # 隐式导入
 # ═══════════════════════════════════════════════
-# NOTE: 此列表与下方 _discover_hidden_imports() 自动发现存在大量重叠。
-# 后续清理时可删除已被 auto-discovery 覆盖的条目（预计可缩减 200+ 行）。
-# 标准库模块（subprocess, socket, threading 等）通常无需手动列举。
-# 保留期：2026-Q3 — 待通过完整构建验证后安全移除。
+# 这里只保留第三方库、少量懒加载标准库和 src/ 动态入口。app/ 与 web/
+# 的内部模块由下方 _discover_hidden_imports() 单源发现，避免手写清单长期漂移。
 
 hiddenimports = [
     # ── 标准库 tkinter（模型下载器 GUI）──
@@ -252,7 +301,6 @@ hiddenimports = [
     'pywintypes', 'pythoncom',
 
     # ── 上传音频 STT（Whisper）──
-    'edge_tts',
     'wave', 'audioop',
     'win32com', 'win32com.client',
 
@@ -264,165 +312,13 @@ hiddenimports = [
     # transformers / peft / trl / accelerate / datasets 属于 LoRA 训练依赖，
     # 全部在函数体内懒加载，不打包进发行版（节省数 GB 体积）。
 
-    # ── App 路由模块 ──
-    'app', 'app.core', 'app.api',
-    'app.core.routing',
-    'app.core.routing.smart_dispatcher',
-    'app.core.routing.local_model_router',
-    'app.core.routing.ai_router',
-    'app.core.routing.intent_analyzer',
-    'app.core.agent', 'app.core.agent.factory',
-    'app.core.agent.base', 'app.core.agent.types',
-    'app.core.agent.unified_agent',
-    'app.core.agent.langgraph_agent',
-    'app.core.agent.multi_agent',
-    'app.core.agent.koto_supervision',
-    'app.core.agent.mcp_adapter',
-    'app.core.agent.mcp_manager',
-    'app.core.agent.tool_registry',
-    'app.core.agent.checkpoint_manager',
-    'app.core.agent.plugins',
-    'app.core.agent.plugins.basic_tools_plugin',
-    'app.core.agent.plugins.file_editor_plugin',
-    'app.core.agent.plugins.search_plugin',
-    'app.core.agent.plugins.system_tools_plugin',
-    'app.core.agent.plugins.data_process_plugin',
-    'app.core.agent.plugins.image_process_plugin',
-    'app.core.agent.plugins.network_plugin',
-    'app.core.agent.plugins.performance_analysis_plugin',
-    'app.core.agent.plugins.trend_analysis_plugin',
-    'app.core.agent.plugins.configuration_plugin',
-    'app.core.agent.plugins.alerting_plugin',
-    'app.core.agent.plugins.auto_remediation_plugin',
-    'app.core.agent.plugins.system_event_monitoring_plugin',
-    'app.core.agent.plugins.system_info_plugin',
-    'app.core.agent.plugins.annotation_plugin',
-    'app.core.agent.plugins.chart_vision_plugin',
-    'app.core.agent.plugins.file_converter_plugin',
-    'app.core.agent.plugins.memory_tools_plugin',
-    'app.core.agent.plugins.ppt_plugin',
-    'app.core.agent.plugins.productivity_plugin',
-    'app.core.agent.plugins.skill_tools_plugin',
-    'app.core.agent.plugins.template_fill_plugin',
-    'app.core.analytics', 'app.core.analytics.trend_analyzer',
-    'app.core.config', 'app.core.config.configuration_manager',
-    'app.core.learning', 'app.core.learning.distill_manager',
-    'app.core.learning.lora_pipeline',
-    'app.core.learning.shadow_tracer',
-    'app.core.learning.training_data_builder',
-    'app.core.llm', 'app.core.llm.base',
-    'app.core.llm.langchain_adapter',
-    'app.core.llm.openai_provider',
-    'app.core.llm.deepseek_config',
-    'app.core.llm.deepseek_provider',
-    'app.core.llm.model_selection',
-    'app.core.llm.ollama_provider',
-    'app.core.monitoring',
-    'app.core.monitoring.alert_manager',
-    'app.core.monitoring.event_database',
-    'app.core.monitoring.system_event_monitor',
-    'app.core.remediation', 'app.core.remediation.remediation_manager',
-    'app.core.security',
-    'app.core.security.output_validator',
-    'app.core.security.pii_filter',
-    'app.core.services',
-    'app.core.services.file_service',
-    'app.core.services.rag_service',
-    'app.core.services.search_service',
-    'app.core.skills',
-    'app.core.skills.skill_manager',
-    'app.core.skills.skill_auto_builder',
-    'app.core.skills.skill_recorder',
-    'app.core.skills.skill_schema',
-    'app.core.workflow',
-    'app.core.workflow.langgraph_workflow',
-    'app.core.workflows',
-    'app.core.workflows.action_item_extractor',
-    'app.core.workflows.cross_format_extractor',
-    'app.core.workflows.data_format_cleaner',
-    'app.core.workflows.doc_deep_compare',
-    'app.core.workflows.questionnaire_filler',
-    'app.api.agent_routes',
-    'app.api.skill_routes',
-    'app.api.skill_marketplace_routes',
-    'app.api.task_routes',
-    'app.api.job_routes',
-    'app.api.goal_routes',
-    'app.api.file_hub_routes',
-    'app.api.ops_routes',
-    'app.api.shadow_routes',
-    'app.api.macro_routes',
-    'app.api.mcp_routes',
-    'app.api.telegram_bot_routes',
-    'app.api.distill_routes',
-    'app.api.bg_agent_routes',
-
-    # ── web/blueprints/ 分层蓝图（动态 import_module，PyInstaller 不自动发现）──
-    'web.blueprints',
-    'web.blueprints.chat',
-    'web.blueprints.voice',
-    'web.blueprints.pages',
-    'web.blueprints.sessions',
-    'web.blueprints.settings',
-    'web.blueprints.workspace',
-    'web.blueprints.document',
-    'web.blueprints.knowledge',
-    'web.blueprints.misc_api',
-    'web.blueprints.analytics',
-    'web.blueprints.proactive',
-    'web.blueprints.execution',
-    'web.blueprints.file_editor',
-    'web.blueprints.file_organize',
-    'web.blueprints.dev',
-    'web.blueprints.editor_ai',
-    'web.blueprints.pptx_editor',
-    'web.blueprints.parallel_api',
-    'web.blueprints.memory_api',
-    'web.blueprints.workflow_api',
-    'web.blueprints.workspace_assistant',
-
-    # ── web/routes/ ──
-    'web.routes',
-    'web.routes.health',
-
+    # app/ and web/ internal packages are discovered from the source tree below.
     # ── 模型下载器 ──
     'model_downloader',
+    'src.koto_app', 'src.runtime_bootstrap',
+    'src.startup_diagnostics', 'src.startup_recovery', 'src.webview2_runtime',
 
-        # ── web/ 全部模块 ──
-    'web', 'web.app', 'web.audio_overview', 'web.audit_logger',
-    'web.auth_manager', 'web.auto_catalog_scheduler',
-    'web.auto_execution', 'web.batch_file_ops', 'web.batch_processor',
-    'web.behavior_monitor', 'web.calendar_manager',
-    'web.clipboard_ocr_assistant', 'web.code_generator',
-    'web.concept_extractor', 'web.consistency_checker', 'web.context_awareness',
-    'web.context_injector', 'web.data_pipeline', 'web.doc_converter',
-    'web.doc_annotation', 'web.doc_planner', 'web.document_batch_annotator',
-    'web.document_comparator', 'web.document_direct_edit', 'web.document_editor',
-    'web.document_feedback', 'web.document_generator', 'web.document_reader',
-    'web.document_validator',
-    'web.enhanced_memory_manager',
-    'web.file_analyzer', 'web.file_converter',
-    'web.file_editor', 'web.file_fields_extractor', 'web.file_indexer',
-    'web.file_organizer', 'web.file_parser', 'web.file_processor',
-    'web.file_qa', 'web.file_quality_checker', 'web.file_scanner',
-    'web.file_watcher', 'web.folder_catalog_organizer', 'web.image_generator',
-    'web.image_manager', 'web.insight_reporter', 
-    'web.knowledge_graph', 'web.local_executor',
-    'web.memory_integration', 'web.memory_manager', 'web.note_manager',
-    'web.operation_history', 'web.organize_cleanup',
-    'web.parallel_executor', 'web.ppt_api_routes',
-    
-    'web.ppt_session_manager', 
-    'web.proactive_dialogue', 'web.proactive_trigger',
-    'web.processed_file_network', 'web.prompt_adapter', 
-    'web.reminder_manager', 'web.settings',
-    'web.shared', 'web.smart_feedback', 'web.suggestion_annotator',
-    'web.suggestion_engine', 'web.system_info',
-    'web.task_dispatcher', 'web.task_scheduler', 'web.template_library',
-    'web.track_changes_editor',
-    'web.web_searcher', 'web.windows_notifier', 'web.work_file_library',
-    
-    'web.pdf_annotator',
+    # Do not duplicate auto-discovered app/web modules here.
 ]
 
 # ═══════════════════════════════════════════════
@@ -503,6 +399,12 @@ datas = _filter_datas(datas)
 
 
 # ── Dynamic Auto-discovery for hiddenimports ──
+_INTERNAL_DISCOVERY_EXCLUDES = {
+    'app.core.llm.gemini',
+    'app.core.llm.gemini_config',
+}
+
+
 def _discover_hidden_imports(base_dir, base_pkg):
     import os
     imports = []
@@ -515,7 +417,9 @@ def _discover_hidden_imports(base_dir, base_pkg):
                 if rel_path != '.':
                     pkg = f"{base_pkg}.{rel_path.replace(os.sep, '.')}"
                 mod = f[:-3]
-                imports.append(f"{pkg}.{mod}")
+                module_name = f"{pkg}.{mod}"
+                if module_name not in _INTERNAL_DISCOVERY_EXCLUDES:
+                    imports.append(module_name)
             elif f == '__init__.py':
                 rel_path = os.path.relpath(root, base_dir)
                 pkg = base_pkg
@@ -541,7 +445,7 @@ hiddenimports = _dedupe_hiddenimports(hiddenimports)
 
 a = Analysis(
     ['src/koto_setup.py'],       # ← 新入口（含下载器向导）
-    pathex=[ROOT],
+    pathex=[_CYTHON_BUILD_ROOT, ROOT] if _STAGED_APP_READY else [ROOT],
     binaries=_all_binaries,
     datas=datas,
     hiddenimports=hiddenimports,

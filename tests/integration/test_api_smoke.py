@@ -136,23 +136,6 @@ class TestMiniChatSmoke:
         _smoke(full_client.post("/api/mini/chat", json={}))
 
 
-# ── Notebook endpoints ───────────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestNotebookSmoke:
-    """Smoke tests for /api/notebook/* endpoints."""
-
-    def test_notebook_overview(self, full_client):
-        _smoke(full_client.post("/api/notebook/overview", json={}))
-
-    def test_notebook_qa(self, full_client):
-        _smoke(full_client.post("/api/notebook/qa", json={"question": "test"}))
-
-    def test_notebook_study_guide(self, full_client):
-        _smoke(full_client.post("/api/notebook/study_guide", json={}))
-
-
 # ── Voice endpoints ──────────────────────────────────────────────────────────
 
 
@@ -203,20 +186,3 @@ class TestOpsSmoke:
 
     def test_ops_incidents(self, full_client):
         _smoke(full_client.get("/api/ops/incidents"))
-
-
-# ── Shadow watcher endpoints ─────────────────────────────────────────────────
-
-
-@pytest.mark.integration
-class TestShadowSmoke:
-    """Smoke tests for /api/shadow/* endpoints."""
-
-    def test_shadow_status(self, full_client):
-        _smoke(full_client.get("/api/shadow/status"))
-
-    def test_shadow_patterns(self, full_client):
-        _smoke(full_client.get("/api/shadow/patterns"))
-
-    def test_shadow_insights(self, full_client):
-        _smoke(full_client.get("/api/shadow/insights"))

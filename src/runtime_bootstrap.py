@@ -48,6 +48,7 @@ def configure_process_environment(
     prepend_paths: Iterable[Path | str] = (),
     append_paths: Iterable[Path | str] = (),
     required_dirs: Iterable[Path | str] = (),
+    desktop_runtime: bool = False,
 ) -> RuntimeRoots:
     """Prepare cwd, import paths, and base runtime directories for an entrypoint."""
     os.chdir(str(roots.app_root))
@@ -60,7 +61,30 @@ def configure_process_environment(
     for directory in required_dirs:
         (roots.app_root / Path(directory)).mkdir(parents=True, exist_ok=True)
 
+    if desktop_runtime:
+        configure_frozen_desktop_runtime(roots)
+
     return roots
+
+
+def configure_frozen_desktop_runtime(roots: RuntimeRoots) -> None:
+    """Bind a frozen desktop process to its bundled WebView/Python runtime."""
+    if not getattr(sys, "frozen", False):
+        return
+
+    # Do not inherit developer-machine GUI/runtime choices. A packaged Koto
+    # must use the WebView2 backend and Python DLL that ship beside Koto.exe.
+    os.environ["PYWEBVIEW_GUI"] = "edgechromium"
+    os.environ.pop("PYTHONNET_PYDLL", None)
+    dll_name = f"python{sys.version_info.major}{sys.version_info.minor}.dll"
+    candidates = (
+        roots.bundle_dir / dll_name,
+        roots.app_root / "_internal" / dll_name,
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            os.environ["PYTHONNET_PYDLL"] = str(candidate.resolve())
+            break
 
 
 def validate_startup_config_or_raise() -> None:

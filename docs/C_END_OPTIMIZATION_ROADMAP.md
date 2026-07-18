@@ -131,7 +131,7 @@ Koto 要从“会分析”变成“会代办”，必须支持授权后的外部
 | 当前模块 | 可复用方向 | 说明 |
 |---------|-----------|------|
 | `app/core/agent/unified_agent.py` | 长任务执行器 | 已有 ReAct、多轮工具调用、输出验收 |
-| `web/enhanced_memory_manager.py` | 任务记忆、用户世界模型 | 已有长期记忆、画像、向量检索底座 |
+| `app/core/services/memory_manager.py` | 任务记忆、用户世界模型 | 已有长期记忆、画像、向量检索底座 |
 | `web/proactive_trigger.py` | 任务追踪与主动回访 | 已有定时/阈值/事件触发框架 |
 | `/api/voice/stt` | 上传音频转写 | 保留上传音频 STT，不再维护系统麦克风链路 |
 | 现有文档/Excel/PPT 工具链 | 行动结果生成 | 可用于摘要、报告、结果交付 |

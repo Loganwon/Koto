@@ -89,7 +89,6 @@ _CRITICAL_ASSETS = [
     _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.js",
     _STATIC_ROOT / "univer-dist" / "assets" / "sheets-main.css",
     _STATIC_ROOT / "js" / "build" / "workspace-bundle.js",
-    _STATIC_ROOT / "js" / "build" / "review-bundle.js",
 ]
 
 
@@ -437,6 +436,51 @@ def get_current_workspace_dir():
     return jsonify({"path": str(p), "name": p.name})
 
 
+def _recent_file_status_target(raw_path: str, workspace_root: Path) -> Path | None:
+    """Resolve a caller-supplied recent path without exposing or opening it."""
+    candidate = Path(raw_path).expanduser()
+    if candidate.is_absolute():
+        target = candidate.resolve()
+    else:
+        target = (workspace_root / candidate).resolve()
+        try:
+            target.relative_to(workspace_root)
+        except ValueError:
+            return None
+    if not _fs_guard(target):
+        return None
+    return target
+
+
+@workspace_assistant_bp.route(
+    "/api/v1/workspace/recent_files/status", methods=["POST"]
+)
+def recent_file_status():
+    """Return existence status for the small recent-file list before rendering it."""
+    body = request.get_json(force=True, silent=True) or {}
+    raw_paths = body.get("paths")
+    if not isinstance(raw_paths, list):
+        return jsonify({"error": "paths 必须是数组"}), 400
+    if len(raw_paths) > 50:
+        return jsonify({"error": "单次最多检查 50 个路径"}), 400
+
+    from web.shared import WORKSPACE_DIR
+
+    workspace_root = Path(WORKSPACE_DIR).resolve()
+    statuses = []
+    seen = set()
+    for value in raw_paths:
+        raw_path = str(value or "").strip()
+        if not raw_path or raw_path in seen:
+            continue
+        seen.add(raw_path)
+        target = _recent_file_status_target(raw_path, workspace_root)
+        statuses.append(
+            {"path": raw_path, "exists": bool(target and target.is_file())}
+        )
+    return jsonify({"files": statuses})
+
+
 @workspace_assistant_bp.route("/api/v1/workspace/list_files")
 def list_workspace_files():
     """
@@ -767,6 +811,61 @@ def ai_context_preview():
             "preview_error": preview.preview_error,
         }
     )
+
+
+@workspace_assistant_bp.route("/api/v1/workspace/import_for_ai_context", methods=["POST"])
+def import_for_ai_context():
+    """Copy a file selected from the filesystem browser into the workspace.
+
+    File-task previews and the agent runtime intentionally operate on workspace
+    paths.  The filesystem browser, however, exposes absolute paths outside the
+    workspace.  Stage those user-selected files first so the preview, chat, and
+    file-task contracts share one safe, readable path.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    raw_path = str(body.get("path") or "").strip()
+    if not raw_path:
+        return jsonify({"error": "缺少 path 字段"}), 400
+
+    from web.shared import WORKSPACE_DIR
+
+    workspace_root = Path(WORKSPACE_DIR).resolve()
+    try:
+        source = _OPEN_FILE_BY_PATH.resolve_target(
+            raw_path=raw_path,
+            workspace_dir=workspace_root,
+            app_config_dir=_APP_CONFIG_DIR,
+            fs_guard=_fs_guard,
+            allow_external_absolute=True,
+        )
+    except OpenFileInConfigError:
+        return jsonify({"error": "不允许访问应用配置目录"}), 403
+    except OpenFilePermissionError:
+        return jsonify({"error": "路径不合法"}), 403
+
+    if not source.is_file():
+        return jsonify({"error": "文件不存在"}), 404
+    if source.suffix.lower() not in _ALLOWED_EXT:
+        return jsonify({"error": f"不支持的格式: {source.suffix.lower()}"}), 400
+    if source.stat().st_size > 50 * 1024 * 1024:
+        return jsonify({"error": "文件大小超过 50 MB"}), 413
+
+    try:
+        ws_path = source.relative_to(workspace_root)
+        imported = False
+    except ValueError:
+        import shutil
+
+        destination_dir = workspace_root / "attachments"
+        destination_dir.mkdir(parents=True, exist_ok=True)
+        destination = _unique_path(destination_dir, source.name)
+        shutil.copy2(source, destination)
+        ws_path = destination.relative_to(workspace_root)
+        imported = True
+
+    normalized_path = str(ws_path).replace("\\", "/")
+    logger.info("[import_for_ai_context] %s -> %s", source, normalized_path)
+    return jsonify({"ok": True, "ws_path": normalized_path, "imported": imported})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1526,8 +1625,6 @@ def set_workspace_dir_endpoint():
     Body (JSON): {"path": "/absolute/path/to/folder"}
     持久化到 config/user_settings.json 并立即生效（无需重启）。
     """
-    import json as _json
-
     body = request.get_json(force=True, silent=True) or {}
     new_path = (body.get("path") or "").strip()
     if not new_path:
@@ -1547,27 +1644,26 @@ def set_workspace_dir_endpoint():
     if not target.is_dir():
         return jsonify({"error": "路径不是文件夹"}), 400
 
-    # Persist to user_settings.json
+    # Persist through the canonical crash-safe settings transaction while
+    # honoring portable/test overrides of the settings file location.
+    from app.core.config.settings_store import atomic_update_settings
+    from app.core.config.user_settings import DEFAULT_SETTINGS
     from web.shared import clear_user_settings_cache, get_user_settings_path
 
-    settings_path = Path(get_user_settings_path())
     try:
-        try:
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = _json.load(f)
-        except Exception:
-            settings = {}
-        settings.setdefault("storage", {})["workspace_dir"] = str(target)
-        with open(settings_path, "w", encoding="utf-8") as f:
-            _json.dump(settings, f, ensure_ascii=False, indent=2)
+        atomic_update_settings(
+            get_user_settings_path(),
+            {"storage": {"workspace_dir": str(target)}},
+            defaults=DEFAULT_SETTINGS,
+        )
     except Exception as e:
         return jsonify({"error": f"设置保存失败: {e}"}), 500
 
     # Invalidate cache and update live module variable (no restart needed)
     clear_user_settings_cache()
-    import web.shared as _shared
+    from web.shared import update_workspace_root
 
-    _shared.WORKSPACE_DIR = str(target)
+    update_workspace_root(str(target))
 
     logger.info("[WorkspaceAssistant] 工作区已切换: %s", target)
     return jsonify({"ok": True, "path": str(target), "name": target.name})
@@ -1581,9 +1677,13 @@ def set_workspace_dir_endpoint():
 
 @workspace_assistant_bp.route("/api/v1/workspace/ollama-status")
 def ollama_status():
-    """Return {running: bool, model: str|null, models: [str]}."""
+    """Return local runtime state plus the selected model's tool capability."""
     try:
         import requests as _req
+
+        from app.core.llm.local_model_capabilities import (
+            local_model_supports_tools,
+        )
 
         r = _req.get(
             "http://127.0.0.1:11434/api/tags",
@@ -1593,25 +1693,40 @@ def ollama_status():
         data = r.json()
         models = [m["name"] for m in data.get("models", [])]
         if not models:
-            return jsonify({"running": True, "model": None, "models": []})
+            return jsonify(
+                {
+                    "running": True,
+                    "model": None,
+                    "models": [],
+                    "configured_model": None,
+                    "configured_model_installed": False,
+                    "configured_model_supports_tools": None,
+                }
+            )
 
-        # 1. Prefer the model configured in user_settings.json
+        def _status_payload(selected_model: str, configured_model: str = ""):
+            resolved_configured = str(configured_model or selected_model or "").strip()
+            return {
+                "running": True,
+                "model": selected_model,
+                "models": models,
+                "configured_model": resolved_configured or None,
+                "configured_model_installed": resolved_configured in models,
+                "configured_model_supports_tools": local_model_supports_tools(
+                    resolved_configured
+                ),
+            }
+
+        # 1. Prefer the model configured in the canonical settings manager.
         try:
-            import json as _js
-            import os as _os
+            from app.core.config.user_settings import SettingsManager
 
-            from web.shared import PROJECT_ROOT as _PR
-
-            _cfg_path = _os.path.join(_PR, "config", "user_settings.json")
-            with open(_cfg_path, "r", encoding="utf-8") as _f:
-                _cfg = _js.load(_f)
+            _cfg = SettingsManager().get_all()
             _configured = (
                 _cfg.get("local_model") or _cfg.get("ai", {}).get("local_model") or ""
             ).strip()
             if _configured and _configured in models:
-                return jsonify(
-                    {"running": True, "model": _configured, "models": models}
-                )
+                return jsonify(_status_payload(_configured, _configured))
         except Exception:
             pass
 
@@ -1627,9 +1742,18 @@ def ollama_status():
             ),
             models[0],
         )
-        return jsonify({"running": True, "model": preferred, "models": models})
+        return jsonify(_status_payload(preferred))
     except Exception:
-        return jsonify({"running": False, "model": None, "models": []})
+        return jsonify(
+            {
+                "running": False,
+                "model": None,
+                "models": [],
+                "configured_model": None,
+                "configured_model_installed": False,
+                "configured_model_supports_tools": None,
+            }
+        )
 
 
 # ─── Browse local filesystem (lazy) ──────────────────────────────────────────
@@ -2181,203 +2305,6 @@ def patch_file():
         return jsonify({"error": f"文本修补失败: {str(exc)}"}), 500
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# POST /api/v1/workspace/audio_overview
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@workspace_assistant_bp.route("/api/v1/workspace/audio_overview", methods=["POST"])
-def audio_overview():
-    """
-    Generate a two-host podcast audio overview from a set of files.
-
-    Body JSON:
-      { "files": [{"name": "...", "content": "..."}], "session_id": "..." }
-
-    SSE stream:
-      {"event": "script",    "data": [{speaker, text}, ...]}
-      {"event": "progress",  "data": "合成音频…"}
-      {"event": "audio_url", "data": "/static/audio_cache/podcast_xxx.mp3"}
-      {"event": "error",     "data": "…"}
-    """
-    import asyncio
-    import uuid as _uuid
-
-    body = request.get_json(force=True, silent=True) or {}
-    files = body.get("files") or []
-    if not files:
-        return jsonify({"error": "缺少 files 字段"}), 400
-
-    combined_text = "\n\n".join(
-        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}" for f in files
-    )[:20000]
-
-    session_id = body.get("session_id") or _uuid.uuid4().hex[:12]
-
-    def _generate():
-        import json as _json
-
-        try:
-            from app.core.llm.provider_factory import get_llm_provider
-            from web.audio_overview import AudioOverviewGenerator
-
-            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
-
-            # Build a simple wrapper that AudioOverviewGenerator expects
-            class _ModelAdapter:
-                def generate_content(self, prompt):
-                    resp = provider.generate_content(prompt=prompt, model="deepseek-chat")
-                    text = (
-                        str(resp.get("content") or resp.get("text") or "")
-                        if isinstance(resp, dict)
-                        else str(getattr(resp, "text", resp) or "")
-                    )
-                    return type("ProviderResponse", (), {"text": text})()
-
-            gen = AudioOverviewGenerator(
-                output_dir=os.path.join(
-                    os.path.dirname(os.path.dirname(__file__)), "static", "audio_cache"
-                )
-            )
-
-            loop = asyncio.new_event_loop()
-            script = loop.run_until_complete(
-                gen.generate_script(combined_text, _ModelAdapter())
-            )
-            if not script:
-                yield f"data: {_json.dumps({'event': 'error', 'data': '脚本生成失败，请重试'}, ensure_ascii=False)}\n\n"
-                return
-
-            yield f"data: {_json.dumps({'event': 'script', 'data': script}, ensure_ascii=False)}\n\n"
-
-            # Attempt TTS synthesis
-            try:
-                audio_path = loop.run_until_complete(
-                    gen.synthesize_audio(script, session_id)
-                )
-                loop.close()
-                if audio_path and os.path.exists(audio_path):
-                    audio_url = "/static/audio_cache/" + os.path.basename(audio_path)
-                    yield f"data: {_json.dumps({'event': 'audio_url', 'data': audio_url}, ensure_ascii=False)}\n\n"
-                else:
-                    yield f"data: {_json.dumps({'event': 'audio_url', 'data': None}, ensure_ascii=False)}\n\n"
-            except Exception as tts_err:
-                loop.close()
-                logger.warning("[audio_overview] TTS 失败: %s", tts_err)
-                yield f"data: {_json.dumps({'event': 'audio_url', 'data': None}, ensure_ascii=False)}\n\n"
-
-        except Exception as exc:
-            logger.error("[audio_overview] 失败: %s", exc, exc_info=True)
-            yield f"data: {_json.dumps({'event': 'error', 'data': str(exc)}, ensure_ascii=False)}\n\n"
-
-    return Response(
-        stream_with_context(_generate()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# POST /api/v1/workspace/notebook_guide
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-@workspace_assistant_bp.route("/api/v1/workspace/notebook_guide", methods=["POST"])
-def notebook_guide():
-    """
-    Generate a 4-section study guide (学习包) from attached files.
-
-    Body JSON:
-      { "files": [{"name": "...", "content": "..."}] }
-
-    SSE stream (one event per section):
-      {"section": "summary",  "content": "..."}
-      {"section": "points",   "content": "..."}
-      {"section": "faq",      "content": "..."}
-      {"section": "glossary", "content": "..."}
-      {"section": "done"}
-      {"section": "error",    "content": "..."}
-    """
-    body = request.get_json(force=True, silent=True) or {}
-    files = body.get("files") or []
-    if not files:
-        return jsonify({"error": "缺少 files 字段"}), 400
-
-    combined_text = "\n\n".join(
-        f"=== {f.get('name', '文件')} ===\n{f.get('content', '')}" for f in files
-    )[:24000]
-
-    SECTIONS = [
-        (
-            "summary",
-            "执行摘要",
-            "请用200-300字对以下资料进行执行摘要，抓住核心结论和关键数据，不要逐条列点。",
-        ),
-        (
-            "points",
-            "关键要点",
-            "请从以下资料中提炼5-8条关键要点，每条以「·」开头，包含具体数据或结论，不要泛泛而谈。",
-        ),
-        (
-            "faq",
-            "常见问答",
-            "请根据以下资料生成5个读者最可能提出的问题及详细解答，格式：Q: 问题\nA: 解答",
-        ),
-        (
-            "glossary",
-            "核心词汇",
-            "请从以下资料中提取8-12个专业术语或核心概念，每个词汇后附一句简洁定义，格式：**词汇** — 定义",
-        ),
-    ]
-
-    def _generate():
-        import json as _json
-
-        try:
-            from app.core.llm.provider_factory import get_llm_provider
-
-            provider = get_llm_provider(provider="deepseek", allow_local_fallback=False)
-
-            for sec_key, sec_label, sec_prompt in SECTIONS:
-                full_prompt = (
-                    f"{sec_prompt}\n\n"
-                    f"资料内容（共 {len(files)} 个文件）:\n{combined_text}"
-                )
-                try:
-                    resp = provider.generate_content(
-                        prompt=full_prompt,
-                        model="deepseek-chat",
-                    )
-                    content = (
-                        str(resp.get("content") or resp.get("text") or "")
-                        if isinstance(resp, dict)
-                        else str(getattr(resp, "text", resp) or "")
-                    ).strip()
-                    if not content:
-                        content = "（AI 暂无回复）"
-                except Exception as sec_err:
-                    content = f"（生成失败: {sec_err}）"
-
-                yield f"data: {_json.dumps({'section': sec_key, 'label': sec_label, 'content': content}, ensure_ascii=False)}\n\n"
-
-            yield f"data: {_json.dumps({'section': 'done'}, ensure_ascii=False)}\n\n"
-
-        except Exception as exc:
-            logger.error("[notebook_guide] 失败: %s", exc, exc_info=True)
-            yield f"data: {_json.dumps({'section': 'error', 'content': str(exc)}, ensure_ascii=False)}\n\n"
-
-    return Response(
-        stream_with_context(_generate()),
-        mimetype="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # POST /api/v1/workspace/pdf/save_annotations
@@ -2624,13 +2551,12 @@ def pdf_convert():
 )
 def pdf_remove_watermark():
     """
-    AI-assisted watermark removal.
+    Local structural watermark removal for documents the user is authorized to edit.
     Body: {"file_id": str, "use_ai": bool}
     Returns the cleaned PDF as an attachment.
     """
     body = request.get_json(silent=True) or {}
     file_id = str(body.get("file_id", ""))
-    use_ai = bool(body.get("use_ai", True))
 
     # Validate file_id: must be alphanumeric/hyphen/underscore only (prevents path traversal)
     if not file_id or not file_id.replace("-", "").replace("_", "").isalnum():
@@ -2643,17 +2569,10 @@ def pdf_remove_watermark():
 
     pdf_path = str(matches[0])
 
-    # Cloud vision cleanup was tied to the archived provider. Keep the
-    # deterministic local cleanup path until a provider-neutral vision backend exists.
-    api_key = None
-    use_ai = False
-
     try:
         from web.pdf_annotator import remove_watermark
 
-        pdf_bytes, removed_count, method_used = remove_watermark(
-            pdf_path, use_ai=use_ai, api_key=api_key
-        )
+        pdf_bytes, removed_count, method_used = remove_watermark(pdf_path)
     except Exception as exc:
         logger.error("[pdf_remove_watermark] 失败: %s", exc, exc_info=True)
         return jsonify({"error": f"去水印失败: {str(exc)}"}), 500

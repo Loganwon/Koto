@@ -21,8 +21,8 @@
         </svg>
       </div>
       <div class="wa-close-warn-copy">
-        <div id="wa-close-warn-title" class="wa-close-warn-title">有未保存的文件</div>
-        <p class="wa-close-warn-description">关闭前选择保存或放弃这些修改。</p>
+        <div id="wa-close-warn-title" class="wa-close-warn-title">是否保存更改？</div>
+        <p class="wa-close-warn-description">关闭 Koto 前，请先处理未保存的文件。</p>
       </div>
       <button
         type="button"
@@ -33,21 +33,18 @@
       >×</button>
     </div>
     <div class="wa-close-warn-body">
-      <div class="wa-close-warn-summary">
-        <div class="wa-close-warn-summary-main">
-          <span class="wa-close-warn-eyebrow">未保存修改</span>
-          <div id="wa-close-warn-count" class="wa-close-warn-count">0 个未保存文件</div>
-        </div>
-        <span class="wa-close-warn-risk">未保存内容会丢失</span>
+      <div class="wa-close-warn-list-head">
+        <span id="wa-close-warn-count" class="wa-close-warn-count">0 个未保存文件</span>
+        <span class="wa-close-warn-risk">不保存将丢失更改</span>
       </div>
       <div id="wa-close-warn-list" class="wa-close-warn-list"></div>
     </div>
     <div class="wa-close-warn-footer">
-      <p class="wa-close-warn-footer-note">保存会先写入当前修改，再继续关闭窗口。</p>
+      <p id="wa-close-warn-status" class="wa-close-warn-footer-note" aria-live="polite">保存后会自动关闭 Koto。</p>
       <div class="wa-close-warn-actions">
-        <button type="button" class="wa-btn" onclick="WA._closeWarnCancel()">取消</button>
-        <button type="button" class="wa-btn wa-close-warn-discard" onclick="WA._closeWarnDiscard()">放弃修改并退出</button>
-        <button type="button" class="wa-btn primary wa-close-warn-save" onclick="WA._closeWarnSaveAll()">保存全部并退出</button>
+        <button type="button" class="wa-btn wa-close-warn-cancel" onclick="WA._closeWarnCancel()">取消</button>
+        <button type="button" class="wa-btn wa-close-warn-discard" onclick="WA._closeWarnDiscard()">不保存并退出</button>
+        <button type="button" class="wa-btn primary wa-close-warn-save" onclick="WA._closeWarnSaveAll()">保存并退出</button>
       </div>
     </div>
   </div>

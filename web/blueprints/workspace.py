@@ -14,11 +14,17 @@ import os
 import sys
 from flask import Blueprint, Response, jsonify, request, send_from_directory
 
-from web.shared import WORKSPACE_DIR
+from web.shared import WORKSPACE_DIR  # Legacy module-level export for integrations.
+import web.shared as shared
 
 _logger = logging.getLogger("koto.routes.workspace")
 
 workspace_bp = Blueprint("workspace", __name__)
+
+
+def _workspace_dir() -> str:
+    """Read the live workspace setting instead of retaining an import-time path."""
+    return str(shared.WORKSPACE_DIR)
 
 
 # ─── Workspace file routes ───────────────────────────────────────────────────
@@ -28,12 +34,13 @@ workspace_bp = Blueprint("workspace", __name__)
 def get_workspace_file(filepath: str) -> Response:
     """获取 workspace 中的文件，支持子目录"""
     _logger.debug(f"[API] Serving workspace file: {filepath}")
-    full_path = os.path.join(WORKSPACE_DIR, filepath)
+    workspace_dir = _workspace_dir()
+    full_path = os.path.join(workspace_dir, filepath)
 
     # 安全检查：确保请求的路径在 WORKSPACE_DIR 下
     try:
         resolved_path = os.path.abspath(full_path)
-        resolved_workspace = os.path.abspath(WORKSPACE_DIR)
+        resolved_workspace = os.path.abspath(workspace_dir)
         if not resolved_path.startswith(resolved_workspace):
             _logger.debug(
                 f"[API] Security violation: {resolved_path} not under {resolved_workspace}"
@@ -45,7 +52,7 @@ def get_workspace_file(filepath: str) -> Response:
             return jsonify({"error": "File not found"}), 404
 
         _logger.debug(f"[API] Serving: {resolved_path}")
-        return send_from_directory(WORKSPACE_DIR, filepath)
+        return send_from_directory(workspace_dir, filepath)
     except Exception as e:
         _logger.debug(f"[API] Error serving {filepath}: {e}")
         import traceback
@@ -56,7 +63,7 @@ def get_workspace_file(filepath: str) -> Response:
 
 @workspace_bp.route("/api/workspace", methods=["GET"])
 def list_workspace_files() -> Response:
-    files = os.listdir(WORKSPACE_DIR)
+    files = os.listdir(_workspace_dir())
     return jsonify({"files": files})
 
 
@@ -92,7 +99,7 @@ def _list_drives():
 def _quick_access_locations():
     """Return Windows quick-access shortcuts: Desktop, Documents, Downloads, etc."""
     locations = []
-    ws = str(WORKSPACE_DIR)
+    ws = _workspace_dir()
     if os.path.isdir(ws):
         locations.append({"name": "Koto 工作区", "path": ws, "type": "quick"})
     if sys.platform == "win32":

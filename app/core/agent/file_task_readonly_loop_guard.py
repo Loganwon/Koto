@@ -35,11 +35,12 @@ def answer_only_round(
     has_context: bool,
     tool_defs: list[dict[str, Any]],
 ) -> AnswerOnlyRound:
-    enabled = (
-        not write_intent
-        and (readonly_answer_guard_injected or readonly_duplicate_guard_injected)
-        and has_context
-    )
+    # Context is read by FileTaskContextReadPhase before the model loop. Once
+    # an answer-only task already has grounded context, exposing file tools is
+    # unnecessary and excludes otherwise capable local chat models that do not
+    # implement Ollama tool calling. Write tasks and context-missing reads keep
+    # the full tool catalog.
+    enabled = not write_intent and has_context
     return AnswerOnlyRound(
         enabled=enabled,
         tool_defs=[] if enabled else tool_defs,

@@ -8,6 +8,7 @@ used by Docker healthchecks and container orchestrators.
 
 from __future__ import annotations
 
+import hmac
 import logging
 import os
 import shutil
@@ -16,7 +17,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import requests
-from flask import Blueprint, current_app, jsonify
+from flask import Blueprint, current_app, jsonify, request
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +25,10 @@ health_bp = Blueprint("health", __name__)
 
 _START_TIME = time.monotonic()
 
-# Resolve paths once at import time
+# Resolve immutable application paths once at import time. The workspace root
+# remains dynamic and is read from the shared runtime owner in _check_disk().
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _VERSION_FILE = _PROJECT_ROOT / "VERSION"
-_WORKSPACE_DIR = _PROJECT_ROOT / "workspace"
 
 # Minimum free disk space in bytes (100 MB)
 _MIN_DISK_FREE_BYTES = 100 * 1024 * 1024
@@ -52,10 +53,91 @@ def _check_ollama() -> dict:
         return {"status": "error", "detail": str(exc)}
 
 
+def _safe_probe_error(response: requests.Response) -> str:
+    """Turn a probe response into a short user-safe status without its body."""
+    if response.status_code in {401, 403}:
+        return "key_invalid"
+    if response.status_code == 404:
+        return "model_not_found"
+    if response.status_code == 429:
+        return "rate_limited"
+    return f"http_{response.status_code}"
+
+
+def _probe_deepseek() -> dict:
+    """Measure a real authenticated DeepSeek completion, never just its host."""
+    from app.core.llm.deepseek_config import DEEPSEEK_DEFAULT_BASE_URL, get_deepseek_api_key
+    from app.core.llm.model_selection import get_configured_cloud_model
+
+    key = get_deepseek_api_key()
+    model_id = get_configured_cloud_model(task_type="CHAT")
+    if not key:
+        return {"reachable": False, "latency_ms": None, "error": "key_missing", "model_id": model_id}
+
+    base_url = (
+        os.getenv("DEEPSEEK_BASE_URL")
+        or os.getenv("DEEPSEEK_API_BASE")
+        or DEEPSEEK_DEFAULT_BASE_URL
+    ).rstrip("/")
+    endpoint = f"{base_url}/chat/completions"
+    try:
+        started = time.monotonic()
+        response = requests.post(
+            endpoint,
+            headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+            json={
+                "model": model_id,
+                "messages": [{"role": "user", "content": "ping"}],
+                "max_tokens": 1,
+                "temperature": 0,
+                "stream": False,
+            },
+            timeout=15,
+        )
+        latency_ms = round((time.monotonic() - started) * 1000)
+        if not response.ok:
+            return {"reachable": False, "latency_ms": None, "error": _safe_probe_error(response), "model_id": model_id}
+        return {"reachable": True, "latency_ms": latency_ms, "model_id": model_id}
+    except requests.exceptions.Timeout:
+        return {"reachable": False, "latency_ms": None, "error": "timeout", "model_id": model_id}
+    except requests.RequestException:
+        logger.info("DeepSeek model probe failed", exc_info=True)
+        return {"reachable": False, "latency_ms": None, "error": "network_error", "model_id": model_id}
+
+
+def _probe_local_model() -> dict:
+    """Measure one real Ollama generation for the configured local model."""
+    from app.core.llm.local_model_runtime import get_configured_local_model_tag
+
+    model_id = get_configured_local_model_tag()
+    if not model_id:
+        return {"reachable": False, "latency_ms": None, "error": "model_missing", "model_id": ""}
+    base_url = (os.getenv("OLLAMA_BASE_URL") or os.getenv("OLLAMA_HOST") or "http://127.0.0.1:11434").rstrip("/")
+    try:
+        started = time.monotonic()
+        response = requests.post(
+            f"{base_url}/api/generate",
+            json={"model": model_id, "prompt": "ping", "stream": False, "options": {"num_predict": 1, "temperature": 0}},
+            timeout=20,
+            proxies={"http": None, "https": None},
+        )
+        latency_ms = round((time.monotonic() - started) * 1000)
+        if not response.ok:
+            return {"reachable": False, "latency_ms": None, "error": _safe_probe_error(response), "model_id": model_id}
+        return {"reachable": True, "latency_ms": latency_ms, "model_id": model_id}
+    except requests.exceptions.Timeout:
+        return {"reachable": False, "latency_ms": None, "error": "timeout", "model_id": model_id}
+    except requests.RequestException:
+        return {"reachable": False, "latency_ms": None, "error": "service_unavailable", "model_id": model_id}
+
+
 def _check_disk() -> dict:
     """Check that workspace directory has enough free disk space."""
     try:
-        path = str(_WORKSPACE_DIR) if _WORKSPACE_DIR.exists() else str(_PROJECT_ROOT)
+        from app.core.config.workspace_runtime import get_workspace_root
+
+        workspace_dir = Path(get_workspace_root())
+        path = str(workspace_dir) if workspace_dir.exists() else str(_PROJECT_ROOT)
         usage = shutil.disk_usage(path)
         ok = usage.free > _MIN_DISK_FREE_BYTES
         free_mb = round(usage.free / (1024 * 1024), 1)
@@ -147,6 +229,17 @@ def health():
             "checks": checks,
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+        launch_token = os.getenv("KOTO_LAUNCH_TOKEN", "").strip()
+        presented_token = request.headers.get("X-Koto-Launch-Token", "").strip()
+        if (
+            launch_token
+            and presented_token
+            and hmac.compare_digest(launch_token, presented_token)
+        ):
+            # Return the token only to the launcher that already knows it. This
+            # proves the response belongs to the process started in this launch
+            # attempt without exposing the token to ordinary health clients.
+            payload["launch_token"] = launch_token
         code = 200 if status != "unhealthy" else 503
         return jsonify(payload), code
     except Exception:
@@ -182,89 +275,40 @@ def ping():
     }), 200
 
 
-@health_bp.route("/api/ping/cloud", methods=["GET"])
-def ping_cloud():
-    """Measure round-trip latency to the active DeepSeek endpoint."""
-    provider = "deepseek"
-    target_url = os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip()
+@health_bp.route("/api/ping/models", methods=["GET"])
+def ping_models():
+    """Probe the configured cloud key and local model through real inference calls.
 
-    try:
-        t0 = time.monotonic()
-        requests.head(target_url, timeout=5, allow_redirects=False)
-        latency_ms = round((time.monotonic() - t0) * 1000)
-        return (
-            jsonify(
-                {"reachable": True, "latency_ms": latency_ms, "target": target_url, "provider": provider}
-            ),
-            200,
-        )
-    except requests.exceptions.Timeout:
-        return (
-            jsonify(
-                {
-                    "reachable": False,
-                    "latency_ms": None,
-                    "error": "timeout",
-                    "target": target_url,
-                    "provider": provider,
-                }
-            ),
-            200,
-        )
-    except Exception as exc:
-        return (
-            jsonify(
-                {
-                    "reachable": False,
-                    "latency_ms": None,
-                    "error": str(exc),
-                    "target": target_url,
-                    "provider": provider,
-                }
-            ),
-            200,
-        )
+    This endpoint deliberately returns HTTP 200 even when a provider is down:
+    the desktop status widget needs to render actionable red state instead of
+    treating a failed provider as a failed Koto server.
+    """
+    from app.core.llm.local_model_runtime import (
+        get_configured_local_model_tag,
+        get_configured_model_mode,
+    )
+    from app.core.llm.model_selection import (
+        get_configured_cloud_model,
+        get_configured_cloud_provider,
+    )
 
+    mode = get_configured_model_mode()
+    cloud_provider = get_configured_cloud_provider()
+    cloud_model = get_configured_cloud_model(task_type="CHAT", provider=cloud_provider)
+    local_model = get_configured_local_model_tag()
+    cloud = _probe_deepseek()
+    local = _probe_local_model()
+    active = local if mode == "local" else cloud
 
-@health_bp.route("/api/ping/cloud/all", methods=["GET"])
-def ping_cloud_all():
-    """Return latency for cloud providers exposed by the current product."""
-    from urllib.parse import urlparse
-
-    results = {}
-
-    providers = {
-        "deepseek": os.getenv("DEEPSEEK_API_BASE", "https://api.deepseek.com").strip(),
-    }
-
-    for provider, base_url in providers.items():
-        parsed = urlparse(base_url)
-        netloc = parsed.netloc or parsed.path.split("/")[0]
-        scheme = parsed.scheme or "https"
-        target_url = f"{scheme}://{netloc}"
-
-        try:
-            t0 = time.monotonic()
-            requests.head(target_url, timeout=5, allow_redirects=False)
-            latency_ms = round((time.monotonic() - t0) * 1000)
-            results[provider] = {
-                "reachable": True,
-                "latency_ms": latency_ms,
-                "target": target_url,
-            }
-        except requests.exceptions.Timeout:
-            results[provider] = {
-                "reachable": False,
-                "latency_ms": None,
-                "error": "timeout",
-                "target": target_url,
-            }
-        except Exception as exc:
-            results[provider] = {
-                "reachable": False,
-                "latency_ms": None,
-                "error": str(exc),
-                "target": target_url,
-            }
-
-    return jsonify(results), 200
+    return jsonify(
+        {
+            "active": {
+                "mode": mode,
+                "provider": "ollama" if mode == "local" else cloud_provider,
+                "model_id": local_model if mode == "local" else cloud_model,
+                "reachable": bool(active.get("reachable")),
+            },
+            "deepseek": cloud,
+            "local": local,
+        }
+    ), 200

@@ -33,7 +33,12 @@ def test_workspace_ai_composer_has_one_final_style_owner() -> None:
     workspace_css = _read("web/static/css/workspace.css")
     css = _read("web/static/css/workspace-ai-panel.css")
 
-    assert html.index("css/workspace.css") < html.index("css/workspace-ai-panel.css")
+    assert (
+        html.index("css/workspace.css")
+        < html.index("css/workspace-task-flow.css")
+        < html.index("css/workspace-task-results.css")
+        < html.index("css/workspace-ai-panel.css")
+    )
     assert 'id="wa-session-list-composer-host" class="wa-composer-host"' in html
     assert 'id="wa-chat-composer-host" class="wa-composer-host"' in html
     assert html.count('id="wa-ai-input-area"') == 1
@@ -192,7 +197,8 @@ def test_workspace_ai_composer_behavior_is_shared_between_entrypoints() -> None:
 def test_workspace_ai_session_api_is_split_from_list_rendering() -> None:
     sessions = _read("web/src/workspace/conversation-sessions.ts")
     conversation_list = _read("web/src/workspace/conversation-list.ts")
-    bundle = _read("web/static/js/build/workspace-bundle.js")
+    bundle = _read("web/static/js/build/conversation-list-bundle.js")
+    workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert "export async function fetchAiSessionPreviews" in sessions
     assert "export async function createAiSessionRecord" in sessions
@@ -203,3 +209,4 @@ def test_workspace_ai_session_api_is_split_from_list_rendering() -> None:
     assert "deleteAiSessionRecord(normalized)" in conversation_list
     assert "fetch('/api/sessions?preview=1'" not in conversation_list
     assert "/api/sessions?preview=1" in bundle
+    assert "/api/sessions?preview=1" not in workspace_bundle

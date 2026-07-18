@@ -5,8 +5,8 @@
     Steps:
       1. Extract ZIP to temp dir
       2. Verify critical files + file size + Python DLL
-      3. Seed config (bypass first-run wizard) + launch
-      4. Poll /api/health + /api/ping
+      3. Seed config (bypass first-run wizard) + launch the real desktop path
+      4. Poll /api/health + verify that the WebView window was shown
       5. Stop process
       6. Remove temp dir
 
@@ -28,12 +28,15 @@ param(
     [string]$ZipFile          = "",
     [int]$Port                = 5098,
     [int]$HealthTimeoutSec    = 45,
-    [bool]$RequireHealth      = $true   # set to $false in headless/CI
+    [bool]$RequireHealth      = $true,
+    [bool]$RequireDesktopWindow = $true,
+    [switch]$RequireCodeSigning
 )
 
 $ErrorActionPreference = "Stop"
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $RepoRoot  = Resolve-Path (Join-Path $ScriptDir "..\..")
+. (Join-Path $ScriptDir "release_e2e_helpers.ps1")
 $ExtractDir = Join-Path $env:TEMP "KotoPortableE2E"
 
 # ── Locate ZIP ───────────────────────────────────────────────────────────
@@ -53,6 +56,28 @@ Write-Host "[E2E-Portable] Port: $Port"
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+$expectedSignerThumbprint = ""
+function Test-RequiredAuthenticodeSignature([string]$Path, [string]$Label) {
+    if (-not $RequireCodeSigning) { return }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Fail "Signed executable missing: $Path"
+        return
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        -not $signature.SignerCertificate -or
+        -not $signature.TimeStamperCertificate) {
+        Fail "$Label must have a valid Authenticode signature and trusted timestamp (status=$($signature.Status))"
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($script:expectedSignerThumbprint)) {
+        $script:expectedSignerThumbprint = $signature.SignerCertificate.Thumbprint
+    } elseif ($signature.SignerCertificate.Thumbprint -ne $script:expectedSignerThumbprint) {
+        Fail "$Label signer does not match the Koto.exe signer"
+        return
+    }
+    Pass "$Label Authenticode signature and timestamp are valid"
+}
 function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
     Write-Host "::group::Koto startup diagnostics"
     Write-Host "Process PID: $($kotoProc.Id); exited: $($kotoProc.HasExited); expected port: $HealthPort"
@@ -62,7 +87,7 @@ function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
     } catch {
         Write-Host "No listener found on port $HealthPort"
     }
-    foreach ($logName in @("startup.log", "runtime.log")) {
+    foreach ($logName in @("startup.log", "startup_prerequisites.log", "runtime.log")) {
         $logPath = Join-Path $InstallDir "logs\$logName"
         if (Test-Path $logPath) {
             Write-Host "--- $logPath (last 200 lines) ---"
@@ -122,9 +147,6 @@ $requiredPaths = @(
     (Join-Path $configRoot "macro_suggestions.json"),
     (Join-Path $configRoot "personality_matrix.json"),
     (Join-Path $configRoot "skill_affinity.json"),
-    (Join-Path $configRoot "skill_bindings.json"),
-    (Join-Path $configRoot "skill_ratings.json"),
-    (Join-Path $configRoot "triggers.json"),
     (Join-Path $configRoot "context"),
     (Join-Path $configRoot "divination_data"),
     (Join-Path $configRoot "skills"),
@@ -135,11 +157,26 @@ $requiredPaths = @(
     (Join-Path $staticRoot "jszip.min.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.js"),
     (Join-Path $staticRoot "univer-dist\assets\sheets-main.css"),
-    (Join-Path $ExtractDir "Start_Koto.bat")
+    (Join-Path $ExtractDir "Start_Koto.bat"),
+    (Join-Path $ExtractDir "Install_WebView2_Runtime.bat"),
+    (Join-Path $ExtractDir "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
+    (Join-Path $ExtractDir "LocalModelInstaller.exe"),
+    (Join-Path $internalDir "python311.dll"),
+    (Join-Path $internalDir "VCRUNTIME140.dll"),
+    (Join-Path $internalDir "webview\lib\runtimes\win-x64\native\WebView2Loader.dll")
 )
 foreach ($path in $requiredPaths) {
     if (Test-Path $path) { Pass "Exists: $(Split-Path -Leaf $path)" }
     else                 { Fail "Missing: $path" }
+}
+Test-RequiredAuthenticodeSignature -Path $exePath -Label "portable Koto.exe"
+Test-RequiredAuthenticodeSignature `
+    -Path (Join-Path $ExtractDir "LocalModelInstaller.exe") `
+    -Label "portable LocalModelInstaller.exe"
+if ($RequireCodeSigning -and $failures.Count -gt 0) {
+    Remove-Item -LiteralPath $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "❌ Refusing to launch portable executables that failed the signing gate." -ForegroundColor Red
+    exit 1
 }
 
 $unexpectedRuntimePaths = @(
@@ -173,11 +210,12 @@ Write-Host "`n[Step 3] Seeding config and launching..."
 & (Join-Path $ScriptDir "seed_config.ps1") -InstallDir $ExtractDir
 
 $env:KOTO_PORT = $Port
-$env:KOTO_SERVER_ONLY = "1"
-Write-Host "  KOTO_SERVER_ONLY=1 (server-only mode)"
-$kotoProc = Start-Process -FilePath $exePath `
-    -WorkingDirectory $ExtractDir `
-    -PassThru
+Remove-Item Env:KOTO_SERVER_ONLY -ErrorAction SilentlyContinue
+Write-Host "  Desktop mode (WebView2 path enabled)"
+$kotoProc = Start-KotoWithoutDeveloperEnvironment `
+    -ExePath $exePath `
+    -WorkingDirectory $ExtractDir
+Write-Host "  Developer runtimes removed from child PATH/environment"
 
 Write-Host "  Koto.exe PID: $($kotoProc.Id)"
 
@@ -196,15 +234,8 @@ while ((Get-Date) -lt $deadline) {
     }
     try {
         $resp = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3 -ErrorAction Stop
-        if ($resp.success -eq $true -or $resp.status -eq "ok" -or $resp.status -eq "healthy") {
+        if (Test-KotoHealthResponse -Response $resp) {
             $healthy = $true; Pass "/api/health returned success"; break
-        }
-    } catch {}
-    # Fallback: accept any 200
-    try {
-        $raw = Invoke-WebRequest -Uri $healthUrl -TimeoutSec 3 -UseBasicParsing -ErrorAction Stop
-        if ($raw.StatusCode -eq 200) {
-            $healthy = $true; Pass "/api/health HTTP 200"; break
         }
     } catch {}
     Start-Sleep -Milliseconds 1000
@@ -216,6 +247,26 @@ if (-not $healthy) {
     } else {
         Write-Host "::warning::Health endpoint did not respond within ${HealthTimeoutSec}s (best-effort in CI — pywebview may not init headless)"
     }
+}
+
+$desktopReady = $false
+$desktopDeadline = (Get-Date).AddSeconds($HealthTimeoutSec)
+$startupLog = Join-Path $ExtractDir "logs\startup.log"
+while ((Get-Date) -lt $desktopDeadline -and -not $kotoProc.HasExited) {
+    if (Test-Path $startupLog) {
+        $startupText = Get-Content -LiteralPath $startupLog -Raw -ErrorAction SilentlyContinue
+        if ($startupText -match "窗口已显示，应用正常运行中") {
+            $desktopReady = $true
+            Pass "WebView2 desktop window reached the shown callback"
+            break
+        }
+    }
+    Start-Sleep -Milliseconds 500
+}
+if (-not $desktopReady) {
+    Show-KotoStartupDiagnostics -InstallDir $ExtractDir -HealthPort $Port
+    if ($RequireDesktopWindow) { Fail "Desktop window was not shown within ${HealthTimeoutSec}s" }
+    else { Write-Host "::warning::Desktop window callback was not observed" }
 }
 
 # /api/ping endpoint check

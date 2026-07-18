@@ -559,15 +559,13 @@ class MCPRegistry:
           }
         }
         """
-        import pathlib
+        from app.core.config.settings_store import load_settings_document
+        from app.core.config.user_settings import SETTINGS_FILE
 
-        settings_path = (
-            pathlib.Path(__file__).parents[3] / "config" / "user_settings.json"
-        )
         reg = cls()
         try:
-            if settings_path.exists():
-                data = json.loads(settings_path.read_text(encoding="utf-8-sig"))
+            if os.path.exists(SETTINGS_FILE):
+                data = load_settings_document(SETTINGS_FILE)
                 mcp_cfg = data.get("mcp_servers") or data.get("mcpServers") or {}
                 if mcp_cfg:
                     reg.from_config(mcp_cfg)

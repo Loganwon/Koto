@@ -10,14 +10,15 @@ import {
   taskReportStatusClass as statusClass,
   taskReportUniqueTexts as uniqueTexts,
 } from './task-report-layout';
-import { fileTaskStatusLabel, isFileTaskAttentionStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import {
+  fileTaskStatusLabel,
+  isFileTaskFailureStatus,
+  normalizeFileTaskTerminalStatus,
+} from './file-task-status';
 import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
 
 const workspaceApi = getWorkspaceApi();
-/**
- * Task Workbench UI — batch task management
- * Workspace task workbench.
- */
+/** Historical file-task detail surface opened explicitly from a conversation. */
 
 export interface WorkbenchFile {
   path: string;
@@ -57,23 +58,12 @@ export interface WorkbenchTask {
   metadata: string;
 }
 
-export interface TaskWorkbenchConfig {
-  host?: HTMLElement;
-}
-
-export interface WorkbenchAction {
-  action: string;
-  taskId?: string;
-}
-
 interface WorkbenchState {
   host: HTMLElement;
-  tasks: WorkbenchTask[];
   activeTaskId: string;
-  filter: string;
-  focusedOnly: boolean;
+  activeTask: WorkbenchTask | null;
   loading: boolean;
-  refreshTimer: number | null;
+  requestVersion: number;
 }
 
 const PRESET_LABELS: Record<string, string> = {
@@ -130,8 +120,6 @@ const INTERNAL_PROGRESS_PATTERNS = [
 
 const TITLE_KEYS = ['query', 'task', 'user_input', 'prompt', 'text', 'title', 'instruction'];
 const SUMMARY_KEYS = ['summary', 'message', 'error', 'observation', 'result_summary', 'result', 'preview'];
-const STARTUP_HEALTH_PROMPT = '请总结当前 Koto 的后台运行状态';
-const INTERNAL_AGENT_SESSIONS = new Set(['s1', 'test-session']);
 const WORKBENCH_STAGE_BY_STEP_ID: Record<string, string> = {
   'task.classified': 'route',
 };
@@ -292,10 +280,6 @@ function normalizeTask(raw: any): WorkbenchTask {
   };
 }
 
-function shortId(taskId: any): string {
-  return String(taskId || '').replace(/-/g, '').slice(0, 8) || 'task';
-}
-
 function statusLabel(status: any): string {
   const normalized = String(status || '').trim().toLowerCase();
   if (normalized === 'retrying') return '重试中';
@@ -327,38 +311,6 @@ function parseMetadata(task: any): Record<string, any> {
 
 function taskPayload(task: any): Record<string, any> | null {
   return safeJsonObject(task && task.user_input) || parseMetadata(task);
-}
-
-function isHousekeepingTask(task: any): boolean {
-  const payload = taskPayload(task);
-  const preset = payloadPresetKey(payload);
-  const hasUserText = !!firstPayloadText(payload, TITLE_KEYS);
-  const type = String(task && task.task_type || '').trim();
-  const source = String(task && task.source || '').trim();
-  const sessionId = String(task && task.session_id || '').trim();
-  const input = String(task && task.user_input || '').trim();
-  const systemJob = source === 'job_runner' || sessionId === 'system';
-  if (systemJob && (preset === 'proactive_agent_tick' || preset === 'startup_runtime_health')) return true;
-  if (source === 'agent' && (type === 'SYSTEM' || type === 'PLAN')) return true;
-  if (source === 'agent' && INTERNAL_AGENT_SESSIONS.has(sessionId)) return true;
-  if (source === 'agent' && input.includes(STARTUP_HEALTH_PROMPT)) return true;
-  if (preset === 'proactive_agent_tick' && !hasUserText) return true;
-  return type === 'proactive_tick' && source === 'job_runner' && !hasUserText;
-}
-
-function displayTasksForFilter(state: WorkbenchState): WorkbenchTask[] {
-  const visible = state.tasks.filter((task) => !isHousekeepingTask(task));
-  return state.filter === 'all'
-    ? visible
-    : visible.filter((task) => task.status === state.filter);
-}
-
-function activeDisplayTask(state: WorkbenchState): WorkbenchTask | null {
-  const visible = displayTasksForFilter(state);
-  if (visible.some((task) => task.task_id === state.activeTaskId)) {
-    return state.tasks.find((task) => task.task_id === state.activeTaskId) || null;
-  }
-  return visible[0] || null;
 }
 
 function runIdForTask(task: any): string {
@@ -431,7 +383,7 @@ function metadataStepsForTask(task: any): WorkbenchStep[] {
   const model = metadataModelLabel(task, metadata) || '自动';
   const status = terminalStatus(task);
   const terminalComplete = status === 'completed';
-  const terminalFailed = status === 'failed';
+  const terminalFailed = isFileTaskFailureStatus(status);
   const steps: WorkbenchStep[] = [{
     tone: terminalFailed ? 'error' : (terminalComplete ? 'answer' : 'action'),
     label: `模型调用 · ${statusLabel(task && task.status)}`,
@@ -468,21 +420,6 @@ function taskCardForTask(taskId: any, runId: any): HTMLElement | null {
     return (id && String(dataset['taskId'] || '').trim() === id)
       || (run && String(dataset['taskRunId'] || '').trim() === run);
   }) || null;
-}
-
-function focusTaskCard(taskId: any, runId: any): boolean {
-  const card = taskCardForTask(taskId, runId) as any;
-  if (!card) return false;
-  card.classList.add('is-workbench-focused');
-  if (card._waWorkbenchFocusTimer) window.clearTimeout(card._waWorkbenchFocusTimer);
-  card._waWorkbenchFocusTimer = window.setTimeout(() => {
-    card.classList.remove('is-workbench-focused');
-    card._waWorkbenchFocusTimer = null;
-  }, 1600);
-  if (typeof card.scrollIntoView === 'function') {
-    card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
-  }
-  return true;
 }
 
 function taskTitle(task: any): string {
@@ -524,12 +461,16 @@ function taskCompletionSummary(task: any): string {
 function taskMetaLine(task: any): string {
   const parts = [
     timeLabel(task && task.created_at),
-    readableType(task && task.task_type),
   ].filter(Boolean);
   if (task && task.elapsed_seconds > 0.05) {
     parts.push(`${Math.max(1, Math.round(task.elapsed_seconds))} 秒`);
   }
   return parts.join(' · ');
+}
+
+function taskTypeMetaHtml(task: any): string {
+  const taskType = readableType(task && task.task_type);
+  return taskType ? `<span class="koto-task-type-meta">${esc(taskType)}</span>` : '';
 }
 
 function openTaskFile(path: any): void {
@@ -555,110 +496,8 @@ function terminalStatus(task: any): string {
   ) || 'running';
 }
 
-function decodeTaskPayload(value: any): Record<string, any> {
-  const raw = String(value || '').trim();
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(decodeURIComponent(raw));
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
-  } catch (_) {
-    return {};
-  }
-}
-
-function latestLiveTaskCard(): HTMLElement | null {
-  const cards = Array.from(document.querySelectorAll('.wa-task-run')) as HTMLElement[];
-  for (let index = cards.length - 1; index >= 0; index--) {
-    const card = cards[index];
-    if (card.classList.contains('streaming')) return card;
-  }
-  for (let index = cards.length - 1; index >= 0; index--) {
-    const card = cards[index];
-    const dataset = card.dataset || {};
-    if (String(dataset.taskRunId || '').trim() && !liveCardCompleted(card)) return card;
-  }
-  return null;
-}
-
-function statusFromLiveCard(card: HTMLElement): string {
-  const dataset = card.dataset || {};
-  const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
-  if (terminal === 'cancelled') return 'cancelled';
-  if (terminal === 'failed' || terminal === 'error' || terminal === 'blocked') return 'failed';
-  if (isFileTaskAttentionStatus(terminal)) return 'waiting';
-  if (terminal === 'completed' || card.classList.contains('done')) return 'completed';
-  if (card.classList.contains('cancelled')) return 'cancelled';
-  if (card.classList.contains('failed')) return 'failed';
-  return 'running';
-}
-
-function liveTaskFromCard(card: HTMLElement): WorkbenchTask {
-  const dataset = card.dataset || {};
-  const requestPayload = decodeTaskPayload(dataset.taskFollowupPayload || dataset.taskPendingResumePayload || '');
-  const metadata: Record<string, any> = {
-    run_id: String(dataset.taskRunId || '').trim(),
-    files: Array.isArray(requestPayload.files) ? requestPayload.files : [],
-    task_request_payload: requestPayload,
-  };
-  const routeIntent = requestPayload.routing_decision && typeof requestPayload.routing_decision === 'object'
-    ? requestPayload.routing_decision
-    : (requestPayload.options && typeof requestPayload.options === 'object'
-      ? requestPayload.options.workspace_route_intent
-      : null);
-  if (routeIntent && typeof routeIntent === 'object') metadata.route_intent = routeIntent;
-  if (requestPayload.model_mode) metadata.model_mode = requestPayload.model_mode;
-  if (requestPayload.model_id) metadata.model_id = requestPayload.model_id;
-  return normalizeTask({
-    task_id: String(dataset.taskId || '').trim(),
-    session_id: '',
-    user_input: String(dataset.taskRequest || requestPayload.task || '').trim() || '文件任务',
-    status: statusFromLiveCard(card),
-    task_type: 'file_task',
-    source: 'file_task',
-    created_at: '',
-    result_summary: String(dataset.taskSummary || card.querySelector('[data-role="summary"]')?.textContent || '').trim(),
-    step_count: card.querySelectorAll('.wa-task-step').length,
-    tool_calls: card.querySelectorAll('.wa-task-row').length,
-    metadata: JSON.stringify(metadata),
-  });
-}
-
-function renderFocusedLiveTask(state: WorkbenchState): boolean {
-  const card = latestLiveTaskCard();
-  if (!card) return false;
-  renderTaskRows(state);
-  renderDetail(state, liveTaskFromCard(card));
-  return true;
-}
-
 function aiMessagesHost(): HTMLElement | null {
   return document.getElementById('wa-ai-messages') as HTMLElement | null;
-}
-
-function ensureWorkbenchChrome(host: HTMLElement | null): void {
-  if (!host) return;
-  const actions = host.querySelector('.wa-task-workbench-actions');
-  const historyButton = actions ? actions.querySelector('[data-task-workbench-action="history"]') : null;
-  if (historyButton) historyButton.remove();
-  const filters = host.querySelector('.wa-task-workbench-filters') as HTMLElement | null;
-  if (filters) filters.hidden = true;
-  const kicker = host.querySelector('.wa-task-workbench-title-group .wa-task-workbench-kicker');
-  if (kicker) kicker.textContent = '流程';
-  const title = host.querySelector('.wa-task-workbench-title-group strong');
-  if (title) title.textContent = '任务流程';
-}
-
-function setWorkbenchFocusedMode(state: WorkbenchState, _focused: boolean): void {
-  if (!state || !state.host) return;
-  const enabled = true;
-  state.focusedOnly = enabled;
-  state.host.classList.toggle('is-focused-task', enabled);
-  const title = state.host.querySelector('.wa-task-workbench-title-group strong');
-  if (title) title.textContent = '任务流程';
-  const filters = state.host.querySelector('.wa-task-workbench-filters') as HTMLElement | null;
-  if (filters) filters.hidden = true;
-  const list = state.host.querySelector('#wa-task-workbench-list');
-  if (list) list.innerHTML = '';
 }
 
 function ensureWorkbench(): HTMLElement | null {
@@ -669,7 +508,6 @@ function ensureWorkbench(): HTMLElement | null {
       messages.appendChild(host);
     }
     host.classList.add('wa-inline-task-workbench');
-    ensureWorkbenchChrome(host);
     return host;
   }
   const fallbackAnchor = aiMessagesHost();
@@ -690,12 +528,10 @@ function ensureWorkbench(): HTMLElement | null {
     '  </div>',
     '</div>',
     '<div class="wa-task-workbench-body">',
-    '  <div id="wa-task-workbench-list" class="wa-task-workbench-list"></div>',
     '  <div id="wa-task-workbench-detail" class="wa-task-workbench-detail"></div>',
     '</div>',
   ].join('');
   fallbackAnchor.appendChild(host);
-  ensureWorkbenchChrome(host);
   return host;
 }
 
@@ -721,36 +557,6 @@ function renderEmptyDetail(detail: HTMLElement | null, message?: string): void {
     return;
   }
   detail.innerHTML = emptyTaskFlowHtml();
-}
-
-function renderTaskRows(state: WorkbenchState): void {
-  const list = state.host.querySelector('#wa-task-workbench-list');
-  if (!list) return;
-  if (state.focusedOnly) {
-    list.innerHTML = '';
-    return;
-  }
-  const filtered = displayTasksForFilter(state);
-  if (!filtered.length) {
-    list.innerHTML = `<div class="wa-task-workbench-empty">${state.tasks.length ? '暂无可展示任务' : '暂无任务'}</div>`;
-    return;
-  }
-  list.innerHTML = filtered.map((task) => {
-    const active = task.task_id === state.activeTaskId ? ' is-active' : '';
-    const artifactDot = task.artifact_result ? '<span class="wa-task-workbench-dot" title="有结果产物"></span>' : '';
-    const title = taskTitle(task);
-    const time = timeLabel(task.created_at);
-    return [
-      `<button type="button" class="wa-task-workbench-item${active}" data-task-id="${attr(task.task_id)}">`,
-      `  <span class="wa-task-workbench-item-title">${esc(title)}</span>`,
-      '  <span class="wa-task-workbench-item-meta">',
-      `    <span data-status="${esc(task.status)}">${esc(statusLabel(task.status))}</span>`,
-      time ? `    <span>${esc(time)}</span>` : '',
-      `    ${artifactDot}`,
-      '  </span>',
-      '</button>',
-    ].join('');
-  }).join('');
 }
 
 function stepTone(stepType: any): string {
@@ -779,7 +585,7 @@ function stepText(step: any): string {
 function liveCardCompleted(card: any): boolean {
   const dataset = card && card.dataset ? card.dataset : {};
   const terminal = normalizeFileTaskTerminalStatus(dataset['taskTerminalStatus'] || '');
-  if (isFileTaskAttentionStatus(terminal)) return false;
+  if (isFileTaskFailureStatus(terminal)) return false;
   return terminal === 'completed' || String(dataset['taskCompleted'] || '').trim().toLowerCase() === 'true';
 }
 
@@ -883,7 +689,7 @@ function inferredStageStatus(def: { id: string }, existing: any, task: any, maxS
   const terminal = terminalStatus(task);
   if (existing && existing.status) return existing.status;
   if (terminal === 'completed') return '已完成';
-  if (terminal === 'failed') return flowStageIndex(def.id) <= maxSeenIndex ? '异常' : '待处理';
+  if (terminal === 'failed') return def.id === 'deliver' || flowStageIndex(def.id) <= maxSeenIndex ? '异常' : '待处理';
   if (flowStageIndex(def.id) < maxSeenIndex) return '已完成';
   return '待处理';
 }
@@ -1070,34 +876,20 @@ function renderDetail(state: WorkbenchState, task: WorkbenchTask | null): void {
   const artifactButton = task.artifact_result
     ? '<button type="button" data-task-detail-action="artifact">查看产物</button>'
     : '';
-  const canResume = typeof workspaceApi.resumePersistedFileTask === 'function';
-  const processButton = !state.focusedOnly && canResume
-    ? '<button type="button" data-task-detail-action="process">定位对话</button>'
-    : '';
-  const inlineTaskCardOwnsResult = taskHasProjectedInlineCard(task);
   const metaLine = taskMetaLine(task);
   detail.innerHTML = [
     '<div class="wa-task-workbench-detail-head">',
     `  <span class="wa-task-workbench-status" data-status="${esc(task.status)}">${esc(statusLabel(task.status))}</span>`,
     `  <strong>${esc(taskTitle(task))}</strong>`,
     metaLine ? `  <span>${esc(metaLine)}</span>` : '',
+    taskTypeMetaHtml(task),
     '</div>',
     renderTaskFiles(files),
     '<div class="wa-task-workbench-steps">',
     renderSteps(task.steps, task),
     '</div>',
-    '<div class="wa-task-workbench-detail-actions">',
-    processButton,
-    '</div>',
-    inlineTaskCardOwnsResult ? '' : renderCompletionReport(task, summary, artifactButton),
+    renderCompletionReport(task, summary, artifactButton),
   ].join('');
-}
-
-function taskHasProjectedInlineCard(task: WorkbenchTask): boolean {
-  const taskId = String(task && task.task_id || '').trim();
-  if (!taskId) return false;
-  return Array.from(document.querySelectorAll('#wa-ai-messages .wa-task-run.is-workbench-projected'))
-    .some((node) => (node as HTMLElement).dataset.taskId === taskId);
 }
 
 async function fetchJson(url: string): Promise<any> {
@@ -1109,62 +901,30 @@ async function fetchJson(url: string): Promise<any> {
   return data;
 }
 
-async function loadTasks(state: WorkbenchState): Promise<void> {
+async function loadActiveTask(state: WorkbenchState): Promise<WorkbenchTask | null> {
+  const id = String(state.activeTaskId || '').trim();
+  if (!id) return null;
+  const requestVersion = ++state.requestVersion;
   state.loading = true;
-  const list = state.host.querySelector('#wa-task-workbench-list');
-  const preferredId = String(state.activeTaskId || '').trim();
-  if (list && !state.focusedOnly) list.innerHTML = '<div class="wa-task-workbench-empty">正在读取任务...</div>';
-  try {
-    const data = await fetchJson('/api/tasks?limit=120&order_by=created_at');
-    state.tasks = Array.isArray(data.data) ? data.data.map(normalizeTask) : [];
-    const preferred = preferredId
-      ? state.tasks.find((task) => task.task_id === preferredId && !isHousekeepingTask(task)) || null
-      : null;
-    const active = preferred || (!state.focusedOnly ? activeDisplayTask(state) : null);
-    const selectedId = active ? active.task_id : (state.focusedOnly ? preferredId : '');
-    state.activeTaskId = selectedId;
-    renderTaskRows(state);
-    if (selectedId) await selectTask(state, selectedId, { silentRows: true, skipFocus: true });
-    else if (!(state.focusedOnly && renderFocusedLiveTask(state))) {
-      renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
-    }
-  } catch (error: any) {
-    if (list) list.innerHTML = `<div class="wa-task-workbench-empty">读取失败：${esc(error.message || error)}</div>`;
-    renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement, '任务列表暂不可用');
-  } finally {
-    state.loading = false;
-  }
-}
-
-async function selectTask(state: WorkbenchState, taskId: any, options?: { silentRows?: boolean; skipFocus?: boolean }): Promise<void> {
-  const id = String(taskId || '').trim();
-  if (!id) return;
-  state.activeTaskId = id;
-  let task = state.tasks.find((item) => item.task_id === id) || null;
+  renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement, '正在读取任务详情...');
   try {
     const data = await fetchJson(`/api/tasks/${encodeURIComponent(id)}`);
-    task = normalizeTask(data.data || task);
-    const taskIndex = state.tasks.findIndex((item) => item.task_id === id);
-    if (taskIndex >= 0) state.tasks = state.tasks.map((item) => item.task_id === id ? task! : item);
-    else if (task && task.task_id) state.tasks = [task].concat(state.tasks);
-  } catch (_) {
-    // Fall back to the list item; the detail route may be unavailable in test shells.
+    if (requestVersion !== state.requestVersion || id !== state.activeTaskId) return null;
+    const task = normalizeTask(data.data);
+    state.activeTask = task && task.task_id ? task : null;
+    renderDetail(state, state.activeTask);
+    return state.activeTask;
+  } catch (error: any) {
+    if (requestVersion !== state.requestVersion || id !== state.activeTaskId) return null;
+    state.activeTask = null;
+    renderEmptyDetail(
+      state.host.querySelector('#wa-task-workbench-detail') as HTMLElement,
+      `任务详情暂不可用：${String(error && error.message || error || '读取失败')}`,
+    );
+    return null;
+  } finally {
+    if (requestVersion === state.requestVersion) state.loading = false;
   }
-  if (!(options && options.silentRows)) renderTaskRows(state);
-  renderDetail(state, task);
-  if (!(options && options.skipFocus)) focusTaskCard(id, runIdForTask(task));
-}
-
-function scheduleWorkbenchRefresh(state: WorkbenchState, taskId?: any): void {
-  if (!state || !state.host || state.host.hidden) return;
-  const id = String(taskId || '').trim();
-  if (id) state.activeTaskId = id;
-  if (!id && state.focusedOnly && !state.activeTaskId && renderFocusedLiveTask(state)) return;
-  if (state.refreshTimer) window.clearTimeout(state.refreshTimer);
-  state.refreshTimer = window.setTimeout(() => {
-    state.refreshTimer = null;
-    if (!state.loading) void loadTasks(state);
-  }, 450);
 }
 
 function bindWorkbench(state: WorkbenchState): void {
@@ -1176,52 +936,21 @@ function bindWorkbench(state: WorkbenchState): void {
       openTaskFile(filePath);
       return;
     }
-    const taskId = target.getAttribute('data-task-id');
-    if (taskId) {
-      void selectTask(state, taskId);
-      return;
-    }
-    const filter = target.getAttribute('data-task-workbench-filter');
-    if (filter) {
-      setWorkbenchFocusedMode(state, true);
-      state.filter = filter;
-      renderTaskRows(state);
-      renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
-      return;
-    }
     const action = target.getAttribute('data-task-workbench-action');
     if (action === 'close') {
       state.host.hidden = true;
       return;
     }
-    if (action === 'history') {
-      setWorkbenchFocusedMode(state, true);
-      renderTaskRows(state);
-      renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
-      return;
-    }
     if (action === 'refresh') {
-      if (state.activeTaskId) void loadTasks(state);
+      if (state.activeTaskId) void loadActiveTask(state);
       else renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
       return;
     }
     const detailAction = target.getAttribute('data-task-detail-action');
-    const task = state.tasks.find((item) => item.task_id === state.activeTaskId);
+    const task = state.activeTask;
     if (!task) return;
     if (detailAction === 'artifact' && task.artifact_result && typeof workspaceApi.renderArtifactResult === 'function') {
       workspaceApi.renderArtifactResult(task.artifact_result);
-    } else if (detailAction === 'focus') {
-      focusTaskCard(task.task_id, runIdForTask(task));
-    } else if (detailAction === 'process' && typeof workspaceApi.resumePersistedFileTask === 'function') {
-      if (focusTaskCard(task.task_id, runIdForTask(task))) return;
-      const syncPromise = workspaceApi.resumePersistedFileTask({
-        taskId: task.task_id,
-        runId: runIdForTask(task),
-        initialStatus: terminalStatus(task),
-        replay: true,
-      });
-      window.setTimeout(() => focusTaskCard(task.task_id, runIdForTask(task)), 0);
-      syncPromise.catch((error: any) => console.warn('[WA taskWorkbench] process sync failed:', error));
     }
   });
 }
@@ -1231,16 +960,13 @@ export function initTaskWorkbench(): WorkbenchState | null {
   if (!host || (host as any)._waTaskWorkbenchState) return host ? (host as any)._waTaskWorkbenchState : null;
   const state: WorkbenchState = {
     host,
-    tasks: [],
     activeTaskId: '',
-    filter: 'all',
-    focusedOnly: true,
+    activeTask: null,
     loading: false,
-    refreshTimer: null,
+    requestVersion: 0,
   };
   (host as any)._waTaskWorkbenchState = state;
   bindWorkbench(state);
-  setWorkbenchFocusedMode(state, true);
   renderEmptyDetail(host.querySelector('#wa-task-workbench-detail') as HTMLElement);
   return state;
 }
@@ -1250,16 +976,11 @@ export function openTaskWorkbenchForCurrentRun(options?: { taskId?: any; scroll?
   if (!state || !state.host) return null;
   const opts = options || {};
   const explicitTaskId = String(opts.taskId || '').trim();
-  if (explicitTaskId) state.activeTaskId = explicitTaskId;
-  setWorkbenchFocusedMode(state, true);
+  if (!explicitTaskId) return null;
+  state.activeTaskId = explicitTaskId;
+  state.activeTask = null;
   state.host.hidden = false;
-  if (state.activeTaskId && !state.loading) {
-    void loadTasks(state);
-  } else {
-    if (!renderFocusedLiveTask(state)) {
-      renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
-    }
-  }
+  void loadActiveTask(state);
   if (opts.scroll !== false && typeof state.host.scrollIntoView === 'function') {
     state.host.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
@@ -1269,32 +990,11 @@ export function openTaskWorkbenchForCurrentRun(options?: { taskId?: any; scroll?
 export function refreshCurrentTaskFlow(): Promise<any> {
   const state = initTaskWorkbench();
   if (!state) return Promise.resolve(null);
-  if (state.focusedOnly && !state.activeTaskId) {
-    if (!renderFocusedLiveTask(state)) {
-      renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
-    }
+  if (!state.activeTaskId) {
+    renderEmptyDetail(state.host.querySelector('#wa-task-workbench-detail') as HTMLElement);
     return Promise.resolve([]);
   }
-  return loadTasks(state);
-}
-
-export function notifyTaskFlowChanged(taskId?: any): void {
-  const state = initTaskWorkbench();
-  if (!state) return;
-  projectWorkbenchBeforeInlineTaskCard(state, taskId);
-  scheduleWorkbenchRefresh(state, taskId);
-}
-
-function projectWorkbenchBeforeInlineTaskCard(state: WorkbenchState, taskId?: any): void {
-  const id = String(taskId || state.activeTaskId || '').trim();
-  if (!id || !state.host) return;
-  const card = Array.from(document.querySelectorAll('#wa-ai-messages .wa-task-run'))
-    .find((node) => (node as HTMLElement).dataset.taskId === id) as HTMLElement | undefined;
-  if (!card || card.classList.contains('is-history-snapshot')) return;
-  card.classList.add('is-workbench-projected');
-  if (state.host.parentElement === card.parentElement && state.host.nextElementSibling !== card) {
-    card.parentElement?.insertBefore(state.host, card);
-  }
+  return loadActiveTask(state);
 }
 
 function ready(): void {
@@ -1310,6 +1010,5 @@ if (document.readyState === 'loading') {
 publishWorkspaceApi({
   initTaskWorkbench,
   refreshCurrentTaskFlow,
-  notifyTaskFlowChanged,
   openTaskWorkbenchForCurrentRun,
 });

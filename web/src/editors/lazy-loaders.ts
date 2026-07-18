@@ -6,38 +6,52 @@
 
 import { KotoTextEditor } from '../editors/text-editor';
 import { _setupDocOutline } from '../editors/docx-outline';
+import { _loadScript } from './cdn-loaders';
 
 // These are loaded eagerly since they're needed for most workflows
 export { KotoTextEditor, _setupDocOutline };
 
 type EditorModule = any;
 
-const _lazyCache: Record<string, EditorModule | null> = {};
+const _lazyCache: Record<string, EditorModule> = {};
+const _lazyLoadPromises: Record<string, Promise<EditorModule> | undefined> = {};
 
-async function _lazyLoad(name: string, importer: () => Promise<EditorModule>): Promise<EditorModule> {
-  if (_lazyCache[name]) return _lazyCache[name]!;
-  _lazyCache[name] = null; // Prevent concurrent loads
-  const mod = await importer();
-  _lazyCache[name] = mod;
-  return mod;
+function _editorAssetUrl(bundleName: string): string {
+  const configured = (window as any).__kotoWorkspaceEditorAssets;
+  return String(configured && configured[bundleName] || `/static/js/build/${bundleName}.js`);
+}
+
+async function _lazyLoad(name: string, bundleName: string, globalName: string): Promise<EditorModule> {
+  if (_lazyCache[name]) return _lazyCache[name];
+  if (_lazyLoadPromises[name]) return _lazyLoadPromises[name]!;
+  const loadPromise = _loadScript(_editorAssetUrl(bundleName), 60000).then(() => {
+    const mod = (window as any)[globalName];
+    if (!mod || typeof mod !== 'object') throw new Error(`${bundleName} 加载后未注册 ${globalName}`);
+    _lazyCache[name] = mod;
+    return mod;
+  }).finally(() => {
+    delete _lazyLoadPromises[name];
+  });
+  _lazyLoadPromises[name] = loadPromise;
+  return loadPromise;
 }
 
 /** Load the PPTX editor (heavy: slide rendering engine). */
-export async function loadPptxEditor(): Promise<typeof import('../editors/pptx-editor')> {
-  return _lazyLoad('pptx', () => import('../editors/pptx-editor'));
+export async function loadPptxEditor(): Promise<EditorModule> {
+  return _lazyLoad('pptx', 'pptx-editor-bundle', 'KotoPptxEditorModule');
 }
 
 /** Load the PDF viewer (medium: PDF.js wrapper). */
-export async function loadPdfViewer(): Promise<typeof import('../editors/pdf-viewer')> {
-  return _lazyLoad('pdf', () => import('../editors/pdf-viewer'));
+export async function loadPdfViewer(): Promise<EditorModule> {
+  return _lazyLoad('pdf', 'pdf-viewer-bundle', 'KotoPdfViewerModule');
 }
 
 /** Load the XLSX editor (heavy: Univer Sheets engine). */
-export async function loadXlsxEditor(): Promise<typeof import('../editors/xlsx-editor')> {
-  return _lazyLoad('xlsx', () => import('../editors/xlsx-editor'));
+export async function loadXlsxEditor(): Promise<EditorModule> {
+  return _lazyLoad('xlsx', 'xlsx-editor-bundle', 'KotoXlsxEditorModule');
 }
 
 /** Load the image viewer (medium: pan/zoom canvas). */
-export async function loadImageViewer(): Promise<typeof import('../editors/image-viewer')> {
-  return _lazyLoad('image', () => import('../editors/image-viewer'));
+export async function loadImageViewer(): Promise<EditorModule> {
+  return _lazyLoad('image', 'image-viewer-bundle', 'KotoImageViewerModule');
 }

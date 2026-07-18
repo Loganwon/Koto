@@ -27,13 +27,43 @@ def git_revision(root: Path) -> str | None:
         return None
 
 
+def git_dirty(root: Path) -> bool | None:
+    """Report whether artifact inputs differ from the recorded revision."""
+    try:
+        output = subprocess.check_output(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
+        return bool(output.strip())
+    except (OSError, subprocess.CalledProcessError):
+        return None
+
+
 def validate_version(value: str) -> str:
     version = str(value or "").strip()
     if not version or not version[0].isalnum():
         raise ValueError("version must start with an alphanumeric character")
-    if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-" for char in version):
+    if any(
+        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-"
+        for char in version
+    ):
         raise ValueError("version contains characters unsafe for release filenames")
     return version
+
+
+def parse_optional_bool(value: str | None, *, fallback: bool | None) -> bool | None:
+    if value is None:
+        return fallback
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    if normalized == "unknown":
+        return None
+    raise ValueError(f"invalid boolean state: {value}")
 
 
 def main() -> int:
@@ -41,6 +71,24 @@ def main() -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--hash-output", type=Path, required=True)
+    parser.add_argument("--git-revision", default=None)
+    parser.add_argument("--git-dirty", choices=("true", "false", "unknown"))
+    parser.add_argument(
+        "--worktree-changed-during-build",
+        choices=("true", "false", "unknown"),
+    )
+    parser.add_argument(
+        "--code-signing-status",
+        choices=("valid", "unsigned"),
+        default="unsigned",
+    )
+    parser.add_argument(
+        "--code-signing-required",
+        choices=("true", "false"),
+        default="false",
+    )
+    parser.add_argument("--signer-thumbprint", default="")
+    parser.add_argument("--timestamp-server", default="")
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args()
     version = validate_version(args.version)
@@ -66,11 +114,30 @@ def main() -> int:
         "schema_version": 1,
         "version": version,
         "generated_at": datetime.now(UTC).isoformat(),
-        "git_revision": git_revision(root),
+        "git_revision": args.git_revision or git_revision(root),
+        "git_dirty": parse_optional_bool(
+            args.git_dirty,
+            fallback=git_dirty(root),
+        ),
+        "worktree_changed_during_build": parse_optional_bool(
+            args.worktree_changed_during_build,
+            fallback=None,
+        ),
+        "code_signing": {
+            "required": parse_optional_bool(
+                args.code_signing_required,
+                fallback=False,
+            ),
+            "status": args.code_signing_status,
+            "signer_thumbprint": args.signer_thumbprint or None,
+            "timestamp_server": args.timestamp_server or None,
+        },
         "artifacts": entries,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     args.hash_output.write_text(
         "".join(f"{entry['sha256']} *{entry['name']}\n" for entry in entries),
         encoding="utf-8",

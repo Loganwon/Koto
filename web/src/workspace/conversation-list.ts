@@ -299,7 +299,7 @@ export async function deleteAiSession(sessionId: string): Promise<boolean> {
         }
       } else {
         _activeAiSessionId = '';
-        const runtime = (window as any)._waConversationRuntime;
+        const runtime = workspaceApi.getWorkspaceConversationRuntime?.();
         if (runtime && typeof runtime.reset === 'function') runtime.reset();
       }
       showAiSessionList();
@@ -345,7 +345,7 @@ export async function clearAiSessions(): Promise<boolean> {
       : [];
     if (!failedIds.length) {
       _activeAiSessionId = '';
-      const runtime = (window as any)._waConversationRuntime;
+      const runtime = workspaceApi.getWorkspaceConversationRuntime?.();
       if (runtime && typeof runtime.reset === 'function') runtime.reset();
     }
     showAiSessionList();

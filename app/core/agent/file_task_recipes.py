@@ -160,6 +160,44 @@ _DOCX_CREATE_PATTERN = re.compile(
     r"(?:创建|新建|生成|产出|输出|记录到|整理成|create|generate|output|record|write).{0,20}(?:docx|word|文档)",
     re.IGNORECASE,
 )
+_NEW_ARTIFACT_OUTPUT_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "docx",
+        re.compile(
+            r"(?:创建|新建|生成|产出|输出|导出|另存为|保存为|整理成|"
+            r"create|generate|produce|output|export|save as).{0,28}"
+            r"(?:\.?(?:docx?|word)|文档)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "pptx",
+        re.compile(
+            r"(?:创建|新建|生成|产出|输出|导出|另存为|保存为|整理成|"
+            r"create|generate|produce|output|export|save as).{0,28}"
+            r"(?:\.?(?:pptx?|powerpoint)|幻灯片|演示文稿|slides?|presentation)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "xlsx",
+        re.compile(
+            r"(?:创建|新建|生成|产出|输出|导出|另存为|保存为|整理成|"
+            r"create|generate|produce|output|export|save as).{0,28}"
+            r"(?:\.?(?:xlsx?|excel)|工作簿|电子表格)",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "pdf",
+        re.compile(
+            r"(?:创建|新建|生成|产出|输出|导出|另存为|保存为|转换为|转成|"
+            r"create|generate|produce|output|export|save as|convert).{0,28}"
+            r"(?:\.?pdf|PDF)",
+            re.IGNORECASE,
+        ),
+    ),
+)
 _STEPWISE_PATTERN = re.compile(
     r"(?:每完成一步|每一步(?:完成)?后|分步|一步一步|拆分成很多个小任务|继续下一步|等我(?:来说)?继续|确认后继续|等待(?:我|用户)?确认|step[- ]?by[- ]?step|stepwise|each step|wait for (?:my )?confirmation|continue next step)",
     re.IGNORECASE,
@@ -209,6 +247,28 @@ def request_file_types(files: Sequence[FileTaskFile]) -> set[str]:
     return file_types
 
 
+def explicit_new_artifact_file_type(task: str) -> str:
+    """Return a uniquely requested *new* output format, if the task names one.
+
+    This deliberately excludes generic "write into Word" wording: with existing
+    office files that wording still needs an unambiguous selected target.  It is
+    only for requests such as "create a DOCX" where the target is a new artifact
+    and attached files are sources rather than write candidates.
+    """
+    text = _semantic_task_text(str(task or ""))
+    matches: list[tuple[int, str]] = []
+    for file_type, pattern in _NEW_ARTIFACT_OUTPUT_PATTERNS:
+        for match in pattern.finditer(text):
+            matches.append((match.start(), file_type))
+    if not matches:
+        return ""
+
+    # A task can request intermediate artifacts; the final explicitly-created
+    # artifact is the last one in natural-language order.
+    matches.sort(key=lambda item: item[0])
+    return matches[-1][1]
+
+
 def request_target_file_type(
     request: FileTaskRequest, files: Sequence[FileTaskFile]
 ) -> str:
@@ -223,7 +283,7 @@ def request_target_file_type(
         candidate = file_type_from_file_info(file_info)
         if candidate:
             return candidate
-    return ""
+    return explicit_new_artifact_file_type(request.task)
 
 
 def semantic_markers(
@@ -767,7 +827,11 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         read_operation_kind="analyze_visualize",
         execution_mode="generic_tool_loop",
         priority=120,
-        required_file_types=("xlsx", "docx"),
+        # A DOCX may be an existing target or a new artifact inferred from the
+        # request.  Requiring it in the attached files made "upload an Excel,
+        # create a new DOCX report" silently fall back to the generic chart
+        # route and skip the financial-report quality contract.
+        required_file_types=("xlsx",),
         target_file_types=("docx", "doc"),
         required_markers=(
             "financial_request",
@@ -781,6 +845,7 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
             "audit_financial_workbook",
             "run_python_code",
             "write_docx_content",
+            "insert_excel_as_docx_table",
             "insert_image_into_docx",
         ),
         plan_steps=(
@@ -792,12 +857,12 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
             {
                 "id": "execute",
                 "title": "生成图表和问题清单",
-                "description": "抽取关键年份指标，生成真实图表，并整理财务模型问题。",
+                "description": "审计模型，抽取关键年份指标，生成至少两张真实图表，并整理财务模型问题。",
             },
             {
                 "id": "write_docx",
                 "title": "写入 Word",
-                "description": "先写入分析结论和问题清单，再插入真实图表图片。",
+                "description": "写入结构化结论、关键数据表和问题清单，再插入真实图表图片。",
             },
             {
                 "id": "check",
@@ -807,8 +872,9 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
         ),
         success_criteria=(
             "目标 DOCX 产生 file.changed 事件",
+            "关键预测数据作为真实 Word 表格写入 DOCX",
             "问题清单作为可读段落写入 DOCX",
-            "图表作为真实图片插入 DOCX",
+            "至少两张互补图表作为真实图片插入 DOCX",
         ),
         quality_gates=(
             {
@@ -820,12 +886,20 @@ TASK_RECIPES: tuple[FileTaskRecipe, ...] = (
                 "detail": "财务图表报告应写入结构化分析段落；当前段落写入数：{actual}。",
             },
             {
+                "criterion": "financial_report_has_key_data_table",
+                "operation": "insert_excel_as_docx_table",
+                "metric": "rows_written",
+                "minimum": 1,
+                "priority": "critical",
+                "detail": "财务图表报告必须保留可核验的关键数据表；当前表格写入行数：{actual}。",
+            },
+            {
                 "criterion": "financial_report_has_real_chart_image",
                 "operation": "insert_image_into_docx",
                 "metric": "images_inserted",
-                "minimum": 1,
+                "minimum": 2,
                 "priority": "critical",
-                "detail": "财务图表报告必须插入真实图表图片；当前图片写入数：{actual}。",
+                "detail": "财务图表报告必须插入至少两张真实图表图片；当前图片写入数：{actual}。",
             },
         ),
     ),

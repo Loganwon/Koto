@@ -15,12 +15,12 @@ from app.core.agent.file_task_readonly_loop_guard import (
 )
 
 
-def test_answer_only_round_disables_tools_after_readonly_guard_with_context():
+def test_answer_only_round_disables_tools_as_soon_as_readonly_context_is_ready():
     tools = [{"name": "parse_file_to_text"}]
 
     plan = answer_only_round(
         write_intent=False,
-        readonly_answer_guard_injected=True,
+        readonly_answer_guard_injected=False,
         readonly_duplicate_guard_injected=False,
         has_context=True,
         tool_defs=tools,

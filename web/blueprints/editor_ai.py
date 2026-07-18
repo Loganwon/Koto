@@ -745,21 +745,12 @@ def editor_ai_task_stream():
         return jsonify({"error": "Missing 'task' parameter"}), 400
     data["task"] = task
 
-    quick_action_mode = str(data.get("options", {}).get("quick_action_mode") or "").strip().lower()
-    if not quick_action_mode:
-        quick_action_mode = str(data.get("quick_action_mode") or "").strip().lower()
-    has_files = bool(data.get("files") or data.get("target_path"))
-    is_text_quick_action = quick_action_mode in {
-        "simple", "polish", "translate", "summary", "rewrite", "continue", "check",
-    }
-    if is_text_quick_action and not has_files:
-        action = quick_action_mode if quick_action_mode != "simple" else "polish"
-        data["action"] = action
-        raw_sel = str(data.get("selection") or "")
-        if raw_sel:
-            data["selection"] = clean_selection_text(raw_sel)
-        return _stream_editor_quick_action(data)
-
+    # This endpoint has one lifecycle contract: every request is persisted in
+    # TaskLedger and emits the canonical file-task SSE sequence.  Text quick
+    # actions used to fall back to the non-persisted editor stream here.  The
+    # workspace task runner would then try to resume the client-generated task
+    # id through /api/tasks/<id>/stream and receive a 404 because no ledger row
+    # existed.  /api/editor/ai/stream remains the explicit editor-only API.
     return _sse_response(stream_file_task_request(data))
 
 

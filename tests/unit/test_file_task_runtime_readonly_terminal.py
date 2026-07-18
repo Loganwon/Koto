@@ -225,7 +225,7 @@ def test_file_task_runtime_readonly_docx_blank_model_gets_visible_fallback_answe
 
     assert "必须直接输出分析结果" in answer_guard.payload["result_preview"]
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "context_summary_fallback"
     assert "临时摘要" in check_finished.payload["summary"]
     assert run_finished.payload["completed_task"] is False
     assert run_finished.payload["runtime"]["readonly_fallback_used"] is True
@@ -338,7 +338,7 @@ def test_file_task_runtime_readonly_investment_report_fallback_uses_risk_opportu
     summary = run_finished.payload["summary"]
 
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "context_summary_fallback"
     assert run_finished.payload["completed_task"] is False
     assert run_finished.payload["runtime"]["readonly_fallback_used"] is True
     assert "## 投资风险与机会分析" in summary
@@ -417,7 +417,7 @@ def test_file_task_runtime_readonly_article_summary_fallback_is_not_read_log():
     summary = run_finished.payload["summary"]
 
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "context_summary_fallback"
     assert run_finished.payload["completed_task"] is False
     assert run_finished.payload["runtime"]["readonly_fallback_used"] is True
     assert "## 文章总结" in summary
@@ -499,7 +499,7 @@ def test_file_task_runtime_readonly_argument_improvement_fallback_matches_task()
     summary = events[-1].payload["summary"]
 
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "context_summary_fallback"
     assert events[-1].payload["completed_task"] is False
     assert events[-1].payload["runtime"]["readonly_fallback_used"] is True
     assert "## 论点优化建议" in summary
@@ -596,11 +596,14 @@ def test_file_task_runtime_readonly_model_unavailable_summarizes_explicit_contex
     assert not any(event.type == "run.error" for event in events)
     assert fallback_message.payload["tool_name"] == "model_message"
     assert fallback_message.payload["model_unavailable"] is True
-    assert fallback_step.payload["status"] == "needs_attention"
+    assert fallback_step.payload["status"] == "failed"
     assert check_finished.payload["passed"] is False
-    assert check_finished.payload["status"] == "needs_attention"
+    assert check_finished.payload["status"] == "context_summary_fallback"
     assert check_finished.payload["runtime"]["execution_path"] == "readonly_fallback"
-    assert check_finished.payload["runtime"]["terminal_status"] == "needs_attention"
+    assert (
+        check_finished.payload["runtime"]["terminal_status"]
+        == "context_summary_fallback"
+    )
     assert check_finished.payload["runtime"]["model_unavailable"] is True
     assert check_finished.payload["runtime"]["readonly_fallback_used"] is True
     assert check_finished.payload["runtime"]["planner"] == {

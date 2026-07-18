@@ -148,7 +148,7 @@ class MorningBriefService:
             sections.append(memory_section)
 
         # 5. 生产力摘要
-        productivity_section = self._section_productivity(now)
+        productivity_section = ""
         if productivity_section:
             sections.append(productivity_section)
 
@@ -330,43 +330,6 @@ class MorningBriefService:
             return "\n".join(lines) + "\n"
         except Exception as exc:
             logger.debug(f"[MorningBrief] 记忆获取跳过: {exc}")
-            return ""
-
-    def _section_productivity(self, now: datetime) -> str:
-        """基于 ShadowWatcher 的生产力洞察。"""
-        try:
-            from app.core.monitoring.shadow_watcher import get_shadow_watcher
-
-            watcher = get_shadow_watcher()
-            obs = watcher.get_observations()
-            if not obs:
-                return ""
-
-            lines: List[str] = []
-
-            # 高频话题 Top 3
-            topics: Dict[str, int] = obs.get("topics", {})
-            if topics:
-                top3 = sorted(topics.items(), key=lambda x: x[1], reverse=True)[:3]
-                topic_strs = "、".join(f"**{k}**" for k, _ in top3)
-                lines.append(f"- 近期最关注话题：{topic_strs}")
-
-            # 最活跃时段
-            active_hours: Dict[str, int] = obs.get("active_hours", {})
-            if active_hours:
-                peak_hour = max(active_hours, key=lambda h: active_hours[h])
-                lines.append(f"- 你的高效时段通常是 **{peak_hour}:00** 前后")
-
-            # 连续使用天数
-            streak: int = obs.get("streak", 0)
-            if streak > 1:
-                lines.append(f"- 连续使用 **{streak} 天** 🔥，保持住！")
-
-            if not lines:
-                return ""
-            return "## 📊 生产力参考\n\n" + "\n".join(lines) + "\n"
-        except Exception as exc:
-            logger.debug(f"[MorningBrief] ShadowWatcher 获取跳过: {exc}")
             return ""
 
     def _generate_motivation(self, now: datetime) -> str:

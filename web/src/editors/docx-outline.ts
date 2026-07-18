@@ -5,10 +5,11 @@
 
 import type { DocxHeadingEntry } from './types';
 import { publishWorkspaceApi } from '../shared/workspace-api';
+import { state as workspaceState } from '../workspace/state';
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 
-declare const state: any;
+const state: any = workspaceState;
 
 export function _isValidDocxHeadingEntry(heading: any): heading is DocxHeadingEntry {
   const level = Number(heading && heading.level);

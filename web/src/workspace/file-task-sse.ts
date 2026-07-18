@@ -3,6 +3,20 @@ export interface SseParseResult {
   remainder: string;
 }
 
+export function persistedTaskStreamEvent(event: Record<string, any>): Record<string, any> {
+  const nested = event && event.detail && typeof event.detail === 'object'
+    ? (event.detail as Record<string, any>).event
+    : null;
+  return nested && typeof nested === 'object' && String((nested as Record<string, any>).type || '').trim()
+    ? nested as Record<string, any>
+    : event;
+}
+
+export function isTaskStreamTerminalEvent(event: Record<string, any>): boolean {
+  const type = String(event && event.type || '').trim();
+  return type === 'run.finished' || type === 'run.cancelled' || type === 'error';
+}
+
 export function parseSseEvents(buffer: string, flush: boolean): SseParseResult {
   const source = String(buffer || '').replace(/\r\n/g, '\n');
   const frames = source.split('\n\n');

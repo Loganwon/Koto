@@ -178,7 +178,8 @@ def write_retry_message(request: FileTaskRequest, files: List[FileTaskFile]) -> 
             " 当前是 Excel 财务预测图表+问题写入 DOCX 任务：不要只插入 Excel 原表，也不要只输出 Python stdout。"
             " 先用 run_python_code 生成真实 PNG/JPG 图表并输出 KOTO_CREATED 路径；"
             "再调用 write_docx_content 写入问题清单/分析结论；"
-            "最后调用 insert_image_into_docx 把生成的真实图片插入目标 DOCX。"
+            "调用 insert_excel_as_docx_table 写入关键预测数据表；"
+            "最后调用 insert_image_into_docx 把至少两张生成的真实图片插入目标 DOCX。"
             " 解析 P&L 时不要依赖 pandas 默认列名；如果列名是 Unnamed，应扫描每一行找到 2025E/2026E/2027E/2028E 等年份头，再按这些列抽取收入、毛利、费用、净利润等指标。"
         )
     elif "xlsx" in current_file_types and "docx" in current_file_types:

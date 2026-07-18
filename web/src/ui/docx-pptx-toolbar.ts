@@ -2,26 +2,39 @@
  * DOCX/PPTX toolbar bridges - hoverbar formatting, slide operations, shape operations.
  */
 
-import { _getDocxSelectionPayload, _showTableTooltipNear } from './selection-toolbar';
+import {
+  _evtEl,
+  _getDocxSelectionPayload,
+  _showTableTooltipNear,
+  _updateContextBar,
+} from './selection-toolbar';
+import { $, _csrfFetch, _escHtml, showToast } from '../workspace/infrastructure';
+import { state as workspaceState } from '../workspace/state';
+import { _updateDocxZoomUI } from '../editors/cdn-loaders';
 import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import {
+  getDocxHoverForceHiddenText,
+  getDocxMouseUpY,
+  getDocxNativeSelectionBottom,
+  getLastSelectionText,
+  isDocxMouseDown,
+  setDocxHoverForceHiddenText,
+  setDocxNativeSelectionBottom,
+  setLastSelectionText,
+} from '../shared/selection-runtime';
+import { isReviewCommentModeEnabled } from '../workspace/docx-review-runtime';
 
-const workspaceApi = getWorkspaceApi();
+// The concrete editor implementations are loaded lazily and expose different
+// runtime protocols. Keep that dynamic boundary explicit here while importing
+// the shared state from its real module.
+const state: any = workspaceState;
+const workspaceApi: any = getWorkspaceApi();
 // Existing toolbar helpers retain this short local name, but it is now the
 // canonical workspace API object rather than an ambient browser global.
 const WA = workspaceApi;
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let lastSelectionText: string;
 let _docxCpEl: HTMLElement | null = null;
 let _docxHbEl: HTMLElement | null = null;
-
-declare function _escHtml(s: any): string;
-declare function showToast(message: string, kind?: string, duration?: number): void;
-declare function _evtEl(target: EventTarget | null): Element | null;
-declare function _updateContextBar(opts?: any): void;
-declare function _updateDocxZoomUI(zoom: number): void;
-declare function _csrfFetch(url: string, init?: RequestInit): Promise<Response>;
 
 const _CP_COLORS = [
   '#000000','#1f1f1f','#595959','#808080','#a6a6a6','#d9d9d9','#f2f2f2','#ffffff',
@@ -61,19 +74,6 @@ function _syncDocxHoverBar(): void {
 function _resetDocxSelection(): void {
   const reset = (window as any)._resetDocxSelection;
   if (typeof reset === 'function') reset();
-}
-
-function _isReviewCommentModeEnabled(): boolean {
-  const check = (window as any)._isReviewCommentModeEnabled;
-  if (typeof check === 'function') return !!check();
-  return state?.fileType === 'docx'
-    && state?._reviewCenterOpen !== false
-    && state?._reviewMode === 'comments';
-}
-
-function _hideReviewSelectionLauncher(): void {
-  const hide = (window as any)._hideReviewSelectionLauncher;
-  if (typeof hide === 'function') hide();
 }
 
 function _updateSubjectBar(fileName: string, fileType: string): void {
@@ -164,7 +164,7 @@ export function _getDocxNativeSelectionBounds(pm?: HTMLElement | null, editorLef
   const rects: DOMRectList | DOMRect[] = range.getClientRects ? range.getClientRects() : [];
   const bounds = _boundsFromRects(rects, editorLeft);
   if (bounds) {
-    (window as any)._docxNativeSelBottom = bounds.bottom;
+    setDocxNativeSelectionBottom(bounds.bottom);
   }
   return bounds;
 }
@@ -283,9 +283,9 @@ export function _showDocxHoverBar(): void {
   // Review mode owns the native selection and uses it to position the comment
   // launcher. Exit before the formatting path attempts to normalize or clear
   // a selection that ProseMirror has not mirrored yet.
-  if (_isReviewCommentModeEnabled()) {
+  if (isReviewCommentModeEnabled()) {
     _hideDocxHoverBar();
-    const tt = $('wa-pdf-tooltip');
+    const tt = $('wa-selection-toolbar');
     if (tt) tt.style.display = 'none';
     return;
   }
@@ -301,7 +301,7 @@ export function _showDocxHoverBar(): void {
     if (docxSelection && docxSelection.kind === 'table' && docxSelection.tableElement) {
       _hideDocxHoverBar();
       _showTableTooltipNear(docxSelection.tableElement);
-      lastSelectionText = docxSelection.rawText;
+      setLastSelectionText(docxSelection.rawText);
       const countEl = $('wa-tooltip-count');
       if (countEl) countEl.textContent = docxSelection.countLabel || docxSelection.previewText;
       _updateContextBar({ table: docxSelection.previewText });
@@ -320,7 +320,7 @@ export function _showDocxHoverBar(): void {
   }
   if (!selText) { _resetDocxSelection(); return; }
 
-  if ((window as any)._docxHoverForceHiddenText === selText) {
+  if (getDocxHoverForceHiddenText() === selText) {
     _hideDocxHoverBar();
     return;
   }
@@ -342,8 +342,8 @@ export function _showDocxHoverBar(): void {
   const vh = window.innerHeight;
   const vw = window.innerWidth;
 
-  const nativeSelectionBottom = Number((window as any)._docxNativeSelBottom) || 0;
-  const mouseUpY = Number((window as any)._docxMouseUpY) || 0;
+  const nativeSelectionBottom = getDocxNativeSelectionBottom();
+  const mouseUpY = getDocxMouseUpY();
   const anchorY = bounds.bottom > 0
     ? bounds.bottom
     : (nativeSelectionBottom > 0 ? nativeSelectionBottom : mouseUpY);
@@ -354,7 +354,7 @@ export function _showDocxHoverBar(): void {
   const EDGE_GAP = 6;
   const minTop = Math.max(EDGE_GAP, ribbonBottom + EDGE_GAP);
 
-  const tt = $('wa-pdf-tooltip');
+  const tt = $('wa-selection-toolbar');
   let ttH = 0;
   let ttW = 0;
   if (tt) {
@@ -392,7 +392,7 @@ export function _showDocxHoverBar(): void {
   _syncDocxHoverBar();
 
   if (selText) {
-    lastSelectionText = selText;
+    setLastSelectionText(selText);
     const countEl = $('wa-tooltip-count');
     if (countEl) {
       countEl.textContent = docxSelection && docxSelection.countLabel
@@ -423,7 +423,7 @@ export function _kotoDocxSelectionChanged(): void {
         state.activeEditor._toolbarSelection = null;
       }
       _resetDocxSelection();
-    } else if (!(state as any)._docxMouseIsDown) {
+    } else if (!isDocxMouseDown(state)) {
       // _showDocxHoverBar handles both the formatting hoverbar and the
       // quick-assistant selection toolbar (快捷助手) as a stacked layout.
       _showDocxHoverBar();
@@ -575,16 +575,8 @@ export function _docxPickColor(color: string, keepOpen?: boolean): void {
   if (!keepOpen && palette) palette.style.display = 'none';
 }
 
-export function docxHoverAI(action: string): void {
-  _hideDocxHoverBar();
-  const selText = workspaceApi._getDocxSelectionTextForAI ? workspaceApi._getDocxSelectionTextForAI() : (window.getSelection()?.toString().trim() || '');
-  if (selText) lastSelectionText = selText;
-  if (!lastSelectionText) { showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info'); return; }
-  WA.sendQuickAction(action);
-}
-
 export function closeDocxHoverBar(): void {
-  (window as any)._docxHoverForceHiddenText = lastSelectionText || (window.getSelection()?.toString().trim() || '');
+  setDocxHoverForceHiddenText(getLastSelectionText() || (window.getSelection()?.toString().trim() || ''));
   _resetDocxSelection();
 }
 
@@ -1008,18 +1000,6 @@ export function _pptxPickColor(color: string, keepOpen?: boolean): void {
   if (!keepOpen && palette) palette.style.display = 'none';
 }
 
-export function pptxHoverAI(action: string): void {
-  const hoverBar = $('wa-pptx-hoverbar');
-  if (hoverBar) hoverBar.style.display = 'none';
-  const selText = window.getSelection()?.toString().trim() || '';
-  if (selText) lastSelectionText = selText;
-  if (!lastSelectionText) {
-    showToast('\u8bf7\u5148\u9009\u4e2d\u6587\u5b57', 'info');
-    return;
-  }
-  WA.sendQuickAction(action);
-}
-
 export function pptxIndent(delta: number): void {
   const ed = state.activeEditor;
   if (ed && typeof ed.applyFormat === 'function') ed.applyFormat('indent', Number(delta) || 0);
@@ -1213,13 +1193,13 @@ _installToolbarColorDelegation();
 
 publishWorkspaceApi({
   docxHoverFmt, docxInsertLink, docxHoverFontFamily, docxHoverFontSize,
-  docxHoverAI, docxColorPicker, _docxPickColor, closeDocxHoverBar,
+  docxColorPicker, _docxPickColor, closeDocxHoverBar,
   pptxShapeFill, pptxShapeBorder, pptxBorderWidth, pptxDupSlide, pptxStepFont,
   pptxClearFormat, pptxAddSlide, pptxDelSlide, pptxInsertShape, pptxSetShapeSize,
   pptxSetShapePos, pptxSetShapeRot, pptxHighlightColor, pptxApplyQuickLayout,
   pptxChangeBgImage, pptxBgColor, pptxSetBgImage, pptxRemoveBg, pptxFmt,
   pptxAlign, pptxFontSize, pptxFontName, pptxFontColor, pptxColorPicker,
-  _pptxPickColor, pptxHoverAI, pptxIndent, pptxLineSpacing, pptxToggleBullet,
+  _pptxPickColor, pptxIndent, pptxLineSpacing, pptxToggleBullet,
   pptxToggleNumbered, pptxVertAlign, pptxOpacity, pptxZOrder, pptxZoom, pptxNav,
   docxZoom, pptxInsertImageClick, pptxInsertImageFile, pptxDelShape, pptxSwitchTab,
   pptxInsertMode, pptxSave, pptxUndo, pptxRedo, pptxDownload, _sendImageToAI,

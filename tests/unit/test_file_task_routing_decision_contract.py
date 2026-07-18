@@ -152,18 +152,66 @@ def test_trusted_file_task_route_still_adjudicates_ambiguous_write_intent():
     )
 
 
+def test_forced_ai_intent_adjudicator_bypasses_local_classifier_fast_path(
+    monkeypatch,
+):
+    import app.core.agent.file_task_intent_adjudicator as adjudicator_module
+    from app.core.agent.file_task_contract import (
+        FileTaskClassification,
+        FileTaskRequest,
+    )
+
+    monkeypatch.setattr(
+        adjudicator_module,
+        "task_classifier_fast_path",
+        lambda _request: (_ for _ in ()).throw(
+            AssertionError("forced AI adjudication must bypass the local fast path")
+        ),
+    )
+    model_calls = []
+
+    def call_model(**kwargs):
+        model_calls.append(kwargs)
+        return {
+            "content": (
+                '{"intent":"create_file","confidence":0.95,'
+                '"should_write":true,"needs_clarification":false}'
+            )
+        }
+
+    result = adjudicator_module.adjudicate_intent_if_needed(
+        request=FileTaskRequest(
+            task="Create a new Word report without modifying the source file.",
+            options={"enable_ai_intent_adjudicator": True},
+        ),
+        files=[],
+        classification=FileTaskClassification(write_intent=True),
+        should_adjudicate=lambda _request, _files, _classification: True,
+        call_model=call_model,
+        logger=adjudicator_module.logging.getLogger(__name__),
+    )
+
+    assert result["source"] == "ai_intent_adjudicator"
+    assert result["status"] == "ok"
+    assert result["intent"] == "create_file"
+    assert len(model_calls) == 1
+
+
 def test_workspace_file_task_payload_exposes_top_level_routing_decision():
     source = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(encoding="utf-8")
+    routing = (ROOT / "web/src/workspace/task-routing-decision.ts").read_text(
+        encoding="utf-8"
+    )
 
-    assert "function normalizeFileTaskRoutingDecision(" in source
+    assert "export function normalizeFileTaskRoutingDecision(" in routing
     assert "routing_decision: routingDecision" in source
     assert "explicitTaskPayload.routing_decision = explicitRoutingDecision;" in source
-    assert "normalized.candidate_workflows = candidateWorkflows;" in source
+    assert "normalized.candidate_workflows = candidateWorkflows;" in routing
     assert (
-        "normalized.requires_adjudication = !!source.requires_adjudication;" in source
+        "normalized.requires_adjudication = !!source.requires_adjudication;" in routing
     )
-    assert "normalized.frontend_label = frontendLabel;" in source
-    assert "normalized.plan_steps = planSteps;" in source
+    assert "normalized.frontend_label = frontendLabel;" in routing
+    assert "normalized.plan_steps = planSteps;" in routing
 
 
 def test_runtime_decision_context_groups_route_classification_and_plan():
@@ -213,8 +261,13 @@ def test_runtime_decision_context_groups_route_classification_and_plan():
     assert payload["effective_planner"]["policy"] == "native_only"
 
 
-def test_workspace_runner_expands_decision_context_for_legacy_consumers():
-    runner = (ROOT / "web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
+def test_workspace_lifecycle_payload_expands_decision_context_for_consumers():
+    run_context = (ROOT / "web/src/workspace/task-run-context.ts").read_text(
+        encoding="utf-8"
+    )
+    lifecycle_payload = (
+        ROOT / "web/src/workspace/task-lifecycle-payload.ts"
+    ).read_text(encoding="utf-8")
     dispatcher = (ROOT / "web/src/workspace/task-dispatcher.ts").read_text(
         encoding="utf-8"
     )
@@ -222,12 +275,11 @@ def test_workspace_runner_expands_decision_context_for_legacy_consumers():
         encoding="utf-8"
     )
 
-    assert "const decisionContext = data.decision_context" in runner
-    assert "decisionContext.classification" in runner
-    assert "normalized.routing_decision = routingDecision;" in runner
-    assert (
-        "card.dataset.taskRoutingDecision = encodeURIComponent(JSON.stringify(routingDecision));"
-        in runner
-    )
+    assert "const decisionContext = data.decision_context" in lifecycle_payload
+    assert "decisionContext?.classification" in lifecycle_payload
+    assert "'routing_decision'," in lifecycle_payload
+    assert "normalizedTaskLifecyclePayload(payload)" in run_context
+    assert "card.dataset.taskRoutingDecision = encodeURIComponent(" in run_context
+    assert "JSON.stringify(routingDecision)," in run_context
     assert "metadata.route_intent = JSON.parse(decodeURIComponent" in dispatcher
-    assert "requestPayload.routing_decision" in workbench
+    assert "const routeIntent = data.route_intent" in workbench

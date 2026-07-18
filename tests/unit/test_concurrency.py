@@ -7,6 +7,7 @@ inconsistent state.
 
 from __future__ import annotations
 
+import json
 import threading
 from unittest.mock import MagicMock, patch
 
@@ -294,19 +295,36 @@ class TestUserSettingsCacheConcurrency:
         assert hasattr(self._mod, "_user_settings_lock")
         assert isinstance(self._mod._user_settings_lock, type(threading.Lock()))
 
-    def test_concurrent_load_returns_same_data(self):
-        """All threads calling _load_user_settings get identical dict."""
+    def test_concurrent_load_returns_same_data(self, tmp_path, monkeypatch):
+        """All threads get equal defensive snapshots from one settings file."""
         fake_data = {"theme": "dark", "lang": "en"}
+        settings_path = tmp_path / "user_settings.json"
+        settings_path.write_text(json.dumps(fake_data), encoding="utf-8")
+        monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
 
-        with patch("builtins.open", create=True), patch(
-            "json.load", return_value=fake_data
-        ):
-            results = _run_concurrently(self._mod._load_user_settings)
+        results = _run_concurrently(self._mod._load_user_settings)
 
         first = results[0]
         assert first == fake_data
         for idx, obj in enumerate(results[1:], start=1):
-            assert obj is first, f"Thread {idx} got a different dict object"
+            assert obj == first, f"Thread {idx} got different settings"
+            assert obj is not first, f"Thread {idx} received a shared mutable object"
+
+    def test_cache_reloads_when_settings_file_signature_changes(
+        self, tmp_path, monkeypatch
+    ):
+        settings_path = tmp_path / "user_settings.json"
+        monkeypatch.setenv("KOTO_USER_SETTINGS_PATH", str(settings_path))
+        settings_path.write_text(json.dumps({"theme": "dark"}), encoding="utf-8")
+
+        assert self._mod._load_user_settings()["theme"] == "dark"
+
+        settings_path.write_text(
+            json.dumps({"theme": "light", "zoom": 1.1}), encoding="utf-8"
+        )
+
+        refreshed = self._mod._load_user_settings()
+        assert refreshed == {"theme": "light", "zoom": 1.1}
 
     def test_concurrent_cache_clear_and_read(self):
         """Clearing cache while others read must not crash."""

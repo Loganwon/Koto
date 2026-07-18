@@ -1,6 +1,7 @@
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
 from app.core.agent.file_task_recipes import (
     TASK_RECIPES,
+    explicit_new_artifact_file_type,
     recipe_matches,
     select_task_recipe,
     semantic_markers,
@@ -26,6 +27,33 @@ def test_recipe_selects_financial_xlsx_docx_report_over_generic_docx_chart():
     assert match.recipe.id == "financial_xlsx_docx_report"
     assert candidates[0].recipe.id == "financial_xlsx_docx_report"
     assert any(item.recipe.id == "docx_chart_report" for item in candidates)
+
+
+def test_recipe_selects_financial_report_when_docx_is_a_new_output_artifact():
+    request = FileTaskRequest(
+        task="分析这个财务预测，找出其中的问题并把数据做成图，把数据和图都放入一个新的docx",
+        files=[
+            FileTaskFile(
+                path="financial_model_clean.xlsx",
+                name="financial_model_clean.xlsx",
+                type="xlsx",
+            )
+        ],
+    )
+
+    match = select_task_recipe(request, request.files, write_intent=True)
+
+    assert match is not None
+    assert match.recipe.id == "financial_xlsx_docx_report"
+    assert "insert_excel_as_docx_table" in match.recipe.matched_capabilities
+
+
+def test_explicit_new_artifact_file_type_distinguishes_output_from_writeback():
+    assert explicit_new_artifact_file_type("创建一个 DOCX 报告") == "docx"
+    assert explicit_new_artifact_file_type("生成一份 PPT 演示文稿") == "pptx"
+    assert explicit_new_artifact_file_type("导出为 Excel 工作簿") == "xlsx"
+    assert explicit_new_artifact_file_type("将当前文档转换为 PDF") == "pdf"
+    assert explicit_new_artifact_file_type("把结论写入 Word") == ""
 
 
 def test_recipe_selects_financial_report_for_sales_ledger_followup():
@@ -495,6 +523,7 @@ def test_quality_gated_file_task_recipes_cover_common_working_file_outputs():
         "long_pdf_stepwise_docx_summary": {"stepwise_docx_has_step_notes"},
         "financial_xlsx_docx_report": {
             "financial_report_has_narrative",
+            "financial_report_has_key_data_table",
             "financial_report_has_real_chart_image",
         },
         "xlsx_table_to_docx": {"docx_table_request_has_table"},

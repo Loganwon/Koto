@@ -63,7 +63,7 @@ Koto: "C 盘: 437GB 可用 (54.2% 满)
 
 ### 核心类
 ```python
-from web.system_info import SystemInfoCollector
+from app.core.services.system_info import SystemInfoCollector
 
 collector = SystemInfoCollector()
 info = collector.get_system_state()  # 获取所有信息
@@ -71,7 +71,7 @@ info = collector.get_system_state()  # 获取所有信息
 
 ### 便利函数
 ```python
-from web.system_info import (
+from app.core.services.system_info import (
     get_system_info,           # 获取完整系统信息
     get_formatted_system_info, # 获取格式化信息
     get_system_warnings        # 获取系统警告
@@ -238,7 +238,7 @@ Koto: "根据当前系统状态分析：
 
 ```bash
 # 测试系统信息收集
-python -c "from web.system_info import get_formatted_system_info; print(get_formatted_system_info())"
+python -c "from app.core.services.system_info import get_formatted_system_info; print(get_formatted_system_info())"
 
 # 测试系统指令生成
 python -c "from web.app import _get_chat_system_instruction; print(_get_chat_system_instruction()[:500])"

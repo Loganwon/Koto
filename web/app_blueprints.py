@@ -45,7 +45,6 @@ _PRELOAD_MODULES = [
     "app.api.job_routes",
     "app.api.mcp_routes",
     "app.api.ops_routes",
-    "app.api.shadow_routes",
     "app.api.macro_routes",
     "web.blueprints.workflow_api",
 ]
@@ -377,18 +376,6 @@ def register_blueprints_deferred(app: Flask, logger: Logger):
     except Exception as exc:
         _record_blueprint_failure(app, "OpsAPI", "app.api.ops_routes", exc)
         logger.error(f"[OpsAPI] ❌ 运维 API 注册失败: {exc}")
-
-    try:
-        from app.api.shadow_routes import shadow_bp as _shadow_bp
-
-        app.register_blueprint(_shadow_bp)
-        logger.info("[ShadowAPI] ✅ 影子追踪 API 已注册: /api/shadow")
-    except ImportError as exc:
-        _record_blueprint_failure(app, "ShadowAPI", "app.api.shadow_routes", exc)
-        logger.warning(f"[ShadowAPI] ⚠️ 未能导入影子追踪蓝图: {exc}")
-    except Exception as exc:
-        _record_blueprint_failure(app, "ShadowAPI", "app.api.shadow_routes", exc)
-        logger.error(f"[ShadowAPI] ❌ 影子追踪 API 注册失败: {exc}")
 
     try:
         from app.api.macro_routes import macro_bp as _macro_bp

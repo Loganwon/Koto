@@ -99,6 +99,22 @@ def _watermarked_pdf_bytes() -> bytes:
     return content
 
 
+def _convertible_pdf_bytes() -> bytes:
+    import pymupdf
+
+    doc = pymupdf.open()
+    for page_number in range(1, 3):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 72), f"Conversion page {page_number}", fontsize=16)
+        page.insert_text((72, 110), "Name    Amount", fontsize=11)
+        page.insert_text(
+            (72, 132), f"Item {page_number}    {page_number * 10}", fontsize=11
+        )
+    content = doc.tobytes()
+    doc.close()
+    return content
+
+
 def _fake_docx_bytes() -> bytes:
     try:
         from io import BytesIO
@@ -112,6 +128,70 @@ def _fake_docx_bytes() -> bytes:
         return buf.getvalue()
     except ImportError:
         return b""
+
+
+class TestRecentFileStatus:
+    def test_reports_existing_and_missing_workspace_files(self, wa_client):
+        client, _, workspace_dir = wa_client
+        (workspace_dir / "available.txt").write_text("ready", encoding="utf-8")
+
+        response = client.post(
+            "/api/v1/workspace/recent_files/status",
+            json={"paths": ["available.txt", "missing.txt"]},
+        )
+
+        assert response.status_code == 200
+        assert response.get_json()["files"] == [
+            {"path": "available.txt", "exists": True},
+            {"path": "missing.txt", "exists": False},
+        ]
+
+    def test_reports_safe_external_file_without_exposing_resolved_path(self, wa_client):
+        client, _, workspace_dir = wa_client
+        external = workspace_dir.parent / "external.txt"
+        external.write_text("ready", encoding="utf-8")
+
+        response = client.post(
+            "/api/v1/workspace/recent_files/status",
+            json={"paths": [str(external)]},
+        )
+
+        assert response.status_code == 200
+        assert response.get_json() == {
+            "files": [{"path": str(external), "exists": True}]
+        }
+
+    def test_rejects_traversal_and_oversized_batches(self, wa_client):
+        client, _, _ = wa_client
+
+        traversal = client.post(
+            "/api/v1/workspace/recent_files/status",
+            json={"paths": ["../outside.txt"]},
+        )
+        oversized = client.post(
+            "/api/v1/workspace/recent_files/status",
+            json={"paths": [f"file-{index}.txt" for index in range(51)]},
+        )
+
+        assert traversal.status_code == 200
+        assert traversal.get_json()["files"] == [
+            {"path": "../outside.txt", "exists": False}
+        ]
+        assert oversized.status_code == 400
+
+
+class TestRetiredNotebookAndAudioRoutes:
+    @pytest.mark.parametrize(
+        "path",
+        (
+            "/api/v1/workspace/audio_overview",
+            "/api/v1/workspace/notebook_guide",
+        ),
+    )
+    def test_retired_routes_are_not_registered(self, wa_client, path):
+        client, _, _ = wa_client
+        resp = client.post(path, json={})
+        assert resp.status_code == 404
 
 
 # ── 1. GET /api/v1/workspace/raw/<file_id> ───────────────────────────────────
@@ -197,6 +277,76 @@ class TestPdfRemoveWatermark:
         cleaned.close()
         assert "CONFIDENTIAL" not in cleaned_text
         assert cleaned_text.count("Keep this content") == 3
+
+    def test_no_watermark_returns_valid_unchanged_content(self, wa_client):
+        import pymupdf
+
+        client, tmp_dir, _ = wa_client
+        file_id = uuid.uuid4().hex
+        (tmp_dir / f"{file_id}.pdf").write_bytes(_convertible_pdf_bytes())
+
+        resp = client.post(
+            "/api/v1/workspace/pdf/remove_watermark",
+            json={"file_id": file_id},
+        )
+
+        assert resp.status_code == 200
+        assert resp.headers["X-Koto-Removed-Count"] == "0"
+        assert resp.headers["X-Koto-Method"] == "none"
+        cleaned = pymupdf.open(stream=resp.data, filetype="pdf")
+        text = "\n".join(page.get_text() for page in cleaned)
+        cleaned.close()
+        assert "Conversion page 1" in text
+        assert "Conversion page 2" in text
+
+
+class TestPdfConversion:
+    @pytest.mark.parametrize("target_format", ("docx", "xlsx", "pptx"))
+    def test_conversion_endpoint_returns_valid_office_package(
+        self, wa_client, target_format
+    ):
+        client, tmp_dir, _ = wa_client
+        file_id = uuid.uuid4().hex
+        (tmp_dir / f"{file_id}.pdf").write_bytes(_convertible_pdf_bytes())
+
+        resp = client.post(
+            "/api/v1/workspace/pdf/convert",
+            json={
+                "file_id": file_id,
+                "target_format": target_format,
+                "filename": "source.pdf",
+            },
+        )
+
+        assert resp.status_code == 200
+        assert resp.data[:2] == b"PK"
+        assert f"source.{target_format}" in resp.headers.get("Content-Disposition", "")
+
+        if target_format == "docx":
+            from docx import Document
+
+            document = Document(io.BytesIO(resp.data))
+            text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+            assert "Conversion page 1" in text
+            assert "Conversion page 2" in text
+        elif target_format == "xlsx":
+            import openpyxl
+
+            workbook = openpyxl.load_workbook(io.BytesIO(resp.data))
+            assert workbook.sheetnames == ["第1页", "第2页"]
+            all_values = [
+                str(cell.value or "")
+                for sheet in workbook.worksheets
+                for row in sheet.iter_rows()
+                for cell in row
+            ]
+            assert any("Conversion page 1" in value for value in all_values)
+        else:
+            from pptx import Presentation
+
+            presentation = Presentation(io.BytesIO(resp.data))
+            assert len(presentation.slides) == 2
+            assert presentation.slide_height > presentation.slide_width
 
 
 # ── 2. POST /api/v1/workspace/open_file ──────────────────────────────────────
@@ -308,6 +458,40 @@ class TestOpenFile:
 
 
 class TestAIContextPreview:
+
+    def test_external_browser_file_is_staged_before_preview(self, wa_client):
+        client, _, workspace_dir = wa_client
+        external = workspace_dir.parent / "Downloads" / "humanise!_revised.docx"
+        external.parent.mkdir(parents=True, exist_ok=True)
+        external.write_bytes(
+            _make_docx_bytes(["外部文件已导入工作区", "可供 AI 文件任务读取"])
+        )
+
+        import_response = client.post(
+            "/api/v1/workspace/import_for_ai_context",
+            json={"path": str(external)},
+        )
+
+        assert import_response.status_code == 200, import_response.get_data(
+            as_text=True
+        )
+        imported = import_response.get_json()
+        assert imported["ok"] is True
+        assert imported["imported"] is True
+        assert imported["ws_path"] == "attachments/humanise!_revised.docx"
+        assert (
+            workspace_dir / imported["ws_path"]
+        ).read_bytes() == external.read_bytes()
+
+        preview_response = client.post(
+            "/api/v1/workspace/ai_context_preview",
+            json={"path": imported["ws_path"]},
+        )
+
+        assert preview_response.status_code == 200, preview_response.get_data(
+            as_text=True
+        )
+        assert "外部文件已导入工作区" in preview_response.get_json()["content_preview"]
 
     def test_unicode_docx_path_is_readable(self, wa_client):
         client, _, workspace_dir = wa_client
@@ -1781,7 +1965,7 @@ class TestEmbeddedModeRenderGuards:
         """The unified editor mount path must await _waitForEditorLayout."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
-        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        fn_end = src.find("new XlsxEditor()", fn_start)
         body = (
             src[fn_start : fn_end + 100]
             if fn_end != -1
@@ -1792,26 +1976,32 @@ class TestEmbeddedModeRenderGuards:
         ), "_mountEditor must await _waitForEditorLayout before creating editors"
 
     def test_router_load_guard_before_xlsx_editor(self):
-        """The guard await must appear before new KotoXlsxEditor() in _applyFileJson."""
+        """The guard await must appear before the lazily loaded XLSX editor is created."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
-        fn_end = src.find("new (window as any).KotoXlsxEditor()", fn_start)
+        fn_end = src.find("new XlsxEditor()", fn_start)
         body = (
             src[fn_start : fn_end + 100]
             if fn_end != -1
             else src[fn_start : fn_start + 3000]
         )
         guard_pos = body.find("await _waitForEditorLayout")
-        xlsx_pos = body.find("new (window as any).KotoXlsxEditor()")
+        xlsx_pos = body.find("new XlsxEditor()")
         assert (
             guard_pos != -1 and xlsx_pos != -1 and guard_pos < xlsx_pos
-        ), "_waitForEditorLayout await must precede new KotoXlsxEditor()"
+        ), "_waitForEditorLayout await must precede XLSX editor creation"
+
+    def test_xlsx_editor_uses_lazy_module_export_not_window_global(self):
+        """Opening an XLSX must await its module instead of relying on a stale global."""
+        assert "const { XlsxEditor } = await loadXlsxEditor();" in self.src
+        assert "new XlsxEditor()" in self.src
+        assert "KotoXlsxEditor" not in self.src
 
     def test_router_load_primes_layout_before_waiting(self):
         """The file-open path must prime xlsx/pptx shells before waiting for size."""
         src = self.src
         fn_start = src.find("async function _mountEditor")
-        fn_end = src.find("new KotoXlsxEditor()", fn_start)
+        fn_end = src.find("new XlsxEditor()", fn_start)
         body = (
             src[fn_start : fn_end + 120]
             if fn_end != -1
@@ -1856,7 +2046,7 @@ class TestEmbeddedModeRenderGuards:
         """Tab switches must use the shared mount path that primes before waiting."""
         src = self.src
         mount_start = src.find("async function _mountEditor")
-        mount_end = src.find("new KotoXlsxEditor()", mount_start)
+        mount_end = src.find("new XlsxEditor()", mount_start)
         tab_body = (
             src[mount_start : mount_end + 120]
             if mount_end != -1
@@ -1868,40 +2058,40 @@ class TestEmbeddedModeRenderGuards:
             prime_pos != -1 and guard_pos != -1 and prime_pos < guard_pos
         ), "_mountEditor must prime the editor shell before waiting for layout"
 
-    # ── KotoXlsxEditor size-polling ──────────────────────────────────────
+    # ── XlsxEditor size-polling ──────────────────────────────────────────
 
     def test_xlsx_editor_polls_for_non_zero_size(self):
-        """KotoXlsxEditor.render must use requestAnimationFrame before calling KotoSheetsAPI.create."""
+        """XlsxEditor.render must use requestAnimationFrame before calling KotoSheetsAPI.create."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor")
-        xlsx_end = src.find("\n  class Koto", xlsx_start)
+        xlsx_start = src.find("class XlsxEditor")
+        xlsx_end = len(src)
         xlsx_body = src[xlsx_start:xlsx_end]
         assert (
             "requestAnimationFrame" in xlsx_body
-        ), "KotoXlsxEditor must use requestAnimationFrame before mounting Univer"
+        ), "XlsxEditor must use requestAnimationFrame before mounting Univer"
         assert (
             "KotoSheetsAPI.create" in xlsx_body
-        ), "KotoXlsxEditor must call KotoSheetsAPI.create"
+        ), "XlsxEditor must call KotoSheetsAPI.create"
 
     def test_xlsx_editor_has_mount_deadline(self):
-        """KotoXlsxEditor.render must have error handling for create failures."""
+        """XlsxEditor.render must have error handling for create failures."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor")
-        xlsx_end = src.find("\n  class Koto", xlsx_start)
+        xlsx_start = src.find("class XlsxEditor")
+        xlsx_end = len(src)
         xlsx_body = src[xlsx_start:xlsx_end]
         assert (
             "catch" in xlsx_body and "初始化失败" in xlsx_body
-        ), "KotoXlsxEditor must catch errors from KotoSheetsAPI.create"
+        ), "XlsxEditor must catch errors from KotoSheetsAPI.create"
 
     def test_xlsx_editor_resize_nudge_present(self):
-        """KotoXlsxEditor.render must pass string container ID to KotoSheetsAPI.create."""
+        """XlsxEditor.render must pass string container ID to KotoSheetsAPI.create."""
         src = self.src
-        xlsx_start = src.find("class KotoXlsxEditor")
-        xlsx_end = src.find("\n  class Koto", xlsx_start)
+        xlsx_start = src.find("class XlsxEditor")
+        xlsx_end = len(src)
         xlsx_body = src[xlsx_start:xlsx_end]
         assert (
             "this._containerId" in xlsx_body
-        ), "KotoXlsxEditor must pass string container ID to KotoSheetsAPI.create"
+        ), "XlsxEditor must pass string container ID to KotoSheetsAPI.create"
 
     # ── KotoPptxEditor size-polling ──────────────────────────────────────
 

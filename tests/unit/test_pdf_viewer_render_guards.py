@@ -10,7 +10,8 @@ def test_pdf_viewer_forces_initial_visible_page_render_passes():
         encoding="utf-8"
     )
 
-    assert "import { _updatePdfZoomUI } from './cdn-loaders';" in src
+    assert "const workspaceApi = getWorkspaceApi();" in src
+    assert "workspaceApi._updatePdfZoomUI?.(pct)" in src
     assert "declare function _updatePdfZoomUI" not in src
     assert "_scheduleVisiblePageRenderPasses()" in src
     assert "requestAnimationFrame(() => this._renderVisiblePagesNow())" in src

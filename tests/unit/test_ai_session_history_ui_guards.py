@@ -64,29 +64,34 @@ def test_completed_task_history_cards_are_readonly_and_collapsible():
     task_src = (
         _repo_root() / "web" / "src" / "workspace" / "task-runner.ts"
     ).read_text(encoding="utf-8")
-    css = (_repo_root() / "web" / "static" / "css" / "workspace.css").read_text(
-        encoding="utf-8"
-    )
+    recovery_src = (
+        _repo_root() / "web" / "src" / "workspace" / "task-run-recovery.ts"
+    ).read_text(encoding="utf-8")
+    css = (
+        _repo_root() / "web" / "static" / "css" / "workspace-task-flow.css"
+    ).read_text(encoding="utf-8")
 
     assert (
         "function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): void"
         in conversation_src
     )
-    assert (
-        "turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function'"
-        in conversation_src
-    )
+    assert "turn.task_card_snapshot" in conversation_src
+    assert "import { restoreTaskRunCard } from './task-runner';" in conversation_src
+    assert "workspaceApi.restoreTaskRunCard" not in conversation_src
     assert (
         "!taskTurnIsTerminal(turn) && workspaceApi.restoreTaskRunCard"
         not in conversation_src
     )
+    assert "function taskTurnIsTerminal(" not in conversation_src
     assert "element.dataset.taskMemorySummary = memorySummary" in conversation_src
-    assert "workspaceApi.syncTaskInteractionSummary(element)" in conversation_src
-    assert "function markTaskRunCardAsHistory" in task_src
-    assert "card.dataset.historyStatus = historyStatus || 'history'" in task_src
-    assert "process.removeAttribute('open')" in task_src
-    assert "process.dataset.historyCollapsed = 'true'" in task_src
-    assert "statusEl.textContent = statusText" in task_src
+    assert "syncTaskInteractionSummary(element)" in conversation_src
+    assert "workspaceApi.syncTaskInteractionSummary" not in conversation_src
+    assert "const markTaskRunCardAsHistory = (" in recovery_src
+    assert "card.dataset.historyStatus = historyStatus || 'history'" in recovery_src
+    assert "process.removeAttribute('open')" in recovery_src
+    assert "process.dataset.historyCollapsed = 'true'" in recovery_src
+    assert "statusEl.textContent = statusText" in recovery_src
+    assert "function markTaskRunCardAsHistory" not in task_src
     assert (
         "#wa-ai-messages .wa-task-run.is-compact.is-history-snapshot .wa-task-header"
         in css

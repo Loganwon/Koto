@@ -209,7 +209,7 @@ def test_file_task_runtime_does_not_external_fallback_after_doc_annotate_bridge_
                 "summary": "Word 原生修订写回未完成。",
                 "completed_task": False,
                 "mode": "doc_annotate_bridge",
-                "runtime": {"terminal_status": "needs_attention"},
+                "runtime": {"terminal_status": "quality_gate_failed"},
             },
             step_id="run",
         )

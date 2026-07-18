@@ -14,10 +14,10 @@ import logging
 import re
 import threading
 import time
+from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Iterable
 
-from app.core.llm.model_mode import normalize_model_mode
 from app.core.security.output_validator import sanitize_user_visible_text
 from web.editor_ai_text import clean_selection_text
 from web.sse.protocol import sse
@@ -90,6 +90,8 @@ def safe_editor_sse(payload: dict) -> str:
 
 def _normalize_file_task_payload(data: dict) -> dict:
     from web.runtime_context import get_configured_local_model_id
+    from app.core.llm.local_model_runtime import get_configured_model_mode
+    from app.core.llm.model_selection import get_configured_cloud_model
 
     payload = dict(data or {})
 
@@ -100,7 +102,11 @@ def _normalize_file_task_payload(data: dict) -> dict:
     if raw_selection:
         payload["selection"] = clean_selection_text(raw_selection)
 
-    model_mode = normalize_model_mode(payload.get("model_mode"), default="deepseek")
+    # The browser may contain a stale task card or an older bundled UI.  File
+    # tasks therefore follow the persisted runtime selection, not a model mode
+    # supplied by the individual request.  This is the same setting consumed
+    # by ordinary chat and the workspace composer.
+    model_mode = get_configured_model_mode()
     payload["model_mode"] = model_mode
     raw_options = payload.get("options")
     options = dict(raw_options) if isinstance(raw_options, dict) else {}
@@ -119,6 +125,9 @@ def _normalize_file_task_payload(data: dict) -> dict:
             options["local_model"] = configured_local_model
         else:
             options.pop("local_model", None)
+    else:
+        payload["model_id"] = get_configured_cloud_model(task_type="FILE_TASK")
+        options.pop("local_model", None)
     history = payload.get("history")
     if not isinstance(history, list):
         history = []
@@ -168,7 +177,7 @@ def _safe_file_task_event_dict(event) -> dict:
     event_payload = payload.get("payload") if isinstance(payload.get("payload"), dict) else {}
 
     safe_event_payload = dict(event_payload)
-    if event_type == "run.error":
+    if event_type == "run.finished" and not bool(safe_event_payload.get("completed_task")):
         _sanitize_sse_text_field(
             safe_event_payload,
             "text",
@@ -290,6 +299,15 @@ def _ensure_file_task_record(request_payload) -> str:
 
 
 def _file_task_message(event_type: str, event_payload: dict) -> str:
+    failure = (
+        event_payload.get("failure")
+        if isinstance(event_payload.get("failure"), dict)
+        else {}
+    )
+    for key in ("summary", "detail"):
+        text = _trim_file_task_text(failure.get(key), 320)
+        if text:
+            return text
     for key in ("summary", "detail", "text", "title", "message", "status"):
         text = _trim_file_task_text(event_payload.get(key), 320)
         if text:
@@ -298,31 +316,6 @@ def _file_task_message(event_type: str, event_payload: dict) -> str:
     if tool_name:
         return f"{event_type}: {tool_name}"
     return event_type or "file_task_event"
-
-
-def _file_task_progress(event_type: str) -> int:
-    explicit = {
-        "run.started": 5,
-        "task.classified": 12,
-        "plan.checked": 18,
-        "plan.created": 24,
-        "multi_target.started": 8,
-        "multi_target.subrun.started": 28,
-        "multi_target.subrun.finished": 72,
-        "multi_target.finished": 100,
-        "check.started": 84,
-        "check.finished": 94,
-        "run.finished": 100,
-        "run.cancelled": 0,
-        "run.error": 0,
-    }
-    if event_type in explicit:
-        return explicit[event_type]
-    if event_type.startswith("tool."):
-        return 62 if event_type.endswith("finished") else 46
-    if event_type.startswith("step."):
-        return 36 if event_type.endswith("started") else 70
-    return 40
 
 
 def _compact_file_task_stream_payload(payload: dict) -> dict:
@@ -339,65 +332,6 @@ def _compact_file_task_stream_payload(payload: dict) -> dict:
     return compact
 
 
-def _file_task_frontend_progress(
-    event_type: str,
-    payload: dict,
-    *,
-    ui_state: dict | None = None,
-) -> dict | None:
-    """Return the browser progress projection for milestone events.
-
-    Keep this mapping aligned with ``file_task_ui_stream.normalize_ui_state``.
-    It is emitted independently of optional UI-message normalization so the
-    task card always has an explicit, machine-readable progress update.
-    """
-    stages = {
-        "run.started": (4, "执行任务", "run", "running"),
-        "task.classified": (12, "任务识别", "plan", "running"),
-        "plan.checked": (20, "规划检查", "plan", "running"),
-        "plan.created": (28, "准备计划", "plan", "running"),
-        "step.started": (36, "执行步骤", "step", "running"),
-        "tool.started": (52, "执行工具", "tool", "running"),
-        "tool.finished": (68, "执行任务", "execute", "running"),
-        "step.finished": (68, "执行任务", "execute", "running"),
-        "step.result": (68, "执行任务", "execute", "running"),
-        "check.started": (84, "检查结果", "check", "running"),
-        "check.finished": (92, "检查结果", "check", "running"),
-        "run.finished": (100, "任务完成", "done", "succeeded"),
-        "run.error": (100, "任务失败", "error", "failed"),
-        "run.cancelled": (100, "已取消", "cancelled", "cancelled"),
-    }
-    stage = stages.get(event_type)
-    if stage is None:
-        return None
-    progress, fallback_label, phase, status = stage
-    if event_type == "plan.checked" and payload.get("passed") is False:
-        status = "warning"
-    if event_type in {"tool.finished", "step.finished", "step.result"}:
-        if payload.get("success") is False or str(payload.get("status") or "").lower() in {"failed", "error"}:
-            status = "failed"
-
-    # ``_safe_file_task_event_dict`` has already projected the authoritative
-    # terminal UI state.  Reuse it here so the separate progress event cannot
-    # claim success while the final run event says the task needs attention.
-    if event_type == "run.finished" and isinstance(ui_state, dict):
-        progress = ui_state.get("progress") if isinstance(ui_state.get("progress"), int) else progress
-        fallback_label = _trim_file_task_text(ui_state.get("title"), 120) or fallback_label
-        phase = _trim_file_task_text(ui_state.get("phase"), 80) or phase
-        status = _trim_file_task_text(ui_state.get("status"), 80) or status
-    label = _trim_file_task_text(
-        payload.get("title") or payload.get("tool_name"),
-        120,
-    ) or fallback_label
-    return {
-        "progress": progress,
-        "label": label,
-        "phase": phase,
-        "status": status,
-        "source_event": event_type,
-    }
-
-
 def _file_task_terminal_status(event_type: str, event_payload: dict) -> str:
     runtime = event_payload.get("runtime") if isinstance(event_payload.get("runtime"), dict) else {}
     raw_status = str(
@@ -406,36 +340,34 @@ def _file_task_terminal_status(event_type: str, event_payload: dict) -> str:
         or event_payload.get("status")
         or ""
     ).strip().lower()
+    if raw_status == "needs_attention":
+        raw_status = "needs_review"
     if raw_status in {
         "awaiting_confirmation",
-        "waiting",
-        "needs_attention",
         "context_summary_fallback",
+        "needs_review",
+        "waiting",
     } or event_payload.get("awaiting_confirmation"):
         return "waiting"
-    if event_type == "run.started" or event_type == "multi_target.started":
+    if event_type == "run.started":
         return "running"
     if event_type == "run.cancelled":
         return "cancelled"
-    if event_type == "run.error":
-        return "failed"
     if event_type == "run.finished":
         if raw_status in {"cancelled", "canceled"}:
             return "cancelled"
         if bool(event_payload.get("completed_task")):
             return "completed"
         return "failed"
-    if event_type == "multi_target.finished":
-        return "completed" if str(event_payload.get("status") or "").strip().lower() == "succeeded" else "failed"
     return ""
 
 
 def _file_task_step_type(event_type: str) -> str:
     if event_type.startswith("tool."):
         return "ACTION"
-    if event_type == "run.error" or event_type.endswith(".error"):
+    if event_type.endswith(".error"):
         return "ERROR"
-    if event_type in {"run.finished", "multi_target.finished", "check.finished", "step.result"}:
+    if event_type in {"run.finished", "check.finished", "step.result"}:
         return "ANSWER"
     return "OBSERVATION"
 
@@ -497,7 +429,7 @@ def _persist_file_task_progress_event(request_payload, event) -> None:
             metadata_patch["waiting_event"] = safe_event
         ledger.update_metadata(task_id, metadata_patch)
 
-        if event_type not in {"run.started", "multi_target.started"}:
+        if event_type != "run.started":
             ledger.add_step(
                 task_id,
                 step_type=step_type,
@@ -513,7 +445,14 @@ def _persist_file_task_progress_event(request_payload, event) -> None:
                 event_type="file_task_event",
                 status=terminal_status or (current_status or "running"),
                 message=message,
-                progress=_file_task_progress(event_type),
+                progress=int(
+                    (
+                        safe_event.get("ui_state")
+                        if isinstance(safe_event.get("ui_state"), dict)
+                        else {}
+                    ).get("progress")
+                    or 0
+                ),
                 step_type=step_type,
                 tool_name=tool_name,
                 detail={"event": safe_event},
@@ -532,18 +471,28 @@ def _persist_file_task_summary_event(
     try:
         event_payload = _coerce_file_task_event_dict(event)
         event_type = str(event_payload.get("type") or "").strip()
-        if event_type not in {"run.finished", "multi_target.subrun.finished"}:
+        if event_type != "run.finished":
             return
         payload = event_payload.get("payload") if isinstance(event_payload.get("payload"), dict) else {}
         event_summary = str(payload.get("summary") or "").strip()
         event_completed = bool(payload.get("completed_task"))
-        event_target = str(payload.get("target") or request_payload.target_path or "").strip()
+        event_target = str(
+            payload.get("target")
+            or payload.get("target_path")
+            or payload.get("revised_file")
+            or request_payload.target_path
+            or ""
+        ).strip()
         if not event_summary or not event_target:
             return
         save_task_summary_fn(
             file_path=event_target,
             task=str(request_payload.task or "")[:500],
-            outcome="completed" if event_completed else "needs_attention",
+            outcome=(
+                "completed"
+                if event_completed
+                else _file_task_artifact_status(event_type, payload)
+            ),
             summary=event_summary,
         )
     except Exception as exc:
@@ -645,10 +594,15 @@ def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
         or event_payload.get("status")
         or ""
     ).strip().lower()
+    # Old persisted tasks can still contain the retired status name.  Translate
+    # at the compatibility boundary so no current artifact result re-emits it.
+    if raw_status == "no_file_change":
+        return "write_not_performed"
+    if raw_status == "needs_attention":
+        return "needs_review"
     if raw_status in {
         "awaiting_confirmation",
         "waiting",
-        "needs_attention",
         "context_summary_fallback",
         "needs_review",
         "pending",
@@ -657,15 +611,17 @@ def _file_task_artifact_status(event_type: str, event_payload: dict) -> str:
         "error",
         "write_blocked",
         "tool_gap",
-        "no_file_change",
+        "write_not_performed",
         "model_unavailable",
+        "model_timeout",
+        "model_error",
         "quality_gate_failed",
     }:
         return raw_status
     terminal_status = _file_task_terminal_status(event_type, event_payload)
     if terminal_status:
         return terminal_status
-    if event_type in {"run.error", "run.cancelled"}:
+    if event_type == "run.cancelled":
         return "failed"
     return "running"
 
@@ -677,7 +633,7 @@ def _should_attach_file_task_artifact_result(
 ) -> bool:
     if isinstance(event_payload.get("artifact_result"), dict):
         return False
-    if event_type in {"run.finished", "multi_target.finished", "run.error", "run.cancelled"}:
+    if event_type in {"run.finished", "run.cancelled"}:
         return True
     if event_type == "file.changed":
         return True
@@ -885,6 +841,14 @@ def _build_file_task_request_from_data(data: dict):
     )
 
 
+@dataclass
+class _FileTaskStreamState:
+    """Mutable projection state shared across the complete SSE response."""
+
+    outbound_seq: int = 0
+    terminal_emitted: bool = False
+
+
 def _iter_file_task_stream_events(
     request_payload,
     event_iterable,
@@ -892,10 +856,25 @@ def _iter_file_task_stream_events(
     save_task_summary_fn,
     normalize_event_fn,
     persist_progress_fn,
+    stream_state: _FileTaskStreamState | None = None,
 ):
-    outbound_seq = 0
+    state = stream_state or _FileTaskStreamState()
     file_changes: list[dict] = []
-    for event in event_iterable:
+    source_iter = iter(event_iterable)
+    while not state.terminal_emitted:
+        try:
+            event = next(source_iter)
+        except StopIteration:
+            return
+        except GeneratorExit:
+            raise
+        except Exception as exc:
+            logger.exception(
+                "[FileTaskRuntime] event producer failed before terminal: %s",
+                exc,
+            )
+            event = _build_file_task_failed_terminal_event(request_payload, exc)
+
         safe_event = _safe_file_task_event_dict(event)
         _collect_file_task_artifact_changes(safe_event, file_changes)
         safe_event = _attach_file_task_artifact_result(request_payload, safe_event, file_changes)
@@ -905,7 +884,7 @@ def _iter_file_task_stream_events(
             save_task_summary_fn=save_task_summary_fn,
         )
         persist_progress_fn(request_payload, safe_event)
-        outbound_seq += 1
+        state.outbound_seq += 1
         outbound_event = dict(safe_event)
         outbound_event["payload"] = _compact_file_task_stream_payload(
             safe_event.get("payload")
@@ -914,69 +893,48 @@ def _iter_file_task_stream_events(
         )
         terminal_event = str(outbound_event.get("type") or "") in {
             "run.finished",
-            "run.error",
             "run.cancelled",
-            "multi_target.finished",
         }
-        progress_payload = _file_task_frontend_progress(
-            str(safe_event.get("type") or "").strip(),
-            safe_event.get("payload") if isinstance(safe_event.get("payload"), dict) else {},
-            ui_state=safe_event.get("ui_state") if isinstance(safe_event.get("ui_state"), dict) else None,
-        )
-        progress_sse = None
-        if progress_payload is not None and terminal_event:
-            progress_sse = _file_task_event_to_safe_sse({
-                "type": "progress",
-                "task_id": outbound_event.get("task_id") or getattr(request_payload, "task_id", "") or "",
-                "run_id": outbound_event.get("run_id") or getattr(request_payload, "run_id", "") or "file_task",
-                "seq": outbound_seq,
-                "step_id": outbound_event.get("step_id") or "progress",
-                "ts": outbound_event.get("ts") or time.time(),
-                "payload": progress_payload,
-            })
-            outbound_seq += 1
-        outbound_event["seq"] = outbound_seq
+        outbound_event["seq"] = state.outbound_seq
         raw_sse = _file_task_event_to_safe_sse(outbound_event)
-        if progress_payload is not None and not terminal_event:
-            outbound_seq += 1
-            progress_sse = _file_task_event_to_safe_sse({
-                "type": "progress",
-                "task_id": outbound_event.get("task_id") or getattr(request_payload, "task_id", "") or "",
-                "run_id": outbound_event.get("run_id") or getattr(request_payload, "run_id", "") or "file_task",
-                "seq": outbound_seq,
-                "step_id": outbound_event.get("step_id") or "progress",
-                "ts": outbound_event.get("ts") or time.time(),
-                "payload": progress_payload,
-            })
-        next_ui_seq = outbound_seq + 1
-        ui_sse = _build_file_task_ui_message_sse(
-            request_payload,
-            safe_event,
-            normalize_event_fn=normalize_event_fn,
-            seq_override=next_ui_seq,
-        )
-        # Keep terminal artifact results as the final event in their run.  The
-        # preceding progress frame receives the lower sequence number so every
-        # consumer can require monotonically increasing SSE sequence values.
-        if progress_sse is not None and terminal_event:
-            yield progress_sse
+        next_ui_seq = state.outbound_seq + 1
+        ui_sse = None
+        if not terminal_event:
+            ui_sse = _build_file_task_ui_message_sse(
+                request_payload,
+                safe_event,
+                normalize_event_fn=normalize_event_fn,
+                seq_override=next_ui_seq,
+            )
+        if terminal_event:
+            state.terminal_emitted = True
         yield raw_sse
-        if progress_sse is not None and not terminal_event:
-            yield progress_sse
+        if terminal_event:
+            return
         if ui_sse is not None:
-            outbound_seq = next_ui_seq
+            state.outbound_seq = next_ui_seq
             yield ui_sse
 
 
-def _build_file_task_error_event(request_payload, exc):
+def _build_file_task_failed_terminal_event(request_payload, exc):
+    from app.core.agent.file_task_failure import build_failed_run_payload
+
+    detail = _trim_file_task_text(str(exc), 1200) or "文件任务流异常终止。"
     return {
-        "type": "run.error",
+        "type": "run.finished",
         "task_id": getattr(request_payload, "task_id", "") or "",
         "run_id": request_payload.run_id or "file_task",
         "seq": 999999,
         "step_id": "run",
         "ts": time.time(),
-        "payload": {"text": str(exc)},
+        "payload": build_failed_run_payload(
+            status="failed",
+            code="FILE_TASK_STREAM_FAILED",
+            phase="stream_transport",
+            summary="文件任务流异常终止，未能完成结果交付。",
+            detail=detail,
+            remaining=["查看任务执行详情，修复异常后重新执行。"],
+        ),
     }
 
 
@@ -989,7 +947,12 @@ def _fallback_file_task_request_for_error(data: dict):
     )
 
 
-def _drain_file_task_stream_output_in_background(request_payload, stream_iter) -> None:
+def _drain_file_task_stream_output_in_background(
+    request_payload,
+    stream_iter,
+    *,
+    stream_state: _FileTaskStreamState,
+) -> None:
     task_id = str(getattr(request_payload, "task_id", "") or "").strip()
 
     def _drain():
@@ -1003,8 +966,15 @@ def _drain_file_task_stream_output_in_background(request_payload, stream_iter) -
                 exc,
             )
             try:
-                error_event = _build_file_task_error_event(request_payload, exc)
-                _persist_file_task_progress_event(request_payload, error_event)
+                if stream_state.terminal_emitted:
+                    return
+                error_event = _build_file_task_failed_terminal_event(request_payload, exc)
+                for _ in _iter_file_task_stream_output(
+                    request_payload,
+                    [error_event],
+                    stream_state=stream_state,
+                ):
+                    pass
             except Exception as persist_exc:
                 logger.debug(
                     "[FileTaskRuntime] background drain error persistence skipped (task_id=%s): %s",
@@ -1019,7 +989,12 @@ def _drain_file_task_stream_output_in_background(request_payload, stream_iter) -
     ).start()
 
 
-def _iter_file_task_stream_output(request_payload, event_iterable):
+def _iter_file_task_stream_output(
+    request_payload,
+    event_iterable,
+    *,
+    stream_state: _FileTaskStreamState | None = None,
+):
     from app.core.agent.file_task_session_store import save_task_summary
     from app.core.agent.file_task_ui_stream import normalize_event as _ui_normalize_event
 
@@ -1029,6 +1004,7 @@ def _iter_file_task_stream_output(request_payload, event_iterable):
         save_task_summary_fn=save_task_summary,
         normalize_event_fn=_ui_normalize_event,
         persist_progress_fn=_persist_file_task_progress_event,
+        stream_state=stream_state,
     )
 
 
@@ -1042,6 +1018,7 @@ def stream_file_task_request(
     from web.runtime_context import get_client_proxy, get_workspace_dir
 
     request_payload = None
+    stream_state = _FileTaskStreamState()
     try:
         request_payload = _build_file_task_request_from_data(data)
         _ensure_file_task_record(request_payload)
@@ -1050,7 +1027,11 @@ def stream_file_task_request(
             gemini_client=gemini_client if gemini_client is not None else get_client_proxy(),
         )
         event_iterable = orchestrator.run(request_payload)
-        stream_iter = _iter_file_task_stream_output(request_payload, event_iterable)
+        stream_iter = _iter_file_task_stream_output(
+            request_payload,
+            event_iterable,
+            stream_state=stream_state,
+        )
         for frame in stream_iter:
             try:
                 yield frame
@@ -1065,12 +1046,18 @@ def stream_file_task_request(
                     _drain_file_task_stream_output_in_background(
                         request_payload,
                         stream_iter,
+                        stream_state=stream_state,
                     )
                 raise
     except Exception as exc:
         logger.exception("[FileTaskRuntime] stream failed: %s", exc)
+        if stream_state.terminal_emitted:
+            return
         if request_payload is None:
             request_payload = _fallback_file_task_request_for_error(data)
-        error_event = _build_file_task_error_event(request_payload, exc)
-        _persist_file_task_progress_event(request_payload, error_event)
-        yield _file_task_event_to_safe_sse(error_event)
+        error_event = _build_file_task_failed_terminal_event(request_payload, exc)
+        yield from _iter_file_task_stream_output(
+            request_payload,
+            [error_event],
+            stream_state=stream_state,
+        )

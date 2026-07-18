@@ -32,6 +32,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: |
             web/package-lock.json
+            web/tiptap-editor/package-lock.json
             web/univer-editor/package-lock.json
 
       - name: Cache pip dependencies
@@ -47,7 +48,7 @@ jobs:
         run: |
           python -m venv .venv
           .\.venv\Scripts\pip install --upgrade pip wheel
-          .\.venv\Scripts\pip install pyinstaller
+          .\.venv\Scripts\pip install -r config\build-requirements.lock
 
           # Use lockfile for reproducible builds; excludes voice/gunicorn for packaging
           $lockContent = Get-Content config\requirements.lock
@@ -74,33 +75,21 @@ jobs:
             Write-Host "::warning::PyAudio install failed, voice will degrade at runtime"
           }
 
-      - name: Build frontend assets
+      - name: Audit frontend dependencies
         shell: pwsh
         run: |
           npm ci --prefix web
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend npm ci failed"; exit 1 }
           npm audit --prefix web --audit-level=high
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend dependency audit failed"; exit 1 }
-          npm run build --prefix web
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Main frontend build failed"; exit 1 }
+          npm ci --prefix web/tiptap-editor
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend npm ci failed"; exit 1 }
+          npm audit --prefix web/tiptap-editor --audit-level=high
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::TipTap DOCX frontend dependency audit failed"; exit 1 }
           npm ci --prefix web/univer-editor
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend npm ci failed"; exit 1 }
           npm audit --prefix web/univer-editor --audit-level=high
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend dependency audit failed"; exit 1 }
-          npm run build --prefix web/univer-editor
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Univer frontend build failed"; exit 1 }
-
-      - name: Build with PyInstaller
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path logs | Out-Null
-          .\.venv\Scripts\pyinstaller.exe koto.spec --clean -y *> logs\build_latest.log
-          if ($LASTEXITCODE -ne 0) {
-            Write-Host "::error::PyInstaller build failed. Last 60 lines:"
-            Get-Content logs\build_latest.log -Tail 60
-            exit 1
-          }
-          Write-Host "Build OK -> dist\Koto\Koto.exe"
 
       - name: Determine version
         shell: pwsh
@@ -109,14 +98,6 @@ jobs:
           if (-not $v) { $v = Get-Date -Format "yyyy.MM.dd" }
           "VERSION=$v" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "Version: $v"
-
-      - name: Assemble portable package
-        shell: pwsh
-        env:
-          PYTHONIOENCODING: utf-8
-        run: |
-          .\.venv\Scripts\python.exe src\deploy_portable.py --allow-missing-installer
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::deploy_portable.py failed"; exit 1 }
 
       - name: Install Inno Setup (if missing)
         shell: pwsh
@@ -127,34 +108,19 @@ jobs:
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
 
-      - name: Build installer (Inno Setup)
+      - name: Build Windows artifacts through canonical pipeline
         shell: pwsh
         run: |
-          $iscc = (& .\scripts\resolve_inno_setup.ps1 -Quiet) | Select-Object -First 1
-          if (-not $iscc -or -not (Test-Path $iscc)) { Write-Host "::error::Inno Setup 6 not found"; exit 1 }
-          & $iscc /DAppVersion=$env:VERSION koto_installer.iss
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Inno Setup build failed"; exit 1 }
-          $setupName = "Koto_v$($env:VERSION)_Setup.exe"
-          $sizeMB = [math]::Round((Get-Item "dist\$setupName").Length / 1MB, 1)
-          Write-Host "Installer: $setupName ($sizeMB MB)"
+          .\Build_Release.ps1 -Version $env:VERSION
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Canonical Windows release build failed"; exit 1 }
 
-      - name: Create ZIP archive
-        shell: pwsh
-        run: |
-          $zipName = "Koto_v$($env:VERSION)_Windows.zip"
-          Compress-Archive -Path "dist\Koto_Portable\*" -DestinationPath "dist\$zipName" -CompressionLevel Optimal
-          Write-Host "Created: dist\$zipName"
-
-      - name: Generate release manifest and SHA-256 checksums
-        shell: pwsh
-        run: |
-          .\.venv\Scripts\python.exe scripts\write_release_manifest.py `
-            --version $env:VERSION `
-            --output "dist\Koto_v$($env:VERSION)_release-manifest.json" `
-            --hash-output "dist\Koto_v$($env:VERSION)_SHA256SUMS.txt" `
-            "dist\Koto_v$($env:VERSION)_Setup.exe" `
-            "dist\Koto_v$($env:VERSION)_Windows.zip"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::Release manifest generation failed"; exit 1 }
+      - name: Upload release build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: koto-windows-build-logs
+          path: logs/*.log
+          retention-days: 7
 
       - name: Run installer E2E test
         shell: pwsh

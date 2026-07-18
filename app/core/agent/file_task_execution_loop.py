@@ -11,6 +11,8 @@ from typing import Any, Dict, Iterable, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskEvent, FileTaskToolStreamResult
 from app.core.agent.file_task_evidence_guard import sanitize_unverified_readonly_quotes
+from app.core.agent.file_task_failure import build_model_execution_failure
+from app.core.agent.file_task_financial_report_recovery import recover_financial_report
 from app.core.agent.file_task_guard_emission import build_tool_guard_emission
 from app.core.agent.file_task_readonly_loop_guard import (
     READONLY_ANSWER_GUARD_PENDING_SUMMARY,
@@ -80,6 +82,7 @@ class FileTaskExecutionResult:
     final_summary: str
     completed_task: bool
     model_failed: bool
+    execution_failure: Optional[Dict[str, Any]]
     readonly_fallback_used: bool
     planner_runtime_payload: Dict[str, Any]
     last_check_payload: Optional[Dict[str, Any]]
@@ -164,6 +167,7 @@ class FileTaskExecutionLoop:
         final_summary = ""
         completed_task = False
         model_failed = False
+        execution_failure: Optional[Dict[str, Any]] = None
         readonly_fallback_used = False
         last_tool_batch_signature = ""
         planner_runtime_payload: Dict[str, Any] = {}
@@ -193,6 +197,7 @@ class FileTaskExecutionLoop:
                 final_summary=final_summary,
                 completed_task=completed_task,
                 model_failed=model_failed,
+                execution_failure=execution_failure,
                 readonly_fallback_used=readonly_fallback_used,
                 planner_runtime_payload=planner_runtime_payload,
                 last_check_payload=last_check_payload,
@@ -240,6 +245,13 @@ class FileTaskExecutionLoop:
                 )
             except Exception as exc:
                 logger.warning("[FileTaskRuntime] model call failed: %s", exc)
+                execution_failure = build_model_execution_failure(
+                    exc,
+                    round_index=round_index,
+                    model_mode=str(request.model_mode or ""),
+                    model_id=str(request.model_id or ""),
+                )
+                model_failed = True
                 yield ledger.event(
                     "model.call.finished",
                     {
@@ -268,7 +280,8 @@ class FileTaskExecutionLoop:
                 if deterministic_change:
                     file_changes.append(deterministic_change)
                     completed_task = True
-                    model_failed = True
+                    execution_failure = None
+                    model_failed = False
                     final_summary = str(
                         deterministic_change.get("summary")
                         or "模型不可用，已使用 Koto 原生流程写入当前分步结果。"
@@ -300,6 +313,8 @@ class FileTaskExecutionLoop:
                 )
                 if fallback_summary:
                     readonly_fallback_used = True
+                    execution_failure = None
+                    model_failed = False
                     completed_task = False
                     final_summary = fallback_summary
                     yield ledger.event(
@@ -318,30 +333,25 @@ class FileTaskExecutionLoop:
                         runtime._build_step_result_payload(
                             title="模型规划并调用工具",
                             summary=fallback_summary,
-                            status="needs_attention",
+                            status="failed",
                             round_index=round_index,
                         ),
                         step_id=execute_step_id,
                     )
                 else:
-                    model_failed = True
-                    error_text = f"模型调用失败：{exc}"
-                    yield ledger.event(
-                        "run.error",
-                        {
-                            "text": error_text,
-                            "recoverable": not write_intent,
-                        },
-                        step_id=execute_step_id,
+                    error_text = str(
+                        execution_failure.get("summary") or "模型调用失败。"
                     )
+                    failed_step = runtime._build_step_result_payload(
+                        title="模型规划并调用工具",
+                        summary=error_text,
+                        status="failed",
+                        round_index=round_index,
+                    )
+                    failed_step["failure"] = dict(execution_failure)
                     yield ledger.event(
                         "step.result",
-                        runtime._build_step_result_payload(
-                            title="模型规划并调用工具",
-                            summary=error_text,
-                            status="failed",
-                            round_index=round_index,
-                        ),
+                        failed_step,
                         step_id=execute_step_id,
                     )
                 break
@@ -373,6 +383,12 @@ class FileTaskExecutionLoop:
             )
             tool_calls = answer_only_tool_calls.tool_calls
             discarded_answer_only_tool_calls = answer_only_tool_calls.discarded_count
+            if discarded_answer_only_tool_calls:
+                # A response coupled to an unavailable tool call is not a
+                # trustworthy final answer (for example, "I will write the
+                # file" beside a discarded write call). Force the normal
+                # readonly-answer guard to request a direct grounded answer.
+                content_text = ""
             yield ledger.event(
                 "model.call.finished",
                 {
@@ -687,7 +703,7 @@ class FileTaskExecutionLoop:
                         runtime._build_step_result_payload(
                             title="模型规划并调用工具",
                             summary=reminder,
-                            status="needs_attention",
+                            status="failed",
                             round_index=round_index,
                         ),
                         step_id=execute_step_id,
@@ -722,7 +738,7 @@ class FileTaskExecutionLoop:
                         runtime._build_step_result_payload(
                             title="修复监管",
                             summary=final_summary,
-                            status="needs_attention",
+                            status="failed",
                             round_index=round_index,
                             file_changes=file_changes,
                         ),
@@ -754,13 +770,30 @@ class FileTaskExecutionLoop:
                             runtime._build_step_result_payload(
                                 title="图表写入核验",
                                 summary=reminder,
-                                status="needs_attention",
+                                status="failed",
                                 round_index=round_index,
                                 file_changes=file_changes,
                             ),
                             step_id=execute_step_id,
                         )
                         continue
+                    if pending_images:
+                        native_changes = yield from runtime._insert_pending_generated_docx_images_native(
+                            ledger,
+                            request,
+                            executor,
+                            context_files,
+                            pending_images,
+                            execute_step_id,
+                        )
+                        if native_changes:
+                            file_changes.extend(native_changes)
+                            pending_images = runtime._pending_generated_docx_images(
+                                request,
+                                context_files,
+                                generated_artifacts,
+                                file_changes,
+                            )
                     last_check_payload = runtime._verify_task(
                         request,
                         executor,
@@ -813,7 +846,7 @@ class FileTaskExecutionLoop:
                                 status=(
                                     "completed"
                                     if repair_check_payload.get("passed")
-                                    else "needs_attention"
+                                    else "failed"
                                 ),
                                 runtime=repair_runtime,
                                 passed=repair_check_payload.get("passed"),
@@ -1025,7 +1058,7 @@ class FileTaskExecutionLoop:
                         runtime._build_step_result_payload(
                             title="监管纠偏",
                             summary=final_summary,
-                            status="needs_attention",
+                            status="failed",
                             round_index=round_index,
                             file_changes=file_changes,
                         ),
@@ -1044,7 +1077,7 @@ class FileTaskExecutionLoop:
                     runtime._build_step_result_payload(
                         title="模型规划并调用工具",
                         summary=final_summary,
-                        status="needs_attention",
+                        status="failed",
                         round_index=round_index,
                         file_changes=file_changes,
                     ),
@@ -1330,7 +1363,16 @@ class FileTaskExecutionLoop:
                 if is_write_tool(tool_name) and tool_name != "run_python_code":
                     target = write_target_for_tool(tool_name, tool_args)
                     write_key = runtime._write_dedupe_key_for_tool(tool_name, tool_args)
-                    if completed_write_ops.get(write_key, 0) >= max_write_ops_per_file:
+                    target_key = runtime._write_dedupe_key_for_target(target)
+                    target_was_locked_by_code = (
+                        bool(target_key)
+                        and completed_write_ops.get(target_key, 0)
+                        >= max_write_ops_per_file
+                    )
+                    same_write_was_completed = (
+                        completed_write_ops.get(write_key, 0) >= max_write_ops_per_file
+                    )
+                    if target_was_locked_by_code or same_write_was_completed:
                         skip_text = f"{tool_name} 已成功写入过 {target or '同一目标'}，本次跳过以避免重复覆盖。"
                         guard = build_tool_guard_emission(
                             tool_name=tool_name,
@@ -1475,6 +1517,91 @@ class FileTaskExecutionLoop:
                     yield runtime._cancelled_event(ledger, request)
                     return _result(cancelled=True)
 
+                recovery_artifacts: List[Dict[str, Any]] = []
+                recovery_changes: List[Dict[str, Any]] = []
+                recovery_message = ""
+                if tool_name == "run_python_code" and success:
+                    # A provider can report that its chart script succeeded while
+                    # producing neither a marker nor a discoverable image.  Do
+                    # not spend the remaining model rounds searching temporary
+                    # folders: create the two data-driven recovery charts now so
+                    # the next round can finish the requested DOCX insertion.
+                    primary_artifacts = runtime._tool_artifacts(tool_name, result)
+                    recovery_args = runtime._financial_chart_recovery_tool_args(
+                        request,
+                        context_files,
+                        tool_args,
+                        primary_artifacts,
+                    )
+                    if recovery_args:
+                        yield ledger.event(
+                            "code.started",
+                            {
+                                "code": str(recovery_args.get("code") or ""),
+                                "financial_chart_recovery": True,
+                            },
+                            step_id=current_step_id,
+                        )
+                        try:
+                            recovery_result = executor("run_python_code", recovery_args)
+                            if isinstance(recovery_result, FileTaskToolStreamResult):
+                                recovery_result = (
+                                    yield from runtime._consume_streaming_tool_result(
+                                        ledger,
+                                        step_id=current_step_id,
+                                        stream_result=recovery_result,
+                                    )
+                                )
+                            recovery_success = not _is_error_result(recovery_result)
+                        except Exception as exc:
+                            recovery_result = f"Error: {exc}"
+                            recovery_success = False
+                            logger.warning(
+                                "[FileTaskRuntime] financial chart recovery failed: %s",
+                                exc,
+                            )
+                        recovery_model_result = runtime._tool_result_for_model(
+                            "run_python_code", recovery_result
+                        )
+                        recovery_result_text = stringify_result(recovery_model_result)
+                        recovery_artifacts = runtime._tool_artifacts(
+                            "run_python_code", recovery_result
+                        )
+                        if recovery_success and recovery_artifacts:
+                            recovery_changes = runtime._extract_file_changes(
+                                "run_python_code", recovery_args, recovery_result
+                            )
+                            recovery_message = (
+                                "运行时已补齐并验证财务图表图片。下一步必须继续写入目标 DOCX："
+                                + ", ".join(
+                                    str(item.get("path") or item.get("name") or "")
+                                    for item in recovery_artifacts
+                                    if isinstance(item, dict)
+                                )
+                                + "；请先写入分析正文和数据表，再逐张调用 insert_image_into_docx。"
+                            )
+                        yield ledger.event(
+                            "code.output",
+                            {
+                                "text": runtime._code_output_preview(
+                                    "run_python_code",
+                                    recovery_result,
+                                    recovery_result_text,
+                                ),
+                                "stream": "stdout" if recovery_success else "stderr",
+                                "financial_chart_recovery": True,
+                            },
+                            step_id=current_step_id,
+                        )
+                        yield ledger.event(
+                            "code.finished",
+                            {
+                                "success": recovery_success,
+                                "financial_chart_recovery": True,
+                            },
+                            step_id=current_step_id,
+                        )
+
                 model_result = runtime._tool_result_for_model(tool_name, result)
                 current_tool_runtime_outcome = runtime._extract_tool_runtime_outcome(
                     result
@@ -1501,6 +1628,8 @@ class FileTaskExecutionLoop:
                         }
                     )
                 artifacts = runtime._tool_artifacts(tool_name, result)
+                if recovery_artifacts:
+                    artifacts = [*artifacts, *recovery_artifacts]
                 if tool_name == "run_python_code":
                     yield ledger.event(
                         "code.output",
@@ -1539,6 +1668,10 @@ class FileTaskExecutionLoop:
                     "tool.finished", tool_finished_payload, step_id=current_step_id
                 )
 
+                if recovery_message:
+                    model_result = (
+                        f"{stringify_result(model_result)}\n{recovery_message}"
+                    )
                 messages.append(
                     {
                         "role": "function",
@@ -1557,6 +1690,25 @@ class FileTaskExecutionLoop:
                 extracted_changes = runtime._extract_file_changes(
                     tool_name, tool_args, result
                 )
+                if recovery_changes:
+                    extracted_changes = [*extracted_changes, *recovery_changes]
+                if success and tool_name == "run_python_code":
+                    # Python may already have modified the same target that a
+                    # later dedicated writer proposes. Count the emitted file
+                    # changes so a second writer cannot append/overwrite it.
+                    for change in extracted_changes:
+                        if not isinstance(change, dict):
+                            continue
+                        metadata = change.get("metadata")
+                        metadata = metadata if isinstance(metadata, dict) else {}
+                        changed_path = str(
+                            change.get("file") or metadata.get("path") or ""
+                        ).strip()
+                        write_key = runtime._write_dedupe_key_for_target(changed_path)
+                        if write_key:
+                            completed_write_ops[write_key] = max(
+                                completed_write_ops.get(write_key, 0), 1
+                            )
                 if (
                     success
                     and is_write_tool(tool_name)
@@ -1654,13 +1806,32 @@ class FileTaskExecutionLoop:
                         runtime._build_step_result_payload(
                             title="图表写入核验",
                             summary=reminder,
-                            status="needs_attention",
+                            status="failed",
                             round_index=round_index,
                             file_changes=file_changes,
                         ),
                         step_id=execute_step_id,
                     )
                     continue
+                if pending_images:
+                    native_changes = (
+                        yield from runtime._insert_pending_generated_docx_images_native(
+                            ledger,
+                            request,
+                            executor,
+                            context_files,
+                            pending_images,
+                            execute_step_id,
+                        )
+                    )
+                    if native_changes:
+                        file_changes.extend(native_changes)
+                        pending_images = runtime._pending_generated_docx_images(
+                            request,
+                            context_files,
+                            generated_artifacts,
+                            file_changes,
+                        )
                 last_check_payload = runtime._verify_task(
                     request,
                     executor,
@@ -1712,7 +1883,7 @@ class FileTaskExecutionLoop:
                             status=(
                                 "completed"
                                 if repair_check_payload.get("passed")
-                                else "needs_attention"
+                                else "failed"
                             ),
                             runtime=repair_runtime,
                             passed=repair_check_payload.get("passed"),
@@ -1803,6 +1974,36 @@ class FileTaskExecutionLoop:
                         title="原生分步兜底写入",
                         summary=final_summary,
                         status="completed",
+                        file_changes=file_changes,
+                    ),
+                    step_id=execute_step_id,
+                )
+
+        if write_intent and not file_changes:
+            financial_recovery = yield from recover_financial_report(
+                runtime,
+                ledger,
+                request,
+                executor,
+                context_files,
+                recipe_skeleton,
+                step_id=execute_step_id,
+            )
+            if financial_recovery.attempted:
+                file_changes.extend(financial_recovery.file_changes)
+                generated_artifacts.extend(financial_recovery.artifacts)
+                final_summary = financial_recovery.summary or final_summary
+                completed_task = bool(financial_recovery.completed)
+                last_check_payload = None
+                if financial_recovery.file_changes:
+                    execution_failure = None
+                    model_failed = False
+                yield ledger.event(
+                    "step.result",
+                    runtime._build_step_result_payload(
+                        title="财务报告原生恢复",
+                        summary=final_summary,
+                        status="completed" if completed_task else "failed",
                         file_changes=file_changes,
                     ),
                     step_id=execute_step_id,

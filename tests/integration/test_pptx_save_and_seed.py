@@ -42,6 +42,27 @@ def _make_pptx_with_text(text: str = "Hello World") -> bytes:
     return buf.getvalue()
 
 
+def _make_pptx_with_rich_text() -> bytes:
+    """Create one text box with two paragraphs and multiple formatted runs."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shape = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(2))
+    first = shape.text_frame.paragraphs[0]
+    run = first.add_run()
+    run.text = "Keep "
+    run.font.bold = True
+    run.font.size = Pt(20)
+    first.add_run().text = "DELETE"
+    second = shape.text_frame.add_paragraph()
+    second.add_run().text = "Remove this paragraph"
+    buf = io.BytesIO()
+    prs.save(buf)
+    return buf.getvalue()
+
+
 def _parse_pptx_geometry_data(pptx_bytes: bytes) -> dict:
     """Parse PPTX bytes via parse_pptx_geometry (the backend parser)."""
     import tempfile
@@ -110,6 +131,92 @@ def wa_client(tmp_path_factory):
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+
+
+class TestPptxTextDeletionExport:
+    """Deleted paragraphs and runs must not come back after PPTX export."""
+
+    def _edited_payload(self) -> tuple[bytes, dict, dict]:
+        raw = _make_pptx_with_rich_text()
+        data = _parse_pptx_geometry_data(raw)
+        shape = next(
+            shape
+            for shape in data["slides"][0]["shapes"]
+            if shape.get("has_text")
+            and "DELETE"
+            in "".join(
+                str(run.get("text", ""))
+                for paragraph in shape.get("paragraphs", [])
+                for run in paragraph.get("runs", [])
+            )
+        )
+        return raw, data, shape
+
+    def test_deleting_complete_run_and_paragraph_is_exact(self):
+        from pptx import Presentation
+        from pptx.enum.text import PP_ALIGN
+
+        from web.blueprints.pptx_editor import _apply_edits
+
+        raw, data, shape = self._edited_payload()
+        kept_run = dict(shape["paragraphs"][0]["runs"][0])
+        kept_run["text"] = "Only this remains"
+        shape["paragraphs"] = [{"align": "RIGHT", "runs": [kept_run]}]
+
+        exported = _apply_edits(raw, data["slides"])
+        prs = Presentation(io.BytesIO(exported))
+        text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
+
+        assert text_shape.text == "Only this remains"
+        assert len(text_shape.text_frame.paragraphs) == 1
+        assert len(text_shape.text_frame.paragraphs[0].runs) == 1
+        assert text_shape.text_frame.paragraphs[0].alignment == PP_ALIGN.RIGHT
+        assert text_shape.text_frame.paragraphs[0].runs[0].font.bold is True
+
+    def test_deleting_all_text_produces_an_empty_text_frame(self):
+        from pptx import Presentation
+
+        from web.blueprints.pptx_editor import _apply_edits
+
+        raw, data, shape = self._edited_payload()
+        shape["paragraphs"] = []
+
+        exported = _apply_edits(raw, data["slides"])
+        prs = Presentation(io.BytesIO(exported))
+        text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
+
+        assert text_shape.text == ""
+        assert len(text_shape.text_frame.paragraphs) == 1
+
+    def test_new_runs_are_added_instead_of_silently_dropped(self):
+        from pptx import Presentation
+
+        from web.blueprints.pptx_editor import _apply_edits
+
+        raw, data, shape = self._edited_payload()
+        template = dict(shape["paragraphs"][0]["runs"][0])
+        shape["paragraphs"] = [
+            {
+                "align": "LEFT",
+                "runs": [
+                    {**template, "text": "A"},
+                    {**template, "text": "B", "bold": False},
+                    {**template, "text": "C"},
+                ],
+            }
+        ]
+
+        exported = _apply_edits(raw, data["slides"])
+        prs = Presentation(io.BytesIO(exported))
+        text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
+
+        assert [run.text for run in text_shape.text_frame.paragraphs[0].runs] == [
+            "A",
+            "B",
+            "C",
+        ]
+
+
 # A. Blank PPTX seed fix
 # ═════════════════════════════════════════════════════════════════════════════
 

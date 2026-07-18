@@ -76,7 +76,6 @@ pyperclip>=1.8.2
 # ── Upload STT (optional) ──
 # Koto records audio in the browser and uploads it to local Whisper.
 # Retired desktop microphone stacks must stay out of this file.
-edge-tts>=7.2,<8              # 有声概览在线语音合成
 # ── 本地离线上传语音识别（可选，无需 API Key）──
 # faster-whisper>=1.0.0    # 推荐：pip install faster-whisper
 # openai-whisper>=20231117 # 备选：pip install openai-whisper

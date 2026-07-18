@@ -36,6 +36,7 @@ from app.core.agent.file_task_doc_annotate_intent import (
     should_route_request,
     should_use_doc_annotate_bridge_execution,
 )
+from app.core.agent.file_task_failure import build_failed_run_payload
 from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.llm.model_mode import normalize_model_mode
 
@@ -43,6 +44,54 @@ logger = logging.getLogger(__name__)
 
 _BATCH_RESUME_ARTIFACT_TYPE = "koto_large_task_resume_v1"
 _BATCH_RESUME_ARTIFACT_CATEGORY = "batch_confirmation"
+
+
+def _failed_run_event(
+    ledger: FileTaskLedger,
+    *,
+    summary: str,
+    code: str,
+    phase: str,
+    step_id: str,
+    detail: str = "",
+    status: str = "quality_gate_failed",
+) -> FileTaskEvent:
+    return ledger.event(
+        "run.finished",
+        build_failed_run_payload(
+            status=status,
+            code=code,
+            phase=phase,
+            summary=summary,
+            detail=detail or summary,
+            remaining=["修正失败原因后重新执行文档任务。"],
+            runtime=_runtime_payload(status),
+            mode="doc_annotate_bridge",
+            execution_mode="doc_annotate_bridge",
+        ),
+        step_id=step_id,
+    )
+
+
+def _cancelled_run_event(
+    ledger: FileTaskLedger,
+    *,
+    summary: str,
+    step_id: str,
+) -> FileTaskEvent:
+    return ledger.event(
+        "run.cancelled",
+        {
+            "summary": summary,
+            "text": summary,
+            "status": "cancelled",
+            "completed_task": False,
+            "mode": "doc_annotate_bridge",
+            "execution_mode": "doc_annotate_bridge",
+            "runtime": _runtime_payload("cancelled"),
+        },
+        step_id=step_id,
+    )
 
 
 def _request_options(request: FileTaskRequest) -> dict[str, Any]:
@@ -424,9 +473,11 @@ def _stream_single_docx_request(
     ledger = FileTaskLedger(request.run_id)
 
     if not target_docx or not os.path.exists(target_docx):
-        yield ledger.event(
-            "run.error",
-            {"text": "未找到可修订的 DOCX 文稿，无法进入 Word 修订写回流程。"},
+        yield _failed_run_event(
+            ledger,
+            summary="未找到可修订的 DOCX 文稿，无法进入 Word 修订写回流程。",
+            code="DOCX_TARGET_MISSING",
+            phase="targeting",
             step_id="run",
         )
         return
@@ -583,17 +634,20 @@ def _stream_single_docx_request(
             break
 
         if stage == "cancelled":
-            yield ledger.event(
-                "run.error",
-                {"text": message or detail or "文稿修订任务已取消。"},
+            yield _cancelled_run_event(
+                ledger,
+                summary=message or detail or "文稿修订任务已取消。",
                 step_id="write" if write_started else "review",
             )
             return
 
         if stage == "error":
-            yield ledger.event(
-                "run.error",
-                {"text": message or detail or "文稿修订失败。"},
+            yield _failed_run_event(
+                ledger,
+                summary=message or detail or "文稿修订失败。",
+                code="DOC_ANNOTATE_FAILED",
+                phase="write" if write_started else "review",
+                status="model_error",
                 step_id="write" if write_started else "review",
             )
             return
@@ -672,7 +726,9 @@ def _stream_single_docx_request(
             "target_path": target_docx,
             "revised_file": revised_file,
             "annotations_added": applied,
-            "runtime": _runtime_payload("verified" if passed else "needs_attention"),
+            "runtime": _runtime_payload(
+                "verified" if passed else "quality_gate_failed"
+            ),
         },
         step_id="run",
     )
@@ -702,16 +758,20 @@ def stream_request(
     ledger = FileTaskLedger(request.run_id)
 
     if not source_pdf or not os.path.exists(source_pdf):
-        yield ledger.event(
-            "run.error",
-            {"text": "未找到可读取的 PDF 原文，无法进入 DOCX 审校修订流程。"},
+        yield _failed_run_event(
+            ledger,
+            summary="未找到可读取的 PDF 原文，无法进入 DOCX 审校修订流程。",
+            code="PDF_SOURCE_MISSING",
+            phase="targeting",
             step_id="run",
         )
         return
     if not target_docx or not os.path.exists(target_docx):
-        yield ledger.event(
-            "run.error",
-            {"text": "未找到可修订的 DOCX 译稿，无法进入 DOCX 审校修订流程。"},
+        yield _failed_run_event(
+            ledger,
+            summary="未找到可修订的 DOCX 译稿，无法进入 DOCX 审校修订流程。",
+            code="DOCX_TARGET_MISSING",
+            phase="targeting",
             step_id="run",
         )
         return
@@ -773,9 +833,12 @@ def stream_request(
         reference_windows, reference_meta = _build_pdf_reference_windows(source_pdf)
     except Exception as exc:
         logger.warning("[DocAnnotateBridge] build reference windows failed: %s", exc)
-        yield ledger.event(
-            "run.error",
-            {"text": f"PDF 原文解析失败: {exc}"},
+        yield _failed_run_event(
+            ledger,
+            summary="PDF 原文解析失败，无法继续文档审校。",
+            detail=str(exc),
+            code="PDF_CONTEXT_READ_FAILED",
+            phase="context_read",
             step_id="reference",
         )
         return
@@ -829,9 +892,11 @@ def stream_request(
         )
 
     if batch_state.get("error"):
-        yield ledger.event(
-            "run.error",
-            {"text": str(batch_state.get("error") or "批次状态无效。")},
+        yield _failed_run_event(
+            ledger,
+            summary=str(batch_state.get("error") or "批次状态无效。"),
+            code="DOC_ANNOTATE_BATCH_INVALID",
+            phase="planning",
             step_id="review",
         )
         return
@@ -994,17 +1059,20 @@ def stream_request(
             break
 
         if stage == "cancelled":
-            yield ledger.event(
-                "run.error",
-                {"text": message or detail or "译稿审校任务已取消。"},
+            yield _cancelled_run_event(
+                ledger,
+                summary=message or detail or "译稿审校任务已取消。",
                 step_id="write" if write_started else "review",
             )
             return
 
         if stage == "error":
-            yield ledger.event(
-                "run.error",
-                {"text": message or detail or "译稿审校失败。"},
+            yield _failed_run_event(
+                ledger,
+                summary=message or detail or "译稿审校失败。",
+                code="DOC_ANNOTATE_FAILED",
+                phase="write" if write_started else "review",
+                status="model_error",
                 step_id="write" if write_started else "review",
             )
             return
@@ -1119,7 +1187,9 @@ def stream_request(
             "annotations_added": applied,
             "batch_index": current_batch_index,
             "total_batches": total_batches,
-            "runtime": _runtime_payload("verified" if passed else "needs_attention"),
+            "runtime": _runtime_payload(
+                "verified" if passed else "quality_gate_failed"
+            ),
         },
         step_id="run",
     )
@@ -1205,13 +1275,15 @@ def stream_request_as_tool(
                     dict(event.payload), path_aliases
                 )
                 continue
-            if event.type == "run.error":
+            if event.type == "run.cancelled":
                 text = (
-                    str(event.payload.get("text") or "文档审校失败。")
+                    str(event.payload.get("summary") or "文档审校任务已取消。")
                     if isinstance(event.payload, dict)
-                    else "文档审校失败。"
+                    else "文档审校任务已取消。"
                 )
-                yield FileTaskToolStreamChunk(kind="result", payload={"error": text})
+                yield FileTaskToolStreamChunk(
+                    kind="result", payload={"error": text, "cancelled": True}
+                )
                 return
             if event.type == "run.finished" and isinstance(event.payload, dict):
                 payload = _tool_result_from_bridge_payload(

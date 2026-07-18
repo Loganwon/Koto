@@ -232,9 +232,3 @@ export function buildConnectorPath({ startX, startY, endX, endY }: ConnectorOpts
   const elbowX = sx + Math.min(20, Math.round((ex - sx) * 0.35));
   return `M ${sx} ${sy} L ${elbowX} ${sy} L ${ex} ${ey}`;
 }
-
-(window as any).KotoDocxReviewGeometry = {
-  computeReviewGeometry,
-  getAnchorGeometry,
-  buildConnectorPath,
-};

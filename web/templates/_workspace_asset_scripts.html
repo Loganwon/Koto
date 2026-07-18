@@ -1,17 +1,45 @@
 <!-- Split.js served locally so a CDN failure cannot crash the workspace runtime -->
 <script src="{{ asset_url('vendor/split.min.js') }}"></script>
 <script>
-  var $, WA = window.WA = window.WA || {}, state, Router, showToast, autoResize, lastSelectionText;
-  var _csrfFetch, _escHtml, _fileIcon, _normalizeWorkspaceModelMode;
-  var _DEFAULT_FILE_SVG, _DOC_SVG, _FOLDER_SVG, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG;
-  var _PIN_SVG, _PENCIL_SVG, _SEARCH_SVG, _CLIPBOARD_SVG, _CHART_SVG, _LIGHTBULB_SVG;
-  var _TRASH_SVG, _PAUSE_SVG, _SEND_SVG, _DOWNLOAD_SVG, _CHAT_SVG, _SLIDES_SVG;
-  var _SUN_SVG, _MOON_SVG, _WORD_FILE_SVG, _EXCEL_FILE_SVG, _POWERPOINT_FILE_SVG, _PDF_SVG, _TEXT_SVG, _CODE_SVG, _IMAGE_SVG, _EXT_ICON;
-  var _fsHandleMap;
-  var _waAiResultsRuntime, _waQuickActionRuntime, _waConversationRuntime, _waTaskDispatcher, _waQuickActionDispatcherAttached;
-  var _hostSessionId, _WA_RUNTIME_SESSION_ID, _initWorkspaceAiRuntimes, _hydrateAiConversation, _waSession, _waRenderMarkdown, _waQuickActionModelMode, _waSampleTaskContext, _persistWorkspaceConversationTurn;
-  var _sanitizeRenderedHtml, _getPinnedSelectionSourceMeta, _selectionContextText, _selectionContextSourceLabel, _createPinnedSelectionContext, _setStreamBtn;
+  window.__kotoStartupErrors = window.__kotoStartupErrors || [];
+  document.documentElement.setAttribute('data-koto-startup-monitor', 'ready');
+  function recordKotoStartupError(payload) {
+    window.__kotoStartupErrors.push(payload);
+    document.documentElement.setAttribute(
+      'data-koto-startup-error',
+      JSON.stringify(window.__kotoStartupErrors.slice(-5))
+    );
+  }
+  window.addEventListener('error', function(event) {
+    recordKotoStartupError({
+      type: 'error',
+      message: String(event.message || 'Unknown startup error'),
+      source: String(event.filename || ''),
+      line: Number(event.lineno || 0),
+      column: Number(event.colno || 0)
+    });
+  });
+  window.addEventListener('unhandledrejection', function(event) {
+    var reason = event.reason;
+    recordKotoStartupError({
+      type: 'unhandledrejection',
+      message: reason && reason.message ? String(reason.message) : String(reason || 'Unknown rejection')
+    });
+  });
+  var WA = window.WA = window.WA || {};
   WA._pendingSendBrowserFilesToAI = WA._pendingSendBrowserFilesToAI || [];
+  window.__kotoWorkspaceEditorAssets = {
+    'pptx-editor-bundle': {{ asset_url('js/build/pptx-editor-bundle.js')|tojson }},
+    'pdf-viewer-bundle': {{ asset_url('js/build/pdf-viewer-bundle.js')|tojson }},
+    'xlsx-editor-bundle': {{ asset_url('js/build/xlsx-editor-bundle.js')|tojson }},
+    'image-viewer-bundle': {{ asset_url('js/build/image-viewer-bundle.js')|tojson }},
+    'docx-review-engine-bundle': {{ asset_url('js/build/docx-review-engine-bundle.js')|tojson }},
+    'frontend-observer-bundle': {{ asset_url('js/build/frontend-observer-bundle.js')|tojson }},
+    'find-replace-bundle': {{ asset_url('js/build/find-replace-bundle.js')|tojson }},
+    'task-workbench-bundle': {{ asset_url('js/build/task-workbench-bundle.js')|tojson }},
+    'conversation-list-bundle': {{ asset_url('js/build/conversation-list-bundle.js')|tojson }},
+    'fs-context-menu-bundle': {{ asset_url('js/build/fs-context-menu-bundle.js')|tojson }}
+  };
   WA.sendBrowserFileToAI = WA.sendBrowserFileToAI || function(path) {
     path = String(path || '').trim();
     if (!path) return Promise.resolve();
@@ -24,5 +52,3 @@
 </script>
 <!-- Bundled TS → IIFE: workspace + editors + ui -->
 <script src="{{ asset_url('js/build/workspace-bundle.js') }}"></script>
-<!-- Bundled TS → IIFE: docx review modules -->
-<script src="{{ asset_url('js/build/review-bundle.js') }}"></script>

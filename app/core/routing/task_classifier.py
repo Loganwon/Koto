@@ -79,19 +79,59 @@ class TaskClassifier:
                 logger.info(f"[TaskClassifier] {cls._load_error}")
                 return False
 
+            if os.path.exists(config_path):
+                import json as _json
+
+                with open(config_path, encoding="utf-8") as f:
+                    cls._config = _json.load(f)
+
+                artifact_sklearn = str(cls._config.get("sklearn_version", ""))
+                if artifact_sklearn:
+                    import sklearn
+
+                    runtime_sklearn = sklearn.__version__
+                    if artifact_sklearn != runtime_sklearn:
+                        cls._available = False
+                        cls._load_error = (
+                            "scikit-learn 版本不匹配: "
+                            f"工件={artifact_sklearn}, 运行时={runtime_sklearn}; "
+                            "请重新运行 scripts/train_task_classifier.py"
+                        )
+                        logger.warning(f"[TaskClassifier] {cls._load_error}")
+                        return False
+
             # 加载 sklearn 工件
             try:
                 import pickle
+                import warnings
 
-                with open(clf_path, "rb") as f:
-                    cls._clf = pickle.load(f)
-                with open(le_path, "rb") as f:
-                    cls._le = pickle.load(f)
-                if os.path.exists(config_path):
-                    import json as _json
+                from sklearn.exceptions import InconsistentVersionWarning
 
-                    with open(config_path, encoding="utf-8") as f:
-                        cls._config = _json.load(f)
+                with warnings.catch_warnings(record=True) as caught_warnings:
+                    warnings.simplefilter("always", InconsistentVersionWarning)
+                    with open(clf_path, "rb") as f:
+                        cls._clf = pickle.load(f)
+                    with open(le_path, "rb") as f:
+                        cls._le = pickle.load(f)
+
+                incompatible = next(
+                    (
+                        warning
+                        for warning in caught_warnings
+                        if issubclass(warning.category, InconsistentVersionWarning)
+                    ),
+                    None,
+                )
+                if incompatible is not None:
+                    cls._clf = None
+                    cls._le = None
+                    cls._available = False
+                    cls._load_error = (
+                        "检测到旧版 scikit-learn 分类器工件; "
+                        "请重新运行 scripts/train_task_classifier.py"
+                    )
+                    logger.warning(f"[TaskClassifier] {cls._load_error}")
+                    return False
             except Exception as e:
                 cls._available = False
                 cls._load_error = f"pickle 加载失败: {e}"

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 
 def test_diagnostics_reports_source_readiness_without_importing_app():
     import src.startup_diagnostics as diagnostics
@@ -98,3 +100,49 @@ def test_removing_source_shadowing_extensions_reports_locked_files(
 
     assert removed == []
     assert blocked == [(artifact, "locked")]
+
+
+def test_frozen_diagnostics_use_bundle_resources_without_pip_guidance(
+    monkeypatch, tmp_path
+):
+    import src.startup_diagnostics as diagnostics
+
+    app_root = tmp_path / "installed"
+    bundle_dir = tmp_path / "bundle"
+    for relative in diagnostics._FROZEN_CRITICAL_FILES:
+        path = bundle_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# packaged resource\n", encoding="utf-8")
+    for directory in ("logs", "chats", "workspace", "config"):
+        (app_root / directory).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(diagnostics.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(diagnostics, "_module_exists", lambda _name: True)
+    report = diagnostics.run_startup_diagnostics(
+        app_root,
+        bundle_dir=bundle_dir,
+        include_import_check=False,
+    )
+
+    checked_names = {check["name"] for check in report["checks"]}
+    assert set(diagnostics._FROZEN_CRITICAL_FILES) <= checked_names
+    assert all(
+        "pip install" not in check.get("action", "") for check in report["checks"]
+    )
+
+
+def test_pytest_guard_rejects_source_shadowing_extensions(monkeypatch, tmp_path):
+    import src.startup_diagnostics as diagnostics
+    import tests.conftest as shared_fixtures
+
+    artifact = tmp_path / "app" / "example.cp311-win_amd64.pyd"
+    monkeypatch.setattr(
+        diagnostics,
+        "_source_shadowing_extensions",
+        lambda root: [artifact],
+    )
+
+    with pytest.raises(pytest.UsageError, match="shadowing source modules") as error:
+        shared_fixtures._assert_source_mode_imports_are_unshadowed(tmp_path)
+
+    assert "clean_inplace_cython_artifacts.py --apply" in str(error.value)

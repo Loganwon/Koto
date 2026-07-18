@@ -295,7 +295,7 @@ class SkillRecorder:
         timeout: float = 8.0,
     ) -> Optional[Dict[str, Any]]:
         """
-        调用 Gemini 对对话进行语义解析，从具体案例中抽象出通用的 Skill 行为定义。
+        调用当前云端 provider 对对话进行语义解析，从具体案例中抽象出通用的 Skill 行为定义。
 
         Returns:
             包含 system_prompt/intent_description/task_types 等字段的 dict；
@@ -313,15 +313,22 @@ class SkillRecorder:
         if not conv_lines:
             return None
 
-        # 获取共享 Gemini client（与 AIRouter 同一模式）
+        # Skill 层直接使用 Core provider，不经过 Web 运行时代理。
         try:
-            from web.runtime_context import get_client_proxy
+            from app.core.llm.model_selection import get_configured_cloud_model
+            from app.core.llm.provider_factory import get_llm_provider
 
-            _client = get_client_proxy()
-        except Exception:
-            _client = None
-        if _client is None:
-            logger.debug("[skill_recorder] Gemini client 不可用，跳过 LLM 分析")
+            model_id = get_configured_cloud_model(
+                task_type="CHAT", fallback_model="deepseek-chat"
+            )
+            provider = get_llm_provider(
+                model=model_id,
+                allow_local_fallback=False,
+            )
+        except Exception as exc:
+            logger.debug(
+                "[skill_recorder] 云端 provider 不可用，跳过 LLM 分析: %s", exc
+            )
             return None
 
         result_holder: Dict[str, Any] = {"data": None, "error": None}
@@ -333,20 +340,22 @@ class SkillRecorder:
 
         def _call():
             try:
-                import importlib
-
-                _types = importlib.import_module("app.core.llm.provider_compat").types
-                resp = _client.models.generate_content(
-                    model="deepseek-chat",
-                    contents="请分析对话并输出 Skill 定义 JSON。",
-                    config=_types.GenerateContentConfig(
-                        system_instruction=prompt_text,
-                        response_mime_type="application/json",
-                        temperature=0.2,
-                        max_output_tokens=700,
-                    ),
+                resp = provider.generate_content(
+                    prompt="请分析对话并输出 Skill 定义 JSON。",
+                    model=model_id,
+                    system_instruction=prompt_text,
+                    stream=False,
+                    response_format={"type": "json_object"},
+                    temperature=0.2,
+                    max_tokens=700,
+                    timeout=timeout,
                 )
-                result_holder["data"] = (resp.text or "").strip()
+                if isinstance(resp, dict):
+                    result_holder["data"] = str(
+                        resp.get("content") or resp.get("text") or ""
+                    ).strip()
+                elif isinstance(resp, str):
+                    result_holder["data"] = resp.strip()
             except Exception as e:
                 result_holder["error"] = str(e)
 

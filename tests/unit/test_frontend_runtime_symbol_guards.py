@@ -28,7 +28,7 @@ def test_welcome_onboarding_and_placeholders_have_readable_copy() -> None:
     assert "只需 3 步，开始使用 Koto" in html
     assert "写一份工作总结" in html
     assert "拖入 Excel/CSV → Koto 分析 → 输出结论与图表" in html
-    assert "直接告诉我你想完成什么，或拖入文件开始分析…" in html
+    assert "你的 AI 工作伙伴。直接告诉我你想做什么，我来帮你搞定。" in html
 
 
 def test_docx_toolbar_imports_selection_payload_instead_of_declaring_global() -> None:
@@ -45,5 +45,9 @@ def test_docx_toolbar_imports_selection_payload_instead_of_declaring_global() ->
 def test_file_utils_imports_tab_renderer_instead_of_declaring_global() -> None:
     file_utils = _read("web/src/workspace/file-utils.ts")
 
-    assert "import { _renderTabs } from './state';" in file_utils
+    assert re.search(
+        r"import\s*\{[^}]*\b_renderTabs\b[^}]*\}\s*from\s*['\"]\./state['\"]",
+        file_utils,
+        flags=re.S,
+    )
     assert "declare function _renderTabs" not in file_utils

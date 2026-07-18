@@ -1,7 +1,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 
-from web.config import get_organize_root
+from web.shared import get_organize_root
 from web.lazy_loaders.registry import _lazy_cache, _lazy_load
 
 

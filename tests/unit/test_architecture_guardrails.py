@@ -167,14 +167,179 @@ def test_core_llm_provider_helpers_do_not_reflect_through_web_runtime_context():
     assert "web.runtime_context" not in source
 
 
-def test_memory_tools_plugin_uses_the_memory_runtime_owner_directly():
+def test_memory_tools_plugin_uses_the_application_context_owner_directly():
     source = _read(
         ROOT / "app" / "core" / "agent" / "plugins" / "memory_tools_plugin.py"
     )
 
-    assert "from web.memory_runtime import get_memory_manager" in source
-    assert "web.runtime_context" not in source
+    assert "from app.core.app_context import ctx" in source
+    assert "web.memory_runtime" not in source
     assert "EnhancedMemoryManager()" not in source
+
+
+def test_system_info_service_is_core_owned_without_web_compatibility_alias():
+    performance_plugin = _read(
+        ROOT / "app" / "core" / "agent" / "plugins" / "performance_analysis_plugin.py"
+    )
+    system_info_plugin = _read(
+        ROOT / "app" / "core" / "agent" / "plugins" / "system_info_plugin.py"
+    )
+    core_service = _read(ROOT / "app" / "core" / "services" / "system_info.py")
+    context_injector = _read(ROOT / "web" / "context_injector.py")
+    system_instruction = _read(ROOT / "web" / "chat_system_instruction.py")
+
+    expected_import = (
+        "from app.core.services.system_info import get_system_info_collector"
+    )
+    assert expected_import in performance_plugin
+    assert expected_import in system_info_plugin
+    assert "from web.system_info import" not in performance_plugin
+    assert "from web.system_info import" not in system_info_plugin
+    assert "class SystemInfoCollector:" in core_service
+    assert expected_import in context_injector
+    assert "from app.core.services.system_info import (" in system_instruction
+    assert not (ROOT / "web" / "system_info.py").exists()
+
+
+def test_core_to_web_import_debt_does_not_expand():
+    """Keep the remaining migration debt explicit and ratchet it down by file."""
+    allowed = {
+        "app/core/agent/file_task_doc_annotate_bridge.py",
+        "app/core/agent/plugins/annotation_plugin.py",
+        "app/core/agent/plugins/file_converter_plugin.py",
+        "app/core/agent/task_tools.py",
+        "app/core/agent/task_tools_conversion.py",
+        "app/core/brain.py",
+        "app/core/file/exporters/docx_exporter.py",
+        "app/core/file/file_watcher.py",
+        "app/core/file_assistant/service.py",
+        "app/core/jobs/job_runner.py",
+        "app/core/services/file_service.py",
+        "app/core/services/intelligent_document_analyzer.py",
+        "app/core/services/morning_brief.py",
+        "app/core/services/ppt_generator.py",
+        "app/core/workflows/doc_ai_review.py",
+        "app/core/workflows/doc_smart_compare.py",
+    }
+    offenders = set()
+
+    for path in (ROOT / "app" / "core").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        imports_web = any(
+            (
+                isinstance(node, ast.Import)
+                and any(
+                    alias.name == "web" or alias.name.startswith("web.")
+                    for alias in node.names
+                )
+            )
+            or (
+                isinstance(node, ast.ImportFrom)
+                and node.module is not None
+                and (node.module == "web" or node.module.startswith("web."))
+            )
+            for node in ast.walk(tree)
+        )
+        if imports_web:
+            offenders.add(path.relative_to(ROOT).as_posix())
+
+    assert offenders == allowed
+
+
+def test_settings_manager_is_core_owned_without_web_import_alias():
+    model_selection = _read(ROOT / "app" / "core" / "llm" / "model_selection.py")
+    server = _read(ROOT / "src" / "server.py")
+    diagnostics = _read(ROOT / "src" / "startup_diagnostics.py")
+    spec = _read(ROOT / "koto.spec")
+
+    expected_import = "from app.core.config.user_settings import SettingsManager"
+    assert expected_import in model_selection
+    assert expected_import in server
+    assert '"app.core.config.user_settings",' in diagnostics
+    assert "'web.settings'" not in spec
+    assert not (ROOT / "web" / "settings.py").exists()
+
+
+def test_web_configuration_helpers_have_one_shared_owner():
+    app_source = _read(ROOT / "web" / "app.py")
+    settings_route = _read(ROOT / "web" / "blueprints" / "settings.py")
+    file_services = _read(ROOT / "web" / "lazy_loaders" / "file_services.py")
+    runtime_services = _read(ROOT / "web" / "runtime_services.py")
+
+    assert "from web.shared import (" in app_source
+    assert "from web.shared import invalidate_settings_cache" in settings_route
+    assert "from web.shared import get_organize_root" in file_services
+    assert (
+        "from web.shared import get_organize_root as _get_service" in runtime_services
+    )
+    assert not (ROOT / "web" / "config" / "__init__.py").exists()
+
+
+def test_skill_recorder_uses_core_llm_provider_boundary():
+    source = _read(ROOT / "app" / "core" / "skills" / "skill_recorder.py")
+
+    assert "from app.core.llm.provider_factory import get_llm_provider" in source
+    assert (
+        "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    )
+    assert "web.runtime_context" not in source
+    assert "get_client_proxy" not in source
+    assert ".models.generate_content(" not in source
+
+
+def test_job_runner_proactive_llm_uses_core_provider_boundary():
+    source = _read(ROOT / "app" / "core" / "jobs" / "job_runner.py")
+
+    assert "from app.core.llm.provider_factory import get_llm_provider" in source
+    assert (
+        "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    )
+    assert "web.runtime_context" not in source
+    assert "get_client_proxy" not in source
+    assert ".models.generate_content(" not in source
+
+
+def test_core_does_not_import_web_runtime_context():
+    offenders = set()
+    for path in (ROOT / "app" / "core").rglob("*.py"):
+        if "__pycache__" in path.parts:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8-sig"))
+        imports_runtime_context = any(
+            (
+                isinstance(node, ast.Import)
+                and any(alias.name == "web.runtime_context" for alias in node.names)
+            )
+            or (
+                isinstance(node, ast.ImportFrom)
+                and (
+                    node.module == "web.runtime_context"
+                    or (
+                        node.module == "web"
+                        and any(alias.name == "runtime_context" for alias in node.names)
+                    )
+                )
+            )
+            for node in ast.walk(tree)
+        )
+        if imports_runtime_context:
+            offenders.add(path.relative_to(ROOT).as_posix())
+
+    assert offenders == set()
+
+
+def test_ppt_image_management_is_core_owned():
+    pipeline_source = _read(ROOT / "app" / "core" / "services" / "ppt_pipeline.py")
+    core_image_manager = _read(ROOT / "app" / "core" / "services" / "image_manager.py")
+
+    assert "from app.core.services.image_manager import ImageManager" in pipeline_source
+    assert "web.runtime_context" not in pipeline_source
+    assert "from web.image_manager import" not in pipeline_source
+    assert "class ImageManager:" in core_image_manager
+    assert "from web.web_searcher import" not in core_image_manager
+    assert not (ROOT / "web" / "image_manager.py").exists()
 
 
 def test_web_app_keeps_executable_lifecycle_outside_application_factory():

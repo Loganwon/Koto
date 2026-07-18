@@ -260,7 +260,7 @@ class FileTaskContextReadPhase:
             runtime._build_step_result_payload(
                 title="读取显式上下文",
                 summary=context_summary,
-                status="completed" if snippets else "needs_attention",
+                status="completed" if snippets else "failed",
                 snippet_count=len(snippets),
                 snippets=snippets,
             ),

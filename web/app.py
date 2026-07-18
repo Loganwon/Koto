@@ -167,7 +167,7 @@ try:
 except Exception as _cfg_val_err:
     _app_logger.debug("Config validation skipped: %s", _cfg_val_err)
 
-from web.config import (
+from web.shared import (
     _load_user_settings,
     get_default_wechat_files_dir,
     get_organize_root,
@@ -1096,7 +1096,7 @@ configure_default_brain_runtime(
         get_utils=lambda: Utils,
         get_local_executor=lambda: LocalExecutor,
         get_client=lambda: client,
-        get_workspace_dir=lambda: WORKSPACE_DIR,
+        get_workspace_dir=get_workspace_root,
         get_settings_manager=lambda: settings_manager,
         get_model_map=lambda: MODEL_MAP,
     )
@@ -1514,7 +1514,7 @@ def chat_stream():
                     task_type, user_input, effective_input,
                     session_name, start_time, context_info,
                     client, session_manager, settings_manager,
-                    Utils, WORKSPACE_DIR, _app_logger, interrupted,
+                    Utils, get_workspace_root(), _app_logger, interrupted,
                 ):
                     yield chunk
                     if interrupted():

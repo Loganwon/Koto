@@ -52,4 +52,4 @@ def test_runtime_embedding_paths_are_local_only():
     assert "resolve_gemini_embedding_model" not in rag_service
     assert "GoogleGenerativeAIEmbeddings" not in rag_service
     assert 'model_name="BAAI/bge-m3"' in rag_service
-    assert "OllamaEmbeddings" in rag_service
+    assert "_OllamaLocalEmbeddings" in rag_service

@@ -1,8 +1,9 @@
 ﻿/**
- * KotoXlsxEditor - Univer spreadsheet editor wrapper
+ * XlsxEditor - Univer spreadsheet editor wrapper
  */
 
 import type { WorkspaceEditor } from './types';
+import { setLastSelectionText } from '../shared/selection-runtime';
 
 declare global {
   var KotoSheetsAPI: any;
@@ -26,7 +27,31 @@ function _xlsxSelectionPayload(): any {
   } : null;
 }
 
-export class KotoXlsxEditor implements WorkspaceEditor {
+function _syncXlsxSelectionContext(payload: any): void {
+  const api = (window as any).WA || {};
+  if (payload && payload.aiText) {
+    setLastSelectionText(payload.aiText);
+    if (typeof api._pinSelectionChip === 'function') {
+      api._pinSelectionChip({
+        kind: payload.kind || 'xlsx-range',
+        text: payload.aiText,
+        previewText: payload.previewText || '选中表格区域',
+        sourceType: 'xlsx',
+        sheetName: payload.sheetName || '',
+        rangeA1: payload.rangeA1 || '',
+        rows: payload.rows || 0,
+        cols: payload.cols || 0,
+      });
+    }
+    return;
+  }
+  const pinned = (window as any).state && (window as any).state.pinnedSelection;
+  if ((!pinned || String(pinned.sourceType || '').toLowerCase() === 'xlsx') && typeof api.clearSelection === 'function') {
+    api.clearSelection();
+  }
+}
+
+export class XlsxEditor implements WorkspaceEditor {
   containerId: string;
   _containerId: string;
   _api: any;
@@ -64,7 +89,7 @@ export class KotoXlsxEditor implements WorkspaceEditor {
 
       try {
         this._api = window.KotoSheetsAPI.create(sheetEl, workbookData);
-        // '[KotoXlsxEditor] Univer Sheets 挂载成功');
+        // '[XlsxEditor] Univer Sheets 挂载成功');
 
         setTimeout(() => {
           const cssW = sheetEl.clientWidth;
@@ -72,10 +97,10 @@ export class KotoXlsxEditor implements WorkspaceEditor {
           if (!cssW || !bcrW) return;
           const browserZoom = bcrW / cssW;
 
-          // `[KotoXlsxEditor] container CSS=${cssW} BCR=${bcrW.toFixed(1)} zoom=${browserZoom.toFixed(3)} DPR=${devicePixelRatio}`);
+          // `[XlsxEditor] container CSS=${cssW} BCR=${bcrW.toFixed(1)} zoom=${browserZoom.toFixed(3)} DPR=${devicePixelRatio}`);
 
           if (Math.abs(browserZoom - 1) > 0.05) {
-            // `[KotoXlsxEditor] DPI counter-zoom: 1/${browserZoom.toFixed(3)}`);
+            // `[XlsxEditor] DPI counter-zoom: 1/${browserZoom.toFixed(3)}`);
             sheetEl.style.zoom = String(1 / browserZoom);
             sheetEl.style.width = (browserZoom * 100) + '%';
             sheetEl.style.height = (browserZoom * 100) + '%';
@@ -85,25 +110,17 @@ export class KotoXlsxEditor implements WorkspaceEditor {
         }, 600);
 
         window.KotoSheetsAPI.onSelectionChange(() => {
-          const payload = _xlsxSelectionPayload();
-          if (payload && payload.aiText) {
-            (window as any).lastSelectionText = payload.aiText;
-            if (typeof (window as any)._pinSelectionChip === 'function') {
-              (window as any)._pinSelectionChip({
-                kind: payload.kind || 'xlsx-range',
-                text: payload.aiText,
-                previewText: payload.previewText || '选中表格区域',
-                sourceType: 'xlsx',
-                sheetName: payload.sheetName || '',
-                rangeA1: payload.rangeA1 || '',
-                rows: payload.rows || 0,
-                cols: payload.cols || 0,
-              });
-            }
-          }
+          _syncXlsxSelectionContext(_xlsxSelectionPayload());
         });
+        if (typeof window.KotoSheetsAPI.onCellDataChange === 'function') {
+          window.KotoSheetsAPI.onCellDataChange(() => {
+            _syncXlsxSelectionContext(_xlsxSelectionPayload());
+            const api = (window as any).WA || {};
+            if (typeof api.scheduleAutoSave === 'function') api.scheduleAutoSave();
+          });
+        }
       } catch (err: any) {
-        console.error('[KotoXlsxEditor] Univer Sheets 初始化失败', err);
+        console.error('[XlsxEditor] Univer Sheets 初始化失败', err);
         sheetEl.innerHTML = `<div style="padding:24px;color:#e74c3c;font-size:13px;">表格引擎加载失败: ${err.message}</div>`;
       }
     };
@@ -173,5 +190,3 @@ export class KotoXlsxEditor implements WorkspaceEditor {
     }
   }
 }
-
-(window as any).KotoXlsxEditor = KotoXlsxEditor;

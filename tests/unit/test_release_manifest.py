@@ -34,6 +34,14 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
     payload = json.loads(manifest.read_text(encoding="utf-8"))
     assert "Wrote release manifest" in result.stdout
     assert payload["schema_version"] == 1
+    assert isinstance(payload["git_dirty"], bool)
+    assert payload["worktree_changed_during_build"] is None
+    assert payload["code_signing"] == {
+        "required": False,
+        "status": "unsigned",
+        "signer_thumbprint": None,
+        "timestamp_server": None,
+    }
     assert payload["version"] == "1.2.3"
     assert payload["artifacts"] == [
         {
@@ -45,6 +53,53 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
     assert (
         checksums.read_text(encoding="utf-8") == f"{expected_hash} *{artifact.name}\n"
     )
+
+
+def test_release_manifest_accepts_build_start_provenance(tmp_path: Path):
+    artifact = tmp_path / "Koto.zip"
+    artifact.write_bytes(b"artifact")
+    manifest = tmp_path / "manifest.json"
+    checksums = tmp_path / "checksums.txt"
+
+    subprocess.run(
+        [
+            sys.executable,
+            "scripts/write_release_manifest.py",
+            "--version",
+            "1.2.3",
+            "--output",
+            str(manifest),
+            "--hash-output",
+            str(checksums),
+            "--git-revision",
+            "build-start-revision",
+            "--git-dirty",
+            "true",
+            "--worktree-changed-during-build",
+            "true",
+            "--code-signing-status",
+            "valid",
+            "--code-signing-required",
+            "true",
+            "--signer-thumbprint",
+            "A" * 40,
+            "--timestamp-server",
+            "https://timestamp.example.test",
+            str(artifact),
+        ],
+        check=True,
+    )
+
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["git_revision"] == "build-start-revision"
+    assert payload["git_dirty"] is True
+    assert payload["worktree_changed_during_build"] is True
+    assert payload["code_signing"] == {
+        "required": True,
+        "status": "valid",
+        "signer_thumbprint": "A" * 40,
+        "timestamp_server": "https://timestamp.example.test",
+    }
 
 
 def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(

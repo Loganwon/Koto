@@ -27,6 +27,9 @@ param(
     [switch]$AllowPrebuiltFrontend, # 仅用于无法安装 Node.js 的受限环境；不应作为正式发布路径
     [switch]$AllowNoInstaller,      # 仅生成便携包；不应作为完整 Windows 发布路径
     [switch]$AllowDirtyWorktree,    # 仅用于诊断构建；不得将产物作为正式发布版本
+    [switch]$RequireCodeSigning,    # 正式 tag 发布必须启用；缺少有效证书时立即失败
+    [string]$SigningCertificateThumbprint = "", # Cert:\CurrentUser\My 中带私钥的代码签名证书
+    [string]$TimestampServer = "http://timestamp.digicert.com",
     [string]$Version = ""
 )
 
@@ -43,11 +46,89 @@ $SPEC_FILE  = Join-Path $REPO_ROOT "koto.spec"
 $LOCAL_INSTALLER_SPEC = Join-Path $REPO_ROOT "local_model_installer.spec"
 $MANIFEST_WRITER = Join-Path $REPO_ROOT "scripts\write_release_manifest.py"
 $CYTHON_CLEANUP = Join-Path $REPO_ROOT "scripts\clean_inplace_cython_artifacts.py"
+$CYTHON_BUILD_ROOT = Join-Path $REPO_ROOT "build\cython_lib"
+$WEBVIEW2_PREPARE = Join-Path $REPO_ROOT "scripts\prepare_webview2_runtime.ps1"
+$BUILD_REQUIREMENTS_LOCK = Join-Path $REPO_ROOT "config\build-requirements.lock"
+$BUILD_REQUIREMENTS_VERIFY = Join-Path $REPO_ROOT "scripts\verify_build_requirements.py"
+$SIGN_WINDOWS_FILE = Join-Path $REPO_ROOT "scripts\sign_windows_file.ps1"
+
+if ($RequireCodeSigning -and (
+    $SkipBuild -or
+    $SkipCython -or
+    $Incremental -or
+    $AllowPrebuiltFrontend -or
+    $AllowNoInstaller -or
+    $AllowDirtyWorktree
+)) {
+    throw "-RequireCodeSigning 只能用于完整、干净、非增量的正式构建；不得组合诊断或跳过步骤开关。"
+}
 
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
 function Write-OK    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundColor Green }
 function Write-Fail  { param([string]$msg) Write-Host "  [!!] $msg" -ForegroundColor Red }
+
+function Get-GitWorktreeFingerprint {
+    param([Parameter(Mandatory = $true)][string]$Root)
+
+    $trackedDiffLines = @(& git -C $Root diff --no-ext-diff --binary HEAD --)
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法读取 Git tracked diff，不能验证构建期间漂移。"
+    }
+    $untrackedPaths = @(& git -C $Root ls-files --others --exclude-standard | Sort-Object)
+    if ($LASTEXITCODE -ne 0) {
+        throw "无法读取 Git untracked 文件，不能验证构建期间漂移。"
+    }
+
+    $parts = [System.Collections.Generic.List[string]]::new()
+    $parts.Add("tracked-diff")
+    $parts.Add([string]::Join("`n", $trackedDiffLines))
+    $parts.Add("untracked-files")
+    foreach ($relativePath in $untrackedPaths) {
+        $fullPath = Join-Path $Root $relativePath
+        $contentHash = if (Test-Path -LiteralPath $fullPath -PathType Leaf) {
+            (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
+        } else {
+            "missing"
+        }
+        $parts.Add("$relativePath`0$contentHash")
+    }
+
+    $payload = [System.Text.Encoding]::UTF8.GetBytes([string]::Join("`n", $parts))
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        return ([System.BitConverter]::ToString($sha.ComputeHash($payload))).Replace("-", "").ToLowerInvariant()
+    } finally {
+        $sha.Dispose()
+    }
+}
+
+function Test-PackagedRuntimePrerequisites {
+    param([Parameter(Mandatory = $true)][string]$PackageRoot)
+
+    $required = @(
+        (Join-Path $PackageRoot "Koto.exe"),
+        (Join-Path $PackageRoot "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
+        (Join-Path $PackageRoot "Install_WebView2_Runtime.bat"),
+        (Join-Path $PackageRoot "_internal\python311.dll"),
+        (Join-Path $PackageRoot "_internal\VCRUNTIME140.dll")
+    )
+    $missing = @($required | Where-Object { -not (Test-Path -LiteralPath $_ -PathType Leaf) })
+    if ($missing.Count -gt 0) {
+        Write-Fail "便携包缺少零环境启动依赖：$($missing -join ', ')"
+        exit 1
+    }
+
+    $runtimeInstaller = Join-Path $PackageRoot "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+    $signature = Get-AuthenticodeSignature -LiteralPath $runtimeInstaller
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        -not $signature.SignerCertificate -or
+        $signature.SignerCertificate.Subject -notmatch 'Microsoft Corporation') {
+        Write-Fail "包内 WebView2 离线安装器未通过 Microsoft Authenticode 校验。"
+        exit 1
+    }
+    Write-OK "零环境启动依赖完整（Python、VC Runtime、Microsoft WebView2）"
+}
 
 function Invoke-CmdLogged {
     param(
@@ -102,6 +183,42 @@ function Format-CmdArg {
     return '"{0}"' -f $Value.Replace('"', '""')
 }
 
+function Invoke-KotoCodeSigning {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$VerifyOnly
+    )
+
+    if (-not $script:codeSigningEnabled) {
+        return
+    }
+    $arguments = @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $SIGN_WINDOWS_FILE,
+        '-FilePath', $Path,
+        '-CertificateThumbprint', $script:signingThumbprint,
+        '-TimestampServer', $TimestampServer
+    )
+    if ($VerifyOnly) {
+        $arguments += '-VerifyOnly'
+    }
+    $signingLog = Join-Path $LOG_DIR ("code_signing_{0}.log" -f ($Label -replace '[^0-9A-Za-z_-]', '_'))
+    $exitCode = Invoke-ProcessLogged `
+        -FilePath "powershell.exe" `
+        -ArgumentList $arguments `
+        -WorkingDirectory $REPO_ROOT `
+        -LogPath $signingLog
+    if ($exitCode -ne 0) {
+        Write-Fail "$Label 代码签名失败，查看日志：$signingLog"
+        Get-Content $signingLog -Tail 30
+        exit 1
+    }
+    Write-OK "$Label Authenticode 签名与 RFC 3161 时间戳已验证"
+}
+
 function Test-WorkspaceStaticAssets {
     param(
         [Parameter(Mandatory = $true)][string]$StaticRoot,
@@ -129,6 +246,81 @@ function Test-WorkspaceStaticAssets {
     Write-OK "$Label 关键静态资源齐全"
 }
 
+function Test-PackagedFrontendParity {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourceWebRoot,
+        [Parameter(Mandatory = $true)][string]$PackagedWebRoot,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-Path $SourceWebRoot)) {
+        throw "找不到源码 Web 目录: $SourceWebRoot"
+    }
+    if (-not (Test-Path $PackagedWebRoot)) {
+        throw "$Label 缺少 Web 目录: $PackagedWebRoot"
+    }
+
+    # A release must be a byte-for-byte copy of the reviewed templates and
+    # static assets.  Presence-only checks miss exactly the stale bundle case
+    # where an old UI survives in a newly assembled installer.
+    $frontendRoots = @('templates', 'static')
+    $sourceFiles = @()
+    foreach ($frontendRoot in $frontendRoots) {
+        $sourceFrontendRoot = Join-Path $SourceWebRoot $frontendRoot
+        if (-not (Test-Path $sourceFrontendRoot -PathType Container)) {
+            throw "源码缺少前端目录: $sourceFrontendRoot"
+        }
+        $sourceFiles += @(Get-ChildItem -LiteralPath $sourceFrontendRoot -File -Recurse)
+    }
+    $sourceRoot = [System.IO.Path]::GetFullPath($SourceWebRoot).TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    $sourceRelativePaths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+
+    foreach ($sourceFile in $sourceFiles) {
+        $relativePath = $sourceFile.FullName.Substring($sourceRoot.Length)
+        [void]$sourceRelativePaths.Add($relativePath)
+        $packagedFile = Join-Path $PackagedWebRoot $relativePath
+        if (-not (Test-Path $packagedFile -PathType Leaf)) {
+            throw "$Label 缺少前端文件: $relativePath"
+        }
+        $sourceHash = (Get-FileHash -LiteralPath $sourceFile.FullName -Algorithm SHA256).Hash
+        $packagedHash = (Get-FileHash -LiteralPath $packagedFile -Algorithm SHA256).Hash
+        if ($sourceHash -ne $packagedHash) {
+            throw "$Label 前端文件与源码不一致: $relativePath"
+        }
+    }
+
+    $packagedRoot = [System.IO.Path]::GetFullPath($PackagedWebRoot).TrimEnd([char[]]@('\', '/')) + [System.IO.Path]::DirectorySeparatorChar
+    foreach ($frontendRoot in $frontendRoots) {
+        $packagedFrontendRoot = Join-Path $PackagedWebRoot $frontendRoot
+        if (-not (Test-Path $packagedFrontendRoot -PathType Container)) {
+            throw "$Label 缺少前端目录: $packagedFrontendRoot"
+        }
+        foreach ($packagedFile in (Get-ChildItem -LiteralPath $packagedFrontendRoot -File -Recurse)) {
+            $relativePath = $packagedFile.FullName.Substring($packagedRoot.Length)
+            if (-not $sourceRelativePaths.Contains($relativePath)) {
+                throw "$Label 包含源码中不存在的旧前端文件: $relativePath"
+            }
+        }
+    }
+
+    $removedFeatureMarkers = @(
+        '学习包',
+        '有声概览',
+        'audio_overview',
+        'notebook_guide',
+        'openNotebookGuide',
+        'openAudioOverview'
+    )
+    $legacyHits = @(Get-ChildItem -LiteralPath $PackagedWebRoot -File -Recurse |
+        Select-String -Pattern $removedFeatureMarkers -SimpleMatch -List)
+    if ($legacyHits.Count -gt 0) {
+        $firstHit = $legacyHits[0]
+        throw "$Label 仍包含已移除功能标记: $($firstHit.Path):$($firstHit.LineNumber)"
+    }
+
+    Write-OK "$Label 与源码前端完全一致，且不含已移除功能"
+}
+
 function Test-PackagedConfigDefaults {
     param(
         [Parameter(Mandatory = $true)][string]$ConfigRoot,
@@ -140,9 +332,6 @@ function Test-PackagedConfigDefaults {
         (Join-Path $ConfigRoot "macro_suggestions.json"),
         (Join-Path $ConfigRoot "personality_matrix.json"),
         (Join-Path $ConfigRoot "skill_affinity.json"),
-        (Join-Path $ConfigRoot "skill_bindings.json"),
-        (Join-Path $ConfigRoot "skill_ratings.json"),
-        (Join-Path $ConfigRoot "triggers.json"),
         (Join-Path $ConfigRoot "context"),
         (Join-Path $ConfigRoot "divination_data"),
         (Join-Path $ConfigRoot "skills"),
@@ -249,6 +438,21 @@ if (-not (Test-Path $PYTHON)) {
 }
 if (-not (Test-Path $LOG_DIR)) { New-Item -ItemType Directory -Path $LOG_DIR | Out-Null }
 
+# PyInstaller analysis imports application modules. Keep any import-time
+# settings initialization out of source config/ and out of the packaged user
+# data boundary. Child build processes inherit this isolated path.
+$buildRuntimeStateDir = Join-Path $LOG_DIR "build_runtime_state"
+New-Item -ItemType Directory -Path $buildRuntimeStateDir -Force | Out-Null
+$env:KOTO_USER_SETTINGS_PATH = Join-Path $buildRuntimeStateDir "user_settings.json"
+Write-OK "构建期用户设置已隔离到 logs\build_runtime_state"
+
+& $PYTHON $BUILD_REQUIREMENTS_VERIFY $BUILD_REQUIREMENTS_LOCK
+if ($LASTEXITCODE -ne 0) {
+    Write-Fail "Windows 构建工具版本与 config\build-requirements.lock 不一致。"
+    exit 1
+}
+Write-OK "构建工具版本与锁文件一致"
+
 # The Cython step emits in-place extensions that the PyInstaller step consumes.
 # A second build can otherwise finish first and delete those extensions during
 # its cleanup, leaving the first build with dangling binary entries.  Keep the
@@ -286,6 +490,9 @@ if ($gitStatus.Count -gt 0) {
     }
     Write-Host "  [--] 工作区存在 $($gitStatus.Count) 条未提交改动；本次仅为诊断构建，不得作为正式发布版本。" -ForegroundColor Yellow
 }
+$gitRevisionAtStart = (& git -C $REPO_ROOT rev-parse HEAD).Trim()
+$gitFingerprintAtStart = Get-GitWorktreeFingerprint -Root $REPO_ROOT
+$gitDirtyAtStart = if ($gitStatus.Count -gt 0) { "true" } else { "false" }
 
 # ─── 版本号（单一来源：根目录 VERSION 文件）──────────
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -301,6 +508,49 @@ if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+\-]*$') {
 }
 Write-OK "版本号: $Version"
 
+# ─── Windows Authenticode 发布身份 ────────────────────────────────
+$script:signingThumbprint = ($SigningCertificateThumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+$script:codeSigningEnabled = -not [string]::IsNullOrWhiteSpace($script:signingThumbprint)
+if ($RequireCodeSigning -and -not $script:codeSigningEnabled) {
+    Write-Fail "本次构建要求 Windows 代码签名，但未提供 -SigningCertificateThumbprint。"
+    exit 1
+}
+if ($script:codeSigningEnabled) {
+    $env:KOTO_SIGNING_CERT_THUMBPRINT = $script:signingThumbprint
+    $env:KOTO_SIGNING_TIMESTAMP_SERVER = $TimestampServer
+    $signingValidationLog = Join-Path $LOG_DIR "code_signing_preflight.log"
+    $signingValidationExitCode = Invoke-ProcessLogged `
+        -FilePath "powershell.exe" `
+        -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $SIGN_WINDOWS_FILE,
+            '-CertificateThumbprint', $script:signingThumbprint,
+            '-TimestampServer', $TimestampServer,
+            '-ValidateOnly'
+        ) `
+        -WorkingDirectory $REPO_ROOT `
+        -LogPath $signingValidationLog
+    if ($signingValidationExitCode -ne 0) {
+        Write-Fail "Windows 代码签名前置检查失败，查看日志：$signingValidationLog"
+        Get-Content $signingValidationLog -Tail 30
+        exit 1
+    }
+    Write-OK "Windows 代码签名证书、私钥与 SignTool 已验证"
+} else {
+    Write-Host "  [--] 未配置 Windows 代码签名；产物将明确标记为 unsigned，不得直接创建正式 tag Release。" -ForegroundColor Yellow
+}
+
+# 发布包携带微软官方 x64 Evergreen 离线运行时。已有且签名有效时不会重复下载。
+Write-Step "准备零环境桌面运行时（Microsoft WebView2）"
+$webView2Installer = & $WEBVIEW2_PREPARE | Select-Object -Last 1
+if (-not $webView2Installer -or -not (Test-Path -LiteralPath $webView2Installer)) {
+    Write-Fail "WebView2 离线运行时准备失败。"
+    exit 1
+}
+Write-OK "WebView2 离线运行时已验证"
+
 # ─── 步骤 0：Cython 编译（保护核心模块 + _license key）────
 if ($SkipCython) {
     Write-Step "步骤 0/5  跳过 Cython 编译（-SkipCython）"
@@ -314,24 +564,56 @@ if ($SkipCython) {
         exit 1
     }
 
-    Write-Step "步骤 0/5  Cython 编译核心模块 → .pyd（保护源码 + 内嵌 Key）"
+    $buildRoot = [System.IO.Path]::GetFullPath((Join-Path $REPO_ROOT "build"))
+    $cythonBuildTarget = [System.IO.Path]::GetFullPath($CYTHON_BUILD_ROOT)
+    if (-not $cythonBuildTarget.StartsWith($buildRoot + [System.IO.Path]::DirectorySeparatorChar, [System.StringComparison]::OrdinalIgnoreCase)) {
+        Write-Fail "拒绝清理不在 build 目录内的 Cython 输出路径: $cythonBuildTarget"
+        exit 1
+    }
+    if (Test-Path -LiteralPath $cythonBuildTarget) {
+        Remove-Item -LiteralPath $cythonBuildTarget -Recurse -Force
+    }
+
+    Write-Step "步骤 0/5  Cython 编译核心模块 → build\cython_lib（保护源码 + 内嵌 Key）"
     $cythonLog = Join-Path $LOG_DIR "cython_build.log"
-    $cythonExitCode = Invoke-CmdLogged -CommandLine ('{0} {1} build_ext --inplace' -f (Format-CmdArg $PYTHON), (Format-CmdArg (Join-Path $REPO_ROOT "build_cython.py"))) -LogPath $cythonLog
+    $cythonExitCode = Invoke-CmdLogged -CommandLine ('{0} {1} build_ext --build-lib {2}' -f (Format-CmdArg $PYTHON), (Format-CmdArg (Join-Path $REPO_ROOT "build_cython.py")), (Format-CmdArg $CYTHON_BUILD_ROOT)) -LogPath $cythonLog
     if ($cythonExitCode -ne 0) {
         Write-Fail "Cython 编译失败，查看日志：$cythonLog"
         Get-Content $cythonLog -Tail 20
         exit 1
     }
-    Write-OK "Cython 编译完成（_license.pyd 及核心模块 .pyd 已生成）"
+    $stagedCythonArtifacts = @(
+        Get-ChildItem -LiteralPath $CYTHON_BUILD_ROOT -Recurse -File -ErrorAction SilentlyContinue |
+            Where-Object { $_.Extension -in @('.pyd', '.so') }
+    )
+    if ($stagedCythonArtifacts.Count -eq 0) {
+        Write-Fail "Cython 命令成功但隔离目录中没有扩展模块: $CYTHON_BUILD_ROOT"
+        exit 1
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $CYTHON_BUILD_ROOT "app\__init__.py") -PathType Leaf)) {
+        Write-Fail "Cython 隔离目录缺少完整 app overlay；已拒绝继续打包。"
+        exit 1
+    }
+    $cythonIsolationLog = Join-Path $LOG_DIR "cython_source_isolation.log"
+    $cythonIsolationExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--check') -WorkingDirectory $REPO_ROOT -LogPath $cythonIsolationLog
+    if ($cythonIsolationExitCode -ne 0) {
+        Write-Fail "Cython 编译污染了源码目录；已拒绝继续打包。日志：$cythonIsolationLog"
+        Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonIsolationLog | Out-Null
+        exit 1
+    }
+    Write-OK "Cython 编译完成：$($stagedCythonArtifacts.Count) 个扩展位于隔离目录，源码目录保持纯净"
 }
 
 # ─── 步骤 0.5：前端资产构建（Vite + esbuild） ──────────
-Write-Step "步骤 0.5  前端资产构建（主界面 + 文件助手 + Univer Sheets）"
+Write-Step "步骤 0.5  前端资产构建（主界面 + DOCX 编辑器 + Univer Sheets）"
 $webDir = Join-Path $REPO_ROOT "web"
+$tiptapDir = Join-Path $REPO_ROOT "web\tiptap-editor"
 $univDir = Join-Path $REPO_ROOT "web\univer-editor"
 $staticRoot = Join-Path $REPO_ROOT "web\static"
 $webFrontendInstallLog = Join-Path $LOG_DIR "web_frontend_npm_ci.log"
 $webFrontendBuildLog = Join-Path $LOG_DIR "web_frontend_build.log"
+$tiptapFrontendInstallLog = Join-Path $LOG_DIR "tiptap_frontend_npm_ci.log"
+$tiptapFrontendBuildLog = Join-Path $LOG_DIR "tiptap_frontend_build.log"
 $univerFrontendInstallLog = Join-Path $LOG_DIR "univer_frontend_npm_ci.log"
 $univerFrontendBuildLog = Join-Path $LOG_DIR "univer_frontend_build.log"
 
@@ -349,6 +631,7 @@ if ($nodeCmd -and $npmCmd) {
 
     $frontendBuilds = @(
         [pscustomobject]@{ Label = "主 Web 前端"; Directory = $webDir; InstallLog = $webFrontendInstallLog; BuildLog = $webFrontendBuildLog },
+        [pscustomobject]@{ Label = "DOCX TipTap 编辑器"; Directory = $tiptapDir; InstallLog = $tiptapFrontendInstallLog; BuildLog = $tiptapFrontendBuildLog },
         [pscustomobject]@{ Label = "Univer 文件助手前端"; Directory = $univDir; InstallLog = $univerFrontendInstallLog; BuildLog = $univerFrontendBuildLog }
     )
     foreach ($frontend in $frontendBuilds) {
@@ -381,6 +664,7 @@ Test-WorkspaceStaticAssets -StaticRoot $staticRoot -Label "源代码前端产物
 
 # ─── 步骤 1：PyInstaller 构建 ─────────────────
 if (-not $SkipBuild) {
+    $env:KOTO_REQUIRE_STAGED_CYTHON = if ($SkipCython) { "0" } else { "1" }
     $buildLog = Join-Path $LOG_DIR "build_latest.log"
     if ($Incremental) {
         Write-Step "步骤 1/5  PyInstaller 增量构建（无 --clean，输出日志至 logs\build_latest.log）"
@@ -397,12 +681,16 @@ if (-not $SkipBuild) {
     }
     Write-OK "构建完成 → dist\Koto\Koto.exe"
     Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto\_internal\web\static") -Label "PyInstaller 包内前端产物"
+    Test-PackagedFrontendParity -SourceWebRoot $webDir -PackagedWebRoot (Join-Path $DIST_DIR "Koto\_internal\web") -Label "PyInstaller 包内前端"
     Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
     Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
     Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto\_internal\config") -Label "PyInstaller 包内默认配置"
 } else {
     Write-Step "跳过 PyInstaller（-SkipBuild）"
 }
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "Koto\Koto.exe") `
+    -Label "Koto.exe"
 
 # ─── 步骤 2：构建本地模型安装器 ─────────────────
 $installerBuildLog = Join-Path $LOG_DIR "local_model_installer_build_latest.log"
@@ -415,6 +703,9 @@ if ($localInstallerExitCode -ne 0) {
     exit 1
 }
 Write-OK "本地模型安装器构建完成 → dist\LocalModelInstaller.exe"
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "LocalModelInstaller.exe") `
+    -Label "LocalModelInstaller.exe"
 
 # ─── 步骤 3：组装便携包 ───────────────────────
 Write-Step "步骤 3/5  组装便携包（dist\Koto_Portable\)"
@@ -427,9 +718,19 @@ if ($portableExitCode -ne 0) {
 }
 Write-OK "便携包已组装 → dist\Koto_Portable\"
 Test-WorkspaceStaticAssets -StaticRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\web\static") -Label "便携包内前端产物"
+Test-PackagedFrontendParity -SourceWebRoot $webDir -PackagedWebRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\web") -Label "便携包内前端"
 Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
+Test-PackagedRuntimePrerequisites -PackageRoot (Join-Path $DIST_DIR "Koto_Portable")
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "Koto_Portable\Koto.exe") `
+    -Label "portable_Koto.exe" `
+    -VerifyOnly
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "Koto_Portable\LocalModelInstaller.exe") `
+    -Label "portable_LocalModelInstaller.exe" `
+    -VerifyOnly
 
 # ─── 步骤 4：构建 Inno Setup 安装包 ─────────────────────
 Write-Step "步骤 4/5  构建安装包（Inno Setup）"
@@ -437,16 +738,34 @@ $resolveInno = Join-Path $REPO_ROOT "scripts\resolve_inno_setup.ps1"
 $iscc = (& $resolveInno -Quiet) | Select-Object -First 1
 $setupName = "Koto_v${Version}_Setup.exe"
 $setupPath = Join-Path $DIST_DIR $setupName
+$setupBuilt = $false
+if (Test-Path -LiteralPath $setupPath -PathType Leaf) {
+    Remove-Item -LiteralPath $setupPath -Force
+}
 if ($iscc) {
     $issFile = Join-Path $REPO_ROOT "koto_installer.iss"
     $isccLog = Join-Path $LOG_DIR "inno_setup_build.log"
-    $isccExitCode = Invoke-CmdLogged -CommandLine ('{0} /DAppVersion={1} {2}' -f (Format-CmdArg $iscc), $Version, (Format-CmdArg $issFile)) -LogPath $isccLog
+    $isccCommandLine = '{0} /DAppVersion={1}' -f (Format-CmdArg $iscc), $Version
+    if ($script:codeSigningEnabled) {
+        # Inno Setup expands $q to a quote and $f to the file being signed. This
+        # signs both the outer Setup executable and its generated uninstaller.
+        $innoSignToolCommand = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `$q$SIGN_WINDOWS_FILE`$q -CertificateThumbprint $script:signingThumbprint -TimestampServer $TimestampServer -FilePath `$f"
+        $innoSignToolArgument = "/SKotoSignTool=$innoSignToolCommand"
+        $isccCommandLine += ' /DKotoCodeSigning=1 {0}' -f (Format-CmdArg $innoSignToolArgument)
+    }
+    $isccCommandLine += ' {0}' -f (Format-CmdArg $issFile)
+    $isccExitCode = Invoke-CmdLogged -CommandLine $isccCommandLine -LogPath $isccLog
     if ($isccExitCode -ne 0) {
         Write-Fail "Inno Setup 构建失败，查看日志：$isccLog"
         Get-Content $isccLog -Tail 30
         exit 1
     }
+    $setupBuilt = $true
     Write-OK "安装包已生成 → dist\$setupName"
+    Invoke-KotoCodeSigning `
+        -Path $setupPath `
+        -Label "Setup.exe" `
+        -VerifyOnly
 } else {
     if (-not $AllowNoInstaller) {
         Write-Fail "未检测到 Inno Setup 6；完整 Windows 发布必须生成安装包。仅生成便携包时请显式传入 -AllowNoInstaller。"
@@ -465,13 +784,62 @@ if (Test-Path $zipPath) { Remove-Item $zipPath -Force }
 Compress-Archive -Path "$portableDir\*" -DestinationPath $zipPath -CompressionLevel Optimal
 Write-OK "zip 已生成 → dist\$zipName"
 
+if (-not $SkipCython) {
+    Write-Step "发布收尾：在漂移校验前清理源码覆盖产物"
+    $cythonCleanupLog = Join-Path $LOG_DIR "cython_cleanup_postbuild.log"
+    $cythonCleanupExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonCleanupLog
+    if ($cythonCleanupExitCode -ne 0) {
+        if (-not $AllowDirtyWorktree) {
+            Write-Fail "源码目录仍有被锁定的 .pyd，无法证明正式构建期间工作区稳定。日志：$cythonCleanupLog"
+            exit 1
+        }
+        Write-Host "  [--] 诊断构建仍有被锁定的 .pyd；最终指纹会如实记录漂移。日志：$cythonCleanupLog" -ForegroundColor Yellow
+    } else {
+        Write-OK "源码覆盖产物已清理，最终指纹只反映真实源码变化"
+    }
+}
+
 # ─── 步骤 6：生成发布清单与校验和 ──────────────────────
 Write-Step "步骤 6/6  生成发布清单与 SHA-256 校验和"
+$gitRevisionAtEnd = (& git -C $REPO_ROOT rev-parse HEAD).Trim()
+$gitFingerprintAtEnd = Get-GitWorktreeFingerprint -Root $REPO_ROOT
+$worktreeChangedDuringBuild = (
+    $gitRevisionAtStart -ne $gitRevisionAtEnd -or
+    $gitFingerprintAtStart -ne $gitFingerprintAtEnd
+)
+if ($worktreeChangedDuringBuild -and -not $AllowDirtyWorktree) {
+    Write-Fail "构建期间 Git revision 或工作区内容发生变化；已拒绝生成正式发布清单，请从冻结提交重新构建。"
+    exit 1
+}
+$worktreeChangedState = if ($worktreeChangedDuringBuild) { "true" } else { "false" }
+if ($worktreeChangedDuringBuild) {
+    Write-Host "  [--] 构建期间工作区发生漂移；manifest 将标记为诊断产物，不得发布。" -ForegroundColor Yellow
+}
 $manifestPath = Join-Path $DIST_DIR "Koto_v${Version}_release-manifest.json"
 $checksumPath = Join-Path $DIST_DIR "Koto_v${Version}_SHA256SUMS.txt"
 $artifacts = @($zipPath)
-if (Test-Path $setupPath) { $artifacts += $setupPath }
-$manifestExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($MANIFEST_WRITER, '--version', $Version, '--output', $manifestPath, '--hash-output', $checksumPath, $artifacts) -WorkingDirectory $REPO_ROOT -LogPath (Join-Path $LOG_DIR 'release_manifest.log')
+if ($setupBuilt) { $artifacts += $setupPath }
+$codeSigningStatus = if ($script:codeSigningEnabled) { "valid" } else { "unsigned" }
+$codeSigningRequiredState = if ($RequireCodeSigning) { "true" } else { "false" }
+$manifestArgs = @(
+    $MANIFEST_WRITER,
+    '--version', $Version,
+    '--output', $manifestPath,
+    '--hash-output', $checksumPath,
+    '--git-revision', $gitRevisionAtStart,
+    '--git-dirty', $gitDirtyAtStart,
+    '--worktree-changed-during-build', $worktreeChangedState,
+    '--code-signing-status', $codeSigningStatus,
+    '--code-signing-required', $codeSigningRequiredState
+)
+if ($script:codeSigningEnabled) {
+    $manifestArgs += @(
+        '--signer-thumbprint', $script:signingThumbprint,
+        '--timestamp-server', $TimestampServer
+    )
+}
+$manifestArgs += $artifacts
+$manifestExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList $manifestArgs -WorkingDirectory $REPO_ROOT -LogPath (Join-Path $LOG_DIR 'release_manifest.log')
 if ($manifestExitCode -ne 0) {
     Write-Fail "生成发布清单失败，查看日志：logs\release_manifest.log"
     exit 1
@@ -479,22 +847,11 @@ if ($manifestExitCode -ne 0) {
 Write-OK "发布清单 → dist\$(Split-Path $manifestPath -Leaf)"
 Write-OK "SHA-256 → dist\$(Split-Path $checksumPath -Leaf)"
 
-if (-not $SkipCython) {
-    Write-Step "发布收尾：清理源码覆盖产物"
-    $cythonCleanupLog = Join-Path $LOG_DIR "cython_cleanup_postbuild.log"
-    $cythonCleanupExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList @($CYTHON_CLEANUP, '--apply') -WorkingDirectory $REPO_ROOT -LogPath $cythonCleanupLog
-    if ($cythonCleanupExitCode -ne 0) {
-        Write-Host "  [--] 发布包已完成，但源码目录仍有被锁定的 .pyd；关闭源码实例后运行清理工具。日志：$cythonCleanupLog" -ForegroundColor Yellow
-    } else {
-        Write-OK "源码覆盖产物已清理，开发启动将使用当前 Python 源码"
-    }
-}
-
 # ─── 完成 ─────────────────────────────────────
 Write-Host ""
 Write-Host "================================================================" -ForegroundColor Green
 Write-Host "  打包完成！发布文件：dist\$zipName" -ForegroundColor Green
 if (Test-Path $setupPath) { Write-Host "  安装包：dist\$setupName" -ForegroundColor Green }
 Write-Host "  校验文件：dist\$(Split-Path $checksumPath -Leaf)" -ForegroundColor Green
-Write-Host "  用户使用方法：解压 → 填写 API Key → 双击 Start_Koto.bat" -ForegroundColor Green
+Write-Host "  用户使用方法：解压 → 双击 Start_Koto.bat → 首次选择云端 API 或本地模型" -ForegroundColor Green
 Write-Host "================================================================" -ForegroundColor Green

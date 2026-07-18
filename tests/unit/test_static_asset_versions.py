@@ -24,11 +24,18 @@ def test_unified_shell_uses_asset_url_instead_of_hand_maintained_cache_tags():
     for asset in (
         "css/style.css",
         "css/workspace.css",
+        "css/workspace-task-flow.css",
+        "css/workspace-task-results.css",
         "js/build/app-bundle.js",
         "js/build/workspace-bundle.js",
-        "js/build/review-bundle.js",
+        "js/build/find-replace-bundle.js",
+        "js/build/task-workbench-bundle.js",
+        "js/build/conversation-list-bundle.js",
+        "js/build/fs-context-menu-bundle.js",
+        "js/build/docx-review-engine-bundle.js",
     ):
         assert f"asset_url('{asset}')" in index + workspace_assets
 
+    assert "review-bundle.js" not in workspace_assets
     assert "?v=202" not in index
     assert "?v=202" not in workspace_assets

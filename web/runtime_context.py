@@ -135,7 +135,11 @@ class ServiceRegistry:
 
     @property
     def workspace_dir(self) -> str:
-        return str(getattr(self.module, "WORKSPACE_DIR", "") or "")
+        # Workspace selection is mutable at runtime. Reading web.app's startup
+        # snapshot here made file tasks keep using the previous directory.
+        from app.core.config.workspace_runtime import get_workspace_root
+
+        return get_workspace_root()
 
     @property
     def project_root(self) -> str:

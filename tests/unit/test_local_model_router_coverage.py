@@ -443,10 +443,15 @@ class TestLocalModelRouterCoverage:
         assert err is None
         assert "<think>" in content
 
-    def test_call_ollama_chat_no_model(self):
+    def test_call_ollama_chat_no_model(self, monkeypatch):
         from app.core.routing.local_model_router import LocalModelRouter
 
         LocalModelRouter._model_name = None
+        monkeypatch.setattr(
+            LocalModelRouter,
+            "_content_model",
+            classmethod(lambda cls: None),
+        )
         content, err = LocalModelRouter.call_ollama_chat(
             messages=[{"role": "user", "content": "test"}],
         )

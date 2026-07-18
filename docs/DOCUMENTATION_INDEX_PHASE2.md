@@ -76,7 +76,7 @@ python test_phase2_context_injection.py
 ```bash
 # 查看系统信息收集是否正常
 python -c "
-from web.system_info import get_system_info_collector
+from app.core.services.system_info import get_system_info_collector
 c = get_system_info_collector()
 print('CPU:', c.get_cpu_info())
 print('Memory:', c.get_memory_info())

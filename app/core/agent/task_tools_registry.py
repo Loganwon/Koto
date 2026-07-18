@@ -139,6 +139,9 @@ def build_task_tool_definitions(plugin: Any, operations: Any) -> List[Dict[str, 
                 "Has access to pandas, openpyxl, matplotlib, numpy. "
                 "Current task files are mirrored into the sandbox working directory under their file names, "
                 "prefer TASK_SANDBOX_FILE_PATHS for attached-file edits, and keep TASK_FILE_PATHS only for compatibility fallback. "
+                "When the request has a target file, create or modify TASK_TARGET_PATH inside the sandbox "
+                "(available both as a Python global and os.environ['TASK_TARGET_PATH']); "
+                "Koto verifies and syncs it to the real workspace target. Do not write the host absolute target directly. "
                 "Args: code (str), timeout (int, default 30). "
                 "Returns: stdout + stderr."
             ),
@@ -477,7 +480,8 @@ def build_task_tool_definitions(plugin: Any, operations: Any) -> List[Dict[str, 
             "name": "write_docx_content",
             "func": operations.write_docx_content,
             "description": (
-                "Write paragraphs to a DOCX file (create or append). "
+                "Create a DOCX or append new paragraphs to its end; this never replaces existing paragraphs. "
+                "Do not use it for localized edits/replacements in an existing DOCX. "
                 "Args: path (str), paragraphs (JSON array of [{text, style}]). "
                 "Returns: JSON with operation result."
             ),
@@ -617,6 +621,7 @@ def build_task_tool_definitions(plugin: Any, operations: Any) -> List[Dict[str, 
                 "table_title (optional), max_rows (optional, default 200), "
                 "sort_by (optional column name), sort_order ('desc' or 'asc'), "
                 "columns (optional JSON array or comma-separated column names). "
+                "For a financial analysis report, set financial_compact=true to select key P&L rows, format percentages/numbers, and produce a readable five-column table. "
                 "For requests like top 3 by Revenue, set sort_by='Revenue', sort_order='desc', max_rows=3. "
                 "If the sheet name is unknown, omit sheet_name instead of guessing Sheet1."
             ),
@@ -631,6 +636,7 @@ def build_task_tool_definitions(plugin: Any, operations: Any) -> List[Dict[str, 
                     "sort_by": {"type": "STRING"},
                     "sort_order": {"type": "STRING"},
                     "columns": {"type": "STRING"},
+                    "financial_compact": {"type": "BOOLEAN"},
                 },
                 "required": ["source_path", "target_path"],
             },

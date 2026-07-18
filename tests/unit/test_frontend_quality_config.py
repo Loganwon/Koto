@@ -7,7 +7,11 @@ EXPECTED_BUNDLES = {
     "skills-ui-bundle": "src/bundles/skills-ui.ts",
     "skills-panel-bundle": "src/skills/skills-panel.ts",
     "workspace-bundle": "src/bundles/workspace.ts",
-    "review-bundle": "src/bundles/review.ts",
+    "find-replace-bundle": "src/bundles/find-replace.ts",
+    "task-workbench-bundle": "src/bundles/task-workbench.ts",
+    "conversation-list-bundle": "src/bundles/conversation-list.ts",
+    "fs-context-menu-bundle": "src/bundles/fs-context-menu.ts",
+    "docx-review-engine-bundle": "src/bundles/docx-review-engine.ts",
     "skill-marketplace-bundle": "src/skills/skill-marketplace.ts",
     "skill-community-bundle": "src/skills/skill-community.ts",
 }
@@ -71,9 +75,14 @@ def test_frontend_bundle_build_entries_match_templates_and_outputs():
     assert "js/build/app-bundle.js" in index_template
     assert "js/build/skills-ui-bundle.js" in index_template
     assert "js/build/workspace-bundle.js" in workspace_assets
-    assert "js/build/review-bundle.js" in workspace_assets
-    assert workspace_assets.index("workspace-bundle.js") < workspace_assets.index(
-        "review-bundle.js"
-    )
+    assert "js/build/find-replace-bundle.js" in workspace_assets
+    assert "js/build/task-workbench-bundle.js" in workspace_assets
+    assert "js/build/conversation-list-bundle.js" in workspace_assets
+    assert "js/build/fs-context-menu-bundle.js" in workspace_assets
+    assert "js/build/docx-review-engine-bundle.js" in workspace_assets
+    assert "js/build/review-bundle.js" not in workspace_assets
+    assert "'review-bundle':" not in build_script
+    assert not Path("web/static/js/build/review-bundle.js").exists()
+    assert not Path("web/static/js/build/review-bundle.js.map").exists()
     assert "js/build/skill-marketplace-bundle.js" in marketplace_template
     assert "js/build/skill-community-bundle.js" in community_template

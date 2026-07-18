@@ -15,7 +15,7 @@ hidden imports, and regression tests agree.
 | `web/app.py` | Large legacy entrypoint with global state and no direct business route decorators | Do not add new routes here; move new endpoints to blueprints |
 | `web/app_blueprints.py` | Central route registry already exists | Treat this as the primary route extension point |
 | `web/voice_api_enhanced.py` | Removed compatibility shim for `web.blueprints.voice` | Do not reintroduce; use `web.blueprints.voice` directly |
-| `web/settings_backup.py` | Removed backup settings implementation | Do not reintroduce; use `web.settings.SettingsManager` |
+| `web/settings_backup.py` | Removed backup settings implementation | Do not reintroduce; use `app.core.config.user_settings.SettingsManager` |
 | `launcher/__init__.py` | Package marker only | Keep side-effect free |
 | Workflow runtime | Old `workflow_engine.py` and LangGraph runtime both in use | Migrate callers in batches with tests per workflow family |
 | External planners | Retired external planner adapters have been removed | Default registry is empty |

@@ -477,16 +477,9 @@ function _ensureUnifiedAiComposerVisible(): Element | null {
   return _findFirstVisible(['#wa-user-input']);
 }
 
-function _assistantComposerTargets(): { input: Element | null; send: Element | null; legacy: boolean } {
+function _assistantComposerTargets(): { input: Element | null; send: Element | null } {
   const input = _ensureUnifiedAiComposerVisible();
-  if (input) {
-    return { input, send: _findFirstVisible(['#wa-send-btn']), legacy: false };
-  }
-  return {
-    input: _findFirstVisible(['#messageInput']),
-    send: _findFirstVisible(['#sendBtn']),
-    legacy: true,
-  };
+  return { input, send: input ? _findFirstVisible(['#wa-send-btn']) : null };
 }
 
 function _selectedTexts(selector: string, limit = 10): string[] {
@@ -1698,7 +1691,6 @@ async function _executeFrontendAction(action: FrontendAction): Promise<Record<st
     return {
       input: _targetSummary(input),
       send: _targetSummary(send),
-      legacyFallback: targets.legacy,
       promptLength: prompt.length,
       submitted: true,
     };

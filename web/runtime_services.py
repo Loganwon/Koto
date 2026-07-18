@@ -98,6 +98,6 @@ def get_batch_ops_manager() -> Any:
 
 
 def get_organize_root() -> str:
-    from web.config import get_organize_root as _get_service
+    from web.shared import get_organize_root as _get_service
 
     return str(_get_service() or "")

@@ -84,7 +84,13 @@ _DOCX_TABLE_OUTPUT_PATTERN = re.compile(
     r"|(?:真实\s*)?(?:word|docx|文档)?\s*(?:表格|table).{0,40}"
     r"(?:创建|新增|生成|插入|添加|加入|追加|写入|放入|包含|包括|附上)"
     r"|(?:create|add|insert|append|write|include|put).{0,40}"
-    r"(?:real\s*)?(?:word|docx|document)?\s*table",
+    r"(?:real\s*)?(?:word|docx|document)?\s*table"
+    r"|(?:风险登记表|风险表|risk\s+register\s+table)",
+    re.IGNORECASE,
+)
+_SPREADSHEET_FORMULA_REQUIRED_PATTERN = re.compile(
+    r"(?:公式(?:列|单元格|计算)?|保留公式|使用公式|写入公式|"
+    r"formula(?:s|\s+column|\s+cells?)?)",
     re.IGNORECASE,
 )
 
@@ -106,7 +112,10 @@ def should_attempt_repair(
     if bool(check_payload.get("passed")):
         return False
     status = str(check_payload.get("status") or "").strip().lower()
-    return status in {"needs_attention", "no_file_change", "quality_gate_failed"}
+    return status in {
+        "write_not_performed",
+        "quality_gate_failed",
+    }
 
 
 def change_operations(file_changes: List[Dict[str, Any]]) -> set[str]:
@@ -204,9 +213,15 @@ def evaluate_task_quality_gate(
     placeholders_replaced = change_sum_int(file_changes, "placeholders_replaced")
     replacements_made = change_sum_int(file_changes, "replacements_made")
     task_text = str(request.task or "")
+    local_docx_replace_request = target_type in {
+        "docx",
+        "doc",
+    } and _looks_like_local_docx_replace_request(task_text)
     local_docx_edit_request = (
         target_type in {"docx", "doc"}
-        and _looks_like_local_docx_edit_request(task_text)
+        and (
+            _looks_like_local_docx_edit_request(task_text) or local_docx_replace_request
+        )
         and not _looks_like_table_request(task_text)
     )
     actual_docx_paragraphs = (
@@ -244,10 +259,27 @@ def evaluate_task_quality_gate(
     explicit_slide_count_gate = _explicit_slide_count_gate(
         request, file_changes, target_type
     )
+    explicit_pptx_native_visual_gate = _pptx_native_visual_requirement_gate(
+        request,
+        file_changes,
+        target_type,
+    )
     explicit_spreadsheet_chart_gate = _spreadsheet_chart_requirement_gate(
         request,
         file_changes,
         target_type,
+    )
+    explicit_spreadsheet_formula_gate = _spreadsheet_formula_requirement_gate(
+        request,
+        file_changes,
+        target_type,
+    )
+    explicit_docx_table_gate = _docx_table_requirement_gate(
+        request,
+        file_changes,
+        target_type,
+        operations,
+        rows_written,
     )
     seen_recipe_criteria: set[str] = set()
     if recipe_match and not local_docx_edit_request:
@@ -304,6 +336,39 @@ def evaluate_task_quality_gate(
                 )
             )
 
+    if _looks_like_financial_xlsx_docx_chart_report_task(request, request.files or []):
+        table_changes = [
+            change
+            for change in file_changes
+            if isinstance(change, dict)
+            and str(change.get("operation") or "").strip()
+            == "insert_excel_as_docx_table"
+        ]
+        readable_table = False
+        table_details: List[str] = []
+        for change in table_changes:
+            rows = int(change.get("rows_written") or 0)
+            columns = int(change.get("columns_written") or 0)
+            table_details.append(f"{rows} 行 × {columns or '未知'} 列")
+            if 1 <= rows <= 24 and (columns == 0 or 2 <= columns <= 8):
+                readable_table = True
+        criteria.append(
+            quality_gate_result(
+                criterion="financial_report_has_readable_key_data_table",
+                passed=readable_table,
+                detail=(
+                    "财务报告中的关键数据表必须为 1-24 行、2-8 列的可读摘要表；"
+                    f"当前表格：{'；'.join(table_details) or '无'}。"
+                ),
+                priority="critical",
+            )
+        )
+        duplicate_report_gate = _financial_report_duplicate_content_gate(
+            request, file_changes
+        )
+        if duplicate_report_gate:
+            criteria.append(duplicate_report_gate)
+
     if criteria:
         table_narrative_gate = _table_narrative_requirement_gate(
             task_text,
@@ -324,8 +389,14 @@ def evaluate_task_quality_gate(
             criteria.append(explicit_bullet_count_gate)
         if explicit_slide_count_gate:
             criteria.append(explicit_slide_count_gate)
+        if explicit_pptx_native_visual_gate:
+            criteria.append(explicit_pptx_native_visual_gate)
         if explicit_spreadsheet_chart_gate:
             criteria.append(explicit_spreadsheet_chart_gate)
+        if explicit_spreadsheet_formula_gate:
+            criteria.append(explicit_spreadsheet_formula_gate)
+        if explicit_docx_table_gate:
+            criteria.append(explicit_docx_table_gate)
         failed = [item for item in criteria if not item.get("passed")]
         return {
             "passed": not failed,
@@ -335,26 +406,7 @@ def evaluate_task_quality_gate(
             ],
         }
 
-    if _looks_like_financial_xlsx_docx_chart_report_task(request, request.files or []):
-        criteria.extend(
-            [
-                quality_gate_result(
-                    criterion="financial_report_has_narrative",
-                    passed="write_docx_content" in operations
-                    and paragraphs_written >= 8,
-                    detail=f"财务图表报告应写入结构化分析段落；当前段落写入数：{paragraphs_written}。",
-                    priority="critical",
-                ),
-                quality_gate_result(
-                    criterion="financial_report_has_real_chart_image",
-                    passed="insert_image_into_docx" in operations
-                    and images_inserted >= 1,
-                    detail=f"财务图表报告必须插入真实图表图片；当前图片写入数：{images_inserted}。",
-                    priority="critical",
-                ),
-            ]
-        )
-    elif target_type in {"docx", "doc"} and _looks_like_chart_request(task_text):
+    if target_type in {"docx", "doc"} and _looks_like_chart_request(task_text):
         criteria.append(
             quality_gate_result(
                 criterion="docx_chart_request_has_image",
@@ -365,24 +417,40 @@ def evaluate_task_quality_gate(
         )
 
     if local_docx_edit_request:
-        inserted_text = any(
-            str(change.get("inserted_text") or "").strip()
-            for change in file_changes
-            if str(change.get("operation") or "").strip() == "insert_docx_paragraph"
-        )
-        criteria.append(
-            quality_gate_result(
-                criterion="docx_local_edit_has_paragraph_insert",
-                passed="insert_docx_paragraph" in operations
-                and (paragraphs_written >= 1 or inserted_text),
-                detail=(
-                    "局部 Word 编辑任务应使用保留原结构的段落插入工具；"
-                    f"当前操作：{', '.join(sorted(operations)) or '无'}，"
-                    f"段落插入数：{paragraphs_written}。"
-                ),
-                priority="high",
+        if local_docx_replace_request:
+            targeted_replace_ops = {"run_python_code", "rewrite_docx_paragraph_window"}
+            criteria.append(
+                quality_gate_result(
+                    criterion="docx_local_replace_has_targeted_write",
+                    passed=bool(file_changes)
+                    and bool(operations.intersection(targeted_replace_ops)),
+                    detail=(
+                        "DOCX 定位替换应在保留原结构的前提下完成一次目标写回；"
+                        f"当前操作：{', '.join(sorted(operations)) or '无'}，"
+                        f"目标变更数：{len(file_changes)}。"
+                    ),
+                    priority="high",
+                )
             )
-        )
+        else:
+            inserted_text = any(
+                str(change.get("inserted_text") or "").strip()
+                for change in file_changes
+                if str(change.get("operation") or "").strip() == "insert_docx_paragraph"
+            )
+            criteria.append(
+                quality_gate_result(
+                    criterion="docx_local_edit_has_paragraph_insert",
+                    passed="insert_docx_paragraph" in operations
+                    and (paragraphs_written >= 1 or inserted_text),
+                    detail=(
+                        "局部 Word 编辑任务应使用保留原结构的段落插入工具；"
+                        f"当前操作：{', '.join(sorted(operations)) or '无'}，"
+                        f"段落插入数：{paragraphs_written}。"
+                    ),
+                    priority="high",
+                )
+            )
         if explicit_source_content_gate:
             criteria.append(explicit_source_content_gate)
         criteria.extend(explicit_section_gates)
@@ -424,21 +492,8 @@ def evaluate_task_quality_gate(
             )
         )
 
-    if target_type in {"docx", "doc"} and (
-        _looks_like_docx_table_output_request(task_text)
-        or (
-            _looks_like_table_request(task_text)
-            and not _looks_like_problem_analysis_request(task_text)
-        )
-    ):
-        criteria.append(
-            quality_gate_result(
-                criterion="docx_table_request_has_table",
-                passed="insert_excel_as_docx_table" in operations and rows_written > 0,
-                detail=f"用户要求表格数据进入 Word；当前表格写入行数：{rows_written}。",
-                priority="high",
-            )
-        )
+    if explicit_docx_table_gate:
+        criteria.append(explicit_docx_table_gate)
         table_narrative_gate = _table_narrative_requirement_gate(
             task_text,
             target_type,
@@ -602,8 +657,12 @@ def evaluate_task_quality_gate(
         criteria.append(explicit_bullet_count_gate)
     if explicit_slide_count_gate:
         criteria.append(explicit_slide_count_gate)
+    if explicit_pptx_native_visual_gate:
+        criteria.append(explicit_pptx_native_visual_gate)
     if explicit_spreadsheet_chart_gate:
         criteria.append(explicit_spreadsheet_chart_gate)
+    if explicit_spreadsheet_formula_gate:
+        criteria.append(explicit_spreadsheet_formula_gate)
 
     failed = [item for item in criteria if not item.get("passed")]
     return {
@@ -893,6 +952,87 @@ def _target_presentation_slide_count(
     return max(counts, default=0)
 
 
+def _pptx_native_visual_requirement_gate(
+    request: FileTaskRequest,
+    file_changes: List[Dict[str, Any]],
+    target_type: str,
+) -> Dict[str, Any] | None:
+    if target_type not in {"pptx", "ppt"}:
+        return None
+    task = str(request.task or "")
+    native_requested = bool(re.search(r"(?:原生|native)", task, re.IGNORECASE))
+    chart_requested = _looks_like_chart_request(task)
+    timeline_requested = bool(
+        re.search(r"(?:时间线|里程碑(?:图|时间线)?|timeline)", task, re.IGNORECASE)
+    )
+    if not native_requested or not (chart_requested or timeline_requested):
+        return None
+
+    chart_count = 0
+    timeline_visual_count = 0
+    for path_text in _quality_target_paths(request, file_changes):
+        counts = _presentation_native_visual_counts(path_text)
+        chart_count = max(chart_count, counts["charts"])
+        timeline_visual_count = max(
+            timeline_visual_count, counts["timeline_visual_shapes"]
+        )
+
+    chart_passed = chart_requested and chart_count >= 1
+    timeline_passed = timeline_requested and timeline_visual_count >= 3
+    return quality_gate_result(
+        criterion="pptx_native_chart_or_timeline_present",
+        passed=chart_passed or timeline_passed,
+        detail=(
+            "用户显式要求原生图表或原生时间线；"
+            f"目标演示文稿中的原生图表数：{chart_count}，"
+            f"时间线/里程碑页的原生视觉形状数：{timeline_visual_count}。"
+        ),
+        priority="critical",
+    )
+
+
+def _presentation_native_visual_counts(path_text: str) -> Dict[str, int]:
+    resolved = _resolve_quality_path(path_text)
+    if not resolved or resolved.suffix.lower() not in {".pptx", ".ppt"}:
+        return {"charts": 0, "timeline_visual_shapes": 0}
+    try:
+        from pptx import Presentation
+        from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+        presentation = Presentation(str(resolved))
+    except Exception:
+        return {"charts": 0, "timeline_visual_shapes": 0}
+
+    charts = 0
+    timeline_visual_shapes = 0
+    visual_types = {
+        MSO_SHAPE_TYPE.AUTO_SHAPE,
+        MSO_SHAPE_TYPE.GROUP,
+        MSO_SHAPE_TYPE.LINE,
+    }
+    for slide in presentation.slides:
+        slide_text = "\n".join(
+            str(getattr(shape, "text", "") or "") for shape in slide.shapes
+        )
+        charts += sum(
+            1 for shape in slide.shapes if bool(getattr(shape, "has_chart", False))
+        )
+        if re.search(r"(?:时间线|里程碑|timeline)", slide_text, re.IGNORECASE):
+            timeline_visual_shapes = max(
+                timeline_visual_shapes,
+                sum(
+                    1
+                    for shape in slide.shapes
+                    if not bool(getattr(shape, "is_placeholder", False))
+                    and getattr(shape, "shape_type", None) in visual_types
+                ),
+            )
+    return {
+        "charts": charts,
+        "timeline_visual_shapes": timeline_visual_shapes,
+    }
+
+
 def _presentation_slide_count(path_text: str) -> int:
     resolved = _resolve_quality_path(path_text)
     if not resolved:
@@ -1083,6 +1223,27 @@ def _spreadsheet_chart_requirement_gate(
     )
 
 
+def _spreadsheet_formula_requirement_gate(
+    request: FileTaskRequest,
+    file_changes: List[Dict[str, Any]],
+    target_type: str,
+) -> Dict[str, Any] | None:
+    if target_type not in {"xlsx", "xlsm"}:
+        return None
+    if not _SPREADSHEET_FORMULA_REQUIRED_PATTERN.search(str(request.task or "")):
+        return None
+    formula_count = _target_workbook_formula_count(request, file_changes)
+    return quality_gate_result(
+        criterion="spreadsheet_formula_request_has_workbook_formula",
+        passed=formula_count > 0,
+        detail=(
+            "用户明确要求 Excel 产物保留公式；"
+            f"目标工作簿中可核验公式单元格数量：{formula_count}。"
+        ),
+        priority="critical",
+    )
+
+
 def _target_workbook_chart_count(
     request: FileTaskRequest, file_changes: List[Dict[str, Any]]
 ) -> int:
@@ -1094,6 +1255,46 @@ def _target_workbook_chart_count(
             paths.extend([file_path, file_name])
     counts = [_workbook_chart_count(path_text) for path_text in paths if path_text]
     return max(counts, default=0)
+
+
+def _target_workbook_formula_count(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> int:
+    paths = list(_quality_target_paths(request, file_changes))
+    for file_info in request.files or []:
+        file_path = str(file_info.path or "").strip()
+        file_name = str(file_info.name or file_path).strip()
+        if file_info.target:
+            paths.extend([file_path, file_name])
+    counts = [_workbook_formula_count(path_text) for path_text in paths if path_text]
+    return max(counts, default=0)
+
+
+def _workbook_formula_count(path_text: str) -> int:
+    resolved = _resolve_quality_path(path_text)
+    if not resolved or resolved.suffix.lower() not in {".xlsx", ".xlsm"}:
+        return 0
+    try:
+        import openpyxl
+
+        workbook = openpyxl.load_workbook(
+            str(resolved), data_only=False, read_only=True
+        )
+    except Exception:
+        return 0
+    try:
+        return sum(
+            1
+            for sheet in workbook.worksheets
+            for row in sheet.iter_rows()
+            for cell in row
+            if getattr(cell, "data_type", "") == "f"
+            or (
+                isinstance(cell.value, str) and str(cell.value).lstrip().startswith("=")
+            )
+        )
+    finally:
+        workbook.close()
 
 
 def _workbook_chart_count(path_text: str) -> int:
@@ -1608,7 +1809,8 @@ def _required_next_action_count(task: str) -> int:
         raw_count = match.group("count").casefold()
         return int(raw_count) if raw_count.isdigit() else _TOP_WORDS.get(raw_count, 0)
     zh_match = re.search(
-        r"(?P<count>\d+|一|二|三|四|五|六|七|八|九|十).{0,8}(?:具体)?(?:下一步|行动项|行动|动作)",
+        r"(?:至少|正好|共)?\s*(?P<count>\d+|一|二|三|四|五|六|七|八|九|十)"
+        r"\s*(?:条|项|个)\s*(?:具体)?(?:下一步|行动项|行动|动作)",
         task,
     )
     if zh_match:
@@ -1701,7 +1903,8 @@ def repair_retry_message(
     if _looks_like_financial_xlsx_docx_chart_report_task(request, request_files):
         lines.append(
             "财务预测图表写入修复要求：本任务不能只完成 Python 计算或打印 stdout。"
-            "必须产生写入工具事件：write_docx_content 写入问题清单/分析结论，insert_image_into_docx 插入真实 PNG/JPG 图表。"
+            "必须产生写入工具事件：write_docx_content 写入问题清单/分析结论，"
+            "insert_excel_as_docx_table 写入关键数据表，insert_image_into_docx 插入至少两张真实 PNG/JPG 图表。"
         )
         lines.append(
             "Excel 解析要求：如果 pandas 读出的列名是 Unnamed，不要用 df.columns 判断年份列；"
@@ -1737,12 +1940,19 @@ def repair_retry_message(
             in {"xlsx", "xlsm", "xls", "csv"}
             and str(file_info.path or file_info.name or "").strip()
         ]
-        lines.append(
-            "表格修复要求：必须调用 insert_excel_as_docx_table，把源表格作为真实 Word 表格写入目标 DOCX；"
-            "只调用 write_docx_content 写文字段落不能通过。"
-        )
         if xlsx_sources:
+            lines.append(
+                "表格修复要求：调用 insert_excel_as_docx_table，把源表格作为真实 Word 表格写入目标 DOCX；"
+                "只调用 write_docx_content 写文字段落不能通过。"
+            )
             lines.append(f"推荐 source_path：{xlsx_sources[0]}")
+        else:
+            lines.append(
+                "表格修复要求：当前没有表格源文件。请使用可用的原生 Word 表格写入能力，"
+                "或通过 run_python_code 使用 python-docx 打开并保存 TASK_TARGET_PATH，"
+                "在该沙箱目标中创建真实 table；不要直接写宿主绝对路径。"
+                "只写标题和文字段落不能通过。"
+            )
         if target_path:
             lines.append(f"推荐 target_path：{target_path}")
 
@@ -1818,6 +2028,130 @@ def _looks_like_table_request(task: str) -> bool:
 
 def _looks_like_docx_table_output_request(task: str) -> bool:
     return bool(_DOCX_TABLE_OUTPUT_PATTERN.search(str(task or "")))
+
+
+def _docx_table_requirement_gate(
+    request: FileTaskRequest,
+    file_changes: List[Dict[str, Any]],
+    target_type: str,
+    operations: set[str],
+    reported_rows: int,
+) -> Dict[str, Any] | None:
+    task = str(request.task or "")
+    if target_type not in {"docx", "doc"}:
+        return None
+    if not (
+        _looks_like_docx_table_output_request(task)
+        or (
+            _looks_like_table_request(task)
+            and not _looks_like_problem_analysis_request(task)
+        )
+    ):
+        return None
+    table_count, actual_rows, max_columns = _target_docx_quality_table_metrics(
+        request, file_changes
+    )
+    passed = ("insert_excel_as_docx_table" in operations and reported_rows > 0) or (
+        table_count >= 1 and actual_rows >= 2 and max_columns >= 2
+    )
+    return quality_gate_result(
+        criterion="docx_table_request_has_table",
+        passed=passed,
+        detail=(
+            "用户要求表格数据进入 Word；"
+            f"工具报告写入行数：{reported_rows}，"
+            f"目标文档实际表格数：{table_count}，"
+            f"实际表格总行数：{actual_rows}，最大列数：{max_columns}。"
+        ),
+        priority="critical",
+    )
+
+
+def _target_docx_quality_table_metrics(
+    request: FileTaskRequest, file_changes: List[Dict[str, Any]]
+) -> tuple[int, int, int]:
+    best = (0, 0, 0)
+    for path_text in _quality_target_paths(request, file_changes):
+        if not str(path_text or "").lower().endswith((".docx", ".doc")):
+            continue
+        resolved = _resolve_quality_path(path_text)
+        if not resolved:
+            continue
+        try:
+            from docx import Document
+
+            document = Document(str(resolved))
+        except Exception:
+            continue
+        table_count = len(document.tables)
+        total_rows = sum(len(table.rows) for table in document.tables)
+        max_columns = max((len(table.columns) for table in document.tables), default=0)
+        best = max(best, (table_count, total_rows, max_columns))
+    return best
+
+
+def _financial_report_duplicate_content_gate(
+    request: FileTaskRequest,
+    file_changes: List[Dict[str, Any]],
+) -> Dict[str, Any] | None:
+    inspected = False
+    repeated_title_count = 0
+    duplicate_table_count = 0
+    for path_text in _quality_target_paths(request, file_changes):
+        if not str(path_text or "").lower().endswith((".docx", ".doc")):
+            continue
+        resolved = _resolve_quality_path(path_text)
+        if not resolved:
+            continue
+        try:
+            from collections import Counter
+
+            from docx import Document
+
+            document = Document(str(resolved))
+        except Exception:
+            continue
+
+        inspected = True
+        title_counts = Counter(
+            " ".join(paragraph.text.split()).casefold()
+            for paragraph in document.paragraphs
+            if paragraph.style is not None
+            and str(paragraph.style.name or "").strip().casefold() == "title"
+            and " ".join(paragraph.text.split())
+        )
+        repeated_title_count = max(
+            repeated_title_count,
+            sum(count - 1 for count in title_counts.values() if count > 1),
+        )
+
+        table_fingerprints = Counter(
+            tuple(
+                tuple(" ".join(cell.text.split()).casefold() for cell in row.cells)
+                for row in table.rows
+            )
+            for table in document.tables
+            if table.rows
+        )
+        duplicate_table_count = max(
+            duplicate_table_count,
+            sum(count - 1 for count in table_fingerprints.values() if count > 1),
+        )
+
+    if not inspected:
+        return None
+
+    passed = repeated_title_count == 0 and duplicate_table_count == 0
+    return quality_gate_result(
+        criterion="financial_report_has_no_duplicate_report_body",
+        passed=passed,
+        detail=(
+            "新建财务报告不能包含重复的报告标题或完全相同的数据表；"
+            f"重复 Title 段落数：{repeated_title_count}，"
+            f"重复表格数：{duplicate_table_count}。"
+        ),
+        priority="critical",
+    )
 
 
 def _table_narrative_requirement_gate(
@@ -1899,6 +2233,21 @@ def _looks_like_local_docx_edit_request(task: str) -> bool:
         or re.search(
             r"\b(?:keep|preserve)\b.{0,40}\b(?:existing|current|original)\b"
             r".{0,30}\b(?:table|structure|content|format)\b",
+            text,
+            re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_local_docx_replace_request(task: str) -> bool:
+    text = str(task or "")
+    if not text.strip():
+        return False
+    return bool(
+        re.search(
+            r"(?:只替换|仅替换|替换.{0,16}(?:一处|那一处|这一处|第\s*\d+\s*处|第\s*\d+\s*段)|"
+            r"(?:第\s*\d+\s*段|一处|那一处|这一处).{0,24}(?:替换|删除|改成|换成)|"
+            r"local(?:ized)?\s+(?:replace|edit)|replace\s+only)",
             text,
             re.IGNORECASE,
         )

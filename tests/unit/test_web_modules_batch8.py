@@ -12,7 +12,7 @@ Modules covered:
   6. app.core.services.clipboard_manager
   7. web.insight_reporter
   8. web.prompt_adapter
-  9. web.memory_integration
+  9. EnhancedMemoryManager regression
  10. web.doc_planner
  11. web.doc_converter
  12. web.data_pipeline
@@ -710,76 +710,18 @@ class TestPromptAdapter:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# 9. MemoryIntegration
+# 9. EnhancedMemoryManager regression
 # ──────────────────────────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
-class TestMemoryIntegration:
-    """Tests for web.memory_integration.MemoryIntegration"""
-
-    def test_create_extraction_prompt(self):
-        from web.memory_integration import MemoryIntegration
-
-        prompt = MemoryIntegration.create_extraction_prompt("我喜欢 Python", "好的")
-        assert "Python" in prompt
-        assert "JSON" in prompt
-
-    def test_should_extract_short_msg(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("hi", "") is False
-
-    def test_should_extract_greeting(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("你好", "") is False
-        assert MemoryIntegration.should_extract("hello", "") is False
-
-    def test_should_extract_strong_signal(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("我非常喜欢简洁的代码风格", "") is True
-        assert (
-            MemoryIntegration.should_extract("以后请记住不要再使用这种方式了", "")
-            is True
-        )
-
-    def test_should_extract_tech_content(self):
-        from web.memory_integration import MemoryIntegration
-
-        assert MemoryIntegration.should_extract("帮我写一个Python爬虫", "") is True
-
-    def test_should_extract_long_msg(self):
-        from web.memory_integration import MemoryIntegration
-
-        # len() > 40 triggers extraction for longer messages
-        long_msg = "这是一段比较长的消息，包含了一些有价值的信息，足够触发记忆提取的阈值，需要有超过四十个字符才能通过检测"
-        assert len(long_msg) > 40
-        assert MemoryIntegration.should_extract(long_msg, "") is True
-
-    def test_enhance_system_instruction(self):
-        from web.memory_integration import MemoryIntegration
-
-        result = MemoryIntegration.enhance_system_instruction(
-            "You are an assistant.", "Memory: user likes Python", "Profile: developer"
-        )
-        assert "Profile: developer" in result
-        assert "Memory: user likes Python" in result
-        assert "回复调整建议" in result
-
-    def test_enhance_system_instruction_empty(self):
-        from web.memory_integration import MemoryIntegration
-
-        result = MemoryIntegration.enhance_system_instruction(
-            "Base instruction.", "", ""
-        )
-        assert "Base instruction." in result
+class TestEnhancedMemoryManagerRegression:
+    """Regression coverage for normalized legacy memory files."""
 
     def test_enhanced_memory_manager_coerces_dict_memories_before_append(
         self, tmp_path
     ):
-        from web.enhanced_memory_manager import EnhancedMemoryManager
+        from app.core.services.memory_manager import EnhancedMemoryManager
 
         memory_path = tmp_path / "memory.json"
         profile_path = tmp_path / "profile.json"

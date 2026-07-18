@@ -17,6 +17,7 @@
 #define AppURL       "https://github.com/Loganwon/Koto"
 #define AppExeName   "Koto.exe"
 #define SourceDir    "dist\Koto_Portable"
+#define WebView2Installer "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
 
 [Setup]
 ; ── AppId 必须固定，Inno Setup 用它识别"同一个程序"以支持升级覆盖安装 ──
@@ -44,6 +45,12 @@ DisableProgramGroupPage=yes
 OutputDir=dist
 OutputBaseFilename=Koto_v{#AppVersion}_Setup
 SetupIconFile=src\assets\koto_icon.ico
+#ifdef KotoCodeSigning
+; The canonical build injects KotoSignTool from the command line. Inno uses it
+; for both the outer Setup executable and the generated uninstaller.
+SignTool=KotoSignTool
+SignedUninstaller=yes
+#endif
 
 ; ── 压缩（生成更小的单文件安装包）──────────────────────────────────
 Compression=lzma2/ultra64
@@ -67,7 +74,11 @@ UninstallDisplayName={#AppName} v{#AppVersion}
 
 ; ── 升级时自动关闭正在运行的实例 ───────────────────────────────────
 CloseApplications=yes
-CloseApplicationsFilter=Koto.exe
+CloseApplicationsFilter=*.exe,*.dll,*.pyd
+RestartApplications=no
+; 与 Koto.exe 创建的命名 Mutex 完全一致。升级/卸载时先要求退出旧实例，
+; 避免一边运行旧 Python/DLL，一边替换 _internal。
+AppMutex=Local\KotoMainWindowMutex_v2
 
 [Languages]
 ; ChineseSimplified.isl 放在 build\ 目录，本地和 CI 均可引用，无需依赖系统语言包
@@ -76,11 +87,27 @@ Name: "english";     MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "在桌面创建 Koto 快捷方式"; GroupDescription: "附加图标:"; Flags: unchecked
-Name: "localmodel"; Description: "安装本地 AI 模型助手（可选，加速离线任务分类，需额外下载约 2–8 GB）"; GroupDescription: "本地 AI 模型:"; Flags: unchecked
+Name: "localmodel"; Description: "立即打开 AI 初始化设置（也可在首次启动时选择云端 API 或本地模型）"; GroupDescription: "AI 初始化:"; Flags: unchecked
 
 [Files]
 ; 将 dist\Koto_Portable\ 下全部文件（含 _internal\ 子目录）复制到安装目录
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[InstallDelete]
+; 原位升级必须先移除上一版的受管运行时。仅覆盖新文件会留下已删除的
+; Python 模块、DLL 和前端资产，造成新旧代码混跑。用户数据目录
+; config/chats/logs/workspace 与 .webview2_profile 不在清理范围内。
+Type: filesandordirs; Name: "{app}\_internal"
+Type: files; Name: "{app}\Koto.exe"
+Type: files; Name: "{app}\LocalModelInstaller.exe"
+Type: files; Name: "{app}\Start_Koto.bat"
+Type: files; Name: "{app}\Stop_Koto.bat"
+Type: files; Name: "{app}\Install_Local_Model.bat"
+Type: files; Name: "{app}\Install_WebView2_Runtime.bat"
+Type: files; Name: "{app}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+Type: files; Name: "{app}\webview2-runtime.json"
+Type: files; Name: "{app}\README_便携版.txt"
+Type: files; Name: "{app}\PORTABLE_RELEASE_GUIDE.md"
 
 [Icons]
 ; 开始菜单快捷方式
@@ -89,6 +116,10 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExeName}"; WorkingDir: "{app}"; Tasks: desktopicon
 
 [Run]
+; Windows 10 clean images may not carry the Evergreen Runtime.  The portable
+; payload contains Microsoft's signed offline installer, so setup can repair
+; the prerequisite without Python, a browser download, or administrator input.
+Filename: "{app}\{#WebView2Installer}"; Parameters: "/silent /install"; StatusMsg: "正在准备 Koto 桌面界面运行时…"; Flags: runhidden waituntilterminated; Check: WebView2RuntimeMissing
 ; 安装完成后可选"立即启动 Koto"
 Filename: "{app}\{#AppExeName}"; Description: "立即启动 Koto"; Flags: nowait postinstall skipifsilent
 ; 如勾选"安装本地 AI 模型助手"则在安装完成后自动打开模型安装向导
@@ -97,3 +128,28 @@ Filename: "{app}\LocalModelInstaller.exe"; Description: "正在启动本地模�
 [UninstallDelete]
 ; 卸载时删除日志（config/ workspace/ chats/ 等用户数据保留）
 Type: filesandordirs; Name: "{app}\logs"
+
+[Code]
+const
+  WebView2ClientKey = 'Software\Microsoft\EdgeUpdate\Clients\{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}';
+
+function IsUsableWebView2Version(const Version: String): Boolean;
+begin
+  Result := (Trim(Version) <> '') and (Trim(Version) <> '0.0.0.0');
+end;
+
+function WebView2RuntimeMissing: Boolean;
+var
+  Version: String;
+begin
+  Result := True;
+  if RegQueryStringValue(HKLM32, WebView2ClientKey, 'pv', Version) and
+     IsUsableWebView2Version(Version) then
+  begin
+    Result := False;
+    exit;
+  end;
+  if RegQueryStringValue(HKCU, WebView2ClientKey, 'pv', Version) and
+     IsUsableWebView2Version(Version) then
+    Result := False;
+end;

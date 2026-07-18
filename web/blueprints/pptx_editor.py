@@ -117,7 +117,7 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
     """
     from pptx import Presentation
     from pptx.dml.color import RGBColor
-    from pptx.enum.text import PP_ALIGN
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
     from pptx.util import Pt
 
     _ALIGN_MAP = {
@@ -128,6 +128,72 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
         "DISTRIBUTE": PP_ALIGN.DISTRIBUTE,
         "THAI_DISTRIBUTE": PP_ALIGN.THAI_DISTRIBUTE,
     }
+    _VERTICAL_ALIGN_MAP = {
+        "t": MSO_ANCHOR.TOP,
+        "top": MSO_ANCHOR.TOP,
+        "ctr": MSO_ANCHOR.MIDDLE,
+        "center": MSO_ANCHOR.MIDDLE,
+        "middle": MSO_ANCHOR.MIDDLE,
+        "b": MSO_ANCHOR.BOTTOM,
+        "bottom": MSO_ANCHOR.BOTTOM,
+    }
+
+    def _delete_xml_element(element) -> None:
+        parent = element.getparent()
+        if parent is not None:
+            parent.remove(element)
+
+    def _sync_paragraph_count(text_frame, target_count: int) -> list:
+        """Make the OOXML paragraph list exactly match the editor model.
+
+        A DrawingML text body must retain at least one paragraph.  The previous
+        exporter only iterated existing paragraphs, so deleting a complete
+        paragraph in the browser left its old text in the saved presentation.
+        """
+        wanted = max(1, target_count)
+        paragraphs = list(text_frame.paragraphs)
+        while len(paragraphs) > wanted:
+            _delete_xml_element(paragraphs.pop()._p)
+        while len(paragraphs) < wanted:
+            paragraphs.append(text_frame.add_paragraph())
+        return paragraphs
+
+    def _sync_runs(para, edit_runs: list[dict]) -> None:
+        """Reconcile runs in both directions, including whole-run deletion."""
+        original_runs = list(para.runs)
+        while len(original_runs) > len(edit_runs):
+            _delete_xml_element(original_runs.pop()._r)
+        while len(original_runs) < len(edit_runs):
+            original_runs.append(para.add_run())
+
+        for run, edit_run in zip(original_runs, edit_runs):
+            run.text = str(edit_run.get("text", ""))
+
+            if "bold" in edit_run:
+                run.font.bold = bool(edit_run["bold"])
+            if "italic" in edit_run:
+                run.font.italic = bool(edit_run["italic"])
+            if "underline" in edit_run:
+                run.font.underline = bool(edit_run["underline"])
+            if edit_run.get("size"):
+                run.font.size = Pt(float(edit_run["size"]))
+            font_name = edit_run.get("fontName") or edit_run.get("eaFontName")
+            if font_name:
+                run.font.name = str(font_name)
+            if edit_run.get("color"):
+                hex_color = str(edit_run["color"]).lstrip("#")
+                if len(hex_color) == 6:
+                    run.font.color.rgb = RGBColor(
+                        int(hex_color[0:2], 16),
+                        int(hex_color[2:4], 16),
+                        int(hex_color[4:6], 16),
+                    )
+
+        # ``para.runs`` can be empty after the user deletes all text.  That is
+        # intentional and must not be replaced with the original content.
+        if not edit_runs:
+            for run in list(para.runs):
+                _delete_xml_element(run._r)
 
     prs = Presentation(io.BytesIO(orig_bytes))
     slide_map = {edit.get("index", edit.get("slide_index", i)): edit for i, edit in enumerate(slides_edits)}
@@ -237,10 +303,24 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                 continue
 
             edit_paras = edit_shape.get("paragraphs", [])
-            for p_idx, para in enumerate(shape.text_frame.paragraphs):
-                if p_idx >= len(edit_paras):
-                    break
-                ep = edit_paras[p_idx]
+            if not isinstance(edit_paras, list):
+                edit_paras = []
+            text_frame = shape.text_frame
+
+            anchor = str(edit_shape.get("textAnchor", "")).lower()
+            if anchor in _VERTICAL_ALIGN_MAP:
+                try:
+                    text_frame.vertical_anchor = _VERTICAL_ALIGN_MAP[anchor]
+                except Exception:
+                    pass
+
+            paragraphs = _sync_paragraph_count(text_frame, len(edit_paras))
+            if not edit_paras:
+                _sync_runs(paragraphs[0], [])
+                continue
+
+            for p_idx, ep in enumerate(edit_paras):
+                para = paragraphs[p_idx]
 
                 # Paragraph alignment
                 align_str = ep.get("align", "").upper()
@@ -249,62 +329,16 @@ def _apply_edits(orig_bytes: bytes, slides_edits: list[dict]) -> bytes:
                         para.alignment = _ALIGN_MAP[align_str]
                     except Exception:
                         pass
-
-                edit_runs = ep.get("runs", [])
-                orig_runs = list(para.runs)
-                for r_idx, run in enumerate(orig_runs):
-                    if r_idx >= len(edit_runs):
-                        # Clear text from original runs that no longer have an edit
-                        try:
-                            run.text = ""
-                        except Exception:
-                            pass
-                        continue
-                    er = edit_runs[r_idx]
-
-                    # Text
-                    new_text = er.get("text", run.text)
-                    if new_text != run.text:
-                        run.text = new_text
-
-                    # Bold
-                    if "bold" in er:
-                        try:
-                            run.font.bold = er["bold"]
-                        except Exception:
-                            pass
-
-                    # Italic
-                    if "italic" in er:
-                        try:
-                            run.font.italic = er["italic"]
-                        except Exception:
-                            pass
-
-                    # Underline
-                    if "underline" in er:
-                        try:
-                            run.font.underline = er["underline"]
-                        except Exception:
-                            pass
-
-                    # Font size
-                    if "size" in er and er["size"]:
-                        try:
-                            run.font.size = Pt(float(er["size"]))
-                        except Exception:
-                            pass
-
-                    # Font color
-                    if "color" in er and er["color"]:
-                        try:
-                            hex_color = er["color"].lstrip("#")
-                            r_val = int(hex_color[0:2], 16)
-                            g_val = int(hex_color[2:4], 16)
-                            b_val = int(hex_color[4:6], 16)
-                            run.font.color.rgb = RGBColor(r_val, g_val, b_val)
-                        except Exception:
-                            pass
+                try:
+                    _sync_runs(para, ep.get("runs", []) or [])
+                except Exception as exc:
+                    _logger.debug(
+                        "Could not reconcile text runs for slide %d shape %s paragraph %d: %s",
+                        slide_idx,
+                        shape_id,
+                        p_idx,
+                        exc,
+                    )
 
         # ── New shapes (inserted on frontend) ────────────────────────────────
         existing_ids = {s.shape_id for s in slide.shapes}

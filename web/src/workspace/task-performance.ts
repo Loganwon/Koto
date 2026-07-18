@@ -19,6 +19,10 @@ export interface ModelSummaryUpdate {
   summary: string;
 }
 
+export interface TaskPerformanceCard {
+  dataset: DOMStringMap;
+}
+
 export function createModelSummaryState(): ModelSummaryState {
   return {
     rounds: new Set(),
@@ -97,6 +101,17 @@ export function updateTaskPerformanceDataset(currentEncoded: string, data: Recor
     encoded: encodeTaskPerformance(performance),
     summary: taskPerformanceSummary({ performance }),
   };
+}
+
+export function updateTaskPerformanceRow(
+  card: TaskPerformanceCard,
+  data: Record<string, any>,
+): void {
+  if (!card || !card.dataset) return;
+  const current = String(card.dataset.taskPerformance || '').trim();
+  const next = updateTaskPerformanceDataset(current, data);
+  try { card.dataset.taskPerformance = next.encoded; }
+  catch { delete card.dataset.taskPerformance; }
 }
 
 export function updateModelSummaryState(state: ModelSummaryState, data: Record<string, any>): ModelSummaryUpdate {

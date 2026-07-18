@@ -3,6 +3,7 @@
  */
 
 import { csrfFetch } from '../shared/csrf';
+import { closeModal, openModal } from '../shared/modal-state';
 
 // ── Skills Management ──
 let _allSkills: any[] = [];
@@ -104,11 +105,11 @@ export function openSkillEditor(skillId: string): void {
   const skeExtractMsg = document.getElementById('skeExtractMsg'); if (skeExtractMsg) skeExtractMsg.textContent = '';
   skeLoadUiTab(skill.ui_config || {}, skill.ui_extensions || {});
   skeSwitchTab('edit');
-  const modal = document.getElementById('skillEditorModal'); if (modal) modal.style.display = 'flex';
+  openModal('skillEditorModal', { initialFocus: '#skillEditorContent' });
 }
 
 export function closeSkillEditor(): void {
-  const modal = document.getElementById('skillEditorModal'); if (modal) modal.style.display = 'none';
+  closeModal('skillEditorModal');
   _editingSkillId = null;
 }
 
@@ -324,39 +325,6 @@ export async function deleteSkillBinding(bindingId: string): Promise<void> {
   } catch (e) { /* ignore */ }
 }
 
-// ── Triggers ──
-function _triggerSchedule(t: any): string {
-  const cfg = t.config || {};
-  if (t.trigger_type === 'interval' && cfg.interval_seconds) return `每 ${cfg.interval_seconds}s`;
-  if (t.trigger_type === 'cron' && cfg.time) return String(cfg.time);
-  if (t.cron) return String(t.cron);
-  return t.trigger_type || '—';
-}
-
-export async function loadTriggers(): Promise<void> {
-  const listEl = document.getElementById('triggersList');
-  if (!listEl) return;
-  try {
-    const resp = await fetch('/api/jobs/triggers');
-    const data = await resp.json();
-    const triggers = data.triggers || data.data || [];
-    if (!triggers.length) { listEl.innerHTML = '<div class="memory-empty">暂无定时触发器</div>'; return; }
-    listEl.innerHTML = triggers.map((t: any) => {
-      const id = t.trigger_id || t.id || '';
-      const enabled = t.enabled !== false;
-      const target = t.name || t.skill_id || t.job_type || '—';
-      return `<div class="trigger-card"><span>${_html(_triggerSchedule(t))}</span><strong>${_html(target)}</strong><span>${enabled ? '✅' : '⏸️'}</span><button onclick="toggleTrigger('${_inlineArg(id)}',${!enabled})">${enabled ? '禁用' : '启用'}</button></div>`;
-    }).join('');
-  } catch (e) { listEl.innerHTML = '<div class="memory-empty">加载失败</div>'; }
-}
-
-export async function toggleTrigger(triggerId: string, enabled: boolean): Promise<void> {
-  try {
-    await _csrfFetch(`/api/jobs/triggers/${encodeURIComponent(triggerId)}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled }) });
-    loadTriggers();
-  } catch (e) { /* ignore */ }
-}
-
 // ── Backward compat ──
 (window as any).loadSkills = loadSkills;
 (window as any).renderSkills = renderSkills;
@@ -379,5 +347,3 @@ export async function toggleTrigger(triggerId: string, enabled: boolean): Promis
 (window as any).skeCollectUiConfig = skeCollectUiConfig;
 (window as any).loadSkillBindings = loadSkillBindings;
 (window as any).deleteSkillBinding = deleteSkillBinding;
-(window as any).loadTriggers = loadTriggers;
-(window as any).toggleTrigger = toggleTrigger;

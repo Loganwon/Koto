@@ -9,6 +9,7 @@ import os
 import sys
 import time
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 # 添加项目根目录到路径
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -28,7 +29,7 @@ def print_section(title):
     print("=" * 60 + "\n")
 
 
-def test_concept_extraction():
+def demo_concept_extraction():
     """测试概念提取"""
     print_section("📝 1. 概念提取测试")
 
@@ -94,7 +95,7 @@ def test_concept_extraction():
     return file_paths
 
 
-def test_knowledge_graph(file_paths):
+def demo_knowledge_graph(file_paths):
     """测试知识图谱"""
     print_section("🕸️ 2. 知识图谱测试")
 
@@ -134,7 +135,7 @@ def test_knowledge_graph(file_paths):
         print(f"  • {key}: {value}")
 
 
-def test_behavior_monitoring():
+def demo_behavior_monitoring():
     """测试行为监控"""
     print_section("👁️ 3. 行为监控测试")
 
@@ -188,7 +189,7 @@ def test_behavior_monitoring():
         print(f"  • {key}: {value}")
 
 
-def test_suggestions():
+def demo_suggestions():
     """测试智能建议"""
     print_section("💡 4. 智能建议测试")
 
@@ -221,7 +222,7 @@ def test_suggestions():
         print(f"  • {key}: {value}")
 
 
-def test_insights():
+def demo_insights():
     """测试洞察报告"""
     print_section("📈 5. 洞察报告测试")
 
@@ -269,20 +270,26 @@ def main():
     print("🧠" * 30)
 
     try:
-        # 1. 概念提取
-        file_paths = test_concept_extraction()
+        original_cwd = Path.cwd()
+        with TemporaryDirectory(prefix="koto-smart-features-") as temp_dir:
+            os.chdir(temp_dir)
+            try:
+                # 1. 概念提取
+                file_paths = demo_concept_extraction()
 
-        # 2. 知识图谱
-        test_knowledge_graph(file_paths)
+                # 2. 知识图谱
+                demo_knowledge_graph(file_paths)
 
-        # 3. 行为监控
-        test_behavior_monitoring()
+                # 3. 行为监控
+                demo_behavior_monitoring()
 
-        # 4. 智能建议
-        test_suggestions()
+                # 4. 智能建议
+                demo_suggestions()
 
-        # 5. 洞察报告
-        test_insights()
+                # 5. 洞察报告
+                demo_insights()
+            finally:
+                os.chdir(original_cwd)
 
         print_section("✅ 所有测试完成")
 

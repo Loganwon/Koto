@@ -76,8 +76,9 @@ class MemoryToolsPlugin(AgentPlugin):
                         "category": {
                             "type": "STRING",
                             "description": (
-                                "Memory category. One of: user_fact, preference, "
-                                "topic_summary, decision, reminder."
+                                "Memory category. One of: fact/user_fact, "
+                                "user_preference/preference, topic_summary, "
+                                "decision, reminder."
                             ),
                         },
                     },
@@ -124,14 +125,16 @@ class MemoryToolsPlugin(AgentPlugin):
 
     def memory_save(self, content: str, category: str = "user_fact") -> str:
         """Save a memory."""
-        valid_categories = {
-            "user_fact",
-            "preference",
-            "topic_summary",
-            "decision",
-            "reminder",
+        category_aliases = {
+            "user_fact": "fact",
+            "fact": "fact",
+            "preference": "user_preference",
+            "user_preference": "user_preference",
+            "topic_summary": "topic_summary",
+            "decision": "decision",
+            "reminder": "reminder",
         }
-        category = category if category in valid_categories else "user_fact"
+        category = category_aliases.get(category, "fact")
         try:
             mgr = self._get_memory_manager()
             if mgr is None:
@@ -169,9 +172,9 @@ class MemoryToolsPlugin(AgentPlugin):
     def _get_memory_manager():
         """Use the one application-owned memory manager."""
         try:
-            from web.memory_runtime import get_memory_manager
+            from app.core.app_context import ctx
 
-            return get_memory_manager()
+            return ctx.memory_manager
         except Exception as e:
             logger.debug(f"[MemoryTools] _get_memory_manager error: {e}")
             return None

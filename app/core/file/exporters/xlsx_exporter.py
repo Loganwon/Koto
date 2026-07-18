@@ -32,7 +32,9 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
         1: "left",
         2: "center",
         3: "right",
-        6: "justify",
+        4: "justify",
+        5: "centerContinuous",
+        6: "distributed",
         7: "distributed",
     }
     _V_ALIGN_REV = {
@@ -45,8 +47,8 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
 
     def _resolve_style(cell: dict, top_styles: dict) -> dict | None:
         style = cell.get("s")
-        if isinstance(style, str):
-            return top_styles.get(style)
+        if isinstance(style, (str, int)):
+            return top_styles.get(style) or top_styles.get(str(style))
         if isinstance(style, dict):
             return style
         return None
@@ -83,13 +85,31 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
 
         ali_kw: dict[str, Any] = {}
         ht = style.get("ht")
+        try:
+            ht = int(ht) if ht is not None else None
+        except (TypeError, ValueError):
+            ht = None
         if ht is not None and ht in _H_ALIGN_REV:
             ali_kw["horizontal"] = _H_ALIGN_REV[ht]
         vt = style.get("vt")
+        try:
+            vt = int(vt) if vt is not None else None
+        except (TypeError, ValueError):
+            vt = None
         if vt is not None and vt in _V_ALIGN_REV:
             ali_kw["vertical"] = _V_ALIGN_REV[vt]
+        # Univer WrapStrategy.WRAP is 3. Accept 2 as a compatibility value for
+        # snapshots created by Koto versions that used the old enum mapping.
+        if style.get("tb") in (2, 3) or style.get("wrapText") is True:
+            ali_kw["wrap_text"] = True
         if ali_kw:
             oc.alignment = XlAlignment(**ali_kw)
+
+        number_format = style.get("n")
+        if isinstance(number_format, dict):
+            number_format = number_format.get("pattern") or number_format.get("p")
+        if isinstance(number_format, str) and number_format:
+            oc.number_format = number_format
 
     if isinstance(workbook_data, dict) and "sheetOrder" in workbook_data:
         top_styles = workbook_data.get("styles", {})
@@ -106,11 +126,44 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
                     if not cell:
                         continue
                     oc = ws.cell(row=r, column=c)
-                    if "v" in cell:
+                    formula = cell.get("f")
+                    if isinstance(formula, str) and formula.strip():
+                        oc.value = formula if formula.startswith("=") else f"={formula}"
+                    elif "v" in cell:
                         oc.value = cell["v"]
+                        if cell.get("t") == 3:
+                            oc.value = bool(cell["v"])
                     style = _resolve_style(cell, top_styles)
                     if style:
                         _apply_style(oc, style)
+
+            # Univer stores dimensions in CSS pixels; openpyxl uses roughly
+            # character widths for columns and points for rows.
+            for col_key, col_info in (sheet_data.get("columnData") or {}).items():
+                if not isinstance(col_info, dict):
+                    continue
+                col_index = int(col_key) + 1
+                width_px = col_info.get("w")
+                if width_px is not None:
+                    ws.column_dimensions[
+                        openpyxl.utils.get_column_letter(col_index)
+                    ].width = max(0.1, (float(width_px) - 5.0) / 7.0)
+                if col_info.get("hd") is True:
+                    ws.column_dimensions[
+                        openpyxl.utils.get_column_letter(col_index)
+                    ].hidden = True
+
+            for row_key, row_info in (sheet_data.get("rowData") or {}).items():
+                if not isinstance(row_info, dict):
+                    continue
+                row_index = int(row_key) + 1
+                height_px = row_info.get("h")
+                if height_px is not None:
+                    ws.row_dimensions[row_index].height = max(
+                        0.1, float(height_px) * 0.75
+                    )
+                if row_info.get("hd") is True:
+                    ws.row_dimensions[row_index].hidden = True
 
             for merge in sheet_data.get("mergeData", []):
                 ws.merge_cells(

@@ -528,6 +528,35 @@ class TestPPTGenerationPipeline:
         result = pipeline._prepare_image_map(bp)
         assert 0 in result
 
+    @patch("app.core.services.ppt_pipeline.ImageManager")
+    @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
+    @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
+    def test_acquire_images_does_not_require_web_runtime_client(
+        self, mock_orch, mock_synth, mock_image_manager, tmp_path
+    ):
+        from app.core.services.ppt_master import PPTBlueprint, SlideBlueprint, SlideType
+        from app.core.services.ppt_pipeline import PPTGenerationPipeline
+
+        image_path = str(tmp_path / "generated.png")
+        mock_image_manager.return_value.get_image.return_value = image_path
+        pipeline = PPTGenerationPipeline(ai_client=None, workspace_dir=str(tmp_path))
+        bp = PPTBlueprint(title="T", subtitle="S")
+        slide = SlideBlueprint(
+            slide_index=1,
+            slide_type=SlideType.CONTENT_IMAGE,
+            title="Visual",
+        )
+        slide.image_prompts = ["未来城市"]
+        bp.slides = [slide]
+
+        pipeline._acquire_images_for_blueprint(bp)
+
+        mock_image_manager.assert_called_once_with(
+            client=None,
+            workspace_dir=str(tmp_path),
+        )
+        assert slide.image_paths == [image_path]
+
     @patch("app.core.services.ppt_pipeline.PPTSynthesizer")
     @patch("app.core.services.ppt_pipeline.PPTMasterOrchestrator")
     def test_finalize_result(self, mock_orch, mock_synth):

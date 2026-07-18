@@ -156,6 +156,38 @@ def test_file_task_runtime_stops_when_plan_check_fails(monkeypatch):
     assert run_finished.payload["summary"] == "规划检查未通过：计划与任务要求不匹配。"
 
 
+def test_file_task_runtime_stops_for_preflight_target_conflict():
+    def model_must_not_run(**kwargs):
+        raise AssertionError("model should not run when target selection is ambiguous")
+
+    events = list(
+        FileTaskRuntime(
+            tool_executor=lambda name, args: "",
+            model_client=model_must_not_run,
+        ).run(
+            FileTaskRequest(
+                task="把总结写入 Word",
+                run_id="preflight_target_conflict_demo",
+                files=[
+                    FileTaskFile(path="a.docx", name="a.docx", type="docx"),
+                    FileTaskFile(path="b.docx", name="b.docx", type="docx"),
+                ],
+            )
+        )
+    )
+
+    run_finished = next(event for event in events if event.type == "run.finished")
+    assert run_finished.payload["runtime"]["terminal_status"] == "blocked"
+    assert run_finished.payload["completed_task"] is False
+    assert (
+        "ambiguous_target:docx" in run_finished.payload["constraint_audit"]["conflicts"]
+    )
+    assert (
+        "constraint_conflict:ambiguous_target:docx"
+        in run_finished.payload["supervisor_audit"]["reason_codes"]
+    )
+
+
 def test_file_task_runtime_emits_plan_checked_for_doc_annotate_bridge_path(monkeypatch):
     import app.core.agent.file_task_doc_annotate_bridge as bridge
     from app.core.agent.file_task_contract import FileTaskLedger

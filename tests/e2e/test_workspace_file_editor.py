@@ -455,13 +455,27 @@ class TestOpenFileByPathApi:
     path traversal with 403, returns 404 for missing files.
     """
 
-    def _post_open_by_path(self, base_url: str, rel_path: str, timeout: int = 8):
+    def _post_open_by_path(
+        self,
+        base_url: str,
+        rel_path: str | None,
+        timeout: int = 8,
+    ):
         import requests
 
         try:
-            return requests.post(
+            session = requests.Session()
+            csrf_response = session.get(
+                f"{base_url}/api/csrf-token",
+                timeout=timeout,
+            )
+            csrf_response.raise_for_status()
+            csrf_token = csrf_response.json()["csrf_token"]
+            payload = {} if rel_path is None else {"path": rel_path}
+            return session.post(
                 f"{base_url}/api/v1/workspace/open_file_by_path",
-                json={"path": rel_path},
+                json=payload,
+                headers={"X-CSRFToken": csrf_token},
                 timeout=timeout,
             )
         except Exception as exc:
@@ -469,16 +483,7 @@ class TestOpenFileByPathApi:
 
     def test_missing_path_returns_400(self, e2e_page, e2e_base_url):
         """Empty / missing path → 400."""
-        import requests
-
-        try:
-            resp = requests.post(
-                f"{e2e_base_url}/api/v1/workspace/open_file_by_path",
-                json={},
-                timeout=8,
-            )
-        except Exception:
-            pytest.skip("Cannot reach open_file_by_path endpoint")
+        resp = self._post_open_by_path(e2e_base_url, None)
         assert resp.status_code == 400
 
     def test_path_traversal_returns_403(self, e2e_page, e2e_base_url):
