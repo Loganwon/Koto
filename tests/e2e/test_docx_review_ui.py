@@ -320,11 +320,9 @@ def test_docx_review_engine_loads_only_when_docx_opens(
     assert e2e_page.evaluate(
         "() => typeof window.KotoDocxReviewEngineModule === 'undefined'"
     )
-    assert e2e_page.evaluate(
-        """() => performance.getEntriesByType('resource').every(
+    assert e2e_page.evaluate("""() => performance.getEntriesByType('resource').every(
             (entry) => !String(entry.name || '').includes('docx-review-engine-bundle.js')
-        )"""
-    )
+        )""")
 
     e2e_page.locator("#wa-file-input").set_input_files(docx_review_ui_docx_path)
     _wait_until_visible(
@@ -334,11 +332,9 @@ def test_docx_review_engine_loads_only_when_docx_opens(
         "() => !!window.KotoDocxReviewEngineModule",
         timeout=REVIEW_TIMEOUT,
     )
-    assert e2e_page.evaluate(
-        """() => performance.getEntriesByType('resource').some(
+    assert e2e_page.evaluate("""() => performance.getEntriesByType('resource').some(
             (entry) => String(entry.name || '').includes('docx-review-engine-bundle.js')
-        )"""
-    )
+        )""")
     assert console_errors == [], f"JS errors: {console_errors}"
 
 

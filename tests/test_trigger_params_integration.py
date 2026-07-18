@@ -103,8 +103,7 @@ def _check_api_endpoint_simulation(tmp_path):
         print(f"   ✅ 参数已更新: {updated_trigger['parameters']}")
         return (
             updated_trigger["priority"] == update_data["priority"]
-            and updated_trigger["cooldown_minutes"]
-            == update_data["cooldown_minutes"]
+            and updated_trigger["cooldown_minutes"] == update_data["cooldown_minutes"]
             and updated_trigger["parameters"] == update_data["parameters"]
         )
 

@@ -15,6 +15,8 @@ from app.core.agent.file_task_contract import (
 )
 
 _LOW_CONFIDENCE_THRESHOLD = 0.58
+
+
 def _clean(value: Any, limit: int = 180) -> str:
     text = str(value or "").strip()
     if limit and len(text) > limit:

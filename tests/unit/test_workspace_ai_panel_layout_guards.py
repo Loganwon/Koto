@@ -119,7 +119,9 @@ def test_workspace_ai_panel_rejects_narrow_persisted_split_sizes() -> None:
     assert "getItem('wa_split_sizes_embedded')" not in panel_layout
 
 
-def test_workspace_embedded_split_resizes_both_side_panels_without_width_animation() -> None:
+def test_workspace_embedded_split_resizes_both_side_panels_without_width_animation() -> (
+    None
+):
     panel_layout = _read("web/src/ui/panel-layout.ts")
     css = _read("web/static/css/workspace.css")
 
@@ -164,7 +166,9 @@ def test_unified_workspace_has_no_ownerless_legacy_resize_handles() -> None:
     assert "export interface PanelLayout" not in panel_layout
 
 
-def test_workspace_split_lifecycle_recovers_from_stale_state_and_storage_failures() -> None:
+def test_workspace_split_lifecycle_recovers_from_stale_state_and_storage_failures() -> (
+    None
+):
     panel_layout = _read("web/src/ui/panel-layout.ts")
 
     assert "function _readStorage" in panel_layout
@@ -179,7 +183,10 @@ def test_workspace_split_lifecycle_recovers_from_stale_state_and_storage_failure
     assert "function _cancelActiveSplitDrag" in panel_layout
     assert "pair?.dragging && typeof pair.stop === 'function'" in panel_layout
     assert "window.addEventListener('blur', _cancelActiveSplitDrag);" in panel_layout
-    assert "window.addEventListener('touchcancel', _cancelActiveSplitDrag, true);" in panel_layout
+    assert (
+        "window.addEventListener('touchcancel', _cancelActiveSplitDrag, true);"
+        in panel_layout
+    )
     assert "if (document.hidden) _cancelActiveSplitDrag();" in panel_layout
     assert "split.parent === workspace" in panel_layout
     assert "_applySavedAiPanelState();" in panel_layout
@@ -301,7 +308,9 @@ def test_workspace_activity_panels_and_task_workbench_use_ts_runtime() -> None:
     assert "fetch('/api/skills/bindings?binding_type=intent')" in app_marketplace
     assert "`/api/skills/bindings/${encodeURIComponent(bindingId)}`" in app_marketplace
     assert "fetch('/api/jobs/triggers')" not in app_marketplace
-    assert "`/api/jobs/triggers/${encodeURIComponent(triggerId)}`" not in app_marketplace
+    assert (
+        "`/api/jobs/triggers/${encodeURIComponent(triggerId)}`" not in app_marketplace
+    )
     assert "loadTriggers" not in app_marketplace
     assert "toggleTrigger" not in app_marketplace
     assert "setActivityActive('navSettingsBtn')" in app_settings

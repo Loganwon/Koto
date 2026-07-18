@@ -159,7 +159,9 @@ def export_xlsx(workbook_data: Any, images_data: Any | None = None) -> bytes:
                 row_index = int(row_key) + 1
                 height_px = row_info.get("h")
                 if height_px is not None:
-                    ws.row_dimensions[row_index].height = max(0.1, float(height_px) * 0.75)
+                    ws.row_dimensions[row_index].height = max(
+                        0.1, float(height_px) * 0.75
+                    )
                 if row_info.get("hd") is True:
                     ws.row_dimensions[row_index].hidden = True
 

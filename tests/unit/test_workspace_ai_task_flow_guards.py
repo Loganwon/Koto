@@ -30,9 +30,7 @@ def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     assistant_js = _read("web/src/workspace/ai-review.ts")
     dispatcher_js = _read("web/src/workspace/task-dispatcher.ts")
     task_js = _read("web/src/workspace/task-runner.ts")
-    task_stream_transport_js = _read(
-        "web/src/workspace/task-stream-transport.ts"
-    )
+    task_stream_transport_js = _read("web/src/workspace/task-stream-transport.ts")
     final_report_js = _read("web/src/workspace/task-final-report.ts")
     quick_actions_js = _read("web/src/workspace/quick-actions.ts")
 
@@ -43,7 +41,10 @@ def test_workspace_file_assistant_uses_single_task_flow_stream_by_default():
     assert "publishWorkspaceApi({ createTaskDispatcher })" not in dispatcher_js
     assert "taskDispatcher.dispatchMessage({" in assistant_js
     assert "taskDispatcher.dispatchQuickAction(action, {" in assistant_js
-    assert "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };" in task_js
+    assert (
+        "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };"
+        in task_js
+    )
     assert "streamTaskFlow: (options: any) => workspaceApi.streamTaskFlow" not in _read(
         "web/src/workspace/runtime-init.ts"
     )
@@ -122,7 +123,9 @@ def test_workspace_attachment_context_excludes_removed_notebook_and_audio_featur
     assert not (_repo_root() / "web/src/workspace/notebook.ts").exists()
     assert not (_repo_root() / "web/templates/notebook_lm.html").exists()
     assert not (_repo_root() / "web/audio_overview.py").exists()
-    _assert_excludes_all(index_template, ("wa-notebook", "wa-audio", "学习包", "有声概览"))
+    _assert_excludes_all(
+        index_template, ("wa-notebook", "wa-audio", "学习包", "有声概览")
+    )
     _assert_excludes_all(ai_context_ts, ("notebook", "audio", "学习包", "有声概览"))
     assert "import '../workspace/notebook';" not in workspace_bundle_entry
     assert "clearFiles.addEventListener('click'" in selection_toolbar
@@ -130,7 +133,9 @@ def test_workspace_attachment_context_excludes_removed_notebook_and_audio_featur
     assert "function _prunePendingTaskPayloadFiles" in ai_context_ts
     assert "_prunePendingTaskPayloadFiles([removed]);" in ai_context_ts
     assert "_prunePendingTaskPayloadFiles(state._aiFileContext);" in ai_context_ts
-    _assert_excludes_all(workspace_bundle, ("学习包", "有声概览", "audio_overview", "notebook_guide"))
+    _assert_excludes_all(
+        workspace_bundle, ("学习包", "有声概览", "audio_overview", "notebook_guide")
+    )
 
 
 def test_unified_workspace_restores_pdf_annotation_toolbar_and_ai_bridge():
@@ -193,16 +198,10 @@ def test_workspace_task_workbench_is_split_and_mounted():
     task_js = _read("web/src/workspace/task-runner.ts")
     task_run_events_js = _read("web/src/workspace/task-run-event-handlers.ts")
     task_run_context_js = _read("web/src/workspace/task-run-context.ts")
-    task_stream_transport_js = _read(
-        "web/src/workspace/task-stream-transport.ts"
-    )
+    task_stream_transport_js = _read("web/src/workspace/task-stream-transport.ts")
     task_presentation_js = _read("web/src/workspace/task-plan-presentation.ts")
-    task_plan_events_js = _read(
-        "web/src/workspace/task-plan-event-handlers.ts"
-    )
-    task_stage_presentation_js = _read(
-        "web/src/workspace/task-stage-presentation.ts"
-    )
+    task_plan_events_js = _read("web/src/workspace/task-plan-event-handlers.ts")
+    task_stage_presentation_js = _read("web/src/workspace/task-stage-presentation.ts")
     task_execution_events_js = _read(
         "web/src/workspace/task-execution-event-handlers.ts"
     )
@@ -229,23 +228,23 @@ def test_workspace_task_workbench_is_split_and_mounted():
     assert "function focusTaskCard(" not in workbench_js
     assert "fetchJson('/api/tasks?limit=120&order_by=created_at')" not in workbench_js
     assert "fetchJson(`/api/tasks/${encodeURIComponent(id)}`)" in workbench_js
-    assert "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };" in task_js
+    assert (
+        "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };"
+        in task_js
+    )
     assert "getWorkspaceApi().resumePersistedFileTask" not in _read(
         "web/src/workspace/file-utils.ts"
     )
     assert "renderArtifactResult" in _read("web/src/workspace/results.ts")
     assert "data-task-open-workbench" not in task_js
     assert "scheduleTaskLiveProgressCollapse" in task_run_events_js
-    assert (
-        "wa-msg ai wa-task-run is-compact"
-        in task_stage_presentation_js
-    )
+    assert "wa-msg ai wa-task-run is-compact" in task_stage_presentation_js
     assert (
         "function syncTaskStageOverview(card: TCard): void"
         in task_stage_presentation_js
     )
-    assert "data-role=\"stage-overview\"" in task_stage_presentation_js
-    assert "data-role=\"stage-current-detail\"" in task_stage_presentation_js
+    assert 'data-role="stage-overview"' in task_stage_presentation_js
+    assert 'data-role="stage-current-detail"' in task_stage_presentation_js
     assert "...EXECUTION_EVENT_HANDLERS" in task_js
     assert "'model.call.started': handleModelCall" in task_execution_events_js
     assert "'model.call.finished': handleModelCall" in task_execution_events_js
@@ -505,12 +504,8 @@ def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation()
     runtime_init_ts = _read("web/src/workspace/runtime-init.ts")
     sessions_bp = _read("web/blueprints/sessions.py")
     workspace_bundle_entry = _read("web/src/bundles/workspace.ts")
-    conversation_list_loader = _read(
-        "web/src/workspace/conversation-list-loader.ts"
-    )
-    conversation_list_bundle_entry = _read(
-        "web/src/bundles/conversation-list.ts"
-    )
+    conversation_list_loader = _read("web/src/workspace/conversation-list-loader.ts")
+    conversation_list_bundle_entry = _read("web/src/bundles/conversation-list.ts")
     build_script = _read("web/scripts/build-bundles.mjs")
     asset_scripts = _read("web/templates/_workspace_asset_scripts.html")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
@@ -579,8 +574,7 @@ def test_workspace_ai_panel_defaults_to_chat_and_keeps_session_list_navigation()
     assert "workspaceAiComposerMode() === 'sessionList'" in conversation_list_loader
     assert "data-koto-conversation-list" in conversation_list_loader
     assert (
-        "'conversation-list-bundle': 'src/bundles/conversation-list.ts'"
-        in build_script
+        "'conversation-list-bundle': 'src/bundles/conversation-list.ts'" in build_script
     )
     assert "'conversation-list-bundle': 50 * 1024" in build_script
     assert "conversation-list-bundle.js" in asset_scripts
@@ -1006,18 +1000,14 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     routing_ts = _read("web/src/workspace/task-routing-decision.ts")
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
     task_run_events_ts = _read("web/src/workspace/task-run-event-handlers.ts")
-    task_result_presentation_ts = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
+    task_result_presentation_ts = _read("web/src/workspace/task-result-presentation.ts")
     task_terminal_state_ts = _read("web/src/workspace/task-terminal-state.ts")
     task_interaction_summary_ts = _read("web/src/workspace/task-interaction-summary.ts")
     runtime_init_ts = _read("web/src/workspace/runtime-init.ts")
     editor_ai = _read("web/blueprints/editor_ai.py")
     sessions_bp = _read("web/blueprints/sessions.py")
     workspace_css = _read("web/static/css/workspace.css")
-    task_results_css = _read(
-        "web/static/css/workspace-task-results.css"
-    )
+    task_results_css = _read("web/static/css/workspace-task-results.css")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     assert (
@@ -1039,10 +1029,7 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
 
     assert "resolveWorkspaceRouteIntent(context)" in dispatcher_ts
     assert "return runWorkspaceModelRoutedTask(context);" in dispatcher_ts
-    assert (
-        "shouldForceFileTaskForWorkspaceContext({"
-        in dispatcher_ts
-    )
+    assert "shouldForceFileTaskForWorkspaceContext({" in dispatcher_ts
     assert "frontend_file_context_guard" in routing_ts
     assert re.search(
         r"streamWorkspaceChatRoute\(context,\s*routeDecision!?\)", dispatcher_ts
@@ -1112,14 +1099,9 @@ def test_workspace_unified_assistant_uses_model_route_before_whitebox():
     assert "export function renderTaskContextDetails(" in task_interaction_summary_ts
     assert "export function syncTaskInteractionSummary<" in task_interaction_summary_ts
     assert "function syncTaskInteractionSummary(" not in task_runner_ts
-    assert (
-        "const title = String(semanticTitle || '').trim()"
-        in task_terminal_state_ts
-    )
+    assert "const title = String(semanticTitle || '').trim()" in task_terminal_state_ts
     assert "publishWorkspaceApi({" in task_runner_ts
-    published = task_runner_ts.split("publishWorkspaceApi({", 1)[1].split(
-        "});", 1
-    )[0]
+    published = task_runner_ts.split("publishWorkspaceApi({", 1)[1].split("});", 1)[0]
     assert "syncTaskInteractionSummary" not in published
     assert "const artifactsHtml = taskArtifactsSummaryHtml(" in task_run_events_ts
     assert "artifactsHtml," in task_run_events_ts
@@ -1214,12 +1196,8 @@ def test_workspace_route_intent_collapses_file_subtypes_to_whitebox_contract():
 
 def test_workspace_file_task_steps_are_user_visible_whitebox_stages():
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
-    task_plan_events_ts = _read(
-        "web/src/workspace/task-plan-event-handlers.ts"
-    )
-    task_stage_presentation_ts = _read(
-        "web/src/workspace/task-stage-presentation.ts"
-    )
+    task_plan_events_ts = _read("web/src/workspace/task-plan-event-handlers.ts")
+    task_stage_presentation_ts = _read("web/src/workspace/task-stage-presentation.ts")
     task_execution_events_ts = _read(
         "web/src/workspace/task-execution-event-handlers.ts"
     )
@@ -1233,7 +1211,10 @@ def test_workspace_file_task_steps_are_user_visible_whitebox_stages():
     assert "from './task-report-layout';" in task_stage_presentation_ts
     assert "taskReportStageFromStep," in task_stage_presentation_ts
     assert "taskReportStageStatusText," in task_stage_presentation_ts
-    assert "import { taskToolLabel } from './task-step-labels';" in task_execution_events_ts
+    assert (
+        "import { taskToolLabel } from './task-step-labels';"
+        in task_execution_events_ts
+    )
     assert "const PRIMARY_STEP_TITLES" not in task_runner_ts
     assert (
         "export function taskReportStageTitle(stageId: string, fallback = '步骤'): string"
@@ -1243,7 +1224,9 @@ def test_workspace_file_task_steps_are_user_visible_whitebox_stages():
         "export function taskReportStageDoneText(stageId: string, fallback = ''): string"
         in task_report_layout_ts
     )
-    assert "taskReportStageFromStep({ id: stepId, title })" in task_stage_presentation_ts
+    assert (
+        "taskReportStageFromStep({ id: stepId, title })" in task_stage_presentation_ts
+    )
     assert "taskReportStageStatusText(" in task_stage_presentation_ts
     assert "const EXTRA_STEP_TITLES: Record<string, string> = {" not in task_runner_ts
     assert "const EXTRA_STEP_TITLES: Record<string, string> = {" in task_step_labels_ts
@@ -1275,9 +1258,7 @@ def test_workspace_blocked_plan_checked_is_not_rendered_as_confirmation_wait():
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
     task_run_events_ts = _read("web/src/workspace/task-run-event-handlers.ts")
     task_run_context_ts = _read("web/src/workspace/task-run-context.ts")
-    task_result_presentation_ts = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
+    task_result_presentation_ts = _read("web/src/workspace/task-result-presentation.ts")
     status_ts = _read("web/src/workspace/file-task-status.ts")
     stage_state_ts = _read("web/src/workspace/task-stage-state.ts")
 
@@ -1315,19 +1296,10 @@ def test_workspace_blocked_plan_checked_is_not_rendered_as_confirmation_wait():
         "return (terminalStatus === 'plan_checked' && !completedTask) || isFileTaskFailureStatus(terminalStatus);"
         in status_ts
     )
-    assert (
-        "if (isFileTaskWaitingStatus(terminalStatus)) return 'pending';"
-        in status_ts
-    )
+    assert "if (isFileTaskWaitingStatus(terminalStatus)) return 'pending';" in status_ts
     assert "needs_attention" not in status_ts
-    assert (
-        "if (isFileTaskWaitingStatus(terminalStatus)) return 'pending';"
-        in status_ts
-    )
-    assert (
-        "const status = fileTaskTerminalUiStatus("
-        in task_run_events_ts
-    )
+    assert "if (isFileTaskWaitingStatus(terminalStatus)) return 'pending';" in status_ts
+    assert "const status = fileTaskTerminalUiStatus(" in task_run_events_ts
     assert (
         ": ['completed', 'done', 'verified'].includes(terminalStatus);"
         in task_run_events_ts
@@ -1345,13 +1317,19 @@ def test_workspace_blocked_plan_checked_is_not_rendered_as_confirmation_wait():
         in task_result_presentation_ts
     )
     assert "improveText = '重新发起'" in task_result_presentation_ts
-    assert "const blocked = payload.blocked === true || toolName === 'ask_user';" in stage_state_ts
+    assert (
+        "const blocked = payload.blocked === true || toolName === 'ask_user';"
+        in stage_state_ts
+    )
     assert "title: imageInsertRecovery" in stage_state_ts
     assert "status: blocked ? 'waiting'" in stage_state_ts
     assert "isFileTaskAttentionStatus" not in task_runner_ts
     assert "return fileTaskOutcomeCopy(" in task_result_presentation_ts
     assert "const copy = taskResultOutcomeCopy(result);" in task_run_events_ts
-    assert "result.status === 'pending') return '任务等待确认。';" not in task_run_events_ts
+    assert (
+        "result.status === 'pending') return '任务等待确认。';"
+        not in task_run_events_ts
+    )
     assert "任务仍在处理中或等待同步" in status_ts
     assert "当前进度已保留，可查看过程并继续处理。" in status_ts
     assert "needs_attention" not in status_ts
@@ -1380,9 +1358,7 @@ def test_workspace_system_action_has_whitelisted_app_fast_path():
 
 def test_workspace_completed_task_actions_are_not_labeled_as_confirmation_flow():
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
-    task_result_presentation_ts = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
+    task_result_presentation_ts = _read("web/src/workspace/task-result-presentation.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
     for source in (task_result_presentation_ts, workspace_bundle):
@@ -1390,8 +1366,14 @@ def test_workspace_completed_task_actions_are_not_labeled_as_confirmation_flow()
         assert 'data-task-followup-action="question">追问</button>' not in source
         assert "询问结果" in source
         assert "继续处理" in source
-    assert "const questionText = completed ? '询问结果' : '追问原因';" in task_result_presentation_ts
-    assert "let improveText = completed ? '继续处理' : '继续修复';" in task_result_presentation_ts
+    assert (
+        "const questionText = completed ? '询问结果' : '追问原因';"
+        in task_result_presentation_ts
+    )
+    assert (
+        "let improveText = completed ? '继续处理' : '继续修复';"
+        in task_result_presentation_ts
+    )
     assert (
         "const actionHint = completed ? '任务已完成，后续操作会作为新请求发送。' : '可继续补充要求或重新处理。';"
         in task_result_presentation_ts
@@ -1624,15 +1606,16 @@ def test_workspace_docx_selection_mouse_state_uses_safe_lookup():
 
     assert "isDocxMouseDown(state) && document.querySelector" in panel_layout_ts
     assert "export function isDocxMouseDown" in selection_runtime_ts
-    assert "state?._docxMouseIsDown || (window as any)._docxMouseIsDown" in selection_runtime_ts
+    assert (
+        "state?._docxMouseIsDown || (window as any)._docxMouseIsDown"
+        in selection_runtime_ts
+    )
     assert "if (_docxMouseIsDown &&" not in panel_layout_ts
 
 
 def test_workspace_task_renderer_compacts_tool_result_details():
     task_runner_ts = _read("web/src/workspace/task-runner.ts")
-    task_card_interactions_ts = _read(
-        "web/src/workspace/task-card-interactions.ts"
-    )
+    task_card_interactions_ts = _read("web/src/workspace/task-card-interactions.ts")
     task_run_events_ts = _read("web/src/workspace/task-run-event-handlers.ts")
     task_execution_events_ts = _read(
         "web/src/workspace/task-execution-event-handlers.ts"
@@ -1962,9 +1945,7 @@ def test_workspace_task_payload_extracts_explicit_text_write_target():
 def test_workspace_task_renderer_uses_supervisor_status_for_stage_only():
     renderer_js = _read("web/src/workspace/task-runner.ts")
     presentation_js = _read("web/src/workspace/task-plan-presentation.ts")
-    plan_events_js = _read(
-        "web/src/workspace/task-plan-event-handlers.ts"
-    )
+    plan_events_js = _read("web/src/workspace/task-plan-event-handlers.ts")
     stage_state_js = _read("web/src/workspace/task-stage-state.ts")
     workspace_template = _read("web/templates/index.html")
     index_template = _read("web/templates/index.html")
@@ -1974,9 +1955,7 @@ def test_workspace_task_renderer_uses_supervisor_status_for_stage_only():
         "export function taskRecognitionText(data: Record<string, any>): string"
         in presentation_js
     )
-    assert (
-        "export function planCheckSummaryText(" in presentation_js
-    )
+    assert "export function planCheckSummaryText(" in presentation_js
     assert "'supervisor.status': handleSupervisorStatus" in plan_events_js
     supervisor_start = plan_events_js.index("const handleSupervisorStatus:")
     supervisor_end = plan_events_js.index(
@@ -2408,10 +2387,7 @@ def test_workspace_task_run_finished_closes_run_stage_step():
     task_run_events_ts = _read("web/src/workspace/task-run-event-handlers.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
 
-    assert (
-        'const runStep = card.querySelector('
-        in task_run_events_ts
-    )
+    assert "const runStep = card.querySelector(" in task_run_events_ts
     assert '.wa-task-step[data-step-id="run"]' in task_run_events_ts
     assert "runtime.markStepFailed(runStep)" in task_run_events_ts
     assert "runtime.markStepDone(runStep)" in task_run_events_ts
@@ -2421,9 +2397,7 @@ def test_workspace_task_run_finished_closes_run_stage_step():
 def test_workspace_file_task_refresh_normalizes_paths_and_blocks_stale_save():
     fs_tree = _read("web/src/workspace/fs-tree.ts")
     task_runner = _read("web/src/workspace/task-runner.ts")
-    execution_events = _read(
-        "web/src/workspace/task-execution-event-handlers.ts"
-    )
+    execution_events = _read("web/src/workspace/task-execution-event-handlers.ts")
     file_change_state = _read("web/src/workspace/task-file-change-state.ts")
     run_events = _read("web/src/workspace/task-run-event-handlers.ts")
     file_open = _read("web/src/workspace/file-open.ts")
@@ -2583,9 +2557,7 @@ def test_workspace_bundle_keeps_only_required_interaction_entrypoints():
     index_template = _read("web/templates/index.html")
 
     runtime_bundles = workspace_bundle + pdf_bundle
-    for expected in (
-        "handleInputKeydown,",
-    ):
+    for expected in ("handleInputKeydown,",):
         assert expected in ai_review
     assert "publishWorkspaceApi({" in ai_review
     for expected in ("focusReviewThread,", "relayoutDocxReviewRail,"):
@@ -2782,9 +2754,7 @@ def test_workspace_assistant_unsafe_requests_include_csrf_token():
 
 def test_workspace_task_stream_requests_include_csrf_token():
     task_js = _read("web/src/workspace/task-runner.ts")
-    task_stream_transport_js = _read(
-        "web/src/workspace/task-stream-transport.ts"
-    )
+    task_stream_transport_js = _read("web/src/workspace/task-stream-transport.ts")
     infrastructure_js = _read("web/src/workspace/infrastructure.ts")
 
     assert (
@@ -2891,9 +2861,7 @@ def test_workspace_task_card_renderer_guards_non_dom_cards():
     task_js = _read("web/src/workspace/task-runner.ts")
     task_run_events_js = _read("web/src/workspace/task-run-event-handlers.ts")
     task_ui_state_js = _read("web/src/workspace/task-ui-state.ts")
-    task_plan_events_js = _read(
-        "web/src/workspace/task-plan-event-handlers.ts"
-    )
+    task_plan_events_js = _read("web/src/workspace/task-plan-event-handlers.ts")
 
     assert "export function isTaskUiStateCard(" in task_ui_state_js
     assert "isTaskUiStateCard as isTaskCardElement" in task_js
@@ -2913,12 +2881,8 @@ def test_workspace_task_card_renderer_guards_non_dom_cards():
 
 def test_workspace_task_progress_has_live_plan_linked_feedback():
     task_js = _read("web/src/workspace/task-runner.ts")
-    task_card_interactions_js = _read(
-        "web/src/workspace/task-card-interactions.ts"
-    )
-    stage_presentation_js = _read(
-        "web/src/workspace/task-stage-presentation.ts"
-    )
+    task_card_interactions_js = _read("web/src/workspace/task-card-interactions.ts")
+    stage_presentation_js = _read("web/src/workspace/task-stage-presentation.ts")
     stage_state_js = _read("web/src/workspace/task-stage-state.ts")
     workspace_css = _read("web/static/css/workspace.css")
     workspace_template = _read("web/templates/index.html")
@@ -2927,27 +2891,18 @@ def test_workspace_task_progress_has_live_plan_linked_feedback():
     assert 'id="wa-task-live-progress"' in workspace_template
     assert 'id="wa-task-live-progress"' in index_template
     assert "function syncTaskLiveProgress(card: TCard): void" in stage_presentation_js
-    assert (
-        "function syncTaskStageOverview(card: TCard): void"
-        in stage_presentation_js
-    )
-    assert "data-role=\"stage-progress-count\"" in stage_presentation_js
-    assert (
-        "function applyCanonicalTaskStageState("
-        in stage_presentation_js
-    )
+    assert "function syncTaskStageOverview(card: TCard): void" in stage_presentation_js
+    assert 'data-role="stage-progress-count"' in stage_presentation_js
+    assert "function applyCanonicalTaskStageState(" in stage_presentation_js
     assert "taskStageProjectionFromEvent(event)" in stage_presentation_js
     assert "export function taskStageProjectionFromEvent(" in stage_state_js
     assert "event.ui_state" in stage_state_js
     assert "host.dataset.basis = 'stage';" in stage_presentation_js
-    assert (
-        "const valueText = countEl"
-        in stage_presentation_js
-    )
+    assert "const valueText = countEl" in stage_presentation_js
     assert "syncLiveProgress: syncTaskLiveProgress," in task_js
     assert "actions.syncLiveProgress(card);" in task_card_interactions_js
     assert ".wa-task-live-progress" in workspace_css
-    assert '.wa-task-progress' not in workspace_css
+    assert ".wa-task-progress" not in workspace_css
     assert 'data-basis="planned"' not in workspace_css
     assert 'data-basis="estimated"' not in workspace_css
 
@@ -2979,9 +2934,7 @@ def test_workspace_stepwise_resume_payload_prefers_workflow_checkpoint():
     task_js = _read("web/src/workspace/task-runner.ts")
     task_run_context = _read("web/src/workspace/task-run-context.ts")
 
-    assert (
-        "compact.options = { workflow_checkpoint: workflowCheckpoint }" in payload_js
-    )
+    assert "compact.options = { workflow_checkpoint: workflowCheckpoint }" in payload_js
     assert "workflowCheckpointFallback" not in dispatcher_js + payload_js
     assert (
         "compactPayload.options.workflow_checkpoint || compactPayload.options.batch_control"

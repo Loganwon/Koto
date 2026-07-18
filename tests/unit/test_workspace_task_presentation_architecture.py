@@ -42,22 +42,12 @@ def test_history_records_show_structured_task_chain_verification() -> None:
 
     task_runner = _read("web/src/workspace/task-runner.ts")
     task_run_events = _read("web/src/workspace/task-run-event-handlers.ts")
-    task_plan_presentation = _read(
-        "web/src/workspace/task-plan-presentation.ts"
-    )
-    task_plan_events = _read(
-        "web/src/workspace/task-plan-event-handlers.ts"
-    )
+    task_plan_presentation = _read("web/src/workspace/task-plan-presentation.ts")
+    task_plan_events = _read("web/src/workspace/task-plan-event-handlers.ts")
     task_final_report = _read("web/src/workspace/task-final-report.ts")
-    task_result_presentation = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
-    task_terminal_state = _read(
-        "web/src/workspace/task-terminal-state.ts"
-    )
-    task_stage_presentation = _read(
-        "web/src/workspace/task-stage-presentation.ts"
-    )
+    task_result_presentation = _read("web/src/workspace/task-result-presentation.ts")
+    task_terminal_state = _read("web/src/workspace/task-terminal-state.ts")
+    task_stage_presentation = _read("web/src/workspace/task-stage-presentation.ts")
     task_step_dom = _read("web/src/workspace/task-step-dom.ts")
     task_performance = _read("web/src/workspace/task-performance.ts")
     file_task_status = _read("web/src/workspace/file-task-status.ts")
@@ -92,8 +82,7 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "(window as any)._waRenderMarkdown" not in task_final_report
     assert "wa-task-final-report" in task_result_presentation
     assert (
-        "export function shouldShowSupervisorAuditInResult("
-        in task_plan_presentation
+        "export function shouldShowSupervisorAuditInResult(" in task_plan_presentation
     )
     assert "function shouldShowSupervisorAuditInResult(" not in task_runner
     assert "shouldShowSupervisorAuditInResult(data)" in task_run_events
@@ -108,7 +97,9 @@ def test_history_records_show_structured_task_chain_verification() -> None:
         "if (normalized === 'context_summary_fallback') return '需复核';"
         in file_task_status
     )
-    assert "模型未返回完整答案；当前仅显示基于已读上下文的临时摘要。" in file_task_status
+    assert (
+        "模型未返回完整答案；当前仅显示基于已读上下文的临时摘要。" in file_task_status
+    )
     assert (
         "report.scrollIntoView({ behavior: 'smooth', block: 'nearest' });"
         in task_run_events
@@ -119,8 +110,7 @@ def test_history_records_show_structured_task_chain_verification() -> None:
     assert "runtime.ensureTaskReportAfterProcess(card);" not in task_stage_presentation
     assert "createTaskPlanEventHandlers" in task_runner
     assert (
-        "'supervisor.step_verified': handleSupervisorStepVerified"
-        in task_plan_events
+        "'supervisor.step_verified': handleSupervisorStepVerified" in task_plan_events
     )
     assert "terminalAnswerText(" in dispatcher
     assert "function terminalTaskAnswer(" not in dispatcher
@@ -194,7 +184,9 @@ def test_task_card_uses_one_canonical_five_stage_projection() -> None:
     assert 'aria-label="任务阶段" aria-live="polite"' not in stage_presentation
 
 
-def test_task_stream_feedback_uses_stable_wait_tiers_and_real_reconnect_states() -> None:
+def test_task_stream_feedback_uses_stable_wait_tiers_and_real_reconnect_states() -> (
+    None
+):
     lifecycle = _read("web/src/workspace/task-stream-lifecycle.ts")
     transport = _read("web/src/workspace/task-stream-transport.ts")
     feedback = _read("web/src/workspace/task-stream-feedback.ts")
@@ -212,9 +204,7 @@ def test_task_card_uses_one_state_driven_primary_action_area() -> None:
     runner = _read("web/src/workspace/task-runner.ts")
     lifecycle = _read("web/src/workspace/task-stream-lifecycle.ts")
     stage_presentation = _read("web/src/workspace/task-stage-presentation.ts")
-    result_presentation = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
+    result_presentation = _read("web/src/workspace/task-result-presentation.ts")
     css = _read("web/static/css/workspace-task-flow.css")
 
     assert 'data-role="task-primary-action"' in stage_presentation
@@ -240,9 +230,7 @@ def test_task_card_uses_one_state_driven_primary_action_area() -> None:
 
 
 def test_visible_task_card_hides_duplicate_global_progress_indicator() -> None:
-    stage_presentation = _read(
-        "web/src/workspace/task-stage-presentation.ts"
-    )
+    stage_presentation = _read("web/src/workspace/task-stage-presentation.ts")
 
     assert (
         "function taskCardIsVisibleInViewport(card: TCard): boolean"
@@ -371,9 +359,7 @@ def test_task_runner_uses_shared_step_label_helpers() -> None:
     labels = _read("web/src/workspace/task-step-labels.ts")
     step_dom = _read("web/src/workspace/task-step-dom.ts")
     tool_output = _read("web/src/workspace/task-tool-output.ts")
-    execution_events = _read(
-        "web/src/workspace/task-execution-event-handlers.ts"
-    )
+    execution_events = _read("web/src/workspace/task-execution-event-handlers.ts")
     presentation = _read("web/src/workspace/task-plan-presentation.ts")
 
     for local_table in [
@@ -409,9 +395,7 @@ def test_task_runner_uses_shared_final_report_helpers() -> None:
     runner = _read("web/src/workspace/task-runner.ts")
     run_events = _read("web/src/workspace/task-run-event-handlers.ts")
     final_report = _read("web/src/workspace/task-final-report.ts")
-    result_presentation = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
+    result_presentation = _read("web/src/workspace/task-result-presentation.ts")
 
     for local_helper in [
         "function previewText(",
@@ -469,9 +453,7 @@ def test_task_detail_policy_hides_internal_events_and_keeps_user_evidence() -> N
     runner = _read("web/src/workspace/task-runner.ts")
     step_dom = _read("web/src/workspace/task-step-dom.ts")
     plan_events = _read("web/src/workspace/task-plan-event-handlers.ts")
-    verification_events = _read(
-        "web/src/workspace/task-verification-event-handlers.ts"
-    )
+    verification_events = _read("web/src/workspace/task-verification-event-handlers.ts")
     policy = _read("web/src/workspace/task-detail-policy.ts")
     terminal_state = _read("web/src/workspace/task-terminal-state.ts")
     css = _read("web/static/css/workspace-task-flow.css")
@@ -543,9 +525,7 @@ def test_task_runner_uses_shared_interaction_summary_helpers() -> None:
 
 def test_task_runner_has_no_dead_presentation_helpers() -> None:
     runner = _read("web/src/workspace/task-runner.ts")
-    result_presentation = _read(
-        "web/src/workspace/task-result-presentation.ts"
-    )
+    result_presentation = _read("web/src/workspace/task-result-presentation.ts")
 
     for removed_helper in [
         "function eventPayload(",
@@ -576,9 +556,7 @@ def test_task_runner_has_no_dead_presentation_helpers() -> None:
 def test_task_runner_plan_event_split_cannot_regress() -> None:
     runner = _read("web/src/workspace/task-runner.ts")
     plan_events = _read("web/src/workspace/task-plan-event-handlers.ts")
-    stage_presentation = _read(
-        "web/src/workspace/task-stage-presentation.ts"
-    )
+    stage_presentation = _read("web/src/workspace/task-stage-presentation.ts")
 
     assert len(runner.splitlines()) <= 1850
     assert "createTaskPlanEventHandlers<TaskCardElement>" in runner
@@ -821,18 +799,9 @@ def test_task_dispatcher_file_context_and_target_inference_have_pure_owners() ->
     assert "export interface TaskFileInfo" in file_contract
     assert "export function buildWorkspaceRouteFiles(" in workspace_context
     assert "export function buildCurrentOpenTaskFile(" in workspace_context
-    assert (
-        "export function buildWorkspaceChatFileContextValue("
-        in workspace_context
-    )
-    assert (
-        "export function inferAttachedWriteTargetFile("
-        in target_inference
-    )
-    assert (
-        "export function explicitWriteTargetPathFromText("
-        in target_inference
-    )
+    assert "export function buildWorkspaceChatFileContextValue(" in workspace_context
+    assert "export function inferAttachedWriteTargetFile(" in target_inference
+    assert "export function explicitWriteTargetPathFromText(" in target_inference
 
     for source in (file_contract, workspace_context, target_inference):
         assert "document." not in source
@@ -960,7 +929,10 @@ def test_task_runner_terminal_state_has_one_owner() -> None:
     assert "prepareTaskCardForActiveRun," in run_events
     assert "export function prepareTaskCardForActiveRun(" in terminal_state
 
-    assert "card.classList.remove('streaming', 'pending', 'done', 'failed', 'cancelled');" in terminal_state
+    assert (
+        "card.classList.remove('streaming', 'pending', 'done', 'failed', 'cancelled');"
+        in terminal_state
+    )
     assert run_events.count("prepareTaskCardForActiveRun(card);") >= 1
     assert "prepareActive: prepareTaskCardForActiveRun" in runner
     assert "runtime.prepareActive(card);" in transport
@@ -989,7 +961,10 @@ def test_task_runner_step_dom_has_one_owner() -> None:
     ):
         assert f"export function {helper}(" in step_dom
 
-    assert "removeStatusRow: (card, role) => removeTaskStepRow(card, 'run', role)" in runner
+    assert (
+        "removeStatusRow: (card, role) => removeTaskStepRow(card, 'run', role)"
+        in runner
+    )
     assert "function ensureStep(" not in runner
     assert "function markStepRunning(" not in runner
     assert "function markStepDone(" not in runner

@@ -357,9 +357,7 @@ class ConversationMemoryExtractor:
             for topic, value in expertise.items():
                 topic_name = str(topic).strip()
                 if topic_name and isinstance(value, (int, float)):
-                    valid_expertise[topic_name] = max(
-                        0.0, min(1.0, float(value))
-                    )
+                    valid_expertise[topic_name] = max(0.0, min(1.0, float(value)))
             if valid_expertise:
                 normalized["expertise"] = valid_expertise
 

@@ -189,8 +189,7 @@ def test_core_does_not_depend_on_web_memory_runtime():
                 and any(alias.name == "web.memory_runtime" for alias in node.names)
             )
             or (
-                isinstance(node, ast.ImportFrom)
-                and node.module == "web.memory_runtime"
+                isinstance(node, ast.ImportFrom) and node.module == "web.memory_runtime"
             )
             for node in ast.walk(tree)
         )

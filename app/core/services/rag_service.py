@@ -87,6 +87,7 @@ class _OllamaLocalEmbeddings:
     def embed_query(self, text: str) -> List[float]:
         return self._request([str(text)])[0]
 
+
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
 _DEFAULT_INDEX_DIR = str(
     Path(
@@ -216,9 +217,7 @@ def _get_embeddings(prefer_local: bool = False):
             logger.info("[RAGService] 嵌入模型: HuggingFace all-MiniLM-L6-v2 (兜底)")
             return emb
         except Exception as exc:
-            raise EmbeddingBackendUnavailable(
-                f"本地嵌入模型不可用: {exc}"
-            ) from exc
+            raise EmbeddingBackendUnavailable(f"本地嵌入模型不可用: {exc}") from exc
 
     raise EmbeddingBackendUnavailable(
         "未安装 sentence-transformers，且 Ollama embeddings 不可用"
@@ -453,7 +452,9 @@ class RAGService:
                 self._vectorstore.add_documents(docs)
         except EmbeddingBackendUnavailable as exc:
             if not self._embedding_unavailable:
-                logger.info("[RAGService] 向量后端不可用，已降级为本地词法检索: %s", exc)
+                logger.info(
+                    "[RAGService] 向量后端不可用，已降级为本地词法检索: %s", exc
+                )
             self._embedding_unavailable = True
         except Exception as exc:
             logger.warning("[RAGService] 向量索引不可用，已保留词法索引: %s", exc)
@@ -642,7 +643,9 @@ class RAGService:
         """
         if self._vectorstore is None:
             if self._lexical_docs:
-                return self._lexical_retrieve(query, k=k, score_threshold=score_threshold)
+                return self._lexical_retrieve(
+                    query, k=k, score_threshold=score_threshold
+                )
             logger.info("[RAGService] 索引为空，返回空结果")
             return []
 
@@ -808,7 +811,9 @@ class RAGService:
             try:
                 from langchain_core.documents import Document
 
-                lexical_payload = json.loads(self._lexical_path.read_text(encoding="utf-8"))
+                lexical_payload = json.loads(
+                    self._lexical_path.read_text(encoding="utf-8")
+                )
                 self._lexical_docs = [
                     Document(
                         page_content=str(item.get("page_content", "")),
@@ -901,7 +906,8 @@ class RAGService:
                 type(self._embeddings).__name__ if self._embeddings else "not_loaded"
             ),
             "retrieval_backend": (
-                "hybrid" if self._vectorstore is not None else "lexical"
-                if self._lexical_docs else "none"
+                "hybrid"
+                if self._vectorstore is not None
+                else "lexical" if self._lexical_docs else "none"
             ),
         }

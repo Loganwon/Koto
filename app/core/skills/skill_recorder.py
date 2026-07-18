@@ -326,7 +326,9 @@ class SkillRecorder:
                 allow_local_fallback=False,
             )
         except Exception as exc:
-            logger.debug("[skill_recorder] 云端 provider 不可用，跳过 LLM 分析: %s", exc)
+            logger.debug(
+                "[skill_recorder] 云端 provider 不可用，跳过 LLM 分析: %s", exc
+            )
             return None
 
         result_holder: Dict[str, Any] = {"data": None, "error": None}

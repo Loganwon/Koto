@@ -42,7 +42,9 @@ def test_classification_signals_infers_new_docx_output_without_a_target_file():
                 name="financial_model_clean.xlsx",
                 type="xlsx",
             ),
-            FileTaskFile(path="supporting_data.xlsx", name="supporting_data.xlsx", type="xlsx"),
+            FileTaskFile(
+                path="supporting_data.xlsx", name="supporting_data.xlsx", type="xlsx"
+            ),
         ],
     )
 

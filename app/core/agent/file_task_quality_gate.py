@@ -213,15 +213,14 @@ def evaluate_task_quality_gate(
     placeholders_replaced = change_sum_int(file_changes, "placeholders_replaced")
     replacements_made = change_sum_int(file_changes, "replacements_made")
     task_text = str(request.task or "")
-    local_docx_replace_request = (
-        target_type in {"docx", "doc"}
-        and _looks_like_local_docx_replace_request(task_text)
-    )
+    local_docx_replace_request = target_type in {
+        "docx",
+        "doc",
+    } and _looks_like_local_docx_replace_request(task_text)
     local_docx_edit_request = (
         target_type in {"docx", "doc"}
         and (
-            _looks_like_local_docx_edit_request(task_text)
-            or local_docx_replace_request
+            _looks_like_local_docx_edit_request(task_text) or local_docx_replace_request
         )
         and not _looks_like_table_request(task_text)
     )
@@ -337,9 +336,7 @@ def evaluate_task_quality_gate(
                 )
             )
 
-    if _looks_like_financial_xlsx_docx_chart_report_task(
-        request, request.files or []
-    ):
+    if _looks_like_financial_xlsx_docx_chart_report_task(request, request.files or []):
         table_changes = [
             change
             for change in file_changes
@@ -439,8 +436,7 @@ def evaluate_task_quality_gate(
             inserted_text = any(
                 str(change.get("inserted_text") or "").strip()
                 for change in file_changes
-                if str(change.get("operation") or "").strip()
-                == "insert_docx_paragraph"
+                if str(change.get("operation") or "").strip() == "insert_docx_paragraph"
             )
             criteria.append(
                 quality_gate_result(
@@ -1281,7 +1277,9 @@ def _workbook_formula_count(path_text: str) -> int:
     try:
         import openpyxl
 
-        workbook = openpyxl.load_workbook(str(resolved), data_only=False, read_only=True)
+        workbook = openpyxl.load_workbook(
+            str(resolved), data_only=False, read_only=True
+        )
     except Exception:
         return 0
     try:
@@ -1292,8 +1290,7 @@ def _workbook_formula_count(path_text: str) -> int:
             for cell in row
             if getattr(cell, "data_type", "") == "f"
             or (
-                isinstance(cell.value, str)
-                and str(cell.value).lstrip().startswith("=")
+                isinstance(cell.value, str) and str(cell.value).lstrip().startswith("=")
             )
         )
     finally:
@@ -2054,9 +2051,9 @@ def _docx_table_requirement_gate(
     table_count, actual_rows, max_columns = _target_docx_quality_table_metrics(
         request, file_changes
     )
-    passed = (
-        "insert_excel_as_docx_table" in operations and reported_rows > 0
-    ) or (table_count >= 1 and actual_rows >= 2 and max_columns >= 2)
+    passed = ("insert_excel_as_docx_table" in operations and reported_rows > 0) or (
+        table_count >= 1 and actual_rows >= 2 and max_columns >= 2
+    )
     return quality_gate_result(
         criterion="docx_table_request_has_table",
         passed=passed,
@@ -2088,9 +2085,7 @@ def _target_docx_quality_table_metrics(
             continue
         table_count = len(document.tables)
         total_rows = sum(len(table.rows) for table in document.tables)
-        max_columns = max(
-            (len(table.columns) for table in document.tables), default=0
-        )
+        max_columns = max((len(table.columns) for table in document.tables), default=0)
         best = max(best, (table_count, total_rows, max_columns))
     return best
 

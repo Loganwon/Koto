@@ -143,7 +143,8 @@ class TestPptxTextDeletionExport:
             shape
             for shape in data["slides"][0]["shapes"]
             if shape.get("has_text")
-            and "DELETE" in "".join(
+            and "DELETE"
+            in "".join(
                 str(run.get("text", ""))
                 for paragraph in shape.get("paragraphs", [])
                 for run in paragraph.get("runs", [])
@@ -154,6 +155,7 @@ class TestPptxTextDeletionExport:
     def test_deleting_complete_run_and_paragraph_is_exact(self):
         from pptx import Presentation
         from pptx.enum.text import PP_ALIGN
+
         from web.blueprints.pptx_editor import _apply_edits
 
         raw, data, shape = self._edited_payload()
@@ -173,6 +175,7 @@ class TestPptxTextDeletionExport:
 
     def test_deleting_all_text_produces_an_empty_text_frame(self):
         from pptx import Presentation
+
         from web.blueprints.pptx_editor import _apply_edits
 
         raw, data, shape = self._edited_payload()
@@ -187,26 +190,33 @@ class TestPptxTextDeletionExport:
 
     def test_new_runs_are_added_instead_of_silently_dropped(self):
         from pptx import Presentation
+
         from web.blueprints.pptx_editor import _apply_edits
 
         raw, data, shape = self._edited_payload()
         template = dict(shape["paragraphs"][0]["runs"][0])
-        shape["paragraphs"] = [{
-            "align": "LEFT",
-            "runs": [
-                {**template, "text": "A"},
-                {**template, "text": "B", "bold": False},
-                {**template, "text": "C"},
-            ],
-        }]
+        shape["paragraphs"] = [
+            {
+                "align": "LEFT",
+                "runs": [
+                    {**template, "text": "A"},
+                    {**template, "text": "B", "bold": False},
+                    {**template, "text": "C"},
+                ],
+            }
+        ]
 
         exported = _apply_edits(raw, data["slides"])
         prs = Presentation(io.BytesIO(exported))
         text_shape = next(item for item in prs.slides[0].shapes if item.has_text_frame)
 
         assert [run.text for run in text_shape.text_frame.paragraphs[0].runs] == [
-            "A", "B", "C"
+            "A",
+            "B",
+            "C",
         ]
+
+
 # A. Blank PPTX seed fix
 # ═════════════════════════════════════════════════════════════════════════════
 

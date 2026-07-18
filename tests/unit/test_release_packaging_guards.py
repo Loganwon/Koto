@@ -300,6 +300,7 @@ def test_windows_release_pipelines_use_one_canonical_builder_and_require_health(
 def test_windows_release_build_tools_are_pinned_once():
     build_tools = Path("config/build-requirements.lock").read_text(encoding="utf-8")
     local_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    ci = Path(".github/workflows/ci.yml").read_text(encoding="utf-8")
     workflows = (
         Path(".github/workflows/build.yml").read_text(encoding="utf-8"),
         Path(".github/workflows/release.yml").read_text(encoding="utf-8"),
@@ -309,8 +310,15 @@ def test_windows_release_build_tools_are_pinned_once():
     assert "PyInstaller==" in build_tools
     assert "scripts\\verify_build_requirements.py" in local_release
     assert "config\\build-requirements.lock" in local_release
-    assert '$env:KOTO_USER_SETTINGS_PATH = Join-Path $buildRuntimeStateDir' in local_release
+    assert (
+        "$env:KOTO_USER_SETTINGS_PATH = Join-Path $buildRuntimeStateDir"
+        in local_release
+    )
     assert 'Join-Path $LOG_DIR "build_runtime_state"' in local_release
+    assert "pip install -r config/build-requirements.lock" in ci
+    assert (
+        "hashFiles('config/requirements.lock', 'config/build-requirements.lock')" in ci
+    )
     for workflow in workflows:
         assert "pip install -r config\\build-requirements.lock" in workflow
         assert "pip install pyinstaller" not in workflow.lower()
@@ -394,8 +402,7 @@ def test_release_packages_exclude_personal_runtime_state():
         for node in spec_tree.body
         if isinstance(node, ast.Assign)
         and any(
-            isinstance(target, ast.Name)
-            and target.id == "_CONFIG_EXCLUDED_FILES"
+            isinstance(target, ast.Name) and target.id == "_CONFIG_EXCLUDED_FILES"
             for target in node.targets
         )
     )
@@ -429,7 +436,7 @@ def test_release_e2e_runs_the_real_desktop_startup_path():
         < desktop_entry.index("import webview")
     )
     for source in (installer_e2e, portable_e2e):
-        assert 'Remove-Item Env:KOTO_SERVER_ONLY' in source
+        assert "Remove-Item Env:KOTO_SERVER_ONLY" in source
         assert "Desktop mode (WebView2 path enabled)" in source
         assert "窗口已显示，应用正常运行中" in source
         assert "RequireDesktopWindow" in source
@@ -478,9 +485,7 @@ def test_release_carries_and_verifies_offline_webview2_runtime():
     build = Path("Build_Release.ps1").read_text(encoding="utf-8")
     deploy = Path("src/deploy_portable.py").read_text(encoding="utf-8")
     installer = Path("koto_installer.iss").read_text(encoding="utf-8")
-    prepare = Path("scripts/prepare_webview2_runtime.ps1").read_text(
-        encoding="utf-8"
-    )
+    prepare = Path("scripts/prepare_webview2_runtime.ps1").read_text(encoding="utf-8")
     workflows = (
         Path(".github/workflows/build.yml").read_text(encoding="utf-8"),
         Path(".github/workflows/release.yml").read_text(encoding="utf-8"),
@@ -516,9 +521,10 @@ def test_installer_cleans_managed_runtime_and_blocks_live_upgrade_conflicts():
     assert "[InstallDelete]" in installer
     assert 'Type: filesandordirs; Name: "{app}\\_internal"' in installer
     for user_data in ("config", "chats", "logs", "workspace", ".webview2_profile"):
-        assert f'Name: "{{app}}\\{user_data}"' not in installer.split(
-            "[InstallDelete]", 1
-        )[1].split("[Icons]", 1)[0]
+        assert (
+            f'Name: "{{app}}\\{user_data}"'
+            not in installer.split("[InstallDelete]", 1)[1].split("[Icons]", 1)[0]
+        )
     assert "$blockedUpgrade" in installer_e2e
     assert "e2e-obsolete-runtime-marker.txt" in installer_e2e
     assert "e2e-user-data-sentinel.txt" in installer_e2e
@@ -722,9 +728,7 @@ def test_staged_app_overlay_excludes_protected_source_but_keeps_packages(tmp_pat
     staged_extension.parent.mkdir(parents=True)
     staged_extension.write_bytes(b"compiled")
     nested_extension = (
-        staged_extension.parent
-        / "plugins"
-        / "runtime.cp311-win_amd64.pyd"
+        staged_extension.parent / "plugins" / "runtime.cp311-win_amd64.pyd"
     )
     nested_extension.parent.mkdir()
     nested_extension.write_bytes(b"compiled")
@@ -742,9 +746,7 @@ def test_staged_app_overlay_excludes_protected_source_but_keeps_packages(tmp_pat
     assert (overlay / "core" / "agent" / staged_extension.name).is_file()
     assert (overlay / "core" / "agent" / "plugins" / "__init__.py").is_file()
     assert not (overlay / "core" / "agent" / "plugins" / "runtime.py").exists()
-    assert (
-        overlay / "core" / "agent" / "plugins" / nested_extension.name
-    ).is_file()
+    assert (overlay / "core" / "agent" / "plugins" / nested_extension.name).is_file()
 
 
 def test_koto_spec_deduplicates_hiddenimports_after_auto_discovery():
@@ -772,8 +774,7 @@ def test_koto_spec_auto_discovers_internal_modules_and_skips_archived_gemini():
     selected_nodes = []
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
-            isinstance(target, ast.Name)
-            and target.id == "_INTERNAL_DISCOVERY_EXCLUDES"
+            isinstance(target, ast.Name) and target.id == "_INTERNAL_DISCOVERY_EXCLUDES"
             for target in node.targets
         ):
             selected_nodes.append(node)
@@ -856,6 +857,8 @@ def test_web_build_sourcemaps_are_line_ending_stable():
     assert "normalizeSourceMapLineEndings" in build_script
     assert "const sourceMap = JSON.parse(raw)" in normalizer
     assert "content.replace(/\\r\\n?/g, '\\n')" in normalizer
+    assert "existsSync" not in normalizer
+    assert "error?.code === 'ENOENT'" in normalizer
     assert "normalize-sourcemap.mjs" in tiptap_package["scripts"]["build"]
     assert source_maps
     for path in source_maps:

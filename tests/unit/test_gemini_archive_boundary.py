@@ -165,8 +165,7 @@ def test_release_manifest_does_not_collect_archived_provider() -> None:
         return {
             element.value
             for element in assignment.value.elts
-            if isinstance(element, ast.Constant)
-            and isinstance(element.value, str)
+            if isinstance(element, ast.Constant) and isinstance(element.value, str)
         }
 
     archived_modules = {

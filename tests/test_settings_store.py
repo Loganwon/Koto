@@ -9,11 +9,11 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
+import app.core.config.settings_store as settings_store
 from app.core.config.settings_store import (
     atomic_update_settings,
     load_settings_document,
 )
-import app.core.config.settings_store as settings_store
 
 
 def test_concurrent_thread_patches_preserve_unrelated_sections(tmp_path):
@@ -46,9 +46,7 @@ def test_concurrent_process_patches_do_not_clobber_each_other(tmp_path):
         env = os.environ.copy()
         env["SETTINGS_PATH"] = str(settings_path)
         env["WORKER_KEY"] = f"process_{index}"
-        env["PYTHONPATH"] = os.pathsep.join(
-            [os.getcwd(), env.get("PYTHONPATH", "")]
-        )
+        env["PYTHONPATH"] = os.pathsep.join([os.getcwd(), env.get("PYTHONPATH", "")])
         processes.append(
             subprocess.Popen(
                 [sys.executable, "-c", script],

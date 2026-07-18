@@ -58,8 +58,7 @@ class TestListWorkspace:
         monkeypatch.setattr(shared, "WORKSPACE_DIR", str(live_workspace))
 
         workspace_entry = next(
-            item for item in _quick_access_locations()
-            if item["name"] == "Koto 工作区"
+            item for item in _quick_access_locations() if item["name"] == "Koto 工作区"
         )
         assert workspace_entry["path"] == str(live_workspace)
 

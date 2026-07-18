@@ -10,6 +10,7 @@ import pytest
 def test_workspace_switch_updates_runtime_file_tools_and_editor_plugin(
     monkeypatch, tmp_path
 ):
+    import web.shared as shared
     from app.core.agent import task_tools
     from app.core.agent.plugins import workspace_editor_plugin
     from app.core.config.workspace_runtime import (
@@ -18,7 +19,6 @@ def test_workspace_switch_updates_runtime_file_tools_and_editor_plugin(
         set_workspace_root,
     )
     from web.runtime_context import ServiceRegistry
-    import web.shared as shared
 
     first = tmp_path / "first-workspace"
     second = tmp_path / "second-workspace"
@@ -28,7 +28,9 @@ def test_workspace_switch_updates_runtime_file_tools_and_editor_plugin(
     clear_workspace_root_override()
     monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", None)
     registry = ServiceRegistry()
-    registry._module = SimpleNamespace(WORKSPACE_DIR=str(tmp_path / "stale-startup-root"))
+    registry._module = SimpleNamespace(
+        WORKSPACE_DIR=str(tmp_path / "stale-startup-root")
+    )
 
     try:
         shared.update_workspace_root(str(first))
@@ -71,7 +73,9 @@ def test_workspace_runtime_honors_external_settings_file(monkeypatch, tmp_path):
 
 
 @pytest.mark.unit
-def test_workspace_reload_preserves_explicit_environment_override(monkeypatch, tmp_path):
+def test_workspace_reload_preserves_explicit_environment_override(
+    monkeypatch, tmp_path
+):
     from app.core.config.workspace_runtime import (
         clear_workspace_root_override,
         reload_workspace_root,

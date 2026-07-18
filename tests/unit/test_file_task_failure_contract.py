@@ -3,7 +3,6 @@ from pathlib import Path
 from app.core.agent.file_task_contract import FileTaskRequest
 from app.core.agent.file_task_runtime import FileTaskRuntime
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -59,9 +58,7 @@ def test_write_task_model_timeout_has_one_precise_terminal_result(tmp_path):
     )
 
     event_types = [event.type for event in events]
-    check_finished = next(
-        event for event in events if event.type == "check.finished"
-    )
+    check_finished = next(event for event in events if event.type == "check.finished")
     run_finished = events[-1]
 
     assert "run.error" not in event_types
@@ -93,9 +90,7 @@ def test_successful_model_without_write_tool_is_not_reported_as_model_failure(tm
         )
     )
 
-    check_finished = next(
-        event for event in events if event.type == "check.finished"
-    )
+    check_finished = next(event for event in events if event.type == "check.finished")
     run_finished = events[-1]
 
     assert check_finished.payload["status"] == "write_not_performed"

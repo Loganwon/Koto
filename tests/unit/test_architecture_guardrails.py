@@ -179,12 +179,7 @@ def test_memory_tools_plugin_uses_the_application_context_owner_directly():
 
 def test_system_info_service_is_core_owned_without_web_compatibility_alias():
     performance_plugin = _read(
-        ROOT
-        / "app"
-        / "core"
-        / "agent"
-        / "plugins"
-        / "performance_analysis_plugin.py"
+        ROOT / "app" / "core" / "agent" / "plugins" / "performance_analysis_plugin.py"
     )
     system_info_plugin = _read(
         ROOT / "app" / "core" / "agent" / "plugins" / "system_info_plugin.py"
@@ -276,7 +271,9 @@ def test_web_configuration_helpers_have_one_shared_owner():
     assert "from web.shared import (" in app_source
     assert "from web.shared import invalidate_settings_cache" in settings_route
     assert "from web.shared import get_organize_root" in file_services
-    assert "from web.shared import get_organize_root as _get_service" in runtime_services
+    assert (
+        "from web.shared import get_organize_root as _get_service" in runtime_services
+    )
     assert not (ROOT / "web" / "config" / "__init__.py").exists()
 
 
@@ -284,7 +281,9 @@ def test_skill_recorder_uses_core_llm_provider_boundary():
     source = _read(ROOT / "app" / "core" / "skills" / "skill_recorder.py")
 
     assert "from app.core.llm.provider_factory import get_llm_provider" in source
-    assert "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    assert (
+        "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    )
     assert "web.runtime_context" not in source
     assert "get_client_proxy" not in source
     assert ".models.generate_content(" not in source
@@ -294,7 +293,9 @@ def test_job_runner_proactive_llm_uses_core_provider_boundary():
     source = _read(ROOT / "app" / "core" / "jobs" / "job_runner.py")
 
     assert "from app.core.llm.provider_factory import get_llm_provider" in source
-    assert "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    assert (
+        "from app.core.llm.model_selection import get_configured_cloud_model" in source
+    )
     assert "web.runtime_context" not in source
     assert "get_client_proxy" not in source
     assert ".models.generate_content(" not in source
@@ -309,9 +310,7 @@ def test_core_does_not_import_web_runtime_context():
         imports_runtime_context = any(
             (
                 isinstance(node, ast.Import)
-                and any(
-                    alias.name == "web.runtime_context" for alias in node.names
-                )
+                and any(alias.name == "web.runtime_context" for alias in node.names)
             )
             or (
                 isinstance(node, ast.ImportFrom)
@@ -333,9 +332,7 @@ def test_core_does_not_import_web_runtime_context():
 
 def test_ppt_image_management_is_core_owned():
     pipeline_source = _read(ROOT / "app" / "core" / "services" / "ppt_pipeline.py")
-    core_image_manager = _read(
-        ROOT / "app" / "core" / "services" / "image_manager.py"
-    )
+    core_image_manager = _read(ROOT / "app" / "core" / "services" / "image_manager.py")
 
     assert "from app.core.services.image_manager import ImageManager" in pipeline_source
     assert "web.runtime_context" not in pipeline_source

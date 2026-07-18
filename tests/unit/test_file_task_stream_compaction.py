@@ -113,7 +113,13 @@ def test_file_task_ui_state_uses_five_user_facing_stages():
         ("run.started", {}, "route", "正在建立任务上下文", 5),
         ("task.classified", {}, "route", "已识别任务目标", 16),
         ("plan.created", {}, "plan", "已生成执行方案", 32),
-        ("tool.started", {"tool_name": "write_docx_content"}, "execute", "正在写入任务结果", 58),
+        (
+            "tool.started",
+            {"tool_name": "write_docx_content"},
+            "execute",
+            "正在写入任务结果",
+            58,
+        ),
         ("check.started", {}, "check", "正在核验结果与文件变更", 86),
         (
             "run.finished",
@@ -124,7 +130,10 @@ def test_file_task_ui_state_uses_five_user_facing_stages():
         ),
     ]
 
-    states = [normalize_ui_state(_event(event_type, payload)) for event_type, payload, *_ in cases]
+    states = [
+        normalize_ui_state(_event(event_type, payload))
+        for event_type, payload, *_ in cases
+    ]
     assert all(state is not None for state in states)
     for state, (_, _, phase, title, progress) in zip(states, cases):
         assert state.phase == phase

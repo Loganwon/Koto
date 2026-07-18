@@ -709,7 +709,13 @@ def run_gui():
     steps_frame.pack(fill="x")
     steps_frame.pack_propagate(False)
 
-    STEP_LABELS = ["①  选择方式", "②  检测硬件", "③  选择模型", "④  安装下载", "⑤  完成"]
+    STEP_LABELS = [
+        "①  选择方式",
+        "②  检测硬件",
+        "③  选择模型",
+        "④  安装下载",
+        "⑤  完成",
+    ]
     step_lbls: List[tk.Label] = []
     for i, txt in enumerate(STEP_LABELS):
         lbl = tk.Label(steps_frame, text=txt, font=F_SMALL, bg=BG, fg=MUTED, padx=18)
@@ -751,7 +757,11 @@ def run_gui():
     p0_inner = tk.Frame(p0, bg=BG)
     p0_inner.place(relx=0.5, rely=0.45, anchor="center")
     tk.Label(
-        p0_inner, text="先选择 Koto 的 AI 方式", font=("Segoe UI", 22, "bold"), bg=BG, fg=TEXT
+        p0_inner,
+        text="先选择 Koto 的 AI 方式",
+        font=("Segoe UI", 22, "bold"),
+        bg=BG,
+        fg=TEXT,
     ).pack(pady=(0, 8))
     tk.Label(
         p0_inner,
@@ -767,8 +777,12 @@ def run_gui():
     cloud_choice = tk.Frame(choice_row, bg=PANEL, width=360, height=260)
     cloud_choice.pack(side="left", padx=(0, 10))
     cloud_choice.pack_propagate(False)
-    tk.Label(cloud_choice, text="☁️", font=("Segoe UI Emoji", 30), bg=PANEL, fg=ACCENT2).pack(pady=(24, 4))
-    tk.Label(cloud_choice, text="使用云端 DeepSeek", font=F_HEAD, bg=PANEL, fg=TEXT).pack()
+    tk.Label(
+        cloud_choice, text="☁️", font=("Segoe UI Emoji", 30), bg=PANEL, fg=ACCENT2
+    ).pack(pady=(24, 4))
+    tk.Label(
+        cloud_choice, text="使用云端 DeepSeek", font=F_HEAD, bg=PANEL, fg=TEXT
+    ).pack()
     tk.Label(
         cloud_choice,
         text="填写自己的 API Key 即可开始。\n无需下载模型，适合多数用户。",
@@ -778,15 +792,24 @@ def run_gui():
         justify="center",
     ).pack(pady=(10, 18))
     cloud_choice_btn = tk.Button(
-        cloud_choice, text="填写 API Key  →", font=("Segoe UI", 10, "bold"), bg=ACCENT2, fg="white",
-        relief="flat", padx=22, pady=8, cursor="hand2"
+        cloud_choice,
+        text="填写 API Key  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT2,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=8,
+        cursor="hand2",
     )
     cloud_choice_btn.pack()
 
     local_choice = tk.Frame(choice_row, bg=PANEL, width=360, height=260)
     local_choice.pack(side="left", padx=(10, 0))
     local_choice.pack_propagate(False)
-    tk.Label(local_choice, text="🖥️", font=("Segoe UI Emoji", 30), bg=PANEL, fg=ACCENT).pack(pady=(24, 4))
+    tk.Label(
+        local_choice, text="🖥️", font=("Segoe UI Emoji", 30), bg=PANEL, fg=ACCENT
+    ).pack(pady=(24, 4))
     tk.Label(local_choice, text="下载本地模型", font=F_HEAD, bg=PANEL, fg=TEXT).pack()
     tk.Label(
         local_choice,
@@ -797,8 +820,15 @@ def run_gui():
         justify="center",
     ).pack(pady=(10, 18))
     local_choice_btn = tk.Button(
-        local_choice, text="选择本地模型  →", font=("Segoe UI", 10, "bold"), bg=ACCENT, fg="white",
-        relief="flat", padx=22, pady=8, cursor="hand2"
+        local_choice,
+        text="选择本地模型  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=8,
+        cursor="hand2",
     )
     local_choice_btn.pack()
 
@@ -809,7 +839,13 @@ def run_gui():
     pages["cloud"] = p_cloud
     cloud_inner = tk.Frame(p_cloud, bg=BG, width=600)
     cloud_inner.place(relx=0.5, rely=0.45, anchor="center")
-    tk.Label(cloud_inner, text="使用 DeepSeek 云端服务", font=("Segoe UI", 20, "bold"), bg=BG, fg=TEXT).pack(anchor="w")
+    tk.Label(
+        cloud_inner,
+        text="使用 DeepSeek 云端服务",
+        font=("Segoe UI", 20, "bold"),
+        bg=BG,
+        fg=TEXT,
+    ).pack(anchor="w")
     tk.Label(
         cloud_inner,
         text="请输入你的 DeepSeek API Key。密钥仅保存在本机配置目录中。",
@@ -817,33 +853,74 @@ def run_gui():
         bg=BG,
         fg=MUTED,
     ).pack(anchor="w", pady=(6, 20))
-    tk.Label(cloud_inner, text="DeepSeek API Key", font=F_HEAD, bg=BG, fg=TEXT).pack(anchor="w")
+    tk.Label(cloud_inner, text="DeepSeek API Key", font=F_HEAD, bg=BG, fg=TEXT).pack(
+        anchor="w"
+    )
     cloud_key_var = tk.StringVar()
     cloud_key_entry = tk.Entry(
-        cloud_inner, textvariable=cloud_key_var, font=("Consolas", 11), bg=PANEL, fg=TEXT,
-        insertbackground=TEXT, relief="flat", show="•", width=64
+        cloud_inner,
+        textvariable=cloud_key_var,
+        font=("Consolas", 11),
+        bg=PANEL,
+        fg=TEXT,
+        insertbackground=TEXT,
+        relief="flat",
+        show="•",
+        width=64,
     )
     cloud_key_entry.pack(fill="x", pady=(6, 10), ipady=9)
     cloud_show_var = tk.BooleanVar(value=False)
     tk.Checkbutton(
-        cloud_inner, text="显示密钥", variable=cloud_show_var,
-        command=lambda: cloud_key_entry.config(show="" if cloud_show_var.get() else "•"),
-        font=F_SMALL, bg=BG, fg=MUTED, activebackground=BG, activeforeground=TEXT,
+        cloud_inner,
+        text="显示密钥",
+        variable=cloud_show_var,
+        command=lambda: cloud_key_entry.config(
+            show="" if cloud_show_var.get() else "•"
+        ),
+        font=F_SMALL,
+        bg=BG,
+        fg=MUTED,
+        activebackground=BG,
+        activeforeground=TEXT,
         selectcolor=PANEL,
     ).pack(anchor="w")
-    tk.Label(cloud_inner, text="自定义 API 地址（可选）", font=F_SMALL, bg=BG, fg=MUTED).pack(anchor="w", pady=(16, 0))
+    tk.Label(
+        cloud_inner, text="自定义 API 地址（可选）", font=F_SMALL, bg=BG, fg=MUTED
+    ).pack(anchor="w", pady=(16, 0))
     cloud_base_var = tk.StringVar(value="https://api.deepseek.com")
     tk.Entry(
-        cloud_inner, textvariable=cloud_base_var, font=("Consolas", 10), bg=PANEL, fg=TEXT,
-        insertbackground=TEXT, relief="flat", width=64
+        cloud_inner,
+        textvariable=cloud_base_var,
+        font=("Consolas", 10),
+        bg=PANEL,
+        fg=TEXT,
+        insertbackground=TEXT,
+        relief="flat",
+        width=64,
     ).pack(fill="x", pady=(6, 12), ipady=8)
-    cloud_status = tk.Label(cloud_inner, text="", font=F_SMALL, bg=BG, fg=RED, wraplength=590, justify="left")
+    cloud_status = tk.Label(
+        cloud_inner,
+        text="",
+        font=F_SMALL,
+        bg=BG,
+        fg=RED,
+        wraplength=590,
+        justify="left",
+    )
     cloud_status.pack(anchor="w", pady=(0, 12))
     cloud_buttons = tk.Frame(cloud_inner, bg=BG)
     cloud_buttons.pack(fill="x")
     tk.Button(
-        cloud_buttons, text="← 返回", font=F_NORMAL, bg=PANEL, fg=MUTED, relief="flat", padx=16, pady=8,
-        cursor="hand2", command=lambda: (set_step(0), show_page("mode"))
+        cloud_buttons,
+        text="← 返回",
+        font=F_NORMAL,
+        bg=PANEL,
+        fg=MUTED,
+        relief="flat",
+        padx=16,
+        pady=8,
+        cursor="hand2",
+        command=lambda: (set_step(0), show_page("mode")),
     ).pack(side="left")
 
     def save_cloud_choice():
@@ -857,8 +934,16 @@ def run_gui():
         root.after(450, root.destroy)
 
     tk.Button(
-        cloud_buttons, text="保存并继续  →", font=("Segoe UI", 10, "bold"), bg=ACCENT2, fg="white",
-        relief="flat", padx=22, pady=8, cursor="hand2", command=save_cloud_choice
+        cloud_buttons,
+        text="保存并继续  →",
+        font=("Segoe UI", 10, "bold"),
+        bg=ACCENT2,
+        fg="white",
+        relief="flat",
+        padx=22,
+        pady=8,
+        cursor="hand2",
+        command=save_cloud_choice,
     ).pack(side="right")
 
     # ═══════════════════════════════════════════

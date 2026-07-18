@@ -33,7 +33,10 @@ def _tool_activity_title(payload: Dict[str, Any], *, finished: bool = False) -> 
         return f"已完成{explicit_title}" if finished else f"正在{explicit_title}"
     if any(token in tool_name for token in ("read", "parse", "inspect", "audit")):
         return "已完成文件读取与分析" if finished else "正在读取并分析文件"
-    if any(token in tool_name for token in ("write", "create", "insert", "replace", "convert", "copy")):
+    if any(
+        token in tool_name
+        for token in ("write", "create", "insert", "replace", "convert", "copy")
+    ):
         return "已完成结果写入" if finished else "正在写入任务结果"
     if any(token in tool_name for token in ("verify", "check", "guard")):
         return "已完成当前核验步骤" if finished else "正在核验处理结果"
@@ -117,9 +120,10 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
             return None
         return FileTaskUiState("route", "已识别任务目标", "succeeded", 16)
     if raw_type in {"plan.checked", "plan.gated"}:
-        passed = payload.get("passed") is not False and str(
-            payload.get("status") or ""
-        ).strip().lower() != "failed"
+        passed = (
+            payload.get("passed") is not False
+            and str(payload.get("status") or "").strip().lower() != "failed"
+        )
         return FileTaskUiState(
             "plan",
             "执行边界检查通过" if passed else "执行方案需要调整",
@@ -171,9 +175,11 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
     if raw_type == "model.call.finished":
         return FileTaskUiState(
             "execute",
-            "AI 分析完成，正在执行处理"
-            if payload.get("success") is not False
-            else "AI 分析暂时失败，正在尝试备用处理",
+            (
+                "AI 分析完成，正在执行处理"
+                if payload.get("success") is not False
+                else "AI 分析暂时失败，正在尝试备用处理"
+            ),
             "running" if payload.get("success") is not False else "warning",
             50,
         )
@@ -200,7 +206,11 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
         return FileTaskUiState(
             "execute",
             _tool_activity_title(payload, finished=not failed),
-            "failed" if failed else ("waiting" if payload.get("blocked") else "running"),
+            (
+                "failed"
+                if failed
+                else ("waiting" if payload.get("blocked") else "running")
+            ),
             70,
         )
     if raw_type in {"step.finished", "step.result"}:
@@ -223,18 +233,18 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
     if raw_type in {"file.changed", "code_summary"}:
         return FileTaskUiState("execute", "已写入任务变更", "running", 78)
     if raw_type == "read.changed":
-        return FileTaskUiState(
-            "execute", "正在读取并整理文件内容", "running", 54
-        )
+        return FileTaskUiState("execute", "正在读取并整理文件内容", "running", 54)
     if raw_type == "supervisor.step_verified":
-        passed = payload.get("passed") is not False and str(
-            payload.get("outcome") or payload.get("status") or ""
-        ).strip().lower() != "failed"
+        passed = (
+            payload.get("passed") is not False
+            and str(payload.get("outcome") or payload.get("status") or "")
+            .strip()
+            .lower()
+            != "failed"
+        )
         return FileTaskUiState(
             "execute",
-            "当前处理步骤已通过核验"
-            if passed
-            else "当前处理步骤核验未通过",
+            "当前处理步骤已通过核验" if passed else "当前处理步骤核验未通过",
             "running" if passed else "failed",
             76,
         )
@@ -244,8 +254,10 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
         if is_text_qa:
             return None
         passed = payload.get("passed") is not False
-        status = "running" if raw_type == "check.started" else (
-            "succeeded" if passed else "failed"
+        status = (
+            "running"
+            if raw_type == "check.started"
+            else ("succeeded" if passed else "failed")
         )
         progress = 86 if raw_type == "check.started" else 94
         return FileTaskUiState(
@@ -296,18 +308,14 @@ def normalize_ui_state(event: Any) -> Optional[FileTaskUiState]:
         )
         return FileTaskUiState(
             "deliver",
-            "结果与产物已整理完成"
-            if not failed
-            else "任务未完成，已保留诊断信息",
+            "结果与产物已整理完成" if not failed else "任务未完成，已保留诊断信息",
             "failed" if failed else "succeeded",
             100,
             True,
             True,
         )
     if raw_type == "run.cancelled":
-        return FileTaskUiState(
-            "deliver", "任务已取消", "cancelled", 100, True, True
-        )
+        return FileTaskUiState("deliver", "任务已取消", "cancelled", 100, True, True)
     return None
 
 

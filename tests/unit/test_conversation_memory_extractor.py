@@ -5,9 +5,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from app.core.memory.conversation_memory_extractor import (
-    ConversationMemoryExtractor,
-)
+from app.core.memory.conversation_memory_extractor import ConversationMemoryExtractor
 
 
 @pytest.mark.unit

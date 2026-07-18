@@ -531,7 +531,9 @@ def _local_model_configured() -> bool:
 
     config_dir = APP_ROOT / "config"
     try:
-        flag = json.loads((config_dir / "model_setup_done.json").read_text(encoding="utf-8"))
+        flag = json.loads(
+            (config_dir / "model_setup_done.json").read_text(encoding="utf-8")
+        )
         if isinstance(flag, dict) and flag.get("done") and flag.get("mode") == "local":
             return bool(str(flag.get("model") or "").strip())
     except Exception:
@@ -557,7 +559,9 @@ def _run_unified_setup() -> bool:
         if installer.exists():
             subprocess.run([str(installer)], cwd=str(APP_ROOT), check=False)
         elif source_installer.exists():
-            subprocess.run([sys.executable, str(source_installer)], cwd=str(APP_ROOT), check=False)
+            subprocess.run(
+                [sys.executable, str(source_installer)], cwd=str(APP_ROOT), check=False
+            )
         else:
             return False
     except Exception:

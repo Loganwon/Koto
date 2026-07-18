@@ -107,7 +107,9 @@ def _convertible_pdf_bytes() -> bytes:
         page = doc.new_page(width=612, height=792)
         page.insert_text((72, 72), f"Conversion page {page_number}", fontsize=16)
         page.insert_text((72, 110), "Name    Amount", fontsize=11)
-        page.insert_text((72, 132), f"Item {page_number}    {page_number * 10}", fontsize=11)
+        page.insert_text(
+            (72, 132), f"Item {page_number}    {page_number * 10}", fontsize=11
+        )
     content = doc.tobytes()
     doc.close()
     return content
@@ -144,9 +146,7 @@ class TestRecentFileStatus:
             {"path": "missing.txt", "exists": False},
         ]
 
-    def test_reports_safe_external_file_without_exposing_resolved_path(
-        self, wa_client
-    ):
+    def test_reports_safe_external_file_without_exposing_resolved_path(self, wa_client):
         client, _, workspace_dir = wa_client
         external = workspace_dir.parent / "external.txt"
         external.write_text("ready", encoding="utf-8")
@@ -463,26 +463,34 @@ class TestAIContextPreview:
         client, _, workspace_dir = wa_client
         external = workspace_dir.parent / "Downloads" / "humanise!_revised.docx"
         external.parent.mkdir(parents=True, exist_ok=True)
-        external.write_bytes(_make_docx_bytes(["外部文件已导入工作区", "可供 AI 文件任务读取"]))
+        external.write_bytes(
+            _make_docx_bytes(["外部文件已导入工作区", "可供 AI 文件任务读取"])
+        )
 
         import_response = client.post(
             "/api/v1/workspace/import_for_ai_context",
             json={"path": str(external)},
         )
 
-        assert import_response.status_code == 200, import_response.get_data(as_text=True)
+        assert import_response.status_code == 200, import_response.get_data(
+            as_text=True
+        )
         imported = import_response.get_json()
         assert imported["ok"] is True
         assert imported["imported"] is True
         assert imported["ws_path"] == "attachments/humanise!_revised.docx"
-        assert (workspace_dir / imported["ws_path"]).read_bytes() == external.read_bytes()
+        assert (
+            workspace_dir / imported["ws_path"]
+        ).read_bytes() == external.read_bytes()
 
         preview_response = client.post(
             "/api/v1/workspace/ai_context_preview",
             json={"path": imported["ws_path"]},
         )
 
-        assert preview_response.status_code == 200, preview_response.get_data(as_text=True)
+        assert preview_response.status_code == 200, preview_response.get_data(
+            as_text=True
+        )
         assert "外部文件已导入工作区" in preview_response.get_json()["content_preview"]
 
     def test_unicode_docx_path_is_readable(self, wa_client):

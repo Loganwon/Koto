@@ -194,8 +194,7 @@ class TestWorkspaceAiAssistantSmoke:
 
         trigger = e2e_page.locator("#wa-model-menu-trigger")
         trigger.click()
-        geometry = e2e_page.evaluate(
-            """() => {
+        geometry = e2e_page.evaluate("""() => {
                 const trigger = document.querySelector('#wa-model-menu-trigger');
                 const menu = document.querySelector('#wa-model-mode-menu');
                 const triggerRect = trigger.getBoundingClientRect();
@@ -211,8 +210,7 @@ class TestWorkspaceAiAssistantSmoke:
                     viewportHeight: window.innerHeight,
                     placement: menu.dataset.placement,
                 };
-            }"""
-        )
+            }""")
 
         assert geometry["left"] >= 7
         assert geometry["right"] <= geometry["viewportWidth"] - 7
@@ -277,8 +275,7 @@ class TestWorkspaceAiAssistantSmoke:
 
         _open_workspace_ai(e2e_page, e2e_base_url)
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 let workbench = document.getElementById('wa-task-workbench');
                 if (!workbench) {
                     workbench = document.createElement('section');
@@ -289,8 +286,7 @@ class TestWorkspaceAiAssistantSmoke:
                 }
                 workbench.hidden = false;
                 workbench.style.display = 'block';
-            }"""
-        )
+            }""")
         assert e2e_page.locator("#wa-task-workbench").is_visible()
 
         e2e_page.locator("#wa-user-input").fill("总结当前文件")
@@ -332,9 +328,11 @@ class TestWorkspaceAiAssistantSmoke:
             route.fulfill(
                 status=200,
                 content_type="text/event-stream",
-                body=_sse_body([
-                    {"type": "token", "content": "系统动作已接收"},
-                ]),
+                body=_sse_body(
+                    [
+                        {"type": "token", "content": "系统动作已接收"},
+                    ]
+                ),
             )
 
         e2e_page.route("**/api/workspace/ai/route-intent", unexpected_route_intent)
@@ -423,7 +421,7 @@ class TestWorkspaceAiAssistantSmoke:
                     "tool_name": "write_text_file",
                     "tool_title": "写入结果文件",
                     "tool_use_id": "write_1",
-                    "tool_args": "{\"content\":\"INTERNAL_SECRET\"}",
+                    "tool_args": '{"content":"INTERNAL_SECRET"}',
                 },
             },
             {
@@ -519,16 +517,27 @@ class TestWorkspaceAiAssistantSmoke:
         assert "核验通过。" not in card_text
         stage_items = task_card.locator("[data-role='stage-overview'] [data-stage-id]")
         assert stage_items.count() == 5
-        assert "分析需求" in task_card.locator("[data-role='stage-overview']").inner_text()
-        assert "制定计划" in task_card.locator("[data-role='stage-overview']").inner_text()
-        assert "正在处理" in task_card.locator("[data-role='stage-overview']").inner_text()
-        assert "检查结果" in task_card.locator("[data-role='stage-overview']").inner_text()
-        assert "交付结果" in task_card.locator("[data-role='stage-overview']").inner_text()
-        assert task_card.locator("[data-role='stage-progress-count']").inner_text() == "5/5"
+        assert (
+            "分析需求" in task_card.locator("[data-role='stage-overview']").inner_text()
+        )
+        assert (
+            "制定计划" in task_card.locator("[data-role='stage-overview']").inner_text()
+        )
+        assert (
+            "正在处理" in task_card.locator("[data-role='stage-overview']").inner_text()
+        )
+        assert (
+            "检查结果" in task_card.locator("[data-role='stage-overview']").inner_text()
+        )
+        assert (
+            "交付结果" in task_card.locator("[data-role='stage-overview']").inner_text()
+        )
+        assert (
+            task_card.locator("[data-role='stage-progress-count']").inner_text()
+            == "5/5"
+        )
         assert task_card.locator("[data-role='process']").evaluate("el => !el.open")
-        final_report_style = task_card.locator(
-            "[data-role='final-report']"
-        ).evaluate(
+        final_report_style = task_card.locator("[data-role='final-report']").evaluate(
             """el => {
                 const style = getComputedStyle(el);
                 return {
@@ -551,8 +560,7 @@ class TestWorkspaceAiAssistantSmoke:
         _mock_file_task_route(e2e_page)
         _open_workspace_ai(e2e_page, e2e_base_url)
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 const card = window.WA.taskFlowTestHarness.makeRunCard(null);
                 document.getElementById('wa-ai-messages').appendChild(card);
                 window.__kotoStageCard = card;
@@ -571,23 +579,22 @@ class TestWorkspaceAiAssistantSmoke:
                     operation_kind: 'read',
                     output_mode: 'answer',
                 });
-            }"""
-        )
+            }""")
 
-        card = e2e_page.locator(
-            ".wa-task-run[data-task-run-id='stage_overview_live']"
-        )
+        card = e2e_page.locator(".wa-task-run[data-task-run-id='stage_overview_live']")
         card.wait_for(timeout=PAGE_TIMEOUT)
         assert "done" in card.locator("[data-stage-id='route']").get_attribute("class")
-        assert "pending" in card.locator("[data-stage-id='plan']").get_attribute("class")
-        assert card.locator("[data-role='stage-current-label']").inner_text() == "分析需求"
+        assert "pending" in card.locator("[data-stage-id='plan']").get_attribute(
+            "class"
+        )
+        assert (
+            card.locator("[data-role='stage-current-label']").inner_text() == "分析需求"
+        )
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 window.__kotoRealDateNow = Date.now;
                 Date.now = () => window.__kotoRealDateNow() + 65000;
-            }"""
-        )
+            }""")
         e2e_page.wait_for_function(
             """() => {
                 const card = window.__kotoStageCard;
@@ -598,31 +605,36 @@ class TestWorkspaceAiAssistantSmoke:
             }""",
             timeout=PAGE_TIMEOUT,
         )
-        heartbeat_text = card.locator(
-            ".wa-task-row[data-role='task-heartbeat']"
-        ).text_content() or ""
+        heartbeat_text = (
+            card.locator(".wa-task-row[data-role='task-heartbeat']").text_content()
+            or ""
+        )
         assert "任务仍在运行" in heartbeat_text
         assert "秒" not in heartbeat_text
         assert card.locator("[data-role='status']").is_visible()
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 Date.now = window.__kotoRealDateNow;
                 window.__kotoEmitStageEvent('plan.created', {
                     summary: '先读取文件，再整理关键结论。',
                     steps: [{ title: '读取文件' }, { title: '整理结论' }],
                 }, 'plan');
-            }"""
-        )
+            }""")
         assert card.locator(".wa-task-row[data-role='task-heartbeat']").count() == 0
 
-        assert "running" in card.locator("[data-stage-id='plan']").get_attribute("class")
-        assert card.locator("[data-role='stage-current-label']").inner_text() == "制定计划"
-        assert "先读取文件" in card.locator("[data-role='stage-current-detail']").inner_text()
+        assert "running" in card.locator("[data-stage-id='plan']").get_attribute(
+            "class"
+        )
+        assert (
+            card.locator("[data-role='stage-current-label']").inner_text() == "制定计划"
+        )
+        assert (
+            "先读取文件"
+            in card.locator("[data-role='stage-current-detail']").inner_text()
+        )
         assert card.locator("[data-role='stage-progress-count']").inner_text() == "1/5"
         assert card.locator("[data-role='status']").is_hidden()
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 window.__kotoEmitStageEvent('plan.checked', {
                     passed: true,
                     summary: '内部边界检查通过。',
@@ -631,26 +643,30 @@ class TestWorkspaceAiAssistantSmoke:
                     stage: 'planned',
                     summary: '内部监管检查通过。',
                 }, 'plan');
-            }"""
+            }""")
+        assert (
+            "先读取文件"
+            in card.locator("[data-role='stage-current-detail']").inner_text()
         )
-        assert "先读取文件" in card.locator(
-            "[data-role='stage-current-detail']"
-        ).inner_text()
 
-        e2e_page.evaluate(
-            """() => window.__kotoEmitStageEvent('model.call.started', {
+        e2e_page.evaluate("""() => window.__kotoEmitStageEvent('model.call.started', {
                 round: 1,
                 model_mode: 'deepseek',
-            }, 'execute')"""
-        )
+            }, 'execute')""")
         assert "done" in card.locator("[data-stage-id='plan']").get_attribute("class")
-        assert "running" in card.locator("[data-stage-id='execute']").get_attribute("class")
-        assert card.locator("[data-role='stage-current-label']").inner_text() == "正在处理"
-        assert "AI 正在分析内容" in card.locator("[data-role='stage-current-detail']").inner_text()
+        assert "running" in card.locator("[data-stage-id='execute']").get_attribute(
+            "class"
+        )
+        assert (
+            card.locator("[data-role='stage-current-label']").inner_text() == "正在处理"
+        )
+        assert (
+            "AI 正在分析内容"
+            in card.locator("[data-role='stage-current-detail']").inner_text()
+        )
         assert card.locator("[data-role='stage-progress-count']").inner_text() == "2/5"
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 window.__kotoEmitStageEvent('model.call.finished', {
                     success: true,
                     tool_call_count: 1,
@@ -666,59 +682,64 @@ class TestWorkspaceAiAssistantSmoke:
                     tool_use_id: 'stage_write_1',
                     success: true,
                 }, 'execute');
-            }"""
-        )
+            }""")
         assert card.locator("[data-role='stage-current-detail']").inner_text() == (
             "正在写入结果文件"
         )
 
-        e2e_page.evaluate(
-            """() => window.__kotoEmitStageEvent('file.changed', {
+        e2e_page.evaluate("""() => window.__kotoEmitStageEvent('file.changed', {
                 path: 'workspace/output.txt',
                 file_path: 'workspace/output.txt',
                 change_type: 'created',
-            }, 'execute')"""
-        )
+            }, 'execute')""")
         assert card.locator("[data-role='stage-current-detail']").inner_text() == (
             "已创建 output.txt"
         )
         assert (
-            card.locator("[data-role='plan']")
-            .evaluate("el => getComputedStyle(el).borderTopStyle")
+            card.locator("[data-role='plan']").evaluate(
+                "el => getComputedStyle(el).borderTopStyle"
+            )
             == "solid"
         )
         assert (
-            card.locator("[data-role='steps'] .wa-task-step")
-            .first
-            .evaluate("el => getComputedStyle(el).borderLeftStyle")
+            card.locator("[data-role='steps'] .wa-task-step").first.evaluate(
+                "el => getComputedStyle(el).borderLeftStyle"
+            )
             == "solid"
         )
         assert (
-            card.locator("[data-role='steps'] .wa-task-row")
-            .first
-            .evaluate("el => getComputedStyle(el).borderTopStyle")
+            card.locator("[data-role='steps'] .wa-task-row").first.evaluate(
+                "el => getComputedStyle(el).borderTopStyle"
+            )
             == "solid"
         )
 
-        e2e_page.evaluate(
-            """() => window.__kotoEmitStageEvent('check.started', {
+        e2e_page.evaluate("""() => window.__kotoEmitStageEvent('check.started', {
                 title: '正在核验结果与文件变更',
-            }, 'check')"""
+            }, 'check')""")
+        assert "done" in card.locator("[data-stage-id='execute']").get_attribute(
+            "class"
         )
-        assert "done" in card.locator("[data-stage-id='execute']").get_attribute("class")
-        assert "running" in card.locator("[data-stage-id='check']").get_attribute("class")
-        assert card.locator("[data-role='stage-current-label']").inner_text() == "检查结果"
-        assert "正在核验" in card.locator("[data-role='stage-current-detail']").inner_text()
+        assert "running" in card.locator("[data-stage-id='check']").get_attribute(
+            "class"
+        )
+        assert (
+            card.locator("[data-role='stage-current-label']").inner_text() == "检查结果"
+        )
+        assert (
+            "正在核验"
+            in card.locator("[data-role='stage-current-detail']").inner_text()
+        )
         assert card.locator("[data-role='stage-progress-count']").inner_text() == "3/5"
 
-        e2e_page.evaluate(
-            """() => window.__kotoEmitStageEvent('run.finished', {
+        e2e_page.evaluate("""() => window.__kotoEmitStageEvent('run.finished', {
                 summary: '任务已完成，结果已核验。',
                 completed_task: true,
-            }, 'check')"""
-        )
+            }, 'check')""")
         assert card.locator("[data-role='stage-progress-count']").inner_text() == "5/5"
-        assert card.locator("[data-role='stage-current-label']").inner_text() == "流程完成"
+        assert (
+            card.locator("[data-role='stage-current-label']").inner_text() == "流程完成"
+        )
         assert card.locator("[data-role='stage-overview'] .done").count() == 5
         assert (
             _real_errors(console_errors) == []
@@ -769,8 +790,7 @@ class TestWorkspaceAiAssistantSmoke:
         )
         _open_workspace_ai(e2e_page, e2e_base_url)
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 const card = window.WA.taskFlowTestHarness.makeRunCard(null);
                 document.getElementById('wa-ai-messages').appendChild(card);
                 window.__kotoDisconnectCard = card;
@@ -780,12 +800,9 @@ class TestWorkspaceAiAssistantSmoke:
                     {},
                     'GET'
                 ).catch(() => {});
-            }"""
-        )
+            }""")
 
-        card = e2e_page.locator(
-            ".wa-task-run[data-task-run-id='disconnect_notice']"
-        )
+        card = e2e_page.locator(".wa-task-run[data-task-run-id='disconnect_notice']")
         card.wait_for(timeout=PAGE_TIMEOUT)
         e2e_page.wait_for_function(
             """() => /进度同步中断/.test(
@@ -795,9 +812,7 @@ class TestWorkspaceAiAssistantSmoke:
             )""",
             timeout=PAGE_TIMEOUT,
         )
-        reconnect_rows = card.locator(
-            ".wa-task-row[data-role='stream-reconnect']"
-        )
+        reconnect_rows = card.locator(".wa-task-row[data-role='stream-reconnect']")
         assert reconnect_rows.count() == 1
         reconnect_text = reconnect_rows.text_content() or ""
         assert "同步中断" in reconnect_text
@@ -826,8 +841,7 @@ class TestWorkspaceAiAssistantSmoke:
         _mock_file_task_route(e2e_page)
         _open_workspace_ai(e2e_page, e2e_base_url)
 
-        e2e_page.evaluate(
-            """() => {
+        e2e_page.evaluate("""() => {
                 window.__kotoResumeDetails = null;
                 window.WA.resumePersistedTaskArtifact = (details) => {
                     window.__kotoResumeDetails = details;
@@ -876,8 +890,7 @@ class TestWorkspaceAiAssistantSmoke:
                     task_id: 'task_primary_running',
                     payload: { mode: 'whitebox_v1' },
                 });
-            }"""
-        )
+            }""")
 
         waiting_card = e2e_page.locator(
             ".wa-task-run[data-task-run-id='primary_waiting']"
@@ -888,9 +901,12 @@ class TestWorkspaceAiAssistantSmoke:
         )
         assert primary_resume.count() == 1
         assert primary_resume.inner_text() == "确认并继续"
-        assert waiting_card.locator(
-            "[data-role='summary'] [data-task-artifact-resume]"
-        ).count() == 0
+        assert (
+            waiting_card.locator(
+                "[data-role='summary'] [data-task-artifact-resume]"
+            ).count()
+            == 0
+        )
         assert waiting_card.locator("[data-role='cancel']").count() == 0
         primary_resume.click()
         e2e_page.wait_for_function(

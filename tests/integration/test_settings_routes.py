@@ -171,11 +171,10 @@ class TestUpdateSettings:
         # provider as the UI-friendly "cloud" value.  Read the persisted
         # value here so the assertion covers the actual runtime mode.
         from app.core.config.user_settings import SettingsManager
+
         original = SettingsManager().get_all()
         raw_original_mode = str(original.get("model_mode") or "cloud").lower()
-        original_mode = (
-            "local" if raw_original_mode in {"local", "ollama"} else "cloud"
-        )
+        original_mode = "local" if raw_original_mode in {"local", "ollama"} else "cloud"
         original_model = str(
             original.get("local_model")
             or (original.get("ai") or {}).get("local_model")

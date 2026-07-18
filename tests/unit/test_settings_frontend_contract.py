@@ -61,7 +61,10 @@ def test_settings_controls_have_one_persisted_runtime_path() -> None:
     local_model_change = settings[
         settings.index("export async function onLocalModelChange") :
     ]
-    assert "body: JSON.stringify({ mode: 'local', model_tag: nextModel })" in local_model_change
+    assert (
+        "body: JSON.stringify({ mode: 'local', model_tag: nextModel })"
+        in local_model_change
+    )
     assert "if (localOnly)" not in local_model_change.split("// ── Setup Wizard", 1)[0]
     assert "export function previewUIZoom" in theme
     assert "currentSettings?.appearance?.ui_zoom" in theme

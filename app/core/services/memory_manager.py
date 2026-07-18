@@ -343,7 +343,9 @@ class PersonalityMatrix:
 
         if changed:
             self.save()
-            logger.debug("[PersonalityMatrix] matrix updated from single-pass extraction")
+            logger.debug(
+                "[PersonalityMatrix] matrix updated from single-pass extraction"
+            )
         return changed
 
 
@@ -665,9 +667,7 @@ class EnhancedMemoryManager:
             ConversationMemoryExtractor,
         )
 
-        return ConversationMemoryExtractor.should_extract(
-            user_msg, ai_msg, task_type
-        )
+        return ConversationMemoryExtractor.should_extract(user_msg, ai_msg, task_type)
 
     def auto_extract_from_conversation(
         self,

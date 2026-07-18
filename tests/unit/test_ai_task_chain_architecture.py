@@ -120,8 +120,7 @@ def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> 
     assert "_csrfFetch('/api/workspace/ai/route-intent'" in source
     assert "export function deterministicWorkspaceRouteDecision(" in routing
     assert (
-        "const deterministicRoute = deterministicWorkspaceRouteDecision({"
-        in route_body
+        "const deterministicRoute = deterministicWorkspaceRouteDecision({" in route_body
     )
     assert route_body.index("deterministicWorkspaceRouteDecision") < route_body.index(
         "resolveWorkspaceRouteIntent"
@@ -354,7 +353,10 @@ def test_workspace_task_helpers_use_direct_module_owners_not_wa_bus() -> None:
         assert "from './task-interaction-summary';" in source
         assert "workspaceApi.syncTaskInteractionSummary" not in source
     assert "import { streamTaskFlow } from './task-runner';" in runtime_init
-    assert "streamTaskFlow: (options: any) => workspaceApi.streamTaskFlow" not in runtime_init
+    assert (
+        "streamTaskFlow: (options: any) => workspaceApi.streamTaskFlow"
+        not in runtime_init
+    )
     assert "import { restoreTaskRunCard } from './task-runner';" in conversation
     assert "workspaceApi.restoreTaskRunCard" not in conversation
     for source in (ai_review, file_utils):
@@ -382,10 +384,7 @@ def test_generated_artifact_transactions_have_one_runtime_owner() -> None:
     recovery = _read("app/core/agent/file_task_financial_report_recovery.py")
     transaction = _read("app/core/agent/file_task_artifact_transaction.py")
 
-    assert (
-        "from app.core.agent.file_task_artifact_transaction import ("
-        in recovery
-    )
+    assert "from app.core.agent.file_task_artifact_transaction import (" in recovery
     assert "def run_scoped_staging_path(" in transaction
     assert "def commit_staged_artifact(" in transaction
     assert "def cleanup_run_owned_paths(" in transaction

@@ -272,9 +272,7 @@ class TestEnhancedMemoryManager:
 
         assert result["memories"] == ["用户偏好简洁的技术回答"]
         assert result["profile_updates"]["programming_languages"] == ["Python"]
-        assert any(
-            item["content"] == "用户偏好简洁的技术回答" for item in mgr.memories
-        )
+        assert any(item["content"] == "用户偏好简洁的技术回答" for item in mgr.memories)
 
     def test_get_profile_returns_dict(self, mgr):
         p = mgr.get_profile()

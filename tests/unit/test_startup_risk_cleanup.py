@@ -86,7 +86,9 @@ def test_task_classifier_rejects_incompatible_sklearn_artifacts(tmp_path, monkey
     assert "请重新运行" in classifier_module.TaskClassifier._load_error
 
 
-def test_task_classifier_catches_unversioned_pickle_compatibility_warning(tmp_path, monkeypatch):
+def test_task_classifier_catches_unversioned_pickle_compatibility_warning(
+    tmp_path, monkeypatch
+):
     import pickle
     import warnings
 

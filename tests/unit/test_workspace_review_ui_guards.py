@@ -57,9 +57,7 @@ def test_workspace_hydrates_native_docx_review_state_and_exposes_visible_review_
     review_engine_entry = _read("web/src/bundles/docx-review-engine.ts")
     review_loader = _read("web/src/workspace/docx-review-loader.ts")
     workspace_bundle = _read("web/static/js/build/workspace-bundle.js")
-    review_engine_bundle = _read(
-        "web/static/js/build/docx-review-engine-bundle.js"
-    )
+    review_engine_bundle = _read("web/static/js/build/docx-review-engine-bundle.js")
     css = _read("web/static/css/workspace.css")
 
     assert "function _syncReviewStateForActiveFile" in js

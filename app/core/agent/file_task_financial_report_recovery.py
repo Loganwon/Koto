@@ -8,28 +8,24 @@ through the canonical allowlisted tools and emits the normal tool/file events.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
 import logging
 import math
 import os
-from pathlib import Path
 import re
+from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
-from app.core.agent.file_task_contract import (
-    FileTaskEvent,
-    FileTaskToolStreamResult,
-)
 from app.core.agent.file_task_artifact_transaction import (
     cleanup_run_owned_paths,
     commit_staged_artifact,
     committed_file_changes,
     run_scoped_staging_path,
 )
+from app.core.agent.file_task_contract import FileTaskEvent, FileTaskToolStreamResult
 from app.core.agent.file_task_runtime_utils import _is_error_result
 from app.core.agent.file_task_tool_catalog import tool_result_preview
-
 
 logger = logging.getLogger(__name__)
 _IMAGE_ARTIFACT_EXTENSIONS = {"png", "jpg", "jpeg", "webp", "bmp", "gif"}
@@ -121,10 +117,7 @@ def _run_tool(
 
 def _expected_financial_chart_paths(source_path: str) -> List[Path]:
     source = Path(source_path)
-    stem = (
-        re.sub(r"[^A-Za-z0-9_-]+", "_", source.stem).strip("_")
-        or "financial_model"
-    )
+    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", source.stem).strip("_") or "financial_model"
     return [
         source.parent / f"{stem}_financial_pnl_trend.png",
         source.parent / f"{stem}_product_sales_revenue_structure.png",
@@ -168,7 +161,9 @@ def _as_number(value: Any) -> Optional[float]:
     return number if math.isfinite(number) else None
 
 
-def _extract_series(source_path: str) -> Tuple[str, List[str], Dict[str, List[Optional[float]]]]:
+def _extract_series(
+    source_path: str,
+) -> Tuple[str, List[str], Dict[str, List[Optional[float]]]]:
     try:
         from openpyxl import load_workbook
     except Exception:
@@ -235,7 +230,9 @@ def _pick_series(
     return "", []
 
 
-def _first_last(values: List[Optional[float]]) -> Tuple[Optional[float], Optional[float]]:
+def _first_last(
+    values: List[Optional[float]],
+) -> Tuple[Optional[float], Optional[float]]:
     present = [value for value in values if value is not None]
     return (present[0], present[-1]) if present else (None, None)
 
@@ -258,7 +255,9 @@ def _build_report_paragraphs(
     sheet_name, periods, series = _extract_series(source_path)
     revenue_label, revenue = _pick_series(series, "收入合计", "营业收入", "revenue")
     gross_label, gross_profit = _pick_series(series, "毛利合计", "毛利", "gross profit")
-    gross_margin_label, gross_margin = _pick_series(series, "综合毛利率", "毛利率", "gross margin")
+    gross_margin_label, gross_margin = _pick_series(
+        series, "综合毛利率", "毛利率", "gross margin"
+    )
     net_label, net_profit = _pick_series(series, "净利润", "net profit")
     net_margin_label, net_margin = _pick_series(series, "净利率", "net margin")
     tax_label, tax = _pick_series(series, "所得税费用", "income tax")
@@ -268,7 +267,12 @@ def _build_report_paragraphs(
     net_first, net_last = _first_last(net_profit)
     period_count = max(1, len([item for item in revenue if item is not None]) - 1)
     revenue_cagr = None
-    if revenue_first and revenue_last is not None and revenue_first > 0 and revenue_last >= 0:
+    if (
+        revenue_first
+        and revenue_last is not None
+        and revenue_first > 0
+        and revenue_last >= 0
+    ):
         revenue_cagr = (revenue_last / revenue_first) ** (1 / period_count) - 1
 
     findings = [
@@ -282,11 +286,17 @@ def _build_report_paragraphs(
         )
     net_values = [value for value in net_profit if value is not None]
     if net_values and min(net_values) < 0 < max(net_values):
-        findings.append("预测期内净利润由亏损转为盈利，盈利拐点高度依赖收入增长和费用率下降，建议建立下行情景。")
+        findings.append(
+            "预测期内净利润由亏损转为盈利，盈利拐点高度依赖收入增长和费用率下降，建议建立下行情景。"
+        )
     if tax and any(value is None for value in tax):
-        findings.append("所得税费用预测存在年度空值，税率、亏损弥补和递延所得税逻辑需要逐年闭环。")
+        findings.append(
+            "所得税费用预测存在年度空值，税率、亏损弥补和递延所得税逻辑需要逐年闭环。"
+        )
     if tax and any((value or 0) < 0 for value in tax if value is not None):
-        findings.append("所得税费用出现负值，应明确其属于税收返还、亏损抵扣还是符号错误，并与净利润公式复核。")
+        findings.append(
+            "所得税费用出现负值，应明确其属于税收返还、亏损抵扣还是符号错误，并与净利润公式复核。"
+        )
     if gross_margin:
         gm_first, gm_last = _first_last(gross_margin)
         if gm_first is not None and gm_last is not None and gm_last - gm_first > 0.08:
@@ -298,7 +308,9 @@ def _build_report_paragraphs(
         if item and item not in unique_findings:
             unique_findings.append(item)
     if not unique_findings:
-        unique_findings.append("未发现可直接判定的结构性错误，但预测模型仍应补充关键假设、敏感性分析和三表勾稽检查。")
+        unique_findings.append(
+            "未发现可直接判定的结构性错误，但预测模型仍应补充关键假设、敏感性分析和三表勾稽检查。"
+        )
 
     period_text = "、".join(periods) if periods else "可用预测年度"
     summary = (
@@ -316,7 +328,11 @@ def _build_report_paragraphs(
         {"text": "二、关键财务趋势", "style": "Heading 1"},
         {
             "text": f"收入趋势：{revenue_label or '收入指标'}从 {_number(revenue_first)} 变为 {_number(revenue_last)}"
-            + (f"，预测期复合增速约 {_percent(revenue_cagr)}。" if revenue_cagr is not None else "。"),
+            + (
+                f"，预测期复合增速约 {_percent(revenue_cagr)}。"
+                if revenue_cagr is not None
+                else "。"
+            ),
             "style": "Normal",
         },
         {
@@ -331,9 +347,7 @@ def _build_report_paragraphs(
         {"text": "三、发现的问题与风险", "style": "Heading 1"},
     ]
     for index, finding in enumerate(unique_findings[:12], start=1):
-        paragraphs.append(
-            {"text": f"问题 {index}：{finding}", "style": "Heading 2"}
-        )
+        paragraphs.append({"text": f"问题 {index}：{finding}", "style": "Heading 2"})
     paragraphs.extend(
         [
             {"text": "四、建议的补充验证", "style": "Heading 1"},
@@ -374,9 +388,7 @@ def recover_financial_report(
 
     staging_path = run_scoped_staging_path(request, target_path)
     expected_chart_paths = _expected_financial_chart_paths(source_path)
-    preexisting_chart_paths = {
-        path for path in expected_chart_paths if path.is_file()
-    }
+    preexisting_chart_paths = {path for path in expected_chart_paths if path.is_file()}
     cleanup_run_owned_paths(staging_path)
 
     yield ledger.event(
@@ -475,9 +487,7 @@ def recover_financial_report(
         if path and Path(path).suffix.lower() in {".png", ".jpg", ".jpeg"}:
             image_paths.append(path)
     if len(image_paths) < 2:
-        image_paths.extend(
-            str(path) for path in expected_chart_paths if path.exists()
-        )
+        image_paths.extend(str(path) for path in expected_chart_paths if path.exists())
     image_paths = list(dict.fromkeys(image_paths))[:2]
 
     image_successes = 0
@@ -635,14 +645,15 @@ def financial_chart_recovery_tool_args(
         return {}
     source_path = Path(source)
     output_dir = source_path.parent
-    stem = re.sub(r"[^A-Za-z0-9_-]+", "_", source_path.stem).strip("_") or "financial_model"
+    stem = (
+        re.sub(r"[^A-Za-z0-9_-]+", "_", source_path.stem).strip("_")
+        or "financial_model"
+    )
     pnl_chart = output_dir / f"{stem}_financial_pnl_trend.png"
     structure_chart = output_dir / f"{stem}_product_sales_revenue_structure.png"
     return {
         "timeout": 120,
-        "code": financial_chart_recovery_code(
-            source_path, pnl_chart, structure_chart
-        ),
+        "code": financial_chart_recovery_code(source_path, pnl_chart, structure_chart),
     }
 
 
@@ -650,7 +661,7 @@ def financial_chart_recovery_code(
     source_path: Path, pnl_chart: Path, structure_chart: Path
 ) -> str:
     """Return self-contained, data-driven chart code for the recovery path."""
-    return f'''from pathlib import Path
+    return f"""from pathlib import Path
 from openpyxl import load_workbook
 import math
 import re
@@ -751,7 +762,7 @@ plt.close(fig)
 
 print('KOTO_CREATED:' + str(pnl_chart.resolve()))
 print('KOTO_CREATED:' + str(structure_chart.resolve()))
-'''
+"""
 
 
 def insert_pending_generated_docx_images_native(
@@ -795,9 +806,7 @@ def insert_pending_generated_docx_images_native(
         except Exception as exc:
             result = f"Error: {exc}"
             success = False
-            logger.warning(
-                "native chart insertion failed for %s: %s", image_name, exc
-            )
+            logger.warning("native chart insertion failed for %s: %s", image_name, exc)
         yield ledger.event(
             "tool.finished",
             {

@@ -35,7 +35,9 @@ def test_file_task_uses_current_local_selection_not_saved_task_payload(monkeypat
     from web.file_task_stream import _normalize_file_task_payload
 
     monkeypatch.setattr(local_runtime, "get_configured_model_mode", lambda: "local")
-    monkeypatch.setattr(runtime_context, "get_configured_local_model_id", lambda: "qwen3.5:9b")
+    monkeypatch.setattr(
+        runtime_context, "get_configured_local_model_id", lambda: "qwen3.5:9b"
+    )
 
     normalized = _normalize_file_task_payload(
         {

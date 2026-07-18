@@ -3,13 +3,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 import logging
 import os
-from pathlib import Path
 import re
+from collections.abc import Iterable
+from pathlib import Path
 from typing import Any, Dict, List
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,15 +44,16 @@ def run_scoped_staging_path(
 ) -> Path:
     """Return a hidden, run-owned staging path beside the final target."""
     target = resolved_write_path(target_path)
-    run_token = re.sub(
-        r"[^A-Za-z0-9_-]+",
-        "_",
-        str(getattr(request, "run_id", "") or "run"),
-    ).strip("_")[:48] or "run"
-    suffix = target.suffix
-    return target.with_name(
-        f".{target.stem}.{run_token}.{marker}{suffix}"
+    run_token = (
+        re.sub(
+            r"[^A-Za-z0-9_-]+",
+            "_",
+            str(getattr(request, "run_id", "") or "run"),
+        ).strip("_")[:48]
+        or "run"
     )
+    suffix = target.suffix
+    return target.with_name(f".{target.stem}.{run_token}.{marker}{suffix}")
 
 
 def cleanup_run_owned_paths(

@@ -46,6 +46,18 @@ def _fresh_executor() -> ModelFallbackExecutor:
 SHORT_CHAIN = ["model-a", "model-b", "model-c"]
 
 
+@pytest.fixture(autouse=True)
+def _disable_machine_local_ollama_fallback(monkeypatch):
+    """Keep cloud fallback tests independent of a developer's Ollama daemon."""
+    from app.core.routing.local_model_router import LocalModelRouter
+
+    monkeypatch.setattr(
+        LocalModelRouter,
+        "is_ollama_available",
+        classmethod(lambda cls: False),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------

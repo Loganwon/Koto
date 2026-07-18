@@ -2760,9 +2760,14 @@ class TestLocalModelMode:
         assert "payload.blocked ? '查看拦截原因' : '查看执行输出'" in tool_output
         assert "data.blocked" in execution_events
         assert "const icon = data.skipped ? '跳过'" in execution_events
-        assert ": (data.blocked ? '阻断' : (finished ? '完成' : '失败'));" in execution_events
+        assert (
+            ": (data.blocked ? '阻断' : (finished ? '完成' : '失败'));"
+            in execution_events
+        )
 
-    def test_workspace_task_renderer_opens_only_the_final_output_and_refreshes_the_file_tree(self):
+    def test_workspace_task_renderer_opens_only_the_final_output_and_refreshes_the_file_tree(
+        self,
+    ):
         """Intermediate artifacts stay out of tabs while external writes refresh the left file tree."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         file_change_state = _read_frontend_source(
@@ -2781,12 +2786,22 @@ class TestLocalModelMode:
         assert "registerFinalTaskOutput(" in run_events
         assert "openFinalTaskOutput(runtime, card, data, result);" in run_events
         assert "function requestFileBrowserRefreshAfterExternalChange(): void" in tree
-        assert "wa.requestFileBrowserRefreshAfterExternalChange = requestFileBrowserRefreshAfterExternalChange;" in tree
-        assert "const handleFileChanged: TaskExecutionEventHandler<TCard>" in execution_events
+        assert (
+            "wa.requestFileBrowserRefreshAfterExternalChange = requestFileBrowserRefreshAfterExternalChange;"
+            in tree
+        )
+        assert (
+            "const handleFileChanged: TaskExecutionEventHandler<TCard>"
+            in execution_events
+        )
         file_changed_start = execution_events.index("const handleFileChanged:")
-        file_changed_end = execution_events.index("const handleReadChanged:", file_changed_start)
+        file_changed_end = execution_events.index(
+            "const handleReadChanged:", file_changed_start
+        )
         file_changed = execution_events[file_changed_start:file_changed_end]
-        assert "refreshWorkspaceFile(change.refreshPath || change.path);" in file_changed
+        assert (
+            "refreshWorkspaceFile(change.refreshPath || change.path);" in file_changed
+        )
         assert "requestFileBrowserRefreshAfterExternalChange" in renderer
         assert "taskFileChangeDescriptor(" in file_changed
         assert "recordTaskFileChange(state, change)" in file_changed
@@ -2811,7 +2826,10 @@ class TestLocalModelMode:
         assert "'repair_guard'" in labels
         assert "'readonly_answer_guard'" in labels
         assert "return !!payload.skipped;" in tool_output
-        assert "const handleToolFinished: TaskExecutionEventHandler<TCard>" in execution_events
+        assert (
+            "const handleToolFinished: TaskExecutionEventHandler<TCard>"
+            in execution_events
+        )
         assert (
             "const kind = data.blocked || data.tool_name === 'ask_user'"
             in execution_events
@@ -2837,10 +2855,7 @@ class TestLocalModelMode:
         dispatch = _read_frontend_source("web/src/workspace/file-task-dispatch.ts")
         ui_state = _read_frontend_source("web/src/workspace/task-ui-state.ts")
 
-        assert (
-            "export function noteTaskStreamIssue("
-            in ui_state
-        )
+        assert "export function noteTaskStreamIssue(" in ui_state
         assert "state.streamIssueKeys" in ui_state
         assert "noteStreamIssue: noteTaskStreamIssue" in renderer
         assert "state.lastEventSeq" in dispatch
@@ -2853,9 +2868,7 @@ class TestLocalModelMode:
         verification_events = _read_frontend_source(
             "web/src/workspace/task-verification-event-handlers.ts"
         )
-        policy = _read_frontend_source(
-            "web/src/workspace/task-detail-policy.ts"
-        )
+        policy = _read_frontend_source("web/src/workspace/task-detail-policy.ts")
 
         assert (
             "const handleStepResult: TaskVerificationEventHandler<TCard> = (card, evt, payload) =>"
@@ -2874,21 +2887,18 @@ class TestLocalModelMode:
         stage_presentation = _read_frontend_source(
             "web/src/workspace/task-stage-presentation.ts"
         )
-        stage_state = _read_frontend_source(
-            "web/src/workspace/task-stage-state.ts"
-        )
+        stage_state = _read_frontend_source("web/src/workspace/task-stage-state.ts")
 
-        assert (
-            "function applyCanonicalTaskStageState("
-            in stage_presentation
-        )
+        assert "function applyCanonicalTaskStageState(" in stage_presentation
         assert "createTaskStagePresentation" in renderer
         assert "taskStageProjectionFromEvent(event)" in stage_presentation
         assert "'progress': handleEvent_progress" not in renderer
         assert "export function taskStageProjectionFromEvent(" in stage_state
         assert "event.ui_state" in stage_state
 
-    def test_workspace_task_renderer_preserves_structured_failed_terminal_payloads(self):
+    def test_workspace_task_renderer_preserves_structured_failed_terminal_payloads(
+        self,
+    ):
         """Failed run.finished payloads keep structured details while local transport errors remain actionable."""
         renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
         terminal_events = _read_frontend_source(
@@ -2923,10 +2933,7 @@ class TestLocalModelMode:
             "const taskRuntime = data.runtime && typeof data.runtime === 'object'"
             in run_context
         )
-        assert (
-            "taskRuntime.terminal_status || ''"
-            in run_context
-        )
+        assert "taskRuntime.terminal_status || ''" in run_context
         assert "card.dataset.taskTerminalStatus = terminalStatus" in run_context
         assert (
             "fatal_error_text: String((element as any)._fatalErrorText || '')"
@@ -2971,22 +2978,10 @@ class TestLocalModelMode:
         )
         assert "from './task-plan-presentation';" in plan_events
         assert "const data = normalizedTaskLifecyclePayload(payload);" in plan_events
-        assert (
-            "['taskRequestKind', data.request_kind]"
-            in run_context
-        )
-        assert (
-            "['taskFamily', data.task_family]"
-            in run_context
-        )
-        assert (
-            "['taskOutputMode', data.output_mode]"
-            in run_context
-        )
-        assert (
-            "['taskSelectedRecipe', data.selected_recipe]"
-            in run_context
-        )
+        assert "['taskRequestKind', data.request_kind]" in run_context
+        assert "['taskFamily', data.task_family]" in run_context
+        assert "['taskOutputMode', data.output_mode]" in run_context
+        assert "['taskSelectedRecipe', data.selected_recipe]" in run_context
         assert "card.dataset.taskIntentStrategy = intentStrategy;" in run_context
         assert (
             "card.dataset.taskIntentCanApply = intentPlan.can_apply ? 'true' : 'false';"
@@ -3061,7 +3056,10 @@ class TestLocalModelMode:
         assert "if (quickActionMode === 'hybrid')" in result_presentation
         assert 'data-task-followup-action="apply"' in result_presentation
         assert "应用建议" in result_presentation
-        assert "} else if (state.outputMode && state.outputMode !== 'write')" in result_presentation
+        assert (
+            "} else if (state.outputMode && state.outputMode !== 'write')"
+            in result_presentation
+        )
         assert (
             "const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);"
             in dispatcher
@@ -3108,9 +3106,7 @@ class TestLocalModelMode:
         plan_events = _read_frontend_source(
             "web/src/workspace/task-plan-event-handlers.ts"
         )
-        stage_state = _read_frontend_source(
-            "web/src/workspace/task-stage-state.ts"
-        )
+        stage_state = _read_frontend_source("web/src/workspace/task-stage-state.ts")
 
         assert (
             "export function classificationValueLabel(kind: string, value: unknown): string"
@@ -3166,7 +3162,10 @@ class TestLocalModelMode:
             "web/src/workspace/task-result-presentation.ts"
         )
 
-        assert "card.dataset.taskQuickActionMode = normalizeQuickActionMode(" in run_context
+        assert (
+            "card.dataset.taskQuickActionMode = normalizeQuickActionMode("
+            in run_context
+        )
         assert "data.quick_action_mode" in run_context
         assert "if (quickActionMode === 'answer')" in result_presentation
         assert "if (quickActionMode === 'hybrid')" in result_presentation
@@ -4850,9 +4849,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         self,
     ):
         dispatcher = _read_frontend_source("web/src/workspace/task-dispatcher.ts")
-        payload = _read_frontend_source(
-            "web/src/workspace/task-dispatcher-payload.ts"
-        )
+        payload = _read_frontend_source("web/src/workspace/task-dispatcher-payload.ts")
 
         assert "function currentOpenTaskFile(): TaskFileInfo | null" in dispatcher
         assert (
@@ -4880,7 +4877,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in target_inference
         )
         assert "splitOutputDirectoryAfterFile(after)" in target_inference
-        assert "export function hasReadOnlyHint(text: string): boolean" in target_inference
+        assert (
+            "export function hasReadOnlyHint(text: string): boolean" in target_inference
+        )
         assert "const readSourcePattern" in target_inference
         assert "const explicitOutputBeforePattern" in target_inference
         assert "overrideOptions.enable_ai_intent_adjudicator = true;" not in dispatcher
@@ -5003,16 +5002,17 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };"
             in renderer
         )
-        assert (
-            "runtime.csrfFetch('/api/editor/ai/task-stream'"
-            in task_stream_transport
-        )
+        assert "runtime.csrfFetch('/api/editor/ai/task-stream'" in task_stream_transport
         assert "export function createWorkspaceAiResultsRuntime(" in ai_results
-        assert "publishWorkspaceApi({ createWorkspaceAiResultsRuntime })" not in ai_results
+        assert (
+            "publishWorkspaceApi({ createWorkspaceAiResultsRuntime })" not in ai_results
+        )
         assert "export function createQuickActionDispatcher(" in quick_actions
         assert "createWorkspaceQuickActionRuntime" not in quick_actions
         assert "export function createWorkspaceAiConversation(" in conversation
-        assert "publishWorkspaceApi({ createWorkspaceAiConversation })" not in conversation
+        assert (
+            "publishWorkspaceApi({ createWorkspaceAiConversation })" not in conversation
+        )
         assert "model' || value === 'ai'" in conversation
         assert "export function installWorkspaceFindReplace" in find_replace
         assert "publishWorkspaceApi({ installWorkspaceFindReplace })" in find_replace
@@ -5035,7 +5035,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert (
             "_waQuickActionRuntime.attachDispatcher(_waTaskDispatcher);" in runtime_init
         )
-        assert "import { createTaskDispatcher } from './task-dispatcher';" in runtime_init
+        assert (
+            "import { createTaskDispatcher } from './task-dispatcher';" in runtime_init
+        )
         assert "fetch('/api/editor/ai/task-stream'" not in assistant
         assert "{% include '_workspace_asset_scripts.html' %}" in standalone
         assert "{% include '_workspace_asset_scripts.html' %}" in main
@@ -5070,7 +5072,9 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "scheduleWorkspaceFindReplaceLoad" in workspace_bundle_entry
         assert "import '../workspace/find-replace';" not in workspace_bundle_entry
         assert "requestIdleCallback" in find_replace_loader
-        assert "[data-wa-find-input], [data-wa-find-replace-input]" in find_replace_loader
+        assert (
+            "[data-wa-find-input], [data-wa-find-replace-input]" in find_replace_loader
+        )
         assert "import '../workspace/task-dispatcher';" in workspace_bundle_entry
         assert "doc-agent-ui.js" not in standalone
         assert "wa-doc-agent-phases" not in standalone
@@ -5165,15 +5169,11 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assistant = _read_frontend_source("web/src/workspace/ai-review.ts")
         runtime_init = _read_frontend_source("web/src/workspace/runtime-init.ts")
         task_renderer = _read_frontend_source("web/src/workspace/task-runner.ts")
-        task_ui_state = _read_frontend_source(
-            "web/src/workspace/task-ui-state.ts"
-        )
+        task_ui_state = _read_frontend_source("web/src/workspace/task-ui-state.ts")
         task_lifecycle = _read_frontend_source(
             "web/src/workspace/task-stream-lifecycle.ts"
         )
-        task_recovery = _read_frontend_source(
-            "web/src/workspace/task-run-recovery.ts"
-        )
+        task_recovery = _read_frontend_source("web/src/workspace/task-run-recovery.ts")
 
         assert "turn.task_card_snapshot" in conversation
         assert "import { restoreTaskRunCard } from './task-runner';" in conversation
@@ -5219,18 +5219,21 @@ class TestWorkspaceAssistantTaskRemovalRegression:
             in runtime_init
         )
         assert "const restoreTaskRunCard = (" in task_recovery
-        assert "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };" in task_renderer
-        assert "restoreTaskRunCard" not in task_renderer.split("taskFlowTestHarness:", 1)[-1]
+        assert (
+            "export { streamTaskFlow, restoreTaskRunCard, resumePersistedFileTask };"
+            in task_renderer
+        )
+        assert (
+            "restoreTaskRunCard"
+            not in task_renderer.split("taskFlowTestHarness:", 1)[-1]
+        )
         assert "export function isTaskUiStateCard(" in task_ui_state
         assert "isTaskUiStateCard as isTaskCardElement" in task_renderer
         assert "if (!card || !runtime.isCard(card)) return false;" in task_lifecycle
         assert "cancelRun: cancelFileTaskRun," in task_renderer
         assert "if (!card || !runtime.isCard(card)) return null;" in task_recovery
-        assert (
-            "const card = isTaskCard(loadingEl)"
-            in _read_frontend_source(
-                "web/src/workspace/task-stage-presentation.ts"
-            )
+        assert "const card = isTaskCard(loadingEl)" in _read_frontend_source(
+            "web/src/workspace/task-stage-presentation.ts"
         )
         task_stream_transport = _read_frontend_source(
             "web/src/workspace/task-stream-transport.ts"
@@ -5299,9 +5302,7 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         task_transport = _read_frontend_source(
             "web/src/workspace/task-stream-transport.ts"
         )
-        direct_chat = _read_frontend_source(
-            "web/src/workspace/task-direct-chat.ts"
-        )
+        direct_chat = _read_frontend_source("web/src/workspace/task-direct-chat.ts")
         assert "/api/editor/ai/task-stream" in task_transport
         assert "createWorkspaceChatStreamer" in direct_chat
 
@@ -5410,13 +5411,15 @@ class TestWorkspaceAssistantTaskRemovalRegression:
         assert "applyStructuredDocToolCall," not in review_api
         assert "focusReviewThread," in review_api
         assert "relayoutDocxReviewRail," in review_api
-        assert "import { applyStructuredDocToolCall } from './docx-review-runtime';" in results
+        assert (
+            "import { applyStructuredDocToolCall } from './docx-review-runtime';"
+            in results
+        )
         assert "applyStructuredDocToolCall(proposal.tool_call" in results
         assert "applyStructuredDocToolCall(toolCall" in results
         assert (
             "export const applyStructuredReviewChangePayload = "
-            "(payload: any, options: any = {}): boolean =>"
-            in docx_review_runtime
+            "(payload: any, options: any = {}): boolean =>" in docx_review_runtime
         )
 
     def test_workspace_proposal_buttons_stay_single_line_and_equal_width(self):

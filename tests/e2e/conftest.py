@@ -17,6 +17,7 @@ import time
 import pytest
 import requests
 
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------
@@ -142,7 +143,10 @@ def _flask_server(e2e_base_url, _protect_user_settings, tmp_path_factory):
         for section, key in stable_paths:
             before_section = settings_before_start.get(section)
             if isinstance(before_section, dict) and key in before_section:
-                assert settings_after_start.get(section, {}).get(key) == before_section[key], (
+                assert (
+                    settings_after_start.get(section, {}).get(key)
+                    == before_section[key]
+                ), (
                     f"Server startup rewrote {section}.{key}: "
                     f"{before_section[key]!r} -> "
                     f"{settings_after_start.get(section, {}).get(key)!r}"

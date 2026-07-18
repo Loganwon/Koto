@@ -260,9 +260,7 @@ def test_financial_report_recovers_through_native_tools_when_model_times_out(tmp
     recovery_finished = next(
         event for event in events if event.type == "recovery.finished"
     )
-    check_finished = next(
-        event for event in events if event.type == "check.finished"
-    )
+    check_finished = next(event for event in events if event.type == "check.finished")
     run_finished = events[-1]
     document = Document(target_path)
 
@@ -272,7 +270,10 @@ def test_financial_report_recovers_through_native_tools_when_model_times_out(tmp
     assert run_finished.type == "run.finished"
     assert run_finished.payload["completed_task"] is True
     assert "failure" not in run_finished.payload
-    assert len([paragraph for paragraph in document.paragraphs if paragraph.text.strip()]) >= 12
+    assert (
+        len([paragraph for paragraph in document.paragraphs if paragraph.text.strip()])
+        >= 12
+    )
     assert len(document.tables) >= 1
     assert len(document.inline_shapes) >= 2
     assert "发现的问题与风险" in "\n".join(
@@ -544,7 +545,9 @@ def test_financial_report_quality_rejects_unreadable_raw_wide_table():
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
     quality = runtime._evaluate_task_quality_gate(
@@ -866,15 +869,23 @@ def test_file_task_runtime_requires_all_generated_chart_images_inserted(tmp_path
 
 def test_generated_docx_image_guard_resolves_workspace_relative_artifacts(tmp_path):
     image = tmp_path / "chart1_revenue_profit_trend.png"
-    image.write_bytes(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="))
+    image.write_bytes(
+        base64.b64decode(
+            "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+tm0YAAAAASUVORK5CYII="
+        )
+    )
     runtime = FileTaskRuntime()
-    runtime._resolve_task_file_path = lambda value: str(image) if value == image.name else None
+    runtime._resolve_task_file_path = lambda value: (
+        str(image) if value == image.name else None
+    )
     request = FileTaskRequest(
         task="分析财务预测并将图表写入新的 docx",
         target_path="report.docx",
         files=[
             FileTaskFile(path="financial.xlsx", name="financial.xlsx", type="xlsx"),
-            FileTaskFile(path="report.docx", name="report.docx", type="docx", target=True),
+            FileTaskFile(
+                path="report.docx", name="report.docx", type="docx", target=True
+            ),
         ],
     )
 

@@ -7,10 +7,8 @@ from app.core.agent.file_task_contract import (
     FileTaskIntentPlan,
     FileTaskRequest,
 )
+from app.core.agent.file_task_preflight_policy import build_preflight_constraint_audit
 from app.core.agent.file_task_runtime import FileTaskRuntime
-from app.core.agent.file_task_preflight_policy import (
-    build_preflight_constraint_audit,
-)
 from app.core.agent.file_task_supervisor_audit import build_supervisor_audit
 from app.core.agent.file_task_validation import (
     build_file_task_requirements,
@@ -314,9 +312,10 @@ def test_supervisor_audit_allows_new_docx_artifact_with_multiple_xlsx_sources():
     assert requirements.target_file_type == "docx"
     assert constraint_audit["status"] == "clear"
     assert "new_artifact_target_required" in constraint_audit["hard_constraints"]
-    assert "explicit_or_unambiguous_target_required" not in constraint_audit[
-        "hard_constraints"
-    ]
+    assert (
+        "explicit_or_unambiguous_target_required"
+        not in constraint_audit["hard_constraints"]
+    )
     assert "ambiguous_target:xlsx" not in constraint_audit["conflicts"]
     assert audit["status"] == "clear"
     assert audit["execution_allowed"] is True

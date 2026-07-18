@@ -1177,9 +1177,7 @@ class TestKotoSetupDeep:
         with patch("sys.argv", ["koto_setup.py", "--setup"]), patch(
             "src.koto_setup._show_api_setup_wizard",
             return_value={"key": None, "base": "", "cancelled": True},
-        ), patch(
-            "src.koto_setup._run_unified_setup", return_value=False
-        ):
+        ), patch("src.koto_setup._run_unified_setup", return_value=False):
             _run_setup_if_needed()  # should not crash
 
     def test_run_setup_skips_when_key_valid(self):

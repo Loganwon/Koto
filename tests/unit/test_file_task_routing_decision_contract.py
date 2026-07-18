@@ -208,8 +208,7 @@ def test_workspace_file_task_payload_exposes_top_level_routing_decision():
     assert "explicitTaskPayload.routing_decision = explicitRoutingDecision;" in source
     assert "normalized.candidate_workflows = candidateWorkflows;" in routing
     assert (
-        "normalized.requires_adjudication = !!source.requires_adjudication;"
-        in routing
+        "normalized.requires_adjudication = !!source.requires_adjudication;" in routing
     )
     assert "normalized.frontend_label = frontendLabel;" in routing
     assert "normalized.plan_steps = planSteps;" in routing
@@ -279,14 +278,8 @@ def test_workspace_lifecycle_payload_expands_decision_context_for_consumers():
     assert "const decisionContext = data.decision_context" in lifecycle_payload
     assert "decisionContext?.classification" in lifecycle_payload
     assert "'routing_decision'," in lifecycle_payload
-    assert (
-        "normalizedTaskLifecyclePayload(payload)"
-        in run_context
-    )
+    assert "normalizedTaskLifecyclePayload(payload)" in run_context
     assert "card.dataset.taskRoutingDecision = encodeURIComponent(" in run_context
     assert "JSON.stringify(routingDecision)," in run_context
     assert "metadata.route_intent = JSON.parse(decodeURIComponent" in dispatcher
-    assert (
-        "const routeIntent = data.route_intent"
-        in workbench
-    )
+    assert "const routeIntent = data.route_intent" in workbench

@@ -48,9 +48,7 @@ def test_workspace_model_controls_use_single_trigger_and_grouped_menu():
     controls = (root / "web/templates/_workspace_model_controls.html").read_text(
         encoding="utf-8"
     )
-    css = (root / "web/static/css/workspace-ai-panel.css").read_text(
-        encoding="utf-8"
-    )
+    css = (root / "web/static/css/workspace-ai-panel.css").read_text(encoding="utf-8")
 
     assert 'id="wa-model-menu-trigger"' in controls
     assert 'aria-haspopup="listbox"' in controls

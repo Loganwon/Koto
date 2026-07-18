@@ -83,11 +83,7 @@ class TestCleanupCallsFlush:
 
         with patch.dict(
             "sys.modules",
-            {
-                "app.core.config.user_settings": MagicMock(
-                    SettingsManager=mock_sm
-                )
-            },
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()
 
@@ -99,11 +95,7 @@ class TestCleanupCallsFlush:
 
         with patch.dict(
             "sys.modules",
-            {
-                "app.core.config.user_settings": MagicMock(
-                    SettingsManager=mock_sm
-                )
-            },
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()
 
@@ -139,11 +131,7 @@ class TestCleanupHandlesFlushException:
 
         with patch.dict(
             "sys.modules",
-            {
-                "app.core.config.user_settings": MagicMock(
-                    SettingsManager=mock_sm
-                )
-            },
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()  # must not propagate
 
@@ -155,11 +143,7 @@ class TestCleanupHandlesFlushException:
 
         with patch.dict(
             "sys.modules",
-            {
-                "app.core.config.user_settings": MagicMock(
-                    SettingsManager=mock_sm
-                )
-            },
+            {"app.core.config.user_settings": MagicMock(SettingsManager=mock_sm)},
         ):
             _cleanup()  # must not propagate
 

@@ -40,15 +40,9 @@ from app.core.agent.file_task_capability import (
 )
 from app.core.agent.file_task_classification import (
     adjudicate_intent_if_needed as _intent_adjudicator_adjudicate_if_needed,
-)
-from app.core.agent.file_task_classification import (
     apply_classification_intent_overrides,
     apply_followup_annotation_overrides,
-)
-from app.core.agent.file_task_classification import (
     apply_intent_adjudication as _classification_contract_apply_intent_adjudication,
-)
-from app.core.agent.file_task_classification import (
     apply_recipe_classification,
     apply_write_intent_reason_codes,
     build_classification_pipeline_state,
@@ -57,29 +51,13 @@ from app.core.agent.file_task_classification import (
     build_final_classification,
     build_intent_adjudication_contract_context,
     build_mainline_contract_context,
-)
-from app.core.agent.file_task_classification import (
     classification_task_text as _intent_adjudication_classification_task_text,
-)
-from app.core.agent.file_task_classification import (
     demote_classification_to_read as _classification_contract_demote_to_read,
-)
-from app.core.agent.file_task_classification import (
     infer_task_family_operation as _classification_semantics_infer_task_family_operation,
-)
-from app.core.agent.file_task_classification import (
     intent_adjudicator_system_prompt as _intent_adjudication_system_prompt,
-)
-from app.core.agent.file_task_classification import (
     normalize_mainline_contract as _classification_contract_normalize_mainline,
-)
-from app.core.agent.file_task_classification import (
     request_with_task as _intent_adjudication_request_with_task,
-)
-from app.core.agent.file_task_classification import (
     routing_decision_payload as _decision_context_routing_decision_payload,
-)
-from app.core.agent.file_task_classification import (
     should_adjudicate_intent as _intent_adjudication_should_adjudicate_intent,
 )
 from app.core.agent.file_task_completion_contract import build_completion_contract
@@ -99,32 +77,18 @@ from app.core.agent.file_task_contract import (
 )
 from app.core.agent.file_task_doc_annotate_request import (
     docx_annotation_contract_for_request as _doc_annotate_contract_for_request,
-)
-from app.core.agent.file_task_doc_annotate_request import (
     docx_annotation_has_request_contract as _doc_annotate_has_request_contract,
-)
-from app.core.agent.file_task_doc_annotate_request import (
     is_docx_annotation_request as _doc_annotate_is_annotation_request,
-)
-from app.core.agent.file_task_doc_annotate_request import (
     is_docx_clear_review_request as _doc_annotate_is_clear_review_request,
 )
 from app.core.agent.file_task_docx_edit_guard import (
     local_docx_edit_block_message as _docx_edit_local_block_message,
-)
-from app.core.agent.file_task_docx_edit_guard import (
     tool_args_docx_paragraph_count as _docx_edit_paragraph_count,
 )
 from app.core.agent.file_task_execution_brief import (
     execution_brief_schema as _brief_execution_brief_schema,
-)
-from app.core.agent.file_task_execution_brief import (
     extract_execution_brief as _brief_extract_execution_brief,
-)
-from app.core.agent.file_task_execution_brief import (
     looks_like_brief_only_content as _brief_looks_like_brief_only_content,
-)
-from app.core.agent.file_task_execution_brief import (
     normalize_execution_brief as _brief_normalize_execution_brief,
 )
 from app.core.agent.file_task_execution_loop import FileTaskExecutionLoop
@@ -136,20 +100,10 @@ from app.core.agent.file_task_financial_report_recovery import (
 )
 from app.core.agent.file_task_execution_messaging import (
     execution_brief_continue_message as _execution_messaging_brief_continue_message,
-)
-from app.core.agent.file_task_execution_messaging import (
     execution_plan_continue_message as _execution_messaging_plan_continue_message,
-)
-from app.core.agent.file_task_execution_messaging import (
     intent_plan_guidance as _execution_messaging_intent_plan_guidance,
-)
-from app.core.agent.file_task_execution_messaging import (
     output_mode_guidance as _execution_messaging_output_mode_guidance,
-)
-from app.core.agent.file_task_execution_messaging import (
     output_mode_label as _execution_messaging_output_mode_label,
-)
-from app.core.agent.file_task_execution_messaging import (
     whitebox_plan_repair_message as _execution_messaging_plan_repair_message,
 )
 from app.core.agent.file_task_finalization import FileTaskFinalizationPhase
@@ -2316,9 +2270,7 @@ class FileTaskRuntime:
                 if source:
                     args["source_path"] = source
             financial_report_table = (
-                self._looks_like_financial_xlsx_docx_chart_report_task(
-                    request, files
-                )
+                self._looks_like_financial_xlsx_docx_chart_report_task(request, files)
                 or (
                     bool(
                         re.search(
@@ -2467,7 +2419,10 @@ class FileTaskRuntime:
     _pending_generated_docx_images = pending_generated_docx_images
     _financial_chart_recovery_tool_args = financial_chart_recovery_tool_args
     _financial_chart_recovery_code = staticmethod(financial_chart_recovery_code)
-    _insert_pending_generated_docx_images_native = insert_pending_generated_docx_images_native
+    _insert_pending_generated_docx_images_native = (
+        insert_pending_generated_docx_images_native
+    )
+
     def _generated_docx_image_insert_guard_message(
         self,
         request: FileTaskRequest,

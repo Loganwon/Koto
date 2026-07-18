@@ -35,9 +35,7 @@ def test_webview2_preflight_uses_packaged_offline_installer(tmp_path, monkeypatc
     monkeypatch.setattr(webview2_runtime.subprocess, "run", fake_run)
     monkeypatch.setattr(webview2_runtime.time, "sleep", lambda _seconds: None)
 
-    ok, detail = webview2_runtime.ensure_webview2_runtime(
-        tmp_path, detection_timeout=1
-    )
+    ok, detail = webview2_runtime.ensure_webview2_runtime(tmp_path, detection_timeout=1)
 
     assert ok is True
     assert detail == "135.0.0.0"

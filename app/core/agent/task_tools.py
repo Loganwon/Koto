@@ -37,25 +37,15 @@ from app.core.agent.path_utils import (
     resolve_existing_path,
 )
 from app.core.agent.task_tool_operation_bindings import build_task_tool_operations
+
+# isort: off
 from app.core.agent.task_tools_conversion import (
     convert_docx_to_pdf as _conversion_convert_docx_to_pdf,
-)
-from app.core.agent.task_tools_conversion import (
     convert_docx_to_pdf_with_docx2pdf as _conversion_docx2pdf,
-)
-from app.core.agent.task_tools_conversion import (
     convert_docx_to_pdf_with_libreoffice as _conversion_libreoffice,
-)
-from app.core.agent.task_tools_conversion import (
     convert_docx_to_pdf_with_word as _conversion_word,
-)
-from app.core.agent.task_tools_conversion import (
     convert_file as _conversion_convert_file,
-)
-from app.core.agent.task_tools_conversion import (
     list_conversions as _conversion_list_conversions,
-)
-from app.core.agent.task_tools_conversion import (
     normalize_conversion_extension as _conversion_normalize_extension,
 )
 from app.core.agent.task_tools_docx_compare import (
@@ -73,6 +63,18 @@ from app.core.agent.task_tools_docx_minimal import (
     _normalize_docx_paragraphs,
     _plain_text_to_docx_paragraphs,
 )
+from app.core.agent.task_tools_docx_review_cleanup import (
+    DOCX_COMMENT_MARKUP_TAGS as _DOCX_COMMENT_MARKUP_TAGS,
+    DOCX_W_NS as _DOCX_W_NS,
+    _serialize_xml_root,
+    accept_docx_revision_markup as _accept_docx_revision_markup,
+    build_docx_review_clear_summary as _build_docx_review_clear_summary,
+    normalize_docx_review_clear_scope as _review_normalize_docx_review_clear_scope,
+    remove_comments_content_type_override as _remove_comments_content_type_override,
+    remove_comments_relationships_xml as _remove_comments_relationships_xml,
+    remove_docx_comment_markup as _remove_docx_comment_markup,
+)
+from app.core.agent.task_tools_docx_style import apply_docx_style as _apply_docx_style
 from app.core.agent.task_tools_docx_table_helpers import (
     _compact_financial_table_rows,
     _match_header_index,
@@ -80,57 +82,21 @@ from app.core.agent.task_tools_docx_table_helpers import (
     _style_compact_financial_docx_table,
     _table_sort_value,
 )
-from app.core.agent.task_tools_docx_review_cleanup import (
-    DOCX_COMMENT_MARKUP_TAGS as _DOCX_COMMENT_MARKUP_TAGS,
-)
-from app.core.agent.task_tools_docx_review_cleanup import DOCX_W_NS as _DOCX_W_NS
-from app.core.agent.task_tools_docx_review_cleanup import _serialize_xml_root
-from app.core.agent.task_tools_docx_review_cleanup import (
-    accept_docx_revision_markup as _accept_docx_revision_markup,
-)
-from app.core.agent.task_tools_docx_review_cleanup import (
-    build_docx_review_clear_summary as _build_docx_review_clear_summary,
-)
-from app.core.agent.task_tools_docx_review_cleanup import (
-    normalize_docx_review_clear_scope as _review_normalize_docx_review_clear_scope,
-)
-from app.core.agent.task_tools_docx_review_cleanup import (
-    remove_comments_content_type_override as _remove_comments_content_type_override,
-)
-from app.core.agent.task_tools_docx_review_cleanup import (
-    remove_comments_relationships_xml as _remove_comments_relationships_xml,
-)
-from app.core.agent.task_tools_docx_review_cleanup import (
-    remove_docx_comment_markup as _remove_docx_comment_markup,
-)
-from app.core.agent.task_tools_docx_style import apply_docx_style as _apply_docx_style
 from app.core.agent.task_tools_docx_template import (
     replace_docx_placeholders_in_paragraph as _replace_docx_placeholders_in_paragraph,
 )
 from app.core.agent.task_tools_office_create import (
     create_docx_file as _office_create_docx_file,
-)
-from app.core.agent.task_tools_office_create import (
     create_pptx_file as _office_create_pptx_file,
-)
-from app.core.agent.task_tools_office_create import (
     create_xlsx_file as _office_create_xlsx_file,
-)
-from app.core.agent.task_tools_office_create import (
     plain_text_to_pptx_slides as _office_plain_text_to_pptx_slides,
 )
 from app.core.agent.task_tools_pdf_window import (
     int_to_chinese_letter_number as _int_to_chinese_letter_number,
-)
-from app.core.agent.task_tools_pdf_window import int_to_pdf_roman as _int_to_pdf_roman
-from app.core.agent.task_tools_pdf_window import (
+    int_to_pdf_roman as _int_to_pdf_roman,
     pdf_letter_heading_terms as _pdf_letter_heading_terms,
-)
-from app.core.agent.task_tools_pdf_window import (
     pdf_page_has_letter_heading as _pdf_page_has_letter_heading,
-)
-from app.core.agent.task_tools_pdf_window import read_pdf_excerpt as _pdf_read_excerpt
-from app.core.agent.task_tools_pdf_window import (
+    read_pdf_excerpt as _pdf_read_excerpt,
     read_pdf_letter_window as _pdf_read_letter_window,
 )
 from app.core.agent.task_tools_pptx_layout import (
@@ -153,31 +119,19 @@ from app.core.agent.task_tools_pptx_theme import (
 from app.core.agent.task_tools_registry import build_task_tool_definitions
 from app.core.agent.task_tools_xlsx_sheet_selection import (
     select_workbook_sheet as _select_workbook_sheet,
-)
-from app.core.agent.task_tools_xlsx_sheet_selection import (
     sheet_matches_statement as _sheet_matches_statement,
 )
 from app.core.agent.task_tools_xlsx_structure import (
     collect_formula_examples as _collect_formula_examples,
-)
-from app.core.agent.task_tools_xlsx_structure import (
     detect_year_header as _detect_year_header,
-)
-from app.core.agent.task_tools_xlsx_structure import (
     display_series_value as _display_series_value,
-)
-from app.core.agent.task_tools_xlsx_structure import (
     extract_external_link_targets as _extract_external_link_targets,
-)
-from app.core.agent.task_tools_xlsx_structure import (
     row_label_for_year_series as _row_label_for_year_series,
-)
-from app.core.agent.task_tools_xlsx_structure import (
     sample_sheet_rows as _sample_sheet_rows,
-)
-from app.core.agent.task_tools_xlsx_structure import (
     severity_for_financial_label as _xlsx_severity_for_financial_label,
 )
+
+# isort: on
 from app.core.services.file_service import FileService
 
 logger = logging.getLogger(__name__)
@@ -1406,8 +1360,7 @@ def _mark_direct_target_mutation(
         for path in _parse_koto_file_markers(stdout).get(marker_kind, [])
     }
     mutation_verified = target.is_file() and (
-        not target_existed
-        or _fingerprint_changed(str(target), initial_fingerprint)
+        not target_existed or _fingerprint_changed(str(target), initial_fingerprint)
     )
     if not mutation_verified:
         if norm_target not in existing:
@@ -1416,7 +1369,9 @@ def _mark_direct_target_mutation(
         for line in stdout.splitlines():
             stripped = line.strip()
             prefix = f"{marker_name}:"
-            candidate = stripped[len(prefix) :].strip() if stripped.startswith(prefix) else ""
+            candidate = (
+                stripped[len(prefix) :].strip() if stripped.startswith(prefix) else ""
+            )
             if candidate and os.path.isabs(candidate):
                 if os.path.normcase(os.path.abspath(candidate)) == norm_target:
                     continue

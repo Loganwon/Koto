@@ -22,6 +22,7 @@ from app.core.agent.base import AgentPlugin
 
 logger = logging.getLogger(__name__)
 
+
 def set_workspace_root(path: str):
     """Compatibility setter for the shared runtime workspace owner."""
     from app.core.config.workspace_runtime import set_workspace_root as _set_root

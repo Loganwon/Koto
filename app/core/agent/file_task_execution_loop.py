@@ -12,9 +12,7 @@ from typing import Any, Dict, Iterable, List, Optional
 from app.core.agent.file_task_contract import FileTaskEvent, FileTaskToolStreamResult
 from app.core.agent.file_task_evidence_guard import sanitize_unverified_readonly_quotes
 from app.core.agent.file_task_failure import build_model_execution_failure
-from app.core.agent.file_task_financial_report_recovery import (
-    recover_financial_report,
-)
+from app.core.agent.file_task_financial_report_recovery import recover_financial_report
 from app.core.agent.file_task_guard_emission import build_tool_guard_emission
 from app.core.agent.file_task_readonly_loop_guard import (
     READONLY_ANSWER_GUARD_PENDING_SUMMARY,
@@ -341,7 +339,9 @@ class FileTaskExecutionLoop:
                         step_id=execute_step_id,
                     )
                 else:
-                    error_text = str(execution_failure.get("summary") or "模型调用失败。")
+                    error_text = str(
+                        execution_failure.get("summary") or "模型调用失败。"
+                    )
                     failed_step = runtime._build_step_result_payload(
                         title="模型规划并调用工具",
                         summary=error_text,
@@ -1366,7 +1366,8 @@ class FileTaskExecutionLoop:
                     target_key = runtime._write_dedupe_key_for_target(target)
                     target_was_locked_by_code = (
                         bool(target_key)
-                        and completed_write_ops.get(target_key, 0) >= max_write_ops_per_file
+                        and completed_write_ops.get(target_key, 0)
+                        >= max_write_ops_per_file
                     )
                     same_write_was_completed = (
                         completed_write_ops.get(write_key, 0) >= max_write_ops_per_file
@@ -1544,10 +1545,12 @@ class FileTaskExecutionLoop:
                         try:
                             recovery_result = executor("run_python_code", recovery_args)
                             if isinstance(recovery_result, FileTaskToolStreamResult):
-                                recovery_result = yield from runtime._consume_streaming_tool_result(
-                                    ledger,
-                                    step_id=current_step_id,
-                                    stream_result=recovery_result,
+                                recovery_result = (
+                                    yield from runtime._consume_streaming_tool_result(
+                                        ledger,
+                                        step_id=current_step_id,
+                                        stream_result=recovery_result,
+                                    )
                                 )
                             recovery_success = not _is_error_result(recovery_result)
                         except Exception as exc:
@@ -1666,7 +1669,9 @@ class FileTaskExecutionLoop:
                 )
 
                 if recovery_message:
-                    model_result = f"{stringify_result(model_result)}\n{recovery_message}"
+                    model_result = (
+                        f"{stringify_result(model_result)}\n{recovery_message}"
+                    )
                 messages.append(
                     {
                         "role": "function",
@@ -1809,13 +1814,15 @@ class FileTaskExecutionLoop:
                     )
                     continue
                 if pending_images:
-                    native_changes = yield from runtime._insert_pending_generated_docx_images_native(
-                        ledger,
-                        request,
-                        executor,
-                        context_files,
-                        pending_images,
-                        execute_step_id,
+                    native_changes = (
+                        yield from runtime._insert_pending_generated_docx_images_native(
+                            ledger,
+                            request,
+                            executor,
+                            context_files,
+                            pending_images,
+                            execute_step_id,
+                        )
                     )
                     if native_changes:
                         file_changes.extend(native_changes)

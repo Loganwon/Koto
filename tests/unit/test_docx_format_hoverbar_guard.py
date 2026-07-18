@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 
@@ -161,15 +162,17 @@ def test_docx_nodes_preserve_parser_role_attributes():
 
 
 def test_docx_tiptap_package_defines_runtime_build_script():
-    package_json = (_repo_root() / "web" / "tiptap-editor" / "package.json").read_text(
-        encoding="utf-8"
+    package_json = json.loads(
+        (_repo_root() / "web" / "tiptap-editor" / "package.json").read_text(
+            encoding="utf-8"
+        )
     )
 
-    assert '"scripts"' in package_json
-    assert (
-        '"build": "esbuild koto-docx-editor.js --bundle --outfile=../static/js/tiptap-docx-bundle.js --format=iife --global-name=KotoDocxEditorLib --minify --sourcemap"'
-        in package_json
-    )
+    build_script = package_json["scripts"]["build"]
+    assert build_script.startswith("esbuild koto-docx-editor.js --bundle")
+    assert "--outfile=../static/js/tiptap-docx-bundle.js" in build_script
+    assert "--global-name=KotoDocxEditorLib --minify --sourcemap" in build_script
+    assert "normalize-sourcemap.mjs" in build_script
 
 
 def test_docx_runtime_bundle_contains_role_and_shared_geometry_contracts():

@@ -118,7 +118,9 @@ def build_model_execution_failure(
         status = "model_timeout"
         code = "MODEL_CALL_TIMEOUT"
         summary = "模型在文件任务执行阶段超时，尚未完成文件写入。"
-        remaining = ["确认当前模型连接稳定后重试；若持续超时，请调整文件任务模型或超时配置。"]
+        remaining = [
+            "确认当前模型连接稳定后重试；若持续超时，请调整文件任务模型或超时配置。"
+        ]
     elif _contains(
         lowered,
         "401",

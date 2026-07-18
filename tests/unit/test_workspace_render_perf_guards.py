@@ -132,9 +132,7 @@ def test_workspace_close_warning_requires_real_unsaved_snapshot_and_clear_ui():
 
     close_warn_start = workspace_css.index("\n    .wa-close-warn-overlay {")
     close_warn_css = workspace_css[
-        close_warn_start : workspace_css.index(
-            "/* ── File rows", close_warn_start
-        )
+        close_warn_start : workspace_css.index("/* ── File rows", close_warn_start)
     ]
     assert "backdrop-filter" not in close_warn_css
     assert "background: var(--ui-overlay);" in close_warn_css
@@ -149,16 +147,17 @@ def test_workspace_close_warning_requires_real_unsaved_snapshot_and_clear_ui():
     assert "outline: none;" in close_warn_css
     # The footer's explanatory copy must not steal horizontal space from the
     # three exit actions: the primary save-and-exit button must remain visible.
-    assert ".wa-close-warn-footer {\n      display: flex;\n      flex-direction: column;" in close_warn_css
+    assert (
+        ".wa-close-warn-footer {\n      display: flex;\n      flex-direction: column;"
+        in close_warn_css
+    )
     assert ".wa-close-warn-actions" in close_warn_css
     assert "flex-wrap: nowrap;" in close_warn_css
     assert ".wa-close-warn-save.wa-btn" in close_warn_css
-    assert "showPath ? `<div class=\"wa-close-warn-item-path\">" in file_utils_ts
+    assert 'showPath ? `<div class="wa-close-warn-item-path">' in file_utils_ts
 
     dialog_overlay_start = workspace_css.index("\n    .wa-dlg-overlay {")
-    dialog_overlay_css = workspace_css[
-        dialog_overlay_start:close_warn_start
-    ]
+    dialog_overlay_css = workspace_css[dialog_overlay_start:close_warn_start]
     assert "backdrop-filter" not in dialog_overlay_css
     assert "background: var(--ui-overlay);" in dialog_overlay_css
     assert "background: var(--ui-surface);" in dialog_overlay_css
@@ -170,12 +169,10 @@ def test_body_level_dialogs_share_one_token_and_workspace_button_owner():
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(
+    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(encoding="utf-8")
+    workspace_css = (root / "web" / "static" / "css" / "workspace.css").read_text(
         encoding="utf-8"
     )
-    workspace_css = (
-        root / "web" / "static" / "css" / "workspace.css"
-    ).read_text(encoding="utf-8")
 
     for token in (
         "--ui-surface:",
@@ -201,12 +198,15 @@ def test_body_level_dialogs_share_one_token_and_workspace_button_owner():
     assert "background: var(--ui-overlay);" in koto_dialog_css
     assert "var(--accent-color" not in style_css
     assert "var(--accent-rgb" not in style_css
-    assert 'koto-dialog-confirm ui-dialog-button primary' in main_ts
-    assert 'koto-dialog-cancel ui-dialog-button secondary' in main_ts
+    assert "koto-dialog-confirm ui-dialog-button primary" in main_ts
+    assert "koto-dialog-cancel ui-dialog-button secondary" in main_ts
 
-    assert workspace_css.count(
-        ":is(#workspaceView, .wa-embedded, .wa-dlg-overlay, .wa-close-warn-overlay) .wa-btn {"
-    ) == 1
+    assert (
+        workspace_css.count(
+            ":is(#workspaceView, .wa-embedded, .wa-dlg-overlay, .wa-close-warn-overlay) .wa-btn {"
+        )
+        == 1
+    )
     assert "\n    .wa-btn {\n" not in workspace_css
     assert "--accent-subtle: var(--ui-accent-subtle);" in workspace_css
 
@@ -216,9 +216,7 @@ def test_agent_and_template_modals_use_shared_dialog_primitives():
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(
-        encoding="utf-8"
-    )
+    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(encoding="utf-8")
     modal_css = style_css[
         style_css.index("/* ===== Shared dialog primitives ===== */") : style_css.index(
             "/* ===== Setup Wizard ===== */"
@@ -259,15 +257,11 @@ def test_template_modal_buttons_and_manager_routes_have_one_current_owner():
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    index_html = (root / "web" / "templates" / "index.html").read_text(
-        encoding="utf-8"
-    )
+    index_html = (root / "web" / "templates" / "index.html").read_text(encoding="utf-8")
     chat_ui_ts = (root / "web" / "src" / "app" / "chat-ui.ts").read_text(
         encoding="utf-8"
     )
-    router_ts = (root / "web" / "src" / "app" / "router.ts").read_text(
-        encoding="utf-8"
-    )
+    router_ts = (root / "web" / "src" / "app" / "router.ts").read_text(encoding="utf-8")
 
     primitive_css = style_css[
         style_css.index("/* ===== Shared dialog primitives ===== */") : style_css.index(
@@ -306,9 +300,7 @@ def test_ghost_buttons_have_one_base_owner_and_explicit_surface_modifiers():
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    index_html = (root / "web" / "templates" / "index.html").read_text(
-        encoding="utf-8"
-    )
+    index_html = (root / "web" / "templates" / "index.html").read_text(encoding="utf-8")
     settings_ts = (root / "web" / "src" / "app" / "settings.ts").read_text(
         encoding="utf-8"
     )
@@ -323,9 +315,7 @@ def test_ghost_buttons_have_one_base_owner_and_explicit_surface_modifiers():
 
     assert 'class="ghost-btn' not in index_html
     assert 'class="ui-ghost-button ui-ghost-button--glass"' in index_html
-    assert index_html.count(
-        'class="ui-ghost-button ui-ghost-button--icon'
-    ) == 2
+    assert index_html.count('class="ui-ghost-button ui-ghost-button--icon') == 2
     assert 'class="ui-ghost-button" onclick="refreshBatchJobs()"' in index_html
 
     assert 'class="ghost-btn"' not in settings_ts
@@ -339,12 +329,10 @@ def test_close_buttons_and_batch_modal_have_one_current_state_owner():
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    index_html = (root / "web" / "templates" / "index.html").read_text(
+    index_html = (root / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+    settings_html = (root / "web" / "templates" / "_settings_panel.html").read_text(
         encoding="utf-8"
     )
-    settings_html = (
-        root / "web" / "templates" / "_settings_panel.html"
-    ).read_text(encoding="utf-8")
     settings_ts = (root / "web" / "src" / "app" / "settings.ts").read_text(
         encoding="utf-8"
     )
@@ -359,9 +347,7 @@ def test_close_buttons_and_batch_modal_have_one_current_state_owner():
     assert 'class="close-panel"' not in index_html
     assert 'class="close-panel"' not in settings_html
     assert index_html.count('class="ui-close-button"') >= 6
-    assert index_html.count(
-        'class="ui-close-button ui-close-button--quiet"'
-    ) >= 2
+    assert index_html.count('class="ui-close-button ui-close-button--quiet"') >= 2
     assert 'id="batchPanelModal" aria-hidden="true"' in index_html
     assert 'role="dialog" aria-modal="true"' in index_html
     assert "#skillsPanel .ui-close-button" in index_html
@@ -383,15 +369,11 @@ def test_suggestion_panel_and_compact_closers_use_current_ui_state():
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    workspace_css = (
-        root / "web" / "static" / "css" / "workspace.css"
-    ).read_text(encoding="utf-8")
-    index_html = (root / "web" / "templates" / "index.html").read_text(
+    workspace_css = (root / "web" / "static" / "css" / "workspace.css").read_text(
         encoding="utf-8"
     )
-    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(
-        encoding="utf-8"
-    )
+    index_html = (root / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(encoding="utf-8")
     settings_ts = (root / "web" / "src" / "app" / "settings.ts").read_text(
         encoding="utf-8"
     )
@@ -427,11 +409,14 @@ def test_suggestion_panel_and_compact_closers_use_current_ui_state():
 
     assert "function setApiKeyBannerVisible" in settings_ts
     assert "banner.toggleAttribute('hidden', !visible)" in settings_ts
-    assert "banner.style.display" not in settings_ts[
-        settings_ts.index("export function skipSetup") : settings_ts.index(
-            "export function finishSetup"
-        )
-    ]
+    assert (
+        "banner.style.display"
+        not in settings_ts[
+            settings_ts.index("export function skipSetup") : settings_ts.index(
+                "export function finishSetup"
+            )
+        ]
+    )
 
 
 def test_dead_token_monitor_is_removed_and_skill_creation_modals_have_one_owner():
@@ -439,21 +424,17 @@ def test_dead_token_monitor_is_removed_and_skill_creation_modals_have_one_owner(
     style_css = (root / "web" / "static" / "css" / "style.css").read_text(
         encoding="utf-8"
     )
-    workspace_css = (
-        root / "web" / "static" / "css" / "workspace.css"
-    ).read_text(encoding="utf-8")
-    index_html = (root / "web" / "templates" / "index.html").read_text(
+    workspace_css = (root / "web" / "static" / "css" / "workspace.css").read_text(
         encoding="utf-8"
     )
-    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(
+    index_html = (root / "web" / "templates" / "index.html").read_text(encoding="utf-8")
+    main_ts = (root / "web" / "src" / "app" / "main.ts").read_text(encoding="utf-8")
+    marketplace_ts = (root / "web" / "src" / "app" / "marketplace.ts").read_text(
         encoding="utf-8"
     )
-    marketplace_ts = (
-        root / "web" / "src" / "app" / "marketplace.ts"
-    ).read_text(encoding="utf-8")
-    modal_state_ts = (
-        root / "web" / "src" / "shared" / "modal-state.ts"
-    ).read_text(encoding="utf-8")
+    modal_state_ts = (root / "web" / "src" / "shared" / "modal-state.ts").read_text(
+        encoding="utf-8"
+    )
 
     assert "Token Monitor" not in workspace_css
     assert "\n#tokenPanel {" not in workspace_css
@@ -483,7 +464,10 @@ def test_dead_token_monitor_is_removed_and_skill_creation_modals_have_one_owner(
         "skillEditorModal",
         "templateUploadModal",
     ):
-        assert f'id="{modal_id}" class="skill-editor-modal" aria-hidden="true"' in index_html
+        assert (
+            f'id="{modal_id}" class="skill-editor-modal" aria-hidden="true"'
+            in index_html
+        )
         assert f'id="{modal_id}" class="skill-editor-modal" style=' not in index_html
     assert 'class="skill-editor-inner skill-editor-inner--wide"' in index_html
     assert 'class="skill-editor-inner skill-editor-inner--compact"' in index_html
@@ -492,7 +476,10 @@ def test_dead_token_monitor_is_removed_and_skill_creation_modals_have_one_owner(
     assert 'id="templateDropZone"' in index_html
     assert 'role="button" tabindex="0" data-modal-initial-focus' in index_html
     assert 'role="dialog" aria-modal="true"' in index_html
-    assert "window.KotoModalState.open('templateUploadModal', '#templateDropZone')" in index_html
+    assert (
+        "window.KotoModalState.open('templateUploadModal', '#templateDropZone')"
+        in index_html
+    )
     assert "window.KotoModalState.close('templateUploadModal')" in index_html
     assert "getElementById('templateUploadModal').style.display" not in index_html
 

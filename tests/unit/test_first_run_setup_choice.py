@@ -17,8 +17,12 @@ def test_cloud_choice_persists_key_and_cloud_mode(tmp_path: Path) -> None:
 
     config_dir = tmp_path / "config"
     env_text = (config_dir / "deepseek_config.env").read_text(encoding="utf-8")
-    settings = json.loads((config_dir / "user_settings.json").read_text(encoding="utf-8"))
-    completion = json.loads((config_dir / "model_setup_done.json").read_text(encoding="utf-8"))
+    settings = json.loads(
+        (config_dir / "user_settings.json").read_text(encoding="utf-8")
+    )
+    completion = json.loads(
+        (config_dir / "model_setup_done.json").read_text(encoding="utf-8")
+    )
     assert "DEEPSEEK_API_KEY=sk-test-key-123456789" in env_text
     assert "DEEPSEEK_BASE_URL=https://proxy.example/v1" in env_text
     assert settings["model_mode"] == "cloud"
@@ -49,9 +53,13 @@ def test_local_choice_is_a_valid_first_run_completion(tmp_path: Path) -> None:
 def test_missing_configuration_must_complete_unified_choice(tmp_path: Path) -> None:
     from src import koto_setup
 
-    with patch.object(koto_setup, "APP_ROOT", tmp_path), patch.object(koto_setup, "_local_model_configured", return_value=False), patch.object(
+    with patch.object(koto_setup, "APP_ROOT", tmp_path), patch.object(
+        koto_setup, "_local_model_configured", return_value=False
+    ), patch.object(
         koto_setup, "_api_key_configured", return_value=False
-    ), patch.object(koto_setup, "_run_unified_setup", return_value=True) as chooser:
+    ), patch.object(
+        koto_setup, "_run_unified_setup", return_value=True
+    ) as chooser:
         assert koto_setup._run_setup_if_needed() is True
     chooser.assert_called_once()
 
@@ -59,9 +67,15 @@ def test_missing_configuration_must_complete_unified_choice(tmp_path: Path) -> N
 def test_cancelled_unified_choice_blocks_desktop_start(tmp_path: Path) -> None:
     from src import koto_setup
 
-    with patch.object(koto_setup, "APP_ROOT", tmp_path), patch.object(koto_setup, "_local_model_configured", return_value=False), patch.object(
+    with patch.object(koto_setup, "APP_ROOT", tmp_path), patch.object(
+        koto_setup, "_local_model_configured", return_value=False
+    ), patch.object(
         koto_setup, "_api_key_configured", return_value=False
-    ), patch.object(koto_setup, "_run_unified_setup", return_value=False), patch.object(
-        koto_setup, "_show_api_setup_wizard", return_value={"key": None, "base": "", "cancelled": True}
+    ), patch.object(
+        koto_setup, "_run_unified_setup", return_value=False
+    ), patch.object(
+        koto_setup,
+        "_show_api_setup_wizard",
+        return_value={"key": None, "base": "", "cancelled": True},
     ):
         assert koto_setup._run_setup_if_needed() is False

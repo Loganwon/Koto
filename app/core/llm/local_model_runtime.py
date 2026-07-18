@@ -33,7 +33,11 @@ def get_configured_model_mode() -> str:
     try:
         from app.core.config.user_settings import SettingsManager
 
-        stored = str(SettingsManager().get_all().get("model_mode") or "cloud").strip().lower()
+        stored = (
+            str(SettingsManager().get_all().get("model_mode") or "cloud")
+            .strip()
+            .lower()
+        )
         return "local" if stored in {"local", "ollama"} else "cloud"
     except Exception:
         return "cloud"

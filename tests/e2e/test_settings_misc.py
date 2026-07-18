@@ -135,16 +135,24 @@ def test_theme_toggle(e2e_page, e2e_base_url, console_errors):
 
 
 @pytest.mark.e2e
-def test_colored_theme_reaches_unified_workspace(e2e_page, e2e_base_url, console_errors):
+def test_colored_theme_reaches_unified_workspace(
+    e2e_page, e2e_base_url, console_errors
+):
     """A palette selected in Settings must also recolor the workspace shell."""
     _navigate_and_wait(e2e_page, e2e_base_url)
-    original_theme = _settings_json(e2e_page, e2e_base_url).get("appearance", {}).get("theme", "light")
+    original_theme = (
+        _settings_json(e2e_page, e2e_base_url)
+        .get("appearance", {})
+        .get("theme", "light")
+    )
     target_theme = "ocean" if original_theme != "ocean" else "forest"
     _open_settings(e2e_page)
     try:
         e2e_page.locator(f".theme-option[data-theme='{target_theme}']").click()
         e2e_page.wait_for_timeout(350)
-        assert e2e_page.evaluate("document.documentElement.dataset.theme") == target_theme
+        assert (
+            e2e_page.evaluate("document.documentElement.dataset.theme") == target_theme
+        )
         accent = e2e_page.evaluate(
             "getComputedStyle(document.querySelector('#workspaceView')).getPropertyValue('--accent').trim()"
         )
@@ -154,7 +162,9 @@ def test_colored_theme_reaches_unified_workspace(e2e_page, e2e_base_url, console
         e2e_page.evaluate("theme => window.selectTheme(theme)", original_theme)
         e2e_page.wait_for_timeout(350)
 
-    assert _filter_errors(console_errors) == [], f"JS errors: {_filter_errors(console_errors)}"
+    assert (
+        _filter_errors(console_errors) == []
+    ), f"JS errors: {_filter_errors(console_errors)}"
 
 
 @pytest.mark.e2e

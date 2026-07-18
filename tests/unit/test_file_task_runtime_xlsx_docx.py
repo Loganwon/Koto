@@ -674,8 +674,7 @@ def test_file_task_runtime_resets_repair_budget_after_real_file_change(tmp_path)
     assert "repair_guard" in tool_names
     assert operations == ["insert_excel_as_docx_table", "write_docx_content"]
     assert any(
-        event.payload.get("status") == "quality_gate_failed"
-        for event in check_finished
+        event.payload.get("status") == "quality_gate_failed" for event in check_finished
     )
     assert check_finished[-1].payload["status"] == "verified"
     assert events[-1].payload["completed_task"] is True

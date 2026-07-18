@@ -178,13 +178,16 @@ def test_uncreated_request_target_is_not_read_even_when_file_flag_is_stale() -> 
         target=False,
     )
 
-    assert should_skip_uncreated_target_context(
-        request,
-        stale_output_entry,
-        same_path=lambda left, right: str(left).casefold() == str(right).casefold(),
-        has_artifact_creation_intent=lambda _task: True,
-        resolve_task_file_path=lambda _path: "",
-    ) is True
+    assert (
+        should_skip_uncreated_target_context(
+            request,
+            stale_output_entry,
+            same_path=lambda left, right: str(left).casefold() == str(right).casefold(),
+            has_artifact_creation_intent=lambda _task: True,
+            resolve_task_file_path=lambda _path: "",
+        )
+        is True
+    )
 
 
 def test_explicit_output_paths_exclude_second_file_in_source_list() -> None:

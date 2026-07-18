@@ -179,12 +179,13 @@ def test_file_task_runtime_stops_for_preflight_target_conflict():
     run_finished = next(event for event in events if event.type == "run.finished")
     assert run_finished.payload["runtime"]["terminal_status"] == "blocked"
     assert run_finished.payload["completed_task"] is False
-    assert "ambiguous_target:docx" in run_finished.payload["constraint_audit"][
-        "conflicts"
-    ]
-    assert "constraint_conflict:ambiguous_target:docx" in run_finished.payload[
-        "supervisor_audit"
-    ]["reason_codes"]
+    assert (
+        "ambiguous_target:docx" in run_finished.payload["constraint_audit"]["conflicts"]
+    )
+    assert (
+        "constraint_conflict:ambiguous_target:docx"
+        in run_finished.payload["supervisor_audit"]["reason_codes"]
+    )
 
 
 def test_file_task_runtime_emits_plan_checked_for_doc_annotate_bridge_path(monkeypatch):

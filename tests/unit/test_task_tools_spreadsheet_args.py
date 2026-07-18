@@ -144,7 +144,9 @@ def test_insert_excel_as_docx_table_compacts_financial_model_for_report(tmp_path
     sheet.append([None, "利润表", *([None] * 10)])
     sheet.append([None, "单位：人民币万元", *([None] * 10)])
     sheet.append([None, None, "2025E", "2026E", "2027E", "2028E", *([None] * 6)])
-    sheet.append([None, "收入合计", 22327.432, 54884.056, 113756.697, 181242.989, *([None] * 6)])
+    sheet.append(
+        [None, "收入合计", 22327.432, 54884.056, 113756.697, 181242.989, *([None] * 6)]
+    )
     sheet.append([None, "增速%", None, 1.4581445, 1.0726729, 0.5932512, *([None] * 6)])
     sheet.append([None, "净利润", -11738, -2041, 952, 13362, *([None] * 6)])
     sheet.append([None, "备注行", "skip", "skip", "skip", "skip", *([None] * 6)])

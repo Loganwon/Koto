@@ -853,9 +853,7 @@ class TestKotoApp:
             "started_at": 0.0,
         }
         with patch.object(mod, "_check_koto_health", return_value=False):
-            status = mod._startup_status_provider(
-                info, "http://127.0.0.1:5000"
-            )()
+            status = mod._startup_status_provider(info, "http://127.0.0.1:5000")()
 
         assert status["status"] == "error"
         assert "ModuleNotFoundError" in status["error"]
@@ -864,9 +862,7 @@ class TestKotoApp:
         mod = self._import_module()
         info = {"started": True, "phase": "importing", "started_at": 0.0}
         with patch.object(mod, "_check_koto_health", return_value=True):
-            status = mod._startup_status_provider(
-                info, "http://127.0.0.1:5000"
-            )()
+            status = mod._startup_status_provider(info, "http://127.0.0.1:5000")()
 
         assert status == {
             "status": "ready",

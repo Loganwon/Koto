@@ -109,9 +109,7 @@ def test_task_stream_quick_action_keeps_persisted_file_task_contract(monkeypatch
         received.update(data)
         yield 'data: {"type":"run.finished","payload":{"completed_task":true}}\n\n'
 
-    monkeypatch.setattr(
-        editor_ai, "stream_file_task_request", fake_file_task_stream
-    )
+    monkeypatch.setattr(editor_ai, "stream_file_task_request", fake_file_task_stream)
     app = Flask(__name__)
     app.register_blueprint(editor_ai.editor_ai_bp)
 
@@ -152,19 +150,17 @@ def test_chart_validation_errors_use_same_sse_headers():
 @pytest.mark.unit
 def test_frontend_task_runner_matches_backend_stream_contract():
     runner = Path("web/src/workspace/task-runner.ts").read_text(encoding="utf-8")
-    transport = Path(
-        "web/src/workspace/task-stream-transport.ts"
-    ).read_text(encoding="utf-8")
+    transport = Path("web/src/workspace/task-stream-transport.ts").read_text(
+        encoding="utf-8"
+    )
     parser = Path("web/src/workspace/file-task-sse.ts").read_text(encoding="utf-8")
     dispatcher = Path("web/src/workspace/file-task-dispatch.ts").read_text(
         encoding="utf-8"
     )
-    ui_state = Path("web/src/workspace/task-ui-state.ts").read_text(
+    ui_state = Path("web/src/workspace/task-ui-state.ts").read_text(encoding="utf-8")
+    presentation = Path("web/src/workspace/task-stage-presentation.ts").read_text(
         encoding="utf-8"
     )
-    presentation = Path(
-        "web/src/workspace/task-stage-presentation.ts"
-    ).read_text(encoding="utf-8")
     bundle = Path("web/static/js/build/workspace-bundle.js").read_text(encoding="utf-8")
 
     assert "from './task-stream-transport';" in runner
@@ -178,8 +174,14 @@ def test_frontend_task_runner_matches_backend_stream_contract():
     assert "export function createFileTaskEventController" in dispatcher
     assert "event.event_seq || payload.seq || payload.event_seq" in dispatcher
     assert "state.processedEventKeys.has(eventKey)" in dispatcher
-    assert "noteStreamIssue?: (_card: Card, _key: string, _text: string) => void;" in dispatcher
-    assert "afterDispatch?: (_card: Card, _event: Record<string, any>) => void;" in dispatcher
+    assert (
+        "noteStreamIssue?: (_card: Card, _key: string, _text: string) => void;"
+        in dispatcher
+    )
+    assert (
+        "afterDispatch?: (_card: Card, _event: Record<string, any>) => void;"
+        in dispatcher
+    )
     assert "createFileTaskEventController<TaskCardElement, FileTaskUiState>({" in runner
     assert "afterDispatch: applyCanonicalTaskStageState" in runner
     assert "function shouldDispatchStreamEvent(" not in runner

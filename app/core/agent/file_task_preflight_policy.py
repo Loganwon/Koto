@@ -5,6 +5,7 @@ Classification decides what the user asked for and completion/quality gates
 verify the result after execution.  This module owns the small middle layer:
 whether the resolved request, plan and target can safely start execution.
 """
+
 from __future__ import annotations
 
 from typing import Any, Mapping, Sequence
@@ -111,9 +112,11 @@ def _target_file_type(
     requirements: FileTaskRequirementSet,
     classification: FileTaskClassification,
 ) -> str:
-    return str(
-        requirements.target_file_type or classification.target_file_type or ""
-    ).strip().lower()
+    return (
+        str(requirements.target_file_type or classification.target_file_type or "")
+        .strip()
+        .lower()
+    )
 
 
 def _creates_new_artifact_of_type(task: str, target_type: str) -> bool:

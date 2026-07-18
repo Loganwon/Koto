@@ -784,19 +784,26 @@ class TestJobRoutes:
     def test_retired_job_trigger_routes_stay_unavailable(self, full_client):
         assert full_client.get("/api/jobs/triggers").status_code == 404
         assert full_client.get("/api/jobs/triggers/templates").status_code == 404
-        assert full_client.post(
-            "/api/jobs/triggers/bootstrap", json={"force": False}
-        ).status_code == 404
+        assert (
+            full_client.post(
+                "/api/jobs/triggers/bootstrap", json={"force": False}
+            ).status_code
+            == 404
+        )
         assert full_client.post("/api/jobs/triggers", json={}).status_code in (404, 405)
-        assert full_client.patch(
-            "/api/jobs/triggers/fake-trigger-id", json={"enabled": False}
-        ).status_code == 404
-        assert full_client.delete(
-            "/api/jobs/triggers/fake-trigger-id"
-        ).status_code == 404
-        assert full_client.post(
-            "/api/jobs/triggers/fake-trigger-id/fire"
-        ).status_code == 404
+        assert (
+            full_client.patch(
+                "/api/jobs/triggers/fake-trigger-id", json={"enabled": False}
+            ).status_code
+            == 404
+        )
+        assert (
+            full_client.delete("/api/jobs/triggers/fake-trigger-id").status_code == 404
+        )
+        assert (
+            full_client.post("/api/jobs/triggers/fake-trigger-id/fire").status_code
+            == 404
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════

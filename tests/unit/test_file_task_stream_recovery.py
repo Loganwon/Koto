@@ -83,9 +83,7 @@ def test_workspace_task_runner_keeps_one_task_id_across_initial_and_recovery_str
 
 
 def test_workspace_target_inference_prefers_a_clean_named_output_path() -> None:
-    source = open(
-        "web/src/workspace/task-target-inference.ts", encoding="utf-8"
-    ).read()
+    source = open("web/src/workspace/task-target-inference.ts", encoding="utf-8").read()
 
     assert "const namedOutputPattern =" in source
     assert "score: 100" in source
@@ -119,4 +117,6 @@ def test_short_stream_cancel_handler_is_cleaned_after_settlement() -> None:
 
     assert "const cleanupCancellation = installTaskCancelHandler(" in transport
     assert "cleanupCancellation();" in transport
-    assert "if (card._cancelHandler === handler) delete card._cancelHandler;" in lifecycle
+    assert (
+        "if (card._cancelHandler === handler) delete card._cancelHandler;" in lifecycle
+    )

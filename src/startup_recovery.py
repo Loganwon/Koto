@@ -118,7 +118,9 @@ def serve_startup_status(
                     }
                 self._json(payload)
                 return
-            self._send(200, _page(str(log_path)).encode("utf-8"), "text/html; charset=utf-8")
+            self._send(
+                200, _page(str(log_path)).encode("utf-8"), "text/html; charset=utf-8"
+            )
 
         def do_POST(self) -> None:  # noqa: N802 - BaseHTTPRequestHandler API
             if urlparse(self.path).path != "/api/retry":

@@ -135,9 +135,10 @@ def resolve_explicit_output_against_request_target(
     normalized_output = clean_output.replace("\\", "/").strip()
     if "/" in normalized_output.strip("/"):
         return clean_output
-    if Path(clean_target.replace("\\", "/")).name.casefold() == Path(
-        normalized_output
-    ).name.casefold():
+    if (
+        Path(clean_target.replace("\\", "/")).name.casefold()
+        == Path(normalized_output).name.casefold()
+    ):
         return clean_target
     return clean_output
 

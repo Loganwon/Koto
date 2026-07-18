@@ -40,9 +40,7 @@ def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods
 
 def test_workspace_runtime_factories_are_direct_module_dependencies():
     root = _repo_root()
-    runtime = (root / "web/src/workspace/runtime-init.ts").read_text(
-        encoding="utf-8"
-    )
+    runtime = (root / "web/src/workspace/runtime-init.ts").read_text(encoding="utf-8")
     owners = {
         "web/src/workspace/conversation.ts": "createWorkspaceAiConversation",
         "web/src/workspace/task-dispatcher.ts": "createTaskDispatcher",
@@ -61,9 +59,12 @@ def test_workspace_runtime_factories_are_direct_module_dependencies():
     )
     assert "createWorkspaceQuickActionRuntime" not in quick_actions
     assert "createWorkspaceQuickActionRuntime" not in runtime
-    assert "state," not in runtime.split(
-        "_waQuickActionRuntime = createQuickActionDispatcher({", 1
-    )[1].split("});", 1)[0]
+    assert (
+        "state,"
+        not in runtime.split(
+            "_waQuickActionRuntime = createQuickActionDispatcher({", 1
+        )[1].split("});", 1)[0]
+    )
 
 
 def test_task_flow_runtime_has_no_same_bundle_window_bus_or_raw_runtime_aliases():
@@ -116,9 +117,7 @@ def test_task_flow_runtime_has_no_same_bundle_window_bus_or_raw_runtime_aliases(
 def test_retired_generic_workspace_transport_stays_removed():
     root = _repo_root()
     bundle = (root / "web/src/bundles/workspace.ts").read_text(encoding="utf-8")
-    retained = (root / "docs/WORKSPACE_RETAINED_LEGACY.md").read_text(
-        encoding="utf-8"
-    )
+    retained = (root / "docs/WORKSPACE_RETAINED_LEGACY.md").read_text(encoding="utf-8")
 
     assert not (root / "web/src/workspace/transport.ts").exists()
     assert "import '../workspace/transport';" not in bundle

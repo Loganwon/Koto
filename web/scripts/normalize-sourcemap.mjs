@@ -1,11 +1,15 @@
-import { existsSync } from 'fs';
 import { readFile, writeFile } from 'fs/promises';
 import { resolve } from 'path';
 import { pathToFileURL } from 'url';
 
 export async function normalizeSourceMapLineEndings(filePath) {
-  if (!existsSync(filePath)) return false;
-  const raw = await readFile(filePath, 'utf8');
+  let raw;
+  try {
+    raw = await readFile(filePath, 'utf8');
+  } catch (error) {
+    if (error?.code === 'ENOENT') return false;
+    throw error;
+  }
   const sourceMap = JSON.parse(raw);
   if (!Array.isArray(sourceMap.sourcesContent)) return false;
   sourceMap.sourcesContent = sourceMap.sourcesContent.map((content) => (

@@ -29,7 +29,6 @@ from app.core.agent.file_task_doc_annotate_events import (
 from app.core.agent.file_task_doc_annotate_events import (
     tool_result_from_bridge_payload as _tool_result_from_bridge_payload,
 )
-from app.core.agent.file_task_failure import build_failed_run_payload
 from app.core.agent.file_task_doc_annotate_intent import (
     looks_like_direct_docx_rewrite_request,
     looks_like_docx_review_clear_request,
@@ -37,6 +36,7 @@ from app.core.agent.file_task_doc_annotate_intent import (
     should_route_request,
     should_use_doc_annotate_bridge_execution,
 )
+from app.core.agent.file_task_failure import build_failed_run_payload
 from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
 from app.core.llm.model_mode import normalize_model_mode
 
@@ -726,7 +726,9 @@ def _stream_single_docx_request(
             "target_path": target_docx,
             "revised_file": revised_file,
             "annotations_added": applied,
-            "runtime": _runtime_payload("verified" if passed else "quality_gate_failed"),
+            "runtime": _runtime_payload(
+                "verified" if passed else "quality_gate_failed"
+            ),
         },
         step_id="run",
     )
@@ -1185,7 +1187,9 @@ def stream_request(
             "annotations_added": applied,
             "batch_index": current_batch_index,
             "total_batches": total_batches,
-            "runtime": _runtime_payload("verified" if passed else "quality_gate_failed"),
+            "runtime": _runtime_payload(
+                "verified" if passed else "quality_gate_failed"
+            ),
         },
         step_id="run",
     )

@@ -50,18 +50,46 @@ class TestPing:
 class TestModelLatencyProbe:
     @patch(
         "web.routes.health._probe_deepseek",
-        return_value={"reachable": True, "latency_ms": 123, "model_id": "deepseek-chat"},
+        return_value={
+            "reachable": True,
+            "latency_ms": 123,
+            "model_id": "deepseek-chat",
+        },
     )
     @patch(
         "web.routes.health._probe_local_model",
-        return_value={"reachable": False, "latency_ms": None, "error": "service_unavailable", "model_id": "qwen3.5:9b"},
+        return_value={
+            "reachable": False,
+            "latency_ms": None,
+            "error": "service_unavailable",
+            "model_id": "qwen3.5:9b",
+        },
     )
-    @patch("app.core.llm.model_selection.get_configured_cloud_provider", return_value="deepseek")
-    @patch("app.core.llm.model_selection.get_configured_cloud_model", return_value="deepseek-chat")
-    @patch("app.core.llm.local_model_runtime.get_configured_local_model_tag", return_value="qwen3.5:9b")
-    @patch("app.core.llm.local_model_runtime.get_configured_model_mode", return_value="cloud")
+    @patch(
+        "app.core.llm.model_selection.get_configured_cloud_provider",
+        return_value="deepseek",
+    )
+    @patch(
+        "app.core.llm.model_selection.get_configured_cloud_model",
+        return_value="deepseek-chat",
+    )
+    @patch(
+        "app.core.llm.local_model_runtime.get_configured_local_model_tag",
+        return_value="qwen3.5:9b",
+    )
+    @patch(
+        "app.core.llm.local_model_runtime.get_configured_model_mode",
+        return_value="cloud",
+    )
     def test_reports_real_probe_results_and_active_cloud_state(
-        self, _mode, _local_model, _cloud_model, _provider, _local_probe, _cloud_probe, client
+        self,
+        _mode,
+        _local_model,
+        _cloud_model,
+        _provider,
+        _local_probe,
+        _cloud_probe,
+        client,
     ):
         response = client.get("/api/ping/models")
 
@@ -78,18 +106,42 @@ class TestModelLatencyProbe:
 
     @patch(
         "web.routes.health._probe_deepseek",
-        return_value={"reachable": False, "latency_ms": None, "error": "key_invalid", "model_id": "deepseek-chat"},
+        return_value={
+            "reachable": False,
+            "latency_ms": None,
+            "error": "key_invalid",
+            "model_id": "deepseek-chat",
+        },
     )
     @patch(
         "web.routes.health._probe_local_model",
         return_value={"reachable": True, "latency_ms": 456, "model_id": "qwen3.5:9b"},
     )
-    @patch("app.core.llm.model_selection.get_configured_cloud_provider", return_value="deepseek")
-    @patch("app.core.llm.model_selection.get_configured_cloud_model", return_value="deepseek-chat")
-    @patch("app.core.llm.local_model_runtime.get_configured_local_model_tag", return_value="qwen3.5:9b")
-    @patch("app.core.llm.local_model_runtime.get_configured_model_mode", return_value="local")
+    @patch(
+        "app.core.llm.model_selection.get_configured_cloud_provider",
+        return_value="deepseek",
+    )
+    @patch(
+        "app.core.llm.model_selection.get_configured_cloud_model",
+        return_value="deepseek-chat",
+    )
+    @patch(
+        "app.core.llm.local_model_runtime.get_configured_local_model_tag",
+        return_value="qwen3.5:9b",
+    )
+    @patch(
+        "app.core.llm.local_model_runtime.get_configured_model_mode",
+        return_value="local",
+    )
     def test_active_local_state_stays_healthy_when_cloud_key_is_invalid(
-        self, _mode, _local_model, _cloud_model, _provider, _local_probe, _cloud_probe, client
+        self,
+        _mode,
+        _local_model,
+        _cloud_model,
+        _provider,
+        _local_probe,
+        _cloud_probe,
+        client,
     ):
         data = client.get("/api/ping/models").get_json()
 

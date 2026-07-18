@@ -600,7 +600,10 @@ def test_file_task_runtime_readonly_model_unavailable_summarizes_explicit_contex
     assert check_finished.payload["passed"] is False
     assert check_finished.payload["status"] == "context_summary_fallback"
     assert check_finished.payload["runtime"]["execution_path"] == "readonly_fallback"
-    assert check_finished.payload["runtime"]["terminal_status"] == "context_summary_fallback"
+    assert (
+        check_finished.payload["runtime"]["terminal_status"]
+        == "context_summary_fallback"
+    )
     assert check_finished.payload["runtime"]["model_unavailable"] is True
     assert check_finished.payload["runtime"]["readonly_fallback_used"] is True
     assert check_finished.payload["runtime"]["planner"] == {

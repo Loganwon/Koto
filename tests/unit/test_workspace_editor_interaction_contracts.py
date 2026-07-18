@@ -1,7 +1,6 @@
 import re
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -36,7 +35,10 @@ def test_univer_legacy_duplicate_warning_filter_is_exact_and_scoped():
     source = _read("web/univer-editor/sheets-main.js")
 
     assert "LEGACY_HEADER_FOOTER_DUPLICATE_WARNING" in source
-    assert "args.length === 1 && args[0] === LEGACY_HEADER_FOOTER_DUPLICATE_WARNING" in source
+    assert (
+        "args.length === 1 && args[0] === LEGACY_HEADER_FOOTER_DUPLICATE_WARNING"
+        in source
+    )
     assert "setTimeout(restoreWarn, 1000);" in source
     assert "catch (error) {\n    restoreWarn();\n    throw error;" in source
     assert "initializeLegacyUniverRuntime(() =>" in source

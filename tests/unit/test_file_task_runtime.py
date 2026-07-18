@@ -1739,8 +1739,7 @@ def test_file_task_runtime_quality_gate_requires_native_risk_register_table(tmp_
     )
     assert text_result["passed"] is False
     assert any(
-        item["criterion"] == "docx_table_request_has_table"
-        and item["passed"] is False
+        item["criterion"] == "docx_table_request_has_table" and item["passed"] is False
         for item in text_result["criteria_results"]
     )
 
@@ -1766,8 +1765,7 @@ def test_file_task_runtime_quality_gate_requires_native_risk_register_table(tmp_
         output_mode="write",
     )
     assert any(
-        item["criterion"] == "docx_table_request_has_table"
-        and item["passed"] is True
+        item["criterion"] == "docx_table_request_has_table" and item["passed"] is True
         for item in table_result["criteria_results"]
     )
 
@@ -6023,7 +6021,8 @@ def test_file_task_runtime_blocks_python_pdf_text_extraction_and_guides_native_r
     )
 
     discarded = [
-        event for event in events
+        event
+        for event in events
         if event.type == "model.call.finished"
         and event.payload.get("discarded_tool_call_count") == 1
     ]
@@ -6031,8 +6030,7 @@ def test_file_task_runtime_blocks_python_pdf_text_extraction_and_guides_native_r
     assert all(name != "run_python_code" for name, _ in calls)
     assert all(call["tools"] == [] for call in model_calls)
     assert any(
-        name == "parse_file_to_text"
-        and args.get("path") == "source.pdf"
+        name == "parse_file_to_text" and args.get("path") == "source.pdf"
         for name, args in calls
     )
     assert discarded
@@ -6125,7 +6123,9 @@ def test_file_task_runtime_keeps_readonly_duplicate_guard_internal():
         for event in events
     )
     assert run_finished.payload["completed_task"] is False
-    assert run_finished.payload["runtime"]["terminal_status"] == "context_summary_fallback"
+    assert (
+        run_finished.payload["runtime"]["terminal_status"] == "context_summary_fallback"
+    )
     assert "避免重复写入" not in run_finished.payload["summary"]
 
 
@@ -6181,7 +6181,8 @@ def test_file_task_runtime_discards_read_tool_call_when_grounded_answer_is_ready
     assert len(model_calls) == 2
     assert model_calls[-1]["tools"] == []
     assert not any(
-        event.type == "tool.started" and event.payload.get("tool_name") == "parse_file_to_text"
+        event.type == "tool.started"
+        and event.payload.get("tool_name") == "parse_file_to_text"
         for event in events
         if event.step_id == "execute"
     )

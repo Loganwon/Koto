@@ -404,13 +404,10 @@ def _terminate_stale_process_on_port(port: int, reason: str = "") -> bool:
                         process_name == "koto.exe" and process_exe == expected_exe
                     )
                     app_root_marker = str(APP_ROOT.resolve()).lower()
-                    same_source_app = (
-                        app_root_marker in cmdline
-                        and (
-                            "koto_app.py" in cmdline
-                            or "web\\app.py" in cmdline
-                            or "web/app.py" in cmdline
-                        )
+                    same_source_app = app_root_marker in cmdline and (
+                        "koto_app.py" in cmdline
+                        or "web\\app.py" in cmdline
+                        or "web/app.py" in cmdline
                     )
                     if same_frozen_app or same_source_app:
                         _write_log(f"⚠️ 终止占用 {port} 的进程 {pid}（{reason}）")
@@ -950,9 +947,7 @@ def start_flask_server():
                 else:
                     alt_port = _find_available_port(KOTO_HOST, FALLBACK_PORT)
                     if alt_port is None:
-                        message = (
-                            f"{KOTO_HOST}:{KOTO_PORT} 被其他程序占用，且没有可用备用端口"
-                        )
+                        message = f"{KOTO_HOST}:{KOTO_PORT} 被其他程序占用，且没有可用备用端口"
                         _write_log(f"❌ {message}")
                         return {
                             "started": False,

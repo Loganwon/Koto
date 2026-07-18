@@ -5,6 +5,7 @@ import math
 import re
 from typing import Any, List, Optional
 
+
 def _normalize_table_columns(columns: Any) -> List[str]:
     if not columns:
         return []
@@ -113,9 +114,7 @@ def _compact_financial_table_rows(
         return []
 
     label_column = max(0, year_columns[0][0] - 1)
-    projected: List[List[str]] = [
-        ["指标", *[label for _column, label in year_columns]]
-    ]
+    projected: List[List[str]] = [["指标", *[label for _column, label in year_columns]]]
     candidates: List[List[str]] = []
     preferred: List[List[str]] = []
     for row in raw_rows[header_index + 1 :]:
@@ -147,9 +146,10 @@ def _style_compact_financial_docx_table(table: Any, document: Any) -> None:
 
     column_count = max(1, len(table.columns))
     section = document.sections[-1]
-    usable_inches = float(
-        section.page_width - section.left_margin - section.right_margin
-    ) / 914400.0
+    usable_inches = (
+        float(section.page_width - section.left_margin - section.right_margin)
+        / 914400.0
+    )
     label_width = min(1.7, max(1.35, usable_inches * 0.25))
     value_width = max(0.85, (usable_inches - label_width) / max(1, column_count - 1))
     widths = [label_width, *([value_width] * (column_count - 1))]
