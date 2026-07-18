@@ -318,6 +318,7 @@ def test_windows_release_build_tools_are_pinned_once():
 
 def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     release_build = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    portable_builder = Path("src/deploy_portable.py").read_text(encoding="utf-8")
 
     assert "function Set-PackagedRuntimeConfigDefaults" in release_build
     assert 'Name = "macro_suggestions.json"' in release_build
@@ -328,6 +329,42 @@ def test_release_build_seeds_gitignored_runtime_defaults_in_packages():
     assert release_build.index(
         "Set-PackagedRuntimeConfigDefaults -ConfigRoot"
     ) < release_build.index("Test-PackagedConfigDefaults -ConfigRoot")
+    assert "RUNTIME_CONFIG_DEFAULTS" in portable_builder
+    assert "ensure_runtime_config_defaults(app_config_root)" in portable_builder
+    assert "ensure_runtime_config_defaults(portable_config_root)" in portable_builder
+    assert '"suggestions": []' in portable_builder
+    assert '"exploratory": 0.5' in portable_builder
+
+
+def test_portable_builder_seeds_empty_runtime_defaults_without_overwriting(tmp_path):
+    spec = importlib.util.spec_from_file_location(
+        "deploy_portable_under_test", Path("src/deploy_portable.py")
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    config_root = tmp_path / "config"
+    module.ensure_runtime_config_defaults(config_root)
+
+    suggestions_path = config_root / "macro_suggestions.json"
+    matrix_path = config_root / "personality_matrix.json"
+    assert json.loads(suggestions_path.read_text(encoding="utf-8")) == {
+        "suggestions": [],
+        "seen_fingerprints": [],
+    }
+    assert json.loads(matrix_path.read_text(encoding="utf-8"))["cognitive"] == {
+        "exploratory": 0.5,
+        "executor": 0.5,
+        "analytical": 0.5,
+        "creative": 0.5,
+    }
+
+    suggestions_path.write_text('{"suggestions": ["keep-me"]}\n', encoding="utf-8")
+    module.ensure_runtime_config_defaults(config_root)
+    assert json.loads(suggestions_path.read_text(encoding="utf-8")) == {
+        "suggestions": ["keep-me"]
+    }
 
 
 def test_release_packages_exclude_personal_runtime_state():
@@ -543,6 +580,23 @@ def test_release_pipelines_publish_manifest_and_sha256_checksums():
         assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
         assert "dist/Koto_v*_SHA256SUMS.txt" in workflow
         assert "dist/Koto_v*_release-manifest.json" in workflow
+
+
+def test_release_pipeline_rejects_reusing_published_tags():
+    release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+
+    assert "Reject reused release tags" in release
+    assert 'gh release view "$GITHUB_REF_NAME"' in release
+    assert "Create a new patch tag instead of rebuilding" in release
+
+
+def test_github_pages_uses_asset_build_date_instead_of_stale_release_date():
+    page = Path("docs/index.html").read_text(encoding="utf-8")
+
+    assert "构建更新于" in page
+    assert "latestAssetTimestamp" in page
+    assert "asset.updated_at || asset.created_at" in page
+    assert "发布于 ' + published" not in page
 
 
 def test_inno_setup_path_resolution_is_shared():
