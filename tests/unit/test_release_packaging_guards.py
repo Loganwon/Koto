@@ -607,6 +607,21 @@ def test_formal_windows_release_requires_end_to_end_authenticode_signing():
     )
 
     assert "[switch]$RequireCodeSigning" in local_release
+    assert "-RequireCodeSigning 只能用于完整、干净、非增量的正式构建" in local_release
+    for incompatible_switch in (
+        "$SkipBuild",
+        "$SkipCython",
+        "$Incremental",
+        "$AllowPrebuiltFrontend",
+        "$AllowNoInstaller",
+        "$AllowDirtyWorktree",
+    ):
+        assert (
+            incompatible_switch
+            in local_release.split("-RequireCodeSigning 只能用于", 1)[0].rsplit(
+                "if ($RequireCodeSigning", 1
+            )[1]
+        )
     assert "SigningCertificateThumbprint" in local_release
     assert "scripts\\sign_windows_file.ps1" in local_release
     assert '-Label "Koto.exe"' in local_release
@@ -642,6 +657,7 @@ def test_formal_windows_release_requires_end_to_end_authenticode_signing():
     for e2e in (installer_e2e, portable_e2e):
         assert "[switch]$RequireCodeSigning" in e2e
         assert "TimeStamperCertificate" in e2e
+        assert "Refusing to" in e2e
     assert '"code_signing": {' in manifest_writer
     assert '"--code-signing-status"' in manifest_writer
 

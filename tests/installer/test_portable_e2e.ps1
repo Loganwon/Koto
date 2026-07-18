@@ -173,6 +173,11 @@ Test-RequiredAuthenticodeSignature -Path $exePath -Label "portable Koto.exe"
 Test-RequiredAuthenticodeSignature `
     -Path (Join-Path $ExtractDir "LocalModelInstaller.exe") `
     -Label "portable LocalModelInstaller.exe"
+if ($RequireCodeSigning -and $failures.Count -gt 0) {
+    Remove-Item -LiteralPath $ExtractDir -Recurse -Force -ErrorAction SilentlyContinue
+    Write-Host "❌ Refusing to launch portable executables that failed the signing gate." -ForegroundColor Red
+    exit 1
+}
 
 $unexpectedRuntimePaths = @(
     (Join-Path $ExtractDir ".webview2_profile"),

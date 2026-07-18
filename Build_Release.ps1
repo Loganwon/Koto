@@ -52,6 +52,17 @@ $BUILD_REQUIREMENTS_LOCK = Join-Path $REPO_ROOT "config\build-requirements.lock"
 $BUILD_REQUIREMENTS_VERIFY = Join-Path $REPO_ROOT "scripts\verify_build_requirements.py"
 $SIGN_WINDOWS_FILE = Join-Path $REPO_ROOT "scripts\sign_windows_file.ps1"
 
+if ($RequireCodeSigning -and (
+    $SkipBuild -or
+    $SkipCython -or
+    $Incremental -or
+    $AllowPrebuiltFrontend -or
+    $AllowNoInstaller -or
+    $AllowDirtyWorktree
+)) {
+    throw "-RequireCodeSigning 只能用于完整、干净、非增量的正式构建；不得组合诊断或跳过步骤开关。"
+}
+
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
 function Write-OK    { param([string]$msg) Write-Host "  [OK] $msg" -ForegroundColor Green }

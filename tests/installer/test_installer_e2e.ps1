@@ -244,6 +244,10 @@ function Test-RemovedFeatureAssets([string]$WebRoot) {
 }
 
 Test-RequiredAuthenticodeSignature -Path $SetupExe -Label "Setup.exe"
+if ($RequireCodeSigning -and $failures.Count -gt 0) {
+    Write-Host "❌ Refusing to execute an installer that failed the signing gate." -ForegroundColor Red
+    exit 1
+}
 
 # ── Cleanup any leftover from previous run ───────────────────────────────
 if (Test-Path $TestInstallDir) {
@@ -312,6 +316,10 @@ Test-RequiredAuthenticodeSignature `
 Test-RequiredAuthenticodeSignature `
     -Path (Join-Path $TestInstallDir "unins000.exe") `
     -Label "installed unins000.exe"
+if ($RequireCodeSigning -and $failures.Count -gt 0) {
+    Write-Host "❌ Refusing to launch installed executables that failed the signing gate." -ForegroundColor Red
+    exit 1
+}
 
 $unexpectedRuntimePaths = @(
     (Join-Path $TestInstallDir ".webview2_profile"),
