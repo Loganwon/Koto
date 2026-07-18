@@ -38,6 +38,7 @@ param(
     [int]$HealthTimeoutSec  = 45,
     [bool]$RequireHealth    = $true,
     [bool]$RequireDesktopWindow = $true,
+    [switch]$RequireCodeSigning,
     [string]$EvidenceDir = "",
     [int]$DesktopHoldSec = 0
 )
@@ -84,6 +85,28 @@ if ($existingRegistration) {
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+$expectedSignerThumbprint = ""
+function Test-RequiredAuthenticodeSignature([string]$Path, [string]$Label) {
+    if (-not $RequireCodeSigning) { return }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Fail "Signed executable missing: $Path"
+        return
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        -not $signature.SignerCertificate -or
+        -not $signature.TimeStamperCertificate) {
+        Fail "$Label must have a valid Authenticode signature and trusted timestamp (status=$($signature.Status))"
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($script:expectedSignerThumbprint)) {
+        $script:expectedSignerThumbprint = $signature.SignerCertificate.Thumbprint
+    } elseif ($signature.SignerCertificate.Thumbprint -ne $script:expectedSignerThumbprint) {
+        Fail "$Label signer does not match the release installer signer"
+        return
+    }
+    Pass "$Label Authenticode signature and timestamp are valid"
+}
 function Save-KotoWindowEvidence([string]$OutputDirectory, [System.Diagnostics.Process]$Process) {
     if ([string]::IsNullOrWhiteSpace($OutputDirectory)) { return }
     try {
@@ -220,6 +243,8 @@ function Test-RemovedFeatureAssets([string]$WebRoot) {
     }
 }
 
+Test-RequiredAuthenticodeSignature -Path $SetupExe -Label "Setup.exe"
+
 # ── Cleanup any leftover from previous run ───────────────────────────────
 if (Test-Path $TestInstallDir) {
     Write-Host "[E2E] Removing leftover install dir..."
@@ -280,6 +305,13 @@ foreach ($path in $requiredPaths) {
     if (Test-Path $path) { Pass "Exists: $(Split-Path -Leaf $path)" }
     else                 { Fail "Missing: $path" }
 }
+Test-RequiredAuthenticodeSignature -Path $exePath -Label "installed Koto.exe"
+Test-RequiredAuthenticodeSignature `
+    -Path (Join-Path $TestInstallDir "LocalModelInstaller.exe") `
+    -Label "installed LocalModelInstaller.exe"
+Test-RequiredAuthenticodeSignature `
+    -Path (Join-Path $TestInstallDir "unins000.exe") `
+    -Label "installed unins000.exe"
 
 $unexpectedRuntimePaths = @(
     (Join-Path $TestInstallDir ".webview2_profile"),

@@ -27,6 +27,9 @@ param(
     [switch]$AllowPrebuiltFrontend, # 仅用于无法安装 Node.js 的受限环境；不应作为正式发布路径
     [switch]$AllowNoInstaller,      # 仅生成便携包；不应作为完整 Windows 发布路径
     [switch]$AllowDirtyWorktree,    # 仅用于诊断构建；不得将产物作为正式发布版本
+    [switch]$RequireCodeSigning,    # 正式 tag 发布必须启用；缺少有效证书时立即失败
+    [string]$SigningCertificateThumbprint = "", # Cert:\CurrentUser\My 中带私钥的代码签名证书
+    [string]$TimestampServer = "http://timestamp.digicert.com",
     [string]$Version = ""
 )
 
@@ -47,6 +50,7 @@ $CYTHON_BUILD_ROOT = Join-Path $REPO_ROOT "build\cython_lib"
 $WEBVIEW2_PREPARE = Join-Path $REPO_ROOT "scripts\prepare_webview2_runtime.ps1"
 $BUILD_REQUIREMENTS_LOCK = Join-Path $REPO_ROOT "config\build-requirements.lock"
 $BUILD_REQUIREMENTS_VERIFY = Join-Path $REPO_ROOT "scripts\verify_build_requirements.py"
+$SIGN_WINDOWS_FILE = Join-Path $REPO_ROOT "scripts\sign_windows_file.ps1"
 
 # ─── 颜色输出辅助 ─────────────────────────────
 function Write-Step  { param([string]$msg) Write-Host "`n[$([char]0x25B6)] $msg" -ForegroundColor Cyan }
@@ -166,6 +170,42 @@ function Format-CmdArg {
     param([Parameter(Mandatory = $true)][string]$Value)
 
     return '"{0}"' -f $Value.Replace('"', '""')
+}
+
+function Invoke-KotoCodeSigning {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Label,
+        [switch]$VerifyOnly
+    )
+
+    if (-not $script:codeSigningEnabled) {
+        return
+    }
+    $arguments = @(
+        '-NoProfile',
+        '-NonInteractive',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', $SIGN_WINDOWS_FILE,
+        '-FilePath', $Path,
+        '-CertificateThumbprint', $script:signingThumbprint,
+        '-TimestampServer', $TimestampServer
+    )
+    if ($VerifyOnly) {
+        $arguments += '-VerifyOnly'
+    }
+    $signingLog = Join-Path $LOG_DIR ("code_signing_{0}.log" -f ($Label -replace '[^0-9A-Za-z_-]', '_'))
+    $exitCode = Invoke-ProcessLogged `
+        -FilePath "powershell.exe" `
+        -ArgumentList $arguments `
+        -WorkingDirectory $REPO_ROOT `
+        -LogPath $signingLog
+    if ($exitCode -ne 0) {
+        Write-Fail "$Label 代码签名失败，查看日志：$signingLog"
+        Get-Content $signingLog -Tail 30
+        exit 1
+    }
+    Write-OK "$Label Authenticode 签名与 RFC 3161 时间戳已验证"
 }
 
 function Test-WorkspaceStaticAssets {
@@ -457,6 +497,40 @@ if ($Version -notmatch '^[0-9A-Za-z][0-9A-Za-z._+\-]*$') {
 }
 Write-OK "版本号: $Version"
 
+# ─── Windows Authenticode 发布身份 ────────────────────────────────
+$script:signingThumbprint = ($SigningCertificateThumbprint -replace '[^0-9A-Fa-f]', '').ToUpperInvariant()
+$script:codeSigningEnabled = -not [string]::IsNullOrWhiteSpace($script:signingThumbprint)
+if ($RequireCodeSigning -and -not $script:codeSigningEnabled) {
+    Write-Fail "本次构建要求 Windows 代码签名，但未提供 -SigningCertificateThumbprint。"
+    exit 1
+}
+if ($script:codeSigningEnabled) {
+    $env:KOTO_SIGNING_CERT_THUMBPRINT = $script:signingThumbprint
+    $env:KOTO_SIGNING_TIMESTAMP_SERVER = $TimestampServer
+    $signingValidationLog = Join-Path $LOG_DIR "code_signing_preflight.log"
+    $signingValidationExitCode = Invoke-ProcessLogged `
+        -FilePath "powershell.exe" `
+        -ArgumentList @(
+            '-NoProfile',
+            '-NonInteractive',
+            '-ExecutionPolicy', 'Bypass',
+            '-File', $SIGN_WINDOWS_FILE,
+            '-CertificateThumbprint', $script:signingThumbprint,
+            '-TimestampServer', $TimestampServer,
+            '-ValidateOnly'
+        ) `
+        -WorkingDirectory $REPO_ROOT `
+        -LogPath $signingValidationLog
+    if ($signingValidationExitCode -ne 0) {
+        Write-Fail "Windows 代码签名前置检查失败，查看日志：$signingValidationLog"
+        Get-Content $signingValidationLog -Tail 30
+        exit 1
+    }
+    Write-OK "Windows 代码签名证书、私钥与 SignTool 已验证"
+} else {
+    Write-Host "  [--] 未配置 Windows 代码签名；产物将明确标记为 unsigned，不得直接创建正式 tag Release。" -ForegroundColor Yellow
+}
+
 # 发布包携带微软官方 x64 Evergreen 离线运行时。已有且签名有效时不会重复下载。
 Write-Step "准备零环境桌面运行时（Microsoft WebView2）"
 $webView2Installer = & $WEBVIEW2_PREPARE | Select-Object -Last 1
@@ -603,6 +677,9 @@ if (-not $SkipBuild) {
 } else {
     Write-Step "跳过 PyInstaller（-SkipBuild）"
 }
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "Koto\Koto.exe") `
+    -Label "Koto.exe"
 
 # ─── 步骤 2：构建本地模型安装器 ─────────────────
 $installerBuildLog = Join-Path $LOG_DIR "local_model_installer_build_latest.log"
@@ -615,6 +692,9 @@ if ($localInstallerExitCode -ne 0) {
     exit 1
 }
 Write-OK "本地模型安装器构建完成 → dist\LocalModelInstaller.exe"
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "LocalModelInstaller.exe") `
+    -Label "LocalModelInstaller.exe"
 
 # ─── 步骤 3：组装便携包 ───────────────────────
 Write-Step "步骤 3/5  组装便携包（dist\Koto_Portable\)"
@@ -632,6 +712,14 @@ Set-PackagedConfigDirectories -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_i
 Set-PackagedRuntimeConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedConfigDefaults -ConfigRoot (Join-Path $DIST_DIR "Koto_Portable\_internal\config") -Label "便携包内默认配置"
 Test-PackagedRuntimePrerequisites -PackageRoot (Join-Path $DIST_DIR "Koto_Portable")
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "Koto_Portable\Koto.exe") `
+    -Label "portable_Koto.exe" `
+    -VerifyOnly
+Invoke-KotoCodeSigning `
+    -Path (Join-Path $DIST_DIR "Koto_Portable\LocalModelInstaller.exe") `
+    -Label "portable_LocalModelInstaller.exe" `
+    -VerifyOnly
 
 # ─── 步骤 4：构建 Inno Setup 安装包 ─────────────────────
 Write-Step "步骤 4/5  构建安装包（Inno Setup）"
@@ -639,16 +727,34 @@ $resolveInno = Join-Path $REPO_ROOT "scripts\resolve_inno_setup.ps1"
 $iscc = (& $resolveInno -Quiet) | Select-Object -First 1
 $setupName = "Koto_v${Version}_Setup.exe"
 $setupPath = Join-Path $DIST_DIR $setupName
+$setupBuilt = $false
+if (Test-Path -LiteralPath $setupPath -PathType Leaf) {
+    Remove-Item -LiteralPath $setupPath -Force
+}
 if ($iscc) {
     $issFile = Join-Path $REPO_ROOT "koto_installer.iss"
     $isccLog = Join-Path $LOG_DIR "inno_setup_build.log"
-    $isccExitCode = Invoke-CmdLogged -CommandLine ('{0} /DAppVersion={1} {2}' -f (Format-CmdArg $iscc), $Version, (Format-CmdArg $issFile)) -LogPath $isccLog
+    $isccCommandLine = '{0} /DAppVersion={1}' -f (Format-CmdArg $iscc), $Version
+    if ($script:codeSigningEnabled) {
+        # Inno Setup expands $q to a quote and $f to the file being signed. This
+        # signs both the outer Setup executable and its generated uninstaller.
+        $innoSignToolCommand = "powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `$q$SIGN_WINDOWS_FILE`$q -CertificateThumbprint $script:signingThumbprint -TimestampServer $TimestampServer -FilePath `$f"
+        $innoSignToolArgument = "/SKotoSignTool=$innoSignToolCommand"
+        $isccCommandLine += ' /DKotoCodeSigning=1 {0}' -f (Format-CmdArg $innoSignToolArgument)
+    }
+    $isccCommandLine += ' {0}' -f (Format-CmdArg $issFile)
+    $isccExitCode = Invoke-CmdLogged -CommandLine $isccCommandLine -LogPath $isccLog
     if ($isccExitCode -ne 0) {
         Write-Fail "Inno Setup 构建失败，查看日志：$isccLog"
         Get-Content $isccLog -Tail 30
         exit 1
     }
+    $setupBuilt = $true
     Write-OK "安装包已生成 → dist\$setupName"
+    Invoke-KotoCodeSigning `
+        -Path $setupPath `
+        -Label "Setup.exe" `
+        -VerifyOnly
 } else {
     if (-not $AllowNoInstaller) {
         Write-Fail "未检测到 Inno Setup 6；完整 Windows 发布必须生成安装包。仅生成便携包时请显式传入 -AllowNoInstaller。"
@@ -701,7 +807,9 @@ if ($worktreeChangedDuringBuild) {
 $manifestPath = Join-Path $DIST_DIR "Koto_v${Version}_release-manifest.json"
 $checksumPath = Join-Path $DIST_DIR "Koto_v${Version}_SHA256SUMS.txt"
 $artifacts = @($zipPath)
-if (Test-Path $setupPath) { $artifacts += $setupPath }
+if ($setupBuilt) { $artifacts += $setupPath }
+$codeSigningStatus = if ($script:codeSigningEnabled) { "valid" } else { "unsigned" }
+$codeSigningRequiredState = if ($RequireCodeSigning) { "true" } else { "false" }
 $manifestArgs = @(
     $MANIFEST_WRITER,
     '--version', $Version,
@@ -709,8 +817,17 @@ $manifestArgs = @(
     '--hash-output', $checksumPath,
     '--git-revision', $gitRevisionAtStart,
     '--git-dirty', $gitDirtyAtStart,
-    '--worktree-changed-during-build', $worktreeChangedState
-) + $artifacts
+    '--worktree-changed-during-build', $worktreeChangedState,
+    '--code-signing-status', $codeSigningStatus,
+    '--code-signing-required', $codeSigningRequiredState
+)
+if ($script:codeSigningEnabled) {
+    $manifestArgs += @(
+        '--signer-thumbprint', $script:signingThumbprint,
+        '--timestamp-server', $TimestampServer
+    )
+}
+$manifestArgs += $artifacts
 $manifestExitCode = Invoke-ProcessLogged -FilePath $PYTHON -ArgumentList $manifestArgs -WorkingDirectory $REPO_ROOT -LogPath (Join-Path $LOG_DIR 'release_manifest.log')
 if ($manifestExitCode -ne 0) {
     Write-Fail "生成发布清单失败，查看日志：logs\release_manifest.log"

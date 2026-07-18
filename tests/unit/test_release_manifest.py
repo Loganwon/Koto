@@ -36,6 +36,12 @@ def test_release_manifest_records_each_artifact_and_sha256(tmp_path: Path):
     assert payload["schema_version"] == 1
     assert isinstance(payload["git_dirty"], bool)
     assert payload["worktree_changed_during_build"] is None
+    assert payload["code_signing"] == {
+        "required": False,
+        "status": "unsigned",
+        "signer_thumbprint": None,
+        "timestamp_server": None,
+    }
     assert payload["version"] == "1.2.3"
     assert payload["artifacts"] == [
         {
@@ -71,6 +77,14 @@ def test_release_manifest_accepts_build_start_provenance(tmp_path: Path):
             "true",
             "--worktree-changed-during-build",
             "true",
+            "--code-signing-status",
+            "valid",
+            "--code-signing-required",
+            "true",
+            "--signer-thumbprint",
+            "A" * 40,
+            "--timestamp-server",
+            "https://timestamp.example.test",
             str(artifact),
         ],
         check=True,
@@ -80,6 +94,12 @@ def test_release_manifest_accepts_build_start_provenance(tmp_path: Path):
     assert payload["git_revision"] == "build-start-revision"
     assert payload["git_dirty"] is True
     assert payload["worktree_changed_during_build"] is True
+    assert payload["code_signing"] == {
+        "required": True,
+        "status": "valid",
+        "signer_thumbprint": "A" * 40,
+        "timestamp_server": "https://timestamp.example.test",
+    }
 
 
 def test_release_manifest_rejects_unsafe_version_and_duplicate_artifact_names(

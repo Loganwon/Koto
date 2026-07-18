@@ -43,7 +43,32 @@ npm --prefix web/univer-editor run build
 task change, also run a live local smoke: open `/`, submit the real task from
 the UI, observe progress, and verify the produced artifact.
 
-## 4. Package and verify
+## 4. Configure Windows code signing
+
+Formal tag releases require an Authenticode code-signing certificate with an
+accessible private key. Import it into `Cert:\CurrentUser\My`, then build with
+its SHA-1 thumbprint:
+
+```powershell
+.\Build_Release.ps1 `
+  -RequireCodeSigning `
+  -SigningCertificateThumbprint "<40-hex-thumbprint>"
+```
+
+The canonical pipeline signs `Koto.exe`, `LocalModelInstaller.exe`, the Inno
+Setup executable, and the generated uninstaller with SHA-256 plus an RFC 3161
+timestamp. It verifies every signature before producing the release manifest;
+the manifest records whether signing was required, the result, signer
+thumbprint, and timestamp service. An unsigned local build remains useful for
+diagnostics but is not a formal publication candidate.
+
+GitHub tag releases import the certificate from the repository secrets
+`WINDOWS_CODE_SIGNING_PFX_BASE64` and `WINDOWS_CODE_SIGNING_PFX_PASSWORD`.
+The PFX should be base64-encoded without being committed to the repository.
+Tag builds fail before packaging if either secret is absent or invalid. Manual
+workflow builds may remain unsigned and are clearly marked as non-publishable.
+
+## 5. Package and verify
 
 ```powershell
 .\Build_Release.ps1

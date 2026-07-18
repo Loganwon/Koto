@@ -29,7 +29,8 @@ param(
     [int]$Port                = 5098,
     [int]$HealthTimeoutSec    = 45,
     [bool]$RequireHealth      = $true,
-    [bool]$RequireDesktopWindow = $true
+    [bool]$RequireDesktopWindow = $true,
+    [switch]$RequireCodeSigning
 )
 
 $ErrorActionPreference = "Stop"
@@ -55,6 +56,28 @@ Write-Host "[E2E-Portable] Port: $Port"
 $failures = [System.Collections.Generic.List[string]]::new()
 function Fail([string]$msg) { $script:failures.Add($msg); Write-Host "::error:: FAIL: $msg" }
 function Pass([string]$msg) { Write-Host "  PASS: $msg" }
+$expectedSignerThumbprint = ""
+function Test-RequiredAuthenticodeSignature([string]$Path, [string]$Label) {
+    if (-not $RequireCodeSigning) { return }
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+        Fail "Signed executable missing: $Path"
+        return
+    }
+    $signature = Get-AuthenticodeSignature -LiteralPath $Path
+    if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        -not $signature.SignerCertificate -or
+        -not $signature.TimeStamperCertificate) {
+        Fail "$Label must have a valid Authenticode signature and trusted timestamp (status=$($signature.Status))"
+        return
+    }
+    if ([string]::IsNullOrWhiteSpace($script:expectedSignerThumbprint)) {
+        $script:expectedSignerThumbprint = $signature.SignerCertificate.Thumbprint
+    } elseif ($signature.SignerCertificate.Thumbprint -ne $script:expectedSignerThumbprint) {
+        Fail "$Label signer does not match the Koto.exe signer"
+        return
+    }
+    Pass "$Label Authenticode signature and timestamp are valid"
+}
 function Show-KotoStartupDiagnostics([string]$InstallDir, [int]$HealthPort) {
     Write-Host "::group::Koto startup diagnostics"
     Write-Host "Process PID: $($kotoProc.Id); exited: $($kotoProc.HasExited); expected port: $HealthPort"
@@ -137,6 +160,7 @@ $requiredPaths = @(
     (Join-Path $ExtractDir "Start_Koto.bat"),
     (Join-Path $ExtractDir "Install_WebView2_Runtime.bat"),
     (Join-Path $ExtractDir "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"),
+    (Join-Path $ExtractDir "LocalModelInstaller.exe"),
     (Join-Path $internalDir "python311.dll"),
     (Join-Path $internalDir "VCRUNTIME140.dll"),
     (Join-Path $internalDir "webview\lib\runtimes\win-x64\native\WebView2Loader.dll")
@@ -145,6 +169,10 @@ foreach ($path in $requiredPaths) {
     if (Test-Path $path) { Pass "Exists: $(Split-Path -Leaf $path)" }
     else                 { Fail "Missing: $path" }
 }
+Test-RequiredAuthenticodeSignature -Path $exePath -Label "portable Koto.exe"
+Test-RequiredAuthenticodeSignature `
+    -Path (Join-Path $ExtractDir "LocalModelInstaller.exe") `
+    -Label "portable LocalModelInstaller.exe"
 
 $unexpectedRuntimePaths = @(
     (Join-Path $ExtractDir ".webview2_profile"),

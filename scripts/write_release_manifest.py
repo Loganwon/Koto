@@ -45,7 +45,10 @@ def validate_version(value: str) -> str:
     version = str(value or "").strip()
     if not version or not version[0].isalnum():
         raise ValueError("version must start with an alphanumeric character")
-    if any(char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-" for char in version):
+    if any(
+        char not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._+-"
+        for char in version
+    ):
         raise ValueError("version contains characters unsafe for release filenames")
     return version
 
@@ -74,6 +77,18 @@ def main() -> int:
         "--worktree-changed-during-build",
         choices=("true", "false", "unknown"),
     )
+    parser.add_argument(
+        "--code-signing-status",
+        choices=("valid", "unsigned"),
+        default="unsigned",
+    )
+    parser.add_argument(
+        "--code-signing-required",
+        choices=("true", "false"),
+        default="false",
+    )
+    parser.add_argument("--signer-thumbprint", default="")
+    parser.add_argument("--timestamp-server", default="")
     parser.add_argument("artifacts", nargs="+", type=Path)
     args = parser.parse_args()
     version = validate_version(args.version)
@@ -108,10 +123,21 @@ def main() -> int:
             args.worktree_changed_during_build,
             fallback=None,
         ),
+        "code_signing": {
+            "required": parse_optional_bool(
+                args.code_signing_required,
+                fallback=False,
+            ),
+            "status": args.code_signing_status,
+            "signer_thumbprint": args.signer_thumbprint or None,
+            "timestamp_server": args.timestamp_server or None,
+        },
         "artifacts": entries,
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     args.hash_output.write_text(
         "".join(f"{entry['sha256']} *{entry['name']}\n" for entry in entries),
         encoding="utf-8",

@@ -127,7 +127,7 @@ def test_release_checks_deepseek_configuration_not_archived_gemini_example():
         assert "deepseek_config.env.example" in source
         assert "gemini_config.env.example" not in source
     for workflow in workflows:
-        assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
+        assert ".\\Build_Release.ps1" in workflow
 
 
 def test_runtime_requirements_exclude_dev_only_tools():
@@ -236,7 +236,7 @@ def test_windows_release_pipelines_use_one_canonical_builder_and_require_health(
         assert "npm audit --prefix web/tiptap-editor --audit-level=high" in pipeline
         assert "npm ci --prefix web/univer-editor" in pipeline
         assert "npm audit --prefix web/univer-editor --audit-level=high" in pipeline
-        assert ".\\Build_Release.ps1 -Version $env:VERSION" in pipeline
+        assert ".\\Build_Release.ps1" in pipeline
         assert "pyinstaller.exe koto.spec" not in pipeline
         assert "src\\deploy_portable.py" not in pipeline
         assert "Compress-Archive" not in pipeline
@@ -254,6 +254,9 @@ def test_windows_release_pipelines_use_one_canonical_builder_and_require_health(
     assert "[switch]$AllowDirtyWorktree" in local_release
     assert "正式发布需要 Node.js/npm 从锁文件重建前端" in local_release
     assert "完整 Windows 发布必须生成安装包" in local_release
+    assert "$setupBuilt = $false" in local_release
+    assert "if ($setupBuilt) { $artifacts += $setupPath }" in local_release
+    assert "Remove-Item -LiteralPath $setupPath -Force" in local_release
     assert "工作区存在未提交改动" in local_release
     assert "release-build.lock" in local_release
     assert "已有发布构建正在运行" in local_release
@@ -503,7 +506,7 @@ def test_release_carries_and_verifies_offline_webview2_runtime():
     assert 'Parameters: "/silent /install"' in installer
     assert "Test-PackagedRuntimePrerequisites" in build
     for workflow in workflows:
-        assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
+        assert ".\\Build_Release.ps1" in workflow
 
 
 def test_installer_cleans_managed_runtime_and_blocks_live_upgrade_conflicts():
@@ -583,9 +586,64 @@ def test_release_pipelines_publish_manifest_and_sha256_checksums():
     assert "构建期间 Git revision 或工作区内容发生变化" in local_release
     assert "--worktree-changed-during-build" in local_release
     for workflow in (release, build):
-        assert ".\\Build_Release.ps1 -Version $env:VERSION" in workflow
+        assert ".\\Build_Release.ps1" in workflow
         assert "dist/Koto_v*_SHA256SUMS.txt" in workflow
         assert "dist/Koto_v*_release-manifest.json" in workflow
+
+
+def test_formal_windows_release_requires_end_to_end_authenticode_signing():
+    release = Path(".github/workflows/release.yml").read_text(encoding="utf-8")
+    local_release = Path("Build_Release.ps1").read_text(encoding="utf-8")
+    signer = Path("scripts/sign_windows_file.ps1").read_text(encoding="utf-8")
+    installer = Path("koto_installer.iss").read_text(encoding="utf-8")
+    installer_e2e = Path("tests/installer/test_installer_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+    portable_e2e = Path("tests/installer/test_portable_e2e.ps1").read_text(
+        encoding="utf-8"
+    )
+    manifest_writer = Path("scripts/write_release_manifest.py").read_text(
+        encoding="utf-8"
+    )
+
+    assert "[switch]$RequireCodeSigning" in local_release
+    assert "SigningCertificateThumbprint" in local_release
+    assert "scripts\\sign_windows_file.ps1" in local_release
+    assert '-Label "Koto.exe"' in local_release
+    assert '-Label "LocalModelInstaller.exe"' in local_release
+    assert "portable_Koto.exe" in local_release
+    assert "Setup.exe" in local_release
+    assert "/DKotoCodeSigning=1" in local_release
+    assert "/SKotoSignTool=" in local_release
+    assert "SignTool=KotoSignTool" in installer
+    assert "SignedUninstaller=yes" in installer
+
+    assert "/fd SHA256" in signer
+    assert "/tr $TimestampServer" in signer
+    assert "/td SHA256" in signer
+    assert "verify /pa /tw" in signer
+    assert "TimeStamperCertificate" in signer
+    assert "1.3.6.1.5.5.7.3.3" in signer
+
+    assert "WINDOWS_CODE_SIGNING_PFX_BASE64" in release
+    assert "WINDOWS_CODE_SIGNING_PFX_PASSWORD" in release
+    assert "Import-PfxCertificate" in release
+    assert "Tag releases require" in release
+    assert "$buildArgs += '-RequireCodeSigning'" in release
+    assert "needs: [build-windows, test-installer, build-docker]" in release
+    docker_job = release.split("  build-docker:", 1)[1].split("  create-release:", 1)[0]
+    assert "needs: quality-gate" in docker_job
+    assert "if: github.event_name == 'push'" in docker_job
+    assert (
+        release.count('-RequireCodeSigning:("${{ github.event_name }}" -eq "push")')
+        == 2
+    )
+
+    for e2e in (installer_e2e, portable_e2e):
+        assert "[switch]$RequireCodeSigning" in e2e
+        assert "TimeStamperCertificate" in e2e
+    assert '"code_signing": {' in manifest_writer
+    assert '"--code-signing-status"' in manifest_writer
 
 
 def test_release_pipeline_rejects_reusing_published_tags():

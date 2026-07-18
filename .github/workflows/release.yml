@@ -176,11 +176,71 @@ jobs:
             if ($LASTEXITCODE -ne 0) { choco install innosetup -y --no-progress }
           }
 
+      - name: Import Windows code-signing certificate
+        shell: pwsh
+        env:
+          KOTO_SIGNING_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGNING_PFX_BASE64 }}
+          KOTO_SIGNING_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGNING_PFX_PASSWORD }}
+        run: |
+          $signingRequired = "${{ github.event_name }}" -eq "push"
+          if (-not $env:KOTO_SIGNING_PFX_BASE64 -or -not $env:KOTO_SIGNING_PFX_PASSWORD) {
+            if ($signingRequired) {
+              Write-Host "::error::Tag releases require WINDOWS_CODE_SIGNING_PFX_BASE64 and WINDOWS_CODE_SIGNING_PFX_PASSWORD secrets."
+              exit 1
+            }
+            Write-Host "::warning::No code-signing secrets configured; this manual build will be unsigned and cannot be published as a formal release."
+            exit 0
+          }
+
+          $pfxPath = Join-Path $env:RUNNER_TEMP "koto-code-signing.pfx"
+          $certificate = $null
+          try {
+            [IO.File]::WriteAllBytes(
+              $pfxPath,
+              [Convert]::FromBase64String($env:KOTO_SIGNING_PFX_BASE64)
+            )
+            $securePassword = ConvertTo-SecureString $env:KOTO_SIGNING_PFX_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate `
+              -FilePath $pfxPath `
+              -CertStoreLocation Cert:\CurrentUser\My `
+              -Password $securePassword `
+              -Exportable:$false
+          } catch {
+            Write-Host "::error::Could not decode or import the Windows code-signing PFX: $($_.Exception.Message)"
+            exit 1
+          } finally {
+            Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
+          }
+          if (-not $certificate -or -not $certificate.HasPrivateKey) {
+            if ($certificate) {
+              Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($certificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
+            }
+            Write-Host "::error::Imported signing certificate does not expose a private key."
+            exit 1
+          }
+          "KOTO_SIGNING_CERT_THUMBPRINT=$($certificate.Thumbprint)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Imported code-signing certificate: $($certificate.Subject)"
+
       - name: Build Windows artifacts through canonical pipeline
         shell: pwsh
         run: |
-          .\Build_Release.ps1 -Version $env:VERSION
+          $buildArgs = @('-Version', $env:VERSION)
+          if ($env:KOTO_SIGNING_CERT_THUMBPRINT) {
+            $buildArgs += @('-SigningCertificateThumbprint', $env:KOTO_SIGNING_CERT_THUMBPRINT)
+          }
+          if ("${{ github.event_name }}" -eq "push") {
+            $buildArgs += '-RequireCodeSigning'
+          }
+          .\Build_Release.ps1 @buildArgs
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::Canonical Windows release build failed"; exit 1 }
+
+      - name: Remove imported code-signing certificate
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:KOTO_SIGNING_CERT_THUMBPRINT) {
+            Remove-Item -LiteralPath "Cert:\CurrentUser\My\$env:KOTO_SIGNING_CERT_THUMBPRINT" -Force -ErrorAction SilentlyContinue
+          }
 
       - name: Upload release build logs
         if: always()
@@ -236,7 +296,8 @@ jobs:
             -SetupExe $setup.FullName `
             -TestInstallDir "$env:LOCALAPPDATA\KotoCI_E2E" `
             -Port $port `
-            -HealthTimeoutSec 120
+            -HealthTimeoutSec 120 `
+            -RequireCodeSigning:("${{ github.event_name }}" -eq "push")
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Run portable E2E test
@@ -253,7 +314,8 @@ jobs:
           & tests\installer\test_portable_e2e.ps1 `
             -ZipFile $zip.FullName `
             -Port $port `
-            -HealthTimeoutSec 120
+            -HealthTimeoutSec 120 `
+            -RequireCodeSigning:("${{ github.event_name }}" -eq "push")
           if ($LASTEXITCODE -ne 0) { exit 1 }
 
   # ══════════════════════════════════════════════════════════════════════════
@@ -262,6 +324,8 @@ jobs:
   build-docker:
     name: Build & Push Docker Image
     runs-on: ubuntu-latest
+    needs: quality-gate
+    if: github.event_name == 'push'
     permissions:
       contents: read
       packages: write
@@ -307,7 +371,7 @@ jobs:
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [build-windows, test-installer]
+    needs: [build-windows, test-installer, build-docker]
     if: github.event_name == 'push'
     permissions:
       contents: write

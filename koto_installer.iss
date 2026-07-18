@@ -45,6 +45,12 @@ DisableProgramGroupPage=yes
 OutputDir=dist
 OutputBaseFilename=Koto_v{#AppVersion}_Setup
 SetupIconFile=src\assets\koto_icon.ico
+#ifdef KotoCodeSigning
+; The canonical build injects KotoSignTool from the command line. Inno uses it
+; for both the outer Setup executable and the generated uninstaller.
+SignTool=KotoSignTool
+SignedUninstaller=yes
+#endif
 
 ; ── 压缩（生成更小的单文件安装包）──────────────────────────────────
 Compression=lzma2/ultra64
