@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 
+import pytest
 from flask import Flask
 
 
@@ -66,7 +67,10 @@ def test_editor_skill_list_uses_public_skill_manager_surface(monkeypatch):
 
 
 def test_task_classifier_rejects_incompatible_sklearn_artifacts(tmp_path, monkeypatch):
-    import sklearn
+    sklearn = pytest.importorskip(
+        "sklearn",
+        reason="task classifier compatibility checks require optional scikit-learn",
+    )
 
     import app.core.routing.task_classifier as classifier_module
 
@@ -92,6 +96,10 @@ def test_task_classifier_catches_unversioned_pickle_compatibility_warning(
     import pickle
     import warnings
 
+    pytest.importorskip(
+        "sklearn",
+        reason="task classifier compatibility checks require optional scikit-learn",
+    )
     from sklearn.exceptions import InconsistentVersionWarning
 
     import app.core.routing.task_classifier as classifier_module
