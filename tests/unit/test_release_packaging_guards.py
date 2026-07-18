@@ -476,12 +476,18 @@ def test_windows_sandbox_release_requires_desktop_evidence():
     assert "<ClipboardRedirection>Disable</ClipboardRedirection>" in generator
     assert generator.count("<ReadOnly>true</ReadOnly>") == 2
     assert "run_windows_sandbox_release.ps1" in generator
+    assert "[switch]$RequireCodeSigning" in generator
+    assert '$command += " -RequireCodeSigning"' in generator
     assert "test_installer_e2e.ps1" in runner
-    assert "-EvidenceDir $ResultsDir" in runner
+    assert "[switch]$RequireCodeSigning" in runner
+    assert "'-EvidenceDir', $ResultsDir" in runner
+    assert "$e2eArguments += '-RequireCodeSigning'" in runner
+    assert "require_code_signing = [bool]$RequireCodeSigning" in runner
     assert "windows-sandbox-result.json" in runner
     assert "Save-KotoWindowEvidence" in installer_e2e
     assert 'Fail "Could not capture desktop evidence:' in installer_e2e
     assert "New-KotoReleaseSandbox.ps1" in release_gate
+    assert "-RequireCodeSigning" in release_gate
 
 
 def test_release_carries_and_verifies_offline_webview2_runtime():

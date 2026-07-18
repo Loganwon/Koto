@@ -8,6 +8,7 @@ param(
     [string]$SetupExe,
     [string]$ResultsDir = "",
     [string]$ConfigPath = "",
+    [switch]$RequireCodeSigning,
     [switch]$Launch
 )
 
@@ -43,6 +44,9 @@ $hostTests = Escape-Xml $scriptDir
 $hostResults = Escape-Xml $resultsPath
 $guestSetup = Escape-Xml ("C:\KotoRelease\" + $setupName)
 $command = "powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File C:\KotoTests\run_windows_sandbox_release.ps1 -SetupExe `"$guestSetup`""
+if ($RequireCodeSigning) {
+    $command += " -RequireCodeSigning"
+}
 $commandXml = Escape-Xml $command
 
 $wsb = @"
@@ -75,6 +79,7 @@ $wsb = @"
 Set-Content -LiteralPath $configFullPath -Value $wsb -Encoding UTF8
 Write-Host "Windows Sandbox configuration: $configFullPath"
 Write-Host "Result folder: $resultsPath"
+Write-Host "Require code signing: $([bool]$RequireCodeSigning)"
 
 if ($Launch) {
     Start-Process -FilePath $sandboxExe -ArgumentList $configFullPath | Out-Null

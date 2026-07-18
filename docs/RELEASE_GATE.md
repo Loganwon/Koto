@@ -99,6 +99,7 @@ Windows Pro/Enterprise with the optional Sandbox feature enabled:
 ```powershell
 tests\installer\New-KotoReleaseSandbox.ps1 `
   -SetupExe dist\Koto_Setup_1.0.0.exe `
+  -RequireCodeSigning `
   -Launch
 ```
 
@@ -109,6 +110,10 @@ user-data sentinel, and writes a transcript, JSON result, and desktop
 screenshot to `dist/windows-sandbox-results`. The
 restricted-PATH local E2E is useful compatibility evidence, but it is not a
 substitute for OS-level isolation when Windows Sandbox is unavailable.
+`-RequireCodeSigning` is mandatory for formal signed release evidence: the
+Sandbox runner passes it through to the installer E2E, which refuses to execute
+an unsigned or inconsistently signed payload. Omit it only when diagnosing an
+explicitly unsigned local build.
 
 If the build stops partway through, inspect `logs/` and verify ZIP, manifest,
 and installer outputs individually before retrying. Do not release with
