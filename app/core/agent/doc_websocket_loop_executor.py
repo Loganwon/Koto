@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
-from app.core.agent.lifecycle import AgentEvent, AgentRequest
+from app.core.agent.kernel import AgentEvent, AgentRequest
 from app.core.agent.session_queue import SessionQueue
 
 

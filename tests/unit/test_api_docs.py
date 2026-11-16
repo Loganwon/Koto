@@ -1,19 +1,41 @@
-"""Test that Swagger docs are accessible."""
-
-import os
-import sys
+"""Test that the opt-in Swagger surface is wired correctly."""
 
 import pytest
+from flask import Flask
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", ".."))
+from web.app_observability import configure_observability
+
+
+class _NullLogger:
+    def debug(self, *args, **kwargs):
+        pass
+
+    info = warning = debug
 
 
 class TestApiDocs:
     @pytest.fixture(autouse=True)
-    def setup(self):
-        from web.app import app
-
+    def setup(self, monkeypatch):
+        monkeypatch.setenv("KOTO_ENABLE_API_DOCS", "1")
+        app = Flask("swagger-opt-in-test")
         app.config["TESTING"] = True
+
+        @app.get("/health")
+        def health():
+            """Test health endpoint.
+            ---
+            responses:
+              200:
+                description: healthy
+            """
+            return {"status": "ok"}
+
+        configure_observability(
+            app,
+            _NullLogger(),
+            "test",
+            lambda: ({"error": "unauthorized"}, 401),
+        )
         self.client = app.test_client()
 
     def test_apidocs_accessible(self):

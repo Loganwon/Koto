@@ -25,6 +25,19 @@ except ImportError:
 
 from flask import Blueprint, g, jsonify, request
 
+from app.core.config.atomic_json_store import (
+    load_json_document,
+    save_json_document,
+    update_json_document,
+)
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    load_or_create_secret,
+    migrate_legacy_file,
+    runtime_data_path,
+    runtime_secret_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── 配置 ──
@@ -47,7 +60,7 @@ def _validate_jwt_secret() -> str:
 
     Priority:
       1. KOTO_JWT_SECRET env var
-      2. config/jwt_secret.txt (auto-generated and persisted on first run)
+      2. data/secrets/jwt_secret.txt (auto-generated and persisted on first run)
 
     Raises:
         RuntimeError: In cloud mode when KOTO_JWT_SECRET is not set.
@@ -59,38 +72,42 @@ def _validate_jwt_secret() -> str:
                 "KOTO_JWT_SECRET environment variable must be set in cloud/production mode. "
                 'Generate one with: python -c "import secrets; print(secrets.token_hex(32))"'
             )
-        # Local mode: persist secret to disk so tokens survive app restarts
-        _secret_file = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "config", "jwt_secret.txt"
-        )
-        if os.path.exists(_secret_file):
-            try:
-                with open(_secret_file, "r", encoding="utf-8") as _f:
-                    secret = _f.read().strip()
-            except Exception:
-                pass
-        if not secret:
+        try:
+            secret = load_or_create_secret(
+                runtime_secret_path(
+                    "jwt_secret.txt", env_var="KOTO_JWT_SECRET_FILE"
+                ),
+                lambda: secrets.token_hex(32),
+            )
+        except Exception as _e:
             secret = secrets.token_hex(32)
-            try:
-                os.makedirs(os.path.dirname(_secret_file), exist_ok=True)
-                with open(_secret_file, "w", encoding="utf-8") as _f:
-                    _f.write(secret)
-                logger.info("[auth] 已生成并保存 JWT 密钥到 config/jwt_secret.txt")
-            except Exception as _e:
-                logger.warning("[auth] 无法持久化 JWT 密钥: %s", _e)
+            logger.warning("[auth] 无法持久化 JWT 密钥: %s", _e)
     return secret
 
 
 JWT_SECRET = _validate_jwt_secret()
 JWT_EXPIRY_HOURS = int(os.environ.get("KOTO_JWT_EXPIRY_HOURS", "72"))
-USERS_FILE = os.environ.get("KOTO_USERS_FILE", "config/users.json")
+def _auth_state_path(filename: str, env_var: str) -> str:
+    configured = os.environ.get(env_var, "").strip()
+    if configured:
+        return configured
+    return str(
+        migrate_legacy_file(
+            runtime_data_path("auth", filename),
+            legacy_paths=(legacy_config_path(filename),),
+        )
+    )
+
+
+USERS_FILE = _auth_state_path("users.json", "KOTO_USERS_FILE")
 MAX_DAILY_REQUESTS = int(os.environ.get("KOTO_MAX_DAILY_REQUESTS", "100"))
 ADMIN_TOKEN = os.environ.get("KOTO_ADMIN_TOKEN", "")
 # 激活码管理文件（管理员颁发，用户兑换后可使用系统 API key）
-ACTIVATION_CODES_FILE = os.environ.get(
-    "KOTO_ACTIVATION_CODES_FILE", "config/activation_codes.json"
+ACTIVATION_CODES_FILE = _auth_state_path(
+    "activation_codes.json", "KOTO_ACTIVATION_CODES_FILE"
 )
+
+
 # 系统 API key（当前 DeepSeek key，供持有激活码的用户使用）
 def _get_system_cloud_key() -> str:
     from app.core.llm.deepseek_config import get_deepseek_api_key
@@ -108,14 +125,10 @@ def _hash_password(password: str, salt: str = None) -> tuple:
 
 def _load_users() -> dict:
     """加载用户数据"""
-    if not os.path.exists(USERS_FILE):
-        return {}
-    try:
-        with open(USERS_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("Failed to load users: %s", e)
-        return {}
+    loaded = load_json_document(USERS_FILE, default={})
+    if not isinstance(loaded, dict):
+        raise RuntimeError("users state must be a JSON object")
+    return loaded
 
 
 # ── 激活码管理 ──
@@ -123,20 +136,18 @@ def _load_users() -> dict:
 
 def _load_activation_codes() -> dict:
     """加载激活码列表  { code: { used_by: null|email, created_at, used_at } }"""
-    if not os.path.exists(ACTIVATION_CODES_FILE):
-        return {}
-    try:
-        with open(ACTIVATION_CODES_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        logger.warning("Failed to load activation codes: %s", e)
-        return {}
+    loaded = load_json_document(ACTIVATION_CODES_FILE, default={})
+    if not isinstance(loaded, dict):
+        raise RuntimeError("activation-code state must be a JSON object")
+    return loaded
 
 
 def _save_activation_codes(codes: dict):
-    os.makedirs(os.path.dirname(ACTIVATION_CODES_FILE) or ".", exist_ok=True)
-    with open(ACTIVATION_CODES_FILE, "w", encoding="utf-8") as f:
-        json.dump(codes, f, ensure_ascii=False, indent=2)
+    save_json_document(ACTIVATION_CODES_FILE, codes)
+
+
+def _update_activation_codes(updater):
+    return update_json_document(ACTIVATION_CODES_FILE, updater, default={})
 
 
 def get_user_api_key(user_record: dict) -> str | None:
@@ -163,9 +174,11 @@ def get_effective_api_key(user_id: str) -> str | None:
 
 def _save_users(users: dict):
     """保存用户数据"""
-    os.makedirs(os.path.dirname(USERS_FILE) or ".", exist_ok=True)
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(users, f, ensure_ascii=False, indent=2)
+    save_json_document(USERS_FILE, users)
+
+
+def _update_users(updater):
+    return update_json_document(USERS_FILE, updater, default={})
 
 
 def _generate_token(user_id: str, email: str) -> str:
@@ -211,6 +224,26 @@ def _verify_token(token: str) -> dict:
     except Exception as e:
         logger.debug("Token verification failed: %s", e)
         return None
+
+
+def resolve_addon_identity() -> tuple[str, str]:
+    """Return a host-verified tenant/principal pair for Addon retrieval.
+
+    Desktop mode is a trusted single-user tenant. Cloud mode requires a valid
+    signed token; client-supplied tenant fields are never accepted.
+    """
+    if not AUTH_ENABLED:
+        return "local", "local"
+    auth_header = request.headers.get("Authorization", "")
+    token = auth_header[7:] if auth_header.startswith("Bearer ") else ""
+    if not token:
+        token = request.cookies.get("koto_token", "")
+    payload = _verify_token(token)
+    if not payload:
+        return "", ""
+    principal_id = str(payload.get("user_id") or "").strip()
+    tenant_id = str(payload.get("tenant_id") or principal_id).strip()
+    return tenant_id, principal_id
 
 
 # ── 3-tier sliding-window rate limiting ──
@@ -397,21 +430,12 @@ def register_auth_routes(app):
         if len(password) < 6:
             return jsonify({"error": "密码至少6位"}), 400
 
-        users = _load_users()
-        # 唯一性检查：邮箱 / 手机号任意一个已存在就拒绝
-        if email and email in users:
-            return jsonify({"error": "该邮箱已注册"}), 409
-        if phone:
-            for rec in users.values():
-                if rec.get("phone") == phone:
-                    return jsonify({"error": "该手机号已注册"}), 409
-
         hashed, salt = _hash_password(password)
         user_id = secrets.token_hex(8)
         # 用邮箱作主键；没有邮箱时用手机号@phone作占位
         key = email if email else f"phone:{phone}"
         display_name = name or (email.split("@")[0] if email else phone)
-        users[key] = {
+        new_user = {
             "user_id": user_id,
             "name": display_name,
             "email": email or "",
@@ -424,7 +448,24 @@ def register_auth_routes(app):
             "deepseek_api_key": "",  # 用户可绑定自己的 key
             "activation_code": "",  # 激活码（兑换后写入）
         }
-        _save_users(users)
+        conflict = []
+
+        def _register(users):
+            if not isinstance(users, dict):
+                raise RuntimeError("users state must be a JSON object")
+            if email and email in users:
+                conflict.append("email")
+                return users
+            if phone and any(rec.get("phone") == phone for rec in users.values()):
+                conflict.append("phone")
+                return users
+            users[key] = new_user
+            return users
+
+        _update_users(_register)
+        if conflict:
+            message = "该邮箱已注册" if conflict[0] == "email" else "该手机号已注册"
+            return jsonify({"error": message}), 409
         logger.info("[Auth] 新用户注册: %s (phone=%s)", key, phone or "-")
 
         token = _generate_token(user_id, key)
@@ -442,6 +483,7 @@ def register_auth_routes(app):
                 },
             }
         )
+
     _exempt_csrf_if_available(app, auth_register)
 
     @auth_bp.route("/api/auth/login", methods=["POST"])
@@ -531,6 +573,7 @@ def register_auth_routes(app):
                 },
             }
         )
+
     _exempt_csrf_if_available(app, auth_login)
 
     @auth_bp.route("/api/auth/me", methods=["GET"])
@@ -575,12 +618,21 @@ def register_auth_routes(app):
         if not api_key.startswith("sk-") or len(api_key) < 20:
             return jsonify({"error": "API Key 格式不正确（应以 sk- 开头）"}), 400
 
-        users = _load_users()
-        for key, rec in users.items():
-            if rec.get("user_id") == g.user_id:
-                rec["deepseek_api_key"] = api_key
-                _save_users(users)
-                return jsonify({"success": True, "message": "API Key 绑定成功"})
+        found = []
+
+        def _bind(users):
+            if not isinstance(users, dict):
+                raise RuntimeError("users state must be a JSON object")
+            for rec in users.values():
+                if rec.get("user_id") == g.user_id:
+                    rec["deepseek_api_key"] = api_key
+                    found.append(True)
+                    break
+            return users
+
+        _update_users(_bind)
+        if found:
+            return jsonify({"success": True, "message": "API Key 绑定成功"})
         return jsonify({"error": "用户不存在"}), 404
 
     @auth_bp.route("/api/auth/activate", methods=["POST"])
@@ -592,29 +644,68 @@ def register_auth_routes(app):
         if not code:
             return jsonify({"error": "请输入激活码"}), 400
 
-        codes = _load_activation_codes()
-        if code not in codes:
-            return jsonify({"error": "激活码无效"}), 400
-        entry = codes[code]
-        if entry.get("used_by"):
-            return jsonify({"error": "该激活码已被使用"}), 400
-
-        # 标记激活码已使用
-        entry["used_by"] = g.user_id
-        entry["used_at"] = datetime.now().isoformat()
-        _save_activation_codes(codes)
-
-        # 写入用户记录
         users = _load_users()
-        for key, rec in users.items():
-            if rec.get("user_id") == g.user_id:
-                rec["activation_code"] = code
-                _save_users(users)
-                logger.info("[Auth] 用户 %s 激活了激活码 %s", g.user_id, code)
-                return jsonify(
-                    {"success": True, "message": "激活成功，可以开始使用 Koto 了！"}
-                )
-        return jsonify({"error": "用户不存在"}), 404
+        if not any(rec.get("user_id") == g.user_id for rec in users.values()):
+            return jsonify({"error": "用户不存在"}), 404
+
+        claim_error = []
+
+        def _claim(codes):
+            if not isinstance(codes, dict):
+                raise RuntimeError("activation-code state must be a JSON object")
+            entry = codes.get(code)
+            if not isinstance(entry, dict):
+                claim_error.append("invalid")
+                return codes
+            if entry.get("used_by"):
+                claim_error.append("used")
+                return codes
+            entry["used_by"] = g.user_id
+            entry["used_at"] = datetime.now().isoformat()
+            return codes
+
+        _update_activation_codes(_claim)
+        if claim_error:
+            message = "激活码无效" if claim_error[0] == "invalid" else "该激活码已被使用"
+            return jsonify({"error": message}), 400
+
+        updated = []
+
+        def _activate_user(current_users):
+            for rec in current_users.values():
+                if rec.get("user_id") == g.user_id:
+                    rec["activation_code"] = code
+                    updated.append(True)
+                    break
+            return current_users
+
+        try:
+            _update_users(_activate_user)
+        except Exception:
+            # Compensate the code claim if the user record cannot be committed.
+            def _release(codes):
+                entry = codes.get(code)
+                if isinstance(entry, dict) and entry.get("used_by") == g.user_id:
+                    entry["used_by"] = None
+                    entry["used_at"] = None
+                return codes
+
+            _update_activation_codes(_release)
+            raise
+        if not updated:
+            def _release_missing_user(codes):
+                entry = codes.get(code)
+                if isinstance(entry, dict) and entry.get("used_by") == g.user_id:
+                    entry["used_by"] = None
+                    entry["used_at"] = None
+                return codes
+
+            _update_activation_codes(_release_missing_user)
+            return jsonify({"error": "用户不存在"}), 404
+        logger.info("[Auth] 用户 %s 激活了激活码 %s", g.user_id, code)
+        return jsonify(
+            {"success": True, "message": "激活成功，可以开始使用 Koto 了！"}
+        )
 
     # ── 管理员接口（需 KOTO_ADMIN_TOKEN） ──
 
@@ -626,19 +717,24 @@ def register_auth_routes(app):
             return jsonify({"error": "无权限"}), 403
         data = request.get_json(force=True) or {}
         count = max(1, min(int(data.get("count", 1)), 100))
-        codes = _load_activation_codes()
         new_codes = []
-        for _ in range(count):
-            code = secrets.token_hex(6).upper()  # 12-char hex code
-            while code in codes:
-                code = secrets.token_hex(6).upper()
-            codes[code] = {
-                "created_at": datetime.now().isoformat(),
-                "used_by": None,
-                "used_at": None,
-            }
-            new_codes.append(code)
-        _save_activation_codes(codes)
+
+        def _create(codes):
+            if not isinstance(codes, dict):
+                raise RuntimeError("activation-code state must be a JSON object")
+            for _ in range(count):
+                code = secrets.token_hex(6).upper()  # 12-char hex code
+                while code in codes:
+                    code = secrets.token_hex(6).upper()
+                codes[code] = {
+                    "created_at": datetime.now().isoformat(),
+                    "used_by": None,
+                    "used_at": None,
+                }
+                new_codes.append(code)
+            return codes
+
+        _update_activation_codes(_create)
         logger.info("[Admin] 生成了 %d 个激活码", count)
         return jsonify({"success": True, "codes": new_codes})
 
@@ -684,6 +780,7 @@ def register_auth_routes(app):
     def auth_logout():
         """登出（客户端清除 token 即可）"""
         return jsonify({"success": True})
+
     _exempt_csrf_if_available(app, auth_logout)
 
     @auth_bp.route("/api/auth/status", methods=["GET"])

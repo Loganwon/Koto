@@ -198,20 +198,20 @@ C:\Users\12524\Desktop\Koto\workspace\_organize\_backups
 
 ### 核心组件
 
-1. **AutoCatalogScheduler** (`web/auto_catalog_scheduler.py`)
+1. **AutoCatalogScheduler** (`app/core/services/auto_catalog_scheduler.py`)
    - 调度器主类
    - 定时任务注册
    - 备份验证逻辑
 
-2. **TaskScheduler** (`web/task_scheduler.py`)
-   - 底层任务调度引擎（使用 `schedule` 库）
-   - 支持 daily/weekly/hourly 调度
+2. **TriggerRegistry + JobRunner** (`app/core/jobs/`)
+   - `TriggerRegistry` 持有每日触发配置
+   - `JobRunner` 执行 `auto_catalog` 作业并写入统一任务账本
 
 3. **FolderCatalogOrganizer** (`web/folder_catalog_organizer.py`)
    - 批量文件夹归纳
    - 发送者信息提取
 
-4. **FileOrganizer** (`web/file_organizer.py`)
+4. **FileOrganizer** (`app/core/services/file_organizer.py`)
    - 单文件归纳执行
    - 文件复制（保留原文件）
 

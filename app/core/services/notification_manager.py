@@ -43,7 +43,7 @@ class NotificationManager:
         "low": {"level": 1, "color": "gray", "sound": False, "popup": False},
     }
 
-    def __init__(self, db_path: str = "config/notifications.db"):
+    def __init__(self, db_path: str = "data/db/notifications.db"):
         """初始化通知管理器"""
         self.db_path = db_path
         self.connections: Dict[str, Set] = defaultdict(
@@ -583,7 +583,7 @@ _notification_manager_instance = None
 
 
 def get_notification_manager(
-    db_path: str = "config/notifications.db",
+    db_path: str = "data/db/notifications.db",
 ) -> NotificationManager:
     """获取通知管理器实例（单例）"""
     global _notification_manager_instance

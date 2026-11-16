@@ -99,6 +99,7 @@ class PlanStep:
     depends_on: List[str] = field(default_factory=list)  # 依赖的步骤名列表
     require_approval: bool = False  # 执行前需要人工确认
     max_retries: int = 2
+    idempotent: bool = False  # 只有显式幂等的步骤才允许异常后自动重试
     timeout_seconds: int = 120
     allow_failure: bool = False  # True = 本步失败不阻塞后续步骤
 
@@ -340,6 +341,7 @@ class PlanTemplates:
                 "description": "…",
                 "depends_on": [],
                 "require_approval": false,
+                "idempotent": false,
                 "executor_prompt": "具体执行指令",
                 "context_keys": [],
                 "result_schema": "输出格式说明",
@@ -357,6 +359,8 @@ class PlanTemplates:
                     step_type=s.get("step_type", "llm"),
                     depends_on=s.get("depends_on", []),
                     require_approval=s.get("require_approval", False),
+                    max_retries=max(0, int(s.get("max_retries", 2) or 0)),
+                    idempotent=bool(s.get("idempotent", False)),
                     allow_failure=s.get("allow_failure", False),
                     timeout_seconds=s.get("timeout_seconds", 120),
                     expected_output=s.get("expected_output", ""),
@@ -440,6 +444,7 @@ class TaskPlanner:
     "step_type": "llm|code|file|search|tool",
     "depends_on": ["前置步骤name列表"],
     "require_approval": false,
+    "idempotent": false,
     "allow_failure": false,
     "executor_prompt": "执行器应直接使用的具体指令（包含所有必要约束，≤200字）",
     "context_keys": ["本步骤需要从哪些前置步骤名获取结果，空=自动继承所有依赖"],
@@ -461,6 +466,7 @@ class TaskPlanner:
 6. 简单问答（无需工具或文件）：单步骤 answer，step_type=llm
 7. 禁止输出注释
 8. executor_prompt 中涉及写入文件的步骤，必须明确说明"写入内容必须来自实际读取/分析的数据，严禁使用任何占位符或示例文本"
+9. 只有纯读取、纯计算或带幂等键的步骤可设置 idempotent=true；写文件、发信、写库、提交外部系统必须为 false
 """
 
         try:
@@ -553,52 +559,6 @@ class TaskPlanner:
             session_context=session_context,
         )
 
-    def plan_from_skill(
-        self,
-        skill_id: str,
-        task_id: str,
-        user_input: str,
-        context: Optional[Dict[str, Any]] = None,
-    ) -> Optional[Plan]:
-        """
-        从 Skill 的 plan_template 构建确定性 Plan。
-
-        当 Skill 定义了 plan_template 时，直接用模板生成 Plan，
-        而不依赖 LLM 动态规划，保证关键任务（如文档标注）的执行步骤稳定可靠。
-
-        Args:
-            skill_id  : Skill ID
-            task_id   : 任务 ID
-            user_input: 用户原始请求
-            context   : 附加上下文（写入 plan.context）
-
-        Returns:
-            Plan if skill has plan_template, None otherwise.
-            返回 None 时调用方应降级到 plan_with_llm()。
-        """
-        try:
-            from app.core.skills.skill_capability import SkillCapabilityRegistry
-
-            template = SkillCapabilityRegistry.get_plan_template(skill_id)
-        except Exception as e:
-            logger.warning("[TaskPlanner] plan_from_skill() 无法加载模板: %s", e)
-            return None
-
-        if not template:
-            return None
-
-        plan = PlanTemplates.multi_step_task(task_id, user_input, template)
-        plan.context["skill_id"] = skill_id
-        if context:
-            plan.context.update(context)
-
-        logger.info(
-            "[TaskPlanner] 📋 从 Skill '%s' 构建计划: %d 步",
-            skill_id,
-            len(plan.steps),
-        )
-        return plan
-
     # ── 执行 ──────────────────────────────────────────────────────────────────
 
     def execute_plan(
@@ -624,7 +584,7 @@ class TaskPlanner:
         Args:
             plan:            已构建的 Plan
             executor_fn:     步骤执行函数 (step, context) -> result
-            approval_fn:     人工确认回调 (step) -> True/False（None 时自动通过）
+            approval_fn:     人工确认回调 (step) -> True/False（None 时拒绝执行）
             cancel_check:    取消检查函数 () -> bool
             llm_provider:    可选，用于再规划的 LLM 实例
             replan_model_id: 再规划时使用的模型 ID
@@ -700,13 +660,28 @@ class TaskPlanner:
                     step.status = StepStatus.WAITING
                     self._publish_step_event(plan.task_id, step, "step_waiting")
                     yield {"event": "step_waiting", "step": step.to_dict()}
-                    if approval_fn:
-                        approved = approval_fn(step)
-                    else:
-                        approved = True  # 自动通过
+                    if approval_fn is None:
+                        # Keep the plan resumable.  Missing approval
+                        # infrastructure is a waiting state, never success or
+                        # an implicit rejection.
+                        step.error = "approval_handler_unavailable"
+                        plan.status = "waiting"
+                        yield {
+                            "event": "plan_waiting",
+                            "task_id": plan.task_id,
+                            "step": step.to_dict(),
+                            "reason": step.error,
+                        }
+                        return
+                    approved = approval_fn(step)
                     if not approved:
                         step.status = StepStatus.SKIPPED
-                        yield {"event": "step_skipped", "step": step.to_dict()}
+                        step.error = "approval_rejected"
+                        yield {
+                            "event": "step_skipped",
+                            "step": step.to_dict(),
+                            "reason": step.error,
+                        }
                         continue
 
                 # 执行
@@ -720,7 +695,8 @@ class TaskPlanner:
                 }
 
                 success = False
-                while step.retry_count <= step.max_retries:
+                allowed_retries = step.max_retries if step.idempotent else 0
+                while step.retry_count <= allowed_retries:
                     try:
                         result = executor_fn(step, step_ctx)
                         step.result = result
@@ -744,7 +720,7 @@ class TaskPlanner:
                     except Exception as e:
                         step.error = str(e)
                         step.retry_count += 1
-                        if step.retry_count <= step.max_retries:
+                        if step.retry_count <= allowed_retries:
                             logger.warning(
                                 "[TaskPlanner] 步骤 %s 失败，第 %d 次重试: %s",
                                 step.name,

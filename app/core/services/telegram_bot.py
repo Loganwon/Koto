@@ -7,14 +7,14 @@ Koto Telegram Bot Integration
 让 Koto 在 Telegram 上随时响应，是最轻量的移动端接入方式。
 
 功能:
-  - 文字对话 → UnifiedAgent 处理（保留对话历史）
+  - 文字对话 → KernelAgent 处理（保留对话历史）
   - 语音消息 → OGG→WAV→STT → Agent
   - 文件/图片 → 下载后通过 Agent 分析
   - 命令: /start /help /goals /morning /status /memory /remind
   - 主动消息推送（ProactiveAgent 队列 → push_proactive_to_telegram）
   - 白名单安全模式（可选）
 
-配置 (在 gemini_config.env 中添加):
+配置 (在 deepseek_config.env 中添加):
   TELEGRAM_BOT_TOKEN=1234567890:ABCDEFGxxxxxx
   TELEGRAM_ALLOWED_CHAT_IDS=123456789,987654321   # 留空则全放行（私有部署慎用）
   TELEGRAM_MORNING_BRIEF_CHAT_ID=123456789        # 晨间简报推送目标 chat_id
@@ -25,7 +25,6 @@ Koto Telegram Bot Integration
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import threading
@@ -409,12 +408,14 @@ class TelegramBot:
         try:
             from pathlib import Path as _Path
 
-            mem_path = _Path(__file__).parent.parent / "config" / "memory.json"
+            from app.core.config.atomic_json_store import load_json_document
+            from app.core.services.memory_manager import _default_memory_path
+
+            mem_path = _Path(_default_memory_path())
             if not mem_path.exists():
                 self.send_text(chat_id, "📭 记忆库为空。")
                 return
-            with open(mem_path, "r", encoding="utf-8") as f:
-                memories = json.load(f)
+            memories = load_json_document(mem_path, default=[])
             if not memories:
                 self.send_text(chat_id, "📭 记忆库为空。")
                 return
@@ -470,22 +471,22 @@ class TelegramBot:
     # ── 对话处理 ──────────────────────────────────────────────────────────────
 
     def _handle_chat(self, chat_id: int, text: str, username: str):
-        """将用户消息转发给 UnifiedAgent，返回回复。"""
+        """将用户消息转发给 KernelAgent，返回回复。"""
         self.send_typing(chat_id)
         session_id = f"{_SESSION_PREFIX}{chat_id}"
         try:
-            from app.api.agent_routes import (
-                _load_history,
-                _run_agent_collect,
-                _save_history,
-                get_agent,
+            from app.core.agent.kernel_agent_service import (
+                load_kernel_history,
+                run_kernel_agent_collect,
+                save_kernel_history,
             )
 
-            history = _load_history(session_id, max_turns=_MAX_HISTORY_TURNS)
-            agent = get_agent()
-            result = _run_agent_collect(
-                agent,
-                message=text,
+            history = load_kernel_history(
+                session_id,
+                max_turns=_MAX_HISTORY_TURNS,
+            )
+            result = run_kernel_agent_collect(
+                text,
                 history=history,
                 session_id=session_id,
                 task_type="CHAT",
@@ -495,7 +496,11 @@ class TelegramBot:
             )
             if not answer:
                 answer = "（抱歉，没有得到回复，请再试一次。）"
-            _save_history(session_id, text, answer)
+            if (
+                not isinstance(result, dict)
+                or result.get("status", "success") == "success"
+            ):
+                save_kernel_history(session_id, text, answer)
             self.send_text(chat_id, answer)
         except Exception as exc:
             logger.warning(f"[Telegram] Agent 调用失败 chat_id={chat_id}: {exc}")

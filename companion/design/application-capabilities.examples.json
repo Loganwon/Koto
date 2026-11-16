@@ -1,0 +1,38 @@
+[
+  {
+    "profile_version": "0.1-design",
+    "application_id": "example.wps.writer",
+    "display_name": "WPS文字深度编辑（目标设计示例）",
+    "transport": {"kind": "host_bridge", "connection_ref": "example.wps-host"},
+    "deep_editing": true,
+    "embedding": "runtime_detected",
+    "capabilities": [
+      {"id": "context.observe", "operation": "observe", "effect": "read", "object_kinds": ["text", "grid"]},
+      {"id": "resource.read", "operation": "read", "effect": "read", "object_kinds": ["text", "grid"], "target_binding": "required"},
+      {"id": "resource.patch", "operation": "replace", "effect": "patch", "object_kinds": ["text"], "target_binding": "required", "version_precondition": "required", "checkpoint": "per_unit", "max_units_per_call": 1, "limits": ["只修改已绑定且可编辑的单段文字；目标设计，不表示该profile已接入运行时"]},
+      {"id": "resource.verify", "operation": "read", "effect": "read", "object_kinds": ["text"], "verification": "independent_readback"}
+    ]
+  },
+  {
+    "profile_version": "0.1-design",
+    "application_id": "example.records",
+    "display_name": "资料记录应用（只读示例）",
+    "transport": {"kind": "mcp", "connection_ref": "example.records-server", "supported_versions": ["2026-07-28", "2025-11-25"]},
+    "deep_editing": false,
+    "embedding": "unavailable",
+    "capabilities": [
+      {"id": "resource.read", "operation": "search_records", "effect": "read", "object_kinds": ["record"], "verification": "result_only", "limits": ["不提供当前编辑选区、局部修改或回滚"]}
+    ]
+  },
+  {
+    "profile_version": "0.1-design",
+    "application_id": "example.unmapped-tools",
+    "display_name": "通用MCP工具（未做深度编辑映射）",
+    "transport": {"kind": "mcp", "connection_ref": "example.generic-server", "supported_versions": ["2026-07-28"]},
+    "deep_editing": false,
+    "embedding": "unavailable",
+    "capabilities": [
+      {"id": "generic.tool", "operation": "lookup", "effect": "read", "object_kinds": ["generic"], "verification": "result_only"}
+    ]
+  }
+]

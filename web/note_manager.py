@@ -53,7 +53,11 @@ class QuickNoteManager:
             logger.info(f"[笔记] 索引保存失败: {e}")
 
     def add_note(
-        self, content: str, tags: List[str] = None, category: str = "general"
+        self,
+        content: str,
+        tags: List[str] = None,
+        category: str = "general",
+        title: str = "",
     ) -> Dict:
         """
         添加新笔记
@@ -73,6 +77,7 @@ class QuickNoteManager:
 
         note = {
             "id": note_id,
+            "title": str(title or "").strip(),
             "content": content,
             "tags": tags or [],
             "category": category,
@@ -94,6 +99,7 @@ class QuickNoteManager:
             0,
             {
                 "id": note_id,
+                "title": note["title"],
                 "preview": content[:100],
                 "tags": tags or [],
                 "category": category,
@@ -103,6 +109,61 @@ class QuickNoteManager:
         self._save_index()
 
         logger.info(f"[笔记] 已添加: {note_id}")
+        return note
+
+    def update_note(
+        self,
+        note_id: str,
+        content: str,
+        tags: List[str] = None,
+        category: str = None,
+        title: str = None,
+    ) -> Dict:
+        """更新现有笔记并保持详情文件与索引一致。"""
+        index_entry = next(
+            (item for item in self.notes if item.get("id") == note_id),
+            None,
+        )
+        if index_entry is None:
+            return None
+
+        note = self.get_note(note_id)
+        if not isinstance(note, dict):
+            return None
+
+        timestamp = datetime.now().isoformat()
+        note.update(
+            {
+                "title": str(title if title is not None else note.get("title") or "").strip(),
+                "content": str(content),
+                "tags": list(tags if tags is not None else note.get("tags") or []),
+                "category": str(
+                    category if category is not None else note.get("category") or "general"
+                ),
+                "updated_at": timestamp,
+            }
+        )
+
+        note_file = os.path.join(self.notes_dir, f"{note_id}.json")
+        try:
+            with open(note_file, "w", encoding="utf-8") as f:
+                json.dump(note, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.info(f"[笔记] 更新失败 {note_id}: {e}")
+            return None
+
+        refreshed_index = {
+            "id": note_id,
+            "title": note["title"],
+            "preview": note["content"][:100],
+            "tags": note["tags"],
+            "category": note["category"],
+            "created_at": note.get("created_at") or index_entry.get("created_at"),
+            "updated_at": timestamp,
+        }
+        self.notes = [item for item in self.notes if item.get("id") != note_id]
+        self.notes.insert(0, refreshed_index)
+        self._save_index()
         return note
 
     def get_note(self, note_id: str) -> Dict:

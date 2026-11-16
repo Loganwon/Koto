@@ -322,19 +322,14 @@ class TestParseXlsx:
         merges = data["sheets"][data["sheetOrder"][0]]["mergeData"]
         assert merges == []
 
-    # ── Formula cells (data_only) ────────────────────────────────────────
+    # ── Formula cells ────────────────────────────────────────────────────
 
-    def test_formula_cell_returns_cached_value_or_none(self, tmp_path):
-        """data_only=True returns the cached value (None if never calculated)."""
+    def test_formula_cell_is_preserved_for_editing(self, tmp_path):
         data = self._parse(_make_formula_xlsx(), tmp_path)
         cd = data["sheets"][data["sheetOrder"][0]]["cellData"]
-        # A1=10, B1=20 should exist
         assert cd[0][0]["v"] == 10
         assert cd[0][1]["v"] == 20
-        # C1 has formula =A1+B1; data_only gives cached value (None for
-        # newly-created workbooks that have never been opened in Excel)
-        # So C1 might be absent or have v=None → we just make sure no crash
-        # and the non-formula cells are correct.
+        assert cd[0][2]["f"] == "=A1+B1"
 
     # ── Empty workbook ───────────────────────────────────────────────────
 
@@ -487,6 +482,27 @@ class TestExportXlsx:
         ali = wb.active.cell(1, 1).alignment
         assert ali.horizontal == "center"
         assert ali.vertical == "top"
+
+    def test_wrap_formula_and_dimensions_exported(self):
+        data = self._simple_univer(
+            {
+                "0": {
+                    "0": {"f": "SUM(B1:C1)", "t": 2, "s": {"tb": 2}},
+                    "1": {"v": 2, "t": 2},
+                    "2": {"v": 3, "t": 2},
+                }
+            }
+        )
+        data["sheets"]["s1"]["columnData"] = {"0": {"w": 145}}
+        data["sheets"]["s1"]["rowData"] = {"0": {"h": 32}}
+
+        wb = self._export_and_reload(data)
+        ws = wb.active
+
+        assert ws["A1"].value == "=SUM(B1:C1)"
+        assert ws["A1"].alignment.wrap_text is True
+        assert ws.column_dimensions["A"].width == pytest.approx(20.0)
+        assert ws.row_dimensions[1].height == pytest.approx(24.0)
 
     # ── Merged cells export ──────────────────────────────────────────────
 
@@ -721,6 +737,75 @@ class TestCellToUniver:
         result = _openpyxl_cell_to_univer(self._make_cell("x", fill_rgb="FFFFFFFF"))
         assert "bg" not in result.get("s", {})
 
+    def test_cross_sheet_formula_uses_cache_and_keeps_original(self):
+        import openpyxl
+
+        from app.core.file.parsers.xlsx_parser import openpyxl_cell_to_univer
+
+        wb = openpyxl.Workbook()
+        cell = wb.active["A1"]
+        cell.value = "=产品线测算!C8"
+
+        result = openpyxl_cell_to_univer(
+            cell,
+            cached_value=42,
+            sheet_names=["P&L", "产品线测算"],
+        )
+
+        assert "f" not in result
+        assert result["v"] == 42
+        assert result["custom"]["kotoOriginalFormula"] == "=产品线测算!C8"
+
+    def test_excel_only_formula_displays_cache_and_preserves_original(self):
+        import openpyxl
+
+        from app.core.file.parsers.xlsx_parser import openpyxl_cell_to_univer
+
+        wb = openpyxl.Workbook()
+        cell = wb.active["A1"]
+        cell.value = '=GETPIVOTDATA("收入",A1)'
+
+        result = openpyxl_cell_to_univer(cell, cached_value=590.4)
+
+        assert "f" not in result
+        assert result["v"] == pytest.approx(590.4)
+        assert result["custom"]["kotoCachedValue"] == pytest.approx(590.4)
+
+
+def test_export_restores_cached_excel_only_formula_until_user_edits_value():
+    import io
+
+    import openpyxl
+
+    from app.core.file.exporters.xlsx_exporter import export_xlsx
+
+    cell = {
+        "v": 590.4,
+        "t": 2,
+        "custom": {
+            "kotoOriginalFormula": '=GETPIVOTDATA("收入",A1)',
+            "kotoCachedValue": 590.4,
+        },
+    }
+    snapshot = {
+        "sheetOrder": ["sheet1"],
+        "sheets": {
+            "sheet1": {
+                "name": "P&L",
+                "cellData": {"0": {"0": cell}},
+            }
+        },
+    }
+
+    restored = openpyxl.load_workbook(
+        io.BytesIO(export_xlsx(snapshot)), data_only=False
+    )
+    assert restored.active["A1"].value == '=GETPIVOTDATA("收入",A1)'
+
+    cell["v"] = 600
+    edited = openpyxl.load_workbook(io.BytesIO(export_xlsx(snapshot)), data_only=False)
+    assert edited.active["A1"].value == 600
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # Layer 4: Full round-trip (parse → export → re-parse)
@@ -834,12 +919,12 @@ def xlsx_client(tmp_path_factory):
     workspace_dir.mkdir(parents=True)
 
     import web.blueprints.workspace_assistant as _wa
-    import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     original_tmp = _wa._TMP_DIR
-    original_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    original_ws = get_workspace_root()
     _wa._TMP_DIR = tmp_dir
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
@@ -853,8 +938,7 @@ def xlsx_client(tmp_path_factory):
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_DIR = original_tmp
-    if original_ws is not None:
-        _shared.WORKSPACE_DIR = original_ws
+    set_workspace_root(original_ws)
 
 
 class TestXlsxUploadEndpoint:

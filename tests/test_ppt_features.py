@@ -24,7 +24,7 @@ def test_file_parser():
     print("=" * 60)
 
     try:
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
 
         print("✅ FileParser 导入成功")
 
@@ -36,7 +36,7 @@ def test_file_parser():
             test_txt = f.name
 
         try:
-            result = FileParser.parse_file(test_txt)
+            result = parse_file(test_txt)
             assert result["success"], "TXT 解析失败"
             assert "测试文件" in result["content"], "内容提取失败"
             print("✅ TXT 文件解析成功")
@@ -201,7 +201,7 @@ def test_integration():
 
     test_file = None
     try:
-        from web.file_parser import FileParser
+        from app.core.file.file_parser import parse_file
         from web.ppt_session_manager import get_ppt_session_manager
 
         # 步骤 1: 创建临时文件
@@ -212,7 +212,7 @@ def test_integration():
             test_file = f.name
 
         # 步骤 2: 解析文件
-        parse_result = FileParser.parse_file(test_file)
+        parse_result = parse_file(test_file)
         assert parse_result["success"], "文件解析失败"
         file_content = parse_result["content"]
         print(f"✅ 步骤 1: 文件解析成功 ({len(file_content)} 字符)")

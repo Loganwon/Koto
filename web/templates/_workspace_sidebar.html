@@ -1,0 +1,28 @@
+<aside class="nav-rail chatgpt-sidebar koto-sidebar" id="sideNav" aria-label="任务导航">
+  <div class="koto-sidebar-brand">
+    <span class="koto-wordmark"><span class="koto-brand-mark" aria-hidden="true">言</span><strong>Koto</strong></span>
+    <button type="button" class="koto-icon-button" data-koto-shell-action="navigation" aria-label="收起或展开导航" aria-expanded="true" aria-controls="sideNav" title="收起或展开导航"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></svg></button>
+  </div>
+  <button type="button" class="koto-new-task" id="koto-new-task" data-koto-shell-action="new" title="新任务"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg><span>新任务</span></button>
+  <div id="wa-ai-session-list-view" class="koto-sidebar-history" aria-label="最近任务">
+    <div id="wa-ai-session-list"><p class="koto-history-placeholder">正在加载任务…</p></div>
+  </div>
+  <div class="koto-sidebar-footer">
+    <details class="koto-more-tools">
+      <summary><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg><span>工具与连接</span></summary>
+      <div class="koto-more-menu">
+        <button type="button" id="navCapabilityBtn" data-koto-event-click="h_56fda12e7df2" aria-expanded="false" aria-controls="capabilityPanel">技能与插件</button>
+        <button type="button" id="navKBBtn" data-koto-event-click="h_toggle_knowledge_panel" aria-expanded="false" aria-controls="kbPanel">知识库</button>
+        <button type="button" class="app-icon-btn" id="navNotesBtn" data-app-id="notes">笔记</button>
+        <button type="button" class="app-icon-btn" id="navScheduleBtn" data-app-id="schedule">日程与提醒</button>
+      </div>
+    </details>
+    <button type="button" class="koto-sidebar-settings" id="navSettingsBtn" data-koto-event-click="h_8b4faa7d173b" aria-expanded="false" aria-controls="settingsPanel"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m9 3-1 3-3 1-2 5 2 5 3 1 1 3h6l1-3 3-1 2-5-2-5-3-1-1-3z"/><circle cx="12" cy="12" r="3"/></svg><span>设置</span></button>
+    <div class="status-indicator koto-sidebar-status" id="statusIndicator" data-koto-event-click="h_fb451bc55781" data-koto-event-keydown="h_2fa90fd76079" role="button" tabindex="0" aria-expanded="false" title="查看服务状态"><span class="status-dot"></span><span class="status-text">正在连接…</span><span id="opsStatusBadge" hidden></span></div>
+    <div class="latency-detail" id="latencyDetail" style="display:none"><div class="latency-detail-inner">
+      <div class="latency-row" id="latencyDeepseek"><span class="latency-provider" id="latencyDeepseekName">DeepSeek</span><span class="latency-bar-bg"><span class="latency-bar-fill" id="latencyDeepseekBar"></span></span><span class="latency-value" id="latencyDeepseekVal">--</span></div>
+      <div class="latency-row" id="latencyLocal"><span class="latency-provider" id="latencyLocalName">本地模型</span><span class="latency-bar-bg"><span class="latency-bar-fill" id="latencyLocalBar"></span></span><span class="latency-value" id="latencyLocalVal">--</span></div>
+    </div></div>
+    <div id="jobsRunningPill"></div>
+  </div>
+</aside>

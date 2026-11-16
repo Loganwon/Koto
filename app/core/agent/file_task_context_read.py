@@ -34,6 +34,17 @@ from app.core.agent.file_task_workflow_state import (
 logger = logging.getLogger(__name__)
 
 
+_FILE_CONTEXT_PLACEHOLDERS = {
+    "[当前表格未选中区域，请提示用户框选数据]",
+}
+
+
+def _is_placeholder_file_content(file_info: Any) -> bool:
+    """Return whether editor-provided content is UI guidance, not file data."""
+    content = str(getattr(file_info, "content", "") or "").strip()
+    return content in _FILE_CONTEXT_PLACEHOLDERS
+
+
 def _is_instruction_prefixed_target_alias(request: Any, file_info: Any) -> bool:
     """Reject a broad-parser artifact such as ``生成一份名为《报告.docx``.
 
@@ -135,11 +146,16 @@ class FileTaskContextReadPhase:
             force_pdf_tool_read = _should_force_pdf_tool_read(
                 request, file_info, recipe_skeleton
             )
-            if file_info.content and not force_pdf_tool_read:
+            if (
+                file_info.content
+                and not _is_placeholder_file_content(file_info)
+                and not force_pdf_tool_read
+            ):
                 snippets.append(
                     {
                         "source": file_info.name or file_info.path,
                         "path": file_info.path,
+                        "success": True,
                         "preview": _preview(file_info.content, 500),
                         "chars": len(file_info.content),
                     }
@@ -223,6 +239,7 @@ class FileTaskContextReadPhase:
                 snippet = {
                     "source": file_info.name or file_info.path,
                     "path": file_info.path,
+                    "success": True,
                     "preview": _preview(result, 500),
                     "chars": len(str(result or "")),
                 }
@@ -260,7 +277,9 @@ class FileTaskContextReadPhase:
             runtime._build_step_result_payload(
                 title="读取显式上下文",
                 summary=context_summary,
-                status="completed" if snippets else "needs_attention",
+                # A generation task can legitimately have no source file.  Treat the
+                # optional context phase as skipped instead of surfacing a false failure.
+                status="completed" if snippets else "skipped",
                 snippet_count=len(snippets),
                 snippets=snippets,
             ),

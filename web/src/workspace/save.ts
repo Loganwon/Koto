@@ -1,3 +1,4 @@
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
 /**
  * Workspace save runtime for the unified Koto shell.
  * Workspace save contract and shortcuts.
@@ -6,7 +7,7 @@
 import { _csrfFetch, $, showToast } from './infrastructure';
 import { _fsHandleMap, _renderTabs, loadRecentFiles, state, type TabInfo } from './state';
 import { _serializeEditorForTab, _stableWorkspaceSnapshot } from './file-open';
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
+import { normalizeWorkspaceFilePath } from './docx-review-runtime';
 
 const _MIME: Record<string, string> = {
   docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -38,16 +39,10 @@ function _activeTab(): TabInfo | null {
 function _normalizeWorkspaceSavePath(path: string): string {
   const raw = String(path || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
   if (!raw) return '';
-  const sharedNormalizer = getWorkspaceApi().normalizeWorkspaceFilePath;
-  if (typeof sharedNormalizer === 'function') {
-    try {
-      const normalized = String(sharedNormalizer(raw) || '').trim().replace(/\\/g, '/').replace(/^\/+/, '');
-      if (normalized) return normalized;
-    } catch (_) {
-      /* fallback below */
-    }
-  }
-  return raw.replace(/^workspace\//i, '');
+  return String(normalizeWorkspaceFilePath(raw) || raw)
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '');
 }
 
 function markExternalFileChange(path: string): void {
@@ -76,7 +71,7 @@ function _isReadonlyType(): boolean {
   return !state.fileType || state.fileType === 'pdf' || state.fileType === 'image';
 }
 
-function _notifyPyModified(tab: TabInfo | null, modified: boolean): void {
+export function _notifyPyModified(tab: TabInfo | null, modified: boolean): void {
   if (!tab) return;
   try {
     const api = (window as any).pywebview?.api;
@@ -115,10 +110,13 @@ function _setSaveButtonsBusy(busy: boolean): void {
   if (saveAsBtn) saveAsBtn.disabled = busy || readonly;
 }
 
-async function _postAutoSave(tab: TabInfo | null, explicit: boolean): Promise<any> {
+export interface SaveReceiptOptions { expected_source_sha256?: string; silent?: boolean }
+
+async function _postAutoSave(tab: TabInfo | null, explicit: boolean, options: SaveReceiptOptions = {}, deferSourceUpdate = false): Promise<any> {
   if (explicit && _hasPendingExternalFileChange(tab)) {
     throw new Error('文件已被任务更新，请重新打开后再保存，避免覆盖任务结果。');
   }
+  const fileId = state.fileId;
   const data = _serializeEditorForTab(tab, state.activeEditor);
   const res = await _csrfFetch('/api/v1/workspace/auto_save', {
     method: 'POST',
@@ -128,49 +126,165 @@ async function _postAutoSave(tab: TabInfo | null, explicit: boolean): Promise<an
       file_id: state.fileId,
       ws_source_path: state.wsSourcePath || null,
       explicit,
+      expected_source_sha256: options.expected_source_sha256 || tab?.sourceSha256 || undefined,
       data,
     }),
   });
   const json = await _safeJson(res);
-  if (!res.ok) throw new Error(json.error || '保存失败');
+  if (!res.ok || json.ok !== true) throw new Error(json.error || '保存失败');
   if (tab) {
-    tab.modified = false;
-    tab.savedSnapshot = _stableWorkspaceSnapshot(data);
+    const savedSnapshot = _stableWorkspaceSnapshot(data);
+    // A user may edit while the network write is in progress. Keep that edit dirty.
+    const currentSnapshot = state.fileId === fileId
+      ? _stableWorkspaceSnapshot(_serializeEditorForTab(tab, state.activeEditor)) : null;
+    tab.modified = currentSnapshot === null || currentSnapshot !== savedSnapshot;
+    tab.savedSnapshot = savedSnapshot;
+    if (json.source_sha256 && !deferSourceUpdate) {
+      tab.sourceSha256 = String(json.source_sha256);
+      if (state.fileId === fileId) state.sourceSha256 = tab.sourceSha256;
+    }
     if (tab.fileType !== 'docx') tab.cache = data;
-    _notifyPyModified(tab, false);
+    _notifyPyModified(tab, tab.modified);
     _renderTabs();
   }
   return json;
 }
 
-async function _doSave(fsHandle?: any): Promise<void> {
-  const tab = _activeTab();
-  if (!_ensureCanSave(tab, true)) return;
-  await _postAutoSave(tab, true);
-  if (fsHandle && state.fileId) {
-    const rawRes = await fetch(`/api/v1/workspace/raw/${encodeURIComponent(state.fileId)}?_=${Date.now()}`);
-    if (rawRes.ok) {
-      await _writeToFileHandle(fsHandle, await rawRes.arrayBuffer());
-    } else {
-      showToast('已保存到 Koto 工作区，无法写回原始文件', 'success');
-      return;
-    }
-  }
-  showToast('已保存', 'success');
-  setTimeout(() => { loadRecentFiles().catch(() => {}); }, 500);
+async function sha256(bytes: ArrayBuffer): Promise<string> {
+  if (!globalThis.crypto?.subtle) throw new Error('当前环境无法核验原文件版本，未执行写入');
+  const digest = await globalThis.crypto.subtle.digest('SHA-256', bytes);
+  return Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, '0')).join('');
 }
 
-async function saveFile(): Promise<void> {
-  if (_isSaving) return;
+async function fileHandleHash(handle: any): Promise<string> {
+  if (typeof handle.getFile !== 'function') throw new Error('无法读取原文件版本，未执行写入');
+  return sha256(await (await handle.getFile()).arrayBuffer());
+}
+
+function _assertActiveSaveDocument(tab: TabInfo | null, fileId: string | null, editor: any): void {
+  if (state.fileId === fileId && state.activeEditor === editor && _activeTab() === tab) return;
+  if (tab) { tab.modified = true; _notifyPyModified(tab, true); _renderTabs(); }
+  throw new Error('保存期间已切换文档，编辑稿已保留；请返回原文档重新保存');
+}
+
+async function _doSave(fsHandle?: any, options: SaveReceiptOptions = {}): Promise<Record<string, any>> {
   const tab = _activeTab();
-  if (!_ensureCanSave(tab, true)) return;
+  if (!_ensureCanSave(tab, true)) throw new Error('当前文档尚不可保存');
+  const fileId = state.fileId;
+  const editor = state.activeEditor;
+  const path = state.wsSourcePath || tab?.path || '';
+  const baseline = options.expected_source_sha256 || tab?.sourceSha256 || '';
+  const savedSnapshotBefore = tab?.savedSnapshot;
+  if (fsHandle && (!baseline || await fileHandleHash(fsHandle) !== baseline)) {
+    if (tab) tab.modified = true;
+    throw new Error('原文件已被外部修改，未覆盖；请重新打开并合并修改');
+  }
+  _assertActiveSaveDocument(tab, fileId, editor);
+  const receipt = await _postAutoSave(tab, true, options, !!fsHandle);
+  let fileHandleWritten = false;
+  let sourceHash = String(receipt.source_sha256 || '');
+  if (fsHandle && fileId) {
+    try {
+      const rawRes = await fetch(`/api/v1/workspace/raw/${encodeURIComponent(fileId)}?_=${Date.now()}`);
+      if (!rawRes.ok) throw new Error('已保存工作区副本，但无法写回原始文件');
+      const bytes = await rawRes.arrayBuffer();
+      const newHash = await sha256(bytes);
+      const currentHash = await fileHandleHash(fsHandle);
+      if (currentHash !== baseline && currentHash !== newHash) {
+        throw new Error('原文件在保存期间被修改，未覆盖；请重新打开并合并修改');
+      }
+      if (currentHash !== newHash) await _writeToFileHandle(fsHandle, bytes);
+      sourceHash = await fileHandleHash(fsHandle);
+      if (sourceHash !== newHash) throw new Error('原文件写回后核验失败');
+      fileHandleWritten = true;
+    } catch (error) {
+      if (tab) { tab.modified = true; tab.savedSnapshot = savedSnapshotBefore; }
+      throw error;
+    }
+  }
+  const persisted = receipt.persisted === true || receipt.src_written === true || fileHandleWritten;
+  if (!persisted) {
+    if (tab) {
+      tab.modified = true;
+      tab.savedSnapshot = savedSnapshotBefore;
+      tab.sourceSha256 = baseline;
+      if (state.fileId === fileId) state.sourceSha256 = baseline;
+      _notifyPyModified(tab, true);
+      _renderTabs();
+    }
+    throw new Error('编辑稿已保留，源文件未保存；请检查原文件路径或另存副本');
+  }
+  if (sourceHash && tab) {
+    tab.sourceSha256 = sourceHash;
+    if (state.fileId === fileId) state.sourceSha256 = sourceHash;
+  }
+  if (!options.silent) showToast('已保存', 'success');
+  setTimeout(() => { loadRecentFiles().catch(() => {}); }, 500);
+  return {
+    ...receipt, file_id: fileId, path,
+    source_sha256: sourceHash,
+    file_handle_written: fileHandleWritten,
+    persisted,
+    unsaved_changes: tab?.modified === true,
+  };
+}
+
+/** Strict save boundary for Agent tools. Errors must reach the calling model. */
+export async function saveFileWithReceipt(options: SaveReceiptOptions = {}): Promise<Record<string, any>> {
+  if (_isSaving) throw new Error('文档正在保存，请等待当前保存结束');
+  const tab = _activeTab();
+  if (!_ensureCanSave(tab, false)) throw new Error('当前文档不支持保存或尚未加载完成');
   _isSaving = true;
   _setSaveButtonsBusy(true);
   try {
     const fsHandle = (tab && tab.fsHandle) || _fsHandleMap.get(state.wsSourcePath || '') || null;
-    await _doSave(fsHandle);
-  } catch (error: any) {
-    showToast(error && error.message ? error.message : '保存失败', 'error');
+    return await _doSave(fsHandle, options);
+  } finally {
+    _isSaving = false;
+    _setSaveButtonsBusy(false);
+  }
+}
+
+async function saveFile(): Promise<void> {
+  try { await saveFileWithReceipt(); }
+  catch (error: any) { showToast(error?.message || '保存失败', 'error'); }
+}
+
+/** Export a copy to the explicitly selected destination without saving over the source. */
+export async function saveFileCopyWithReceipt(fsHandle: any, expectedTargetSha256: string): Promise<Record<string, any>> {
+  if (_isSaving) throw new Error('文档正在保存，请等待当前保存结束');
+  const tab = _activeTab();
+  const fileId = state.fileId;
+  const editor = state.activeEditor;
+  if (!_ensureCanSave(tab, false)) throw new Error('当前文档尚不可导出');
+  _isSaving = true;
+  _setSaveButtonsBusy(true);
+  try {
+    if (!expectedTargetSha256 || await fileHandleHash(fsHandle) !== expectedTargetSha256) {
+      throw new Error('另存目标已发生变化，未覆盖');
+    }
+    _assertActiveSaveDocument(tab, fileId, editor);
+    const data = _serializeEditorForTab(tab, state.activeEditor);
+    const response = await _csrfFetch('/api/v1/workspace/save_file', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ file_type: state.fileType, file_id: state.fileId,
+        file_name: fsHandle.name || tab?.name || 'document', data }),
+    });
+    if (!response.ok) {
+      const error = await _safeJson(response);
+      throw new Error(error.error || '导出副本失败');
+    }
+    const bytes = await response.arrayBuffer();
+    const digest = await sha256(bytes);
+    const currentHash = await fileHandleHash(fsHandle);
+    if (currentHash !== expectedTargetSha256 && currentHash !== digest) {
+      throw new Error('另存目标在导出期间被修改，未覆盖');
+    }
+    if (currentHash !== digest) await _writeToFileHandle(fsHandle, bytes);
+    if (await fileHandleHash(fsHandle) !== digest) throw new Error('另存副本写入后核验失败');
+    showToast('副本已另存为，原文件未覆盖', 'success');
+    return { ok: true, persisted: true, verified: true, source_sha256: digest,
+      path: fsHandle.name || '', copy: true, original_unchanged: true };
   } finally {
     _isSaving = false;
     _setSaveButtonsBusy(false);
@@ -198,12 +312,9 @@ async function saveAs(): Promise<void> {
     showToast(`无法打开保存对话框：${error && error.message ? error.message : error}`, 'error');
     return;
   }
-  if (tab) tab.fsHandle = fsHandle;
-  if (state.wsSourcePath) _fsHandleMap.set(state.wsSourcePath, fsHandle);
-  _isSaving = true;
-  _setSaveButtonsBusy(true);
   try {
-    await _doSave(fsHandle);
+    const targetBaseline = await fileHandleHash(fsHandle);
+    await saveFileCopyWithReceipt(fsHandle, targetBaseline);
   } catch (error: any) {
     showToast(error && error.message ? error.message : '另存为失败', 'error');
   } finally {
@@ -212,7 +323,7 @@ async function saveAs(): Promise<void> {
   }
 }
 
-function scheduleAutoSave(options?: { skipDiskWrite?: boolean }): void {
+export function scheduleAutoSave(options?: { skipDiskWrite?: boolean }): void {
   if (!state.fileId || _isReadonlyType()) return;
   const tab = _activeTab();
   if (tab && !tab.modified) {
@@ -220,7 +331,11 @@ function scheduleAutoSave(options?: { skipDiskWrite?: boolean }): void {
     _notifyPyModified(tab, true);
     _renderTabs();
   }
-  if (options && options.skipDiskWrite) return;
+  if (options && options.skipDiskWrite) {
+    if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+    _autoSaveTimer = null;
+    return;
+  }
   if (!_autoSaveEnabled) return;
   if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
   _autoSaveTimer = setTimeout(() => {
@@ -234,7 +349,7 @@ async function autoSave(): Promise<void> {
   const tab = _activeTab();
   if (!_ensureCanSave(tab, false)) return;
   try {
-    await _postAutoSave(tab, true);
+    await saveFileWithReceipt({ silent: true });
   } catch (error) {
     console.warn('[WA autoSave]', error);
   }
@@ -268,8 +383,8 @@ function toggleAutoSave(force?: boolean): boolean {
 }
 
 function _installSaveShortcuts(): void {
-  if ((window as any).__waSaveShortcutsInstalled) return;
-  (window as any).__waSaveShortcutsInstalled = true;
+  if (getFeatureRegistry().__waSaveShortcutsInstalled) return;
+  getFeatureRegistry().__waSaveShortcutsInstalled = true;
   document.addEventListener('keydown', (event) => {
     if ((event.ctrlKey || event.metaKey) && String(event.key || '').toLowerCase() === 's') {
       if (!state.activeEditor || _isReadonlyType()) return;
@@ -279,8 +394,11 @@ function _installSaveShortcuts(): void {
   }, true);
 }
 
-publishWorkspaceApi({
+registerFeatures({
   saveFile,
+  saveFileWithReceipt,
+  isDocumentSaveInProgress: () => _isSaving,
+  saveFileCopyWithReceipt,
   saveAs,
   autoSave,
   scheduleAutoSave,

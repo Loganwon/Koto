@@ -97,7 +97,6 @@ class TestPluginMeta:
             "extract_archive",
             "manage_tag",
             "manage_favorite",
-            "summarize_file",
             "undo_last_op",
         ]
         for name in expected:
@@ -1294,100 +1293,6 @@ class TestManageFavorite:
 
         result = plugin.manage_favorite(action="add")
         assert "请提供 path" in result
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 28  summarize_file
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestSummarizeFile:
-    def test_summarize_nonexistent(self, plugin):
-        result = plugin.summarize_file("/no/file.txt")
-        assert "不存在" in result
-
-    def test_summarize_not_a_file(self, plugin, tmp_path):
-        result = plugin.summarize_file(str(tmp_path))
-        assert "不是文件" in result
-
-    def test_summarize_empty_content(self, plugin, tmp_path):
-        f = tmp_path / "empty.txt"
-        f.write_text("", encoding="utf-8")
-
-        with patch(
-            "app.core.file.file_registry._extract_text_preview", return_value=""
-        ):
-            result = plugin.summarize_file(str(f))
-        assert "无法提取文本内容" in result
-
-    def test_summarize_extract_failure(self, plugin, tmp_path):
-        f = tmp_path / "bad.bin"
-        f.write_bytes(b"\x00\x01\x02")
-
-        with patch(
-            "app.core.file.file_registry._extract_text_preview",
-            side_effect=Exception("parse fail"),
-        ):
-            result = plugin.summarize_file(str(f))
-        assert "内容提取失败" in result
-
-    def test_summarize_llm_success(self, plugin, tmp_path):
-        f = tmp_path / "doc.txt"
-        f.write_text("Important document content", encoding="utf-8")
-
-        with patch(
-            "app.core.file.file_registry._extract_text_preview",
-            return_value="Important document content",
-        ):
-            with patch("app.core.llm.provider_factory.get_llm_provider") as MockLLM:
-                mock_llm = MagicMock()
-                mock_llm.generate_content.return_value = {
-                    "text": "This is a summary of the document."
-                }
-                MockLLM.return_value = mock_llm
-                result = plugin.summarize_file(str(f))
-
-        assert "doc.txt" in result
-        assert (
-            "summary" in result.lower()
-            or "Summary" in result
-            or "摘要" in result
-            or "document" in result.lower()
-        )
-
-    def test_summarize_llm_failure(self, plugin, tmp_path):
-        f = tmp_path / "doc.txt"
-        f.write_text("Some content here", encoding="utf-8")
-
-        with patch(
-            "app.core.file.file_registry._extract_text_preview",
-            return_value="Some content here",
-        ):
-            with patch(
-                "app.core.llm.provider_factory.get_llm_provider",
-                side_effect=Exception("API key missing"),
-            ):
-                result = plugin.summarize_file(str(f))
-
-        assert "LLM 摘要失败" in result
-        assert "Some content" in result
-
-    def test_summarize_with_focus(self, plugin, tmp_path):
-        f = tmp_path / "doc.txt"
-        f.write_text("Data analysis report with charts.", encoding="utf-8")
-
-        with patch(
-            "app.core.file.file_registry._extract_text_preview",
-            return_value="Data analysis report with charts.",
-        ):
-            with patch("app.core.llm.provider_factory.get_llm_provider") as MockLLM:
-                mock_llm = MagicMock()
-                mock_llm.generate_content.return_value = {"text": "Focused summary."}
-                MockLLM.return_value = mock_llm
-                result = plugin.summarize_file(str(f), focus="key findings")
-
-        assert "doc.txt" in result
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

@@ -15,7 +15,7 @@ def test_file_task_runtime_keeps_explicit_readonly_request_out_of_write_loop():
 
     assert runtime._has_readonly_write_negation(request.task) is True
     assert runtime._has_write_intent(request.task) is False
-    assert classification.write_intent is False, details
+    assert classification.write_required is False, details
     assert classification.output_mode != "write", details
     assert "readonly_write_negation" in classification.reason_codes, details
 
@@ -47,11 +47,12 @@ def test_file_task_runtime_followup_existing_docx_write_allows_source_file_prote
             ),
         ],
         options={
+            "output_mode": "write",
             "followup_context": {
                 "kind": "review_last_task",
                 "followup_action": "improve",
                 "previous_task_output_mode": "write",
-            }
+            },
         },
     )
 
@@ -65,7 +66,7 @@ def test_file_task_runtime_followup_existing_docx_write_allows_source_file_prote
         == "workspace/koto_frontend_fulltest_report_20260614.docx"
     )
     assert classification.output_mode == "write", details
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.target_file_type == "docx", details
     assert classification.task_family != "table_transfer", details
     assert classification.operation_kind != "write_table", details
@@ -116,7 +117,7 @@ def test_file_task_runtime_target_repair_allows_generic_source_file_protection()
 
     assert runtime._has_readonly_write_negation(task) is False
     assert runtime._has_write_intent(task) is True
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.output_mode == "write", details
     assert "readonly_write_negation" not in classification.reason_codes, details
 
@@ -162,7 +163,7 @@ def test_file_task_runtime_frontend_target_repair_ignores_confirmation_negation(
 
     assert runtime._has_readonly_write_negation(task) is False
     assert runtime._has_write_intent(task) is True
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.output_mode == "write", details
     assert classification.selected_recipe != "multi_file_compare_readonly", details
     assert "readonly_write_negation" not in classification.reason_codes, details
@@ -230,12 +231,9 @@ def test_file_task_runtime_frontend_docx_table_append_stays_write_mode():
     assert normalized.target_path.endswith(
         "workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx"
     )
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.output_mode == "write", details
-    assert classification.selected_recipe in {
-        "xlsx_table_to_docx",
-        "docx_report_table_write",
-    }, details
+    assert classification.selected_recipe == "", details
     assert "readonly_write_negation" not in classification.reason_codes, details
 
 
@@ -263,11 +261,11 @@ def test_file_task_runtime_frontend_xlsx_sheet_to_docx_table_does_not_target_sou
         "workspace/koto_complex_task_test/service_agreement_full_test_20260628.docx"
     )
     assert runtime._has_write_intent(task) is True
-    assert classification.write_intent is True, details
+    assert classification.write_required is True, details
     assert classification.output_mode == "write", details
     assert classification.target_file_type == "docx", details
-    assert classification.selected_recipe == "xlsx_table_to_docx", details
-    assert classification.operation_kind == "write_table", details
+    assert classification.selected_recipe == "", details
+    assert classification.operation_kind == "write", details
     assert classification.selected_recipe != "spreadsheet_cell_write", details
     assert "readonly_write_negation" not in classification.reason_codes, details
 
@@ -293,7 +291,7 @@ def test_file_task_runtime_keeps_generated_artifact_followup_readonly():
     classification = runtime._classify_request(request, request.files)
 
     assert runtime._has_write_intent(task) is False
-    assert classification.write_intent is False
+    assert classification.write_required is False
     assert classification.output_mode == "answer"
 
 
@@ -315,10 +313,11 @@ def test_file_task_runtime_followup_question_can_create_new_artifact():
             )
         ],
         options={
+            "output_mode": "write",
             "followup_context": {
                 "kind": "review_last_task",
                 "followup_action": "question",
-            }
+            },
         },
     )
 
@@ -331,11 +330,11 @@ def test_file_task_runtime_followup_question_can_create_new_artifact():
         normalized.target_path
         == "workspace/_codex_frontend_task_tests/koto_target_metadata_smoke_20260617_c.md"
     )
-    assert classification.write_intent is True
+    assert classification.write_required is True
     assert classification.output_mode == "write"
-    assert "followup_question_new_artifact" in classification.reason_codes
+    assert "followup_question_explicit_write" in classification.reason_codes
     assert "diagnostic_request" not in classification.reason_codes
-    assert "diagnostic_overrode_write_intent" not in classification.reason_codes
+    assert "diagnostic_overrode_write_requirement" not in classification.reason_codes
 
 
 def test_file_task_runtime_followup_feedback_messages_are_not_framed_as_new_task():
@@ -497,9 +496,9 @@ def test_file_task_runtime_classifies_followup_apply_from_previous_hybrid_as_wri
     assert run_started.payload["output_mode"] == "write"
     assert run_started.payload["task_family"] == "transform"
     assert run_started.payload["operation_kind"] == "write"
-    assert run_started.payload["write_intent"] is True
+    assert run_started.payload["write_required"] is True
     assert "followup_action:apply" in run_started.payload["reason_codes"]
-    assert "followup_apply_write_intent" in run_started.payload["reason_codes"]
+    assert "followup_apply_write_requirement" in run_started.payload["reason_codes"]
 
 
 def test_file_task_runtime_diagnostic_question_with_write_words_stays_answer_only():
@@ -542,18 +541,20 @@ def test_file_task_runtime_diagnostic_question_with_write_words_stays_answer_onl
     assert run_started.payload["output_mode"] == "answer"
     assert run_started.payload["task_family"] == "analyze"
     assert run_started.payload["operation_kind"] == "read"
-    assert run_started.payload["write_intent"] is False
-    assert run_started.payload["docx_annotation_request"] is False
+    assert run_started.payload["write_required"] is False
+    assert "docx_annotation_request" not in run_started.payload
     assert "followup_action:question" in run_started.payload["reason_codes"]
     assert "diagnostic_request" in run_started.payload["reason_codes"]
-    assert "diagnostic_overrode_write_intent" in run_started.payload["reason_codes"]
+    assert (
+        "diagnostic_overrode_write_requirement" in run_started.payload["reason_codes"]
+    )
     assert (
         run_started.payload["intent_plan"]["recommended_strategy"]
         == "diagnose_then_answer"
     )
 
 
-def test_file_task_runtime_followup_improve_carries_previous_file_changes_and_no_repeat_insert_guidance():
+def test_file_task_runtime_followup_improve_carries_previous_file_changes_without_recipe_guidance():
     runtime = FileTaskRuntime(
         tool_executor=lambda name, args: "", model_client=lambda **kwargs: {}
     )
@@ -589,8 +590,9 @@ def test_file_task_runtime_followup_improve_carries_previous_file_changes_and_no
 
     assert '"previous_task_file_changes": [' in content
     assert '"operation": "insert_excel_as_docx_table"' in content
-    assert "不要重复同一插表" in content
-    assert "不要再次插入同一张表" in system
+    assert "不要重复同一插表" not in content
+    assert "不要再次插入同一张表" not in system
+    assert "优先沿用上一轮的目标" in system
 
 
 def test_file_task_runtime_preserves_reasoning_content_in_followup_model_turn():
@@ -627,7 +629,9 @@ def test_file_task_runtime_preserves_reasoning_content_in_followup_model_turn():
                 path="notes.txt",
                 name="notes.txt",
                 type="txt",
-                content="这是一段文件内容。",
+                # Keep context absent so the first model turn genuinely needs
+                # the read tool before the follow-up model call.
+                content="",
             )
         ],
     )
@@ -643,7 +647,7 @@ def test_file_task_runtime_preserves_reasoning_content_in_followup_model_turn():
     model_turns = [
         msg
         for msg in second_messages
-        if msg.get("role") == "model" and msg.get("tool_calls")
+        if msg.get("role") == "assistant" and msg.get("reasoning_content")
     ]
     assert model_turns
     assert model_turns[-1]["reasoning_content"] == "reasoning token"

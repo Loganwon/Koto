@@ -8,7 +8,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from web.organize_cleanup import OrganizeCleanup
+from app.core.services.organize_cleanup import OrganizeCleanup
 
 
 def test_cleanup_merges_duplicates():

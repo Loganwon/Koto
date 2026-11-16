@@ -50,7 +50,6 @@ def get_status() -> dict:
 
 def is_available() -> bool:
     """快速检查本地 STT 是否可用"""
-    global _initialized
     if not _initialized:
         _try_load_model()
     return _model is not None
@@ -157,8 +156,6 @@ def transcribe(
 
 def _do_transcribe(audio_path: str) -> str:
     """实际调用模型转写，兼容 faster-whisper 和 openai-whisper 两种 API"""
-    global _engine_name
-
     if _engine_name.startswith("faster-whisper"):
         # faster-whisper API
         segments, info = _model.transcribe(

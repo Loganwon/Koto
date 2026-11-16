@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Pattern
 
 from app.core.agent.file_task_runtime_utils import _json_payload, _preview
-from app.core.agent.file_task_tool_catalog import (
+from app.core.agent.toolkits.foundation.catalog import (
     extract_koto_paths,
     extract_sandbox_artifacts,
     parse_file_change,
@@ -125,7 +125,9 @@ def extract_file_changes(
             }
             change.update(metrics)
             changes.append(change)
-    return changes
+    from app.core.agent.file_task_document_metrics import attach_structure_to_changes
+
+    return attach_structure_to_changes(changes, result)
 
 
 def truncate_tool_feedback_value(value: Any, *, depth: int = 0) -> Any:
@@ -266,7 +268,7 @@ def extract_tool_runtime_outcome(result: Any) -> Optional[Dict[str, Any]]:
         return None
 
     outcome: Dict[str, Any] = {
-        "status": status or "needs_attention",
+        "status": status or "failed",
         "summary": summary,
     }
     if suggested_next_step:

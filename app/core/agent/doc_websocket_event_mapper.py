@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.agent.lifecycle import EventType
+from app.core.agent.kernel import EventType
 from app.core.security.output_validator import sanitize_user_visible_text
 
 
@@ -204,14 +204,6 @@ def emit_agent_event(socketio, sid, event, namespace: str = "/doc") -> None:
 
     elif etype == EventType.DOC_TOOL_CALL:
         socketio.emit("doc_tool_call", data, namespace=namespace, to=sid)
-
-    elif etype == EventType.SKILL_SUGGESTIONS:
-        socketio.emit(
-            "skill_suggestions",
-            {"suggestions": data.get("suggestions", [])},
-            namespace=namespace,
-            to=sid,
-        )
 
     elif etype == EventType.RAG_INFO:
         socketio.emit("rag_info", data, namespace=namespace, to=sid)

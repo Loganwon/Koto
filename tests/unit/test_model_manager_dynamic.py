@@ -29,12 +29,15 @@ class _NoneModelApi:
 
 class _FakeClient:
     def __init__(self, models):
-        self.models = _FakeModelApi(models)
+        self._models = models
+
+    def list_models(self):
+        return list(self._models)
 
 
 class _NoneClient:
-    def __init__(self):
-        self.models = _NoneModelApi()
+    def list_models(self):
+        return None
 
 
 def _caps(speed: int, quality: int, reasoning: int, context: int, tier: int):

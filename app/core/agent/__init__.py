@@ -32,9 +32,20 @@ def _prefer_source_module(module_basename: str) -> None:
 
 
 _prefer_source_module("tool_registry")
-_prefer_source_module("unified_agent")
+_prefer_source_module("kernel_agent")
 
 from .base import Agent, AgentPlugin
+from .kernel_agent import KernelAgent
 from .tool_registry import ToolRegistry
 from .types import AgentAction, AgentResponse, AgentStep, AgentStepType
-from .unified_agent import UnifiedAgent
+
+__all__ = [
+    "Agent",
+    "AgentAction",
+    "AgentPlugin",
+    "AgentResponse",
+    "AgentStep",
+    "AgentStepType",
+    "KernelAgent",
+    "ToolRegistry",
+]

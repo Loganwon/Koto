@@ -10,7 +10,7 @@ function bindPrimaryComposerSuggestions(): void {
     if (!text) return;
     event.preventDefault();
     setActiveKotoComposerText(text);
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    document.getElementById('wa-user-input')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 }
 

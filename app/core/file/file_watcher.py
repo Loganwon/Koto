@@ -26,7 +26,6 @@ FileWatcher — Koto 目录监控器
 
 from __future__ import annotations
 
-import json
 import logging
 import threading
 from pathlib import Path
@@ -82,9 +81,11 @@ class FileWatcher:
 
     def _reload_config(self):
         try:
+            from app.core.config.settings_store import load_settings_document
+
             cfg_path = Path(self._settings_path)
             if cfg_path.exists():
-                raw = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+                raw = load_settings_document(cfg_path)
                 self._cfg = raw.get("file_watcher", {})
         except Exception as e:
             logger.warning(f"[FileWatcher] 读取配置失败: {e}")
@@ -449,11 +450,8 @@ class FileWatcher:
         def _run():
             try:
                 from app.core.file.file_registry import get_file_registry
+                from app.core.services.file_analyzer import FileAnalyzer
 
-                try:
-                    from web.file_analyzer import FileAnalyzer
-                except ImportError:
-                    from file_analyzer import FileAnalyzer  # type: ignore
                 analyzer = FileAnalyzer()
                 name = Path(path_str).name
                 result = analyzer.analyze_file(path_str)

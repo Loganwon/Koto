@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "policy": "Ratchet only: budgets may decrease but must never increase.",
+  "budgets": {
+    "inline_script_tags": 2,
+    "external_script_tags": 3,
+    "inline_event_handlers": 0,
+    "product_template_inline_event_handlers": 58,
+    "inline_wa_event_handlers": 0,
+    "inline_wa_method_count": 0,
+    "window_global_assignments": 4,
+    "unapproved_window_global_assignment_count": 0,
+    "generated_inline_event_handlers": 0,
+    "window_state_writes": 0,
+    "publish_workspace_api_calls": 0,
+    "frontend_source_files_over_1000_count": 0,
+    "over_1500_count": 13,
+    "over_1500_lines": 22533,
+    "over_2000_count": 0,
+    "over_2000_lines": 0
+  }
+}

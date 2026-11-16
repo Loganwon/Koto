@@ -2,7 +2,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 from __future__ import annotations
 
-from web.local_executor import LocalExecutor
+from web.tasks.local_executor import LocalExecutor
 
 
 def test_whitelisted_app_launch_is_system_command() -> None:

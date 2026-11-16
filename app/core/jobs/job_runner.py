@@ -14,10 +14,9 @@ Koto JobRunner — 后台作业执行器
 - 崩溃恢复：启动时自动检测 PENDING/job_runner 任务并重排
 
 作业类型 (job_type) 与内置处理器：
-  "agent_query"   — 通过 UnifiedAgent 执行用户查询
-  "workflow"      — 通过 WorkflowRuntime 执行命名工作流
+  "agent_query"   — 通过 KernelAgent 执行用户查询
+  "workflow"      — 通过 TaskPlanner 执行多步工作流
   "auto_catalog"  — 触发自动整理任务
-  "skill_exec"    — 通过指定 skill_id 执行技能
 
 自定义处理器注册：
     runner = get_job_runner()
@@ -32,6 +31,7 @@ import queue
 import threading
 import time
 import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, Optional
@@ -51,7 +51,6 @@ class JobSpec:
     job_type: str
     payload: Dict[str, Any] = field(default_factory=dict)
     session_id: str = ""
-    skill_id: Optional[str] = None
     max_retries: int = 0
     timeout_seconds: float = 300.0
     metadata: Optional[Dict[str, Any]] = None
@@ -112,6 +111,28 @@ class JobContext:
         except Exception as _e:
             logger.warning("[JobContext] TaskLedger 记录步骤失败: %s", _e)
         try:
+            detail = None
+            task = self.ledger.get(self.task_id)
+            metadata = (
+                json.loads(task.metadata or "{}")
+                if task and isinstance(task.metadata, str)
+                else {}
+            )
+            run_id = str(metadata.get("run_id") or self.task_id)
+            event = self.ledger.append_run_event(
+                self.task_id,
+                run_id,
+                "agent_step",
+                {
+                    "data": {
+                        "step_type": str(step_type).lower(),
+                        "content": content,
+                        "metadata": {"progress": progress, "tool_name": tool_name},
+                    }
+                },
+            )
+            if isinstance(event, dict):
+                detail = {"event": event}
             self.bus.publish_step(
                 task_id=self.task_id,
                 session_id=self.session_id,
@@ -119,6 +140,7 @@ class JobContext:
                 content=content,
                 progress=progress,
                 tool_name=tool_name,
+                detail=detail,
             )
         except Exception as _e:
             logger.warning("[JobContext] ProgressBus 发布步骤失败: %s", _e)
@@ -140,7 +162,7 @@ class JobRunner:
             payload={"query": "帮我写一份周报"},
             session_id="sess-abc",
         ))
-        # 通过 GET /api/jobs/<task_id>/stream 跟踪进度
+        # 通过 GET /api/tasks/<task_id>/stream 跟踪进度
     """
 
     def __init__(self, max_workers: int = 4):
@@ -187,6 +209,17 @@ class JobRunner:
         self._handlers[job_type] = fn
         logger.debug("[JobRunner] 注册处理器: %s", job_type)
 
+    def submit_continuation(self, consume: Callable[[], Any]):
+        """Adopt an already-running producer after its viewing socket closes.
+
+        The caller retains the original generator and its trusted invocation
+        context.  This schedules no new task and never restarts its model/tool
+        loop; the existing pool simply continues consuming that same producer.
+        """
+        if not callable(consume):
+            raise TypeError("continuation must be callable")
+        return self._executor.submit(consume)
+
     # ── 提交作业 ──────────────────────────────────────────────────────────────
 
     def submit(self, spec: JobSpec) -> str:
@@ -208,7 +241,6 @@ class JobRunner:
             session_id=spec.session_id or "system",
             user_input=user_input_str,
             task_type=spec.job_type,
-            skill_id=spec.skill_id,
             source="job_runner",
             priority=_priority_int,
             metadata={
@@ -216,6 +248,8 @@ class JobRunner:
                 "max_retries": spec.max_retries,
                 "timeout_seconds": spec.timeout_seconds,
                 **(spec.metadata or {}),
+                "job_payload": json.loads(json.dumps(spec.payload, ensure_ascii=False)),
+                "run_id": str((spec.metadata or {}).get("run_id") or uuid.uuid4().hex),
             },
         )
 
@@ -228,6 +262,258 @@ class JobRunner:
             _priority_int,
         )
         return task.task_id
+
+    def retry(self, task_id: str) -> str:
+        """Requeue a failed or cancelled job using its persisted task metadata."""
+        from app.core.tasks.task_ledger import TaskStatus, get_ledger
+
+        ledger = get_ledger()
+        task = ledger.get(task_id)
+        if task is None:
+            raise LookupError("作业不存在")
+        if task.status not in (TaskStatus.FAILED, TaskStatus.CANCELLED):
+            raise ValueError(
+                f"只能重试 failed/cancelled 作业，当前状态: {task.status.value}"
+            )
+
+        metadata = json.loads(task.metadata or "{}")
+        job_type = metadata.get("job_type") or task.task_type
+        if not job_type:
+            raise ValueError("无法确定 job_type，无法重试")
+        payload = metadata.get("job_payload")
+        if not isinstance(payload, dict):
+            try:
+                payload = json.loads(task.user_input)
+            except (TypeError, json.JSONDecodeError):
+                payload = {"raw": task.user_input}
+
+        ledger._update_fields(
+            task_id,
+            status=TaskStatus.PENDING.value,
+            error=None,
+            cancel_requested=0,
+            completed_at=None,
+        )
+        previous_runs = list(metadata.get("previous_runs") or [])
+        previous_runs.append(
+            {"run_id": metadata.get("run_id") or task_id, "status": task.status.value}
+        )
+        metadata.update(
+            {"previous_runs": previous_runs[-20:], "run_id": uuid.uuid4().hex}
+        )
+        ledger.update_metadata(task_id, metadata)
+        ledger.clear_cancel_for_retry(task_id)
+        spec = JobSpec(
+            job_type=job_type,
+            payload=payload,
+            session_id=task.session_id,
+            max_retries=int(metadata.get("max_retries", 0)),
+            timeout_seconds=float(metadata.get("timeout_seconds", 300.0)),
+            priority=int(getattr(task, "priority", 1)),
+            metadata=metadata,
+        )
+        priority = max(0, min(3, int(spec.priority)))
+        self._queue.put((3 - priority, time.time(), task_id, spec))
+        return task_id
+
+    def resume_kernel(
+        self, task_id: str, *, run_id: Optional[str] = None, approved: bool = False
+    ) -> str:
+        """Continue a saved Kernel state through this runner's existing pool.
+
+        This never reconstructs a fresh request from a result summary and never
+        replays an unconfirmed write.  A durable lease prevents two workers
+        from continuing the same run at once.
+        """
+        from app.core.tasks.task_ledger import get_ledger
+
+        ledger = get_ledger()
+        task = ledger.get(task_id)
+        if task is None:
+            raise LookupError("任务不存在")
+        if (
+            task.interrupt_requested or task.status.value == "waiting"
+        ) and not approved:
+            raise ValueError("任务正在等待明确确认，不能自动恢复")
+        checkpoint = ledger.get_kernel_checkpoint(task_id, run_id)
+        if not checkpoint:
+            raise ValueError("没有可恢复的内核检查点")
+        if not checkpoint["resumable"]:
+            raise ValueError("工具副作用尚未核实，不能自动重放")
+        owner_id = f"kernel-resume-{uuid.uuid4()}"
+        claimed = ledger.claim_kernel_checkpoint(
+            task_id, owner_id, run_id=checkpoint["run_id"]
+        )
+        if not claimed:
+            raise ValueError("任务仍在执行、已结束或已请求取消，不能重复恢复")
+        try:
+            self._executor.submit(self._continue_kernel, task_id, claimed, owner_id)
+        except BaseException:
+            ledger.release_kernel_checkpoint(task_id, checkpoint["run_id"], owner_id)
+            raise
+        return task_id
+
+    def _continue_kernel(self, task_id: str, checkpoint: Dict[str, Any], owner_id: str):
+        from app.core.agent.kernel_agent_service import get_kernel_agent
+        from app.core.tasks.progress_bus import ProgressEvent, get_progress_bus
+        from app.core.tasks.task_ledger import get_ledger
+
+        ledger, bus = get_ledger(), get_progress_bus()
+        task = ledger.get(task_id)
+        run_id = checkpoint["run_id"]
+        stopped = threading.Event()
+
+        def heartbeat():
+            while not stopped.wait(10.0):
+                if not ledger.renew_kernel_lease(task_id, run_id, owner_id):
+                    return
+
+        threading.Thread(
+            target=heartbeat, daemon=True, name=f"kernel-lease-{task_id[:8]}"
+        ).start()
+
+        def save(state):
+            snapshot = dict(state)
+            for identity_key in ("model_mode", "requires_authorization"):
+                if identity_key in checkpoint["state"]:
+                    snapshot[identity_key] = checkpoint["state"][identity_key]
+            ledger.save_kernel_checkpoint(task_id, run_id, snapshot, owner_id=owner_id)
+            ledger.renew_kernel_lease(task_id, run_id, owner_id)
+
+        try:
+            if task is None:
+                return
+            state = checkpoint["state"]
+            if state.get("requires_authorization"):
+                ledger.mark_waiting(task_id, reason="恢复需要重新建立原调用权限")
+                return
+            if state.get("runtime_adapter") == "file_task":
+                self._continue_file_task(task, state, owner_id)
+                return
+            ledger.resume_task(task_id)
+            agent = get_kernel_agent(
+                local=str(state.get("model_mode") or "") == "local",
+                model_id=str(state.get("model_id") or "") or None,
+            )
+            answer = ""
+            failed = False
+            for step in agent.run(
+                input_text=task.user_input,
+                session_id=task.session_id,
+                task_type=task.task_type or "AGENT",
+                task_id=task_id,
+                run_id=run_id,
+                resume_state=state,
+                checkpoint_callback=save,
+                stream_events=True,
+            ):
+                data = step.to_dict()
+                kind = str(data.get("step_type") or "").lower()
+                if kind == "answer":
+                    answer = str(data.get("content") or "")
+                if kind == "error":
+                    failed = True
+                from app.core.agent.kernel_step_events import project_agent_step
+
+                event_type, payload = project_agent_step(data)
+                event = ledger.append_run_event(task_id, run_id, event_type, payload)
+                bus.publish(
+                    ProgressEvent.from_run_event(event, session_id=task.session_id)
+                )
+            status = (
+                "cancelled"
+                if ledger.is_cancel_requested(task_id)
+                else "failed" if failed else "completed"
+            )
+            event = ledger.append_run_event(
+                task_id,
+                run_id,
+                "run.finished",
+                {
+                    "status": status,
+                    "summary": answer,
+                    "completed_task": status == "completed",
+                },
+            )
+            bus.publish(ProgressEvent.from_run_event(event, session_id=task.session_id))
+        except Exception as exc:
+            from app.core.agent.file_task_checkpoint import FileTaskCheckpointConflict
+
+            if isinstance(exc, FileTaskCheckpointConflict):
+                blocked = dict(checkpoint["state"])
+                blocked["recovery_conflict"] = str(exc)
+                ledger.save_kernel_checkpoint(
+                    task_id, run_id, blocked, resumable=False, owner_id=owner_id
+                )
+                ledger.mark_waiting(task_id, reason=str(exc))
+                event = ledger.append_run_event(
+                    task_id,
+                    run_id,
+                    "run.waiting",
+                    {"status": "waiting", "summary": str(exc), "recoverable": True},
+                )
+                bus.publish(
+                    ProgressEvent.from_run_event(
+                        event, session_id=task.session_id if task else ""
+                    )
+                )
+                return
+            logger.exception(
+                "[JobRunner] Kernel continuation failed task_id=%s", task_id
+            )
+            ledger.mark_failed(task_id, str(exc)[:1000])
+            try:
+                event = ledger.append_run_event(
+                    task_id,
+                    run_id,
+                    "run.finished",
+                    {
+                        "status": "failed",
+                        "completed_task": False,
+                        "summary": "恢复执行失败",
+                        "error": str(exc)[:1000],
+                    },
+                )
+                bus.publish(
+                    ProgressEvent.from_run_event(
+                        event, session_id=task.session_id if task else ""
+                    )
+                )
+            except ValueError:
+                pass  # A previous terminal event wins.
+        finally:
+            stopped.set()
+            ledger.release_kernel_checkpoint(task_id, run_id, owner_id)
+
+    def _continue_file_task(
+        self, task: Any, state: Dict[str, Any], owner_id: str
+    ) -> None:
+        """Rebuild the file adapter, including its validator and finalization."""
+        from app.core.agent.file_task_checkpoint import restore_file_task_receipts
+        from app.core.agent.file_task_contract import FileTaskRequest
+        from app.core.services.file_task_stream import (
+            _build_file_task_orchestrator,
+            _iter_file_task_stream_output,
+        )
+
+        restore_file_task_receipts(state)
+        original = dict(state["file_task_request"])
+        options = dict(original.get("options") or {})
+        options["_kernel_resume_state"] = state
+        options["_checkpoint_owner"] = owner_id
+        original.update(
+            {"task_id": task.task_id, "run_id": state["run_id"], "options": options}
+        )
+        request_payload = FileTaskRequest.from_mapping(original)
+        orchestrator = _build_file_task_orchestrator(
+            workspace_root=str(state.get("workspace_root") or "") or None
+        )
+        # The same domain stream persists events, validates outputs and records
+        # the terminal fact; this branch must not append a generic final event.
+        for _ in _iter_file_task_stream_output(
+            request_payload, orchestrator.run(request_payload)
+        ):
+            pass
 
     # ── 内部执行循环 ──────────────────────────────────────────────────────────
 
@@ -251,6 +537,7 @@ class JobRunner:
         handler = self._handlers.get(spec.job_type)
         if not handler:
             ledger.mark_failed(task_id, f"未知 job_type: {spec.job_type!r}")
+            self._publish_job_terminal(ledger, bus, task_id, "failed")
             return
 
         ctx = JobContext(
@@ -263,11 +550,24 @@ class JobRunner:
 
         ledger.mark_running(task_id)
         try:
+            if ledger.is_cancel_requested(task_id) is True:
+                ledger.mark_cancelled(task_id)
+                self._publish_job_terminal(ledger, bus, task_id, "cancelled")
+                return
             result_summary = handler(ctx)
             if ledger.is_cancel_requested(task_id):
                 ledger.mark_cancelled(task_id)
             else:
-                ledger.mark_completed(task_id, result_summary=result_summary)
+                current = ledger.get(task_id)
+                if (
+                    not current
+                    or str(getattr(current.status, "value", current.status))
+                    != "waiting"
+                ):
+                    ledger.mark_completed(task_id, result_summary=result_summary)
+            self._publish_job_terminal(
+                ledger, bus, task_id, "completed", summary=result_summary or ""
+            )
         except Exception as exc:
             tb = traceback.format_exc()
             logger.error("[JobRunner] 作业失败 task_id=%s: %s", task_id[:8], exc)
@@ -289,6 +589,7 @@ class JobRunner:
                     return
 
             ledger.mark_failed(task_id, f"{type(exc).__name__}: {exc}\n\n{tb}"[:1000])
+            self._publish_job_terminal(ledger, bus, task_id, "failed", summary=str(exc))
 
             # 发布运维事件
             try:
@@ -305,6 +606,48 @@ class JobRunner:
             except Exception as _e:
                 logger.debug("[JobRunner] OpsEventBus 发布 job_failed 事件失败: %s", _e)
 
+    @staticmethod
+    def _publish_job_terminal(
+        ledger: Any, bus: Any, task_id: str, fallback_status: str, *, summary: str = ""
+    ) -> None:
+        """Publish the sole journal terminal from the ledger's actual status."""
+        from app.core.tasks.progress_bus import ProgressEvent
+
+        task = ledger.get(task_id)
+        metadata = (
+            json.loads(task.metadata or "{}")
+            if task and isinstance(task.metadata, str)
+            else {}
+        )
+        run_id = str(metadata.get("run_id") or task_id)
+        status = (
+            str(getattr(task.status, "value", task.status)) if task else fallback_status
+        )
+        if status not in {"completed", "failed", "cancelled", "waiting"}:
+            status = fallback_status
+        latest = ledger.latest_run_event(task_id, run_id)
+        if isinstance(latest, dict):
+            from app.core.tasks.task_journal import _terminal_event
+
+            if _terminal_event(latest):
+                return
+        event = ledger.append_run_event(
+            task_id,
+            run_id,
+            "run.waiting" if status == "waiting" else "run.finished",
+            {
+                "status": status,
+                "summary": summary,
+                "completed_task": status == "completed",
+            },
+        )
+        if isinstance(event, dict):
+            bus.publish(
+                ProgressEvent.from_run_event(
+                    event, session_id=task.session_id if task else ""
+                )
+            )
+
     def _recover_stale_tasks(self):
         """启动时将上次未完成的 PENDING 作业重新入队（崩溃恢复）。"""
         time.sleep(5)
@@ -312,6 +655,19 @@ class JobRunner:
             from app.core.tasks.task_ledger import TaskStatus, get_ledger
 
             ledger = get_ledger()
+            for checkpoint in ledger.list_kernel_checkpoints(expired_only=True):
+                if checkpoint["resumable"]:
+                    try:
+                        self.resume_kernel(
+                            checkpoint["task_id"], run_id=checkpoint["run_id"]
+                        )
+                    except ValueError:
+                        pass  # Claimed by another worker or durably cancelled.
+                else:
+                    ledger.mark_waiting(
+                        checkpoint["task_id"],
+                        reason="上次工具写入结果待核实，已保留检查点",
+                    )
             try:
                 ledger.cancel_stale_running_tasks(timeout_seconds=86400.0)
             except Exception as exc:
@@ -325,18 +681,27 @@ class JobRunner:
             )
             for task in stale:
                 meta = json.loads(task.metadata or "{}")
+                checkpoint = ledger.get_kernel_checkpoint(
+                    task.task_id, str(meta.get("run_id") or task.task_id)
+                )
+                if checkpoint is not None:
+                    # Recovery above already claimed this continuation (or
+                    # retained an unsafe write for reconciliation). Never also
+                    # enqueue the original request from the beginning.
+                    continue
                 job_type = meta.get("job_type") or task.task_type
                 if not job_type:
                     continue
-                try:
-                    payload = json.loads(task.user_input)
-                except Exception:
-                    payload = {"raw": task.user_input}
+                payload = meta.get("job_payload")
+                if not isinstance(payload, dict):
+                    try:
+                        payload = json.loads(task.user_input)
+                    except Exception:
+                        payload = {"raw": task.user_input}
                 spec = JobSpec(
                     job_type=job_type,
                     payload=payload,
                     session_id=task.session_id,
-                    skill_id=task.skill_id,
                     max_retries=meta.get("max_retries", 0),
                     timeout_seconds=meta.get("timeout_seconds", 300.0),
                     priority=getattr(task, "priority", 1),
@@ -378,12 +743,11 @@ def _register_builtin_handlers(runner: JobRunner):
     runner.register_handler("agent_query", _handle_agent_query)
     runner.register_handler("workflow", _handle_workflow)
     runner.register_handler("auto_catalog", _handle_auto_catalog)
-    runner.register_handler("skill_exec", _handle_skill_exec)
     runner.register_handler("proactive_tick", _handle_proactive_tick)
 
 
 def _handle_agent_query(ctx: JobContext) -> Optional[str]:
-    """通过 UnifiedAgent 执行自然语言查询。"""
+    """通过 KernelAgent 执行自然语言查询。"""
     query = ctx.payload.get("query", "")
     if not query:
         raise ValueError("payload.query 不能为空")
@@ -392,30 +756,55 @@ def _handle_agent_query(ctx: JobContext) -> Optional[str]:
     ctx.step("THOUGHT", f"开始处理查询: {query[:120]}", progress=5)
 
     try:
-        from app.api.agent_routes import get_agent
+        from app.core.agent.kernel_agent_service import get_kernel_agent
+        from app.core.agent.types import AgentStepType
 
-        agent = get_agent()
+        agent = get_kernel_agent()
         final_answer = ""
-        for step in agent.run(input_text=query, history=history, record_task=False):
-            from app.api.agent_routes import AgentStepType
-
+        record = ctx.ledger.get(ctx.task_id)
+        metadata = (
+            json.loads(record.metadata or "{}")
+            if record and isinstance(record.metadata, str)
+            else {}
+        )
+        run_id = str(metadata.get("run_id") or ctx.task_id)
+        for step in agent.run(
+            input_text=query,
+            history=history,
+            session_id=ctx.session_id,
+            record_task=False,
+            task_ledger=ctx.ledger,
+            task_id=ctx.task_id,
+            run_id=run_id,
+            stream_events=True,
+        ):
             step_data = step.to_dict()
-            ctx.step(
-                step_data.get("step_type", "THOUGHT"),
-                (step_data.get("content") or "")[:300],
-                progress=50,
-                tool_name=step_data.get("tool_name"),
+            from app.core.agent.kernel_step_events import project_agent_step
+            from app.core.tasks.progress_bus import ProgressEvent
+
+            event_type, payload = project_agent_step(step_data)
+            event = ctx.ledger.append_run_event(
+                ctx.task_id, run_id, event_type, payload
             )
+            if isinstance(event, dict):
+                ctx.bus.publish(
+                    ProgressEvent.from_run_event(event, session_id=ctx.session_id)
+                )
+            if str(step_data.get("step_type") or "").lower() != "stream":
+                ctx.ledger.add_step(
+                    ctx.task_id,
+                    step_type=str(step_data.get("step_type") or ""),
+                    content=str(step_data.get("content") or ""),
+                )
             if step.step_type == AgentStepType.ANSWER:
                 final_answer = step.content or ""
-        ctx.step("ANSWER", final_answer[:300], progress=100)
         return final_answer[:500]
     except Exception as exc:
         raise RuntimeError(f"agent_query 执行失败: {exc}") from exc
 
 
 def _handle_workflow(ctx: JobContext) -> Optional[str]:
-    """通过 WorkflowRuntime 执行命名工作流。"""
+    """通过 TaskPlanner 生成并执行多步工作流。"""
     workflow_id = ctx.payload.get("workflow_id", "")
     user_input = ctx.payload.get("user_input", "")
     variables = ctx.payload.get("variables") or {}
@@ -423,19 +812,48 @@ def _handle_workflow(ctx: JobContext) -> Optional[str]:
     if not workflow_id and not user_input:
         raise ValueError("workflow_id 或 user_input 至少提供一个")
 
-    ctx.step("THOUGHT", f"启动工作流: {workflow_id or '(auto-detect)'}", progress=5)
+    ctx.step("THOUGHT", f"启动工作流: {workflow_id or user_input[:30]}", progress=5)
     try:
-        from app.core.workflow.workflow_runtime import WorkflowRuntime
+        from app.core.tasks.task_planner import TaskPlanner
 
-        rt = WorkflowRuntime()
-        result = rt.execute(
-            workflow_id=workflow_id,
-            user_input=user_input,
-            variables=variables,
-            task_ctx=ctx,
+        planner = TaskPlanner()
+        plan_input = f"{workflow_id}: {user_input}" if workflow_id else user_input
+        from app.core.llm.langchain_adapter import KotoLangChainLLM
+
+        llm = KotoLangChainLLM(model_id="deepseek-chat")
+
+        plan = planner.plan_with_llm(
+            task_id=ctx.session_id or "",
+            user_input=plan_input,
+            llm_provider=llm,
         )
-        summary = (result.get("output") or "")[:500]
-        ctx.step("ANSWER", summary or "工作流完成", progress=100)
+        if plan is None or len(plan.steps) == 0:
+            return "无法生成工作流计划"
+
+        def _step_executor(step, context):
+            prompt = step.executor_prompt or step.description
+            if context:
+                ctx_text = "\n".join(
+                    f"[{k}]: {str(v)[:300]}" for k, v in context.items()
+                )
+                prompt = f"## 已完成上下文\n{ctx_text}\n\n## 当前任务\n{prompt}"
+            resp = llm.generate_content(model="deepseek-chat", contents=prompt)
+            return getattr(resp, "text", str(resp))
+
+        outputs = []
+        for event in planner.execute_plan(
+            plan, _step_executor, cancel_check=ctx.is_cancelled
+        ):
+            if event.get("event") == "step_done":
+                outputs.append(str(event.get("result", ""))[:200])
+                ctx.step(
+                    "THOUGHT",
+                    event.get("step_name", ""),
+                    progress=min(90, (ctx.progress or 0) + 10),
+                )
+
+        summary = "\n".join(outputs)[:500] or "工作流完成"
+        ctx.step("ANSWER", summary, progress=100)
         return summary
     except Exception as exc:
         raise RuntimeError(f"workflow 执行失败: {exc}") from exc
@@ -446,9 +864,11 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
     source_dir = ctx.payload.get("source_dir", "")
     ctx.step("THOUGHT", f"自动整理: {source_dir or '默认目录'}", progress=5)
     try:
-        from web.auto_catalog_scheduler import AutoCatalogScheduler
+        from app.core.services.auto_catalog_scheduler import AutoCatalogScheduler
 
-        scheduler = AutoCatalogScheduler()
+        scheduler = AutoCatalogScheduler(
+            settings_file=str(ctx.payload.get("settings_file") or "") or None
+        )
         # 如果指定了 source_dir，临时覆盖配置
         if source_dir:
             scheduler.config.setdefault("auto_catalog", {}).setdefault(
@@ -466,40 +886,51 @@ def _handle_auto_catalog(ctx: JobContext) -> Optional[str]:
         raise RuntimeError(f"auto_catalog 失败: {exc}") from exc
 
 
-def _handle_skill_exec(ctx: JobContext) -> Optional[str]:
-    """通过技能 ID 执行对话技能（注入 skill prompt 后调用 agent）。"""
-    skill_id = ctx.payload.get("skill_id")
-    if not skill_id:
-        raise ValueError("payload.skill_id 不能为空")
-    query = ctx.payload.get("query", "")
-    if not query:
-        raise ValueError("payload.query 不能为空")
+def _create_proactive_llm() -> Callable[[str], str]:
+    """Create the optional short-form LLM used by proactive background checks."""
+    from app.core.llm.model_selection import get_configured_cloud_model
+    from app.core.llm.provider_factory import get_llm_provider
 
-    ctx.step("THOUGHT", f"加载技能 {skill_id}", progress=5)
-    try:
-        from app.core.skills.skill_manager import SkillManager
+    model_id = get_configured_cloud_model(
+        task_type="CHAT",
+        fallback_model="deepseek-chat",
+    )
+    provider = get_llm_provider(
+        model=model_id,
+        allow_local_fallback=False,
+    )
 
-        skill_def = SkillManager.get_definition(skill_id)
-        if skill_def:
-            base_prompt = skill_def.system_prompt_template or ""
-            query = f"{base_prompt}\n\n{query}" if base_prompt else query
+    def _llm(prompt: str) -> str:
+        response = provider.generate_content(
+            prompt=prompt,
+            model=model_id,
+            stream=False,
+            temperature=0.7,
+            max_tokens=80,
+            timeout=15,
+        )
+        if isinstance(response, dict):
+            text = str(response.get("content") or response.get("text") or "")
+        elif isinstance(response, str):
+            text = response
+        else:
+            text = ""
 
-        ctx.step("ACTION", f"调用 agent (skill={skill_id})", progress=20)
+        try:
+            from app.core.security.output_validator import OutputValidator
 
-        from app.api.agent_routes import get_agent
+            validated = OutputValidator.validate(text=text)
+            if validated.is_blocked:
+                logger.warning(
+                    "[proactive_tick] llm 输出被拦截: %s",
+                    validated.reasons,
+                )
+                return ""
+            return validated.text
+        except Exception:
+            return text
 
-        agent = get_agent()
-        final_answer = ""
-        for step in agent.run(input_text=query, history=[]):
-            from app.api.agent_routes import AgentStepType
-
-            if step.step_type == AgentStepType.ANSWER:
-                final_answer = step.content or ""
-
-        ctx.step("ANSWER", final_answer[:300], progress=100)
-        return final_answer[:500]
-    except Exception as exc:
-        raise RuntimeError(f"skill_exec 失败: {exc}") from exc
+    return _llm
 
 
 def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
@@ -509,39 +940,7 @@ def _handle_proactive_tick(ctx: JobContext) -> Optional[str]:
         # 尝试获取 LLM 函数（非必须）
         llm_fn = None
         try:
-            from app.core.llm.provider_compat import types as _types
-            from web.runtime_context import get_client_proxy
-
-            client = get_client_proxy()
-            if client is None:
-                raise RuntimeError("Active LLM client unavailable")
-
-            def _llm(prompt: str) -> str:
-                resp = client.models.generate_content(
-                    model="deepseek-chat",
-                    contents=prompt,
-                    config=_types.GenerateContentConfig(
-                        temperature=0.7, max_output_tokens=80
-                    ),
-                )
-                text = resp.text or ""
-                # 有害内容检测
-                try:
-                    from app.core.security.output_validator import OutputValidator
-
-                    _v = OutputValidator.validate(text=text)
-                    if _v.is_blocked:
-                        import logging as _log
-
-                        _log.getLogger(__name__).warning(
-                            "[proactive_tick] llm 输出被拦截: %s", _v.reasons
-                        )
-                        return ""
-                    return _v.text
-                except Exception:
-                    return text
-
-            llm_fn = _llm
+            llm_fn = _create_proactive_llm()
         except Exception as _e:
             logger.warning("[JobRunner] proactive_tick LLM 初始化失败: %s", _e)
 

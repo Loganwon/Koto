@@ -231,7 +231,9 @@ def test_file_task_runtime_prompts_write_after_generic_chart_tool_round_without_
         ).run(request)
     )
     write_guard = next(
-        event for event in events if event.payload.get("tool_name") == "write_guard"
+        event
+        for event in events
+        if event.payload.get("tool_name") == "kernel_evidence_guard"
     )
 
     assert "write_docx_content" in write_guard.payload["result_preview"]
@@ -394,6 +396,7 @@ def test_file_task_runtime_xlsx_to_docx_write_loop_fails_without_file_change(tmp
         task="把 xlsx 表格加入 docx",
         run_id="xlsx_docx_no_change",
         target_path=str(target_path),
+        options={"output_mode": "write"},
         files=[
             FileTaskFile(
                 path=str(target_path),
@@ -424,7 +427,7 @@ def test_file_task_runtime_xlsx_to_docx_write_loop_fails_without_file_change(tmp
     assert "File not found" in insert_finished.payload["result_preview"]
     assert check_events[0].payload["passed"] is False
     assert check_events[0].payload["status"] in {
-        "no_file_change",
+        "write_not_performed",
         "quality_gate_failed",
     }
     assert run_finished.payload["completed_task"] is False
@@ -495,6 +498,7 @@ def test_file_task_runtime_retries_write_task_after_read_only_model_answer(tmp_p
         run_id="xlsx_docx_retry_after_read_only",
         model_mode="local",
         target_path=str(target_path),
+        options={"output_mode": "write"},
         files=[
             FileTaskFile(
                 path=str(workbook_path),
@@ -517,7 +521,7 @@ def test_file_task_runtime_retries_write_task_after_read_only_model_answer(tmp_p
         event
         for event in events
         if event.type == "tool.finished"
-        and event.payload.get("tool_name") == "write_guard"
+        and event.payload.get("tool_name") == "kernel_evidence_guard"
     )
     insert_finished = next(
         event
@@ -540,7 +544,9 @@ def test_file_task_runtime_retries_write_task_after_read_only_model_answer(tmp_p
     assert len(Document(str(target_path)).tables) == 1
 
 
-def test_file_task_runtime_resets_repair_budget_after_real_file_change(tmp_path):
+def test_file_task_runtime_executes_complete_multi_write_plan_before_final_answer(
+    tmp_path,
+):
     workbook_path = tmp_path / "sales.xlsx"
     target_path = tmp_path / "target.docx"
     workbook_path.write_text("xlsx placeholder", encoding="utf-8")
@@ -548,9 +554,8 @@ def test_file_task_runtime_resets_repair_budget_after_real_file_change(tmp_path)
 
     responses = iter(
         [
-            {"content": "我先看一下。", "tool_calls": []},
             {
-                "content": "先插入表格。",
+                "content": "插入表格并补充说明。",
                 "tool_calls": [
                     {
                         "name": "insert_excel_as_docx_table",
@@ -560,20 +565,14 @@ def test_file_task_runtime_resets_repair_budget_after_real_file_change(tmp_path)
                             "sheet_name": "Sales",
                             "table_title": "Q2 月度销售数据",
                         },
-                    }
-                ],
-            },
-            {"content": "表格已经插入。", "tool_calls": []},
-            {
-                "content": "补充表格说明。",
-                "tool_calls": [
+                    },
                     {
                         "name": "write_docx_content",
                         "args": {
                             "path": str(target_path),
                             "paragraphs": '[{"text":"说明：下表展示 Q2 月度销售核心数据。"}]',
                         },
-                    }
+                    },
                 ],
             },
             {"content": "已补充说明并保留表格。", "tool_calls": []},
@@ -670,12 +669,10 @@ def test_file_task_runtime_resets_repair_budget_after_real_file_change(tmp_path)
     ]
     check_finished = [event for event in events if event.type == "check.finished"]
 
-    assert "write_guard" in tool_names
-    assert "repair_guard" in tool_names
+    assert "kernel_evidence_guard" not in tool_names
+    assert "write_guard" not in tool_names
+    assert "repair_guard" not in tool_names
     assert operations == ["insert_excel_as_docx_table", "write_docx_content"]
-    assert any(
-        event.payload.get("status") in {"needs_attention", "quality_gate_failed"}
-        for event in check_finished
-    )
+    assert len(check_finished) == 1
     assert check_finished[-1].payload["status"] == "verified"
     assert events[-1].payload["completed_task"] is True

@@ -32,115 +32,6 @@ def _json(resp):
         return None
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# 1. Agent Routes  (/api/agent/…)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestAgentRoutes:
-    """Tests for app.api.agent_routes endpoints."""
-
-    # -- /chat ---------------------------------------------------------------
-
-    def test_chat_missing_params(self, full_client):
-        resp = full_client.post("/api/agent/chat", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_chat_valid_payload(self, full_client):
-        resp = full_client.post(
-            "/api/agent/chat", json={"message": "hello", "session_id": "test-session"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /tools --------------------------------------------------------------
-
-    def test_list_tools(self, full_client):
-        resp = full_client.get("/api/agent/tools")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /process ------------------------------------------------------------
-
-    def test_process_missing_body(self, full_client):
-        resp = full_client.post("/api/agent/process", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_process_valid(self, full_client):
-        resp = full_client.post(
-            "/api/agent/process", json={"request": "summarize", "session_id": "s1"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- retired interaction callbacks --------------------------------------
-
-    def test_confirm_route_is_removed(self, full_client):
-        resp = full_client.post("/api/agent/confirm", json={})
-        assert resp.status_code == 404
-
-    def test_choice_route_is_removed(self, full_client):
-        resp = full_client.post("/api/agent/choice", json={})
-        assert resp.status_code == 404
-
-    # -- /plan ---------------------------------------------------------------
-
-    def test_plan_missing_body(self, full_client):
-        resp = full_client.post("/api/agent/plan", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_plan_valid(self, full_client):
-        resp = full_client.post(
-            "/api/agent/plan", json={"request": "build a plan", "session": "s1"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /optimize -----------------------------------------------------------
-
-    def test_optimize_valid(self, full_client):
-        resp = full_client.post(
-            "/api/agent/optimize", json={"request": "optimize this", "session_id": "s1"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /monitor/* ----------------------------------------------------------
-
-    def test_monitor_status(self, full_client):
-        resp = full_client.get("/api/agent/monitor/status")
-        assert resp.status_code in _ANY_VALID
-
-    def test_monitor_start(self, full_client):
-        resp = full_client.post("/api/agent/monitor/start", json={"check_interval": 60})
-        assert resp.status_code in _ANY_VALID
-
-    def test_monitor_stop(self, full_client):
-        resp = full_client.post("/api/agent/monitor/stop", json={})
-        assert resp.status_code in _ANY_VALID
-
-    def test_monitor_events(self, full_client):
-        resp = full_client.get("/api/agent/monitor/events")
-        assert resp.status_code in _ANY_VALID
-
-    def test_monitor_events_with_filters(self, full_client):
-        resp = full_client.get("/api/agent/monitor/events?limit=5&event_type=cpu")
-        assert resp.status_code in _ANY_VALID
-
-    def test_monitor_clear(self, full_client):
-        resp = full_client.post("/api/agent/monitor/clear")
-        assert resp.status_code in _ANY_VALID
-
-    # -- retired /generate-script/* -----------------------------------------
-
-    def test_generate_script_missing_body(self, full_client):
-        resp = full_client.post("/api/agent/generate-script", json={})
-        assert resp.status_code == 404
-
-    def test_generate_script_valid(self, full_client):
-        resp = full_client.post(
-            "/api/agent/generate-script",
-            json={"issue_type": "high_cpu", "process_name": "python"},
-        )
-        assert resp.status_code == 404
-
-
 @pytest.mark.unit
 class TestDocumentRoutes:
     """Tests for retired document-route compatibility aliases."""
@@ -152,263 +43,6 @@ class TestDocumentRoutes:
         )
 
         assert resp.status_code == 404
-
-    def test_list_available_scripts(self, full_client):
-        resp = full_client.get("/api/agent/generate-script/list")
-        assert resp.status_code == 404
-
-    def test_save_generated_script(self, full_client):
-        resp = full_client.post(
-            "/api/agent/generate-script/save",
-            json={"script_content": "echo hello", "filename": "test.sh"},
-        )
-        assert resp.status_code == 404
-
-    # -- /feedback/* ---------------------------------------------------------
-
-    def test_submit_feedback(self, full_client):
-        resp = full_client.post(
-            "/api/agent/feedback",
-            json={
-                "feedback_type": "thumbs_up",
-                "session_id": "s1",
-                "message_id": "m1",
-            },
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_feedback_stats(self, full_client):
-        resp = full_client.get("/api/agent/feedback/stats")
-        assert resp.status_code in _ANY_VALID
-
-    def test_feedback_settings(self, full_client):
-        resp = full_client.post(
-            "/api/agent/feedback/settings",
-            json={"recording_enabled": True, "threshold": 0.5},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /stats/cost ---------------------------------------------------------
-
-    def test_cost_stats(self, full_client):
-        resp = full_client.get("/api/agent/stats/cost")
-        assert resp.status_code in _ANY_VALID
-
-    def test_cost_stats_with_period(self, full_client):
-        resp = full_client.get("/api/agent/stats/cost?period=7d&skill_id=test")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /hardware -----------------------------------------------------------
-
-    def test_hardware(self, full_client):
-        resp = full_client.get("/api/agent/hardware")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /distill/* ----------------------------------------------------------
-
-    def test_distill_prerequisites(self, full_client):
-        resp = full_client.get("/api/agent/distill/prerequisites")
-        assert resp.status_code in _ANY_VALID
-
-    def test_distill_jobs_list(self, full_client):
-        resp = full_client.get("/api/agent/distill/jobs")
-        assert resp.status_code in _ANY_VALID
-
-    def test_distill_train_missing_body(self, full_client):
-        resp = full_client.post("/api/agent/distill/train", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_distill_job_not_found(self, full_client):
-        resp = full_client.get("/api/agent/distill/jobs/nonexistent-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_distill_cancel_not_found(self, full_client):
-        resp = full_client.post("/api/agent/distill/jobs/nonexistent-id/cancel")
-        assert resp.status_code in _ANY_VALID
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 2. Skill Marketplace Routes  (/api/skillmarket/…)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestSkillMarketplaceRoutes:
-    """Tests for app.api.skill_marketplace_routes endpoints."""
-
-    # -- /catalog ------------------------------------------------------------
-
-    def test_catalog(self, full_client):
-        resp = full_client.get("/api/skillmarket/catalog")
-        assert resp.status_code in _ANY_VALID
-
-    def test_catalog_with_filters(self, full_client):
-        resp = full_client.get(
-            "/api/skillmarket/catalog?category=general&search=test&limit=5"
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /library ------------------------------------------------------------
-
-    def test_library(self, full_client):
-        resp = full_client.get("/api/skillmarket/library")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /featured -----------------------------------------------------------
-
-    def test_featured(self, full_client):
-        resp = full_client.get("/api/skillmarket/featured")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /search -------------------------------------------------------------
-
-    def test_search_skills(self, full_client):
-        resp = full_client.get("/api/skillmarket/search?q=test")
-        assert resp.status_code in _ANY_VALID
-
-    def test_search_skills_with_filters(self, full_client):
-        resp = full_client.get(
-            "/api/skillmarket/search?q=code&tags=python&author=system&limit=3"
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /auto-build ---------------------------------------------------------
-
-    def test_auto_build_missing_body(self, full_client):
-        resp = full_client.post("/api/skillmarket/auto-build", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_auto_build_valid(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/auto-build",
-            json={"description": "A skill that translates text"},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /preview-prompt -----------------------------------------------------
-
-    def test_preview_prompt(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/preview-prompt",
-            json={"description": "summarizer", "task_type": "text"},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /from-session -------------------------------------------------------
-
-    def test_from_session_missing_id(self, full_client):
-        resp = full_client.post("/api/skillmarket/from-session", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_from_session_valid(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/from-session", json={"session_id": "fake-session"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /install ------------------------------------------------------------
-
-    def test_install_missing_body(self, full_client):
-        resp = full_client.post("/api/skillmarket/install", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_install_skill_json(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/install",
-            json={
-                "skill_json": {
-                    "id": "test_install_skill",
-                    "name": "Test Install Skill",
-                    "description": "For testing",
-                    "system_prompt": "You are a test skill.",
-                }
-            },
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /uninstall/<skill_id> -----------------------------------------------
-
-    def test_uninstall_nonexistent(self, full_client):
-        resp = full_client.post("/api/skillmarket/uninstall/nonexistent-skill")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /toggle/<skill_id> --------------------------------------------------
-
-    def test_toggle_nonexistent(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/toggle/nonexistent-skill", json={"enabled": True}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /duplicate/<skill_id> -----------------------------------------------
-
-    def test_duplicate_nonexistent(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/duplicate/nonexistent-skill", json={"new_name": "copy"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /export/<skill_id> --------------------------------------------------
-
-    def test_export_nonexistent(self, full_client):
-        resp = full_client.get("/api/skillmarket/export/nonexistent-skill")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /export-pack --------------------------------------------------------
-
-    def test_export_pack(self, full_client):
-        resp = full_client.get("/api/skillmarket/export-pack?skill_ids=a,b")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /rate/<skill_id> ----------------------------------------------------
-
-    def test_rate_nonexistent(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/rate/nonexistent-skill",
-            json={"rating": 5, "comment": "great"},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /stats --------------------------------------------------------------
-
-    def test_stats(self, full_client):
-        resp = full_client.get("/api/skillmarket/stats")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /suggest ------------------------------------------------------------
-
-    def test_suggest_skills(self, full_client):
-        resp = full_client.get("/api/skillmarket/suggest?user_task=write+code")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /check-conflicts/<skill_id> -----------------------------------------
-
-    def test_check_conflicts(self, full_client):
-        resp = full_client.get("/api/skillmarket/check-conflicts/nonexistent")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /validate-response --------------------------------------------------
-
-    def test_validate_response(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/validate-response",
-            json={"response_text": "hello", "skill_id": "test"},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    # -- /status -------------------------------------------------------------
-
-    def test_skill_status(self, full_client):
-        resp = full_client.get("/api/skillmarket/status")
-        assert resp.status_code in _ANY_VALID
-
-    # -- /check-updates ------------------------------------------------------
-
-    def test_check_updates(self, full_client):
-        resp = full_client.post(
-            "/api/skillmarket/check-updates", json={"skill_ids": ["a", "b"]}
-        )
-        assert resp.status_code in _ANY_VALID
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -527,8 +161,15 @@ class TestFileHubRoutes:
         resp = full_client.get("/api/files/tree?path=.&depth=2")
         assert resp.status_code in _ANY_VALID
 
-    def test_disk_usage(self, full_client):
-        resp = full_client.get("/api/files/disk-usage?path=.")
+    def test_disk_usage(self, full_client, tmp_path):
+        # Keep this route-coverage test bounded. Scanning the repository also
+        # walks node_modules/build outputs and made the full suite depend on
+        # workstation size rather than endpoint behaviour.
+        sample = tmp_path / "disk-usage-sample.txt"
+        sample.write_text("koto", encoding="utf-8")
+        resp = full_client.get(
+            "/api/files/disk-usage", query_string={"path": str(tmp_path)}
+        )
         assert resp.status_code in _ANY_VALID
 
     # -- /large-files, /old-files --------------------------------------------
@@ -587,12 +228,6 @@ class TestFileHubRoutes:
         )
         assert resp.status_code in _ANY_VALID
 
-    # -- /summarize ----------------------------------------------------------
-
-    def test_summarize_file(self, full_client):
-        resp = full_client.post("/api/files/summarize", json={"file_id": "fake-id"})
-        assert resp.status_code in _ANY_VALID
-
     # -- /batch-rename, /batch-move, /cleanup-dups ---------------------------
 
     def test_batch_rename(self, full_client):
@@ -629,111 +264,6 @@ class TestFileHubRoutes:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. Skill Routes  (/api/skills/…)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestSkillRoutes:
-    """Tests for app.api.skill_routes endpoints."""
-
-    def test_list_skills(self, full_client):
-        resp = full_client.get("/api/skills/")
-        assert resp.status_code in _ANY_VALID
-
-    def test_list_skills_with_filters(self, full_client):
-        resp = full_client.get("/api/skills/?tag=general&search=test&enabled=true")
-        assert resp.status_code in _ANY_VALID
-
-    def test_create_skill(self, full_client):
-        resp = full_client.post(
-            "/api/skills/",
-            json={
-                "id": "test_cov_skill",
-                "name": "Coverage Test Skill",
-                "description": "Skill for coverage",
-                "system_prompt": "You are helpful.",
-            },
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_create_skill_missing_fields(self, full_client):
-        resp = full_client.post("/api/skills/", json={})
-        assert resp.status_code in (*_CLIENT_ERR, 500)
-
-    def test_get_skill_nonexistent(self, full_client):
-        resp = full_client.get("/api/skills/nonexistent-skill-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_update_skill_nonexistent(self, full_client):
-        resp = full_client.put(
-            "/api/skills/nonexistent-skill-id", json={"name": "Updated Name"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_delete_skill_nonexistent(self, full_client):
-        resp = full_client.delete("/api/skills/nonexistent-skill-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_toggle_skill_v2(self, full_client):
-        resp = full_client.post(
-            "/api/skills/nonexistent/toggle", json={"enabled": False}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_skill_stats(self, full_client):
-        resp = full_client.get("/api/skills/stats")
-        assert resp.status_code in _ANY_VALID
-
-    def test_export_mcp_tools(self, full_client):
-        resp = full_client.get("/api/skills/mcp")
-        assert resp.status_code in _ANY_VALID
-
-    def test_list_bindings(self, full_client):
-        resp = full_client.get("/api/skills/bindings")
-        assert resp.status_code in _ANY_VALID
-
-    def test_bootstrap_bindings(self, full_client):
-        resp = full_client.post("/api/skills/bindings/bootstrap", json={"force": False})
-        assert resp.status_code in _ANY_VALID
-
-    def test_bind_skill_intent(self, full_client):
-        resp = full_client.post(
-            "/api/skills/nonexistent/bindings/intent",
-            json={"intent_keywords": ["test", "hello"]},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_bind_skill_trigger(self, full_client):
-        resp = full_client.post(
-            "/api/skills/nonexistent/bindings/trigger",
-            json={"trigger_type": "keyword", "trigger_pattern": "hello"},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_toggle_binding_nonexistent(self, full_client):
-        resp = full_client.post(
-            "/api/skills/bindings/fake-binding-id/toggle",
-            json={"enabled": True},
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_delete_binding_nonexistent(self, full_client):
-        resp = full_client.delete("/api/skills/bindings/fake-binding-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_save_skill_prompt(self, full_client):
-        resp = full_client.post(
-            "/api/skills/nonexistent/prompt", json={"prompt": "New system prompt"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_reset_skill_prompt(self, full_client):
-        resp = full_client.post("/api/skills/nonexistent/reset")
-        assert resp.status_code in _ANY_VALID
-
-
-# ═══════════════════════════════════════════════════════════════════════════
 # 5. Job Routes  (/api/jobs/…)
 # ═══════════════════════════════════════════════════════════════════════════
 
@@ -742,13 +272,12 @@ class TestSkillRoutes:
 class TestJobRoutes:
     """Tests for app.api.job_routes endpoints."""
 
-    def test_list_jobs(self, full_client):
-        resp = full_client.get("/api/jobs/")
-        assert resp.status_code in _ANY_VALID
-
-    def test_list_jobs_with_filters(self, full_client):
-        resp = full_client.get("/api/jobs/?status=pending&job_type=chat&limit=5")
-        assert resp.status_code in _ANY_VALID
+    def test_job_query_routes_are_owned_by_task_api(self, full_client):
+        assert full_client.get("/api/jobs/").status_code == 404
+        assert full_client.get("/api/jobs/nonexistent-task-id").status_code == 404
+        assert (
+            full_client.get("/api/jobs/nonexistent-task-id/stream").status_code == 404
+        )
 
     def test_create_job_missing_fields(self, full_client):
         resp = full_client.post("/api/jobs/", json={})
@@ -765,59 +294,41 @@ class TestJobRoutes:
         )
         assert resp.status_code in _ANY_VALID
 
-    def test_get_job_nonexistent(self, full_client):
-        resp = full_client.get("/api/jobs/nonexistent-task-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_cancel_job_nonexistent(self, full_client):
-        resp = full_client.post("/api/jobs/nonexistent-task-id/cancel")
-        assert resp.status_code in _ANY_VALID
-
-    def test_resume_job_nonexistent(self, full_client):
-        resp = full_client.post("/api/jobs/nonexistent-task-id/resume")
-        assert resp.status_code in _ANY_VALID
+    def test_job_control_routes_are_owned_by_task_api(self, full_client):
+        assert (
+            full_client.post("/api/jobs/nonexistent-task-id/cancel").status_code == 404
+        )
+        assert (
+            full_client.post("/api/jobs/nonexistent-task-id/resume").status_code == 404
+        )
 
     def test_retry_job_nonexistent(self, full_client):
         resp = full_client.post("/api/jobs/nonexistent-task-id/retry")
         assert resp.status_code in _ANY_VALID
 
-    def test_list_triggers(self, full_client):
-        resp = full_client.get("/api/jobs/triggers")
-        assert resp.status_code in _ANY_VALID
-
-    def test_list_trigger_templates(self, full_client):
-        resp = full_client.get("/api/jobs/triggers/templates")
-        assert resp.status_code in _ANY_VALID
-
-    def test_bootstrap_triggers(self, full_client):
-        resp = full_client.post("/api/jobs/triggers/bootstrap", json={"force": False})
-        assert resp.status_code in _ANY_VALID
-
-    def test_create_trigger(self, full_client):
-        resp = full_client.post(
-            "/api/jobs/triggers",
-            json={
-                "name": "test_trigger",
-                "trigger_type": "cron",
-                "job_type": "chat",
-                "job_payload": {"message": "ping"},
-            },
+    def test_retired_job_trigger_routes_stay_unavailable(self, full_client):
+        assert full_client.get("/api/jobs/triggers").status_code == 404
+        assert full_client.get("/api/jobs/triggers/templates").status_code == 404
+        assert (
+            full_client.post(
+                "/api/jobs/triggers/bootstrap", json={"force": False}
+            ).status_code
+            == 404
         )
-        assert resp.status_code in _ANY_VALID
-
-    def test_update_trigger_nonexistent(self, full_client):
-        resp = full_client.patch(
-            "/api/jobs/triggers/fake-trigger-id", json={"enabled": False}
+        assert full_client.post("/api/jobs/triggers", json={}).status_code in (404, 405)
+        assert (
+            full_client.patch(
+                "/api/jobs/triggers/fake-trigger-id", json={"enabled": False}
+            ).status_code
+            == 404
         )
-        assert resp.status_code in _ANY_VALID
-
-    def test_delete_trigger_nonexistent(self, full_client):
-        resp = full_client.delete("/api/jobs/triggers/fake-trigger-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_fire_trigger_nonexistent(self, full_client):
-        resp = full_client.post("/api/jobs/triggers/fake-trigger-id/fire")
-        assert resp.status_code in _ANY_VALID
+        assert (
+            full_client.delete("/api/jobs/triggers/fake-trigger-id").status_code == 404
+        )
+        assert (
+            full_client.post("/api/jobs/triggers/fake-trigger-id/fire").status_code
+            == 404
+        )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1003,94 +514,4 @@ class TestOpsRoutes:
 
     def test_manual_gc(self, full_client):
         resp = full_client.post("/api/ops/gc")
-        assert resp.status_code in _ANY_VALID
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 9. Macro Routes  (/api/macro/…)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestMacroRoutes:
-    """Tests for app.api.macro_routes endpoints."""
-
-    def test_pending(self, full_client):
-        resp = full_client.get("/api/macro/pending")
-        assert resp.status_code in _ANY_VALID
-
-    def test_history(self, full_client):
-        resp = full_client.get("/api/macro/history")
-        assert resp.status_code in _ANY_VALID
-
-    def test_confirm_nonexistent(self, full_client):
-        resp = full_client.post(
-            "/api/macro/confirm/fake-suggestion-id", json={"name": "my_macro"}
-        )
-        assert resp.status_code in _ANY_VALID
-
-    def test_dismiss_nonexistent(self, full_client):
-        resp = full_client.post("/api/macro/dismiss/fake-suggestion-id")
-        assert resp.status_code in _ANY_VALID
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# 10. Shadow Routes  (/api/shadow/…)
-# ═══════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestShadowRoutes:
-    """Tests for app.api.shadow_routes endpoints."""
-
-    @pytest.fixture(autouse=True)
-    def _isolate_shadow(self, tmp_path, monkeypatch):
-        """Redirect ShadowWatcher file I/O to tmp_path and reset singleton so
-        that these tests never touch the production shadow_observations.json."""
-        from app.core.monitoring import shadow_watcher as sw_module
-
-        sw_module.ShadowWatcher._instance = None
-        obs_file = tmp_path / "shadow_observations.json"
-        monkeypatch.setattr(sw_module, "_OBS_FILE", obs_file)
-        yield
-        sw_module.ShadowWatcher._instance = None
-
-    def test_shadow_status(self, full_client):
-        resp = full_client.get("/api/shadow/status")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_toggle(self, full_client):
-        resp = full_client.post("/api/shadow/toggle", json={"enabled": True})
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_observations(self, full_client):
-        resp = full_client.get("/api/shadow/observations")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_pending(self, full_client):
-        resp = full_client.get("/api/shadow/pending")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_dismiss_nonexistent(self, full_client):
-        resp = full_client.post("/api/shadow/dismiss/fake-msg-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_dismiss_all(self, full_client):
-        resp = full_client.post("/api/shadow/dismiss-all")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_tick(self, full_client):
-        resp = full_client.post("/api/shadow/tick", json={"force": True})
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_open_tasks(self, full_client):
-        resp = full_client.get("/api/shadow/open-tasks")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_dismiss_task(self, full_client):
-        resp = full_client.post("/api/shadow/dismiss-task/fake-task-id")
-        assert resp.status_code in _ANY_VALID
-
-    def test_shadow_reset(self, full_client):
-        resp = full_client.post("/api/shadow/reset")
         assert resp.status_code in _ANY_VALID

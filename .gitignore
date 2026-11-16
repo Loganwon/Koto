@@ -179,6 +179,10 @@ web/uploads/*
 # Node modules (if any)
 node_modules/
 
+# Large third-party debug map is reproducible from web/univer-editor.
+# Keep the actual spreadsheet JS/CSS runtime assets in source control.
+/web/static/univer-dist/assets/sheets-main.js.map
+
 # WebView2 runtime profile
 .webview2_profile/
 

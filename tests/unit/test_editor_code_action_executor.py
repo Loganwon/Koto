@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.agent.editor_code_action_executor import EditorCodeActionExecutor
-from app.core.agent.lifecycle import AgentRequest
+from app.core.agent.kernel import AgentRequest
 
 
 def _events_for(request: AgentRequest):

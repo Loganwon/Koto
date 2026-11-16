@@ -1,6 +1,11 @@
 from __future__ import annotations
 
+import io
+import json
+import zipfile
 from pathlib import Path
+
+import pytest
 
 
 def test_diagnostics_reports_source_readiness_without_importing_app():
@@ -98,3 +103,112 @@ def test_removing_source_shadowing_extensions_reports_locked_files(
 
     assert removed == []
     assert blocked == [(artifact, "locked")]
+
+
+def test_frozen_diagnostics_use_bundle_resources_without_pip_guidance(
+    monkeypatch, tmp_path
+):
+    import src.startup_diagnostics as diagnostics
+
+    app_root = tmp_path / "installed"
+    bundle_dir = tmp_path / "bundle"
+    for relative in diagnostics._FROZEN_CRITICAL_FILES:
+        path = bundle_dir / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("# packaged resource\n", encoding="utf-8")
+    for directory in ("logs", "chats", "workspace", "config"):
+        (app_root / directory).mkdir(parents=True, exist_ok=True)
+
+    monkeypatch.setattr(diagnostics.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(diagnostics, "_module_exists", lambda _name: True)
+    report = diagnostics.run_startup_diagnostics(
+        app_root,
+        bundle_dir=bundle_dir,
+        include_import_check=False,
+    )
+
+    checked_names = {check["name"] for check in report["checks"]}
+    assert set(diagnostics._FROZEN_CRITICAL_FILES) <= checked_names
+    assert all(
+        "pip install" not in check.get("action", "") for check in report["checks"]
+    )
+
+
+def test_support_bundle_is_bounded_redacted_and_excludes_user_content(tmp_path):
+    import src.startup_diagnostics as diagnostics
+
+    logs = tmp_path / "logs"
+    logs.mkdir()
+    (logs / "startup.log").write_text(
+        f'api_key="top-secret"\nAuthorization: Bearer abcdefghijklmnop\n{tmp_path}\n',
+        encoding="utf-8",
+    )
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "deepseek_config.env").write_text(
+        "DEEPSEEK_API_KEY=must-never-be-exported\n", encoding="utf-8"
+    )
+    (tmp_path / "chats").mkdir()
+    (tmp_path / "workspace").mkdir()
+
+    payload = diagnostics.build_startup_support_bundle(tmp_path)
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        names = set(archive.namelist())
+        combined = "\n".join(
+            archive.read(name).decode("utf-8") for name in sorted(names)
+        )
+
+    assert {
+        "diagnostics.json",
+        "system.json",
+        "manifest.json",
+        "logs/startup.log",
+    } <= names
+    assert not any(
+        name.startswith(("config/", "chats/", "workspace/")) for name in names
+    )
+    assert "top-secret" not in combined
+    assert "abcdefghijklmnop" not in combined
+    assert "must-never-be-exported" not in combined
+    assert str(tmp_path) not in combined
+    assert "<APP_ROOT>" in combined
+
+
+def test_crash_report_is_structured_and_redacted(tmp_path):
+    import src.startup_diagnostics as diagnostics
+
+    try:
+        raise RuntimeError(f"api_key=private-value at {tmp_path}")
+    except RuntimeError as exc:
+        report_path = diagnostics.write_crash_report(
+            tmp_path,
+            type(exc),
+            exc,
+            exc.__traceback__,
+            thread_name="test-worker",
+        )
+
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert report["schema_version"] == 1
+    assert report["thread"] == "test-worker"
+    assert report["exception_type"] == "RuntimeError"
+    assert "private-value" not in json.dumps(report)
+    assert str(tmp_path) not in json.dumps(report)
+    assert "<APP_ROOT>" in report["traceback"]
+
+
+def test_pytest_guard_rejects_source_shadowing_extensions(monkeypatch, tmp_path):
+    import src.startup_diagnostics as diagnostics
+    import tests.conftest as shared_fixtures
+
+    artifact = tmp_path / "app" / "example.cp311-win_amd64.pyd"
+    monkeypatch.setattr(
+        diagnostics,
+        "_source_shadowing_extensions",
+        lambda root: [artifact],
+    )
+
+    with pytest.raises(pytest.UsageError, match="shadowing source modules") as error:
+        shared_fixtures._assert_source_mode_imports_are_unshadowed(tmp_path)
+
+    assert "clean_inplace_cython_artifacts.py --apply" in str(error.value)

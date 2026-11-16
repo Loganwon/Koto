@@ -1,24 +1,9 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
-# app/core/learning/__init__.py
-from app.core.learning.distill_manager import DistillManager, JobStatus, TrainingJob
-from app.core.learning.lora_pipeline import (
-    AdapterMeta,
-    LoRAPipeline,
-    TrainingConfig,
-    get_pipeline,
-)
-from app.core.learning.shadow_tracer import ShadowTracer, TraceEvent, TraceRecord
+"""General learning and evaluation services.
 
-__all__ = [
-    "ShadowTracer",
-    "TraceRecord",
-    "TraceEvent",
-    "LoRAPipeline",
-    "TrainingConfig",
-    "AdapterMeta",
-    "get_pipeline",
-    "DistillManager",
-    "TrainingJob",
-    "JobStatus",
-]
+The former Skill-specific tracing, distillation, and LoRA runtime has been
+removed. New domain training belongs behind an Add-on boundary.
+"""
+
+__all__: list[str] = []

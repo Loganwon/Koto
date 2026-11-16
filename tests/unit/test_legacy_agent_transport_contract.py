@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.agent.lifecycle import (
+from app.core.agent.kernel import (
     RunState,
     evt_code_result,
     evt_error,
@@ -24,7 +24,7 @@ from app.core.agent.lifecycle import (
 
 
 def test_editor_sse_agent_event_payload_contract() -> None:
-    from app.core.agent.lifecycle import AgentEvent, EventType
+    from app.core.agent.kernel import AgentEvent, EventType
     from web.blueprints.editor_ai import _agent_event_payload
 
     assert _agent_event_payload(evt_stream_chunk("hello")) == {
@@ -303,7 +303,7 @@ def test_doc_websocket_secondary_event_contracts() -> None:
             "sid-1",
         )
     ]
-    from app.core.agent.lifecycle import evt_doc_tool_call
+    from app.core.agent.kernel import evt_doc_tool_call
 
     assert _emit(evt_doc_tool_call({"type": "set_html", "value": "<p>新内容</p>"})) == [
         (

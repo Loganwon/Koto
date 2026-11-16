@@ -53,9 +53,16 @@ def build_completion_contract(
             ],
         ]
     )
+    write_authorized = bool(classification.write_authorized)
+    write_required = bool(requirements.write_required)
     if classification.output_mode == "hybrid":
-        acceptance_criteria.append("先给出分析建议，未获确认前不默认写回原文件")
-    if not bool(requirements.write_required):
+        if intent_plan.requires_confirmation:
+            acceptance_criteria.append("先给出分析建议，并在写入前等待本轮所需确认")
+        else:
+            acceptance_criteria.append(
+                "目标和依据明确时可按需写入；不写入也可以完成本轮任务"
+            )
+    if not write_authorized:
         acceptance_criteria.append("只读任务必须说明使用的显式上下文来源")
 
     return FileTaskCompletionContract(
@@ -63,7 +70,8 @@ def build_completion_contract(
         objective=str(request.task or "").strip()[:800],
         decomposition_strategy=decomposition_strategy,
         complexity=complexity,
-        write_required=bool(requirements.write_required),
+        write_authorized=write_authorized,
+        write_required=write_required,
         output_mode=str(classification.output_mode or "answer").strip() or "answer",
         target_path=str(requirements.target_path or request.target_path or "").strip(),
         target_file_type=target_file_type,
@@ -77,14 +85,18 @@ def build_completion_contract(
             if isinstance(item, dict)
         ],
         checkpoints=_checkpoints(
-            write_required=bool(requirements.write_required),
+            write_required=write_required,
             decomposition_strategy=decomposition_strategy,
             required_operations=required_operations,
         ),
         repair_policy=(
             "repair_write_or_quality_failures"
-            if bool(requirements.write_required)
-            else "surface_read_context_gaps"
+            if write_required
+            else (
+                "repair_optional_write_or_surface_context_gaps"
+                if write_authorized
+                else "surface_read_context_gaps"
+            )
         ),
         reason_codes=_unique_strings(
             [

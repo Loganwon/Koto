@@ -97,6 +97,19 @@ def _make_minimal_docx_bytes() -> bytes:
         pytest.skip("python-docx not installed — cannot build test DOCX")
 
 
+def _make_minimal_pdf_bytes() -> bytes:
+    try:
+        from pypdf import PdfWriter
+
+        buf = io.BytesIO()
+        writer = PdfWriter()
+        writer.add_blank_page(width=612, height=792)
+        writer.write(buf)
+        return buf.getvalue()
+    except ImportError:
+        pytest.skip("pypdf not installed — cannot build test PDF")
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Journey 1: Landing on the workspace editor page
 # ─────────────────────────────────────────────────────────────────────────────
@@ -109,11 +122,10 @@ class TestWorkspaceEditorPageLoad:
     def test_workspace_page_loads_without_crash(
         self, e2e_page, console_errors, e2e_base_url
     ):
-        """GET /workspace returns the editor shell with no JS errors."""
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
+        """GET / returns the unified workspace shell with no JS errors."""
+        resp = _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available at /workspace")
+        assert resp is not None and resp.status < 400
 
         # The editor shell must be present
         has_canvas = e2e_page.locator("#wa-canvas, #wa-drop-zone").count() > 0
@@ -127,10 +139,9 @@ class TestWorkspaceEditorPageLoad:
         self, e2e_page, console_errors, e2e_base_url
     ):
         """The left-hand file tree panel must exist in the DOM."""
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
+        resp = _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        assert resp is not None and resp.status < 400
 
         assert (
             e2e_page.locator("#wa-files-list").count() > 0
@@ -142,10 +153,9 @@ class TestWorkspaceEditorPageLoad:
 
     def test_workspace_header_has_title(self, e2e_page, console_errors, e2e_base_url):
         """Header title element must be visible."""
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
+        resp = _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        assert resp is not None and resp.status < 400
 
         title_el = e2e_page.locator("#wa-file-name").first
         assert title_el.count() > 0, "#wa-file-name must be present in the header"
@@ -158,10 +168,9 @@ class TestWorkspaceEditorPageLoad:
         self, e2e_page, console_errors, e2e_base_url
     ):
         """The toast notification element must be present (required for error display)."""
-        resp = _goto(e2e_page, f"{e2e_base_url}/workspace")
+        resp = _goto(e2e_page, f"{e2e_base_url}/")
         _settle(e2e_page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        assert resp is not None and resp.status < 400
 
         assert (
             e2e_page.locator("#wa-toast").count() > 0
@@ -182,10 +191,13 @@ class TestPptxUploadJourney:
     """User picks a PPTX file via the file input and sees the slides rendered."""
 
     def _navigate_to_workspace(self, page, base_url):
-        resp = _goto(page, f"{base_url}/workspace")
-        _settle(page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        resp = _goto(page, f"{base_url}/")
+        assert resp is not None and resp.status < 400
+        page.wait_for_function(
+            "() => document.documentElement.dataset.kotoWorkspaceRuntime === 'ready'",
+            timeout=30_000,
+        )
+        page.locator("#wa-file-input").wait_for(state="attached", timeout=PAGE_TIMEOUT)
 
     def test_pptx_upload_opens_without_package_not_found_error(
         self, e2e_page, console_errors, e2e_base_url
@@ -315,7 +327,7 @@ class TestPptxUploadJourney:
     def test_pdf_upload_no_crash(self, e2e_page, console_errors, e2e_base_url):
         """Uploading a PDF must not crash the editor."""
         self._navigate_to_workspace(e2e_page, e2e_base_url)
-        pdf_bytes = b"%PDF-1.4\n1 0 obj\n<</Type /Catalog>>\nendobj\n%%EOF"
+        pdf_bytes = _make_minimal_pdf_bytes()
 
         file_input = e2e_page.locator("#wa-file-input, input[accept*='.pdf']").first
         if file_input.count() == 0:
@@ -455,13 +467,27 @@ class TestOpenFileByPathApi:
     path traversal with 403, returns 404 for missing files.
     """
 
-    def _post_open_by_path(self, base_url: str, rel_path: str, timeout: int = 8):
+    def _post_open_by_path(
+        self,
+        base_url: str,
+        rel_path: str | None,
+        timeout: int = 8,
+    ):
         import requests
 
         try:
-            return requests.post(
+            session = requests.Session()
+            csrf_response = session.get(
+                f"{base_url}/api/csrf-token",
+                timeout=timeout,
+            )
+            csrf_response.raise_for_status()
+            csrf_token = csrf_response.json()["csrf_token"]
+            payload = {} if rel_path is None else {"path": rel_path}
+            return session.post(
                 f"{base_url}/api/v1/workspace/open_file_by_path",
-                json={"path": rel_path},
+                json=payload,
+                headers={"X-CSRFToken": csrf_token},
                 timeout=timeout,
             )
         except Exception as exc:
@@ -469,16 +495,7 @@ class TestOpenFileByPathApi:
 
     def test_missing_path_returns_400(self, e2e_page, e2e_base_url):
         """Empty / missing path → 400."""
-        import requests
-
-        try:
-            resp = requests.post(
-                f"{e2e_base_url}/api/v1/workspace/open_file_by_path",
-                json={},
-                timeout=8,
-            )
-        except Exception:
-            pytest.skip("Cannot reach open_file_by_path endpoint")
+        resp = self._post_open_by_path(e2e_base_url, None)
         assert resp.status_code == 400
 
     def test_path_traversal_returns_403(self, e2e_page, e2e_base_url):
@@ -520,10 +537,9 @@ class TestWorkspaceDragDropJourney:
     """User drags a file from the OS onto the workspace drop-zone."""
 
     def _navigate_to_workspace(self, page, base_url):
-        resp = _goto(page, f"{base_url}/workspace")
+        resp = _goto(page, f"{base_url}/")
         _settle(page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        assert resp is not None and resp.status < 400
 
     def test_drop_zone_element_exists(self, e2e_page, console_errors, e2e_base_url):
         """
@@ -623,10 +639,9 @@ class TestWorkspaceTabManagement:
     """User opens a file and expects a tab to appear in the tab bar."""
 
     def _navigate_to_workspace(self, page, base_url):
-        resp = _goto(page, f"{base_url}/workspace")
+        resp = _goto(page, f"{base_url}/")
         _settle(page, THINK_LONG)
-        if resp and resp.status >= 400:
-            pytest.skip("Workspace editor page not available")
+        assert resp is not None and resp.status < 400
 
     def test_tab_bar_element_exists(self, e2e_page, console_errors, e2e_base_url):
         """The tab bar must be present in the DOM at page load."""
@@ -745,6 +760,9 @@ class TestWorkspaceAssistantJsSource:
                 (root / "web" / "src" / "workspace" / "fs-tree.ts").read_text(
                     encoding="utf-8"
                 ),
+                (
+                    root / "web" / "src" / "workspace" / "fs-tree-file-loader.ts"
+                ).read_text(encoding="utf-8"),
                 (root / "web" / "src" / "workspace" / "infrastructure.ts").read_text(
                     encoding="utf-8"
                 ),
@@ -844,7 +862,7 @@ class TestWorkspaceAssistantJsSource:
         fn_start = self.src.find("async function openBrowserFile")
         assert fn_start >= 0, "openBrowserFile function not found"
         fn_body = self.src[fn_start : fn_start + 3000]
-        assert "openWorkspaceFile(absPath, supported)" in fn_body
+        assert "openWorkspaceFile(absPath, supported, forceReload)" in fn_body
         assert ("new File(" + "[blob]") not in fn_body
 
     def test_open_browser_file_uses_open_abs_file_for_external_files(self):
@@ -931,10 +949,10 @@ class TestWorkspaceAssistantJsSource:
         fn_start = self.src.find("async function reloadFileByPath")
         assert fn_start >= 0, "WA.reloadFileByPath function not found"
         fn_body = self.src[fn_start : fn_start + 2200]
-        assert "return openWorkspaceFile(filePath, supported)" in fn_body
+        assert "return openWorkspaceFile(filePath, supported, true)" in fn_body
         assert (
             "_isAbsolutePath" in fn_body
         ), "WA.reloadFileByPath must treat non-absolute file-change paths as workspace-relative"
         assert (
-            "openBrowserFile(filePath, supported)" in fn_body
+            "openBrowserFile(filePath, supported, true)" in fn_body
         ), "WA.reloadFileByPath must still support absolute-path refreshes for external files"

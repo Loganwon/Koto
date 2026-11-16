@@ -60,12 +60,12 @@ def wa_client(tmp_path_factory):
     workspace_dir.mkdir(parents=True)
 
     import web.blueprints.workspace_assistant as _wa
-    import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     orig_tmp = _wa._TMP_DIR
-    orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    orig_ws = get_workspace_root()
     _wa._TMP_DIR = tmp_dir
-    _shared.WORKSPACE_DIR = str(workspace_dir)
+    set_workspace_root(str(workspace_dir))
 
     from flask import Flask
 
@@ -80,8 +80,7 @@ def wa_client(tmp_path_factory):
         yield client, tmp_dir, workspace_dir
 
     _wa._TMP_DIR = orig_tmp
-    if orig_ws is not None:
-        _shared.WORKSPACE_DIR = orig_ws
+    set_workspace_root(orig_ws)
 
 
 # ── helpers ────────────────────────────────────────────────────────────────

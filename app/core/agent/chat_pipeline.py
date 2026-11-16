@@ -36,7 +36,6 @@ class ChatPipeline:
         tracker: Any | None = None,
         tracker_path: str = "",
         self_eval_fn: Callable | None = None,
-        skill_suggester: Any | None = None,
     ):
         self.agent = agent
         self.pii_filter = pii_filter
@@ -49,7 +48,6 @@ class ChatPipeline:
         self.tracker = tracker
         self.tracker_path = tracker_path
         self.self_eval_fn = self_eval_fn
-        self.skill_suggester = skill_suggester
         self._collected_steps: list[dict] = []
 
     # ── Public entry ────────────────────────────────────────────────────────
@@ -61,12 +59,9 @@ class ChatPipeline:
         *,
         session_id: str = "",
         model_id: str | None = None,
-        skill_id: str | None = None,
         task_type: str | None = None,
         system_context: str | None = None,
         user_chose_local: bool = False,
-        enable_skill_suggestions: bool = False,
-        auto_skill_ids: list[str] | None = None,
     ) -> Generator[str, None, None]:
         self._collected_steps = []
         final_answer = ""
@@ -115,7 +110,6 @@ class ChatPipeline:
                     input_text=safe_message,
                     history=history,
                     session_id=session_id,
-                    skill_id=skill_id,
                     task_type=task_type,
                     system_context=system_context,
                 ):
@@ -149,7 +143,6 @@ class ChatPipeline:
             # ── Step 4: Output validation + retry ────────────────────────
             validated_answer, validation_action = self._validate_output(
                 final_answer,
-                skill_id=skill_id,
                 original_prompt=message,
                 used_local_fallback=used_local_fallback,
                 safe_message=safe_message,
@@ -171,19 +164,11 @@ class ChatPipeline:
                     f"{display_answer}"
                 )
 
-            # ── Step 7: Skill suggestions ────────────────────────────────
-            if enable_skill_suggestions and display_answer and not used_local_fallback:
-                display_answer = self._inject_skill_suggestions(
-                    display_answer, message, task_type, skill_id, auto_skill_ids
-                )
-
-            # ── Step 8: task_final SSE + persistence ─────────────────────
+            # ── Step 7: task_final SSE + persistence ─────────────────────
             latency_ms = int((time.time() - t_start) * 1000)
             task_payload = self._build_task_payload(
                 display_answer,
                 session_id,
-                skill_id,
-                auto_skill_ids,
                 task_type,
                 validation_action,
                 mask_result,
@@ -215,7 +200,6 @@ class ChatPipeline:
                     mask_result,
                     session_id,
                     message,
-                    skill_id,
                     task_type,
                 )
                 return
@@ -293,7 +277,6 @@ class ChatPipeline:
         self,
         final_answer: str,
         *,
-        skill_id: str | None,
         original_prompt: str,
         used_local_fallback: bool,
         safe_message: str,
@@ -310,7 +293,6 @@ class ChatPipeline:
         try:
             val = self.output_validator.validate(
                 text=final_answer,
-                skill_id=skill_id if not used_local_fallback else None,
                 original_prompt=original_prompt if not used_local_fallback else None,
             )
             action = val.action
@@ -326,7 +308,6 @@ class ChatPipeline:
                     retry_input,
                     history,
                     session_id,
-                    skill_id,
                     task_type,
                     system_context,
                 )
@@ -347,7 +328,6 @@ class ChatPipeline:
         retry_input: str,
         history: list[dict],
         session_id: str,
-        skill_id: str | None,
         task_type: str | None,
         system_context: str | None,
     ) -> str:
@@ -358,7 +338,6 @@ class ChatPipeline:
                 input_text=retry_input,
                 history=history,
                 session_id=session_id,
-                skill_id=skill_id,
                 task_type=task_type,
                 system_context=system_context,
             ):
@@ -383,45 +362,10 @@ class ChatPipeline:
             logger.warning("[ChatPipeline] PII restore failed", exc_info=True)
             return text
 
-    def _inject_skill_suggestions(
-        self,
-        answer: str,
-        message: str,
-        task_type: str | None,
-        skill_id: str | None,
-        auto_skill_ids: list[str] | None,
-    ) -> str:
-        if not self.skill_suggester:
-            return answer
-        try:
-            suggestions = self.skill_suggester.suggest(
-                user_input=message or "",
-                task_type=task_type or "CHAT",
-                already_active_ids=auto_skill_ids or [],
-                answer_text=answer,
-            )
-            if suggestions:
-                answer += self.skill_suggester.format_hint(suggestions)
-            all_active = list(
-                set((auto_skill_ids or []) + ([skill_id] if skill_id else []))
-            )
-            already_ids = [s["id"] for s in suggestions] if suggestions else []
-            chains = self.skill_suggester.suggest_chains(
-                active_skill_ids=all_active,
-                already_suggested_ids=already_ids,
-            )
-            if chains:
-                answer += self.skill_suggester.format_chain_hint(chains)
-        except Exception as e:
-            logger.debug("[ChatPipeline] Skill suggestions skipped: %s", e)
-        return answer
-
     def _build_task_payload(
         self,
         answer: str,
         session_id: str,
-        skill_id: str | None,
-        auto_skill_ids: list[str] | None,
         task_type: str | None,
         validation_action: str,
         mask_result: Any,
@@ -437,8 +381,6 @@ class ChatPipeline:
             "steps": self._collected_steps,
             "meta": {
                 "session_id": session_id,
-                "skill_id": skill_id,
-                "auto_skill_ids": auto_skill_ids,
                 "task_type": task_type,
                 "validation_action": validation_action,
                 "pii_masked": mask_result.has_pii if mask_result else False,
@@ -489,7 +431,6 @@ class ChatPipeline:
         mask_result: Any,
         session_id: str,
         original_message: str,
-        skill_id: str | None,
         task_type: str | None,
     ):
         logger.warning(
@@ -533,7 +474,6 @@ class ChatPipeline:
                     "steps": self._collected_steps,
                     "meta": {
                         "session_id": session_id,
-                        "skill_id": skill_id,
                         "task_type": task_type,
                         "model": lm,
                         "local_fallback": True,

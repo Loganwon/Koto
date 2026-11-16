@@ -9,6 +9,7 @@ Koto 桌面应用 - 独立窗口版本
 """
 
 import faulthandler
+import hmac
 import logging
 import os
 import socket
@@ -29,12 +30,18 @@ try:
 except ImportError:
     from runtime_bootstrap import configure_process_environment, resolve_runtime_roots
 
+try:
+    from src.single_instance import WINDOW_TITLE
+except ImportError:
+    from single_instance import WINDOW_TITLE
+
 logger = logging.getLogger(__name__)
 
 KOTO_HOST = "127.0.0.1"
 KOTO_PORT = int(os.environ.get("KOTO_PORT", "5000"))
 FALLBACK_PORT = int(os.environ.get("KOTO_FALLBACK_PORT", "5001"))
-STARTUP_TIMEOUT_SEC = int(os.environ.get("KOTO_STARTUP_TIMEOUT_SEC", "10"))
+STARTUP_FAST_READY_SEC = float(os.environ.get("KOTO_STARTUP_FAST_READY_SEC", "3"))
+STARTUP_HARD_TIMEOUT_SEC = float(os.environ.get("KOTO_STARTUP_TIMEOUT_SEC", "120"))
 WINDOW_RECOVERY_COUNT_ENV = "KOTO_WINDOW_RECOVERY_COUNT"
 WINDOW_RECOVERY_MAX_ENV = "KOTO_MAX_UNEXPECTED_WINDOW_RECOVERY"
 BACKEND_RECOVERY_COUNT_ENV = "KOTO_BACKEND_RECOVERY_COUNT"
@@ -42,30 +49,12 @@ BACKEND_RECOVERY_MAX_ENV = "KOTO_MAX_BACKEND_RECOVERY"
 BACKEND_WATCHDOG_ENABLED_ENV = "KOTO_ENABLE_BACKEND_WATCHDOG"
 BACKEND_WATCHDOG_INTERVAL_ENV = "KOTO_BACKEND_WATCHDOG_INTERVAL_SEC"
 BACKEND_WATCHDOG_MAX_FAILURES_ENV = "KOTO_BACKEND_WATCHDOG_MAX_FAILURES"
+STARTUP_HEALTH_PATH = "/api/startup-health"
 
 # 获取应用根目录和资源目录
 ROOTS = resolve_runtime_roots(__file__)
 APP_ROOT = ROOTS.app_root
 BUNDLE_DIR = ROOTS.bundle_dir
-
-if getattr(sys, "frozen", False):
-    # PyInstaller打包后：
-    # - APP_ROOT: exe所在目录（用于持久化数据：chats/、config/、workspace/等）
-    # - BUNDLE_DIR: 临时解压目录（用于bundled资源：web/、assets/等）
-    # Fix pythonnet runtime path for pywebview's EdgeChromium backend in frozen environment
-    # pythonnet needs to know where the Python runtime is located
-    _internal_py = APP_ROOT / "internal" / "py"
-    if _internal_py.exists():
-        os.environ.setdefault(
-            "PYTHONNET_PYDLL",
-            str(
-                _internal_py
-                / f"python{sys.version_info.major}{sys.version_info.minor}.dll"
-            ),
-        )
-    # Alternative: Force pywebview to use EdgeChromium without pythonnet initialization issues
-    os.environ.setdefault("PYWEBVIEW_GUI", "edgechromium")
-
 
 # 图标资源目录：打包模式下在 _MEIPASS/assets/，源码模式下在 src/assets/
 ASSETS_DIR = (
@@ -76,12 +65,69 @@ configure_process_environment(
     ROOTS,
     prepend_paths=(BUNDLE_DIR,),
     required_dirs=("logs", "chats", "workspace", "config"),
+    desktop_runtime=True,
 )
 
 LOG_FILE = APP_ROOT / "logs" / "startup.log"
 RUNTIME_LOG_FILE = (
     APP_ROOT / "logs" / f"runtime_{datetime.now().strftime('%Y%m%d')}.log"
 )
+
+try:
+    from src.startup_events import StartupEventRecorder
+except ImportError:
+    from startup_events import StartupEventRecorder
+
+
+def _process_started_at_monotonic() -> float:
+    """Approximate the process creation point on the monotonic clock."""
+    now_wall = time.time()
+    now_monotonic = time.monotonic()
+    try:
+        process_age = max(0.0, now_wall - psutil.Process(os.getpid()).create_time())
+        if process_age <= 3600.0:
+            return now_monotonic - process_age
+    except Exception:
+        pass
+    return now_monotonic
+
+
+_startup_events = StartupEventRecorder(
+    APP_ROOT / "logs" / "startup_events.jsonl",
+    parent_session_id=os.environ.get("KOTO_STARTUP_PARENT_SESSION_ID"),
+    started_at_monotonic=_process_started_at_monotonic(),
+)
+
+
+def _python_runtime_ready_monotonic() -> float:
+    now = time.monotonic()
+    try:
+        observed = float(os.environ.get("KOTO_PYTHON_RUNTIME_READY_MONOTONIC", ""))
+        if _startup_events.started_at <= observed <= now:
+            return observed
+    except (TypeError, ValueError):
+        pass
+    return now
+
+
+_python_runtime_ready_at = _python_runtime_ready_monotonic()
+_startup_once_lock = threading.Lock()
+_startup_once_events: set[str] = set()
+
+
+def _write_startup_event(event: str, **details):
+    try:
+        return _startup_events.record(event, **details)
+    except Exception:
+        return None
+
+
+def _write_startup_event_once(event: str, **details):
+    with _startup_once_lock:
+        if event in _startup_once_events:
+            return None
+        _startup_once_events.add(event)
+    return _write_startup_event(event, **details)
 
 
 class DualOutput:
@@ -147,6 +193,7 @@ _startup_log_file = None
 _startup_log_lock = threading.Lock()
 _shutdown_reason = None
 _shutdown_lock = threading.Lock()
+_crash_hooks_installed = False
 
 
 def _get_startup_log():
@@ -176,10 +223,58 @@ def _write_log(message: str):
         pass
 
 
+def _install_crash_hooks():
+    """Record unhandled main/background exceptions before the process exits."""
+    global _crash_hooks_installed
+    if _crash_hooks_installed:
+        return
+    _crash_hooks_installed = True
+    previous_main_hook = sys.excepthook
+    previous_thread_hook = getattr(threading, "excepthook", None)
+
+    def _record(exc_type, exc_value, exc_traceback, thread_name: str):
+        try:
+            try:
+                from src.startup_diagnostics import write_crash_report
+            except ImportError:
+                from startup_diagnostics import write_crash_report
+
+            report_path = write_crash_report(
+                APP_ROOT,
+                exc_type,
+                exc_value,
+                exc_traceback,
+                thread_name=thread_name,
+            )
+            _write_log(f"❌ 未捕获异常已记录：{report_path.name}")
+            _write_startup_event(
+                "unhandled_exception",
+                thread=thread_name,
+                error_type=exc_type.__name__,
+            )
+        except Exception as report_error:
+            _write_log(f"⚠️ 无法写入崩溃报告：{report_error}")
+
+    def _main_hook(exc_type, exc_value, exc_traceback):
+        _record(exc_type, exc_value, exc_traceback, "MainThread")
+        previous_main_hook(exc_type, exc_value, exc_traceback)
+
+    def _thread_hook(args):
+        thread_name = args.thread.name if args.thread is not None else "unknown"
+        _record(args.exc_type, args.exc_value, args.exc_traceback, thread_name)
+        if previous_thread_hook is not None:
+            previous_thread_hook(args)
+
+    sys.excepthook = _main_hook
+    if previous_thread_hook is not None:
+        threading.excepthook = _thread_hook
+
+
 def _request_app_shutdown(reason: str):
     global _shutdown_reason
     with _shutdown_lock:
         _shutdown_reason = reason
+    _write_startup_event("shutdown_requested", reason=reason)
 
 
 def _clear_app_shutdown_request():
@@ -193,6 +288,15 @@ def _get_app_shutdown_reason():
         return _shutdown_reason
 
 
+def _release_desktop_instance_lock():
+    """Release the shared mutex before replacing the current process."""
+    try:
+        from src.single_instance import release_desktop_instance
+    except ImportError:
+        from single_instance import release_desktop_instance
+    release_desktop_instance()
+
+
 def _set_window_icon(icon_path=None):
     if not icon_path:
         return
@@ -201,7 +305,7 @@ def _set_window_icon(icon_path=None):
         from ctypes import wintypes
 
         user32 = ctypes.windll.user32
-        hwnd = user32.FindWindowW(None, "Koto - AI 个人助手")
+        hwnd = user32.FindWindowW(None, WINDOW_TITLE)
         if not hwnd:
             return
 
@@ -225,6 +329,7 @@ def _handle_webview_exit():
     shutdown_reason = _get_app_shutdown_reason()
     if shutdown_reason:
         _write_log(f"ℹ️ webview.start 结束（窗口已关闭，原因={shutdown_reason}）")
+        _write_startup_event("desktop_exit", reason=shutdown_reason, exit_code=0)
         return os._exit(0)
 
     _write_log("⚠️ webview.start 非显式结束，可能是窗口或渲染进程异常关闭")
@@ -243,9 +348,17 @@ def _handle_webview_exit():
         env = os.environ.copy()
         env[WINDOW_RECOVERY_COUNT_ENV] = str(recovery_count + 1)
         env["KOTO_WINDOW_LAST_EXIT_REASON"] = "unexpected_webview_exit"
+        env["KOTO_STARTUP_PARENT_SESSION_ID"] = _startup_events.session_id
         _write_log(
             f"🔄 检测到窗口异常结束，尝试自动恢复 ({recovery_count + 1}/{max_recovery})"
         )
+        _write_startup_event(
+            "recovery_requested",
+            reason="unexpected_webview_exit",
+            attempt=recovery_count + 1,
+            maximum=max_recovery,
+        )
+        _release_desktop_instance_lock()
         os.execve(sys.executable, [sys.executable] + sys.argv, env)
         return
 
@@ -277,9 +390,17 @@ def _attempt_process_recovery(
     env = os.environ.copy()
     env[count_env] = str(recovery_count + 1)
     env["KOTO_LAST_RECOVERY_REASON"] = reason
+    env["KOTO_STARTUP_PARENT_SESSION_ID"] = _startup_events.session_id
     _write_log(
         f"🔄 检测到 {reason}，尝试自动恢复 ({recovery_count + 1}/{max_recovery})"
     )
+    _write_startup_event(
+        "recovery_requested",
+        reason=reason,
+        attempt=recovery_count + 1,
+        maximum=max_recovery,
+    )
+    _release_desktop_instance_lock()
     os.execve(sys.executable, [sys.executable] + sys.argv, env)
     return True
 
@@ -296,6 +417,7 @@ def _start_backend_health_watchdog(
     expect_server_thread: bool = False,
     interval_sec: float | None = None,
     max_failures: int | None = None,
+    expected_launch_token: str | None = None,
 ):
     if not health_url:
         return None
@@ -333,7 +455,11 @@ def _start_backend_health_watchdog(
                 except Exception:
                     thread_alive = False
 
-            health_ok = _check_http_ok(health_url, timeout=min(interval, 0.5))
+            health_ok = _check_koto_health(
+                health_url,
+                timeout=min(interval, 0.5),
+                expected_launch_token=expected_launch_token,
+            )
             if health_ok and thread_alive:
                 consecutive_failures = 0
             else:
@@ -378,8 +504,11 @@ def _dump_threads(label: str = "thread-dump"):
 
 
 def _terminate_stale_process_on_port(port: int, reason: str = "") -> bool:
-    """如果端口被本机 pythonw 占用且无健康响应，尝试终止并释放端口
-    优化：仅在端口确实被占用时才扫描网络连接，避免不必要的全量扫描"""
+    """Terminate only an unhealthy Koto process from this exact app root.
+
+    A generic ``pythonw`` listener may belong to an unrelated application and
+    must never be killed merely because it uses Koto's preferred port.
+    """
     killed = False
     try:
         # 快速预检：通过 socket 确认端口已被占用，否则直接跳过全量扫描
@@ -402,7 +531,22 @@ def _terminate_stale_process_on_port(port: int, reason: str = "") -> bool:
                 try:
                     proc = psutil.Process(pid)
                     cmdline = " ".join(proc.cmdline()).lower()
-                    if "koto_app.py" in cmdline or "pythonw" in proc.name().lower():
+                    process_name = proc.name().lower()
+                    try:
+                        process_exe = Path(proc.exe()).resolve()
+                    except (OSError, psutil.Error):
+                        process_exe = None
+                    expected_exe = (APP_ROOT / "Koto.exe").resolve()
+                    same_frozen_app = (
+                        process_name == "koto.exe" and process_exe == expected_exe
+                    )
+                    app_root_marker = str(APP_ROOT.resolve()).lower()
+                    same_source_app = app_root_marker in cmdline and (
+                        "koto_app.py" in cmdline
+                        or "web\\app.py" in cmdline
+                        or "web/app.py" in cmdline
+                    )
+                    if same_frozen_app or same_source_app:
                         _write_log(f"⚠️ 终止占用 {port} 的进程 {pid}（{reason}）")
                         proc.kill()
                         time.sleep(0.5)  # 0.5s 通常足够进程退出
@@ -414,25 +558,8 @@ def _terminate_stale_process_on_port(port: int, reason: str = "") -> bool:
     return killed
 
 
-def _wait_for_port(host: str, port: int, timeout_sec: int) -> bool:
-    """等待端口监听就绪"""
-    start = time.time()
-    while time.time() - start < timeout_sec:
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(0.2)
-            if sock.connect_ex((host, port)) == 0:
-                sock.close()
-                return True
-            sock.close()
-        except Exception:
-            pass
-        time.sleep(0.2)
-    return False
-
-
 def _check_http_ok(url: str, timeout: float = 2.0) -> bool:
-    """检查 HTTP 是否可访问"""
+    """Return whether an arbitrary local HTTP page responds successfully."""
     try:
         from urllib.request import ProxyHandler, build_opener, urlopen
 
@@ -440,6 +567,45 @@ def _check_http_ok(url: str, timeout: float = 2.0) -> bool:
         with opener.open(url, timeout=max(float(timeout or 0), 0.05)) as resp:
             return resp.status == 200
     except Exception:
+        return False
+
+
+def _check_koto_health(
+    url: str,
+    timeout: float = 2.0,
+    *,
+    expected_launch_token: str | None = None,
+) -> bool:
+    """Validate Koto's JSON health contract, not merely an HTTP 200 page."""
+    try:
+        import json
+        from urllib.request import ProxyHandler, Request, build_opener
+
+        opener = build_opener(ProxyHandler({}))
+        request = (
+            Request(url, headers={"X-Koto-Launch-Token": expected_launch_token})
+            if expected_launch_token
+            else url
+        )
+        with opener.open(request, timeout=max(float(timeout or 0), 0.05)) as resp:
+            if resp.status != 200:
+                return False
+            payload = json.loads(resp.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            return False
+        status = str(payload.get("status") or "").strip().lower()
+        healthy = payload.get("success") is True or status in {
+            "ok",
+            "healthy",
+            "degraded",
+        }
+        if not healthy:
+            return False
+        if expected_launch_token:
+            actual_token = str(payload.get("launch_token") or "")
+            return hmac.compare_digest(actual_token, expected_launch_token)
+        return True
+    except (OSError, ValueError, TypeError):
         return False
 
 
@@ -470,6 +636,30 @@ def _wait_for_http_ok(
         time.sleep(min(poll_interval, remaining))
 
 
+def _wait_for_koto_health(
+    url: str,
+    timeout_sec: float,
+    *,
+    request_timeout: float = 0.5,
+    poll_interval: float = 0.25,
+    expected_launch_token: str | None = None,
+) -> bool:
+    """Wait for the structured Koto health contract."""
+    deadline = time.monotonic() + max(float(timeout_sec or 0), 0.0)
+    request_timeout = max(float(request_timeout or 0), 0.05)
+    poll_interval = max(float(poll_interval or 0), 0.05)
+    while time.monotonic() < deadline:
+        remaining = deadline - time.monotonic()
+        if _check_koto_health(
+            url,
+            timeout=min(request_timeout, remaining),
+            expected_launch_token=expected_launch_token,
+        ):
+            return True
+        time.sleep(min(poll_interval, max(deadline - time.monotonic(), 0.0)))
+    return False
+
+
 def _find_available_port(host: str, start_port: int, max_tries: int = 20) -> int | None:
     """从 start_port 开始查找可用端口，返回端口号或 None。"""
     for port in range(start_port, start_port + max_tries):
@@ -481,6 +671,31 @@ def _find_available_port(host: str, start_port: int, max_tries: int = 20) -> int
         except Exception:
             continue
     return None
+
+
+def _find_startup_status_port(backend_port: int) -> int | None:
+    """Pick a status-page port that can never race the pending backend bind."""
+    return _find_available_port(KOTO_HOST, max(FALLBACK_PORT, backend_port + 1))
+
+
+def _publish_startup_port(port: int) -> None:
+    """Atomically report the effective backend port to the outer launcher."""
+    raw_path = os.environ.get("KOTO_STARTUP_PORT_FILE", "").strip()
+    if not raw_path:
+        return
+    port_file = Path(raw_path)
+    temp_file = port_file.with_name(f"{port_file.name}.{os.getpid()}.tmp")
+    try:
+        port_file.parent.mkdir(parents=True, exist_ok=True)
+        temp_file.write_text(str(port), encoding="ascii")
+        os.replace(temp_file, port_file)
+        _write_log(f"ℹ️ 已向启动器报告实际后端端口: {port}")
+    except Exception as exc:
+        _write_log(f"⚠️ 无法向启动器报告实际端口: {exc}")
+        try:
+            temp_file.unlink(missing_ok=True)
+        except Exception:
+            pass
 
 
 def ensure_directories():
@@ -547,7 +762,7 @@ def check_config():
 
 
 def ensure_dependencies():
-    """检查桌面依赖是否已安装（用 find_spec 快速探测，不实际导入）"""
+    """Verify that build-time desktop dependencies are present in this bundle."""
     import importlib.util
 
     missing = []
@@ -560,17 +775,12 @@ def ensure_dependencies():
         missing.append("pystray/pillow")
 
     if missing:
-        auto_install = os.environ.get("KOTO_AUTO_INSTALL_DEPS", "0") == "1"
-        if auto_install:
-            os.system(
-                f'"{sys.executable}" -m pip install pywebview pystray pillow --quiet'
-            )
-            _write_log(f"⚠️ 自动安装缺失依赖: {', '.join(missing)}")
-            return True
+        detail = ", ".join(missing)
+        if getattr(sys, "frozen", False):
+            _write_log(f"❌ 发布包缺少内置桌面组件: {detail}；请重新安装 Koto")
         else:
-            _write_log("⚠️ 缺少依赖: " + ", ".join(missing))
-            _write_log("请先执行: pip install pywebview pystray pillow")
-            return False
+            _write_log(f"❌ 开发环境缺少桌面组件: {detail}；请同步项目锁定依赖")
+        return False
     _write_log("✔ 关键依赖就绪")
     return True
 
@@ -619,6 +829,75 @@ class WindowAPI:
         # JS updates this via mark_file_modified() so _on_closing never needs evaluate_js
         # for the common "nothing dirty" path.
         self._unsaved_files: dict = {}
+
+    def report_frontend_ready(self, metrics=None):
+        """Record the first fully initialized and painted Koto frontend."""
+        values = metrics if isinstance(metrics, dict) else {}
+
+        def _milliseconds(name):
+            try:
+                return max(0, min(600000, int(float(values.get(name) or 0))))
+            except (TypeError, ValueError, OverflowError):
+                return 0
+
+        event = _write_startup_event_once(
+            "frontend_ready",
+            document_ready_state=str(values.get("document_ready_state") or "")[:32],
+            navigation_type=str(values.get("navigation_type") or "")[:32],
+            dom_content_loaded_ms=_milliseconds("dom_content_loaded_ms"),
+            load_event_ms=_milliseconds("load_event_ms"),
+        )
+        if event is not None:
+            _write_log("✔ Koto 前端首屏已渲染并可交互")
+        return {"success": True, "recorded": event is not None}
+
+    def report_workspace_ready(self, metrics=None):
+        """Record completion of the deferred workspace runtime bundle."""
+        values = metrics if isinstance(metrics, dict) else {}
+        try:
+            bundle_load_ms = max(
+                0,
+                min(600000, int(float(values.get("bundle_load_ms") or 0))),
+            )
+        except (TypeError, ValueError, OverflowError):
+            bundle_load_ms = 0
+        event = _write_startup_event_once(
+            "workspace_ready",
+            bundle_load_ms=bundle_load_ms,
+        )
+        if event is not None:
+            _write_log("✔ Koto 工作区运行时已就绪")
+        return {"success": True, "recorded": event is not None}
+
+    def consume_external_open_requests(self):
+        """Return Explorer open requests to the canonical frontend file loader."""
+        try:
+            try:
+                from src.external_open import consume_external_open_requests
+            except ImportError:
+                from external_open import consume_external_open_requests
+
+            paths = consume_external_open_requests(APP_ROOT)
+            if paths:
+                _write_log(f"ℹ️ 收到 {len(paths)} 个外部文件打开请求")
+                _write_startup_event(
+                    "external_open_requests_consumed", count=len(paths)
+                )
+            return {"success": True, "paths": paths}
+        except Exception as exc:
+            _write_log(f"⚠️ 外部文件打开请求读取失败：{exc}")
+            return {"success": False, "paths": [], "error": str(exc)}
+
+    def open_default_apps_settings(self):
+        """Let the user choose Koto in Windows' protected default-app UI."""
+        try:
+            from src.external_open import open_default_apps_settings as open_settings
+        except ImportError:
+            from external_open import open_default_apps_settings as open_settings
+        success, error = open_settings()
+        if success:
+            _write_log("ℹ️ 已打开 Windows 默认应用设置")
+        return {"success": success, "error": error}
 
     def _get_logical_screen_size(self):
         """返回逻辑像素下的屏幕尺寸（pywebview.move/resize 使用逻辑像素坐标）。
@@ -822,114 +1101,49 @@ def _pre_check_syntax(filepath: str):
         return False, str(e)
 
 
-def _auto_fix_syntax(filepath: str, error_msg: str) -> bool:
-    """
-    尝试自动修复常见的语法错误。
-    当前支持修复:
-    1. f-string 表达式中的反斜杠 (Python < 3.12)
-    2. 未闭合的括号/引号（简单情况）
-
-    返回 True 如果做了修改，False 如果无法修复。
-    """
-    import re as re_mod
-    import shutil
-
-    try:
-        with open(filepath, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-    except Exception:
-        return False
-
-    fixed = False
-
-    # 修复类型 1: f-string 表达式中的反斜杠
-    # 错误信息形如: "f-string expression part cannot include a backslash"
-    if "backslash" in error_msg.lower() and "f-string" in error_msg.lower():
-        _write_log("🔧 检测到 f-string 反斜杠问题，尝试自动修复...")
-
-        # 提取错误行号
-        line_match = re_mod.search(r"line\s+(\d+)", error_msg)
-        if line_match:
-            error_line = int(line_match.group(1)) - 1  # 0-indexed
-            if 0 <= error_line < len(lines):
-                original_line = lines[error_line]
-
-                # 策略: 将包含 \\n 的 f-string json.dumps 表达式拆分
-                # 例如: yield f"data: {json.dumps({'message': f'xx\\nxx'})}\n\n"
-                # 修复为: 先构建 msg 变量，再使用
-                if "\\\\n" in original_line or "\\\\n" in original_line:
-                    # 在当前行之前插入一个变量定义
-                    indent = len(original_line) - len(original_line.lstrip())
-                    indent_str = " " * indent
-
-                    # 提取 json.dumps 内的 f-string 并替换 \\n 为换行变量
-                    new_line = original_line.replace("\\\\n", "' + chr(10) + '")
-
-                    if new_line != original_line:
-                        lines[error_line] = new_line
-                        fixed = True
-                        _write_log(
-                            f"  修复第 {error_line + 1} 行: 替换 f-string 中的反斜杠"
-                        )
-
-    if fixed:
-        # 备份原文件
-        backup_path = filepath + ".bak"
-        try:
-            shutil.copy2(filepath, backup_path)
-            _write_log(f"  备份原文件到 {os.path.basename(backup_path)}")
-        except Exception:
-            pass
-
-        # 写回修复后的文件
-        try:
-            with open(filepath, "w", encoding="utf-8") as f:
-                f.writelines(lines)
-            _write_log("✅ 语法修复已写入文件")
-            return True
-        except Exception as e:
-            _write_log(f"❌ 写入修复文件失败: {e}")
-            return False
-
-    return False
-
-
 def start_flask_server():
-    """在后台线程启动 Flask 服务器（带预检查和错误恢复）"""
+    """Start the packaged Flask backend and expose live startup state."""
     global KOTO_PORT
-    import logging
 
-    log = logging.getLogger("werkzeug")
-    log.setLevel(logging.ERROR)
-
-    health_url = f"http://{KOTO_HOST}:{KOTO_PORT}/api/health"
+    requested_port = KOTO_PORT
+    _write_startup_event("backend_start_requested", requested_port=requested_port)
+    logging.getLogger("werkzeug").setLevel(logging.ERROR)
+    health_url = f"http://{KOTO_HOST}:{KOTO_PORT}{STARTUP_HEALTH_PATH}"
     reuse_healthy_backend = os.environ.get("KOTO_REUSE_HEALTHY_BACKEND", "0") == "1"
 
-    # 如果端口已被占用，先校验是否真的是可用的 Koto 服务
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(0.2)
-        if sock.connect_ex((KOTO_HOST, KOTO_PORT)) == 0:
-            sock.close()
-            if _check_http_ok(health_url):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+            sock.settimeout(0.2)
+            port_in_use = sock.connect_ex((KOTO_HOST, KOTO_PORT)) == 0
+        if port_in_use:
+            _write_startup_event("preferred_port_occupied", port=KOTO_PORT)
+            if _check_koto_health(health_url):
                 if reuse_healthy_backend:
                     _write_log(
                         f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已在运行，健康检查通过，跳过内置服务启动"
                     )
-                    return {"started": False, "already_running": True}
+                    return {
+                        "started": False,
+                        "already_running": True,
+                        "phase": "ready",
+                        "error": None,
+                    }
 
                 alt_port = _find_available_port(KOTO_HOST, FALLBACK_PORT)
                 if alt_port is None:
                     _write_log(
-                        f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已有健康 Koto 后端，但未找到可用备用端口，继续复用现有实例"
+                        f"ℹ️ {KOTO_HOST}:{KOTO_PORT} 已有健康 Koto 后端且无备用端口，复用现有实例"
                     )
-                    return {"started": False, "already_running": True}
-
+                    return {
+                        "started": False,
+                        "already_running": True,
+                        "phase": "ready",
+                        "error": None,
+                    }
                 _write_log(
-                    f"ℹ️ 检测到 {KOTO_HOST}:{KOTO_PORT} 已有健康 Koto 后端；为避免复用旧实例，当前窗口改用端口 {alt_port}"
+                    f"ℹ️ {KOTO_HOST}:{KOTO_PORT} 已有健康 Koto 后端；当前窗口改用端口 {alt_port}"
                 )
                 KOTO_PORT = alt_port
-                health_url = f"http://{KOTO_HOST}:{KOTO_PORT}/api/health"
             else:
                 _write_log(
                     f"⚠️ {KOTO_HOST}:{KOTO_PORT} 被占用但健康检查失败，尝试清理占用进程"
@@ -942,47 +1156,62 @@ def start_flask_server():
                 else:
                     alt_port = _find_available_port(KOTO_HOST, FALLBACK_PORT)
                     if alt_port is None:
-                        _write_log(
-                            f"⚠️ 清理失败，且未找到可用备用端口（起始 {FALLBACK_PORT}）"
+                        message = f"{KOTO_HOST}:{KOTO_PORT} 被其他程序占用，且没有可用备用端口"
+                        _write_log(f"❌ {message}")
+                        _write_startup_event(
+                            "backend_port_failed", requested_port=requested_port
                         )
                         return {
                             "started": False,
                             "already_running": False,
                             "needs_fallback": True,
+                            "phase": "port allocation failed",
+                            "error": message,
                         }
                     _write_log(f"⚠️ 清理失败，自动改用可用端口 {alt_port}")
                     KOTO_PORT = alt_port
-                    health_url = f"http://{KOTO_HOST}:{KOTO_PORT}/api/health"
-        sock.close()
-    except Exception:
-        pass
+    except Exception as exc:
+        _write_log(f"⚠️ 检查端口状态失败，继续尝试启动: {exc}")
 
-    _server_error = [None]  # 用列表存储，方便在闭包中修改
+    _publish_startup_port(KOTO_PORT)
+    _write_startup_event(
+        "backend_port_selected",
+        requested_port=requested_port,
+        port=KOTO_PORT,
+        used_fallback=KOTO_PORT != requested_port,
+    )
+
+    server_info = {
+        "started": True,
+        "already_running": False,
+        "phase": "preparing backend import",
+        "error": None,
+        "traceback": None,
+        "started_at": time.monotonic(),
+    }
 
     def run_server():
         try:
-            # ──────── 预启动语法检查 (仅在调试模式或显式要求时启用) ────────
-            # 在导入 app.py 之前先检查语法，避免大文件导入时崩溃
-            # 优化：默认跳过此检查以加速启动 (12MB文件解析耗时)
-            app_file = os.path.join(str(APP_ROOT), "web", "app.py")
+            app_file = os.path.join(str(BUNDLE_DIR), "web", "app.py")
             debug_syntax = os.environ.get("KOTO_DEBUG_SYNTAX", "0") == "1"
-
             if debug_syntax and os.path.exists(app_file):
+                server_info["phase"] = "checking packaged web application syntax"
                 _write_log("🔍 正在执行语法预检查...")
                 syntax_ok, syntax_err = _pre_check_syntax(app_file)
                 if not syntax_ok:
-                    _write_log(f"❌ app.py 语法检查失败: {syntax_err}")
-                    # Do not rewrite source during startup.  Heuristic repairs
-                    # can turn a recoverable syntax error into data loss.
-                    _server_error[0] = syntax_err
-                    _start_fallback_server(syntax_err, port=KOTO_PORT)
-                    return
+                    raise SyntaxError(syntax_err)
             else:
                 _write_log("⚡ 快速启动：跳过语法预检查")
 
-            # ──────── 正式启动 Flask ────────
+            server_info["phase"] = "importing packaged web application"
+            _write_log("⏳ 正在导入 Koto 后端...")
+            _write_startup_event("backend_import_started", port=KOTO_PORT)
             from web.app import app, socketio
 
+            _write_startup_event("backend_import_completed", port=KOTO_PORT)
+
+            server_info["phase"] = "binding local HTTP service"
+            _write_log(f"⏳ 正在监听 http://{KOTO_HOST}:{KOTO_PORT}")
             if socketio is not None:
                 socketio.run(
                     app,
@@ -1000,221 +1229,142 @@ def start_flask_server():
                     use_reloader=False,
                     threaded=True,
                 )
-        except SyntaxError as e:
-            error_msg = f"语法错误 ({e.filename}, 第{e.lineno}行): {e.msg}"
-            _server_error[0] = error_msg
-            _write_log(f"❌ Flask 服务启动失败(语法): {error_msg}")
-            _start_fallback_server(error_msg, port=KOTO_PORT)
-        except Exception as e:
-            _server_error[0] = str(e)
-            _write_log(f"❌ Flask 服务启动失败: {e}")
-            # 启动一个最小的错误提示服务器
-            _start_fallback_server(str(e), port=KOTO_PORT)
+            if server_info.get("error") is None:
+                server_info["error"] = "Koto 后端服务意外退出"
+                server_info["phase"] = "backend exited"
+        except Exception as exc:
+            message = (
+                f"语法错误: {exc}"
+                if isinstance(exc, SyntaxError)
+                else f"{type(exc).__name__}: {exc}"
+            )
+            server_info["error"] = message
+            server_info["traceback"] = traceback.format_exc()
+            server_info["phase"] = "backend startup failed"
+            _write_log(f"❌ Flask 服务启动失败: {message}")
+            _write_startup_event(
+                "backend_start_failed",
+                port=KOTO_PORT,
+                error_type=type(exc).__name__,
+            )
+            _write_log(server_info["traceback"])
 
-    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread = threading.Thread(
+        target=run_server,
+        name="KotoFlaskBackend",
+        daemon=True,
+    )
+    server_info["thread"] = server_thread
     server_thread.start()
     _write_log("✔ Flask 后台线程已启动")
-    return {
-        "started": True,
-        "already_running": False,
-        "thread": server_thread,
-        "error": _server_error[0],
-    }
+    _write_startup_event("backend_thread_started", port=KOTO_PORT)
+    return server_info
 
 
-def _start_fallback_server(error_msg: str, port: int = KOTO_PORT):
-    """当主 Flask 应用加载失败时，启动一个带诊断能力的错误恢复服务器"""
+def _startup_status_provider(
+    server_info: dict,
+    backend_url: str,
+    expected_launch_token: str | None = None,
+):
+    """Build a pollable status provider for the startup window."""
+    health_url = f"{backend_url}{STARTUP_HEALTH_PATH}"
+    started_at = float(server_info.get("started_at") or time.monotonic())
+
+    def provide():
+        if _check_koto_health(
+            health_url,
+            timeout=0.4,
+            expected_launch_token=expected_launch_token,
+        ):
+            server_info["phase"] = "ready"
+            _write_startup_event_once("backend_ready", port=KOTO_PORT, path="status")
+            return {"status": "ready", "phase": "ready", "target_url": backend_url}
+
+        error = server_info.get("error")
+        if error:
+            return {
+                "status": "error",
+                "phase": server_info.get("phase") or "backend startup failed",
+                "error": str(error),
+                "target_url": backend_url,
+            }
+
+        thread = server_info.get("thread")
+        if server_info.get("started") and thread is not None and not thread.is_alive():
+            return {
+                "status": "error",
+                "phase": "backend thread exited",
+                "error": "Koto 后端线程在开始监听前意外退出，请查看 startup.log",
+                "target_url": backend_url,
+            }
+
+        elapsed = time.monotonic() - started_at
+        if elapsed >= STARTUP_HARD_TIMEOUT_SEC:
+            return {
+                "status": "timeout",
+                "phase": server_info.get("phase") or "initializing",
+                "error": (
+                    f"后端初始化已超过 {int(STARTUP_HARD_TIMEOUT_SEC)} 秒；"
+                    "Koto 会继续等待，并已保留线程与错误日志"
+                ),
+                "target_url": backend_url,
+            }
+
+        return {
+            "status": "starting",
+            "phase": server_info.get("phase") or "initializing",
+            "elapsed_seconds": round(elapsed, 1),
+            "target_url": backend_url,
+        }
+
+    return provide
+
+
+def _restart_current_process():
+    _write_log("🔄 正在重启 Koto...")
+    _write_startup_event("restart_requested", reason="startup_status_action")
+    executable = sys.executable
+    arguments = (
+        [executable, *sys.argv[1:]]
+        if getattr(sys, "frozen", False)
+        else [executable, *sys.argv]
+    )
+    env = os.environ.copy()
+    env["KOTO_STARTUP_PARENT_SESSION_ID"] = _startup_events.session_id
+    _release_desktop_instance_lock()
+    os.execve(executable, arguments, env)
+
+
+def _start_startup_status_server(
+    port: int,
+    *,
+    backend_url: str,
+    server_info: dict,
+    expected_launch_token: str | None = None,
+):
     try:
-        import html
-        import json as json_mod
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-        from urllib.parse import parse_qs, urlparse
+        try:
+            from src.startup_recovery import serve_startup_status
+        except ImportError:
+            from startup_recovery import serve_startup_status
 
-        safe_error = html.escape(error_msg)
-
-        class FallbackHandler(BaseHTTPRequestHandler):
-            def do_GET(self):
-                parsed = urlparse(self.path)
-
-                # API: 获取诊断信息
-                if parsed.path == "/api/diagnose":
-                    self._handle_diagnose()
-                    return
-
-                # API: 尝试重启
-                if parsed.path == "/api/retry":
-                    self._handle_retry()
-                    return
-
-                # 主页面
-                self.send_response(200)
-                self.send_header("Content-Type", "text/html; charset=utf-8")
-                self.end_headers()
-                page = self._build_error_page(safe_error)
-                self.wfile.write(page.encode("utf-8"))
-
-            def do_POST(self):
-                if self.path == "/api/retry":
-                    self._handle_retry()
-                    return
-                self.send_response(404)
-                self.end_headers()
-
-            def _handle_diagnose(self):
-                """Run a safe, structured startup diagnosis."""
-                try:
-                    from src.startup_diagnostics import run_startup_diagnostics
-                except ImportError:
-                    from startup_diagnostics import run_startup_diagnostics
-
-                info = run_startup_diagnostics(APP_ROOT, port=port)
-                info["error"] = error_msg
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(
-                    json_mod.dumps(info, ensure_ascii=False).encode("utf-8")
-                )
-
-            def _handle_retry(self):
-                """Restart only after a non-mutating self-check passes."""
-                result = {"success": False, "message": ""}
-                try:
-                    from src.startup_diagnostics import run_startup_diagnostics
-                except ImportError:
-                    from startup_diagnostics import run_startup_diagnostics
-
-                report = run_startup_diagnostics(APP_ROOT, port=port)
-                result["diagnostics"] = report
-                if report["can_restart"]:
-                    result["message"] = "自检通过，正在安全重启程序..."
-                    result["success"] = True
-                    result["action"] = "restart"
-                else:
-                    result["message"] = "自检发现阻断问题；请根据诊断结果修复后再重试。"
-
-                self.send_response(200)
-                self.send_header("Content-Type", "application/json; charset=utf-8")
-                self.end_headers()
-                self.wfile.write(
-                    json_mod.dumps(result, ensure_ascii=False).encode("utf-8")
-                )
-
-                # 如果修复成功，重启整个进程
-                if result.get("success"):
-                    _write_log("🔄 自检通过，准备重启进程...")
-
-                    def _do_restart():
-                        time.sleep(1)
-                        _write_log("🔄 正在重启 Koto...")
-                        os.execv(sys.executable, [sys.executable] + sys.argv)
-
-                    threading.Thread(target=_do_restart, daemon=True).start()
-
-            def _build_error_page(self, safe_err):
-                return (
-                    '<!DOCTYPE html><html><head><meta charset="utf-8">'
-                    "<title>Koto - 启动修复</title>"
-                    "<style>"
-                    "*{box-sizing:border-box}"
-                    "body{font-family:system-ui,-apple-system,sans-serif;display:flex;align-items:center;"
-                    "justify-content:center;min-height:100vh;margin:0;background:#0f0f1a;color:#e0e0e0}"
-                    ".card{background:#1a1a2e;border-radius:20px;padding:48px;max-width:680px;width:90%;"
-                    "box-shadow:0 12px 48px rgba(0,0,0,.4)}"
-                    "h1{color:#ff6b6b;margin:0 0 8px;font-size:28px;text-align:center}"
-                    ".subtitle{color:#888;text-align:center;margin-bottom:24px;font-size:14px}"
-                    ".error-box{background:#0d1b2a;border:1px solid #1b2838;border-radius:12px;"
-                    'padding:20px;margin:20px 0;font-family:"Cascadia Code","Fira Code",monospace;'
-                    "font-size:13px;word-break:break-all;max-height:160px;overflow:auto;"
-                    "line-height:1.6;color:#ffd93d}"
-                    ".actions{display:flex;gap:12px;margin:24px 0;flex-wrap:wrap}"
-                    ".btn{flex:1;padding:14px 24px;border:none;border-radius:12px;font-size:15px;"
-                    "font-weight:600;cursor:pointer;transition:all .2s;min-width:140px;text-align:center}"
-                    ".btn-primary{background:linear-gradient(135deg,#4361ee,#3a0ca3);color:#fff}"
-                    ".btn-primary:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(67,97,238,.4)}"
-                    ".btn-secondary{background:#1b2838;color:#4fc3f7;border:1px solid #2a3a4a}"
-                    ".btn-secondary:hover{background:#243447}"
-                    ".btn:disabled{opacity:.5;cursor:not-allowed;transform:none}"
-                    ".status{padding:16px;border-radius:12px;margin:16px 0;font-size:14px;"
-                    "display:none;line-height:1.8}"
-                    ".status.show{display:block}"
-                    ".status.success{background:#1a3a2a;border:1px solid #2d6a4f;color:#52b788}"
-                    ".status.error{background:#3a1a1a;border:1px solid #6a2d2d;color:#ff6b6b}"
-                    ".status.info{background:#1a2a3a;border:1px solid #2d4a6a;color:#4fc3f7}"
-                    ".tips{margin-top:20px;padding:20px;background:#16213e;border-radius:12px}"
-                    ".tips h3{margin:0 0 12px;font-size:15px;color:#aaa}"
-                    ".tips ul{margin:0;padding-left:20px;line-height:2.2}"
-                    ".tips li{font-size:13px;color:#999}"
-                    ".tips code{background:#0d1b2a;padding:2px 8px;border-radius:4px;font-size:12px;color:#4fc3f7}"
-                    ".spinner{display:inline-block;width:16px;height:16px;border:2px solid #fff3;"
-                    "border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;"
-                    "vertical-align:middle;margin-right:8px}"
-                    "@keyframes spin{to{transform:rotate(360deg)}}"
-                    ".footer{text-align:center;margin-top:24px;font-size:12px;color:#555}"
-                    "</style></head><body>"
-                    '<div class="card">'
-                    "<h1>⚠️ Koto 启动遇到问题</h1>"
-                    '<p class="subtitle">应用加载过程中出现错误；先执行安全自检，再决定是否重启</p>'
-                    f'<div class="error-box">{safe_err}</div>'
-                    '<div id="status" class="status"></div>'
-                    '<div class="actions">'
-                    '<button class="btn btn-primary" id="retryBtn" onclick="handleRetry()">'
-                    "🛡️ 安全检查并重启</button>"
-                    '<button class="btn btn-secondary" id="diagnoseBtn" onclick="handleDiagnose()">'
-                    "🔍 诊断检查</button>"
-                    "</div>"
-                    '<div class="tips">'
-                    "<h3>💡 手动排查提示</h3>"
-                    "<ul>"
-                    "<li>🔑 检查 <code>config/deepseek_config.env</code> 中的 API 密钥</li>"
-                    "<li>📦 运行 <code>pip install -r requirements.txt</code></li>"
-                    "<li>🔄 关闭后重新运行 <code>RunSource.bat</code></li>"
-                    "<li>📋 查看 <code>logs/startup.log</code> 获取详细日志</li>"
-                    "</ul></div>"
-                    '<div class="footer">Koto v2.0 | 错误恢复模式</div>'
-                    "</div>"
-                    "<script>"
-                    'const statusEl=document.getElementById("status");'
-                    'const retryBtn=document.getElementById("retryBtn");'
-                    'const diagnoseBtn=document.getElementById("diagnoseBtn");'
-                    "function showStatus(msg,type){"
-                    'statusEl.className="status show "+type;statusEl.innerHTML=msg}'
-                    "async function handleRetry(){"
-                    "retryBtn.disabled=true;"
-                    "retryBtn.innerHTML='<span class=\"spinner\"></span>正在自检...';"
-                    'showStatus("⏳ 正在执行安全自检...","info");'
-                    'try{const r=await fetch("/api/retry",{method:"POST"});'
-                    "const d=await r.json();"
-                    "if(d.success){"
-                    'showStatus("✅ "+d.message+"<br>页面将在 3 秒后自动刷新...","success");'
-                    "setTimeout(()=>location.reload(),3000)"
-                    "}else{"
-                    'showStatus("❌ "+d.message,"error");'
-                    'retryBtn.disabled=false;retryBtn.innerHTML="🛡️ 安全检查并重启"}'
-                    "}catch(e){"
-                    'showStatus("❌ 请求失败: "+e.message,"error");'
-                    'retryBtn.disabled=false;retryBtn.innerHTML="🛡️ 安全检查并重启"}}'
-                    "async function handleDiagnose(){"
-                    'diagnoseBtn.disabled=true;diagnoseBtn.innerHTML="🔍 检查中...";'
-                    'try{const r=await fetch("/api/diagnose");const d=await r.json();'
-                    'const esc=v=>String(v||"").replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));'
-                    'let info="<b>📋 启动自检："+esc(d.summary)+"</b><br>";'
-                    'for(const c of (d.checks||[])){const icon=c.level==="ok"?"✅":c.level==="warning"?"⚠️":"❌";info+=icon+" "+esc(c.name)+"："+esc(c.message)+(c.action?"（"+esc(c.action)+"）":"")+"<br>";}'
-                    'showStatus(info,d.status==="blocked"?"error":d.status==="attention"?"info":"success")'
-                    '}catch(e){showStatus("❌ 诊断失败: "+e.message,"error")}'
-                    'diagnoseBtn.disabled=false;diagnoseBtn.innerHTML="🔍 诊断检查"}'
-                    "</script></body></html>"
-                )
-
-            def log_message(self, fmt, *args):
-                pass  # 静默日志
-
-        server = HTTPServer((KOTO_HOST, port), FallbackHandler)
-        _write_log(f"⚠️ 错误恢复服务器已启动在 http://{KOTO_HOST}:{port}")
-        server.serve_forever()
-    except Exception as fallback_err:
-        _write_log(f"❌ 错误恢复服务器也无法启动: {fallback_err}")
+        serve_startup_status(
+            KOTO_HOST,
+            port,
+            app_root=APP_ROOT,
+            bundle_dir=BUNDLE_DIR,
+            backend_url=backend_url,
+            status_provider=_startup_status_provider(
+                server_info,
+                backend_url,
+                expected_launch_token,
+            ),
+            restart=_restart_current_process,
+            log=_write_log,
+            event=_write_startup_event,
+        )
+    except Exception as exc:
+        _write_log(f"❌ 启动状态服务无法监听 {KOTO_HOST}:{port}: {exc}")
 
 
 def create_system_tray(window_ref=None):
@@ -1297,46 +1447,82 @@ def create_system_tray(window_ref=None):
         return None
 
 
-def _bootstrap_api_setup():
-    """从 _internal/koto_setup.py 加载并执行 API 密钥向导。
-    兼容旧版编译入口：写入 model_setup_done.json 防止 model_downloader 重复弹出。
+def _bootstrap_api_setup() -> bool:
+    """Refresh optional AI capability state without gating desktop startup.
+
+    Interactive configuration is reserved for the explicit ``--setup`` and
+    ``--reconfigure`` commands.  A normal launch performs configuration-only
+    inspection: no network validation, Ollama connection, or model loading.
     """
-    import json as _json
-
-    # 抑制旧版编译入口下次弹出 model_downloader
-    _flag = APP_ROOT / "config" / "model_setup_done.json"
-    if not _flag.exists():
-        try:
-            _flag.write_text(
-                _json.dumps({"done": True, "version": 1}), encoding="utf-8"
-            )
-        except Exception:
-            pass
-    # 调用 koto_setup.py 中的 API 密钥向导
     try:
-        import runpy as _runpy
+        explicit_setup = "--setup" in sys.argv or "--reconfigure" in sys.argv
+        if explicit_setup and os.environ.get("KOTO_SERVER_ONLY") != "1":
+            import runpy as _runpy
 
-        _bundle = (
-            Path(sys._MEIPASS)
-            if getattr(sys, "frozen", False)
-            else Path(__file__).parent
-        )
-        _setup_py = _bundle / "koto_setup.py"
-        if _setup_py.exists():
-            _ns = _runpy.run_path(
-                str(_setup_py)
-            )  # run_name 默认非 __main__，不触发 main()
-            if "_run_setup_if_needed" in _ns:
-                _ns["_run_setup_if_needed"]()
+            bundle = (
+                Path(sys._MEIPASS)
+                if getattr(sys, "frozen", False)
+                else Path(__file__).parent
+            )
+            setup_path = bundle / "koto_setup.py"
+            if setup_path.exists():
+                namespace = _runpy.run_path(str(setup_path))
+                setup = namespace.get("_run_setup_if_needed")
+                if callable(setup):
+                    setup()
+
+        from app.core.llm.runtime_capabilities import refresh_model_capabilities
+
+        state = refresh_model_capabilities(probe_local=False)
+        active = state["capabilities"].get("active_model", {})
+        return active.get("status") == "available"
     except Exception:
-        pass
+        _write_log("⚠️ AI 能力状态读取失败；桌面和设置仍会继续启动")
+        return False
 
 
 def main():
     """主入口 - 桌面应用模式"""
+    _install_crash_hooks()
+    try:
+        try:
+            from src.external_open import enqueue_external_open_arguments
+        except ImportError:
+            from external_open import enqueue_external_open_arguments
+
+        enqueue_external_open_arguments(APP_ROOT, sys.argv[1:])
+    except Exception as exc:
+        _write_log(f"⚠️ 无法登记外部文件打开请求：{exc}")
+    try:
+        from src.single_instance import acquire_desktop_instance
+    except ImportError:
+        from single_instance import acquire_desktop_instance
+
+    if not acquire_desktop_instance(log=_write_log):
+        return
+
+    _write_startup_event(
+        "python_runtime_ready",
+        occurred_at_monotonic=_python_runtime_ready_at,
+        frozen=bool(getattr(sys, "frozen", False)),
+    )
+    _write_startup_event(
+        "desktop_start",
+        requested_port=KOTO_PORT,
+        frozen=bool(getattr(sys, "frozen", False)),
+        server_only=os.environ.get("KOTO_SERVER_ONLY") == "1",
+    )
+
     # 初始化
     ensure_directories()
-    _bootstrap_api_setup()  # API 密钥向导（便携版 / 首次启动 / 密钥失效时触发）
+    # AI providers are optional runtime capabilities.  A cancelled first-run
+    # chooser, a detached model drive, or an Ollama/model version mismatch must
+    # not prevent users from opening Koto to manage files and repair settings.
+    if not _bootstrap_api_setup():
+        _write_log(
+            "⚠️ 尚未完成可用的 AI 模型配置；Koto 将以降级模式启动，"
+            "可稍后在设置中配置云端 API 或本地模型"
+        )
     check_config()
     if not ensure_dependencies():
         return
@@ -1402,64 +1588,63 @@ def main():
     _icon_thread.start()
 
     # 在 Flask 后台启动的同时导入 webview（重叠 I/O 开销）
+    _write_startup_event("webview_import_started")
     import webview
 
+    _write_startup_event("webview_import_completed")
     _write_log("✔ 已导入 webview")
 
-    app_url = f"http://{KOTO_HOST}:{KOTO_PORT}"
-    health_url = f"{app_url}/api/health"
-    backend_ready = False
-    if server_info.get("error"):
-        _write_log(f"⚠️ Flask 线程报错: {server_info['error']}")
-    if server_info.get("already_running"):
-        _write_log("ℹ️ 发现已有后端运行，复用它")
+    backend_app_url = f"http://{KOTO_HOST}:{KOTO_PORT}"
+    health_url = f"{backend_app_url}{STARTUP_HEALTH_PATH}"
+    launch_token = os.environ.get("KOTO_LAUNCH_TOKEN", "").strip() or None
+    backend_ready = _wait_for_koto_health(
+        health_url,
+        STARTUP_FAST_READY_SEC,
+        request_timeout=0.4,
+        poll_interval=0.2,
+        expected_launch_token=launch_token,
+    )
+    app_url = backend_app_url
 
-    # 如果端口被外部程序占用且不健康，直接切换备用端口
-    if server_info.get("needs_fallback"):
-        err_msg = (
-            "检测到 5000 端口被其他程序占用且响应异常，自动切换备用端口 5001。\n"
-            "请关闭占用 5000 端口的程序，或使用备用端口访问。"
-        )
-        _write_log(err_msg)
-        threading.Thread(
-            target=_start_fallback_server, args=(err_msg, FALLBACK_PORT), daemon=True
-        ).start()
-        app_url = f"http://{KOTO_HOST}:{FALLBACK_PORT}"
+    if backend_ready:
+        _write_log("✔ 后端健康检查已就绪")
+        _write_startup_event_once("backend_ready", port=KOTO_PORT, path="direct")
     else:
-        # 等待后端就绪（容忍慢启动，避免误判后错误恢复页占住主端口）
-        backend_ready = _wait_for_port(KOTO_HOST, KOTO_PORT, STARTUP_TIMEOUT_SEC)
-        if (
-            not backend_ready
-            and server_info.get("thread") is not None
-            and server_info["thread"].is_alive()
-        ):
-            _write_log("⚠️ 后端启动较慢，延长等待健康检查（最多 15 秒）")
-            backend_ready = _wait_for_http_ok(
-                health_url,
-                15.0,
-                request_timeout=0.5,
-                poll_interval=0.25,
-            )
-
-        if not backend_ready:
-            err_msg = "后端服务启动超时，请检查依赖或端口占用情况。"
-            _write_log(err_msg)
-            _dump_threads("wait-port-timeout")
-            fallback_port = (
-                _find_available_port(KOTO_HOST, FALLBACK_PORT) or FALLBACK_PORT
-            )
+        # Slow clean machines should see a live loading page instead of a false
+        # 25-second failure. The page keeps polling and redirects when healthy.
+        status_port = _find_startup_status_port(KOTO_PORT)
+        if status_port is not None:
+            status_url = f"http://{KOTO_HOST}:{status_port}"
             threading.Thread(
-                target=_start_fallback_server,
-                args=(err_msg, fallback_port),
+                target=_start_startup_status_server,
+                kwargs={
+                    "port": status_port,
+                    "backend_url": backend_app_url,
+                    "server_info": server_info,
+                    "expected_launch_token": launch_token,
+                },
+                name="KotoStartupStatus",
                 daemon=True,
             ).start()
-            app_url = f"http://{KOTO_HOST}:{fallback_port}"
+            if _wait_for_http_ok(
+                status_url,
+                2.0,
+                request_timeout=0.25,
+                poll_interval=0.1,
+            ):
+                app_url = status_url
+                _write_startup_event(
+                    "status_page_selected",
+                    port=status_port,
+                    backend_port=KOTO_PORT,
+                )
+                _write_log(
+                    f"ℹ️ 后端仍在初始化，先显示启动状态页（最终目标 {backend_app_url}）"
+                )
+            else:
+                _write_log("⚠️ 启动状态页未及时就绪，窗口直接等待后端")
         else:
-            _write_log("✔ 后端端口已就绪")
-
-    # === 快速启动模式：跳过预热检查 ===
-    # pywebview 内部会处理加载超时，无需提前检查
-    _write_log("⚡ 快速启动：跳过预热检查，直接创建窗口")
+            _write_log("⚠️ 没有可用端口显示启动状态页，窗口直接等待后端")
 
     # === 启动后台系统监控（守护线程，桌面模式专用）===
     try:
@@ -1471,39 +1656,6 @@ def main():
             _write_log("✔ 系统资源监控已启动（CPU/内存/磁盘告警）")
     except Exception as _sem_err:
         _write_log(f"⚠️ 系统监控启动失败（非致命）: {_sem_err}")
-
-    # === 预热本地路由模型（守护线程，不阻塞窗口创建）===
-    def _init_local_router_async():
-        import socket as _socket
-
-        time.sleep(3)  # 等待 Flask 和 Ollama 完全就绪
-        try:
-            _s = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
-            _s.settimeout(0.5)
-            _ollama_up = _s.connect_ex(("127.0.0.1", 11434)) == 0
-            _s.close()
-        except Exception:
-            _ollama_up = False
-
-        if not _ollama_up:
-            _write_log(
-                "🦙 Ollama 未运行，本地模型路由不可用（可运行 LocalModelInstaller 安装）"
-            )
-            return
-
-        try:
-            from app.core.routing.local_model_router import LocalModelRouter
-
-            if LocalModelRouter.init_model():
-                _write_log(f"🦙 本地路由模型已就绪: {LocalModelRouter._model_name}")
-            else:
-                _write_log(
-                    "🦙 Ollama 运行中但无可用路由模型，请通过 LocalModelInstaller 下载模型"
-                )
-        except Exception as _lmr_e:
-            _write_log(f"🦙 本地路由模型初始化跳过: {_lmr_e}")
-
-    threading.Thread(target=_init_local_router_async, daemon=True).start()
 
     # 等待图标生成完成（通常此时已完成，因为与 Flask 等待并行进行）
     _icon_ready.wait(timeout=5)
@@ -1534,8 +1686,12 @@ def main():
         _write_log(f"⚠️ 无法检测屏幕分辨率，使用默认 1200x800: {_e}")
 
     # 创建桌面窗口
+    _write_startup_event(
+        "window_create_started",
+        target="status" if app_url != backend_app_url else "app",
+    )
     window = webview.create_window(
-        title="Koto - AI 个人助手",
+        title=WINDOW_TITLE,
         url=app_url,
         width=_win_w,
         height=_win_h,
@@ -1549,6 +1705,7 @@ def main():
         easy_drag=False,  # 关闭拖拽模式，防止拦截点击事件
         on_top=False,  # 不置顶，让用户正常使用
     )
+    _write_startup_event("window_created")
 
     if icon_path:
         _write_log(f"✔ 图标路径: {icon_path}")
@@ -1559,13 +1716,37 @@ def main():
             health_url,
             server_thread=server_info.get("thread"),
             expect_server_thread=bool(server_info.get("started")),
+            expected_launch_token=launch_token,
         )
         _write_log("✔ 后端健康守护已启动")
     elif backend_ready:
         _write_log("ℹ️ 后端健康守护默认关闭，避免任务流期间误判自恢复")
+    elif _backend_watchdog_enabled():
+
+        def _deferred_watchdog():
+            if _wait_for_koto_health(
+                health_url,
+                STARTUP_HARD_TIMEOUT_SEC + 60.0,
+                request_timeout=0.5,
+                poll_interval=0.5,
+                expected_launch_token=launch_token,
+            ):
+                _start_backend_health_watchdog(
+                    health_url,
+                    server_thread=server_info.get("thread"),
+                    expect_server_thread=bool(server_info.get("started")),
+                    expected_launch_token=launch_token,
+                )
+                _write_log("✔ 延迟后端健康守护已启动")
+
+        threading.Thread(
+            target=_deferred_watchdog,
+            name="KotoDeferredWatchdog",
+            daemon=True,
+        ).start()
 
     # 绑定窗口控制API
-    window_api = WindowAPI(window, app_url)
+    window_api = WindowAPI(window, backend_app_url)
     window_api.full_size = (_win_w, _win_h)  # 同步实际初始窗口尺寸
     window.expose(window_api.switch_to_mini)
     window.expose(window_api.switch_to_full)
@@ -1576,6 +1757,10 @@ def main():
     window.expose(window_api.force_close)
     window.expose(window_api.mark_file_modified)
     window.expose(window_api.open_url)
+    window.expose(window_api.report_frontend_ready)
+    window.expose(window_api.report_workspace_ready)
+    window.expose(window_api.consume_external_open_requests)
+    window.expose(window_api.open_default_apps_settings)
 
     # ── 原生窗口X按钮关闭拦截 ─────────────────────────────────────
     # 当用户点击操作系统原生的关闭按钮时，先让JS检查未保存文件；
@@ -1653,6 +1838,11 @@ def main():
         """窗口显示后的回调"""
         _window_shown.set()  # 通知看门狗：窗口已加载
         _write_log("✔ 窗口已显示，应用正常运行中")
+        _write_startup_event(
+            "window_shown",
+            backend_port=KOTO_PORT,
+            via_status_page=app_url != backend_app_url,
+        )
         _set_window_icon(icon_path)
 
     def _startup_watchdog(timeout_sec: int = 45):
@@ -1670,6 +1860,7 @@ def main():
     watchdog.start()
 
     _write_log("🚀 启动 webview.start（窗口事件循环）")
+    _write_startup_event("webview_loop_started")
 
     # private_mode=False：关闭隐私模式，使麦克风等权限、Cookie 在重启后保留
     # storage_path：指定持久化用户数据目录（与前面创建的 .webview2_profile 一致）

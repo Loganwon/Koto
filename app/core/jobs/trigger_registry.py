@@ -19,7 +19,7 @@ Koto TriggerRegistry — 统一触发器管理中心
   "startup"   — 应用启动时自动触发一次
                 config: {}
 
-触发器持久化存储在 config/triggers.json，重启后自动恢复。
+触发器持久化存储在 data/triggers.json，重启后自动恢复。
 
 用法示例：
     from app.core.jobs.trigger_registry import get_trigger_registry, TriggerSpec
@@ -47,9 +47,7 @@ Koto TriggerRegistry — 统一触发器管理中心
 
 from __future__ import annotations
 
-import json
 import logging
-import os
 import threading
 import time
 import uuid
@@ -58,13 +56,30 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.config.atomic_json_store import load_json_document, save_json_document
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    migrate_legacy_file,
+    runtime_data_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── 持久化路径 ────────────────────────────────────────────────────────────────
-_BASE = Path(
-    os.environ.get("KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config")
+_DEFAULT_TRIGGERS_FILE = runtime_data_path(
+    "triggers.json", env_var="KOTO_TRIGGERS_PATH"
 )
-_TRIGGERS_FILE = _BASE / "triggers.json"
+_TRIGGERS_FILE = _DEFAULT_TRIGGERS_FILE
+
+
+def _triggers_file() -> Path:
+    target = Path(_TRIGGERS_FILE)
+    if target == _DEFAULT_TRIGGERS_FILE:
+        return migrate_legacy_file(
+            target, legacy_paths=(legacy_config_path("triggers.json"),)
+        )
+    return target
+
 
 _VALID_TRIGGER_TYPES = frozenset({"interval", "cron", "webhook", "startup"})
 
@@ -85,9 +100,8 @@ _RECOMMENDED_TRIGGER_PRESETS = [
         "key": "daily_task_planner",
         "name": "每日任务规划",
         "trigger_type": "cron",
-        "job_type": "skill_exec",
+        "job_type": "agent_query",
         "job_payload": {
-            "skill_id": "task_planner",
             "query": "基于今天的待办，生成一个按优先级排序的执行计划。",
         },
         "session_id": "system",
@@ -200,7 +214,7 @@ class TriggerRegistry:
     """
     统一触发器注册与调度中心。
 
-    - 持久化：触发器配置存储到 config/triggers.json
+    - 持久化：触发器配置存储到 data/triggers.json
     - 调度：后台线程每 15 秒扫描一次，判断是否触发
     - 解耦：触发时通过 get_job_runner().submit() 提交作业
     """
@@ -210,13 +224,30 @@ class TriggerRegistry:
         self._lock = threading.Lock()
         self._running = False
         self._scheduler_thread: Optional[threading.Thread] = None
+        self._active_trigger_ids: Optional[set[str]] = None
         self._load_persisted()
         self.ensure_recommended_triggers()
 
     # ── 生命周期 ──────────────────────────────────────────────────────────────
 
-    def start(self):
-        self._running = True
+    def start(self, *, active_trigger_ids: Optional[set[str]] = None):
+        """Start the single scheduler thread, optionally scoped to trigger IDs.
+
+        Scoped startup lets one managed feature activate its own persisted
+        trigger without implicitly enabling unrelated recommended triggers.
+        Repeated scoped starts extend the active set; an unscoped start enables
+        all registered triggers.
+        """
+        with self._lock:
+            if active_trigger_ids is None:
+                self._active_trigger_ids = None
+            elif self._active_trigger_ids is not None:
+                self._active_trigger_ids.update(active_trigger_ids)
+            else:
+                self._active_trigger_ids = set(active_trigger_ids)
+            if self._running:
+                return
+            self._running = True
         self._scheduler_thread = threading.Thread(
             target=self._scheduler_loop, daemon=True, name="koto_trigger_scheduler"
         )
@@ -396,7 +427,17 @@ class TriggerRegistry:
             now = time.time()
             with self._lock:
                 specs = list(self._triggers.values())
+                active_trigger_ids = (
+                    None
+                    if self._active_trigger_ids is None
+                    else set(self._active_trigger_ids)
+                )
             for spec in specs:
+                if (
+                    active_trigger_ids is not None
+                    and spec.trigger_id not in active_trigger_ids
+                ):
+                    continue
                 if spec.enabled and self._should_fire(spec, now):
                     threading.Thread(
                         target=self._dispatch, args=(spec,), daemon=True
@@ -441,7 +482,19 @@ class TriggerRegistry:
 
     def _fire_startup_triggers(self):
         time.sleep(8)  # 等应用完全初始化
-        for spec in list(self._triggers.values()):
+        with self._lock:
+            specs = list(self._triggers.values())
+            active_trigger_ids = (
+                None
+                if self._active_trigger_ids is None
+                else set(self._active_trigger_ids)
+            )
+        for spec in specs:
+            if (
+                active_trigger_ids is not None
+                and spec.trigger_id not in active_trigger_ids
+            ):
+                continue
             if spec.trigger_type == "startup" and spec.enabled:
                 try:
                     logger.info("[TriggerRegistry] 🚀 startup 触发: %s", spec.name)
@@ -458,22 +511,29 @@ class TriggerRegistry:
 
     def _persist(self):
         try:
-            _BASE.mkdir(parents=True, exist_ok=True)
             data = [t.to_dict() for t in self._triggers.values()]
-            _TRIGGERS_FILE.write_text(
-                json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
+            save_json_document(_triggers_file(), data)
         except Exception as exc:
             logger.warning("[TriggerRegistry] 持久化失败: %s", exc)
 
     def _load_persisted(self):
-        if not _TRIGGERS_FILE.exists():
+        path = _triggers_file()
+        if not path.exists():
             return
         try:
-            data = json.loads(_TRIGGERS_FILE.read_text(encoding="utf-8"))
+            data = load_json_document(path, default=[])
+            migrated = False
             for d in data:
+                if d.get("job_type") == "skill_exec":
+                    d["job_type"] = "agent_query"
+                    payload = d.get("job_payload")
+                    if isinstance(payload, dict):
+                        payload.pop("skill_id", None)
+                    migrated = True
                 spec = TriggerSpec.from_dict(d)
                 self._triggers[spec.trigger_id] = spec
+            if migrated:
+                self._persist()
             logger.info("[TriggerRegistry] 加载 %d 个持久化触发器", len(self._triggers))
         except Exception as exc:
             logger.warning("[TriggerRegistry] 加载触发器失败: %s", exc)
@@ -488,11 +548,10 @@ _reg_lock = threading.Lock()
 
 
 def get_trigger_registry() -> TriggerRegistry:
-    """获取全局 TriggerRegistry 单例，首次调用时自动启动调度器。"""
+    """Return the trigger registry without implicitly starting background work."""
     global _registry
     if _registry is None:
         with _reg_lock:
             if _registry is None:
                 _registry = TriggerRegistry()
-                _registry.start()
     return _registry

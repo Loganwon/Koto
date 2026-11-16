@@ -8,14 +8,14 @@ from web.sse.sanitizer import safe_sse as _safe_sse
 from app.core.llm.provider_compat import types
 
 
-def handle_web_search(yield_thinking, context_info, client, session_manager, user_input, session_name, start_time, _app_logger, MODEL_MAP):
-    from web.chat_runtime_services import get_create_client, get_utils, get_web_searcher
+def handle_web_search(yield_thinking, client, session_manager, user_input, session_name, start_time, _app_logger, MODEL_MAP):
+    from web.runtime_context import service_registry
 
-    Utils = get_utils()
+    Utils = service_registry.utils
     try:
-        WebSearcher = get_web_searcher()
+        WebSearcher = service_registry.web_searcher
     except RuntimeError:
-        from web import web_searcher as _web_searcher
+        from web.knowledge import web_searcher as _web_searcher
 
         class WebSearcher:
             search_with_grounding = staticmethod(_web_searcher.search_with_grounding)
@@ -25,7 +25,7 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
 
         model = normalize_public_model(model)
         try:
-            return client.models.generate_content(
+            return client.generate_content(
                 model=model,
                 contents=contents,
                 config=config,
@@ -34,10 +34,10 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
             exc_text = str(exc)
             if "model is required" not in exc_text and "Ollama" not in exc_text:
                 raise
-            create_client = get_create_client()
-            if not callable(create_client):
+            gateway = service_registry.llm_gateway
+            if gateway is None:
                 raise
-            return create_client().models.generate_content(
+            return gateway.generate_content(
                 model=model,
                 contents=contents,
                 config=config,
@@ -48,10 +48,7 @@ def handle_web_search(yield_thinking, context_info, client, session_manager, use
     yield _safe_sse({"type": "progress", "message": "正在搜索实时信息...", "detail": "Web Search"})
     yield _safe_sse({"type": "progress", "message": "正在整理搜索结果...", "detail": ""})
 
-    _skill_prompt = (context_info or {}).get("skill_prompt")
-    search_result = WebSearcher.search_with_grounding(
-        user_input, skill_prompt=_skill_prompt
-    )
+    search_result = WebSearcher.search_with_grounding(user_input)
     response_text = search_result["response"]
     response_sources = search_result.get("sources") or []
 

@@ -2,9 +2,9 @@
  * KotoTextEditor - plain text/code editor
  */
 
-import type { WorkspaceEditor } from './types';
-import type { TextEditorData } from './types';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import type { TextEditorData, WorkspaceEditor } from './types';
+import type { EditorSession } from './editor-session';
+import { getFeatureRegistry } from '../shared/feature-registry';
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 
@@ -13,8 +13,10 @@ export class KotoTextEditor implements WorkspaceEditor {
   _ta: HTMLTextAreaElement | null;
   _badge: HTMLElement | null;
   _selectionNotifyTimer: number | null;
+  _session: EditorSession;
 
-  constructor(fileType: string) {
+  constructor(session: EditorSession, fileType: string) {
+    this._session = session;
     this._fileType = fileType;
     this._ta = $('wa-text-content') as HTMLTextAreaElement | null;
     this._badge = $('wa-text-lang-badge');
@@ -29,9 +31,12 @@ export class KotoTextEditor implements WorkspaceEditor {
     }
   }
 
-  _handleInput = () => {
-    const scheduleAutoSave = getWorkspaceApi().scheduleAutoSave;
-    if (typeof scheduleAutoSave === 'function') scheduleAutoSave();
+  _handleInput = (event: Event) => {
+    const scheduleAutoSave = getFeatureRegistry().scheduleAutoSave;
+    if (typeof scheduleAutoSave === 'function') {
+      if ((event as Event & { kotoSkipDiskWrite?: boolean }).kotoSkipDiskWrite === true) scheduleAutoSave({ skipDiskWrite: true });
+      else scheduleAutoSave();
+    }
     this._queueSelectionToolbarUpdate();
   };
 
@@ -43,7 +48,7 @@ export class KotoTextEditor implements WorkspaceEditor {
     if (this._selectionNotifyTimer) window.clearTimeout(this._selectionNotifyTimer);
     this._selectionNotifyTimer = window.setTimeout(() => {
       this._selectionNotifyTimer = null;
-      const showToolbar = getWorkspaceApi()._showSelectionToolbarForCurrentSelection;
+      const showToolbar = getFeatureRegistry()._showSelectionToolbarForCurrentSelection;
       if (typeof showToolbar === 'function') showToolbar();
     }, 0);
   }
@@ -67,7 +72,7 @@ export class KotoTextEditor implements WorkspaceEditor {
   applyToolCall(cmd: any) {
     if (cmd.type === 'set_html' || cmd.type === 'set_text') {
       if (this._ta) this._ta.value = cmd.value || '';
-      getWorkspaceApi().scheduleAutoSave?.();
+      getFeatureRegistry().scheduleAutoSave?.();
     }
   }
 
@@ -88,4 +93,4 @@ export class KotoTextEditor implements WorkspaceEditor {
   }
 }
 
-(window as any).KotoTextEditor = KotoTextEditor;
+getFeatureRegistry().KotoTextEditor = KotoTextEditor;

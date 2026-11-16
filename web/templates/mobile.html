@@ -474,8 +474,8 @@ a{color:var(--accent);}
   <div id="inputArea">
     <div id="filePrev"></div>
     <div id="inputRow">
-      <label class="iBtn" id="fileLabel" title="附加文件">
-        📎<input type="file" id="fileIn" multiple
+      <label class="iBtn" id="fileLabel" title="附加文件" for="fileIn">
+        📎<input type="file" id="fileIn" aria-label="附加文件" multiple
           accept=".docx,.doc,.pdf,.txt,.md,.png,.jpg,.jpeg,.gif,.webp,.csv,.xlsx,.xls,.json"
           onchange="onFileChg(event)">
       </label>
@@ -547,16 +547,16 @@ a{color:var(--accent);}
     <div class="spSec">
       <div class="spLbl">AI 模型</div>
       <div class="spRow">
-        <span>默认模型</span>
-        <select id="spModel" onchange="saveSp('ai','default_model',this.value)">
+        <label for="spModel">默认模型</label>
+        <select id="spModel" aria-label="默认模型" onchange="saveSp('ai','default_model',this.value)">
           <option value="auto">🤖 Auto</option>
           <option value="deepseek-chat">DeepSeek Chat</option>
           <option value="local">本地模型</option>
         </select>
       </div>
       <div class="spRow">
-        <span>仅本地模型</span>
-        <label class="sw"><input type="checkbox" id="spLocal" onchange="saveSp('ai','local_only',this.checked)"><span class="sws"></span></label>
+        <span id="spLocalLabel">仅本地模型</span>
+        <label class="sw" for="spLocal"><input type="checkbox" id="spLocal" aria-labelledby="spLocalLabel" onchange="saveSp('ai','local_only',this.checked)"><span class="sws"></span></label>
       </div>
     </div>
     <button style="width:100%;padding:12px;border-radius:12px;border:none;background:var(--grad);color:#fff;font-size:14px;font-weight:500;margin-top:4px" onclick="spClose()">完成</button>
@@ -589,7 +589,7 @@ a{color:var(--accent);}
         → SSE (same as above) OR JSON {response,...}
    POST /api/chat/interrupt    body: {session}   → {success}
         → {success, text, engine?, message}
-   GET  /api/settings          → full settings object (categories: storage,appearance,ai,proxy,skills)
+   GET  /api/settings          → full settings object (categories: storage,appearance,ai,proxy)
    POST /api/settings          body: {category, key, value}  → {success}
    ==================================================== */
 

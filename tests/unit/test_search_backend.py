@@ -3,7 +3,7 @@ from __future__ import annotations
 
 
 def test_search_backend_extracts_duckduckgo_results(monkeypatch):
-    from web import search_backend
+    import web.knowledge.search_backend as search_backend
 
     class _Response:
         text = """
@@ -34,9 +34,9 @@ def test_search_backend_extracts_duckduckgo_results(monkeypatch):
 
 
 def test_web_searcher_synthesizes_retrieved_sources(monkeypatch):
-    import web.search_backend
+    import web.knowledge.search_backend as canonical_search_backend
     from app.core.llm import provider_factory
-    from web.web_searcher import WebSearcher
+    from web.knowledge.web_searcher import WebSearcher
 
     sources = [
         {
@@ -53,7 +53,7 @@ def test_web_searcher_synthesizes_retrieved_sources(monkeypatch):
             assert "Gold is 100" in kwargs["prompt"]
             return {"content": "当前金价为 100。[1]"}
 
-    monkeypatch.setattr(web.search_backend, "search_web", lambda query: sources)
+    monkeypatch.setattr(canonical_search_backend, "search_web", lambda query: sources)
     monkeypatch.setattr(
         provider_factory, "get_llm_provider", lambda **kwargs: _Provider()
     )

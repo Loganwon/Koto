@@ -288,6 +288,11 @@ def _mount_docx(page, html: str, base_url: str, opts: dict | None = None) -> Non
 def _open_docx_via_file_input(page, base_url: str, docx_path: str) -> None:
     """Open a DOCX through the real unified workspace file input flow."""
     page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => document.documentElement.dataset.kotoWorkspaceRuntime === 'ready'",
+        timeout=30_000,
+    )
+    page.locator("#wa-file-input").wait_for(state="attached", timeout=10_000)
     page.locator("#wa-file-input").set_input_files(docx_path)
     page.wait_for_selector(
         "#wa-docx-editor .ProseMirror", state="visible", timeout=60_000
@@ -393,23 +398,18 @@ class TestHeaderFooter:
         )
 
     def test_footer_element_in_dom(self, e2e_page, e2e_base_url, docx_html_from_api):
-        """Footer paragraphs must have the koto-footer class in DOM.
-        Skipped when the test doc has no footer section (same as backend test)."""
-        _mount_docx(e2e_page, docx_html_from_api, e2e_base_url)
+        """Footer paragraph classes must survive the TipTap parse cycle."""
+        html = docx_html_from_api + '<p class="koto-footer">Footer Probe</p>'
+        _mount_docx(e2e_page, html, e2e_base_url)
         count = e2e_page.locator(".koto-footer").count()
-        if count == 0:
-            pytest.skip(
-                "Document has no footer section — koto-footer class not present"
-            )
         assert count > 0
 
     def test_header_is_not_display_none(
         self, e2e_page, e2e_base_url, docx_html_from_api
     ):
         """First koto-header element must not be hidden."""
-        _mount_docx(e2e_page, docx_html_from_api, e2e_base_url)
-        if e2e_page.locator(".koto-header").count() == 0:
-            pytest.skip("No .koto-header — covered by test_header_element_in_dom")
+        html = '<p class="koto-header">Header Probe</p>' + docx_html_from_api
+        _mount_docx(e2e_page, html, e2e_base_url)
         # Use computed style so the check is robust against Playwright's
         # is_visible() stricter bounding-box requirement.
         hidden = e2e_page.evaluate("""() => {
@@ -1379,9 +1379,8 @@ class TestScreenshots:
         Should show the header text styled as it is in Word.
         """
         self._ensure_dir()
-        _mount_docx(e2e_page, docx_html_from_api, e2e_base_url)
-        if e2e_page.locator(".koto-header").count() == 0:
-            pytest.skip("No .koto-header elements")
+        html = '<p class="koto-header">Header Probe</p>' + docx_html_from_api
+        _mount_docx(e2e_page, html, e2e_base_url)
         # Scroll the header element into view via JS (may be outside initial viewport)
         e2e_page.evaluate("""() => {
             const el = document.querySelector('.koto-header');

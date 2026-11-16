@@ -1,7 +1,7 @@
 /**
  * Shared HTML sanitization — single source of truth for escHtml / escapeHtml.
  *
- * Previously duplicated across 10+ files (main.ts, settings.ts, skill-*.ts, etc.).
+ * Previously duplicated across many feature modules.
  * All callers should import from here to avoid drift.
  */
 

@@ -19,7 +19,6 @@ def handle_research(
     start_time,
     model_id,
     system_instruction,
-    context_info,
     _rag_context_block,
     client,
     session_manager,
@@ -102,11 +101,6 @@ def handle_research(
 - 内容全面且有深度
 - 适当使用图表和示例说明"""
 
-    _research_skill = (context_info or {}).get("skill_prompt")
-    if _research_skill:
-        research_instruction += (
-            f"\n\n[用户期望的输出重点] {_research_skill}"
-        )
     if _rag_context_block:
         research_instruction += (
             f"\n\n[📚 知识库参考资料]\n{_rag_context_block}"
@@ -128,7 +122,7 @@ def handle_research(
         else:
             yield f"data: {json.dumps({'type': 'progress', 'message': '📊 正在进行深度分析...', 'detail': f'{research_model} 正在思考，可能需要30-90秒'})}{newline}{newline}"
 
-            response_stream = client.models.generate_content_stream(
+            response_stream = client.generate_content_stream(
                 model=research_model,
                 contents=effective_input,
                 config=types.GenerateContentConfig(
@@ -209,7 +203,7 @@ def handle_research(
                 newline = "\n"
                 yield f"data: {json.dumps({'type': 'progress', 'message': '⚠️ 服务繁忙，正在使用 DeepSeek 快速重试...', 'detail': ''})}{newline}{newline}"
 
-                response_stream = client.models.generate_content_stream(
+                response_stream = client.generate_content_stream(
                     model="deepseek-chat",  # was gemini-2.5-flash
                     contents=effective_input,
                     config=types.GenerateContentConfig(

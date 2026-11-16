@@ -1,8 +1,10 @@
+import { getFeatureRegistry } from '../shared/feature-registry';
 /**
  * Application Framework — multi-window app shell
  */
 
 import { csrfFetch } from '../shared/csrf';
+import { appendToUiPortal, getVisualViewportBounds, placeFixedInViewport } from '../shared/ui-scale';
 
 export interface AppFrameworkConfig {
   name: string;
@@ -240,13 +242,13 @@ export class AppWindow {
     const offsetX = Math.random() * 100 - 50;
     const offsetY = Math.random() * 100 - 50;
 
-    const x = window.innerWidth - 450 + offsetX;
-    const y = 80 + offsetY;
-
-    this.element.style.left = Math.max(0, x) + 'px';
-    this.element.style.top = Math.max(0, y) + 'px';
     this.element.style.width = (this.config.width || 450) + 'px';
     this.element.style.height = (this.config.height || 400) + 'px';
+    const viewport = getVisualViewportBounds();
+    const paintedWidth = this.element.getBoundingClientRect().width;
+    const x = viewport.right - paintedWidth - 24 + offsetX;
+    const y = viewport.top + 80 + offsetY;
+    placeFixedInViewport(this.element, x, y, 8);
   }
 
   setupDragAndDrop(): void {
@@ -262,8 +264,12 @@ export class AppWindow {
 
       const onMouseMove = (moveEvent: MouseEvent) => {
         if (this.isDragging) {
-          this.element.style.left = (moveEvent.clientX - this.dragOffsetX) + 'px';
-          this.element.style.top = (moveEvent.clientY - this.dragOffsetY) + 'px';
+          placeFixedInViewport(
+            this.element,
+            moveEvent.clientX - this.dragOffsetX,
+            moveEvent.clientY - this.dragOffsetY,
+            4,
+          );
         }
       };
 
@@ -289,7 +295,7 @@ export class AppWindow {
     this.isMinimized = !this.isMinimized;
     this.element.classList.toggle('minimized');
 
-    const framework = (window as any).appFramework;
+    const framework = getFeatureRegistry().appFramework;
     if (framework) {
       framework.updateTaskbarState(this.appId);
     }
@@ -311,7 +317,7 @@ export class AppWindow {
 
   close(): void {
     this.element.remove();
-    const framework = (window as any).appFramework as AppFramework;
+    const framework = getFeatureRegistry().appFramework as AppFramework;
     if (framework) {
       framework.closeApp(this.appId);
     }
@@ -506,8 +512,8 @@ export class NotesApp {
     }
 
     try {
-      const response = await csrfFetch('/api/notes/add', {
-        method: 'POST',
+      const response = await csrfFetch(noteId ? `/api/notes/${encodeURIComponent(noteId)}` : '/api/notes/add', {
+        method: noteId ? 'PUT' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content, category, tags }),
       });
@@ -591,7 +597,7 @@ export class NotesApp {
       animation: slideIn 0.3s ease;
     `;
     notification.textContent = message;
-    document.body.appendChild(notification);
+    appendToUiPortal(notification);
 
     setTimeout(() => {
       notification.style.animation = 'slideOut 0.3s ease';
@@ -820,7 +826,7 @@ export class ScheduleApp {
       animation: slideIn 0.3s ease;
     `;
     notification.textContent = message;
-    document.body.appendChild(notification);
+    appendToUiPortal(notification);
 
     setTimeout(() => {
       notification.style.animation = 'slideOut 0.3s ease';
@@ -845,7 +851,7 @@ export function createAppFramework(): AppFramework {
 
 document.addEventListener('DOMContentLoaded', () => {
   const framework = new AppFramework();
-  (window as any).appFramework = framework;
+  getFeatureRegistry().appFramework = framework;
 
   framework.registerApp('notes', {
     name: '笔记',
@@ -869,8 +875,12 @@ document.addEventListener('DOMContentLoaded', () => {
     },
   });
 
-  (window as any).openScheduleApp = function () {
-    (window as any).appFramework.openApp('schedule');
+  getFeatureRegistry().openNotesApp = function () {
+    getFeatureRegistry().appFramework.openApp('notes');
+  };
+
+  getFeatureRegistry().openScheduleApp = function () {
+    getFeatureRegistry().appFramework.openApp('schedule');
   };
 
   // App Framework initialized

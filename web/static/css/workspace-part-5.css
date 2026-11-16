@@ -1,0 +1,1702 @@
+.koto-docx-comment-edit:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 16%, transparent);
+    }
+
+.wa-proposal-note {
+      display: flex;
+      gap: 4px;
+      align-items: flex-start;
+      color: inherit;
+      max-width: calc(var(--wa-review-rail-width, 220px) - 40px);
+    }
+
+.wa-proposal-note-label {
+      flex-shrink: 0;
+      font-weight: 700;
+    }
+
+.wa-proposal-note-text {
+      min-width: 0;
+      max-width: calc(var(--wa-review-rail-width, 220px) - 52px);
+      word-break: break-word;
+      overflow-wrap: anywhere;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      overflow: hidden;
+    }
+
+.wa-proposal-edit {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      width: 100%;
+      min-width: 0;
+    }
+
+.wa-proposal-edit-textarea {
+      width: 100%;
+      min-height: 74px;
+      resize: vertical;
+      border: 1px solid rgba(37, 99, 235, 0.28);
+      background: #ffffff;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 8px 9px;
+      font-size: 12px;
+      line-height: 1.45;
+      font-family: inherit;
+      box-sizing: border-box;
+    }
+
+.wa-proposal-edit-textarea:focus {
+      outline: none;
+      border-color: #2563eb;
+      box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    }
+
+.wa-review-anchor-link {
+      display: none;
+    }
+
+#wa-review-selection-launcher {
+      position: absolute;
+      left: 0;
+      top: 0;
+      z-index: var(--z-debug-overlay);
+      display: none;
+      pointer-events: none;
+    }
+
+#wa-review-selection-launcher.is-visible {
+      display: block;
+    }
+
+.wa-review-selection-box,
+    .wa-review-composer-card {
+      display: flex;
+      flex-wrap: nowrap;
+      align-items: center;
+      gap: 8px;
+      padding: 7px 8px;
+      border: 1px solid color-mix(in srgb, var(--ai-border) 84%, transparent);
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, var(--bg-secondary, #f7f8fb) 4%);
+      box-shadow: 0 14px 30px rgba(15, 23, 42, 0.12);
+      pointer-events: auto;
+    }
+
+.wa-review-selection-box {
+      width: 100%;
+      max-width: min(420px, calc(var(--koto-layout-width, 100vw) - 20px));
+      min-height: 42px;
+      box-sizing: border-box;
+    }
+
+.wa-review-selection-kicker {
+      width: 28px;
+      height: 28px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 10%, #ffffff);
+      border: 1px solid color-mix(in srgb, var(--accent) 18%, transparent);
+      flex: 0 0 auto;
+    }
+
+.wa-review-selection-copy {
+      min-width: 0;
+      flex: 1 1 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+    }
+
+.wa-review-selection-actions {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+.wa-review-selection-title {
+      color: var(--text);
+      font-size: 11.5px;
+      font-weight: 700;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+.wa-review-selection-subtitle {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      color: var(--text-muted);
+      font-size: 10.5px;
+      font-weight: 500;
+      line-height: 1.35;
+    }
+
+.wa-review-selection-add {
+      border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      min-width: 58px;
+      height: 28px;
+      padding: 0 9px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 5px;
+      font-size: 11.5px;
+      font-weight: 650;
+      cursor: pointer;
+      pointer-events: auto;
+      flex-shrink: 0;
+      line-height: 1;
+      white-space: nowrap;
+      writing-mode: horizontal-tb;
+      text-orientation: mixed;
+      box-shadow: 0 5px 12px color-mix(in srgb, var(--accent) 20%, transparent);
+      transition: background 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease;
+    }
+
+.wa-review-selection-add svg {
+      flex-shrink: 0;
+    }
+
+.wa-review-selection-add:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+      transform: translateY(-1px);
+    }
+
+.wa-review-selection-add:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+    }
+
+.wa-review-selection-revise {
+      border-color: rgba(15, 118, 110, 0.20);
+      background: rgba(15, 118, 110, 0.08);
+      color: #0f766e;
+      box-shadow: none;
+    }
+
+.wa-review-selection-revise:hover {
+      background: rgba(15, 118, 110, 0.14);
+      border-color: rgba(15, 118, 110, 0.28);
+      color: #0f766e;
+    }
+
+.wa-review-selection-revise:focus-visible {
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.14);
+    }
+
+/* Focused: solid bold connector */
+    /* Hover: lift and slight shift to right (WPS feel) */
+    /* Focused (active) card */
+    /* Resolved / accepted / rejected — muted */
+    /* Draft state */
+    /* Thread reply — indented */
+    /* Dot at the connector terminus */
+    /* Focused dot — brighter */
+    /* Focused: reveal full comment text */
+    .koto-comment-anchor {
+      background: rgba(0, 122, 255, 0.06);
+      outline: none;
+      border-radius: 3px;
+      transition: background 0.14s;
+    }
+
+/* WPS-style DOCX review rail. The single live implementation is
+       #wa-review-shell mounted inside #wa-docx-editor. */
+    .koto-doc-page {
+      position: relative;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx {
+      position: absolute;
+      inset: 0 0 26px 0;
+      min-height: 0;
+      max-height: none;
+      margin: 0;
+      border: 0;
+      background: transparent;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 14;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .koto-docx-comment-layer {
+      position: absolute;
+      inset: 0 auto 0 0;
+      display: block;
+      flex: none;
+      overflow: visible;
+      padding: 0;
+      pointer-events: none;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-connector-layer {
+      position: absolute;
+      inset: 0;
+      overflow: visible;
+      pointer-events: none;
+      display: none;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-layer {
+      position: absolute;
+      inset: 0;
+      overflow: visible;
+      pointer-events: none;
+      display: block;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-rect {
+      fill: rgba(0, 122, 255, 0.16);
+      stroke: rgba(0, 122, 255, 0.26);
+      stroke-width: 1;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-rect.is-focused {
+      fill: rgba(0, 122, 255, 0.26);
+      stroke: rgba(0, 122, 255, 0.42);
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-anchor-highlight-rect.is-proposal {
+      fill: rgba(15, 118, 110, 0.16);
+      stroke: rgba(15, 118, 110, 0.28);
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-review-connector-path {
+      fill: none;
+      stroke: rgba(148, 163, 184, 0.64);
+      stroke-width: 0.95;
+      stroke-dasharray: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+#wa-docx-editor > #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card,
+    #wa-docx-editor > #wa-review-shell.wa-review-shell-docx .wa-proposal-card {
+      position: absolute;
+      width: var(--wa-review-rail-width, 240px);
+      max-width: var(--wa-review-rail-width, 240px);
+      pointer-events: auto;
+    }
+
+[data-comment-ui="wps"] .koto-docx-comment-card {
+      width: var(--wa-review-rail-width, 240px);
+      max-width: var(--wa-review-rail-width, 240px);
+      border-color: var(--ai-border);
+      border-left-color: var(--accent);
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, var(--accent) 4%);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    }
+
+[data-comment-ui="wps"] .koto-docx-comment-badge {
+      background: color-mix(in srgb, var(--accent) 12%, #ffffff);
+      color: var(--accent);
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card {
+      min-height: var(--wa-review-card-anchor-min-height, 54px);
+      padding: 4px 6px;
+      gap: 3px;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      overflow: hidden;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-head {
+      flex: 0 1 auto;
+      min-width: 0;
+      justify-content: flex-start;
+      align-items: center;
+      gap: 2px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card {
+      position: absolute;
+      min-height: var(--wa-review-card-anchor-min-height, 72px);
+      padding: 9px 10px;
+      gap: 6px;
+      border-radius: 8px;
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      justify-content: flex-start;
+      overflow: hidden;
+      transition: box-shadow 0.14s ease, border-color 0.14s ease, transform 0.14s ease;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-head {
+      position: relative;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 6px;
+      min-height: 20px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-title-group,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-head-end {
+      min-width: 0;
+      gap: 2px;
+      flex-wrap: nowrap;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-title-group {
+      align-items: center;
+      gap: 6px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-head-end {
+      justify-content: flex-end;
+      align-items: center;
+      gap: 4px;
+      margin-left: auto;
+      min-height: 18px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-badge {
+      width: 20px;
+      height: 20px;
+      padding: 0;
+      font-size: 9.5px;
+      font-weight: 700;
+      letter-spacing: 0.03em;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-author {
+      max-width: 104px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11.5px;
+      font-weight: 600;
+      line-height: 1.24;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-meta {
+      max-width: none;
+      font-size: 10px;
+      line-height: 1.24;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-body {
+      display: -webkit-box;
+      flex: 1 1 auto;
+      min-width: 0;
+      max-width: none;
+      font-size: 12.5px;
+      line-height: 1.42;
+      white-space: normal;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-draft-hint {
+      display: none;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-review-anchor-inline {
+      display: inline-flex;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      padding: 2px 6px;
+      border: 1px solid color-mix(in srgb, var(--accent) 16%, transparent);
+      border-radius: 6px;
+      background: color-mix(in srgb, var(--accent) 7%, #ffffff);
+      color: var(--accent);
+      font-size: 9px;
+      font-weight: 600;
+      transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-inline-action {
+      display: inline-flex;
+      visibility: hidden;
+      opacity: 0;
+      pointer-events: none;
+      padding: 2px 5px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: #64748b;
+      font-size: 9px;
+      font-weight: 600;
+      transition: opacity 0.12s ease, color 0.12s ease, background 0.12s ease, border-color 0.12s ease;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover .wa-review-anchor-inline,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused .wa-review-anchor-inline,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .wa-review-anchor-inline {
+      visibility: visible;
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover .koto-docx-comment-inline-action,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused .koto-docx-comment-inline-action,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-inline-action {
+      visibility: visible;
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-inline-action:hover {
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 7%, #ffffff);
+      border-color: color-mix(in srgb, var(--accent) 14%, transparent);
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card {
+      border-color: var(--ai-border);
+      border-left: 3px solid #0f766e;
+      border-radius: 8px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 96%, #0f766e 4%);
+      box-shadow: 0 8px 20px rgba(15, 23, 42, 0.06);
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-header {
+      flex: 0 0 auto;
+      min-width: 0;
+      padding: 0;
+      background: transparent;
+      border-bottom: 0;
+      gap: 2px;
+      font-size: 9px;
+      white-space: nowrap;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-badge {
+      padding: 2px 6px;
+      font-size: 9.5px;
+      border-radius: 999px;
+      letter-spacing: 0;
+      background: rgba(15, 118, 110, 0.10);
+      color: #0f766e;
+      flex-shrink: 0;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-diff {
+      flex: 1 1 auto;
+      min-width: 0;
+      padding: 0;
+      font-size: 12.75px;
+      line-height: 1.12;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-note {
+      min-width: 0;
+      max-width: none;
+      gap: 2px;
+      align-items: center;
+      white-space: nowrap;
+      overflow: hidden;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-note-label {
+      font-size: 12.75px;
+      line-height: 1.12;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-note-text {
+      max-width: none;
+      font-size: 12.75px;
+      line-height: 1.12;
+      display: -webkit-box;
+      -webkit-box-orient: vertical;
+      -webkit-line-clamp: 2;
+      line-clamp: 2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing {
+      flex-direction: column;
+      align-items: stretch;
+      overflow: visible;
+      z-index: 4;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-header {
+      align-items: center;
+      white-space: normal;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-edit {
+      width: 100%;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-edit-textarea {
+      min-height: 80px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions {
+      flex: 0 0 auto;
+      align-self: center;
+      padding: 0;
+      border-top: 0;
+      gap: 2px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions:empty {
+      display: none;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn {
+      flex: 0 0 auto;
+      min-width: 0;
+      width: auto;
+      min-height: 0;
+      padding: 2px 5px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 84%, transparent);
+      box-shadow: none;
+      opacity: 0.84;
+      font-size: 0;
+      line-height: 1;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn:hover {
+      background: color-mix(in srgb, var(--hover) 80%, #ffffff);
+      opacity: 1;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn.accept.small {
+      color: #16a34a;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn.reject.small {
+      color: #dc2626;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn.accept.small::before {
+      content: "✓";
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-actions .wa-proposal-btn.reject.small::before {
+      content: "×";
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-actions {
+      align-self: flex-start;
+      gap: 6px;
+      padding-top: 2px;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-actions .wa-proposal-btn {
+      font-size: 11px;
+      min-height: 24px;
+      padding: 3px 9px;
+      border: 1px solid rgba(148, 163, 184, 0.28);
+      border-radius: 6px;
+      background: #ffffff;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-editing .wa-proposal-actions .wa-proposal-btn::before {
+      content: none;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused {
+      padding: 7px 8px;
+      align-items: flex-start;
+      overflow: visible;
+      border-color: color-mix(in srgb, var(--accent) 28%, var(--ai-border));
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 8%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
+      z-index: 3;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused {
+      padding: 7px 8px 8px;
+      align-items: stretch;
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
+      border-left-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
+      transform: none;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded {
+      padding: 8px 9px;
+      align-items: stretch;
+      overflow: visible;
+      border-color: color-mix(in srgb, var(--accent) 42%, var(--ai-border));
+      border-left-color: var(--accent);
+      box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 12%, transparent), 0 12px 24px rgba(15, 23, 42, 0.08);
+      z-index: 4;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused {
+      border-color: rgba(15, 118, 110, 0.34);
+      border-left-color: #0f766e;
+      box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.10), 0 12px 24px rgba(15, 23, 42, 0.08);
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-head {
+      align-items: flex-start;
+      white-space: normal;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-title-group,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-head-end {
+      flex-wrap: wrap;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-author,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-meta {
+      max-width: none;
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-docx-comment-body {
+      display: block;
+      white-space: pre-wrap;
+      overflow: visible;
+      text-overflow: clip;
+      -webkit-line-clamp: unset;
+      line-clamp: unset;
+      line-height: 1.42;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-hover-expanded .koto-comment-anchor,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card:hover .koto-comment-anchor,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-focused .koto-comment-anchor {
+      display: block;
+      white-space: pre-wrap;
+      overflow: visible;
+      text-overflow: clip;
+      -webkit-line-clamp: unset;
+      line-clamp: unset;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover .wa-proposal-header,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused .wa-proposal-header {
+      align-items: flex-start;
+      white-space: normal;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover .wa-proposal-note,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused .wa-proposal-note,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover .wa-proposal-note-text,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused .wa-proposal-note-text {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
+      -webkit-line-clamp: unset;
+      line-clamp: unset;
+      display: block;
+    }
+
+#wa-review-shell.wa-review-shell-docx .wa-proposal-card:hover .wa-proposal-note,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.focused .wa-proposal-note {
+      align-items: flex-start;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded {
+      max-height: var(--wa-review-card-page-max-height, none);
+      overflow: hidden;
+    }
+
+#wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded:hover,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded.is-focused,
+    #wa-review-shell.wa-review-shell-docx .koto-docx-comment-card.is-page-bounded.is-hover-expanded,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded:hover,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded.focused,
+    #wa-review-shell.wa-review-shell-docx .wa-proposal-card.is-page-bounded.is-editing {
+      overflow: auto !important;
+    }
+
+/* ── PEMO-style Welcome Card ── */
+
+
+#wa-task-workbench:not([hidden]) ~ #wa-ai-messages #wa-ai-welcome,
+    #wa-artifact-panel:not([hidden]) ~ #wa-ai-messages #wa-ai-welcome,
+    #wa-review-shell:not([style*="display:none"]) ~ #wa-ai-messages #wa-ai-welcome {
+      display: none !important;
+    }
+
+
+
+
+
+
+
+
+
+.wa-scenario-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+      width: 100%;
+    }
+
+.wa-scenario-card {
+      background: color-mix(in srgb, var(--ai-surface) 92%, white 8%);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px 14px;
+      cursor: pointer;
+      font-size: 12px;
+      color: var(--text);
+      text-align: left;
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+      line-height: 1.5;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-height: 0;
+    }
+
+.wa-scenario-card:hover {
+      border-color: var(--accent);
+      box-shadow: 0 4px 16px color-mix(in srgb, var(--accent) 12%, transparent);
+      transform: translateY(-2px);
+    }
+
+.wa-scenario-card .scenario-icon { flex-shrink: 0; }
+
+.wa-scenario-card .scenario-title {
+      font-size: 12.5px;
+      font-weight: 600;
+      color: var(--text);
+      line-height: 1.4;
+    }
+
+.wa-scenario-card .scenario-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.45;
+    }
+
+.wa-msg {
+      max-width: 96%;
+      padding: 12px 16px;
+      border-radius: 16px;
+      font-size: 13.5px;
+      line-height: 1.65;
+      word-break: break-word;
+    }
+
+/* User bubble — right-aligned, solid accent */
+    .wa-msg.user {
+      align-self: flex-end;
+      background: var(--accent);
+      color: #fff;
+      border-bottom-right-radius: 4px;
+      box-shadow: 0 1px 6px var(--accent-medium);
+      font-size: 13.5px;
+      max-width: 85%;
+    }
+
+/* Quote block inside user bubble */
+    .wa-msg-quote {
+      border-left: 3px solid var(--border);
+      padding-left: 9px;
+      margin-bottom: 7px;
+      font-style: italic;
+      font-size: 11.5px;
+      opacity: 0.85;
+      line-height: 1.45;
+      overflow: hidden;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
+    }
+
+.wa-msg-files-note {
+      font-size: 10.5px;
+      opacity: 0.7;
+      margin-bottom: 4px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+/* AI bubble — clean, no border, subtle background */
+    .wa-msg.ai {
+      align-self: flex-start;
+      background: var(--ai-surface);
+      color: var(--text);
+      border: none;
+      border-bottom-left-radius: 4px;
+      position: relative;
+      max-width: 96%;
+      padding: 14px 18px;
+    }
+
+/* Removed star decorator — ChatGPT-clean style */
+
+    /* Markdown inside AI bubble */
+    .wa-msg.ai p { margin: 0 0 7px; }
+
+.wa-msg.ai p:last-child { margin-bottom: 0; }
+
+.wa-msg.ai h1, .wa-msg.ai h2, .wa-msg.ai h3,
+    .wa-msg.ai h4, .wa-msg.ai h5, .wa-msg.ai h6 {
+      margin: 10px 0 5px;
+      font-weight: 700;
+      line-height: 1.3;
+      color: var(--text);
+    }
+
+.wa-msg.ai h1 { font-size: 15px; }
+
+.wa-msg.ai h2 { font-size: 14px; }
+
+.wa-msg.ai h3, .wa-msg.ai h4 { font-size: 13px; }
+
+.wa-msg.ai ul, .wa-msg.ai ol {
+      padding-left: 18px;
+      margin: 5px 0;
+    }
+
+.wa-msg.ai li { margin: 3px 0; }
+
+.wa-msg.ai strong { color: var(--accent); font-weight: 700; }
+
+.wa-msg.ai em { color: var(--text-muted); }
+
+.wa-msg.ai code {
+      background: var(--code-bg);
+      border-radius: 5px;
+      padding: 2px 6px;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 11.5px;
+      color: var(--accent);
+    }
+
+.wa-msg.ai pre {
+      background: var(--code-bg);
+      border: 1px solid var(--ai-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin: 8px 0;
+      overflow-x: auto;
+    }
+
+.wa-msg.ai pre code {
+      background: transparent;
+      padding: 0;
+      font-size: 11.5px;
+      color: var(--code-text);
+    }
+
+.wa-msg.ai blockquote {
+      border-left: 3px solid var(--accent);
+      margin: 7px 0;
+      padding: 5px 12px;
+      color: var(--text-muted);
+      font-style: italic;
+    }
+
+.wa-msg.ai table {
+      border-collapse: collapse;
+      width: 100%;
+      margin: 8px 0;
+      font-size: 12px;
+    }
+
+.wa-msg.ai th, .wa-msg.ai td {
+      border: 1px solid var(--ai-border);
+      padding: 5px 9px;
+      text-align: left;
+    }
+
+.wa-msg.ai th { background: var(--hover); font-weight: 700; }
+
+.wa-msg.ai a { color: var(--accent); text-decoration: underline; }
+
+.wa-msg.ai.streaming {
+      white-space: pre-wrap;
+    }
+
+.wa-msg.ai.streaming::after {
+      content: "▌";
+      animation: blink 0.8s step-end infinite;
+      color: var(--accent);
+    }
+
+.wa-msg-context-hint {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      padding: 4px 10px;
+      background: var(--ai-surface);
+      border-radius: 6px;
+      border-left: 2px solid var(--accent);
+      align-self: flex-start;
+      max-width: 90%;
+    }
+
+/* Tool call notification */
+    .wa-tool-notification {
+      align-self: center;
+      background: rgba(62, 200, 122, 0.1);
+      border: 1px solid rgba(62,200,122,0.3);
+      color: var(--success);
+      border-radius: 8px;
+      padding: 5px 14px;
+      font-size: 11px;
+    }
+
+/* Chat-mode preview */
+    .wa-tool-preview {
+      max-width: 95%;
+      overflow-x: auto;
+    }
+
+.wa-tool-preview img { max-width: 100%; border-radius: 8px; display: block; }
+
+/* Context bar — unified selection + file context indicator */
+    #wa-context-bar {
+      display: none;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      margin-bottom: 0;
+      background: var(--surface2, #F5F5F7);
+      border-radius: 8px;
+      font-size: 12px;
+      color: var(--text-muted, #6E6E73);
+      line-height: 1.4;
+    }
+
+#wa-context-bar b { color: var(--text, #1D1D1F); font-weight: 600; }
+
+.ctx-bar-sel { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; white-space: nowrap; }
+
+.ctx-bar-sel b { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.ctx-bar-quote { width: 3px; height: 14px; background: var(--accent, #5b8def); border-radius: 2px; flex-shrink: 0; }
+
+.ctx-bar-source { color: var(--text-muted, #6E6E73); white-space: nowrap; }
+
+.ctx-bar-files { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+
+.ctx-bar-current { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+
+.ctx-bar-current.active { color: var(--text, #1D1D1F); }
+
+.ctx-bar-action {
+      background: rgba(91, 141, 239, 0.08);
+      border: 1px solid rgba(91, 141, 239, 0.22);
+      color: var(--text-muted, #4b5563);
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 11px;
+      line-height: 1.5;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+
+.ctx-bar-action:hover { color: var(--text, #1D1D1F); border-color: rgba(91, 141, 239, 0.38); }
+
+.ctx-bar-action.active {
+      background: rgba(91, 141, 239, 0.14);
+      border-color: rgba(91, 141, 239, 0.45);
+      color: var(--text, #1D1D1F);
+    }
+
+.ctx-bar-sep { color: var(--text-muted, #666); font-size: 10px; }
+
+.ctx-bar-clear {
+      background: none; border: none; color: var(--text-muted, #888); cursor: pointer;
+      font-size: 14px; padding: 0 2px; line-height: 1; opacity: 0.7;
+    }
+
+.ctx-bar-clear:hover { opacity: 1; color: var(--text); }
+
+.ctx-bar-clear-selection {
+      flex: 0 0 auto;
+      margin-left: 4px;
+      padding: 2px 6px;
+      border: 1px solid var(--border, rgba(0,0,0,.12));
+      border-radius: 6px;
+      background: var(--surface, #fff);
+      color: var(--text-muted, #6E6E73);
+      font-size: 12px;
+      line-height: 1.35;
+      opacity: 1;
+    }
+
+.ctx-bar-clear-selection:hover {
+      border-color: var(--accent, #5b8def);
+      color: var(--text, #1D1D1F);
+      background: rgba(91, 141, 239, 0.08);
+    }
+
+.ctx-bar-clear-files {
+      flex: 0 0 auto;
+      margin-left: 4px;
+      padding: 2px 6px;
+      border: 1px solid var(--border, rgba(0,0,0,.12));
+      border-radius: 6px;
+      background: var(--surface, #fff);
+      color: var(--text-muted, #6E6E73);
+      font-size: 12px;
+      line-height: 1.35;
+      opacity: 1;
+    }
+
+.ctx-bar-clear-files:hover {
+      border-color: var(--danger, #d92d20);
+      color: var(--danger, #d92d20);
+      background: rgba(217, 45, 32, 0.06);
+    }
+
+/* ── Chart image result ── */
+    #wa-canvas-body.wa-drop-active {
+      outline: 2px dashed var(--accent, #4b9eff);
+      outline-offset: -4px;
+      background: rgba(75, 158, 255, 0.04);
+    }
+
+.wa-chart-code details {
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+.wa-chart-code details summary {
+      cursor: pointer;
+      padding: 4px 0;
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+.wa-chart-code details pre {
+      background: var(--code-bg);
+      border: 1px solid var(--ai-border);
+      border-radius: 4px;
+      padding: 8px;
+      margin: 4px 0 0;
+      font-size: 11px;
+      color: var(--code-text);
+      overflow-x: auto;
+      font-family: Consolas, monospace;
+    }
+
+.wa-code-block {
+      font-size: 11px;
+      background: var(--code-bg);
+      color: var(--code-text);
+      padding: 8px;
+      border-radius: 4px;
+      white-space: pre-wrap;
+      font-family: Consolas, monospace;
+    }
+
+.wa-action-btn {
+      padding: 5px 12px;
+      font-size: 11px;
+      background: rgba(62,200,122,0.1);
+      border: 1px solid rgba(62,200,122,0.25);
+      border-radius: 8px;
+      color: var(--success);
+      cursor: pointer;
+      align-self: flex-start;
+      font-weight: 500;
+      transition: background 0.12s;
+    }
+
+.wa-action-btn:hover { background: rgba(62,200,122,0.2); }
+
+.wa-action-btn.secondary {
+      background: rgba(75,158,255,0.08);
+      border-color: rgba(75,158,255,0.25);
+      color: #4b9eff;
+    }
+
+.wa-action-btn.secondary:hover { background: rgba(75,158,255,0.18); }
+
+/* .wa-tooltip-count replaced by .wa-sel-count in new selection toolbar */
+
+    .wa-msg-quote-meta {
+      font-size: 11px;
+      color: var(--text-muted, #6E6E73);
+      margin-bottom: 6px;
+    }
+
+/* ── Display Mode Toggle (面板 | 内嵌) ── */
+    .wa-display-mode-toggle button {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      padding: 3px 6px;
+      cursor: pointer;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.15s;
+    }
+
+.wa-display-mode-toggle button.active {
+      background: var(--accent);
+      color: #fff;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+    }
+
+.wa-display-mode-toggle button:hover:not(.active) {
+      background: var(--surface-hover);
+      color: var(--text);
+    }
+
+/* ═══════════════════════════════
+       INLINE AI DIALOG (bottom of canvas)
+       ═══════════════════════════════ */
+    #wa-inline-ai {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      max-height: 340px;
+      display: flex;
+      flex-direction: column;
+      background: color-mix(in srgb, var(--ai-bg) 96%, transparent);
+      backdrop-filter: blur(16px) saturate(180%);
+      -webkit-backdrop-filter: blur(16px) saturate(180%);
+      border-top: 1px solid var(--ai-border);
+      border-radius: 12px 12px 0 0;
+      box-shadow: 0 -4px 24px rgba(0,0,0,0.08);
+      z-index: var(--z-dropdown);
+      overflow: hidden;
+    }
+
+.wa-iai-messages .wa-iai-msg {
+      margin-bottom: 6px;
+      padding: 6px 10px;
+      border-radius: 8px;
+      max-width: 100%;
+      animation: iai-fade 0.15s ease;
+    }
+
+.wa-iai-messages .wa-iai-msg.user {
+      background: var(--accent-subtle);
+      color: var(--text);
+      font-size: 12px;
+    }
+
+.wa-iai-messages .wa-iai-msg.ai {
+      background: var(--hover);
+      color: var(--text);
+    }
+
+.wa-iai-messages .wa-iai-msg.ai.streaming::after {
+      content: "▊";
+      animation: blink 0.8s infinite;
+      color: var(--accent);
+      margin-left: 2px;
+    }
+
+@keyframes iai-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+#wa-iai-selection-chip .chip-clear {
+      flex-shrink: 0;
+      background: transparent; border: none; color: var(--text-muted);
+      cursor: pointer; font-size: 14px; line-height: 1; padding: 0;
+    }
+
+.wa-iai-input-wrap {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--ai-border);
+      border-radius: 10px;
+      padding: 6px 8px;
+    }
+
+/* Canvas needs position:relative for inline AI absolute positioning */
+    #wa-canvas {
+      position: relative;
+    }
+
+/* ── Code block ── */
+    .wa-msg-code {
+      align-self: flex-start;
+      background: var(--code-bg);
+      border: 1px solid var(--ai-border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-family: "Cascadia Code", "Consolas", monospace;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      color: var(--code-text);
+      max-width: 95%;
+      overflow-x: auto;
+    }
+
+/* ── Chart result ── */
+    .wa-chart-result img {
+      max-width: 100%;
+      border-radius: 8px;
+      border: 1px solid var(--ai-border);
+      display: block;
+    }
+
+.wa-chart-result .wa-chart-caption {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 5px;
+      text-align: center;
+    }
+
+.wa-chart-result .wa-chart-download {
+      font-size: 11px;
+      color: var(--accent);
+      cursor: pointer;
+      text-align: center;
+      margin-top: 2px;
+      text-decoration: underline;
+    }
+
+/* ── File Summary Row ── */
+    .wa-file-item-wrap { display: contents; }
+
+.wa-file-summary-btn {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 12px;
+      padding: 0 3px;
+      opacity: 0;
+      transition: opacity 0.15s, transform 0.15s, color 0.15s;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+
+.wa-file-item:hover .wa-file-summary-btn { opacity: 0.6; }
+
+.wa-file-summary-btn:hover { opacity: 1 !important; color: var(--accent) !important; }
+
+.wa-file-summary-btn.open { opacity: 1; color: var(--accent); transform: rotate(90deg); }
+
+.wa-file-summary-row {
+      display: none;
+      padding: 7px 12px 7px 32px;
+      font-size: 11px;
+      color: var(--text-muted);
+      background: var(--hover);
+      border-bottom: 1px solid var(--border);
+      line-height: 1.55;
+    }
+
+.wa-file-summary-row.open { display: block; animation: fadeInDown 0.18s ease; }
+
+.wa-file-summary-row.loading { font-style: italic; opacity: 0.65; }
+
+@keyframes fadeInDown { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+
+/* ── Chart insert button ── */
+
+    /* ── AI image drag-to-doc hint overlay ── */
+    #wa-ai-img-drop-hint {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: var(--accent-subtle);
+      border: 2px dashed var(--accent);
+      border-radius: 6px;
+      z-index: var(--z-panel);
+      pointer-events: none;
+      transition: opacity 0.15s;
+    }
+
+#wa-ai-img-drop-hint.active { display: flex; pointer-events: all; cursor: copy; }
+
+#wa-ai-img-drop-hint span {
+      background: var(--surface2);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 15px;
+      font-weight: 600;
+      padding: 10px 22px;
+      border-radius: 8px;
+      box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+    }
+
+/* Draggable AI image cursor + drag badge */
+    .wa-ai-draggable-img {
+      cursor: grab;
+      transition: box-shadow 0.15s, transform 0.15s;
+    }
+
+.wa-ai-draggable-img:hover {
+      box-shadow: 0 0 0 2px var(--accent);
+      transform: scale(1.01);
+    }
+
+.wa-ai-draggable-img:active { cursor: grabbing; }
+
+/* CSS Custom Highlight API */
+    ::highlight(wa-pinned) { background-color: var(--accent-medium); }
+
+::highlight(wa-accepted-highlight) { background-color: rgba(16, 163, 127, 0.3); }
+
+::highlight(wa-docx-comment-anchor) { background-color: rgba(0, 122, 255, 0.12); }
+
+::highlight(wa-docx-comment-anchor-focus) { background-color: rgba(0, 122, 255, 0.2); }
+
+/* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+
+::-webkit-scrollbar-track { background: transparent; }
+
+::-webkit-scrollbar-thumb { background: var(--scrollbar); border-radius: 4px; }
+
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-hover); }
+
+/* ── Toast notification ── */
+    #wa-toast {
+      position: fixed;
+      bottom: 24px;
+      left: 50%;
+      transform: translateX(-50%) translateY(20px);
+      background: var(--surface);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border: 1px solid var(--border);
+      color: var(--text);
+      padding: 10px 22px;
+      border-radius: 12px;
+      font-size: 13px;
+      font-weight: 500;
+      z-index: var(--z-toast);
+      opacity: 0;
+      transition: opacity 0.28s, transform 0.32s cubic-bezier(0.34, 1.56, 0.64, 1);
+      pointer-events: none;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+#wa-toast.show {
+      opacity: 1;
+      transform: translateX(-50%) translateY(0);
+    }
+
+#wa-toast.success { border-color: var(--success); color: var(--success); }
+
+#wa-toast.error { border-color: var(--danger); color: var(--danger); }
+
+#wa-toast.info { border-color: var(--accent); color: var(--accent); }
+
+/* ── Chart prompt dialog ── */
+    #wa-chart-dialog {
+      position: fixed;
+      inset: 0;
+      z-index: var(--z-topmost-loading);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      background: rgba(15, 23, 42, 0.22);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+    }
+
+#wa-chart-dialog.open {
+      display: flex;
+    }
+
+#wa-chart-dialog .wa-dialog-box {
+      width: min(420px, calc(var(--koto-layout-width, 100vw) - 48px));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: 0 18px 50px rgba(15, 23, 42, 0.18);
+      padding: 18px;
+      animation: wa-dialog-in 0.2s cubic-bezier(0.2, 0, 0.2, 1);
+    }
+
+#wa-chart-dialog h3 {
+      margin: 0 0 10px;
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+#wa-chart-dialog textarea {
+      width: 100%;
+      min-height: 96px;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 10px 12px;
+      font: inherit;
+      color: var(--text);
+      background: var(--bg);
+    }
+
+#wa-chart-dialog .wa-dialog-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 12px;
+    }
+
+/* ── File-switch loading overlay ── */
+    #wa-canvas-loading {
+      position: absolute;
+      inset: 0;
+      background: color-mix(in srgb, var(--bg) 88%, transparent);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      z-index: var(--z-sticky);
+      backdrop-filter: blur(6px);
+      -webkit-backdrop-filter: blur(6px);
+    }
+
+.wa-loading-spinner {
+      width: 36px;
+      height: 36px;
+      border: 3px solid var(--accent-medium);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: wa-spin 0.7s linear infinite;
+    }
+
+.wa-loading-text {
+      color: var(--text-muted);
+      font-size: 13px;
+      letter-spacing: 0.02em;
+    }
+
+.wa-loading-cancel {
+      min-width: 92px;
+      min-height: 34px;
+      padding: 0 16px;
+      border: 1px solid var(--ui-border);
+      border-radius: 8px;
+      background: var(--ui-surface);
+      color: var(--text-main);
+      font: inherit;
+      cursor: pointer;
+    }
+
+.wa-loading-cancel:hover {
+      border-color: var(--ui-accent);
+      color: var(--ui-accent);
+    }
+
+/* Disable file list while loading */
+    #wa-files-list.loading {
+      opacity: 0.45;
+      pointer-events: none;
+    }
+
+/* ═══════════════════════════════════════════════════════════════
+   My Workspace: pinned files section
+   ═══════════════════════════════════════════════════════════════ */
+
+    .wa-myws-list {
+      max-height: 180px;
+      overflow-y: auto;
+      padding: 0;
+    }
+
+.wa-myws-list::-webkit-scrollbar { width: 4px; }
+
+.wa-myws-list::-webkit-scrollbar-thumb { background: rgba(121,121,121,0.4); border-radius: 2px; }
+
+.wa-myws-item {
+  content-visibility: auto;
+  contain-intrinsic-size: 32px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px 4px 14px;
+      font-size: 12px;
+      cursor: pointer;
+      color: var(--text);
+      transition: background 0.1s;
+      position: relative;
+    }
+
+.wa-myws-item:hover { background: var(--hover); }
+
+.wa-myws-item.active { background: var(--accent-subtle); }
+
+.wa-myws-item .wa-file-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.wa-myws-item .wa-myws-remove {
+      opacity: 0;
+      border: none;
+      background: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 14px;
+      padding: 0 4px;
+      transition: opacity 0.15s, color 0.15s;
+    }
+
+.wa-myws-item:hover .wa-myws-remove { opacity: 1; }
+
+.wa-myws-item .wa-myws-remove:hover { color: var(--danger); }
+
+/* Draggable file item style while dragging */
+    .wa-file-item[draggable="true"] { cursor: grab; }
+
+.wa-file-item.dragging { opacity: 0.4; }
+
+.wa-myws-empty {
+      padding: 12px 14px;
+      text-align: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+/* My Workspace drop target indicator */
+    .wa-myws-list.drag-over {
+      background: var(--accent-subtle);
+      outline: 1.5px dashed var(--accent);
+      outline-offset: -2px;
+      border-radius: 4px;
+    }
+
+.wa-session-list-drag-over {
+      outline: 1.5px dashed var(--accent);
+      outline-offset: -3px;
+      background: var(--accent-subtle);
+    }
+
+/* ═══════════════════════════════════════════════════════════════
+   AI Panel: multi-file context chips
+   ═══════════════════════════════════════════════════════════════ */
+
+    /* ═══════════════════════════════════════════════════════════════
+       AI Panel: analysis file list (redesigned rows)
+       ═══════════════════════════════════════════════════════════════ */
+    #wa-ai-file-chips {
+      padding: 10px 12px 12px;
+      border-bottom: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      background: var(--accent-subtle);
+      flex-shrink: 0;
+      margin-bottom: 10px;
+    }
+
+.wa-ai-file-chips-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 7px;
+    }
+
+.wa-multidoc-title {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+.wa-multidoc-title svg { opacity: 0.65; flex-shrink: 0; }
+
+.wa-multi-doc-badge {
+      display: inline-flex;
+      align-items: center;
+      background: var(--accent);
+      color: #fff;
+      font-size: 9px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 8px;
+      line-height: 1.6;
+    }
+
+.wa-multidoc-actions {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }
+
+.wa-ai-file-chips-header > button,
+    .wa-multidoc-actions > button {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 2px 6px;
+      border-radius: 3px;
+    }
+
+.wa-ai-file-chips-header > button:hover,
+    .wa-multidoc-actions > button:hover { background: var(--hover); color: var(--text); }
+
+/* File rows */
+    .wa-ctx-file-list {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      margin-bottom: 5px;
+    }
+
+#wa-ai-file-chip-list { /* alias */ }
+
+.wa-ctx-file-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 8px;
+      border-radius: 6px;
+      font-size: 12px;
+      color: var(--text);
+      background: var(--hover);
+      transition: background 0.15s;
+    }
+
+.wa-ctx-file-row:hover { background: var(--accent-subtle); }
+
+.wa-ctx-file-row.ai-target {
+      background: rgba(255,171,0,0.12);
+      border: 1px solid rgba(255,171,0,0.35);
+    }
+
+/* Loading shimmer */
+    .wa-ctx-file-row.loading { pointer-events: none; opacity: 0.65; }
+
+.wa-ctx-file-row.error {
+      background: rgba(239, 68, 68, 0.08);
+      border: 1px solid rgba(239, 68, 68, 0.22);
+    }

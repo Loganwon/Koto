@@ -4,25 +4,24 @@
 """
 OllamaLLMProvider
 =================
-A LLMProvider implementation for Ollama that plugs directly into UnifiedAgent.
+A LLMProvider implementation for Ollama used through KernelAgent's
+ProviderModelGateway.
 
-Because UnifiedAgent calls `SkillManager.inject_into_prompt()` on every turn
-*before* it calls `llm.generate_content()`, all active Skills are automatically
-included in the system_instruction passed here — no extra wiring needed.
+Prompt/context policy is owned by the Agent request adapter. This provider only
+translates the normalized model request and must not inject extension behavior.
 
 Tool calling
 ─────────────
-Passed through using Ollama's OpenAI-compatible tool format.  Works out of
-the box for models that support it (qwen3, qwen2.5, llama3.1, mistral-nemo…).
-If the model or Ollama version doesn't support tools, the payload is safely
-ignored and the agent falls back to plain-text parsing of tool requests.
+Passed through using Ollama's native function-call format. Tool execution
+requires a complete structured call and valid JSON arguments; plain assistant
+text is never interpreted as a tool request.
 
 Usage
 ─────
     from app.core.llm.ollama_llm_provider import OllamaLLMProvider
-    from app.core.agent.unified_agent import UnifiedAgent
+    from app.core.agent.kernel_agent import KernelAgent
 
-    agent = UnifiedAgent(
+    agent = KernelAgent(
         llm_provider=OllamaLLMProvider(model="qwen3:8b"),
         ...
     )
@@ -39,23 +38,11 @@ import urllib.request
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from app.core.llm.base import LLMProvider
+from app.core.llm.stream_control import watch_stream_cancellation
 
 logger = logging.getLogger(__name__)
 
 _OLLAMA_BASE_URL = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434")
-
-# ── Koto Skill 元认知前言 ────────────────────────────────────────────────────
-# 注入在 system prompt 最前面，让本地模型理解 Koto Skills 框架。
-# 只在确实有激活 Skills 时插入（通过检测 Skills 分隔符来判断）。
-_KOTO_SKILL_PREAMBLE = """\
-你正在 Koto AI 助手平台上运行。
-本系统消息中，以「## 🎯 当前激活的 Skills」开头的部分是用户为本次对话激活的功能模块（Skills）。
-每个 Skill 以「## [emoji] ...」标题开头，并附有具体的格式与行为要求。
-你必须严格遵循所有 Skill 的全部规则，它们的优先级高于你的默认行为风格。
-如果多个 Skill 同时存在，请同时满足所有要求，不要忽略其中任何一个。
----
-"""
-_SKILL_BLOCK_MARKER = "## 🎯 当前激活的 Skills"
 
 
 def _supports_thinking_toggle(model_tag: str) -> bool:
@@ -72,9 +59,9 @@ def _supports_thinking_toggle(model_tag: str) -> bool:
 def _to_ollama_messages(
     prompt: Union[str, List[Dict[str, Any]]],
     system_instruction: Optional[str],
-) -> List[Dict[str, str]]:
-    """Convert UnifiedAgent prompt + system_instruction → Ollama messages list."""
-    messages: List[Dict[str, str]] = []
+) -> List[Dict[str, Any]]:
+    """Convert KernelAgent prompt + system_instruction → Ollama messages list."""
+    messages: List[Dict[str, Any]] = []
 
     if system_instruction:
         messages.append({"role": "system", "content": system_instruction})
@@ -97,14 +84,12 @@ def _to_ollama_messages(
                 # Convert to Ollama OpenAI-compatible tool_calls format
                 ollama_tcs = []
                 for tc in tool_calls:
+                    name, arguments = _tool_function(tc)
                     ollama_tcs.append(
                         {
-                            "id": tc.get("id") or "",
+                            "id": tc.get("id") or tc.get("call_id") or "",
                             "type": "function",
-                            "function": {
-                                "name": tc.get("name", ""),
-                                "arguments": tc.get("args") or {},
-                            },
+                            "function": {"name": name, "arguments": arguments},
                         }
                     )
                 messages.append(
@@ -117,9 +102,9 @@ def _to_ollama_messages(
             elif content:
                 messages.append({"role": "assistant", "content": str(content)})
 
-        elif role == "function":
+        elif role in {"function", "tool"}:
             # Tool result — convert to Ollama "tool" role
-            fn_name = msg.get("name", "tool")
+            fn_name = msg.get("name") or msg.get("tool_name") or ""
             content = msg.get("content", "")
             tool_call_id = msg.get("tool_call_id") or ""
             if not tool_call_id:
@@ -132,48 +117,88 @@ def _to_ollama_messages(
                                 break
                     if tool_call_id:
                         break
+            if not fn_name and tool_call_id:
+                for prev in reversed(messages):
+                    matching = next(
+                        (
+                            call
+                            for call in prev.get("tool_calls", [])
+                            if call.get("id") == tool_call_id
+                        ),
+                        None,
+                    )
+                    if matching:
+                        fn_name = matching["function"]["name"]
+                        break
+            tool_message = {
+                "role": "tool",
+                "content": (
+                    content
+                    if isinstance(content, str)
+                    else json.dumps(content, ensure_ascii=False)
+                ),
+            }
             if tool_call_id:
-                messages.append(
-                    {
-                        "role": "tool",
-                        "content": str(content),
-                        "tool_call_id": tool_call_id,
-                    }
-                )
-            else:
-                # No id available — inject as user message so context isn't lost
-                messages.append(
-                    {
-                        "role": "user",
-                        "content": f"[Tool result from {fn_name}]: {str(content)}",
-                    }
-                )
+                tool_message["tool_call_id"] = tool_call_id
+            if fn_name:
+                tool_message.update({"name": fn_name, "tool_name": fn_name})
+            messages.append(tool_message)
 
-        elif role == "user":
+        elif role in {"user", "system", "developer"}:
             content = msg.get("content", "")
             if not content and isinstance(msg.get("parts"), list):
                 content = " ".join(str(p) for p in msg["parts"] if p)
             if content:
-                messages.append({"role": "user", "content": str(content)})
+                messages.append(
+                    {
+                        "role": "system" if role == "developer" else role,
+                        "content": str(content),
+                    }
+                )
 
     return messages
 
 
+def _tool_function(value: Dict[str, Any]):
+    """Accept canonical and OpenAI shapes without dropping names or arguments."""
+    function = value.get("function")
+    function = function if isinstance(function, dict) else {}
+    name = value.get("name") or function.get("name")
+    if not name:
+        raise ValueError("Ollama tool call requires a function name")
+    arguments = value.get("args")
+    if arguments is None:
+        arguments = value.get("arguments")
+    if arguments is None:
+        arguments = function.get("arguments", {})
+    if isinstance(arguments, str):
+        arguments = json.loads(arguments)
+    if not isinstance(arguments, dict):
+        raise ValueError("Ollama tool arguments must be a JSON object")
+    return str(name), arguments
+
+
 def _to_ollama_tools(tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
-    """Convert UnifiedAgent tool defs → Ollama OpenAI-compatible tool format."""
+    """Convert KernelAgent tool defs → Ollama OpenAI-compatible tool format."""
     if not tools:
         return None
     result = []
     for t in tools:
-        if not isinstance(t, dict) or not t.get("name"):
+        if not isinstance(t, dict):
+            continue
+        function = t.get("function")
+        declaration = function if isinstance(function, dict) else t
+        if not declaration.get("name"):
+            # Catalog conversion historically filters incomplete declarations.
+            # Model-returned calls use _tool_function and still fail closed.
             continue
         result.append(
             {
                 "type": "function",
                 "function": {
-                    "name": t["name"],
-                    "description": t.get("description", ""),
-                    "parameters": t.get("parameters")
+                    "name": declaration["name"],
+                    "description": declaration.get("description", ""),
+                    "parameters": declaration.get("parameters")
                     or {
                         "type": "object",
                         "properties": {},
@@ -186,7 +211,7 @@ def _to_ollama_tools(tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
 
 
 def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
-    """Convert Ollama /api/chat response → UnifiedAgent {content, tool_calls, usage}."""
+    """Convert Ollama /api/chat response → Kernel model response format."""
     import re as _re
     import uuid as _uuid
 
@@ -197,19 +222,10 @@ def _parse_ollama_response(resp_json: Dict) -> Dict[str, Any]:
 
     tool_calls: List[Dict] = []
     for tc in msg.get("tool_calls") or []:
-        fn = tc.get("function") or {}
-        name = fn.get("name")
-        args = fn.get("arguments") or {}
-        if isinstance(args, str):
-            try:
-                args = json.loads(args)
-            except Exception:
-                args = {}
-        if name:
-            # Preserve id from Ollama if present; generate one otherwise so
-            # multi-turn tool result messages can reference it.
-            tc_id = tc.get("id") or _uuid.uuid4().hex[:8]
-            tool_calls.append({"id": tc_id, "name": name, "args": args})
+        name, args = _tool_function(tc)
+        # Native Ollama may omit ids, but the Kernel requires a stable pairing.
+        tc_id = tc.get("id") or tc.get("call_id") or _uuid.uuid4().hex[:8]
+        tool_calls.append({"id": tc_id, "name": name, "args": args})
 
     usage = {
         "prompt_tokens": resp_json.get("prompt_eval_count", 0),
@@ -257,6 +273,7 @@ def _raw_post(
 def _stream_deltas(
     req: urllib.request.Request,
     timeout_seconds: Optional[float] = None,
+    cancel_check: Any = None,
 ) -> Generator[str, None, None]:
     """Yield text delta strings from a streaming Ollama response, stripping <think> blocks."""
     _opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -268,9 +285,13 @@ def _stream_deltas(
             timeout = max(1.0, float(timeout_seconds))
         except Exception:
             timeout = 180.0
+    cancel_monitor = None
     try:
         with _opener.open(req, timeout=timeout) as resp:
+            cancel_monitor = watch_stream_cancellation(resp, cancel_check)
             for raw in resp:
+                if callable(cancel_check) and cancel_check():
+                    raise RuntimeError("Model generation cancelled")
                 line = raw.decode("utf-8", errors="replace").strip()
                 if not line:
                     continue
@@ -309,6 +330,9 @@ def _stream_deltas(
                     continue
     except Exception as e:
         raise RuntimeError(f"Ollama streaming failed: {e}") from e
+    finally:
+        if cancel_monitor is not None:
+            cancel_monitor.set()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,14 +340,60 @@ def _stream_deltas(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def default_ollama_context_window() -> int:
+    for value in (os.getenv("KOTO_OLLAMA_NUM_CTX"), os.getenv("OLLAMA_NUM_CTX")):
+        if value:
+            try:
+                if int(value) > 0:
+                    return int(value)
+            except (TypeError, ValueError):
+                pass
+    return 8192
+
+
+def resolve_ollama_context_options(options=None, defaults=None) -> Dict[str, Any]:
+    """Pure configuration projection shared by budget and native payload."""
+    resolved = dict(options or {})
+    nested = resolved.get("options")
+    nested = nested if isinstance(nested, dict) else {}
+    defaults = defaults or {}
+    capacity = int(
+        resolved.get("num_ctx")
+        or nested.get("num_ctx")
+        or defaults.get("num_ctx")
+        or default_ollama_context_window()
+    )
+    output = int(
+        resolved.get("num_predict")
+        or nested.get("num_predict")
+        or defaults.get("num_predict")
+        or 4096
+    )
+    if capacity <= 0 or output <= 0:
+        raise ValueError("Agent context and output token limits must be positive")
+    declared = resolved.get("context_window_tokens") or resolved.get("context_window")
+    resolved.update(
+        {
+            "num_ctx": capacity,
+            "num_predict": output,
+            "context_window_tokens": (
+                min(capacity, int(declared)) if declared else capacity
+            ),
+            "reserved_output_tokens": max(
+                output, int(resolved.get("reserved_output_tokens") or 0)
+            ),
+        }
+    )
+    return resolved
+
+
 class OllamaLLMProvider(LLMProvider):
     """
     LLMProvider backed by a local Ollama instance.
 
-    UnifiedAgent calls ``generate_content(prompt, system_instruction=…, tools=…)``
-    on every ReAct step.  The system_instruction already includes all active
-    Skills (injected upstream by ``SkillManager.inject_into_prompt``), so this
-    class just faithfully forwards everything to Ollama.
+    KernelAgent calls ``generate_content(prompt, system_instruction=…, tools=…)``
+    on every ReAct step. The provider faithfully forwards the normalized
+    request without adding product-layer behavior.
 
     Parameters
     ----------
@@ -333,6 +403,10 @@ class OllamaLLMProvider(LLMProvider):
     temperature : Sampling temperature
     num_predict : Max tokens to generate per call
     """
+
+    # The current native text parser does not reconstruct tool-call fragments.
+    # Keep local tool turns non-streaming rather than silently lose an action.
+    streaming_tool_calls = False
 
     # 类级自动选模型缓存（所有 model=None 实例共享，60 秒 TTL）
     _auto_model: str = ""
@@ -345,13 +419,24 @@ class OllamaLLMProvider(LLMProvider):
         base_url: str = _OLLAMA_BASE_URL,
         temperature: float = 0.7,
         num_predict: int = 4096,
+        num_ctx: Optional[int] = None,
     ):
         self.model = model  # None 表示运行时自动选择
         self.base_url = base_url.rstrip("/")
         self._options: Dict[str, Any] = {
             "temperature": temperature,
             "num_predict": num_predict,
+            "num_ctx": num_ctx or self._default_context_window(),
         }
+
+    @staticmethod
+    def _default_context_window() -> int:
+        """An explicit request capacity, never inferred from a model's name."""
+        return default_ollama_context_window()
+
+    def context_options(self, options=None) -> Dict[str, Any]:
+        """Return the exact generation limits used by both budget and request."""
+        return resolve_ollama_context_options(options, getattr(self, "_options", {}))
 
     # ── LLMProvider interface ──────────────────────────────────────────────
     def _resolve_model(self) -> str:
@@ -381,9 +466,9 @@ class OllamaLLMProvider(LLMProvider):
         ):
             return OllamaLLMProvider._auto_model
         try:
-            from app.core.routing.local_model_router import LocalModelRouter
+            from app.core.llm.local_model_runtime import OllamaRuntime
 
-            best = LocalModelRouter.pick_best_chat_model()
+            best = OllamaRuntime.pick_best_chat_model()
             if best:
                 OllamaLLMProvider._auto_model = best
                 OllamaLLMProvider._auto_model_ts = now
@@ -407,16 +492,17 @@ class OllamaLLMProvider(LLMProvider):
         **kwargs,
     ) -> Union[Dict[str, Any], Generator[Dict[str, Any], None, None]]:
         target = model or self._resolve_model()
-        # 若 system_instruction 含有激活的 Skills 块，在最前面插入元认知前言
-        effective_sys = system_instruction
-        if effective_sys and _SKILL_BLOCK_MARKER in effective_sys:
-            effective_sys = _KOTO_SKILL_PREAMBLE + effective_sys
-        messages = _to_ollama_messages(prompt, effective_sys)
+        messages = _to_ollama_messages(prompt, system_instruction)
         ollama_tools = _to_ollama_tools(tools)
 
         # Merge per-call kwargs into options
-        options = {**self._options}
-        for key in ("temperature", "num_predict", "top_p", "top_k"):
+        limits = self.context_options(kwargs)
+        options = {
+            **self._options,
+            "num_ctx": limits["num_ctx"],
+            "num_predict": limits["num_predict"],
+        }
+        for key in ("temperature", "top_p", "top_k"):
             if kwargs.get(key) is not None:
                 options[key] = kwargs[key]
 
@@ -438,7 +524,12 @@ class OllamaLLMProvider(LLMProvider):
         timeout_seconds = kwargs.get("call_timeout")
 
         if stream:
-            return self._stream_chunks(url, payload, timeout_seconds=timeout_seconds)
+            return self._stream_chunks(
+                url,
+                payload,
+                timeout_seconds=timeout_seconds,
+                cancel_check=kwargs.get("_cancel_check"),
+            )
 
         resp_json = _raw_post(
             url, payload, stream=False, timeout_seconds=timeout_seconds
@@ -466,8 +557,9 @@ class OllamaLLMProvider(LLMProvider):
         url: str,
         payload: Dict,
         timeout_seconds: Optional[float] = None,
+        cancel_check: Any = None,
     ) -> Generator[Dict[str, Any], None, None]:
-        """Yield UnifiedAgent-format chunks from a streaming Ollama call."""
+        """Yield Kernel-compatible chunks from a streaming Ollama call."""
         payload = {**payload, "stream": True}
         data = json.dumps(payload).encode("utf-8")
         req = urllib.request.Request(
@@ -476,5 +568,7 @@ class OllamaLLMProvider(LLMProvider):
             method="POST",
             headers={"Content-Type": "application/json"},
         )
-        for delta in _stream_deltas(req, timeout_seconds=timeout_seconds):
-            yield {"content": delta, "tool_calls": [], "usage": {}}
+        for delta in _stream_deltas(
+            req, timeout_seconds=timeout_seconds, cancel_check=cancel_check
+        ):
+            yield {"content": delta, "delta": delta, "tool_calls": [], "usage": {}}

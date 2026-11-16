@@ -23,6 +23,9 @@ maintained as prerelease/test history.
   while preserving the browser and streaming contracts.
 - Standardized the release build on clean worktrees, reproducible dependency
   installation, and runtime health checks.
+- Made the production Agent deterministic, introduced explicit tool profiles,
+  removed unreferenced legacy Agent loops, and moved development visualization
+  to the canonical Kernel topology.
 
 ### Fixed
 - Hardened file-task delivery verification, read-only safety, streamed terminal

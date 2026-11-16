@@ -6,9 +6,37 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
+  source-hygiene:
+    name: Source publication and dependency contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install packaging==26.0
+      - name: Reject private state, credentials, and build output in tracked source
+        run: python scripts/source_publish_hygiene.py --check --output source-publication-manifest.json
+      - name: Check direct requirements against the runtime lock
+        run: python scripts/check_dependency_contract.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-publication-manifest
+          path: source-publication-manifest.json
+
   lint:
     name: Lint & Format
+    needs: source-hygiene
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -20,10 +48,10 @@ jobs:
           python-version: "3.11"
 
       - name: Install lint tools
-        run: pip install flake8 black isort==5.9.3 bandit
+        run: pip install flake8==7.3.0 black==26.5.1 isort==5.9.3 bandit==1.7.9
 
       - name: Run flake8
-        run: flake8 src/ app/ tests/ --count --show-source --statistics
+        run: flake8 app/ launcher/ scripts/ src/ tests/ web/ --count --show-source --statistics
 
       - name: Check formatting (black)
         run: black --check src/ app/ tests/
@@ -36,7 +64,8 @@ jobs:
         run: bandit -r app/ src/ -lll -q
 
   test:
-    name: Test
+    name: Original workspace and Kernel regressions
+    needs: source-hygiene
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -67,30 +96,47 @@ jobs:
           pip install -r config/requirements.lock
           pip install pytest pytest-mock pytest-cov pytest-rerunfailures hypothesis pytest-timeout
 
+      - name: Verify required runtime imports from the installed lock
+        run: python scripts/check_dependency_contract.py --check-imports
+
       - name: CVE scan (pip-audit)
         run: |
           pip install pip-audit
           pip-audit --requirement config/requirements.lock --desc
+
+      - name: Verify test collection
+        env:
+          PYTHONPATH: .
+          KOTO_PYTEST_HARD_EXIT: "0"
+        run: |
+          pytest --collect-only -q -m "not live_api and not e2e"
 
       - name: Run tests
         env:
           PYTHONPATH: .
           KOTO_PYTEST_HARD_EXIT: "0"
         run: |
-          pytest \
-            tests/unit/ \
-            tests/integration/ \
-            tests/test_file_agent.py \
-            tests/test_organize_cleanup.py \
-            tests/test_organize_dedup.py \
-            tests/test_p0_e2e_flow.py \
-            tests/test_smart_routing.py \
-            tests/test_trigger_params.py \
-            tests/test_trigger_params_integration.py \
-            tests/test_unified_agent.py \
+          pytest tests/ -m "not live_api and not e2e" \
             -v --tb=short -q \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
             --cov-fail-under=50
+
+      - name: Exercise the original workspace Kernel HTTP contract offline
+        run: python -B scripts/standalone_acceptance.py --http-only --state-dir build/ci-standalone-acceptance
+
+      - name: Run the 24 fixed office tasks three times with production tools
+        run: python -B scripts/standalone_office_eval.py --state-dir build/ci-office-evaluation --repeats 3
+
+      - name: Upload standalone task evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: standalone-offline-engineering-evidence
+          path: |
+            build/ci-standalone-acceptance/results.json
+            build/ci-office-evaluation/evaluation.json
+            build/ci-office-evaluation/evaluation.md
+          retention-days: 14
 
       - name: Upload coverage report
         if: always()
@@ -100,8 +146,86 @@ jobs:
           path: coverage.xml
           retention-days: 14
 
+  companion:
+    name: Office and WPS compatibility adapter contracts
+    needs: source-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: companion/requirements-native.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+      - name: Install embedded runtime and test tools
+        run: pip install -r companion/requirements-native.txt pytest black
+      - name: Check embedded Python syntax and formatting
+        run: |
+          python -m compileall -q companion
+          black --check companion/agent_lab/planning_model.py companion/agent_lab/output_limits.py companion/streaming.py companion/tests/test_planning_model.py companion/tests/test_range_and_permission_recovery.py
+          black --check companion/agent_lab/deepseek_model.py companion/tests/test_deepseek_model.py companion/agent_lab/read_grounding.py companion/tests/test_read_grounding.py
+          black --check companion/agent_lab/source_grounding.py companion/tests/test_source_grounding.py
+          black --check companion/agent_lab/write_authority.py companion/agent_lab/content_metrics.py companion/tests/test_write_authority.py
+          black --check companion/agent_lab/progress_window.py companion/tests/test_progress_window.py
+          black --check companion/agent_lab/literal_intent.py companion/tests/test_literal_intent.py
+          black --check companion/agent_lab/editing_baseline.py companion/tests/test_editing_baseline.py
+          black --check companion/agent_lab/document_table.py companion/agent_lab/data_engine.py companion/tests/test_document_table_query.py
+          black --check companion/agent_lab/acceptance_plan.py companion/agent_lab/fixed_acceptance.py companion/agent_lab/contract_runtime.py companion/agent_lab/source_tools.py companion/agent_lab/content_checks.py companion/benchmarks/long_horizon.py companion/benchmarks/worker.py companion/benchmarks/grade.py companion/tests/test_fixed_acceptance.py companion/tests/test_contract_runtime.py companion/tests/test_content_checks.py companion/tests/test_deep_engine.py
+          black --check companion/agent_lab/task_requirements.py companion/agent_lab/query_units.py companion/agent_lab/drafts.py companion/agent_lab/draft_composer.py companion/agent_lab/draft_editorial.py companion/agent_lab/working_context.py companion/agent_lab/user_requests.py companion/native_read_context.py companion/agent_lab/artifact_creation.py companion/agent_lab/artifact_text.py companion/agent_lab/delivery_acceptance.py companion/agent_lab/acceptance_evidence.py companion/diagnostics.py companion/tests/test_cleanup_optimization.py companion/tests/test_delivery_acceptance.py companion/tests/test_native_continuity.py companion/tests/test_user_requests.py companion/tests/test_acceptance_evidence.py
+      - name: Run embedded tests with the actual Deep Agents SDK
+        run: python -m pytest companion/tests -q --tb=short --junitxml=companion-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: companion-results
+          path: companion-results.xml
+
+  frontend:
+    name: Frontend typecheck and tests
+    needs: source-hygiene
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm ci --prefix tiptap-editor
+          npm ci --prefix univer-editor
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Build frontend and enforce bundle budgets
+        run: |
+          npm run build
+          npm run build --prefix univer-editor
+
   docker:
     name: Docker Build
+    needs: source-hygiene
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -115,8 +239,16 @@ jobs:
 
       - name: Verify container starts
         run: |
-          docker run -d --name koto-ci-test -p 5001:5000 koto:ci
-          sleep 15
-          docker inspect koto-ci-test --format='{{.State.Status}}'
-          docker stop koto-ci-test || true
-          docker rm koto-ci-test || true
+          trap 'docker logs koto-ci-test; docker rm -f koto-ci-test >/dev/null 2>&1 || true' EXIT
+          docker run -d --name koto-ci-test -p 5001:5000 \
+            -e KOTO_JWT_SECRET=ci-only-secret-not-for-production-0123456789 \
+            koto:ci
+          for attempt in $(seq 1 45); do
+            if curl --fail --silent --max-time 2 http://127.0.0.1:5001/api/startup-health >/dev/null; then
+              exit 0
+            fi
+            test "$(docker inspect koto-ci-test --format='{{.State.Running}}')" = true || exit 1
+            sleep 2
+          done
+          echo "::error::Container never reached the startup health endpoint"
+          exit 1

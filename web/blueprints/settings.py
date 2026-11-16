@@ -16,21 +16,8 @@ from math import isfinite
 from flask import Blueprint, Response, current_app, jsonify, request
 
 from web.blueprints.auth import require_auth
-from web.config import invalidate_settings_cache
-from web.settings_runtime_services import (
-    get_api_key,
-    get_app_version,
-    get_detected_proxy,
-    get_force_proxy,
-    get_model_runtime,
-    get_project_root,
-    get_settings_manager,
-    get_workspace_dir,
-    reset_client_cache,
-    reset_proxy_detection,
-    update_chat_dir,
-    update_workspace_dir,
-)
+from web.runtime_context import service_registry
+from web.shared import invalidate_settings_cache
 
 _logger = logging.getLogger("koto.app")
 
@@ -72,41 +59,35 @@ def _normalize_setting_value(category: str, key: str, value):
     return value, None
 
 def _get_settings_manager():
-    return get_settings_manager()
+    return service_registry.settings_manager
 
 
 def _save_model_runtime(sm, *, mode: str, model_tag=None) -> tuple[bool, str]:
     """Persist the one shared model-mode/model-tag runtime contract."""
-    with sm._lock:
-        sm._settings["model_mode"] = mode
-        ai_settings = sm._settings.setdefault("ai", {})
-        if not isinstance(ai_settings, dict):
-            ai_settings = {}
-            sm._settings["ai"] = ai_settings
-        # model_mode is the canonical global inference mode.  Keep this older
-        # compatibility flag derived from it so socket and editor paths cannot
-        # retain a contradictory local-only mode.
-        ai_settings["use_local_only"] = mode == "local"
-        if mode == "deepseek":
-            ai_settings["cloud_provider"] = mode
-        elif mode == "cloud":
-            ai_settings.setdefault("cloud_provider", "deepseek")
-        normalized_model_tag = str(model_tag or "").strip()
-        if normalized_model_tag:
-            # Older UI code still reads ai.local_model, while all model
-            # providers read the top-level value.  They must never diverge.
-            sm._settings["local_model"] = normalized_model_tag
-            ai_settings["local_model"] = normalized_model_tag
-        active_model = str(sm._settings.get("local_model") or "").strip()
-        saved = sm._save_settings()
+    canonical_mode = "local" if str(mode or "").strip().lower() in {"local", "ollama"} else "cloud"
+    # model_mode is the canonical global inference mode. Keep the older
+    # compatibility fields derived from it, but persist everything through one
+    # cross-process transaction instead of mutating SettingsManager internals.
+    ai_patch = {
+        "use_local_only": canonical_mode == "local",
+        "cloud_provider": "deepseek",
+    }
+    settings_patch = {
+        "model_mode": canonical_mode,
+        "ai": ai_patch,
+    }
+    normalized_model_tag = str(model_tag or "").strip()
+    if normalized_model_tag:
+        settings_patch["local_model"] = normalized_model_tag
+        ai_patch["local_model"] = normalized_model_tag
+    saved = sm.patch(settings_patch)
+    active_model = str(sm.get_all().get("local_model") or "").strip()
     if saved:
-        # LocalModelRouter has a separate response cache for legacy fast
-        # paths.  Clear it here so it cannot keep answering with the model
-        # selected before this atomic settings update.
+        # Clear the Ollama response cache after the atomic settings update.
         try:
-            from app.core.routing.local_model_router import LocalModelRouter
+            from app.core.llm.local_model_runtime import OllamaRuntime
 
-            LocalModelRouter.reset_response_model()
+            OllamaRuntime.reset_response_model()
         except Exception:
             pass
         try:
@@ -116,6 +97,35 @@ def _save_model_runtime(sm, *, mode: str, model_tag=None) -> tuple[bool, str]:
         except Exception:
             pass
     return saved, active_model
+
+
+def _model_runtime_payload(sm) -> dict:
+    """Expose the only supported model-selection contract to every UI entry."""
+    from app.core.llm.local_model_runtime import (
+        get_configured_local_model_tag,
+        get_configured_model_mode,
+    )
+    from app.core.llm.model_selection import (
+        get_configured_cloud_model,
+        get_configured_cloud_provider,
+    )
+
+    mode = get_configured_model_mode()
+    cloud_provider = get_configured_cloud_provider()
+    cloud_model = get_configured_cloud_model(provider=cloud_provider)
+    local_model = get_configured_local_model_tag()
+    active_model = local_model if mode == "local" else cloud_model
+    return {
+        "mode": mode,
+        "cloud_provider": cloud_provider,
+        "cloud_model": cloud_model,
+        "local_model": local_model,
+        "active_model": {
+            "mode": mode,
+            "provider": "ollama" if mode == "local" else cloud_provider,
+            "id": active_model,
+        },
+    }
 
 
 def _augment_models_for_cloud_provider(payload: dict) -> dict:
@@ -167,7 +177,7 @@ def _augment_models_for_cloud_provider(payload: dict) -> dict:
                 else:
                     current_id = str(current or "").lower()
                     current_provider = ""
-                if is_legacy_public_model(current_id) or current_provider == "gemini":
+                if is_legacy_public_model(current_id):
                     raw_map.pop(task, None)
             for task in text_tasks:
                 current = raw_map.get(task)
@@ -189,10 +199,7 @@ def _augment_models_for_cloud_provider(payload: dict) -> dict:
                 for item in available
                 if not (
                     isinstance(item, dict)
-                    and (
-                        is_legacy_public_model(item.get("id"))
-                        or str(item.get("provider") or "").lower() == "gemini"
-                    )
+                    and is_legacy_public_model(item.get("id"))
                 )
             ]
             if not any(
@@ -237,7 +244,7 @@ def api_info() -> Response:
     """
     return jsonify(
         {
-            "version": get_app_version(""),
+            "version": service_registry.app_version,
             "deploy_mode": os.environ.get("KOTO_DEPLOY_MODE", "local"),
             "auth_enabled": os.environ.get("KOTO_AUTH_ENABLED", "false").lower()
             == "true",
@@ -287,11 +294,11 @@ def local_model_status() -> Response:
         from app.core.llm.model_selection import get_configured_cloud_provider
 
         info = get_local_model_info()
-        if info.get("mode") in {"cloud", "gemini", "deepseek"}:
+        if info.get("mode") in {"cloud", "deepseek"}:
             provider = get_configured_cloud_provider()
             info["cloud_provider"] = provider
-            info["mode"] = provider
-        return jsonify({"success": True, **info})
+            info["mode"] = "cloud"
+        return jsonify({"success": True, **info, **_model_runtime_payload(_get_settings_manager())})
     except Exception as e:
         return jsonify({"success": False, "error": str(e)}), 500
 
@@ -361,7 +368,7 @@ def local_model_switch() -> Response:
                     "code": "provider_archived",
                 }
             ), 410
-        mode = raw_mode if raw_mode in {"local", "cloud", "deepseek"} else "cloud"
+        mode = "local" if raw_mode in {"local", "ollama"} else "cloud"
         model_tag = data.get("model_tag")  # 本地模式时可指定模型
 
         save_ok, active_model = _save_model_runtime(sm, mode=mode, model_tag=model_tag)
@@ -370,12 +377,18 @@ def local_model_switch() -> Response:
 
         # 清除缓存，下次 get_client() 调用时重建
         invalidate_settings_cache()
-        reset_client_cache()
+        service_registry.reset_llm_gateway()
+        # Reset RAG embeddings so model change takes effect
+        try:
+            from app.core.services.rag_service import reset_rag_service
+            reset_rag_service()
+        except Exception:
+            pass
 
         return jsonify(
             {
                 "success": True,
-                "mode": mode,
+                **_model_runtime_payload(sm),
                 "model": active_model,
                 "use_local_only": mode == "local",
             }
@@ -393,7 +406,7 @@ def local_model_setup() -> Response:
         import sys as _sys
         from pathlib import Path as _Path
 
-        app_root = _Path(_sys.executable).parent if getattr(_sys, "frozen", False) else _Path(get_project_root())
+        app_root = _Path(_sys.executable).parent if getattr(_sys, "frozen", False) else _Path(service_registry.project_root)
         installer = app_root / "LocalModelInstaller.exe"
         if installer.exists():
             _subprocess.Popen([str(installer)], cwd=str(app_root))
@@ -408,7 +421,7 @@ def local_model_setup() -> Response:
             run_downloader_gui()
             # 安装完成后清除缓存
             invalidate_settings_cache()
-            reset_client_cache()
+            service_registry.reset_llm_gateway()
         except Exception as e:
             _logger.debug(f"[LocalModel] 安装向导失败: {e}")
 
@@ -439,7 +452,9 @@ def get_settings() -> Response:
     # 合并 appearance 主题（如有 cookie/参数可在此合并）
     from app.core.llm.provider_boundary import sanitize_public_settings
 
-    return jsonify(sanitize_public_settings(_get_settings_manager().get_all()))
+    response = jsonify(sanitize_public_settings(_get_settings_manager().get_all()))
+    response.headers["Cache-Control"] = "no-store, max-age=0"
+    return response
 
 
 @settings_bp.route("/api/settings", methods=["POST"])
@@ -506,16 +521,20 @@ def update_settings() -> Response:
         # 使 _load_user_settings 缓存失效，确保后续读取获得最新值
         invalidate_settings_cache()
         if category == "ai" and key in {"local_model", "use_local_only"}:
-            reset_client_cache()
+            service_registry.reset_llm_gateway()
         # 存储路径变更时立即更新模块级全局变量，让运行时路径即时生效
         if category == "storage" and key in ("workspace_dir", "chats_dir", "documents_dir", "images_dir"):
             if key == "workspace_dir":
-                update_workspace_dir(sm.workspace_dir)
+                service_registry.update_workspace_dir(sm.workspace_dir)
             elif key == "chats_dir":
-                update_chat_dir(sm.chats_dir)
+                service_registry.update_chat_dir(sm.chats_dir)
         # 代理设置变更时立即重新检测
         if category == "proxy":
-            reset_proxy_detection()
+            service_registry.reset_proxy_detection()
+            # The old client may already hold a transport created with the
+            # previous proxy.  Rebuild it lazily for the next request so this
+            # setting takes effect now rather than after an application restart.
+            service_registry.reset_llm_gateway()
         return jsonify({"success": success})
     return jsonify({"success": False, "error": "Missing category or key"})
 
@@ -527,7 +546,8 @@ def reset_settings() -> Response:
     success = sm.reset()
     # 同样清除缓存
     invalidate_settings_cache()
-    reset_proxy_detection()
+    service_registry.reset_proxy_detection()
+    service_registry.reset_llm_gateway()
     return jsonify({"success": success})
 
 
@@ -565,8 +585,8 @@ def get_setup_status() -> Response:
               description: Absolute path to the configuration file
     """
     from app.core.llm.deepseek_config import find_deepseek_config_path, has_deepseek_api_key
-    PROJECT_ROOT = get_project_root()
-    WORKSPACE_DIR = get_workspace_dir()
+    PROJECT_ROOT = service_registry.project_root
+    WORKSPACE_DIR = service_registry.workspace_dir
     provider = "deepseek"
     ds_path = find_deepseek_config_path()
     config_path = str(ds_path or os.path.join(PROJECT_ROOT, "config", "deepseek_config.env"))
@@ -626,9 +646,9 @@ def setup_api_key() -> Response:
 
 
 def _write_provider_env(filename: str, key_name: str, api_key: str) -> str:
-    """Write a simple .env file for OpenAI / Anthropic style providers."""
+    """Write a simple .env file for cloud providers."""
     from pathlib import Path as _Path
-    config_path = _Path(get_project_root()) / "config" / filename
+    config_path = _Path(service_registry.project_root) / "config" / filename
     config_path.parent.mkdir(parents=True, exist_ok=True)
     config_path.write_text(f"{key_name}={api_key}\n", encoding="utf-8")
     # Also load into current environment
@@ -640,7 +660,7 @@ def _write_provider_env(filename: str, key_name: str, api_key: str) -> str:
 @settings_bp.route("/api/setup/workspace", methods=["POST"])
 def setup_workspace() -> Response:
     """设置工作区目录"""
-    PROJECT_ROOT = get_project_root()
+    PROJECT_ROOT = service_registry.project_root
     sm = _get_settings_manager()
     data = request.json
     workspace_path = data.get("path", "").strip()
@@ -703,8 +723,8 @@ def diagnose_models() -> Response:
 
     results = {
         "proxy": {
-            "detected": get_detected_proxy(),
-            "force": get_force_proxy() or None,
+            "detected": service_registry.detected_proxy,
+            "force": service_registry.force_proxy or None,
             "cloud_provider": "deepseek",
         },
         "models": {},
@@ -863,7 +883,7 @@ def setup_activate() -> Response:
         return jsonify({"success": False, "error": "激活服务暂不可用"})
     if not key:
         return jsonify({"success": False, "error": "激活码无效"})
-    PROJECT_ROOT = get_project_root()
+    PROJECT_ROOT = service_registry.project_root
     from app.core.llm.deepseek_config import (
         set_runtime_deepseek_api_key,
         write_deepseek_config_file,
@@ -873,7 +893,7 @@ def setup_activate() -> Response:
     try:
         config_path = str(write_deepseek_config_file(key))
         set_runtime_deepseek_api_key(key)
-        reset_client_cache()
+        service_registry.reset_llm_gateway()
         sm = _get_settings_manager()
         sm.set("ai", "cloud_provider", "deepseek")
         sm.set("ai", "deepseek_model", "deepseek-chat")
@@ -887,7 +907,7 @@ def setup_activate() -> Response:
 @require_auth
 def api_list_models() -> Response:
     """动态模型列表 API — 返回当前可用模型及各任务的路由结果"""
-    runtime = get_model_runtime()
+    runtime = service_registry.model_runtime
     if runtime.model_manager:
         return jsonify(
             _augment_models_for_cloud_provider({
@@ -933,7 +953,7 @@ def api_list_models() -> Response:
 @require_auth
 def api_refresh_models() -> Response:
     """手动触发模型列表刷新，重新查询 API 并更新路由表"""
-    runtime = get_model_runtime()
+    runtime = service_registry.model_runtime
     if not runtime.model_manager_available or runtime.model_manager is None:
         import threading as _t
 
@@ -952,25 +972,6 @@ def api_refresh_models() -> Response:
             get_fallback_executor().update_model_map(runtime.model_map)
         except Exception as _fe:
             _logger.warning("[ModelRefresh] FallbackExecutor sync failed: %s", _fe)
-        try:
-            from app.core.routing.ai_router import AIRouter
-
-            _caps = runtime.model_manager._cached_caps
-            _candidates = [
-                (mid, caps)
-                for mid, caps in _caps.items()
-                if not caps.get("interactions_only", False)
-                and not caps.get("image_gen", False)
-                and mid != "local-executor"
-            ]
-            if _candidates:
-                _best = max(
-                    _candidates,
-                    key=lambda x: x[1].get("speed", 0) + x[1].get("tier", 0) * 0.1,
-                )[0]
-                AIRouter.set_router_model(_best)
-        except Exception as _are:
-            _logger.warning("[ModelRefresh] AIRouter update failed: %s", _are)
         return jsonify(
             {
                 "status": "ok",
@@ -985,10 +986,8 @@ def api_refresh_models() -> Response:
 @settings_bp.route("/api/analyze", methods=["POST"])
 @require_auth
 def analyze_task() -> Response:
-    """预分析任务类型和模型选择 — 让前端立即显示路由结果"""
-    from app.core.routing import SmartDispatcher
-
-    runtime = get_model_runtime()
+    """Report the explicit task contract and its configured model."""
+    runtime = service_registry.model_runtime
     data = request.json or {}
     message: str = data.get("message", "")
     locked_task: str | None = data.get("locked_task")
@@ -1001,42 +1000,22 @@ def analyze_task() -> Response:
             {"task": "CHAT", "model": runtime.model_map["CHAT"], "route_method": "Empty"}
         )
 
-    IMAGE_EDIT_KEYWORDS = [
-        "修改",
-        "换",
-        "改成",
-        "变成",
-        "底色",
-        "背景",
-        "颜色",
-        "抠图",
-        "去背景",
-        "P图",
-        "美化",
-        "滤镜",
-        "调色",
-        "编辑",
-        "change",
-        "modify",
-        "edit",
-        "background",
-        "color",
-    ]
-
     if locked_task:
         task = locked_task
         route_method = "🔒 Manual"
     elif has_file and file_type and file_type.startswith("image"):
-        is_edit = any(kw in message.lower() for kw in IMAGE_EDIT_KEYWORDS)
-        task = "PAINTER" if is_edit else "VISION"
-        route_method = "🖼️ Image Edit" if is_edit else "👁️ Image Analysis"
+        task = "VISION"
+        route_method = "👁️ Explicit image context"
     else:
-        task, route_method, _ = SmartDispatcher.analyze(message)
+        task = "AGENT"
+        route_method = "🤖 Kernel Default"
 
-    model = (
-        locked_model
-        if (locked_model and locked_model != "auto")
-        else SmartDispatcher.get_model_for_task(task, has_image=has_file)
+    from app.core.llm.model_selection import select_task_model
+
+    model = locked_model if (locked_model and locked_model != "auto") else select_task_model(
+        task,
+        model_map=runtime.model_map,
+        has_image=bool(has_file and file_type.startswith("image")),
     )
     try:
         from app.core.llm.model_selection import get_configured_cloud_model

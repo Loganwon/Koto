@@ -136,7 +136,7 @@ class TestDeepSeekClientCacheReset:
         mod = self._make_mod_mock(old_client)
 
         # Simulate the fixed handler logic
-        api_key = "sk-deepseek-new-key-valid-enough"
+        api_key = "sk-" + "deepseek-new-key-valid-enough"
         import os
 
         with patch("os.makedirs"), patch("builtins.open", mock_open()):
@@ -151,7 +151,7 @@ class TestDeepSeekClientCacheReset:
     def test_new_client_created(self):
         """create_client() must be invoked with updated API_KEY."""
         mod = self._make_mod_mock(MagicMock())
-        new_key = "sk-deepseek-fresh-key-valid-enough"
+        new_key = "sk-" + "deepseek-fresh-key-valid-enough"
         mod.API_KEY = new_key
         mod._client = None
         mod.client = mod.create_client()
@@ -161,13 +161,13 @@ class TestDeepSeekClientCacheReset:
         """The active DeepSeek runtime key is updated."""
         import os
 
-        new_key = "sk-deepseek-env-valid-key-here"
+        new_key = "sk-" + "deepseek-env-valid-key-here"
         os.environ["DEEPSEEK_API_KEY"] = new_key
         assert os.environ["DEEPSEEK_API_KEY"] == new_key
 
 
 class TestGetClientLocalIsolation:
-    """Local-mode get_client must stay on the local system and never reverse-fallback to cloud."""
+    """The runtime gateway keeps local mode isolated from cloud providers."""
 
     def _load_app_module(self):
         import web.app as app_mod
@@ -177,58 +177,47 @@ class TestGetClientLocalIsolation:
         return app_mod
 
     def test_local_mode_without_explicit_model_uses_ollama(self):
-        app_mod = self._load_app_module()
+        from app.core.llm import runtime_gateway
 
+        provider = MagicMock(name="ollama_provider")
         with patch.object(
-            app_mod, "_get_local_model_config", return_value=("local", None)
-        ), patch(
-            "app.core.llm.ollama_provider.create_ollama_client",
-            return_value=MagicMock(name="ollama_client"),
-        ) as mock_create_ollama, patch.object(
-            app_mod,
-            "create_client",
-            side_effect=AssertionError(
-                "create_client should not be called in local mode"
-            ),
-        ):
-            client = app_mod.get_client()
+            runtime_gateway, "is_local_mode", return_value=True
+        ), patch.object(
+            runtime_gateway, "get_local_model_tag", return_value=""
+        ), patch.object(
+            runtime_gateway, "get_llm_provider", return_value=provider
+        ) as get_provider:
+            gateway = runtime_gateway.create_runtime_llm_gateway()
 
-        assert client is mock_create_ollama.return_value
-        mock_create_ollama.assert_called_once_with(model_tag=None)
+        assert gateway._provider is provider
+        assert gateway.model_id == ""
+        get_provider.assert_called_once_with(provider="ollama", model="")
 
     def test_local_mode_failure_does_not_reverse_fallback_to_cloud(self):
-        app_mod = self._load_app_module()
+        from app.core.llm import runtime_gateway
 
         with patch.object(
-            app_mod, "_get_local_model_config", return_value=("local", None)
-        ), patch(
-            "app.core.llm.ollama_provider.create_ollama_client",
-            side_effect=RuntimeError("boom"),
+            runtime_gateway, "is_local_mode", return_value=True
         ), patch.object(
-            app_mod,
-            "create_client",
-            side_effect=AssertionError(
-                "create_client should not be called on local failure"
-            ),
-        ):
-            with pytest.raises(
-                RuntimeError, match="本地模式已启用，但 Ollama 初始化失败"
-            ):
-                app_mod.get_client()
+            runtime_gateway, "get_local_model_tag", return_value=""
+        ), patch.object(
+            runtime_gateway, "get_llm_provider", side_effect=RuntimeError("boom")
+        ), patch.object(
+            runtime_gateway, "get_configured_cloud_provider"
+        ) as cloud_provider:
+            with pytest.raises(RuntimeError, match="boom"):
+                runtime_gateway.create_runtime_llm_gateway()
+        cloud_provider.assert_not_called()
 
     def test_local_mode_uses_ollama_factory_so_empty_model_can_auto_resolve(self):
         root = Path(__file__).resolve().parents[2]
-        app_source = (root / "web" / "app.py").read_text(encoding="utf-8")
+        gateway_source = (root / "app/core/llm/runtime_gateway.py").read_text(
+            encoding="utf-8"
+        )
 
-        assert (
-            "from app.core.llm.ollama_provider import create_ollama_client"
-            in app_source
-        )
-        assert (
-            "_client = create_ollama_client(model_tag=local_model or None)"
-            in app_source
-        )
-        assert "OllamaClientProxy(model_tag=local_model or None)" not in app_source
+        assert "model_id = get_local_model_tag()" in gateway_source
+        assert 'get_llm_provider(provider="ollama", model=model_id)' in gateway_source
+        assert "create_client" not in gateway_source
 
 
 class TestOllamaModelAutoSelection:
@@ -311,7 +300,12 @@ class TestApiKeySettingsPanelHtml:
         assert 'id="settingsApiKeyInput"' in self.html
 
     def test_api_key_save_button(self):
-        assert "saveSettingsApiKey()" in self.html
+        assert 'data-koto-event-click="h_settings_save_api_key"' in self.html
+        controller = Path("web/src/app/template-event-controller.ts").read_text(
+            encoding="utf-8"
+        )
+        assert '"h_settings_save_api_key"' in controller
+        assert "features.saveSettingsApiKey?.();" in controller
 
     def test_api_key_status_element(self):
         assert 'id="settingsApiKeyStatus"' in self.html

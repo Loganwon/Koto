@@ -5,7 +5,7 @@ import re
 from collections.abc import Iterator
 
 from app.core.agent import llm_provider_helpers
-from app.core.agent.lifecycle import (
+from app.core.agent.kernel import (
     AgentEvent,
     AgentRequest,
     RunMetadata,
@@ -169,7 +169,7 @@ class EditorCodeActionExecutor:
 
     def _resolve_phases(self, request: AgentRequest) -> list[dict[str, str]]:
         try:
-            from app.core.editor_skills import get_phases
+            from app.core.editor_actions import get_phases
 
             action_hint = request.action_type or ""
             return get_phases(action_hint) if action_hint else get_phases("")

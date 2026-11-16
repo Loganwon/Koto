@@ -3,6 +3,7 @@
  */
 
 import type { WorkspaceEditor } from './types';
+import type { EditorSession } from './editor-session';
 
 function $(id: string): HTMLElement | null { return document.getElementById(id); }
 
@@ -10,8 +11,10 @@ export class KotoImageViewer implements WorkspaceEditor {
   containerId: string;
   _scale: number;
   _wheelHandler: ((e: WheelEvent) => void) | null;
+  _session: EditorSession;
 
-  constructor() {
+  constructor(session: EditorSession) {
+    this._session = session;
     this.containerId = 'wa-image-viewer';
     this._scale = 1.0;
     const container = $(this.containerId);
@@ -48,5 +51,3 @@ export class KotoImageViewer implements WorkspaceEditor {
     if (this._wheelHandler) container.removeEventListener('wheel', this._wheelHandler);
   }
 }
-
-(window as any).KotoImageViewer = KotoImageViewer;

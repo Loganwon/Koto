@@ -25,7 +25,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sqlite3
 import threading
 import time
@@ -36,17 +35,28 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    prepare_runtime_database,
+    runtime_database_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── 默认 DB 路径（与 TaskLedger 同库文件）──────────────────────────────────
-_DEFAULT_DB_PATH = str(
-    Path(
-        os.environ.get(
-            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+_DEFAULT_DB_PATH = str(runtime_database_path("koto_checkpoints.sqlite"))
+
+
+def _resolve_db_path(db_path: Optional[str] = None) -> str:
+    if db_path:
+        return db_path
+    return str(
+        prepare_runtime_database(
+            _DEFAULT_DB_PATH,
+            legacy_paths=(legacy_config_path("koto_checkpoints.sqlite"),),
         )
     )
-    / "koto_checkpoints.sqlite"
-)
+
 
 # ── 单例 ─────────────────────────────────────────────────────────────────────
 _manager_instance: Optional["GoalManager"] = None
@@ -223,7 +233,7 @@ class GoalManager:
     _CHECK_INTERVAL_SECONDS = 60  # 后台循环检查间隔
 
     def __init__(self, db_path: Optional[str] = None):
-        self._db_path = db_path or _DEFAULT_DB_PATH
+        self._db_path = _resolve_db_path(db_path)
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._db_lock = threading.RLock()
         self._conn = self._open_conn()
@@ -567,28 +577,10 @@ class GoalManager:
             self._submit_goal_job(goal)
 
     def _submit_goal_job(self, goal: GoalTask):
-        """将目标检查任务提交给 JobRunner；失败时降级到直接执行线程。"""
+        """Submit goal checks through the single durable JobRunner path."""
         # 字符串优先级 → TaskPriority int
         _PRIORITY_MAP = {"urgent": 3, "high": 2, "normal": 1, "low": 0}
         _priority_int = _PRIORITY_MAP.get(goal.priority, 1)
-
-        # 在 TaskLedger 创建对应的 TaskRecord，便于跨系统追踪
-        linked_task_id: Optional[str] = None
-        try:
-            from app.core.tasks.task_ledger import get_ledger
-
-            ledger = get_ledger()
-            task_rec = ledger.create(
-                session_id=goal.session_id or "goal_manager",
-                user_input=goal.user_goal[:500],
-                task_type="goal_check",
-                source="goal_manager",
-                metadata={"goal_id": goal.goal_id, "goal_title": goal.title},
-                priority=_priority_int,
-            )
-            linked_task_id = task_rec.task_id
-        except Exception as e:
-            logger.debug(f"[GoalManager] TaskLedger 记录失败（非致命）: {e}")
 
         try:
             from app.core.jobs.job_runner import JobSpec, get_job_runner
@@ -599,77 +591,18 @@ class GoalManager:
                     job_type="goal_check",
                     payload={"goal_id": goal.goal_id},
                     session_id=goal.session_id or "",
-                    metadata={
-                        "goal_title": goal.title,
-                        "linked_task_id": linked_task_id,
-                    },
+                    metadata={"goal_title": goal.title},
                     priority=_priority_int,
                 )
             )
         except Exception as e:
-            logger.warning(f"[GoalManager] JobRunner 不可用，降级执行: {e}")
-            threading.Thread(
-                target=self._execute_goal_direct,
-                args=(goal,),
-                daemon=True,
-                name=f"GoalExec-{goal.goal_id[:8]}",
-            ).start()
-
-    def _execute_goal_direct(self, goal: GoalTask):
-        """JobRunner 不可用时直接调用 UnifiedAgent 执行目标。"""
-        run = self.start_run(goal.goal_id)
-        try:
-            result_text = self._run_agent_for_goal(goal)
-            outcome = "success"
-        except Exception as e:
-            result_text = f"执行出错: {e}"
-            outcome = "failed"
-            logger.error(f"[GoalManager] 目标 {goal.goal_id[:8]} 直接执行失败: {e}")
-
-        self.finish_run(run.run_id, outcome=outcome, summary=result_text)
-        self.update_from_run(goal.goal_id, run_outcome=outcome, summary=result_text)
-
-    # ── Agent 调用 ────────────────────────────────────────────────────────────
-
-    def _run_agent_for_goal(self, goal: GoalTask) -> str:
-        """构建目标提示词并调用 UnifiedAgent，返回结果摘要。"""
-        ctx = goal.get_context()
-        progress = ctx.get("progress_summary", "（首次执行）")
-
-        prompt = (
-            f"[长期目标追踪]\n"
-            f"目标标题：{goal.title}\n"
-            f"目标描述：{goal.user_goal}\n"
-            f"当前进展：{progress}\n"
-            f"上次结果：{goal.last_result or '暂无'}\n\n"
-            f"请根据上述信息，执行下一步追踪，并以中文简洁汇报：\n"
-            f"1. 当前状态\n"
-            f"2. 本次执行内容\n"
-            f"3. 下一步建议\n"
-            f"4. 如目标已完成，请明确说明"
-        )
-
-        # 懒加载 UnifiedAgent，避免循环依赖
-        from app.core.agent.tool_registry import ToolRegistry
-        from app.core.agent.unified_agent import UnifiedAgent
-        from app.core.llm.provider_factory import get_llm_provider
-
-        llm = get_llm_provider(allow_local_fallback=False)
-        agent = UnifiedAgent(
-            llm_provider=llm,
-            tool_registry=ToolRegistry(),
-            system_instruction=(
-                "你是 Koto，正在追踪一个用户委托的长期目标。"
-                "请以简洁、清晰的方式汇报进展，重点说明本次做了什么和下一步。"
-            ),
-        )
-
-        result_parts: List[str] = []
-        for step in agent.run(prompt, session_id=goal.session_id or goal.goal_id):
-            if step.step_type.value == "ANSWER":
-                result_parts.append(step.content)
-
-        return "\n".join(result_parts) or "（未获得明确答案）"
+            # Do not fork a second, untracked execution path. Put the goal back
+            # into the due set so the durable runner can accept it later.
+            self._update(goal.goal_id, next_check_at=_minutes_later(5))
+            logger.warning(
+                "[GoalManager] JobRunner unavailable; retry scheduled in 5 minutes: %s",
+                e,
+            )
 
     def stop(self):
         """停止后台循环（测试或关闭时使用）。"""

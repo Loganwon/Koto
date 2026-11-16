@@ -81,7 +81,7 @@ python test_trigger_params_integration.py
 
 ### 步骤 2️⃣: 查看实现 (2 分钟)
 
-**参数管理系统** (`web/proactive_trigger.py`)
+**参数管理系统** (`app/core/services/proactive_trigger.py`)
 ```python
 # 调用 get_trigger_params() 获取参数
 params = self.get_trigger_params("threshold_work_too_long")
@@ -152,7 +152,7 @@ cp config/proactive_triggers.db config/proactive_triggers.db.backup
 
 # 2. 更新代码（或使用你们的部署工具）
 #    需要更新这 4 个文件：
-#    - web/proactive_trigger.py
+#    - app/core/services/proactive_trigger.py
 #    - web/app.py  
 #    - web/src/app/ (已迁移至模块化主应用)
 #    - web/static/css/style.css
@@ -251,7 +251,7 @@ systemctl start koto
 1. 读 PROJECT_COMPLETION_REPORT.md (10 分钟)
 2. 读 docs/TRIGGER_USER_GUIDE.md (15 分钟)
 3. 读 docs/TRIGGER_PARAMETERS_GUIDE.md (30 分钟)
-4. 查看 web/proactive_trigger.py 源代码 (20 分钟)
+4. 查看 app/core/services/proactive_trigger.py 源代码 (20 分钟)
 5. 运行所有测试脚本 (5 分钟)
 6. 读 TRIGGER_CHANGELOG.md (5 分钟)
 7. 完成！你理解了每个细节
@@ -352,7 +352,7 @@ python test_trigger_params_integration.py
 1. [ ] 阅读本文（已完成✓）
 2. [ ] 运行 `python test_trigger_params_integration.py` (1 分钟)
 3. [ ] 读 [技术文档](docs/TRIGGER_PARAMETERS_GUIDE.md) (30 分钟)
-4. [ ] 查看源代码 [web/proactive_trigger.py](web/proactive_trigger.py) (20 分钟)
+4. [ ] 查看源代码 [app/core/services/proactive_trigger.py](../app/core/services/proactive_trigger.py) (20 分钟)
 5. [ ] 理解 API [web/app.py](web/app.py) (10 分钟)
 
 ### 对于运维 🔧

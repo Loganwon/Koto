@@ -5,22 +5,29 @@
 
 import { _fileIcon, _escHtml, showToast, _FOLDER_OPEN_SVG, _FOLDER_PICK_SVG, _FOLDER_SVG } from './infrastructure';
 import { state, _forgetRecentPath, _trackUserOpen, loadRecentFiles, BrowserNode } from './state';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { getFeatureRegistry } from '../shared/feature-registry';
+import { appendToUiPortal } from '../shared/ui-scale';
+import {
+  entrySearchCategory as _entrySearchCategory,
+  flattenWorkspaceListFiles as _flattenWorkspaceListFiles,
+  formatFileSize as _formatSize,
+  isAbsolutePath as isAbsoluteFsPath,
+  isInsideWorkspace as isInsideWorkspaceRoot,
+  isSupportedExtension as _isSupportedExt,
+  joinWorkspacePath as _joinWorkspacePath,
+  mergeSearchResults as _mergeSearchResults,
+  workspaceRelativePath as relativeToWorkspaceRoot,
+} from './fs-tree-helpers';
 
-const workspaceApi = getWorkspaceApi();
+export type { SearchResult } from './fs-tree-helpers';
+
+export const workspaceApi = getFeatureRegistry();
+let fileBrowserLoadPromise: Promise<void> | null = null;
 
 
 export interface SortConfig {
   sortKey: string;
   order: string[];
-}
-
-export interface SearchResult {
-  name: string;
-  path: string;
-  category?: string;
-  ext?: string;
-  size_bytes?: number;
 }
 
 export interface FsTreeOptions {
@@ -32,39 +39,16 @@ export interface FsTreeOptions {
 const _MORE_BTN_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="2.5" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="8" cy="13.5" r="1.5"/></svg>`;
 const _SEND_AI_SVG = `<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2.2l.9 2.5 2.6.9-2.6.9L8 9l-.9-2.5-2.6-.9 2.6-.9L8 2.2z"/><path d="M12.3 9.7l.45 1.2 1.25.45-1.25.45-.45 1.2-.45-1.2-1.25-.45 1.25-.45.45-1.2z"/></svg>`;
 
-// ── Extension Support ──
-
-function _isSupportedExt(ext: string): boolean {
-  const s = new Set([
-    'docx', 'xlsx', 'pptx', 'pdf',
-    'txt', 'md', 'markdown', 'csv',
-    'py', 'js', 'ts', 'json', 'html', 'css', 'xml',
-    'sh', 'bash', 'yaml', 'yml',
-    'c', 'cpp', 'h', 'hpp', 'java', 'rb', 'go',
-    'rs', 'cs', 'php', 'swift', 'kt', 'r', 'sql',
-    'toml', 'ini', 'cfg', 'conf',
-    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg',
-  ]);
-  return s.has((ext || '').toLowerCase().replace(/^\./, ''));
-}
-
-function _formatSize(bytes: number): string {
-  if (!bytes || bytes < 0) return '';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1048576).toFixed(1) + ' MB';
-}
-
 // ── CSRF Fetch ──
 
-function _csrfFetch(url: string, options: any = {}): Promise<Response> {
+export function _csrfFetch(url: string, options: any = {}): Promise<Response> {
   if (typeof workspaceApi._csrfFetch === 'function') {
     return workspaceApi._csrfFetch(url, options);
   }
   return fetch(url, options);
 }
 
-function _safeJson(res: Response): Promise<any> {
+export function _safeJson(res: Response): Promise<any> {
   return res.json().catch(() => ({}));
 }
 
@@ -89,85 +73,27 @@ export function _applyBrowserSort(entries: BrowserNode[]): BrowserNode[] {
 
 // ── Path Helpers ──
 
-function _joinWorkspacePath(root: string, relPath: string): string {
-  const rootText = String(root || '').replace(/[\\/]+$/, '');
-  const relText = String(relPath || '').replace(/^[\\/]+/, '');
-  if (!rootText) return relText;
-  return rootText + '\\' + relText.replace(/\//g, '\\');
-}
-
-function _flattenWorkspaceListFiles(nodes: any[], workspacePath: string, out: SearchResult[] = []): SearchResult[] {
-  (Array.isArray(nodes) ? nodes : []).forEach((node) => {
-    if (!node || typeof node !== 'object') return;
-    if (node.type === 'folder') {
-      _flattenWorkspaceListFiles(node.children || [], workspacePath, out);
-      return;
-    }
-    if (node.type !== 'file') return;
-    const path = _joinWorkspacePath(workspacePath, node.path || node.name || '');
-    out.push({
-      name: node.name || (path.split(/[\\/]/).pop() || path),
-      path,
-      category: node.category || '',
-      ext: node.ext || '',
-      size_bytes: Number(node.size_bytes || 0) || 0,
-    });
-  });
-  return out;
-}
-
 export function _isAbsolutePath(rawPath: string): boolean {
-  return /^(?:[a-zA-Z]:[\\/]|\/|\\\\)/.test(String(rawPath || '').trim());
+  return isAbsoluteFsPath(rawPath);
 }
 
 export function _isInsideWorkspace(rawPath: string): boolean {
-  const raw = String(rawPath || '').replace(/\\/g, '/');
-  const root = String(state._workspacePath || '').replace(/\\/g, '/').replace(/\/+$/, '');
-  return !!root && (raw === root || raw.startsWith(root + '/'));
+  return isInsideWorkspaceRoot(rawPath, state._workspacePath || '');
 }
 
 export function _workspaceRelativePath(rawPath: string): string {
-  const raw = String(rawPath || '').trim();
-  if (!raw) return '';
-  const normalized = raw.replace(/\\/g, '/');
-  const workspaceRoot = String(state._workspacePath || '').replace(/\\/g, '/').replace(/\/+$/, '');
-  if (workspaceRoot && (normalized === workspaceRoot || normalized.startsWith(workspaceRoot + '/'))) {
-    return normalized.slice(workspaceRoot.length).replace(/^\/+/, '');
-  }
-  return normalized.replace(/^\/+/, '').replace(/^workspace\//i, '');
+  return relativeToWorkspaceRoot(rawPath, state._workspacePath || '');
 }
 
-function _mergeSearchResults(indexedResults: SearchResult[], liveResults: SearchResult[], limit: number = 60): SearchResult[] {
-  const seen = new Set<string>();
-  const merged: SearchResult[] = [];
-  [...(indexedResults || []), ...(liveResults || [])].forEach((file: any) => {
-    const key = String((file && (file.path || file.name)) || '').toLowerCase();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    merged.push(file);
-  });
-  return merged.slice(0, limit);
-}
-
-function _entrySearchCategory(entry: Partial<BrowserNode | SearchResult>): string {
-  const rawCategory = String(entry.category || '').toLowerCase();
-  const ext = String(entry.ext || (entry.name || '').split('.').pop() || '').replace(/^\./, '').toLowerCase();
-  if (['doc', 'docx', 'pdf', 'txt', 'md', 'markdown'].includes(ext) || ['docx', 'pdf', 'text', '文档'].includes(rawCategory)) return '文档';
-  if (['xls', 'xlsx', 'csv'].includes(ext) || ['xlsx', 'spreadsheet', '表格'].includes(rawCategory)) return '表格';
-  if (['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg'].includes(ext) || ['image', '图片'].includes(rawCategory)) return '图片';
-  if (['py', 'js', 'ts', 'json', 'html', 'css', 'xml', 'yaml', 'yml', 'sql'].includes(ext) || ['code', '代码'].includes(rawCategory)) return '代码';
-  return '其他';
-}
-
-function _fileDragAttrs(): string {
+export function _fileDragAttrs(): string {
   return 'draggable="true" data-wa-file-draggable="true"';
 }
 
-function _fileOpenHitDragAttrs(): string {
+export function _fileOpenHitDragAttrs(): string {
   return 'data-wa-file-action="open"';
 }
 
-function _fileActionButtons(supported: boolean): string {
+export function _fileActionButtons(supported: boolean): string {
   const isolatedPressAttrs = 'draggable="false"';
   const sendButton = supported
     ? `<button type="button" class="wa-file-send-ai" data-wa-file-action="send-ai" ${isolatedPressAttrs} title="发送给 AI" aria-label="发送给 AI">${_SEND_AI_SVG}</button>`
@@ -190,7 +116,7 @@ function _browserFileDragStart(event: DragEvent, el: HTMLElement): void {
   document.body.classList.add('wa-file-dragging');
 }
 
-async function _attachBrowserFileToAI(path: string, source: string): Promise<void> {
+export async function _attachBrowserFileToAI(path: string, source: string): Promise<void> {
   const normalized = String(path || '').trim();
   if (!normalized) return;
   const attachFilesToTask = workspaceApi.attachFilesToTask;
@@ -344,276 +270,17 @@ function _browserFileDragEnd(event: DragEvent, el: HTMLElement): void {
   const x = Number(event && event.clientX);
   const y = Number(event && event.clientY);
   if (!path || !Number.isFinite(x) || !Number.isFinite(y) || !_isPointInsideAIPanel(x, y)) return;
-  _suppressBrowserRowClickUntil = Date.now() + 450;
+  _suppressBrowserRowClickFor(450);
   _attachBrowserFileToAI(path, 'file_tree_dragend_drop').catch((error) => {
     console.warn('[WA] file dragend drop failed:', error);
   });
 }
 
-let _browserPointerDrag: {
-  path: string;
-  supported: boolean;
-  el: HTMLElement;
-  startX: number;
-  startY: number;
-  active: boolean;
-} | null = null;
-let _suppressBrowserRowClickUntil = 0;
+import { _focusVisibleAIComposer, _installBrowserPointerDragFallback, _isAiSessionListVisible, _isPointInsideAIPanel, _startBrowserPointerDrag, _suppressBrowserRowClickFor, _suppressBrowserRowClickUntil } from './fs-tree-pointer-drag';
+export * from './fs-tree-pointer-drag';
+import { _browserPathKey, _displayFileName, _doSearch, _loadBrowserFolderEntries } from './fs-tree-search';
+export * from './fs-tree-search';
 
-function _isAiSessionListVisible(): boolean {
-  const listView = document.getElementById('wa-ai-session-list-view');
-  return !!listView && !listView.hidden;
-}
-
-function _focusVisibleAIComposer(): void {
-  const input = document.getElementById('wa-user-input') as HTMLInputElement | null;
-  if (input) setTimeout(() => input.focus(), 120);
-}
-
-function _isPointInsideAIPanel(x: number, y: number): boolean {
-  const target = document.elementFromPoint(x, y) as HTMLElement | null;
-  if (target && target.closest('#wa-ai, #wa-ai-session-list-composer, #wa-ai-input-area, #wa-ai-file-drop')) return true;
-  const aiPanel = document.getElementById('wa-ai');
-  if (!aiPanel) return false;
-  const rect = aiPanel.getBoundingClientRect();
-  return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
-}
-
-function _endBrowserPointerDrag(): void {
-  if (_browserPointerDrag && _browserPointerDrag.el) _browserPointerDrag.el.classList.remove('dragging');
-  _browserPointerDrag = null;
-  document.body.classList.remove('wa-file-dragging');
-}
-
-function _isBrowserFileActionTarget(target: EventTarget | null): boolean {
-  const el = target instanceof Element ? target : null;
-  return !!(el && el.closest('.wa-file-actions, .wa-file-check, input, select, textarea, a'));
-}
-
-function _startBrowserPointerDrag(event: MouseEvent | PointerEvent, el: HTMLElement): void {
-  if (!el || event.button !== 0 || state.selectMode) return;
-  if (_isBrowserFileActionTarget(event.target)) return;
-  const path = String(el.dataset.path || '').trim();
-  if (!path) return;
-  _browserPointerDrag = {
-    path,
-    supported: el.dataset.supported !== 'false',
-    el,
-    startX: event.clientX,
-    startY: event.clientY,
-    active: false,
-  };
-}
-
-function _onBrowserPointerMove(event: MouseEvent | PointerEvent): void {
-  const drag = _browserPointerDrag;
-  if (!drag) return;
-  if (!drag.active) {
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    if (Math.sqrt(dx * dx + dy * dy) < 8) return;
-    drag.active = true;
-    drag.el.classList.add('dragging');
-    document.body.classList.add('wa-file-dragging');
-  }
-}
-
-async function _onBrowserPointerUp(event: MouseEvent | PointerEvent): Promise<void> {
-  const drag = _browserPointerDrag;
-  if (!drag) return;
-  const shouldAttach = drag.active && drag.supported && _isPointInsideAIPanel(event.clientX, event.clientY);
-  _endBrowserPointerDrag();
-  if (!shouldAttach) return;
-  event.preventDefault();
-  event.stopPropagation();
-  _suppressBrowserRowClickUntil = Date.now() + 450;
-  await _attachBrowserFileToAI(drag.path, 'file_tree_pointer_drop');
-}
-
-function _installBrowserPointerDragFallback(): void {
-  if ((window as any)._waBrowserPointerDragFallbackInstalled) return;
-  (window as any)._waBrowserPointerDragFallbackInstalled = true;
-  document.addEventListener('mousemove', (event) => _onBrowserPointerMove(event));
-  document.addEventListener('pointermove', (event) => _onBrowserPointerMove(event));
-  document.addEventListener('mouseup', (event) => {
-    _onBrowserPointerUp(event).catch((error) => {
-      console.warn('[WA] file pointer drop failed:', error);
-      _endBrowserPointerDrag();
-    });
-  }, true);
-  document.addEventListener('pointerup', (event) => {
-    _onBrowserPointerUp(event).catch((error) => {
-      console.warn('[WA] file pointer drop failed:', error);
-      _endBrowserPointerDrag();
-    });
-  }, true);
-}
-
-function _searchCachedBrowserEntries(query: string, category: string, limit: number = 60): SearchResult[] {
-  const q = String(query || '').trim().toLowerCase();
-  const cat = String(category || '').trim();
-  if (!q && !cat) return [];
-  const seen = new Set<string>();
-  const out: SearchResult[] = [];
-  const visit = (entry: BrowserNode | null | undefined) => {
-    if (!entry || out.length >= limit) return;
-    const isFolder = entry.type === 'folder' || entry.type === 'drive' || entry.type === 'quick';
-    if (isFolder) {
-      (entry.children || []).forEach(visit);
-      const cached = state._browserCache[_browserPathKey(entry.path)];
-      if (Array.isArray(cached)) cached.forEach(visit);
-      return;
-    }
-    if (entry.type !== 'file') return;
-    const rawPath = String(entry.path || '').trim();
-    const path = rawPath && !_isAbsolutePath(rawPath) ? _joinWorkspacePath(state._workspacePath || '', rawPath) : rawPath;
-    const name = String(entry.name || path.split(/[\\/]/).pop() || '').trim();
-    const haystack = `${name} ${path}`.toLowerCase();
-    if (q && !haystack.includes(q)) return;
-    const normalizedCategory = _entrySearchCategory(entry);
-    if (cat && normalizedCategory !== cat) return;
-    const key = (path || name).toLowerCase();
-    if (!key || seen.has(key)) return;
-    seen.add(key);
-    out.push({
-      name,
-      path,
-      category: normalizedCategory,
-      ext: entry.ext || (name.includes('.') ? name.split('.').pop() : ''),
-      size_bytes: Number((entry as any).size_bytes || 0) || 0,
-    });
-  };
-  const roots = state._browserRoots;
-  (roots?.quick_access || []).forEach(visit);
-  (roots?.drives || []).forEach(visit);
-  return out.slice(0, limit);
-}
-
-export function _displayFileName(rawPath: string, fallback: string = '文件'): string {
-  return String(rawPath || fallback).split(/[\\/]/).pop() || fallback;
-}
-
-function _browserPathKey(rawPath: string): string {
-  return String(rawPath || '').trim().replace(/[\\/]+$/, '');
-}
-
-async function _loadBrowserFolderEntries(absPath: string): Promise<any[]> {
-  const path = String(absPath || '').trim();
-  const key = _browserPathKey(path);
-  if (!path || !key) return [];
-  state._browserLoading = state._browserLoading || {};
-  if (state._browserLoading[key] !== undefined) return state._browserLoading[key];
-  state._browserLoading[key] = fetch('/api/v1/workspace/browse_local?path=' + encodeURIComponent(path), { cache: 'no-store' })
-    .then(async (res) => {
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || '无法读取文件夹');
-      return data.entries || [];
-    })
-    .finally(() => {
-      delete state._browserLoading[key];
-    });
-  return state._browserLoading[key];
-}
-
-// ── Live Search ──
-
-async function _searchLiveWorkspaceFiles(query: string, category: string, limit?: number): Promise<SearchResult[]> {
-  const q = String(query || '').trim().toLowerCase();
-  if (!q) return [];
-  try {
-    const res = await fetch('/api/v1/workspace/list_files', { cache: 'no-store' });
-    if (!res.ok) return [];
-    const data = await res.json();
-    const files = _flattenWorkspaceListFiles(data.files || [], data.workspace_path || state._workspacePath || '');
-    const matches = files.filter((file) => {
-      const haystack = `${file.name || ''} ${file.path || ''}`.toLowerCase();
-      if (!haystack.includes(q)) return false;
-      if (!category) return true;
-      return String(file.category || '').toLowerCase() === String(category || '').toLowerCase();
-    });
-    return matches.slice(0, limit || 60);
-  } catch (_) {
-    return [];
-  }
-}
-
-// ── Search ──
-
-async function _doSearch(): Promise<void> {
-  state._searchActive = true;
-  const q = state.searchQuery;
-  const cat = state._searchFilter !== 'all' ? state._searchFilter : '';
-  const list = document.getElementById('wa-files-list');
-  if (!list) return;
-  list.innerHTML =
-    '<div class="wa-loading-row" style="padding:12px 8px;display:flex;align-items:center;gap:8px">' +
-    '<span class="wa-spinner"></span>搜索中…</div>';
-  const cachedResults = _searchCachedBrowserEntries(q, cat, 60);
-  if (cachedResults.length) _renderSearchResults(cachedResults, q);
-  try {
-    const params = new URLSearchParams({ limit: '60' });
-    if (q) params.set('q', q);
-    if (cat) params.set('category', cat);
-    const res = await fetch('/api/files/search?' + params);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const d = await res.json();
-    const indexedResults = d.results || [];
-    const searchToken = `${q}\u0000${cat}`;
-    _renderSearchResults(_mergeSearchResults(cachedResults, indexedResults, 60), q);
-    _searchLiveWorkspaceFiles(q, cat, 60).then((liveResults) => {
-      if (!state._searchActive || `${state.searchQuery}\u0000${state._searchFilter !== 'all' ? state._searchFilter : ''}` !== searchToken) return;
-      _renderSearchResults(_mergeSearchResults(_mergeSearchResults(cachedResults, indexedResults, 60), liveResults, 60), q);
-    }).catch(() => {
-      // Indexed results are already visible; live search is only a freshness supplement.
-    });
-  } catch (e: any) {
-    if (list) list.innerHTML = `<div class="wa-empty-row" style="padding:12px 8px">搜索失败: ${_escHtml(e.message)}</div>`;
-  }
-}
-
-function _renderSearchResults(results: SearchResult[], query: string): void {
-  const list = document.getElementById('wa-files-list');
-  if (!list) return;
-  const header =
-    '<div class="wa-search-header">' +
-    `<span>找到 ${results.length} 个文件${query ? ' &middot; "' + _escHtml(query) + '"' : ''}</span>` +
-    '<button type="button" data-wa-file-action="clear-search">&#8592; 返回浏览</button>' +
-    '</div>';
-  if (!results.length) {
-    list.innerHTML =
-      header +
-      '<div style="padding:20px 12px;text-align:center;color:var(--text-muted);font-size:12px">' +
-      '未找到匹配的文件<br><span style="font-size:11px;margin-top:4px;display:block">尝试其他关键词或调整类型过滤</span></div>';
-    return;
-  }
-  const rows = results.map((f) => {
-    const name = f.name || (f.path || '').split(/[\\/]/).pop() || '';
-    const ext = (name.includes('.') ? (name.split('.').pop() || '') : '').toLowerCase();
-    const path = f.path || '';
-    const dir = path.replace(/[\\/][^\\/]+$/, '');
-    const cat = f.category || '';
-    const size = f.size_bytes ? _formatSize(f.size_bytes) : '';
-    const supported = _isSupportedExt(ext);
-    const unsupported = supported ? '' : ' wa-unsupported';
-    const checkHtml = state.selectMode
-      ? '<input type="checkbox" class="wa-file-check">'
-      : '';
-    return (
-      `<div class="wa-file-item file${unsupported}" style="padding-left:8px"` +
-      ` data-path="${_escHtml(path)}" data-supported="${supported}"` +
-      ` ${_fileDragAttrs()}` +
-      ` title="${_escHtml(path)}">` +
-      `<button type="button" class="wa-file-open-hit" ${_fileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}"></button>` +
-      `${checkHtml}${_fileIcon(ext, cat)}` +
-      `<span class="wa-file-label">${_escHtml(name)}</span>` +
-      `<span class="wa-search-dir" title="${_escHtml(dir)}">${_escHtml(dir)}</span>` +
-      `${size ? `<span class="wa-recent-date">${size}</span>` : ''}` +
-      _fileActionButtons(supported) +
-      '</div>'
-    );
-  });
-  list.innerHTML = header + rows.join('');
-}
 
 // ── File Browser ──
 
@@ -780,7 +447,7 @@ function _showFolderFilePicker(files: File[]): void {
       if (file) void _loadPickedFiles([file]);
     });
   });
-  document.body.appendChild(overlay);
+  appendToUiPortal(overlay);
 }
 
 function _bindLocalFilePickers(): void {
@@ -832,14 +499,23 @@ function _bindLocalFilePickers(): void {
   });
 }
 
+export function ensureFileBrowserLoaded(): Promise<void> {
+  if (!fileBrowserLoadPromise) {
+    fileBrowserLoadPromise = Promise.all([loadFileBrowser(), loadRecentFiles()])
+      .then(() => undefined)
+      .catch((error) => {
+        fileBrowserLoadPromise = null;
+        throw error;
+      });
+  }
+  return fileBrowserLoadPromise;
+}
+
 function _autoLoadStandaloneFileBrowser(): void {
   if (!document.getElementById('wa-files-list')) return;
   const embeddedWorkspace = document.getElementById('workspaceView');
   if (embeddedWorkspace && getComputedStyle(embeddedWorkspace).display === 'none') return;
-  if ((window as any)._WA_fileBrowserLoaded) return;
-  (window as any)._WA_fileBrowserLoaded = true;
-  void loadFileBrowser();
-  void loadRecentFiles();
+  void ensureFileBrowserLoaded();
 }
 
 async function _softRefreshBrowser(): Promise<void> {
@@ -862,6 +538,18 @@ async function _softRefreshBrowser(): Promise<void> {
     requestAnimationFrame(() => {
       list.scrollTop = savedScroll;
     });
+}
+
+let _externalFileBrowserRefreshTimer: number | null = null;
+
+function requestFileBrowserRefreshAfterExternalChange(): void {
+  if (_externalFileBrowserRefreshTimer !== null) {
+    window.clearTimeout(_externalFileBrowserRefreshTimer);
+  }
+  _externalFileBrowserRefreshTimer = window.setTimeout(() => {
+    _externalFileBrowserRefreshTimer = null;
+    void _softRefreshBrowser();
+  }, 160);
 }
 
 // ── Live Polling ──
@@ -1079,133 +767,9 @@ async function _dropOntoFolder(event: DragEvent, destPath: string): Promise<void
   delete state._browserCache[destKey];
   state._browserExpanded.add(destKey);
   await _softRefreshBrowser();
-}
+}import { _createFallbackWorkspaceFileLoader } from './fs-tree-file-loader';
+export * from './fs-tree-file-loader';
 
-// ── Workspace File Loader (fallback) ──
-
-function _createFallbackWorkspaceFileLoader(): any {
-  const _switchToTab = async (path: string): Promise<void> => {
-    if (typeof workspaceApi._tabClick === 'function') {
-      await workspaceApi._tabClick(path);
-    }
-  };
-
-  const setLoadingFn = (show: boolean, msg?: string): void => {
-    const overlay = document.getElementById('wa-canvas-loading');
-    if (show) {
-      if (overlay) {
-        const text = overlay.querySelector('.wa-loading-text');
-        if (text) text.textContent = msg || '加载中...';
-        overlay.style.display = 'flex';
-      }
-    } else {
-      if (overlay) overlay.style.display = 'none';
-    }
-  };
-
-  async function openParsedFile(json: any, wsPath: string | null, _fsHandle: any = null): Promise<any> {
-    const resolvedPath = wsPath || json.ws_source_path || json.source_path || json.temp_path || json.file_name;
-    if (typeof workspaceApi._applyFileJson === 'function') {
-      await workspaceApi._applyFileJson(json, resolvedPath, _fsHandle);
-    }
-    if (resolvedPath) _trackUserOpen(resolvedPath);
-    return json;
-  }
-
-  async function openWorkspaceFile(path: string, supported: boolean = true): Promise<any> {
-    const requestPath = _workspaceRelativePath(path);
-    if (!requestPath) return null;
-    if (!supported) {
-      showToast('此格式暂不支持在线编辑：' + _displayFileName(requestPath), 'info');
-      return null;
-    }
-    setLoadingFn(true, '正在打开文件...');
-    try {
-      const res = await _csrfFetch('/api/v1/workspace/open_file_by_path', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: requestPath }),
-      });
-      const data = await _safeJson(res);
-      if (!res.ok) throw new Error(data.error || '打开文件失败');
-      return await openParsedFile(data, requestPath, null);
-    } catch (error: any) {
-      console.error('[WA] openWorkspaceFile failed:', error);
-      showToast(error.message || '打开文件失败', 'error');
-      return null;
-    } finally {
-      setLoadingFn(false);
-    }
-  }
-
-  async function openBrowserFile(absPath: string, supported: boolean = true): Promise<any> {
-    if (!supported) {
-      showToast('此格式暂不支持在线编辑：' + _displayFileName(absPath), 'info');
-      return null;
-    }
-    if (_isAbsolutePath(absPath) && !_isInsideWorkspace(absPath)) {
-      setLoadingFn(true, '正在打开文件...');
-      let missingExternalFile = false;
-      try {
-        const res = await _csrfFetch('/api/v1/workspace/open_abs_file', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ path: absPath }),
-        });
-        const data = await _safeJson(res);
-        if (!res.ok) {
-          missingExternalFile = res.status === 404;
-          if (missingExternalFile) {
-            _forgetRecentPath(absPath);
-            await loadRecentFiles().catch(() => {});
-          }
-          throw new Error(data.error || '打开文件失败');
-        }
-        return await openParsedFile(data, absPath, null);
-      } catch (error: any) {
-        if (missingExternalFile) console.warn('[WA] openBrowserFile missing file:', error);
-        else console.error('[WA] openBrowserFile failed:', error);
-        showToast(error.message || '打开文件失败', 'error');
-        return null;
-      } finally {
-        setLoadingFn(false);
-      }
-    }
-    return openWorkspaceFile(absPath, supported);
-  }
-
-  async function reloadFileByPath(filePath: string, supported: boolean = true): Promise<any> {
-    if (_isAbsolutePath(filePath) && !_isInsideWorkspace(filePath)) {
-      return openBrowserFile(filePath, supported);
-    }
-    return openWorkspaceFile(filePath, supported);
-  }
-
-  async function load(file: any): Promise<any> {
-    if (!file) return null;
-    if (file._waPath) return openWorkspaceFile(file._waPath, true);
-    setLoadingFn(true, '正在解析文件...');
-    try {
-      const formData = new FormData();
-      formData.append('file', file);
-      const res = await _csrfFetch('/api/v1/workspace/open_file', {
-        method: 'POST',
-        body: formData,
-      });
-      const data = await _safeJson(res);
-      if (!res.ok) throw new Error(data.error || '打开文件失败');
-        return await openParsedFile(data, data.ws_source_path || file.name, file._fsHandle || null);
-    } catch (error: any) {
-      console.error('[WA] load file failed:', error);
-      showToast(error.message || '打开文件失败', 'error');
-      return null;
-    } finally {
-      setLoadingFn(false);
-    }
-  }
-
-  return { openBrowserFile, openWorkspaceFile, reloadFileByPath, openParsedFile, fromParsed: openParsedFile, load };
-}
 
 export const _waSharedFileLoader: any = typeof workspaceApi.createWorkspaceFileLoader === 'function'
   ? workspaceApi.createWorkspaceFileLoader({
@@ -1236,6 +800,7 @@ const wa = workspaceApi;
 
 wa._renderBrowserTree = _renderBrowserTree;
 wa._softRefreshBrowser = _softRefreshBrowser;
+wa.requestFileBrowserRefreshAfterExternalChange = requestFileBrowserRefreshAfterExternalChange;
 wa._doSearch = _doSearch;
 wa.toggleBrowserFolder = toggleBrowserFolder;
 wa.handleBrowserFolderClick = handleBrowserFolderClick;
@@ -1342,7 +907,7 @@ wa.openRecentFile = async (filePath: string) => {
   return wa.openBrowserFile(rawPath, supported);
 };
 
-(window as any).loadFileBrowser = loadFileBrowser;
+getFeatureRegistry().loadFileBrowser = loadFileBrowser;
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {

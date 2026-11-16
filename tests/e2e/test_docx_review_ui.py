@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 EDITOR_LOAD_TIMEOUT = 60_000
@@ -44,28 +46,25 @@ def _wait_until_text_includes(
 
 def _open_docx_for_review(page, base_url: str, docx_path: str) -> None:
     page.goto(f"{base_url}/", timeout=15_000, wait_until="domcontentloaded")
+    page.wait_for_function(
+        "() => document.getElementById('wa-file-input')?._waLocalPickerBound === true",
+        timeout=REVIEW_TIMEOUT,
+    )
     page.locator("#wa-file-input").set_input_files(docx_path)
     _wait_until_visible(
         page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT
-    )
-    page.wait_for_function(
-        "() => !!window.WA && typeof window.WA.toggleReviewCommentMode === 'function'",
-        timeout=REVIEW_TIMEOUT,
     )
     _wait_until_visible(page, ".wa-docx-review-mode")
 
 
 def _ensure_review_mode_open(page) -> None:
     is_open = page.evaluate("""() => {
-            const shell = document.getElementById('wa-review-shell');
-            if (!shell) return false;
-            const style = window.getComputedStyle(shell);
-            return style.display !== 'none' && style.visibility !== 'hidden';
+            const btn = document.querySelector('.wa-docx-review-mode');
+            return !!btn && btn.getAttribute('aria-pressed') === 'true';
         }""")
     if is_open:
         return
     page.locator(".wa-docx-review-mode").click()
-    _wait_until_visible(page, "#wa-review-shell")
     page.wait_for_function(
         """() => {
             const btn = document.querySelector('.wa-docx-review-mode');
@@ -120,7 +119,6 @@ def _select_docx_text(page, target_text: str) -> None:
     assert selection, f"Could not select DOCX text: {target_text!r}"
     assert target_text in selection["selectedText"]
     assert selection["rectCount"] > 0
-    page.evaluate("() => window.WA.captureReviewSelection()")
 
 
 def _review_card_ids(page) -> list[str]:
@@ -234,6 +232,25 @@ def _wait_for_review_card_focus(
     )
 
 
+def _review_toolbar_center_delta(page, review_id: str) -> float:
+    return page.evaluate(
+        """(reviewId) => {
+            const toolbar = document.querySelector('.wa-docx-review-group');
+            const card = document.querySelector(
+                `#wa-review-shell [data-review-id="${reviewId}"]`
+            );
+            if (!toolbar || !card) return Number.POSITIVE_INFINITY;
+            const toolbarRect = toolbar.getBoundingClientRect();
+            const cardRect = card.getBoundingClientRect();
+            return Math.abs(
+                (toolbarRect.left + toolbarRect.width / 2)
+                - (cardRect.left + cardRect.width / 2)
+            );
+        }""",
+        review_id,
+    )
+
+
 def _create_comment_via_launcher(
     page,
     anchor_text: str,
@@ -296,7 +313,59 @@ def docx_review_ui_docx_path(tmp_path):
     return str(path)
 
 
+@pytest.fixture()
+def docx_large_review_docx_path(tmp_path):
+    docx_module = pytest.importorskip("docx")
+
+    path = tmp_path / "docx_large_review_corpus.docx"
+    doc = docx_module.Document()
+    for index in range(500):
+        paragraph = doc.add_paragraph(
+            f"P4 review anchor {index:04d}: large review corpus stability check."
+        )
+        doc.add_comment(
+            runs=paragraph.runs,
+            text=f"P4 comment {index:04d}",
+            author="Koto P4",
+            initials="P4",
+        )
+    doc.save(path)
+    return str(path)
+
+
 pytestmark = pytest.mark.e2e
+
+
+def test_docx_review_engine_loads_only_when_docx_opens(
+    e2e_page,
+    e2e_base_url,
+    docx_review_ui_docx_path,
+    console_errors,
+):
+    e2e_page.goto(f"{e2e_base_url}/", timeout=15_000, wait_until="domcontentloaded")
+    assert e2e_page.evaluate(
+        "() => typeof window.KotoDocxReviewEngineModule === 'undefined'"
+    )
+    assert e2e_page.evaluate("""() => performance.getEntriesByType('resource').every(
+            (entry) => !String(entry.name || '').includes('docx-review-engine-bundle.js')
+        )""")
+
+    e2e_page.wait_for_function(
+        "() => document.getElementById('wa-file-input')?._waLocalPickerBound === true",
+        timeout=REVIEW_TIMEOUT,
+    )
+    e2e_page.locator("#wa-file-input").set_input_files(docx_review_ui_docx_path)
+    _wait_until_visible(
+        e2e_page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT
+    )
+    e2e_page.wait_for_function(
+        "() => !!window.KotoDocxReviewEngineModule",
+        timeout=REVIEW_TIMEOUT,
+    )
+    assert e2e_page.evaluate("""() => performance.getEntriesByType('resource').some(
+            (entry) => String(entry.name || '').includes('docx-review-engine-bundle.js')
+        )""")
+    assert console_errors == [], f"JS errors: {console_errors}"
 
 
 def test_docx_review_selection_launcher_creates_comment(
@@ -341,7 +410,28 @@ def test_docx_review_selection_launcher_creates_comment(
     assert saved_geometry["hasLegacyAnchorRow"] is False
     assert "批注测试" in saved_geometry["anchorButtonLabel"]
     assert saved_geometry["connectorExists"] is True
+    assert _review_toolbar_center_delta(e2e_page, review_id) <= 2
     assert len(_review_card_ids(e2e_page)) == 1
+    assert console_errors == [], f"JS errors: {console_errors}"
+
+
+def test_docx_review_toolbar_stays_centered_over_review_rail_at_narrow_width(
+    e2e_page,
+    e2e_base_url,
+    docx_review_ui_docx_path,
+    console_errors,
+):
+    e2e_page.set_viewport_size({"width": 1008, "height": 720})
+    _open_docx_for_review(e2e_page, e2e_base_url, docx_review_ui_docx_path)
+
+    review_id = _create_comment_via_launcher(
+        e2e_page,
+        anchor_text="批注测试",
+        comment_text="窄窗口工具栏对齐测试",
+        expected_summary="1条批注",
+    )
+
+    assert _review_toolbar_center_delta(e2e_page, review_id) <= 2
     assert console_errors == [], f"JS errors: {console_errors}"
 
 
@@ -435,4 +525,98 @@ def test_docx_review_nav_menu_edit_and_delete_flow(
         }""",
         timeout=REVIEW_TIMEOUT,
     )
+    assert console_errors == [], f"JS errors: {console_errors}"
+
+
+def test_docx_large_review_corpus_stays_within_render_budget(
+    e2e_page,
+    e2e_base_url,
+    docx_large_review_docx_path,
+    console_errors,
+):
+    e2e_page.goto(f"{e2e_base_url}/", timeout=15_000, wait_until="domcontentloaded")
+    e2e_page.evaluate("""() => {
+        window.__p4LongTasks = [];
+        if (typeof PerformanceObserver === 'function') {
+            const observer = new PerformanceObserver((list) => {
+                for (const entry of list.getEntries()) window.__p4LongTasks.push(entry.duration);
+            });
+            try { observer.observe({ type: 'longtask', buffered: true }); } catch (_) {}
+            window.__p4LongTaskObserver = observer;
+        }
+    }""")
+
+    e2e_page.wait_for_function(
+        "() => document.getElementById('wa-file-input')?._waLocalPickerBound === true",
+        timeout=REVIEW_TIMEOUT,
+    )
+    started = time.perf_counter()
+    e2e_page.locator("#wa-file-input").set_input_files(docx_large_review_docx_path)
+    _wait_until_visible(
+        e2e_page, "#wa-docx-editor .ProseMirror", timeout=EDITOR_LOAD_TIMEOUT
+    )
+    _wait_until_text_includes(
+        e2e_page, ".wa-docx-review-summary", "500条批注", timeout=EDITOR_LOAD_TIMEOUT
+    )
+    ready_seconds = time.perf_counter() - started
+
+    render_state = e2e_page.evaluate("""() => {
+        const list = document.querySelector('#wa-review-list');
+        const cards = Array.from(list?.querySelectorAll('.koto-docx-comment-card') || []);
+        const durations = Array.isArray(window.__p4LongTasks) ? window.__p4LongTasks : [];
+        return {
+            total: Number(list?.dataset.reviewTotal || 0),
+            rendered: cards.length,
+            windowStart: Number(list?.dataset.reviewWindowStart || -1),
+            windowEnd: Number(list?.dataset.reviewWindowEnd || -1),
+            maxLongTaskMs: durations.length ? Math.max(...durations) : 0,
+        };
+    }""")
+    assert (
+        ready_seconds <= 20
+    ), f"500-comment DOCX took {ready_seconds:.2f}s to become usable"
+    assert render_state["total"] == 500
+    assert 1 <= render_state["rendered"] <= 120
+    assert render_state["windowStart"] == 0
+    assert render_state["windowEnd"] == 120
+    assert render_state["maxLongTaskMs"] <= 1500, render_state
+
+    e2e_page.locator(".wa-docx-review-summary").click()
+    _wait_until_visible(e2e_page, ".wa-docx-review-nav-menu")
+    nav_items = e2e_page.locator(".wa-docx-review-nav-item")
+    assert nav_items.count() == 80
+    nav_state = e2e_page.locator(".wa-docx-review-nav-menu")
+    assert nav_state.get_attribute("data-review-nav-total") == "500"
+    assert nav_state.get_attribute("data-review-nav-rendered") == "80"
+    search = e2e_page.locator(".wa-docx-review-nav-search-input")
+    search.fill("P4 review anchor 0499")
+    e2e_page.wait_for_function(
+        "() => document.querySelectorAll('.wa-docx-review-nav-item').length === 1",
+        timeout=REVIEW_TIMEOUT,
+    )
+    far_id = e2e_page.locator(".wa-docx-review-nav-item").get_attribute(
+        "data-review-nav-id"
+    )
+    assert far_id
+    e2e_page.locator(".wa-docx-review-nav-item").click()
+    _wait_for_review_card_focus(e2e_page, far_id)
+    far_state = e2e_page.evaluate(
+        """(reviewId) => {
+        const list = document.querySelector('#wa-review-list');
+        const card = list?.querySelector(`[data-review-id="${reviewId}"]`);
+        return {
+            rendered: list?.querySelectorAll('.koto-docx-comment-card').length || 0,
+            windowEnd: Number(list?.dataset.reviewWindowEnd || -1),
+            position: Number(card?.getAttribute('aria-posinset') || 0),
+            setSize: Number(card?.getAttribute('aria-setsize') || 0),
+        };
+    }""",
+        far_id,
+    )
+    assert far_state == {
+        "rendered": 120,
+        "windowEnd": 500,
+        "position": 500,
+        "setSize": 500,
+    }
     assert console_errors == [], f"JS errors: {console_errors}"

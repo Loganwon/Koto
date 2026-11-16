@@ -14,7 +14,14 @@ _LOGGER = "app.core.agent.types"
 class TestAgentStepType:
     def test_all_expected_values_exist(self):
         values = {e.value for e in AgentStepType}
-        assert values == {"thought", "action", "observation", "answer", "error"}
+        assert values == {
+            "stream",
+            "thought",
+            "action",
+            "observation",
+            "answer",
+            "error",
+        }
 
     def test_enum_accessible_by_value(self):
         assert AgentStepType("thought") is AgentStepType.THOUGHT
@@ -36,6 +43,38 @@ class TestAgentAction:
 
 @pytest.mark.unit
 class TestAgentStep:
+    @pytest.mark.parametrize(
+        "kind,text,status,draft",
+        [
+            ("message.started", "", "generating", True),
+            ("message.delta", "好", "generating", True),
+            ("message.finished", "你好", "completed", False),
+        ],
+    )
+    def test_stream_serialization_preserves_message_identity_and_draft_status(
+        self, kind, text, status, draft
+    ):
+        metadata = {
+            "event_type": kind,
+            "task_id": "task-a",
+            "run_id": "run-a",
+            "message_id": "run-a:message:1",
+            "attempt_id": "run-a:message:1",
+            "status": status,
+            "draft": draft,
+        }
+        if kind == "message.delta":
+            metadata["delta"] = text
+        if kind == "message.finished":
+            metadata["text"] = text
+        serialized = AgentStep(AgentStepType.STREAM, text, metadata=metadata).to_dict()
+        assert serialized == {
+            "step_type": "stream",
+            "content": text,
+            "metadata": metadata,
+        }
+        assert "action" not in serialized and "observation" not in serialized
+
     def test_minimal_step(self):
         step = AgentStep(step_type=AgentStepType.THOUGHT, content="Let me think…")
         assert step.step_type is AgentStepType.THOUGHT

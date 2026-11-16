@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "metric": "packaged native window and frontend interactive elapsed milliseconds",
+  "phase_budgets": {
+    "process_to_python": {"warning_ms": 10000, "hard_ms": 30000},
+    "desktop_preflight": {"warning_ms": 5000, "hard_ms": 20000},
+    "port_selection": {"warning_ms": 2000, "hard_ms": 10000},
+    "backend_import": {"warning_ms": 10000, "hard_ms": 40000},
+    "backend_ready": {"warning_ms": 15000, "hard_ms": 60000},
+    "webview_import": {"warning_ms": 5000, "hard_ms": 20000},
+    "window_create": {"warning_ms": 3000, "hard_ms": 12000},
+    "window_show": {"warning_ms": 8000, "hard_ms": 30000},
+    "frontend_after_window": {"warning_ms": 8000, "hard_ms": 30000}
+  },
+  "trend": {
+    "history_window": 20,
+    "minimum_samples": 5,
+    "p95_warning_ratio": 1.35,
+    "p95_blocking_ratio": 2.0,
+    "consecutive_degradation_runs": 3,
+    "minimum_consecutive_increase_ratio": 0.1,
+    "retention_records": 50
+  },
+  "scenarios": {
+    "installer": {"warning_window_ms": 15000, "hard_window_ms": 60000, "warning_interactive_ms": 20000, "hard_interactive_ms": 70000, "require_frontend_ready": true, "require_phase_metrics": true, "expected_fallback": false},
+    "portable": {"warning_window_ms": 15000, "hard_window_ms": 60000, "warning_interactive_ms": 20000, "hard_interactive_ms": 70000, "require_frontend_ready": true, "require_phase_metrics": true, "expected_fallback": false}
+  }
+}

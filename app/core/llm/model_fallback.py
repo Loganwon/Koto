@@ -392,9 +392,9 @@ class ModelFallbackExecutor:
         # 所有候选均失败 — 尝试 Ollama 本地兜底 ─────────────────────────────────
         _local_tried = False
         try:
-            from app.core.routing.local_model_router import LocalModelRouter
+            from app.core.llm.local_model_runtime import OllamaRuntime
 
-            if LocalModelRouter.is_ollama_available():
+            if OllamaRuntime.is_available():
                 _local_tried = True
                 _msgs = (
                     prompt
@@ -430,9 +430,7 @@ class ModelFallbackExecutor:
                         )
 
                 # 无工具或工具模式失败时，退回简单文本调用
-                _content, _err = LocalModelRouter.call_ollama_chat(
-                    messages=_msgs, timeout=60.0
-                )
+                _content, _err = OllamaRuntime.call_chat(messages=_msgs, timeout=60.0)
                 if not _err and _content:
                     logger.info(
                         "[ModelFallback] ✅ 云端全部失败，Ollama 本地兜底成功 (task=%s)",

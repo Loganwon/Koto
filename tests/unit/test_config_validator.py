@@ -25,6 +25,11 @@ def _clear_env(monkeypatch):
         "DS_KEY",
         "KOTO_WORKSPACE",
         "OLLAMA_BASE_URL",
+        "KOTO_DEPLOY_MODE",
+        "KOTO_AUTH_ENABLED",
+        "KOTO_JWT_SECRET",
+        "KOTO_BIND_HOST",
+        "KOTO_ALLOW_UNSAFE_BIND",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -129,6 +134,31 @@ class TestOllamaUrlValidation:
         monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
         monkeypatch.setenv("OLLAMA_BASE_URL", "http://localhost:11434")
         validate_startup_config()  # should not raise
+
+
+@pytest.mark.unit
+class TestNetworkSecurityValidation:
+    def test_cloud_requires_authentication_and_secret(self, monkeypatch, tmp_path):
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("KOTO_DEPLOY_MODE", "cloud")
+        monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
+        with pytest.raises(ConfigError, match="requires KOTO_AUTH_ENABLED"):
+            validate_startup_config()
+
+    def test_wildcard_bind_without_auth_fails_closed(self, monkeypatch, tmp_path):
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("KOTO_BIND_HOST", "0.0.0.0")
+        monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
+        with pytest.raises(ConfigError, match="wildcard KOTO_BIND_HOST"):
+            validate_startup_config()
+
+    def test_cloud_with_auth_and_strong_secret_is_valid(self, monkeypatch, tmp_path):
+        _clear_env(monkeypatch)
+        monkeypatch.setenv("KOTO_DEPLOY_MODE", "cloud")
+        monkeypatch.setenv("KOTO_AUTH_ENABLED", "true")
+        monkeypatch.setenv("KOTO_JWT_SECRET", "x" * 32)
+        monkeypatch.setenv("KOTO_WORKSPACE", str(tmp_path / "ws"))
+        validate_startup_config()
 
 
 @pytest.mark.unit

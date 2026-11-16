@@ -34,7 +34,9 @@ def test_extract_file_changes_reads_run_python_spreadsheet_metrics():
 def test_create_file_uses_context_directory_for_bare_output(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source_dir = tmp_path / "codex_context_dir"
     source_dir.mkdir()
     (source_dir / "orders.csv").write_text("sku,units\nA100,1\n", encoding="utf-8")
@@ -67,7 +69,9 @@ def test_run_python_relocates_root_created_files_to_context_directory(
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source_dir = tmp_path / "codex_context_dir"
     source_dir.mkdir()
     root_output = tmp_path / "restock_plan.csv"
@@ -88,7 +92,9 @@ def test_run_python_relocates_root_created_files_to_context_directory(
 def test_context_directory_uses_resolved_workspace_root(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source_dir = tmp_path / "codex_context_dir"
     source_dir.mkdir()
     plugin = task_tools.TaskToolsPlugin(
@@ -107,7 +113,9 @@ def test_context_directory_uses_resolved_workspace_root(tmp_path, monkeypatch):
 def test_copy_file_delegates_to_canonical_file_service(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source = tmp_path / "source.txt"
     source.write_text("hello", encoding="utf-8")
     calls = []
@@ -134,7 +142,10 @@ def test_copy_file_delegates_to_canonical_file_service(tmp_path, monkeypatch):
                 "destination": destination_path,
             }
 
-    monkeypatch.setattr(task_tools, "FileService", FakeFileService)
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common.FileService",
+        FakeFileService,
+    )
 
     payload = json.loads(task_tools.copy_file("source.txt", "copied.txt"))
 

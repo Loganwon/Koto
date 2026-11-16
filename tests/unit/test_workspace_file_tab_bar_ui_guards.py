@@ -1,11 +1,15 @@
 from pathlib import Path
 
+from tests.source_graph import read_frontend_partitions
+
 
 def _repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
 def _read(rel_path: str) -> str:
+    if Path(rel_path).suffix in {".ts", ".js", ".css"}:
+        return read_frontend_partitions(rel_path)
     return (_repo_root() / rel_path).read_text(encoding="utf-8")
 
 

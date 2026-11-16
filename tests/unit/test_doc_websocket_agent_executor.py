@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from app.core.agent.doc_websocket_agent_executor import DocWebSocketAgentExecutor
-from app.core.agent.lifecycle import AgentRequest
+from app.core.agent.kernel import AgentRequest
 
 
 class _FakeProvider:

@@ -53,13 +53,17 @@ def _goto(page, url):
 
 
 def _wait_ready(page):
-    """Wait for the page to settle after navigation."""
-    page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
+    """Wait for Koto's workspace runtime instead of perpetual network idleness."""
+    page.wait_for_function(
+        "document.documentElement.dataset.kotoWorkspaceRuntime === 'ready'",
+        timeout=PAGE_TIMEOUT,
+    )
+    page.locator("#wa-user-input").wait_for(state="visible", timeout=PAGE_TIMEOUT)
 
 
 def _fill_and_send(page, message: str = "Hello from E2E test"):
     """Type a message into the chat input and submit via Enter key."""
-    textarea = page.locator("#messageInput")
+    textarea = page.locator("#wa-user-input")
     textarea.wait_for(state="visible", timeout=PAGE_TIMEOUT)
     textarea.fill(message)
     textarea.press("Enter")
@@ -76,10 +80,10 @@ def test_chat_input_exists(e2e_page, console_errors, e2e_base_url):
     _goto(e2e_page, f"{e2e_base_url}/")
     _wait_ready(e2e_page)
 
-    textarea = e2e_page.locator("#messageInput")
-    assert textarea.count() > 0, "Missing #messageInput textarea"
-    assert textarea.is_visible(), "#messageInput is not visible"
-    assert textarea.is_enabled(), "#messageInput is not enabled"
+    textarea = e2e_page.locator("#wa-user-input")
+    assert textarea.count() > 0, "Missing #wa-user-input textarea"
+    assert textarea.is_visible(), "#wa-user-input is not visible"
+    assert textarea.is_enabled(), "#wa-user-input is not enabled"
 
     # Verify we can type into it
     textarea.fill("typing test")
@@ -103,19 +107,16 @@ def test_send_message_button(e2e_page, console_errors, e2e_base_url):
     # Give the UI time to render the user message bubble
     e2e_page.wait_for_timeout(2000)
 
-    # The user message should appear inside #chatMessages
-    chat_area = e2e_page.locator("#chatMessages")
-    assert chat_area.count() > 0, "Missing #chatMessages"
+    # The user message should appear inside the canonical workspace AI panel.
+    chat_area = e2e_page.locator("#wa-ai-messages")
+    assert chat_area.count() > 0, "Missing #wa-ai-messages"
 
-    user_bubble = chat_area.locator(".message.user")
+    user_bubble = chat_area.locator(".wa-msg.user")
     assert user_bubble.count() > 0, "User message bubble not found after send"
 
     # Verify the text we sent appears in one of the user bubbles
     assert (
-        chat_area.locator(".message.user .message-body")
-        .filter(has_text=test_msg)
-        .count()
-        > 0
+        chat_area.locator(".wa-msg.user").filter(has_text=test_msg).count() > 0
     ), "Sent text not found in user message bubble"
 
     # Wait a bit for any async errors to surface
@@ -132,21 +133,19 @@ def test_send_empty_message(e2e_page, console_errors, e2e_base_url):
     _goto(e2e_page, f"{e2e_base_url}/")
     _wait_ready(e2e_page)
 
-    send_btn = e2e_page.locator("#sendBtn")
+    send_btn = e2e_page.locator("#wa-send-btn")
     send_btn.wait_for(state="visible", timeout=PAGE_TIMEOUT)
-    send_btn.click()
+    assert send_btn.is_disabled(), "Empty composer send button should be disabled"
 
-    e2e_page.wait_for_timeout(1000)
-
-    # Also try pressing Enter on an empty input
-    textarea = e2e_page.locator("#messageInput")
+    # Pressing Enter on an empty input must remain a no-op.
+    textarea = e2e_page.locator("#wa-user-input")
     textarea.focus()
     textarea.press("Enter")
 
     e2e_page.wait_for_timeout(1000)
 
     # No user message should have been created
-    user_messages = e2e_page.locator("#chatMessages .message.user")
+    user_messages = e2e_page.locator("#wa-ai-messages .wa-msg.user")
     assert user_messages.count() == 0, "Empty message should not create a user bubble"
 
     assert (
@@ -160,8 +159,8 @@ def test_file_upload_button(e2e_page, console_errors, e2e_base_url):
     _goto(e2e_page, f"{e2e_base_url}/")
     _wait_ready(e2e_page)
 
-    file_input = e2e_page.locator("#fileInput")
-    assert file_input.count() > 0, "Missing #fileInput"
+    file_input = e2e_page.locator("#wa-ai-context-file-input")
+    assert file_input.count() > 0, "Missing #wa-ai-context-file-input"
 
     # Playwright can set files on hidden inputs directly
     file_input.set_input_files(
@@ -176,7 +175,7 @@ def test_file_upload_button(e2e_page, console_errors, e2e_base_url):
 
     # File preview area should become visible (or at least not crash)
     # The file list or preview div may appear
-    file_preview = e2e_page.locator("#filePreview")
+    file_preview = e2e_page.locator("#wa-ai-file-chips")
     if file_preview.count() > 0:
         # It may or may not be visible depending on the UI, but no crash
         pass
@@ -201,7 +200,7 @@ def test_message_copy_button(e2e_page, console_errors, e2e_base_url):
     e2e_page.wait_for_timeout(3000)
 
     # Try to find any .msg-action-btn on a user message (resend button)
-    action_btn = e2e_page.locator(".message.user .msg-action-btn").first
+    action_btn = e2e_page.locator("#wa-ai-messages .wa-msg.user .msg-action-btn").first
     if action_btn.count() > 0 and action_btn.is_visible():
         action_btn.click()
         e2e_page.wait_for_timeout(1000)
@@ -209,7 +208,7 @@ def test_message_copy_button(e2e_page, console_errors, e2e_base_url):
     # Also look for copy button on assistant messages (may exist if
     # the backend returned an error message rendered as assistant bubble)
     copy_btn = e2e_page.locator(
-        '.message.assistant .msg-action-btn[title="复制回复"]'
+        '#wa-ai-messages .wa-msg.ai .msg-action-btn[title="复制回复"]'
     ).first
     if copy_btn.count() > 0 and copy_btn.is_visible():
         copy_btn.click()
@@ -233,7 +232,7 @@ def test_chat_interrupt_button(e2e_page, console_errors, e2e_base_url):
 
     # The sendBtn gets class 'generating' during streaming, which makes
     # it act as a stop button.  Try clicking it quickly.
-    send_btn = e2e_page.locator("#sendBtn")
+    send_btn = e2e_page.locator("#wa-send-btn")
     e2e_page.wait_for_timeout(500)
 
     # Attempt to click the stop button — it may or may not be in
@@ -257,7 +256,7 @@ def test_rapid_message_send(e2e_page, console_errors, e2e_base_url):
     _wait_ready(e2e_page)
 
     for i in range(3):
-        textarea = e2e_page.locator("#messageInput")
+        textarea = e2e_page.locator("#wa-user-input")
         textarea.wait_for(state="visible", timeout=PAGE_TIMEOUT)
         textarea.fill(f"Rapid message {i + 1}")
         textarea.press("Enter")
@@ -268,7 +267,7 @@ def test_rapid_message_send(e2e_page, console_errors, e2e_base_url):
     e2e_page.wait_for_timeout(4000)
 
     # At least one user message bubble should exist
-    user_messages = e2e_page.locator("#chatMessages .message.user")
+    user_messages = e2e_page.locator("#wa-ai-messages .wa-msg.user")
     assert user_messages.count() >= 1, "No user messages found after rapid send"
 
     assert (

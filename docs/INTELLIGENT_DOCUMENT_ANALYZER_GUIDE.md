@@ -227,7 +227,7 @@ Koto现已升级为**智能文档分析引擎**，不再局限于"古板"的文�
    - 专用提示词生成
    - 流式处理与标红
 
-2. **DocumentReader** (`web/document_reader.py`)
+2. **DocumentReader** (`app/core/file/readers/`)
    - 结构化文档读取
    - 标题层次提取
    - 段落类型识别

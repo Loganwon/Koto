@@ -129,6 +129,60 @@ def test_insert_excel_as_docx_table_accepts_string_max_rows(tmp_path):
     assert saved.tables[0].cell(1, 0).text == "杭州新汇鑫光电有限公司"
 
 
+def test_insert_excel_as_docx_table_compacts_financial_model_for_report(tmp_path):
+    import openpyxl
+    from docx import Document
+
+    from app.core.agent.task_tools import insert_excel_as_docx_table
+
+    workbook_path = tmp_path / "financial.xlsx"
+    target_path = tmp_path / "report.docx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "P&L"
+    sheet.append([None] * 12)
+    sheet.append([None, "利润表", *([None] * 10)])
+    sheet.append([None, "单位：人民币万元", *([None] * 10)])
+    sheet.append([None, None, "2025E", "2026E", "2027E", "2028E", *([None] * 6)])
+    sheet.append(
+        [None, "收入合计", 22327.432, 54884.056, 113756.697, 181242.989, *([None] * 6)]
+    )
+    sheet.append([None, "增速%", None, 1.4581445, 1.0726729, 0.5932512, *([None] * 6)])
+    sheet.append([None, "净利润", -11738, -2041, 952, 13362, *([None] * 6)])
+    sheet.append([None, "备注行", "skip", "skip", "skip", "skip", *([None] * 6)])
+    workbook.save(workbook_path)
+
+    payload = json.loads(
+        insert_excel_as_docx_table(
+            str(workbook_path),
+            str(target_path),
+            sheet_name="P&L",
+            table_title="关键财务预测数据",
+            max_rows=18,
+            financial_compact=True,
+        )
+    )
+    table = Document(target_path).tables[0]
+
+    assert payload["financial_compact"] is True
+    assert payload["columns_written"] == 5
+    assert payload["rows_written"] == 3
+    assert [cell.text for cell in table.rows[0].cells] == [
+        "指标",
+        "2025E",
+        "2026E",
+        "2027E",
+        "2028E",
+    ]
+    assert [cell.text for cell in table.rows[2].cells] == [
+        "增速%",
+        "—",
+        "145.8%",
+        "107.3%",
+        "59.3%",
+    ]
+
+
 def test_insert_excel_as_docx_table_sorts_and_selects_columns_for_top_n(tmp_path):
     import openpyxl
     from docx import Document
@@ -239,14 +293,16 @@ def test_insert_excel_as_docx_table_continues_when_backup_creation_is_denied(
     document.add_paragraph("雷鸟访谈问题")
     document.save(target_path)
 
-    real_copy2 = task_tools.shutil.copy2
+    from app.core.agent.tools import _internal_backup
+
+    real_copy2 = _internal_backup.shutil.copy2
 
     def deny_backup_copy(src, dst, *args, **kwargs):
         if str(dst).endswith(".bak"):
             raise PermissionError("backup file is locked")
         return real_copy2(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(task_tools.shutil, "copy2", deny_backup_copy)
+    monkeypatch.setattr(_internal_backup.shutil, "copy2", deny_backup_copy)
 
     payload = json.loads(
         insert_excel_as_docx_table(
@@ -291,14 +347,16 @@ def test_insert_excel_as_docx_table_falls_back_to_unique_backup_when_primary_bac
     document.add_paragraph("雷鸟访谈问题")
     document.save(target_path)
 
-    real_copy2 = task_tools.shutil.copy2
+    from app.core.agent.tools import _internal_backup
+
+    real_copy2 = _internal_backup.shutil.copy2
 
     def deny_only_canonical_backup(src, dst, *args, **kwargs):
         if str(dst) == str(canonical_backup_path):
             raise PermissionError("backup file is locked")
         return real_copy2(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(task_tools.shutil, "copy2", deny_only_canonical_backup)
+    monkeypatch.setattr(_internal_backup.shutil, "copy2", deny_only_canonical_backup)
 
     payload = json.loads(
         insert_excel_as_docx_table(
@@ -353,14 +411,16 @@ def test_insert_excel_as_docx_table_clears_readonly_existing_backup_before_copy(
     backup_path.write_bytes(b"stale backup")
     backup_path.chmod(stat.S_IREAD)
 
-    real_copy2 = task_tools.shutil.copy2
+    from app.core.agent.tools import _internal_backup
+
+    real_copy2 = _internal_backup.shutil.copy2
 
     def guarded_copy2(src, dst, *args, **kwargs):
         if str(dst) == str(backup_path):
             assert os.stat(dst).st_mode & stat.S_IWRITE
         return real_copy2(src, dst, *args, **kwargs)
 
-    monkeypatch.setattr(task_tools.shutil, "copy2", guarded_copy2)
+    monkeypatch.setattr(_internal_backup.shutil, "copy2", guarded_copy2)
 
     payload = json.loads(
         insert_excel_as_docx_table(
@@ -539,7 +599,9 @@ def test_run_python_code_syncs_relative_workspace_outputs_without_target_path(
     from app.core.agent import task_tools
     from app.core.agent.task_tools import run_python_in_sandbox
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result = run_python_in_sandbox(
         "from pathlib import Path\n"
@@ -573,7 +635,9 @@ def test_run_python_code_strips_workspace_prefix_for_explicit_target_path(
     from app.core.agent import task_tools
     from app.core.agent.task_tools import run_python_in_sandbox
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result = run_python_in_sandbox(
         "from pathlib import Path\n"
@@ -602,7 +666,9 @@ def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(
     from app.core.agent import task_tools
     from app.core.agent.task_tools import insert_excel_as_docx_table
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     workbook_path = tmp_path / "financial-model.xlsx"
     target_path = tmp_path / "target.docx"
@@ -618,14 +684,16 @@ def test_insert_excel_as_docx_table_writes_fallback_copy_when_target_is_locked(
     document.add_paragraph("雷鸟访谈问题")
     document.save(target_path)
 
-    real_replace = task_tools.os.replace
+    from app.core.agent.tools import _internal_tempfile
+
+    real_replace = _internal_tempfile.os.replace
 
     def deny_target_replace(src, dst):
         if str(dst) == str(target_path):
             raise PermissionError(32, "locked", dst)
         return real_replace(src, dst)
 
-    monkeypatch.setattr(task_tools.os, "replace", deny_target_replace)
+    monkeypatch.setattr(_internal_tempfile.os, "replace", deny_target_replace)
 
     payload = json.loads(
         insert_excel_as_docx_table(
@@ -669,7 +737,9 @@ def test_save_docx_via_temp_file_reports_locked_target_with_actionable_message(
     def deny_replace(src, dst):
         raise PermissionError(32, "locked", dst)
 
-    monkeypatch.setattr(task_tools.os, "replace", deny_replace)
+    from app.core.agent.tools import _internal_tempfile
+
+    monkeypatch.setattr(_internal_tempfile.os, "replace", deny_replace)
 
     with pytest.raises(PermissionError, match="目标文件 target.docx 当前不可写"):
         task_tools._save_docx_via_temp_file(FakeDocument(), str(target_path))

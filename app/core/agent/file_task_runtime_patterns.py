@@ -5,8 +5,6 @@ from __future__ import annotations
 
 import re
 
-from app.core.agent.file_task_review_intent import DOCX_REVIEW_INTENT_MARKERS
-
 _READ_LIMIT = 12_000
 _TASK_TEXT_FILE_EXTENSIONS = {
     ".csv",
@@ -55,6 +53,8 @@ _SOURCE_PATH_CONTEXT_PATTERNS = (
 )
 _WRITE_INTENT_WORDS = (
     "修改",
+    "编辑",
+    "新增",
     "写入",
     "生成",
     "创建",
@@ -74,6 +74,8 @@ _WRITE_INTENT_WORDS = (
     "填充",
     "批注",
     "标注",
+    "复制",
+    "拷贝",
     "审校",
     "校对",
     "润色",
@@ -86,6 +88,8 @@ _WRITE_INTENT_WORDS = (
     "设计主题",
     "设计风格",
     "fill",
+    "copy",
+    "duplicate",
     "write",
     "create",
     "insert",
@@ -182,6 +186,7 @@ _SOFT_WRITE_ACTION_WORDS = (
 _WRITE_TARGET_HINT_WORDS = (
     "文件",
     "文档",
+    "报告",
     "word",
     "docx",
     "ppt",
@@ -203,68 +208,9 @@ _WRITE_TARGET_HINT_WORDS = (
     "文本",
     "段落",
 )
-_ANALYSIS_ADVICE_PATTERNS = (
-    re.compile(
-        r"(?:看看|看下|分析|评估|审查|review|review一下).{0,32}(?:哪些|哪里|什么地方|哪部分).{0,20}(?:需要|可以)?(?:修改|改进|优化|调整)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:哪些|哪里|什么地方|哪部分).{0,16}(?:需要|可以)?(?:修改|改进|优化|调整)(?:的地方|之处)?",
-        re.IGNORECASE,
-    ),
-    re.compile(r"(?:修改建议|改进建议|优化建议|调整建议)", re.IGNORECASE),
-    re.compile(r"(?:从大方向上|整体上|方向上).{0,12}(?:修改|改进|优化)", re.IGNORECASE),
-)
-_ANALYSIS_CUE_WORDS = (
-    "分析",
-    "看看",
-    "看下",
-    "评估",
-    "审查",
-    "review",
-    "指出",
-    "列出",
-    "说明",
-    "找出",
-    "发现",
-)
-_ADVICE_CUE_WORDS = (
-    "修改",
-    "改进",
-    "优化",
-    "调整",
-    "建议",
-    "问题",
-    "风险",
-    "方向",
-)
-_DIAGNOSTIC_REQUEST_PATTERNS = (
-    re.compile(
-        r"^\s*(?:为什么|为啥|为何|怎么会|怎么没有|为什么没有|为什么没|失败原因|原因是什么|怎么回事|哪里出了问题|请解释|解释一下|说明一下|帮我解释|帮我说明)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"^\s*(?:这个任务|这次任务|这个结果|这次结果|上一轮|上次|这轮|这个流程|这次审校).{0,18}(?:为什么|为啥|为何|失败|出错|不对|有问题)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:为什么|为啥|为何).{0,20}(?:任务|结果|审校|修订|写回|批注|修改|删除|失败|报错|权限|permission denied)",
-        re.IGNORECASE,
-    ),
-)
-_DIAGNOSTIC_NEW_TASK_PATTERNS = (
-    re.compile(
-        r"(?:并|然后|顺便|同时).{0,8}(?:请|帮我|直接)?(?:修改|删除|写入|应用|批注|润色|重写|继续处理|重新执行)",
-        re.IGNORECASE,
-    ),
-    re.compile(
-        r"(?:请|帮我|麻烦).{0,6}(?:直接|顺便)?(?:修改|删除|写入|应用|批注|润色|重写|继续处理|重新执行)",
-        re.IGNORECASE,
-    ),
-)
 _READONLY_WRITE_NEGATION_PATTERNS = (
     re.compile(
-        r"(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:改|修改|改动|编辑|写入|写回|更新|保存|插入|删除|替换|应用|落盘|生成文件)",
+        r"(?:不要|不用|无需|不需要|不必|别|不(?!变)).{0,10}(?:改|修改|改动|编辑|写入|写回|更新|保存|插入|删除|替换|应用|落盘|生成文件)",
         re.IGNORECASE,
     ),
     re.compile(
@@ -277,11 +223,11 @@ _READONLY_WRITE_NEGATION_PATTERNS = (
 )
 _GLOBAL_READONLY_WRITE_NEGATION_PATTERNS = (
     re.compile(
-        r"(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:写入|写回|保存|生成文件|创建|新建|导出|落盘)",
+        r"(?:不要|不用|无需|不需要|不必|别|不(?!变)).{0,10}(?:写入|写回|保存|生成文件|创建|新建|导出|落盘)",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:改|修改|改动|编辑|更新|删除|替换)(?:(?!原文件|源文件|原始文件|输入文件|已添加的文件|当前文件).){0,8}(?:任何|所有|全部)?文件",
+        r"(?:不要|不用|无需|不需要|不必|别|不(?!变)).{0,10}(?:改|修改|改动|编辑|更新|删除|替换)(?:(?!原文件|源文件|原始文件|输入文件|已添加的文件|当前文件).){0,8}(?:任何|所有|全部)?文件",
         re.IGNORECASE,
     ),
     re.compile(
@@ -302,11 +248,11 @@ _GLOBAL_READONLY_WRITE_NEGATION_PATTERNS = (
 )
 _SOURCE_SCOPED_WRITE_NEGATION_PATTERNS = (
     re.compile(
-        r"(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新).{0,12}(?:原文件|源文件|源\s*(?:docx|xlsx|xls|csv|pptx?|pdf)?|原始文件|输入文件|已添加的?文件|当前文件)",
+        r"(?:不要|不用|无需|不需要|不必|别|不(?!变)).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新).{0,12}(?:原文件|源文件|源\s*(?:docx|xlsx|xls|csv|pptx?|pdf)?|原始文件|输入文件|已添加的?文件|当前文件)",
         re.IGNORECASE,
     ),
     re.compile(
-        r"(?:原文件|源文件|源\s*(?:docx|xlsx|xls|csv|pptx?|pdf)?|原始文件|输入文件|已添加的?文件|当前文件).{0,12}(?:不要|不用|无需|不需要|不必|别|不).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新)",
+        r"(?:原文件|源文件|源\s*(?:docx|xlsx|xls|csv|pptx?|pdf)?|原始文件|输入文件|已添加的?文件|当前文件).{0,12}(?:不要|不用|无需|不需要|不必|别|不(?!变)).{0,10}(?:修改|改动|编辑|覆盖|替换|删除|写回|更新)",
         re.IGNORECASE,
     ),
     re.compile(
@@ -353,13 +299,12 @@ _RUN_PYTHON_ARTIFACT_WRITE_PATTERNS = (
 )
 _IMPERATIVE_WRITE_PATTERNS = (
     re.compile(
-        r"^(?:请|帮我|麻烦)?(?:把|将)?(?:这个|当前|这份|该)?(?:文件|文档|word|ppt|表格|内容|文本|段落|译稿|稿件).{0,12}(?:修改|更新|润色|改写|重写|补充|完善)",
+        r"^(?:请|帮我|麻烦)?(?:把|将)?(?:这个|当前|这份|该)?(?:文件|文档|报告|word|ppt|表格|内容|文本|段落|译稿|稿件).{0,12}(?:修改|更新|润色|改写|重写|补充|完善)",
         re.IGNORECASE,
     ),
     re.compile(
-        r"^(?:请|帮我|麻烦)?(?:直接|立刻)?(?:修改|更新|润色|改写|重写|补充|完善).{0,16}(?:文件|文档|word|ppt|表格|内容|文本|段落|译稿|稿件)",
+        r"^(?:请|帮我|麻烦)?(?:直接|立刻)?(?:修改|更新|润色|改写|重写|补充|完善).{0,16}(?:文件|文档|报告|word|ppt|表格|内容|文本|段落|译稿|稿件)",
         re.IGNORECASE,
     ),
 )
-_DOCX_ANNOTATE_INTENT_WORDS = DOCX_REVIEW_INTENT_MARKERS
 _MAX_MODEL_ROUNDS = 6

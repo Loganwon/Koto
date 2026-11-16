@@ -1,3 +1,4 @@
+import { getFeatureRegistry } from './feature-registry';
 /**
 import { installErrorBoundary } from '../shared/error-boundary';
 installErrorBoundary();
@@ -142,5 +143,5 @@ const KotoAuth = {
   },
 };
 
-(window as any).KotoAuth = KotoAuth;
+getFeatureRegistry().KotoAuth = KotoAuth;
 export { KotoAuth };

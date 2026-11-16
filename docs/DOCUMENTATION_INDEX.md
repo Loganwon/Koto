@@ -1,32 +1,13 @@
-# Koto documentation index
+# Koto 文档索引
 
-Last verified: 2026-07-12
+这里仅保留当前仍受代码与测试维护的入口。
 
-This is the single entrypoint for current project documentation. Do not use an
-unlinked completion report, phase guide, or legacy audit as an implementation
-guide.
+- [用户指南](USER_GUIDE.md)：安装、首次配置和常用操作。
+- [支持与反馈](SUPPORT.md)：故障信息、安全提交和问题反馈。
+- [架构说明](ARCHITECTURE.md)：当前运行边界与主要模块。
+- [架构治理](ARCHITECTURE_GOVERNANCE.md)：结构预算和合并约束。
+- [Agent Kernel](AGENT_KERNEL_ARCHITECTURE.md)：Web 主程序的 Agent 执行主链。
+- [Office/WPS 内嵌助手](../companion/README.md)：独立的当前内嵌执行器、兼容边界及能力限制。
+- [插件协议](PLUGIN_INTEGRATION_PROTOCOL_V1.md)：扩展边界与接入约束。
 
-| Need | Current document | Canonical command or owner |
-| --- | --- | --- |
-| Download, configure, and complete first tasks | [USER_GUIDE.md](USER_GUIDE.md) | Windows release / first-run checklist |
-| Get help or send a safe problem report | [SUPPORT.md](SUPPORT.md) | GitHub Issues and diagnostic checklist |
-| Install and start Koto | [QUICKSTART.md](QUICKSTART.md) | `start_koto.bat` / `.venv\\Scripts\\python.exe -m web.app` |
-| Set up and run tests | [PYTHON_TEST_ENV.md](PYTHON_TEST_ENV.md) | `.venv` Python, `npm --prefix web run typecheck` |
-| Test AI assistant flows | [ai-assistant-testing.md](ai-assistant-testing.md) | `python scripts/run_ai_assistant_flow_tests.py smoke` |
-| Understand active architecture | [ARCHITECTURE.md](ARCHITECTURE.md) | `web/blueprints`, `web/services`, `app/core`, `web/src` |
-| Track architecture debt | [KOTO_CODE_DEBT_REPORT.md](KOTO_CODE_DEBT_REPORT.md) | owner and line-count snapshot |
-| Plan cleanup work | [ARCHITECTURE_CLEANUP_ROADMAP.md](ARCHITECTURE_CLEANUP_ROADMAP.md) | staged, test-backed changes |
-| Prepare a Windows release | [RELEASE_GATE.md](RELEASE_GATE.md) | `Build_Release.ps1` and release tests |
-
-## Documentation policy
-
-- The root [README](../README.md) and this page are the only general entry
-  indexes.
-- `docs/USER_GUIDE.md`, `docs/SUPPORT.md`, `docs/QUICKSTART.md`,
-  `docs/PYTHON_TEST_ENV.md`, and `docs/RELEASE_GATE.md` are the current
-  user, support, startup, testing, and release guides.
-- Documents headed **Historical snapshot** record a past state only. They may
-  mention removed files, old test counts, or retired routes and must not be
-  used to make implementation decisions.
-- The current frontend source is `web/src/`; generated bundles are runtime
-  outputs, not source-of-truth documentation targets.
+历史阶段报告不再作为当前实现说明；需要追溯时请查看 `docs/archive/`。

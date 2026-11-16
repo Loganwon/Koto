@@ -29,6 +29,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from typing import Any, Callable, Dict, Generator, List, Optional
 
+from app.core.tasks.task_journal import _terminal_event
+
 logger = logging.getLogger(__name__)
 
 # 单例
@@ -67,14 +69,67 @@ class ProgressEvent:
     timestamp: str = field(
         default_factory=lambda: datetime.now().isoformat(timespec="milliseconds")
     )
+    run_id: str = ""
+    seq: int = 0
+    event_id: str = ""
 
     def to_sse(self, event_name: str = "progress") -> str:
         """格式化为 SSE 消息文本（两个换行结尾）。"""
         data = json.dumps(asdict(self), ensure_ascii=False)
-        return f"event: {event_name}\ndata: {data}\n\n"
+        cursor = f"id: {self.run_id}:{self.seq}\n" if self.run_id and self.seq else ""
+        return f"{cursor}event: {event_name}\ndata: {data}\n\n"
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
+
+    @classmethod
+    def from_run_event(
+        cls, event: Dict[str, Any], *, session_id: str = ""
+    ) -> "ProgressEvent":
+        """Project a journal fact without allocating another event identity."""
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        kind = str(event.get("type") or "")
+        status = str(payload.get("status") or "")
+        if status in {"success", "succeeded"}:
+            status = "completed"
+        runtime = (
+            payload.get("runtime") if isinstance(payload.get("runtime"), dict) else {}
+        )
+        domain_status = str(
+            runtime.get("terminal_status") or payload.get("terminal_status") or status
+        )
+        if domain_status in {
+            "awaiting_confirmation",
+            "context_summary_fallback",
+            "needs_review",
+            "needs_attention",
+            "waiting",
+        } or payload.get("awaiting_confirmation"):
+            status = "waiting"
+        if kind == "run.cancelled":
+            status = "cancelled"
+        elif kind == "run.finished" and not status:
+            status = "completed" if payload.get("completed_task", True) else "failed"
+        return cls(
+            task_id=str(event.get("task_id") or ""),
+            session_id=session_id,
+            event_type=(
+                "file_task_event"
+                if kind.startswith(("run.", "step.", "tool.", "file.", "ui."))
+                else "run_event"
+            ),
+            status=status,
+            message=str(
+                payload.get("summary")
+                or payload.get("message")
+                or payload.get("text")
+                or ""
+            )[:1000],
+            detail={"event": event},
+            run_id=str(event.get("run_id") or ""),
+            seq=int(event.get("seq") or 0),
+            event_id=str(event.get("event_id") or ""),
+        )
 
 
 # ============================================================================
@@ -168,6 +223,14 @@ class ProgressBus:
         detail: Optional[Dict[str, Any]] = None,
     ):
         """便捷方法：发布一个 Agent 步骤事件。"""
+        canonical = (detail or {}).get("event") if isinstance(detail, dict) else None
+        if isinstance(canonical, dict):
+            event = ProgressEvent.from_run_event(canonical, session_id=session_id)
+            event.step_type = step_type
+            event.tool_name = tool_name
+            event.progress = progress
+            self.publish(event)
+            return
         self.publish(
             ProgressEvent(
                 task_id=task_id,
@@ -188,6 +251,10 @@ class ProgressBus:
         task_id: str,
         timeout: float = 300.0,
         replay: bool = True,
+        after_seq: int = 0,
+        run_id: Optional[str] = None,
+        event_loader: Optional[Callable[..., List[Dict[str, Any]]]] = None,
+        session_id: str = "",
     ) -> Generator[str, None, None]:
         """
         生成器，供 Flask SSE Response 使用。
@@ -206,6 +273,46 @@ class ProgressBus:
             self._sse_queues.setdefault(task_id, []).append(q)
 
         try:
+            if event_loader is not None:
+                # Register before reading the journal.  Publications racing with
+                # replay can be duplicated, but the durable cursor removes them.
+                # Periodic reads also observe events committed by another worker
+                # and repair a slow subscriber's full in-memory queue.
+                cursor = max(0, int(after_seq))
+                active_run = str(run_id or "")
+                deadline = time.monotonic() + timeout if timeout > 0 else None
+                if not replay and cursor == 0:
+                    existing = event_loader(
+                        task_id, active_run or None, after_seq=0, limit=10000
+                    )
+                    if existing:
+                        cursor = int(existing[-1].get("seq") or 0)
+                        active_run = str(existing[-1].get("run_id") or active_run)
+                while True:
+                    events = event_loader(
+                        task_id, active_run or None, after_seq=cursor, limit=1000
+                    )
+                    for raw in events:
+                        event = ProgressEvent.from_run_event(raw, session_id=session_id)
+                        if not active_run:
+                            active_run = event.run_id
+                        if event.run_id != active_run or event.seq <= cursor:
+                            continue
+                        cursor = event.seq
+                        yield event.to_sse()
+                        if _terminal_event(raw):
+                            return
+                    if events:
+                        continue
+                    remaining = deadline - time.monotonic() if deadline else 1.0
+                    if remaining <= 0:
+                        yield "event: timeout\ndata: {}\n\n"
+                        return
+                    try:
+                        q.get(timeout=min(remaining, 1.0))
+                    except queue.Empty:
+                        yield ": heartbeat\n\n"
+                return
             # 回放历史
             if replay:
                 for ev in history_snapshot:

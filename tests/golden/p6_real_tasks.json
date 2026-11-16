@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "corpus_version": "2026-07-19",
+  "description": "Koto P6 executable golden corpus. Every scenario is backed by one or more real pytest nodes and a user-visible oracle.",
+  "required_surfaces": ["startup", "docx", "pdf", "xlsx", "pptx", "addon", "workspace"],
+  "required_operations": ["open", "edit", "save", "convert", "cleanup", "analyze", "compatibility", "performance", "fault_recovery"],
+  "required_environments": ["source", "installer", "portable"],
+  "cases": [
+    {
+      "id": "startup-no-provider",
+      "priority": "P0",
+      "surface": "startup",
+      "operation": "fault_recovery",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "在没有云端密钥、没有 Ollama、没有任何本地模型时启动 Koto。",
+      "fixture_profile": "provider_none",
+      "oracle": {"kind": "startup_health", "assertions": ["主窗口可交互", "健康状态为 degraded 而不是进程退出", "不弹出阻断式模型安装"], "evidence": "startup events + process exit code"},
+      "node_ids": [
+        "tests/unit/test_startup_reliability_contract.py::test_startup_health_has_no_optional_provider_dependency",
+        "tests/unit/test_first_run_setup_choice.py::test_desktop_start_is_not_gated_by_provider_readiness"
+      ]
+    },
+    {
+      "id": "startup-local-model-mismatch",
+      "priority": "P0",
+      "surface": "startup",
+      "operation": "compatibility",
+      "environments": ["installer", "portable"],
+      "real_task": "用户设置引用已卸载或与当前安装包不兼容的本地模型标签后启动。",
+      "fixture_profile": "configured_tag_missing",
+      "oracle": {"kind": "provider_fallback", "assertions": ["启动不被模型就绪状态阻断", "保留明确的降级原因", "不会静默改写用户模型选择"], "evidence": "startup health + runtime model status"},
+      "node_ids": [
+        "tests/unit/test_startup_reliability_contract.py::test_desktop_entry_treats_provider_setup_as_nonfatal",
+        "tests/unit/test_local_model_selection_contract.py::test_ollama_llm_provider_prefers_configured_model_over_auto_cache"
+      ]
+    },
+    {
+      "id": "startup-package-matrix",
+      "priority": "P0",
+      "surface": "startup",
+      "operation": "compatibility",
+      "environments": ["installer", "portable"],
+      "real_task": "安装包和便携版执行完全相同的八场景启动矩阵。",
+      "fixture_profile": "release_startup_matrix",
+      "oracle": {"kind": "release_matrix", "assertions": ["两种分发形态场景集合完全一致", "每个场景产出桌面启动证据", "使用动态回环端口"], "evidence": "release evidence manifest"},
+      "node_ids": [
+        "tests/unit/test_startup_reliability_contract.py::test_installer_and_portable_share_the_complete_startup_matrix",
+        "tests/unit/test_release_packaging_guards.py::test_windows_release_runs_real_desktop_startup_lifecycle_matrix"
+      ]
+    },
+    {
+      "id": "docx-open-edit-save-reopen",
+      "priority": "P0",
+      "surface": "docx",
+      "operation": "save",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "打开真实 DOCX，修改正文，保存并重新打开核对内容。",
+      "fixture_profile": "docx_mixed_paragraphs_tables",
+      "oracle": {"kind": "round_trip", "assertions": ["保存文件可重新解析", "修改文本存在", "源文件结构未损坏"], "evidence": "reopened DOCX content"},
+      "node_ids": ["tests/integration/test_e2e_user_scenarios.py::TestCreateOpenSaveReopen::test_docx_full_round_trip"]
+    },
+    {
+      "id": "docx-review-comment-lifecycle",
+      "priority": "P0",
+      "surface": "docx",
+      "operation": "edit",
+      "environments": ["source"],
+      "real_task": "在正文选区创建批注，再编辑、导航和删除批注。",
+      "fixture_profile": "docx_review_anchors",
+      "oracle": {"kind": "browser_state", "assertions": ["批注锚点与选区一致", "编辑后内容保留", "删除后导航状态同步"], "evidence": "rendered review rail + document state"},
+      "node_ids": [
+        "tests/e2e/test_docx_review_ui.py::test_docx_review_selection_launcher_creates_comment",
+        "tests/e2e/test_docx_review_ui.py::test_docx_review_nav_menu_edit_and_delete_flow"
+      ]
+    },
+    {
+      "id": "docx-review-large-corpus",
+      "priority": "P0",
+      "surface": "docx",
+      "operation": "performance",
+      "environments": ["source"],
+      "real_task": "加载含大量正文、批注与修订锚点的文档并保持交互。",
+      "fixture_profile": "docx_large_review_corpus",
+      "oracle": {"kind": "performance_budget", "assertions": ["加载时间不超过门禁", "批注定位完成", "主线程仍可响应"], "evidence": "browser performance marks"},
+      "node_ids": ["tests/e2e/test_docx_review_ui.py::test_docx_large_review_corpus_stays_within_render_budget"]
+    },
+    {
+      "id": "pdf-text-anchor-zoom-reload",
+      "priority": "P0",
+      "surface": "pdf",
+      "operation": "edit",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "在 PDF 指定文本附近添加标注，缩放、保存、渲染并重新打开。",
+      "fixture_profile": "pdf_text_geometry",
+      "oracle": {"kind": "visual_geometry", "assertions": ["标注页码正确", "保存前后归一化坐标稳定", "渲染像素落在目标文本附近"], "evidence": "PDF reopen + rendered page geometry"},
+      "node_ids": ["tests/e2e/test_p4_pdf_document_flows.py::test_pdf_annotation_position_survives_zoom_save_render_and_reload"]
+    },
+    {
+      "id": "pdf-watermark-cleanup",
+      "priority": "P0",
+      "surface": "pdf",
+      "operation": "cleanup",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "清理自有 PDF 的文字水印，并对无水印文件安全执行同一操作。",
+      "fixture_profile": "pdf_owned_watermark_and_clean_control",
+      "oracle": {"kind": "artifact_diff", "assertions": ["水印对象被移除", "正文仍可提取", "无水印输入返回安全 no-op"], "evidence": "downloaded PDF object/text comparison"},
+      "node_ids": ["tests/e2e/test_p4_pdf_document_flows.py::test_pdf_watermark_cleanup_reports_effect_and_safe_noop"]
+    },
+    {
+      "id": "pdf-to-office-conversion",
+      "priority": "P0",
+      "surface": "pdf",
+      "operation": "convert",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "把同一份 PDF 转换为可重新打开的 DOCX、XLSX 和 PPTX。",
+      "fixture_profile": "pdf_text_table_page_mix",
+      "oracle": {"kind": "artifact_reopen", "assertions": ["三种包格式签名正确", "输出可被对应解析器重新打开", "关键文本存在"], "evidence": "downloaded OOXML package reopen"},
+      "node_ids": ["tests/e2e/test_p4_pdf_document_flows.py::test_pdf_conversion_downloads_reopenable_office_packages"]
+    },
+    {
+      "id": "pdf-page-reorder-download",
+      "priority": "P1",
+      "surface": "pdf",
+      "operation": "save",
+      "environments": ["source"],
+      "real_task": "删除、旋转和重排 PDF 页面后下载并重新打开。",
+      "fixture_profile": "pdf_multi_page",
+      "oracle": {"kind": "artifact_reopen", "assertions": ["页数正确", "页面顺序正确", "旋转角度持久化"], "evidence": "reopened PDF page sequence"},
+      "node_ids": ["tests/e2e/test_p4_pdf_document_flows.py::test_pdf_page_operations_download_requested_sequence_and_reopen"]
+    },
+    {
+      "id": "xlsx-analyze-real-table",
+      "priority": "P0",
+      "surface": "xlsx",
+      "operation": "analyze",
+      "environments": ["source"],
+      "real_task": "分析包含客户、产品、数量和金额的销售表，找出贡献最高项。",
+      "fixture_profile": "xlsx_sales_rows",
+      "oracle": {"kind": "semantic_result", "assertions": ["客户结论正确", "产品结论正确", "金额字段参与计算"], "evidence": "runtime result + deterministic judge"},
+      "node_ids": ["tests/evaluation/test_execution_quality.py::test_execution_analyze_xlsx"]
+    },
+    {
+      "id": "xlsx-open-edit-save-reopen",
+      "priority": "P0",
+      "surface": "xlsx",
+      "operation": "save",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "打开表格、修改单元格、保存并重新打开验证值和公式结构。",
+      "fixture_profile": "xlsx_values_and_formulas",
+      "oracle": {"kind": "round_trip", "assertions": ["单元格修改持久化", "文件可重新加载", "包结构有效"], "evidence": "reopened XLSX cells"},
+      "node_ids": ["tests/integration/test_e2e_user_scenarios.py::TestCreateOpenSaveReopen::test_xlsx_full_round_trip"]
+    },
+    {
+      "id": "pptx-open-edit-download",
+      "priority": "P0",
+      "surface": "pptx",
+      "operation": "save",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "打开演示文稿，修改文本，下载并重新打开核对内容。",
+      "fixture_profile": "pptx_text_shapes",
+      "oracle": {"kind": "round_trip", "assertions": ["下载包有效", "编辑文本持久化", "幻灯片数量不变"], "evidence": "reopened PPTX XML/content"},
+      "node_ids": [
+        "tests/integration/test_e2e_user_scenarios.py::TestCreateOpenSaveReopen::test_pptx_full_round_trip",
+        "tests/integration/test_pptx_save_and_seed.py::TestPptxAutoSaveRichFormat::test_auto_save_with_edited_text"
+      ]
+    },
+    {
+      "id": "workspace-multiformat-round-trip",
+      "priority": "P1",
+      "surface": "workspace",
+      "operation": "open",
+      "environments": ["source"],
+      "real_task": "在统一工作区连续创建并打开 DOCX、XLSX、PPTX 和 PDF。",
+      "fixture_profile": "workspace_empty_then_create",
+      "oracle": {"kind": "api_round_trip", "assertions": ["每种文件非零字节", "编辑器类型正确", "返回稳定 file_id"], "evidence": "create/open API responses"},
+      "node_ids": [
+        "tests/integration/test_create_and_open_file.py::TestCreateThenOpen::test_create_then_open_docx",
+        "tests/integration/test_create_and_open_file.py::TestCreateThenOpen::test_create_then_open_xlsx",
+        "tests/integration/test_create_and_open_file.py::TestCreateThenOpen::test_create_then_open_pptx"
+      ]
+    },
+    {
+      "id": "workspace-ai-real-runtime",
+      "priority": "P0",
+      "surface": "workspace",
+      "operation": "analyze",
+      "environments": ["source"],
+      "real_task": "通过真实 FileTaskRuntime 总结、分析、诊断、翻译和写回文档。",
+      "fixture_profile": "evaluation_docx_xlsx",
+      "oracle": {"kind": "runtime_quality", "assertions": ["不替换 FileTaskRuntime.run", "读任务返回语义结果", "写任务产出可重新打开文档"], "evidence": "runtime result + artifact reopen + judge"},
+      "node_ids": [
+        "tests/evaluation/test_execution_quality.py::test_execution_summarize_docx",
+        "tests/evaluation/test_execution_quality.py::test_execution_polish_docx",
+        "tests/evaluation/test_execution_quality.py::test_execution_diagnostic"
+      ]
+    },
+    {
+      "id": "workspace-stream-disconnect",
+      "priority": "P1",
+      "surface": "workspace",
+      "operation": "fault_recovery",
+      "environments": ["source"],
+      "real_task": "文件任务流中途断开连接，用户仍能看到一个稳定且可恢复的状态。",
+      "fixture_profile": "task_stream_disconnect",
+      "oracle": {"kind": "browser_state", "assertions": ["只显示一次同步警告", "任务卡不重复", "可继续操作"], "evidence": "task card DOM + console/network record"},
+      "node_ids": ["tests/e2e/test_workspace_ai_assistant.py::TestWorkspaceAiAssistantSmoke::test_workspace_ai_task_stream_disconnect_shows_one_stable_sync_warning"]
+    },
+    {
+      "id": "addon-manifest-admission",
+      "priority": "P1",
+      "surface": "addon",
+      "operation": "compatibility",
+      "environments": ["source", "installer", "portable"],
+      "real_task": "用户加载 Addon 示例清单，验证协议并确认可注册。",
+      "fixture_profile": "addon_example_manifest",
+      "oracle": {"kind": "browser_state", "assertions": ["清单验证成功", "协议版本可接受", "注册按钮启用"], "evidence": "Addon admission UI"},
+      "node_ids": ["tests/e2e/test_human_journeys.py::TestAddonCapabilityJourney::test_capability_panel_and_addon_admission"]
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.core.agent.lifecycle import (
+from app.core.agent.kernel import (
     AgentRequest,
     EventType,
     evt_doc_tool_call,

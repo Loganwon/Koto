@@ -13,12 +13,11 @@ Koto ProactiveAgent — 主动交互决策引擎
   suggestion  — 基于高频话题的主动建议
   reminder    — 定时器触发的提醒
 
-队列消息存储在内存中（重启清空），可选持久化到 config/proactive_queue.json。
+队列消息存储在内存中（重启清空），可选持久化到 data/proactive_queue.json。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import queue
 import threading
@@ -27,10 +26,29 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from app.core.config.atomic_json_store import load_json_document, save_json_document
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    migrate_legacy_file,
+    runtime_data_path,
+)
+
 logger = logging.getLogger(__name__)
 
-_BASE = Path(__file__).parent.parent.parent.parent / "config"
-_QUEUE_FILE = _BASE / "proactive_queue.json"
+_DEFAULT_QUEUE_FILE = runtime_data_path(
+    "proactive_queue.json", env_var="KOTO_PROACTIVE_QUEUE_PATH"
+)
+_QUEUE_FILE = _DEFAULT_QUEUE_FILE
+
+
+def _queue_file() -> Path:
+    target = Path(_QUEUE_FILE)
+    if target == _DEFAULT_QUEUE_FILE:
+        return migrate_legacy_file(
+            target, legacy_paths=(legacy_config_path("proactive_queue.json"),)
+        )
+    return target
+
 
 # 最大队列深度（防止无限积压）
 _MAX_QUEUE = 20
@@ -260,7 +278,7 @@ class ProactiveAgent:
             if msg:
                 self._enqueue(msg)
 
-        # 3. 模式洞察（高频话题/短语 → 建议建 Skill / 工作流）
+        # 3. 模式洞察（高频话题/短语 → 建议建快捷工作流）
         if self._can_fire("insight"):
             msg = self._build_insight(obs)
             if msg:
@@ -447,7 +465,7 @@ class ProactiveAgent:
 
         if top_task:
             picked = top_task
-            content = f"💡 我注意到你经常需要「{top_task}」，要不要创建一个快捷 Skill？"
+            content = f"💡 我注意到你经常需要「{top_task}」，要不要创建一个快捷工作流？"
         elif top_topic:
             picked = top_topic
             content = f"💡 你经常使用 Koto 处理「{top_topic}」相关任务，要不要让我整理一份最佳实践？"
@@ -499,7 +517,7 @@ class ProactiveAgent:
         )
 
     def _build_insight(self, obs: Dict) -> Optional[Dict]:
-        """基于高频话题 / 短语，主动提出效率优化建议（创建 Skill、工作流等）。"""
+        """基于高频话题 / 短语，主动提出快捷工作流建议。"""
         recent_topics = obs.get("recent_topics_7d") or {}
         phrases = obs.get("recurring_phrases", {})
 
@@ -518,12 +536,12 @@ class ProactiveAgent:
                     ttl_hours=12,
                 )
 
-        # 某个短语被使用 8 次以上 → 提议创建 Skill
+        # 某个短语被使用 8 次以上 → 提议创建快捷工作流
         for phrase, count in sorted(phrases.items(), key=lambda x: -x[1]):
             if count >= 8:
                 content = (
                     f"💡 你已经用「{phrase}」请求了 {count} 次，"
-                    "要不要我把它做成一个快捷 Skill，以后触发更高效？"
+                    "要不要我把它做成一个快捷工作流，以后触发更高效？"
                 )
                 return _make_msg(
                     "insight",
@@ -677,7 +695,6 @@ class ProactiveAgent:
 
     def _save_queue(self):
         try:
-            _BASE.mkdir(parents=True, exist_ok=True)
             with self._q_lock:
                 # 同时持久化冷却时间，防止重启后立即群发消息
                 cooldown_data = {
@@ -689,17 +706,15 @@ class ProactiveAgent:
                     "last_type_time": cooldown_data,
                     "last_suggestion_topic": self._last_suggestion_topic,
                 }
-                _QUEUE_FILE.write_text(
-                    json.dumps(payload, ensure_ascii=False, indent=2),
-                    encoding="utf-8",
-                )
+                save_json_document(_queue_file(), payload)
         except Exception as exc:
             logger.warning("[ProactiveAgent] 队列保存失败: %s", exc)
 
     def _load_queue(self):
-        if _QUEUE_FILE.exists():
+        path = _queue_file()
+        if path.exists():
             try:
-                raw = json.loads(_QUEUE_FILE.read_text(encoding="utf-8"))
+                raw = load_json_document(path, default={})
                 now = datetime.now()
                 # 兼容旧格式（纯列表）和新格式（含冷却时间的字典）
                 if isinstance(raw, list):

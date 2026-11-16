@@ -20,7 +20,7 @@ from app.core.agent.file_task_contract import (
     FileTaskRequest,
 )
 from app.core.agent.file_task_runtime_utils import workflow_checkpoint_from_options
-from app.core.agent.file_task_tool_catalog import is_write_tool
+from app.core.agent.toolkits.foundation.catalog import is_write_tool
 
 
 def _file_type(file_info: FileTaskFile) -> str:
@@ -236,7 +236,7 @@ def _step_id(value: Any, fallback: str) -> str:
     )[:64]
 
 
-def _stage_for_tool(tool_name: str, *, write_intent: bool) -> str:
+def _stage_for_tool(tool_name: str, *, write_required: bool) -> str:
     tool = str(tool_name or "").strip()
     if (
         tool == "parse_file_to_text"
@@ -248,7 +248,7 @@ def _stage_for_tool(tool_name: str, *, write_intent: bool) -> str:
         return "verifying"
     if is_write_tool(tool):
         return "writing"
-    return "analyzing" if write_intent else "answering"
+    return "analyzing" if write_required else "answering"
 
 
 def _allowed_tools_for_stage(
@@ -316,7 +316,7 @@ def build_task_plan(
     recipe_skeleton: Mapping[str, Any],
     completion_contract: Mapping[str, Any] | None = None,
 ) -> Dict[str, Any]:
-    write_intent = bool(classification.write_intent)
+    write_required = bool(classification.write_required)
     required_steps = [
         dict(step)
         for step in recipe_skeleton.get("required_steps") or []
@@ -344,7 +344,7 @@ def build_task_plan(
             continue
         stage = _clean_text(raw_step.get("stage"), 40) or _stage_for_tool(
             tool,
-            write_intent=write_intent,
+            write_required=write_required,
         )
         _append_plan_step(
             steps,
@@ -367,12 +367,12 @@ def build_task_plan(
         steps,
         step_id="model_reasoning",
         title="分析并选择工具",
-        stage="analyzing" if write_intent else "answering",
+        stage="analyzing" if write_required else "answering",
         required=True,
         expected_result="模型基于上下文和工具目录选择下一步，不让关键词旁路改写主线。",
         allowed_tools=_allowed_tools_for_stage("analyzing", recipe_skeleton),
     )
-    if write_intent:
+    if write_required:
         write_tools = [tool for tool in required_tools if is_write_tool(tool)]
         if not write_tools:
             write_tools = _allowed_tools_for_stage("writing", recipe_skeleton)
@@ -406,7 +406,8 @@ def build_task_plan(
         "mainline_locked": True,
         "model_controls": "choose_tools_and_arguments_within_allowed_plan",
         "recipe_id": str(recipe_skeleton.get("recipe_id") or "generic_file_task"),
-        "write_intent": write_intent,
+        "write_authorized": bool(classification.write_authorized),
+        "write_required": write_required,
         "target_path": request.target_path,
         "file_count_by_type": file_count_by_type,
         "steps": steps,
@@ -436,7 +437,8 @@ def build_workflow_state(
             "operation_kind": classification.operation_kind,
             "execution_mode": classification.execution_mode,
             "output_mode": classification.output_mode,
-            "write_intent": bool(classification.write_intent),
+            "write_authorized": bool(classification.write_authorized),
+            "write_required": bool(classification.write_required),
             "selected_recipe": classification.selected_recipe,
         },
         "files": {
@@ -525,27 +527,6 @@ def supervisor_status_payload(
     }
 
 
-def attach_workflow_checkpoint(
-    artifact: Dict[str, Any],
-    workflow_state: Mapping[str, Any],
-) -> Dict[str, Any]:
-    if not isinstance(artifact, dict):
-        return {}
-    payload = dict(artifact)
-    checkpoint = workflow_state.get("checkpoint")
-    windows = workflow_state.get("large_file_windows")
-    if isinstance(checkpoint, Mapping) and checkpoint:
-        payload["workflow_checkpoint"] = _resume_checkpoint_from_artifact(
-            payload,
-            checkpoint,
-        )
-    if isinstance(windows, list) and windows:
-        payload["large_file_windows"] = [
-            dict(item) for item in windows if isinstance(item, dict)
-        ]
-    return payload
-
-
 def _resume_checkpoint_from_artifact(
     artifact: Mapping[str, Any],
     current_checkpoint: Mapping[str, Any],
@@ -622,6 +603,7 @@ def request_with_workflow_checkpoint(request: FileTaskRequest) -> FileTaskReques
         normalized_options.pop("batch_control", None)
         return FileTaskRequest(
             task=request.task,
+            task_id=request.task_id,
             run_id=request.run_id,
             session_id=request.session_id,
             files=list(request.files),
@@ -663,6 +645,7 @@ def request_with_workflow_checkpoint(request: FileTaskRequest) -> FileTaskReques
     ).strip()
     return FileTaskRequest(
         task=request.task,
+        task_id=request.task_id,
         run_id=request.run_id,
         session_id=request.session_id,
         files=list(request.files),

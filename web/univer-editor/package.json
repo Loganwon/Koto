@@ -19,6 +19,7 @@
     "@univerjs/sheets": "^0.5.5",
     "@univerjs/sheets-formula": "^0.5.5",
     "@univerjs/sheets-formula-ui": "^0.5.5",
+    "@univerjs/sheets-numfmt": "^0.5.5",
     "@univerjs/sheets-ui": "^0.5.5",
     "@univerjs/ui": "^0.5.0",
     "esbuild": "^0.28.0",

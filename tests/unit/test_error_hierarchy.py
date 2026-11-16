@@ -17,10 +17,6 @@ from app.core.errors import (
     OllamaConnectionError,
     PathTraversalError,
     RoutingError,
-    SkillError,
-    SkillExecutionError,
-    SkillLoadError,
-    SkillNotFoundError,
     StorageError,
     TaskClassificationError,
     TokenExpiredError,
@@ -34,10 +30,6 @@ ALL_EXCEPTIONS = [
     GeminiAPIError,
     ModelNotFoundError,
     ModelTimeoutError,
-    SkillError,
-    SkillNotFoundError,
-    SkillExecutionError,
-    SkillLoadError,
     AuthenticationError,
     TokenExpiredError,
     InsufficientPermissionsError,
@@ -69,10 +61,6 @@ class TestInheritance:
             ModelTimeoutError,
         ):
             assert issubclass(cls, LLMProviderError)
-
-    def test_skill_subtree(self):
-        for cls in (SkillNotFoundError, SkillExecutionError, SkillLoadError):
-            assert issubclass(cls, SkillError)
 
     def test_auth_subtree(self):
         for cls in (TokenExpiredError, InsufficientPermissionsError):
@@ -109,7 +97,7 @@ class TestToDict:
         assert result["details"] == details
 
     def test_to_dict_keys(self):
-        err = SkillNotFoundError("no such skill")
+        err = ModelNotFoundError("no such model")
         assert set(err.to_dict().keys()) == {"error", "message", "details"}
 
     @pytest.mark.parametrize("exc_cls", ALL_EXCEPTIONS, ids=lambda c: c.__name__)
@@ -175,10 +163,6 @@ class TestRaiseAndCatch:
         with pytest.raises(KotoError):
             raise OllamaConnectionError("offline")
 
-    def test_catch_skill_not_found_as_skill_error(self):
-        with pytest.raises(SkillError):
-            raise SkillNotFoundError("missing")
-
     def test_catch_token_expired_as_auth_error(self):
         with pytest.raises(AuthenticationError):
             raise TokenExpiredError("expired")
@@ -212,8 +196,8 @@ class TestStringRepresentation:
         assert str(err) == "llama3 not found"
 
     def test_message_attribute(self):
-        err = SkillExecutionError("timeout in skill")
-        assert err.message == "timeout in skill"
+        err = ModelTimeoutError("model timeout")
+        assert err.message == "model timeout"
 
     @pytest.mark.parametrize("exc_cls", ALL_EXCEPTIONS, ids=lambda c: c.__name__)
     def test_str_matches_message(self, exc_cls):

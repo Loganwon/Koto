@@ -1,0 +1,4 @@
+# Dedicated native-pane Agent runtime; keep the desktop app environment intact.
+-r agent_lab/requirements.txt
+pywin32>=310; sys_platform == "win32"
+cryptography>=43,<47

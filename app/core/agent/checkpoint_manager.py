@@ -31,22 +31,20 @@ SqliteSaver 持久化的能力：
 from __future__ import annotations
 
 import logging
-import os
 import threading
 from pathlib import Path
 from typing import Any, List, Optional
 
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    prepare_runtime_database,
+    runtime_database_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
-_DEFAULT_DB_PATH = str(
-    Path(
-        os.environ.get(
-            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
-        )
-    )
-    / "koto_checkpoints.sqlite"
-)
+_DEFAULT_DB_PATH = str(runtime_database_path("koto_checkpoints.sqlite"))
 
 # ── 单例 ──────────────────────────────────────────────────────────────────────
 _checkpointer_instance: Optional[Any] = None
@@ -61,7 +59,7 @@ def get_checkpointer(db_path: Optional[str] = None) -> Any:
 
     参数:
         db_path: SQLite 文件路径（仅首次调用有效，之后忽略）。
-                 默认: config/koto_checkpoints.sqlite
+                 默认: data/db/koto_checkpoints.sqlite
     """
     global _checkpointer_instance, _checkpointer_type
 
@@ -72,7 +70,12 @@ def get_checkpointer(db_path: Optional[str] = None) -> Any:
         if _checkpointer_instance is not None:
             return _checkpointer_instance
 
-        path = db_path or _DEFAULT_DB_PATH
+        path = db_path or str(
+            prepare_runtime_database(
+                _DEFAULT_DB_PATH,
+                legacy_paths=(legacy_config_path("koto_checkpoints.sqlite"),),
+            )
+        )
 
         # 1. 尝试 SqliteSaver（推荐）
         try:

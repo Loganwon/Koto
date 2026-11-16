@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import importlib.util
 import os
 import subprocess
 import sys
 from collections import OrderedDict
+from pathlib import Path
 
 
 SUITES = OrderedDict(
@@ -21,7 +23,7 @@ SUITES = OrderedDict(
                     "tests/test_ai_stream.py::TestEditorAIStream::test_whitebox_task_stream_emits_new_contract",
                     "tests/unit/test_file_task_runtime.py::test_file_task_model_client_passes_file_task_timeout_to_local_provider",
                     "tests/unit/test_file_task_runtime.py::test_file_task_model_client_routes_local_and_cloud",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_execution_brief_ignores_legacy_delegated_planner_and_stays_native",
+                    "tests/unit/test_file_task_prompt_architecture.py",
                 ],
             },
         ),
@@ -53,28 +55,29 @@ SUITES = OrderedDict(
         (
             "runtime",
             {
-                "description": "File-task runtime, native routing, tool-gap, and provider fallback behavior.",
+                "description": "File-task runtime, single-protocol routing, failure contracts, and provider boundaries.",
                 "nodes": [
                     "tests/unit/test_llm_providers.py::TestOllamaProviderTimeoutPassthrough::test_generate_content_passes_call_timeout",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_parses_native_tool_design_protocol_from_model_text",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_system_prompt_rejects_secondary_plan_protocols",
                     "tests/unit/test_file_task_runtime.py::test_file_task_model_client_passes_file_task_timeout_to_local_provider",
                     "tests/unit/test_file_task_runtime.py::test_file_task_model_client_routes_local_and_cloud",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_model_client_prefers_file_task_model_route",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_execution_brief_ignores_legacy_delegated_planner_and_stays_native",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_model_client_uses_core_model_selection",
+                    "tests/unit/test_file_task_prompt_architecture.py",
                     "tests/unit/test_file_task_runtime.py::test_file_task_runtime_classification_defers_planner_without_explicit_override",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_does_not_external_fallback_after_tool_gap",
-                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_does_not_external_fallback_after_native_model_failure",
+                    "tests/unit/test_file_task_runtime.py::test_file_task_runtime_uses_injected_tool_provider_boundary",
+                    "tests/unit/test_file_task_failure_contract.py",
                 ],
             },
         ),
         (
             "matrix",
             {
-                "description": "Task-family routing matrix and completion-contract coverage.",
+                "description": "File-task safety matrix, classification policy, and routing-contract coverage.",
                 "nodes": [
-                    "tests/unit/test_ai_task_family_matrix.py",
-                    "tests/unit/test_file_task_recipes.py",
-                    "tests/unit/test_file_task_classification_recipes.py",
+                    "tests/unit/test_file_task_safety_matrix.py",
+                    "tests/unit/test_file_task_classification_policy.py",
+                    "tests/unit/test_file_task_classification_architecture.py",
+                    "tests/unit/test_file_task_routing_decision_contract.py",
                 ],
             },
         ),
@@ -100,7 +103,7 @@ SUITES = OrderedDict(
         (
             "evaluation",
             {
-                "description": "Offline deterministic intent accuracy and execution-quality checks; set KOTO_LIVE_EVALUATION=1 for real LLM calls.",
+                "description": "Offline deterministic intent and execution/judging contracts (not live model quality); set KOTO_LIVE_EVALUATION=1 for real LLM calls.",
                 "nodes": [
                     "tests/evaluation/test_intent_accuracy.py",
                     "tests/evaluation/test_execution_quality.py",
@@ -163,6 +166,53 @@ def _all_suite_names() -> list[str]:
 
 def _suite_requires_browser(name: str) -> bool:
     return "browser-mock" in _resolve_suite_names(name)
+
+
+def _missing_node_ids(nodes: list[str], root: Path | None = None) -> list[str]:
+    """Return suite entries whose file or explicit pytest selector is stale."""
+    root = Path(__file__).resolve().parents[1] if root is None else root
+    parsed_files: dict[Path, ast.Module] = {}
+    missing: list[str] = []
+
+    for node_id in nodes:
+        parts = node_id.split("::")
+        test_path = root / parts[0]
+        if not test_path.is_file():
+            missing.append(node_id)
+            continue
+        if len(parts) == 1:
+            continue
+
+        try:
+            module = parsed_files.setdefault(
+                test_path,
+                ast.parse(test_path.read_text(encoding="utf-8-sig")),
+            )
+        except (OSError, SyntaxError, UnicodeError):
+            missing.append(node_id)
+            continue
+
+        scope = module.body
+        for selector in parts[1:]:
+            selector_name = selector.split("[", 1)[0]
+            definition = next(
+                (
+                    statement
+                    for statement in scope
+                    if isinstance(
+                        statement,
+                        (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef),
+                    )
+                    and statement.name == selector_name
+                ),
+                None,
+            )
+            if definition is None:
+                missing.append(node_id)
+                break
+            scope = definition.body
+
+    return missing
 
 
 def _pytest_environment(base_environment: dict[str, str] | None = None) -> dict[str, str]:
@@ -234,6 +284,15 @@ def main(argv: list[str] | None = None) -> int:
 
     resolved_suite = SUITE_ALIASES.get(args.suite, args.suite)
     nodes = _resolve_nodes(resolved_suite)
+    missing_nodes = _missing_node_ids(nodes)
+    if missing_nodes:
+        print(
+            "[ai-assistant-tests] stale or missing pytest node ids:",
+            file=sys.stderr,
+        )
+        for node in missing_nodes:
+            print(f"  - {node}", file=sys.stderr)
+        return 4
     command = [sys.executable, "-m", "pytest", *nodes, *pytest_args]
 
     if resolved_suite != args.suite:

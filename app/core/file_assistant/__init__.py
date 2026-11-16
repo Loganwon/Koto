@@ -3,6 +3,11 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
+from app.core.file_assistant.cancellation import (
+    FileOpenCancellationRegistry,
+    FileOpenCancellationToken,
+    FileOpenCancelledError,
+)
 from app.core.file_assistant.fs_service import (
     WorkspaceFsError,
     WorkspaceFsPathResult,
@@ -29,6 +34,7 @@ from app.core.file_assistant.preview_service import (
     FileContextPreviewService,
 )
 from app.core.file_assistant.save_service import (
+    AutoSaveConflictError,
     AutoSavePermissionError,
     AutoSavePersistenceService,
     AutoSaveResult,
@@ -62,10 +68,14 @@ __all__ = [
     "TEXT_EXTENSIONS",
     "ExportedEditorFile",
     "FileAssistantService",
+    "FileOpenCancelledError",
+    "FileOpenCancellationRegistry",
+    "FileOpenCancellationToken",
     "FileTooLargeError",
     "ParsedEditorFile",
     "UnsupportedFileTypeError",
     "AutoSavePermissionError",
+    "AutoSaveConflictError",
     "AutoSavePersistenceService",
     "AutoSaveResult",
     "OpenFileByPathService",

@@ -6,7 +6,7 @@ rating_store.py — 双轨评分存储（用户打分 + 模型自评）
 =======================================================
 
 架构：
-  workspace/rating_store/ratings.db
+  data/db/ratings.db
   ├── user_ratings   — 用户对每条回复的 1-5 星评分 + 文字反馈
   └── model_evals    — 模型对自身回复的多维度自评分
 
@@ -38,16 +38,23 @@ from typing import Any, Dict, Generator, List, Optional
 logger = logging.getLogger(__name__)
 
 # ── 路径 ─────────────────────────────────────────────────────────────────────
-import sys as _sys
+from app.core.config.runtime_storage import (
+    prepare_runtime_database,
+    project_root,
+    runtime_data_path,
+)
+
+_DB_PATH = runtime_data_path("db", "ratings.db", env_var="KOTO_RATING_DB_PATH")
 
 
-def _base_dir() -> Path:
-    if getattr(_sys, "frozen", False):
-        return Path(_sys.executable).parent
-    return Path(__file__).resolve().parents[3]
+def _resolve_db_path(db_path: Optional[Path] = None) -> Path:
+    if db_path is not None:
+        return Path(db_path)
+    return prepare_runtime_database(
+        _DB_PATH,
+        legacy_paths=(project_root() / "workspace" / "rating_store" / "ratings.db",),
+    )
 
-
-_DB_PATH = _base_dir() / "workspace" / "rating_store" / "ratings.db"
 
 # 用户评分→质量分换算表（1-5星 → 0.0-1.0）
 _STAR_TO_QUALITY = {1: 0.0, 2: 0.25, 3: 0.55, 4: 0.82, 5: 1.0}
@@ -72,8 +79,8 @@ class RatingStore:
 
     _lock = threading.Lock()
 
-    def __init__(self, db_path: Path = _DB_PATH):
-        self.db_path = db_path
+    def __init__(self, db_path: Optional[Path] = None):
+        self.db_path = _resolve_db_path(db_path)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self._init_schema()
 
@@ -247,7 +254,7 @@ class RatingStore:
         limit: int = 2000,
     ) -> List[Dict[str, Any]]:
         """
-        导出高质量样本（供 TrainingDataBuilder 使用）。
+        导出高质量样本，供离线质量分析使用。
         仅返回「用户评分高 OR 模型自评高」且两轨均有记录的条目。
         """
         rows: List[Dict[str, Any]] = []

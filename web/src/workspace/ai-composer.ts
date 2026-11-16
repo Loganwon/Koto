@@ -3,7 +3,7 @@
  * The workspace owns one real composer DOM node and mounts it between views.
  */
 
-export type WorkspaceAiComposerKind = 'chat' | 'sessionList';
+export type WorkspaceAiComposerKind = 'chat';
 
 interface ComposerConfig {
   inputId: string;
@@ -19,18 +19,11 @@ const COMPOSERS: Record<WorkspaceAiComposerKind, ComposerConfig> = {
     inputId: 'wa-user-input',
     sendButtonId: 'wa-send-btn',
     hostId: 'wa-chat-composer-host',
-    placeholder: '输入问题，或让 Koto 处理当前文件',
+    placeholder: '描述任务，或添加文件一起处理…',
     sendTitle: '发送',
     fallbackMaxHeight: 360,
   },
-  sessionList: {
-    inputId: 'wa-user-input',
-    sendButtonId: 'wa-send-btn',
-    hostId: 'wa-session-list-composer-host',
-    placeholder: '输入问题，新建对话',
-    sendTitle: '发送并新建对话',
-    fallbackMaxHeight: 360,
-  },
+
 };
 
 const pendingComposerResizeFrames = new WeakMap<HTMLTextAreaElement, number>();
@@ -60,12 +53,7 @@ export function getWorkspaceAiComposerSendButton(kind: WorkspaceAiComposerKind =
 }
 
 export function workspaceAiComposerMode(): WorkspaceAiComposerKind {
-  const area = document.getElementById('wa-ai-input-area');
-  if (area && area.parentElement && area.parentElement.id === COMPOSERS.sessionList.hostId) {
-    return 'sessionList';
-  }
-  const listView = document.getElementById('wa-ai-session-list-view');
-  return listView && !listView.hidden ? 'sessionList' : 'chat';
+  return 'chat';
 }
 
 export function visibleWorkspaceAiComposerKind(): WorkspaceAiComposerKind {
@@ -150,7 +138,7 @@ export function focusWorkspaceAiComposer(kind: WorkspaceAiComposerKind = 'chat')
   } catch (_) { /* noop */ }
 }
 
-export function syncWorkspaceAiComposerSendState(kind: WorkspaceAiComposerKind): void {
+export function syncWorkspaceAiComposerSendState(_kind: WorkspaceAiComposerKind): void {
   const input = getWorkspaceAiComposerInput();
   const button = getWorkspaceAiComposerSendButton();
   if (!button) return;

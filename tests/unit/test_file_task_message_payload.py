@@ -29,7 +29,7 @@ def test_file_task_runtime_messages_include_derived_payloads():
     )
     classification = FileTaskClassification(
         output_mode="write",
-        write_intent=True,
+        write_required=True,
     )
 
     messages = build_file_task_runtime_messages(
@@ -40,7 +40,6 @@ def test_file_task_runtime_messages_include_derived_payloads():
         intent_plan=FileTaskIntentPlan(intent_type="edit_file"),
         known_tool_gap={"missing": "native_docx"},
         recipe_skeleton=None,
-        execution_brief_schema={"type": "object"},
     )
 
     context = _message_context(messages)
@@ -48,7 +47,8 @@ def test_file_task_runtime_messages_include_derived_payloads():
     assert context["followup_context"]["followup_action"] == "improve"
     assert context["known_native_tool_gap"] == {"missing": "native_docx"}
     assert context["recipe_skeleton"]["version"]
-    assert context["execution_brief_schema"] == {"type": "object"}
+    assert "execution_brief_schema" not in context
+    assert "execution_plan_schema" not in context
 
 
 def test_file_task_runtime_messages_preserve_supplied_recipe_skeleton():
@@ -63,7 +63,6 @@ def test_file_task_runtime_messages_preserve_supplied_recipe_skeleton():
         intent_plan=FileTaskIntentPlan(),
         known_tool_gap=None,
         recipe_skeleton=skeleton,
-        execution_brief_schema={},
     )
 
     context = _message_context(messages)

@@ -1,22 +1,16 @@
 @echo off
-REM Koto Server Launcher
-REM Ensures the correct venv Python is used, not any system Python.
-REM Usage: start_koto.bat
+REM Koto legacy compatibility launcher.
+REM Default behavior is the unified desktop app. Use an explicit "server"
+REM argument only for development/debugging.
+REM Usage: start_koto.bat [desktop^|server]
 
 setlocal
 cd /d "%~dp0"
 
-if not exist ".venv\Scripts\python.exe" (
-    echo [ERROR] Virtual environment not found at .venv\Scripts\python.exe
-    echo Run: python -m venv .venv ^&^& .venv\Scripts\pip install -r config\requirements.txt
-    pause
-    exit /b 1
-)
+set "MODE=%~1"
+if "%MODE%"=="" set "MODE=desktop"
 
-echo [Koto] Starting server with .venv Python...
-.venv\Scripts\python.exe -m web.app
-if %ERRORLEVEL% NEQ 0 (
-    echo [ERROR] Server exited with code %ERRORLEVEL%
-    pause
-)
-endlocal
+echo [Koto] This compatibility entry now uses the unified launcher (%MODE%).
+call "%~dp0Koto_Start.bat" "%MODE%"
+set "EXIT_CODE=%ERRORLEVEL%"
+endlocal & exit /b %EXIT_CODE%

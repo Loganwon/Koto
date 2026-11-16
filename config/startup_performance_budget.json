@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "metric": "native window and frontend interactive elapsed milliseconds",
+  "phase_budgets": {
+    "process_to_python": {"warning_ms": 3000, "hard_ms": 15000},
+    "desktop_preflight": {"warning_ms": 3000, "hard_ms": 15000},
+    "port_selection": {"warning_ms": 2000, "hard_ms": 10000},
+    "backend_import": {"warning_ms": 6000, "hard_ms": 30000},
+    "backend_ready": {"warning_ms": 10000, "hard_ms": 45000},
+    "webview_import": {"warning_ms": 3000, "hard_ms": 15000},
+    "window_create": {"warning_ms": 2000, "hard_ms": 10000},
+    "window_show": {"warning_ms": 5000, "hard_ms": 20000},
+    "frontend_after_window": {"warning_ms": 5000, "hard_ms": 25000}
+  },
+  "trend": {
+    "history_window": 20,
+    "minimum_samples": 5,
+    "p95_warning_ratio": 1.35,
+    "p95_blocking_ratio": 2.0,
+    "consecutive_degradation_runs": 3,
+    "minimum_consecutive_increase_ratio": 0.1,
+    "retention_records": 50
+  },
+  "scenarios": {
+    "normal": {"warning_window_ms": 8000, "hard_window_ms": 30000, "warning_interactive_ms": 10000, "hard_interactive_ms": 35000, "require_frontend_ready": true, "require_phase_metrics": true, "expected_fallback": false},
+    "slow": {"warning_window_ms": 12000, "hard_window_ms": 45000, "warning_interactive_ms": 15000, "hard_interactive_ms": 50000, "require_frontend_ready": true, "require_phase_metrics": true, "expected_status_page": true, "max_status_release_after_window_ms": 5000},
+    "port_conflict": {"warning_window_ms": 12000, "hard_window_ms": 45000, "warning_interactive_ms": 15000, "hard_interactive_ms": 50000, "require_frontend_ready": true, "require_phase_metrics": true, "expected_fallback": true}
+  }
+}

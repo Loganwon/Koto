@@ -31,81 +31,40 @@ def test_index_page(e2e_page, console_errors, e2e_base_url):
     resp = _goto(e2e_page, f"{e2e_base_url}/")
     assert resp is not None and resp.status < 500, f"Status {resp.status}"
 
-    e2e_page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
-
-    # Key elements: chat messages area and session sidebar
-    assert e2e_page.locator("#chatMessages").count() > 0, "Missing #chatMessages"
-    assert e2e_page.locator("#sessionsList").count() > 0, "Missing #sessionsList"
-
-    assert console_errors == [], f"JS errors: {console_errors}"
-
-
-@pytest.mark.e2e
-def test_skill_marketplace_page(e2e_page, console_errors, e2e_base_url):
-    """/skill-marketplace — skill catalog and library."""
-    resp = _goto(e2e_page, f"{e2e_base_url}/skill-marketplace")
-    assert resp is not None and resp.status < 500, f"Status {resp.status}"
-
-    e2e_page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
-
-    assert e2e_page.locator(".sm-app").count() > 0, "Missing .sm-app"
-    assert e2e_page.locator("#sm-search-input").count() > 0, "Missing search input"
+    # The unified workspace keeps long-lived connections open, so networkidle
+    # is not a valid readiness signal. Wait for its actual shell contract.
+    e2e_page.locator("#wa-workspace").wait_for(state="attached", timeout=PAGE_TIMEOUT)
+    assert (
+        e2e_page.locator("#wa-ai-messages").count() == 1
+    ), "Missing AI message surface"
+    assert (
+        e2e_page.locator("#wa-ai-session-list").count() == 1
+    ), "Missing AI session list"
 
     assert console_errors == [], f"JS errors: {console_errors}"
 
 
 @pytest.mark.e2e
-def test_landing_page(e2e_page, console_errors, e2e_base_url):
-    """/landing — may not exist; skip if 404."""
-    resp = _goto(e2e_page, f"{e2e_base_url}/landing")
-    if resp is not None and resp.status == 404:
-        pytest.skip("/landing route not available")
-
-    assert resp is not None and resp.status < 500, f"Status {resp.status}"
-    e2e_page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
-    assert console_errors == [], f"JS errors: {console_errors}"
-
-
-@pytest.mark.e2e
-def test_mobile_page(e2e_page, console_errors, e2e_base_url):
-    """/mobile — mobile-optimised chat UI."""
-    resp = _goto(e2e_page, f"{e2e_base_url}/mobile")
+def test_addon_center_page(e2e_page, console_errors, e2e_base_url):
+    """/addons — current Addon protocol and admission surface."""
+    resp = _goto(e2e_page, f"{e2e_base_url}/addons")
     assert resp is not None and resp.status < 500, f"Status {resp.status}"
 
     e2e_page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
 
-    assert e2e_page.locator("#app").count() > 0, "Missing #app container"
-    assert e2e_page.locator("#chat").count() > 0, "Missing #chat area"
-    assert e2e_page.locator("#txIn").count() > 0, "Missing #txIn textarea"
+    assert e2e_page.locator("#manifest-input").count() == 1, "Missing manifest input"
+    assert e2e_page.locator("#addon-catalog").count() == 1, "Missing Addon catalog"
 
     assert console_errors == [], f"JS errors: {console_errors}"
 
 
 @pytest.mark.e2e
-def test_file_network_page(e2e_page, console_errors, e2e_base_url):
-    """/file-network — file relationship network graph."""
-    resp = _goto(e2e_page, f"{e2e_base_url}/file-network")
-    assert resp is not None and resp.status < 500, f"Status {resp.status}"
-
-    e2e_page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
-
-    assert e2e_page.locator(".container").count() > 0, "Missing .container"
-    assert e2e_page.locator(".search-panel").count() > 0, "Missing .search-panel"
-
-    assert console_errors == [], f"JS errors: {console_errors}"
-
-
-@pytest.mark.e2e
-def test_knowledge_graph_page(e2e_page, console_errors, e2e_base_url):
-    """/knowledge-graph — D3 knowledge graph visualisation."""
-    resp = _goto(e2e_page, f"{e2e_base_url}/knowledge-graph")
-    assert resp is not None and resp.status < 500, f"Status {resp.status}"
-
-    e2e_page.wait_for_load_state("networkidle", timeout=PAGE_TIMEOUT)
-
-    assert e2e_page.locator("#graph").count() > 0, "Missing #graph SVG"
-    assert e2e_page.locator(".sidebar").count() > 0, "Missing .sidebar"
-
+def test_mini_page(e2e_page, console_errors, e2e_base_url):
+    """/mini — the supported compact chat surface."""
+    resp = _goto(e2e_page, f"{e2e_base_url}/mini")
+    assert resp is not None and resp.status < 400, f"Status {resp.status}"
+    assert e2e_page.locator(".app").count() == 1
+    assert e2e_page.locator("#q").count() == 1
     assert console_errors == [], f"JS errors: {console_errors}"
 
 
@@ -114,11 +73,8 @@ def test_knowledge_graph_page(e2e_page, console_errors, e2e_base_url):
 # ---------------------------------------------------------------------------
 ALL_PAGES = [
     ("/", "body"),
-    ("/skill-marketplace", ".sm-app"),
-    ("/landing", "body"),
-    ("/mobile", "#app"),
-    ("/file-network", ".container"),
-    ("/knowledge-graph", "#graph"),
+    ("/addons", "#addon-catalog"),
+    ("/mini", ".app"),
 ]
 
 
@@ -129,10 +85,7 @@ def test_page_loads_without_errors(
 ):
     """Every major page should return < 500, render its key element, and emit no JS errors."""
     resp = _goto(e2e_page, f"{e2e_base_url}{path}")
-    if resp is not None and resp.status == 404:
-        pytest.skip(f"{path} route not available")
-
-    assert resp is not None and resp.status < 500, f"{path} returned {resp.status}"
+    assert resp is not None and resp.status < 400, f"{path} returned {resp.status}"
 
     e2e_page.wait_for_load_state("domcontentloaded", timeout=PAGE_TIMEOUT)
 

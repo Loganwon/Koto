@@ -20,7 +20,14 @@ function flush(): void {
   scheduled = false;
   while (queue.length) {
     const fn = queue.shift()!;
-    try { fn(); } catch (e) { console.warn('[Koto] deferred init failed:', e); }
+    try {
+      const result = fn();
+      if (result && typeof result.then === 'function') {
+        void result.catch((error) => console.warn('[Koto] deferred init failed:', error));
+      }
+    } catch (error) {
+      console.warn('[Koto] deferred init failed:', error);
+    }
   }
 }
 
@@ -48,4 +55,13 @@ export function batchInit(fns: InitFn[]): void {
       setTimeout(flush, 0);
     }
   }
+}
+
+/**
+ * Schedule non-critical work only after the browser has painted the startup
+ * shell. Two frames keep the setTimeout fallback from competing with first
+ * paint on runtimes that do not implement requestIdleCallback (pywebview).
+ */
+export function deferAfterPaint(fn: InitFn): void {
+  requestAnimationFrame(() => requestAnimationFrame(() => deferInit(fn)));
 }

@@ -8,9 +8,10 @@ export default defineConfig({
   build: {
     outDir: 'static/js/build',
     sourcemap: true,
-    emptyOutDir: true,
+    emptyOutDir: false,
     target: 'es2020',
     minify: 'esbuild',
+    chunkSizeWarningLimit: 700,
     rollupOptions: {
       input: resolve(__dirname, 'src/bundles/app.ts'),
       output: {

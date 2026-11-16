@@ -35,7 +35,10 @@ def test_mammoth_fallback_keeps_page_layout_and_navigation_contract(
     def _force_rich_renderer_failure(*_args, **_kwargs):
         raise RuntimeError("forced rich renderer failure")
 
-    monkeypatch.setattr(docx_parser, "_docx_to_rich_html", _force_rich_renderer_failure)
+    monkeypatch.setattr(
+        "app.core.file.parsers.docx._docx_to_rich_html",
+        _force_rich_renderer_failure,
+    )
     result = docx_parser.parse_docx(str(fixture), progressive_preview=True)
 
     assert result["render_contract_version"] == 1

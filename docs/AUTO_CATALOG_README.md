@@ -20,7 +20,7 @@
 
 ### ✅ 2. 每日定时执行
 - 支持自定义时间（默认凌晨 02:00）
-- 与 TaskScheduler 集成
+- 通过统一的 TriggerRegistry → JobRunner 管线执行
 - 支持手动立即执行
 
 ### ✅ 3. 文件分配到归纳库
@@ -40,7 +40,7 @@
 
 ### 核心类: AutoCatalogScheduler
 ```python
-from auto_catalog_scheduler import get_auto_catalog_scheduler
+from app.core.services.auto_catalog_scheduler import get_auto_catalog_scheduler
 
 scheduler = get_auto_catalog_scheduler()
 
@@ -252,7 +252,7 @@ C:\Users\12524\Desktop\Koto\workspace\_organize\_backups
 
 ### 运行单元测试
 ```bash
-python tests/test_auto_catalog.py
+.venv\Scripts\python.exe -m pytest tests/unit/test_task_scheduler_stability.py tests/unit/test_web_modules_batch9.py -q
 ```
 
 结果：✅ 5/5 测试通过
@@ -272,12 +272,12 @@ python examples/auto_catalog_quickstart.py run
 ## 📂 文件清单
 
 ### 新增文件
-- **web/auto_catalog_scheduler.py** (427 行) - 核心调度器
+- **app/core/services/auto_catalog_scheduler.py** - 核心调度器
 - **docs/AUTO_CATALOG_SCHEDULER_GUIDE.md** - 完整指南
 - **docs/AUTO_CATALOG_IMPLEMENTATION_SUMMARY.md** - 实现总结
 - **docs/AUTO_CATALOG_VERIFICATION_CHECKLIST.md** - 验证清单
 - **docs/AUTO_CATALOG_FEATURE_OVERVIEW.md** - 功能概览
-- **tests/test_auto_catalog.py** - 单元测试
+- **tests/unit/test_task_scheduler_stability.py** - 调度所有权回归测试
 - **examples/auto_catalog_quickstart.py** - 使用示例
 
 ### 修改文件
@@ -389,7 +389,7 @@ python examples/auto_catalog_quickstart.py run
 遇到问题或需要帮助？
 
 1. 查看完整文档：[AUTO_CATALOG_SCHEDULER_GUIDE.md](AUTO_CATALOG_SCHEDULER_GUIDE.md)
-2. 运行测试脚本：`python tests/test_auto_catalog.py`
+2. 运行回归测试：`.venv\Scripts\python.exe -m pytest tests/unit/test_task_scheduler_stability.py -q`
 3. 尝试示例脚本：`python examples/auto_catalog_quickstart.py`
 4. 检查日志文件：`workspace/logs/`
 

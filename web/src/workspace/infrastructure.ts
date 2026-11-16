@@ -3,6 +3,8 @@
  * Workspace infrastructure helpers.
  */
 
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
+
 export interface CsrfOptions {
   url?: string;
   method?: string;
@@ -415,54 +417,44 @@ export function _shouldIgnorePptxGlobalKeydown(target: EventTarget | null): bool
 }
 
 // Backward compatibility
-(window as any).$ = $;
-(window as any)._csrfFetch = _csrfFetch;
-(window as any)._escHtml = _escHtml;
-(window as any)._hexLuma = _hexLuma;
-(window as any)._safeTextColor = _safeTextColor;
-(window as any)._shouldIgnorePptxGlobalKeydown = _shouldIgnorePptxGlobalKeydown;
-// _saveEditorRange — preserve editor selection before focus leaves
-// Called by the quick-action / selection-toolbar path so the editor can
-// restore the selection later when applying AI replacements.
-(window as any).WA = (window as any).WA || {};
-(window as any).WA._saveEditorRange = () => {
-  const editor = (window as any).state?.activeEditor;
-  if (editor && typeof editor.saveSelection === 'function') {
-    try { editor.saveSelection(); } catch (_) { /* noop */ }
-  }
-};
-(window as any)._runTextDecoration = _runTextDecoration;
-(window as any)._fileIcon = _fileIcon;
-(window as any)._DEFAULT_FILE_SVG = _DEFAULT_FILE_SVG;
-(window as any)._DOC_SVG = _DOC_SVG;
-(window as any)._FOLDER_SVG = _FOLDER_SVG;
-(window as any)._FOLDER_OPEN_SVG = _FOLDER_OPEN_SVG;
-(window as any)._FOLDER_PICK_SVG = _FOLDER_PICK_SVG;
-(window as any)._PIN_SVG = _PIN_SVG;
-(window as any)._PENCIL_SVG = _PENCIL_SVG;
-(window as any)._SEARCH_SVG = _SEARCH_SVG;
-(window as any)._CLIPBOARD_SVG = _CLIPBOARD_SVG;
-(window as any)._CHART_SVG = _CHART_SVG;
-(window as any)._LIGHTBULB_SVG = _LIGHTBULB_SVG;
-(window as any)._TRASH_SVG = _TRASH_SVG;
-(window as any)._PAUSE_SVG = _PAUSE_SVG;
-(window as any)._SEND_SVG = _SEND_SVG;
-(window as any)._DOWNLOAD_SVG = _DOWNLOAD_SVG;
-(window as any)._CHAT_SVG = _CHAT_SVG;
-(window as any)._SLIDES_SVG = _SLIDES_SVG;
-(window as any)._SUN_SVG = _SUN_SVG;
-(window as any)._MOON_SVG = _MOON_SVG;
-(window as any)._WORD_FILE_SVG = _WORD_FILE_SVG;
-(window as any)._EXCEL_FILE_SVG = _EXCEL_FILE_SVG;
-(window as any)._POWERPOINT_FILE_SVG = _POWERPOINT_FILE_SVG;
-(window as any)._PDF_SVG = _PDF_SVG;
-(window as any)._TEXT_SVG = _TEXT_SVG;
-(window as any)._CODE_SVG = _CODE_SVG;
-(window as any)._IMAGE_SVG = _IMAGE_SVG;
-(window as any)._EXT_ICON = _EXT_ICON;
-(window as any).showToast = showToast;
-(window as any).WA = (window as any).WA || {};
-const wa = (window as any).WA;
+getFeatureRegistry().$ = $;
+getFeatureRegistry()._csrfFetch = _csrfFetch;
+getFeatureRegistry()._escHtml = _escHtml;
+getFeatureRegistry()._hexLuma = _hexLuma;
+getFeatureRegistry()._safeTextColor = _safeTextColor;
+getFeatureRegistry()._shouldIgnorePptxGlobalKeydown = _shouldIgnorePptxGlobalKeydown;
+getFeatureRegistry()._runTextDecoration = _runTextDecoration;
+getFeatureRegistry()._fileIcon = _fileIcon;
+getFeatureRegistry()._DEFAULT_FILE_SVG = _DEFAULT_FILE_SVG;
+getFeatureRegistry()._DOC_SVG = _DOC_SVG;
+getFeatureRegistry()._FOLDER_SVG = _FOLDER_SVG;
+getFeatureRegistry()._FOLDER_OPEN_SVG = _FOLDER_OPEN_SVG;
+getFeatureRegistry()._FOLDER_PICK_SVG = _FOLDER_PICK_SVG;
+getFeatureRegistry()._PIN_SVG = _PIN_SVG;
+getFeatureRegistry()._PENCIL_SVG = _PENCIL_SVG;
+getFeatureRegistry()._SEARCH_SVG = _SEARCH_SVG;
+getFeatureRegistry()._CLIPBOARD_SVG = _CLIPBOARD_SVG;
+getFeatureRegistry()._CHART_SVG = _CHART_SVG;
+getFeatureRegistry()._LIGHTBULB_SVG = _LIGHTBULB_SVG;
+getFeatureRegistry()._TRASH_SVG = _TRASH_SVG;
+getFeatureRegistry()._PAUSE_SVG = _PAUSE_SVG;
+getFeatureRegistry()._SEND_SVG = _SEND_SVG;
+getFeatureRegistry()._DOWNLOAD_SVG = _DOWNLOAD_SVG;
+getFeatureRegistry()._CHAT_SVG = _CHAT_SVG;
+getFeatureRegistry()._SLIDES_SVG = _SLIDES_SVG;
+getFeatureRegistry()._SUN_SVG = _SUN_SVG;
+getFeatureRegistry()._MOON_SVG = _MOON_SVG;
+getFeatureRegistry()._WORD_FILE_SVG = _WORD_FILE_SVG;
+getFeatureRegistry()._EXCEL_FILE_SVG = _EXCEL_FILE_SVG;
+getFeatureRegistry()._POWERPOINT_FILE_SVG = _POWERPOINT_FILE_SVG;
+getFeatureRegistry()._PDF_SVG = _PDF_SVG;
+getFeatureRegistry()._TEXT_SVG = _TEXT_SVG;
+getFeatureRegistry()._CODE_SVG = _CODE_SVG;
+getFeatureRegistry()._IMAGE_SVG = _IMAGE_SVG;
+getFeatureRegistry()._EXT_ICON = _EXT_ICON;
+getFeatureRegistry().showToast = showToast;
+const workspaceApi = getFeatureRegistry();
+const wa = workspaceApi;
 wa._csrfToken = _csrfToken;
 wa._setCsrfToken = _setCsrfToken;
 wa._refreshCsrfToken = _refreshCsrfToken;
@@ -471,3 +463,16 @@ wa._needsCsrf = _needsCsrf;
 wa._csrfFetch = _csrfFetch;
 wa._cleanupDocumentListeners = _cleanupDocumentListeners;
 wa.showToast = showToast;
+registerFeatures({
+  $,
+  _csrfFetch,
+  _escHtml,
+  _hexLuma,
+  _safeTextColor,
+  _shouldIgnorePptxGlobalKeydown,
+  _runTextDecoration,
+  showToast,
+  _PENCIL_SVG,
+  _TRASH_SVG,
+  _CLIPBOARD_SVG,
+});

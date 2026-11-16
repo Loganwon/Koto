@@ -25,6 +25,8 @@ _PLACEHOLDER_VALUES = {
 
 
 def project_root() -> Path:
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
     return Path(__file__).resolve().parents[3]
 
 
@@ -34,6 +36,9 @@ def normalize_deepseek_api_key(value: Optional[str]) -> str:
 
 
 def _candidate_key_files() -> list[Path]:
+    explicit_path = str(os.getenv("KOTO_DEEPSEEK_CONFIG_PATH") or "").strip()
+    if explicit_path:
+        return [Path(explicit_path).expanduser()]
     root = project_root()
     home = Path.home()
     candidates = [
@@ -170,7 +175,12 @@ def write_deepseek_config_file(
     if not normalized:
         raise ValueError("Invalid DeepSeek API key")
 
-    config_path = project_root() / "config" / "deepseek_config.env"
+    explicit_path = str(os.getenv("KOTO_DEEPSEEK_CONFIG_PATH") or "").strip()
+    config_path = (
+        Path(explicit_path).expanduser()
+        if explicit_path
+        else project_root() / "config" / "deepseek_config.env"
+    )
     config_path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
         f"{header}\n",

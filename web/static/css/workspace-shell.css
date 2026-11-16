@@ -1,0 +1,284 @@
+/* One owner for navigation and the document/assistant layout. */
+:root[data-theme="light"] {
+  --bg-primary: #faf9f6;
+  --bg-secondary: #ffffff;
+  --bg-tertiary: #f3f2ee;
+  --bg-hover: #eeeee8;
+  --text-primary: #252824;
+  --text-secondary: #71766e;
+  --accent-primary: #37634c;
+  --accent-secondary: #284d3a;
+  --border-color: #e5e6df;
+}
+:root[data-theme="dark"] {
+  --bg-primary: #191c1a;
+  --bg-secondary: #222623;
+  --bg-tertiary: #1e221f;
+  --bg-hover: #2c342d;
+  --text-primary: #e8ece6;
+  --text-secondary: #a2aca1;
+  --accent-primary: #a7c5a5;
+  --accent-secondary: #bdd6bb;
+  --border-color: #343c35;
+}
+:root {
+  --bg: var(--bg-primary);
+  --surface: var(--bg-secondary);
+  --surface2: var(--bg-tertiary);
+  --text: var(--text-primary);
+  --text-muted: var(--text-secondary);
+  --accent: var(--accent-primary);
+  --accent-hover: var(--accent-secondary);
+  --accent-medium: color-mix(in srgb, var(--accent-primary) 12%, var(--bg-secondary));
+  --border: var(--border-color);
+  --hover: var(--bg-hover);
+}
+.app-shell.koto-unified-workspace {
+  --koto-activity-rail-width: 228px;
+  --koto-aux-panel-width: min(440px, calc(var(--koto-layout-width, 100vw) - var(--koto-activity-rail-width)));
+  position: fixed;
+  inset: 0;
+  width: var(--koto-layout-width, 100vw);
+  height: var(--koto-layout-height, 100vh);
+  display: grid;
+  grid-template-columns: var(--koto-activity-rail-width) minmax(0, 1fr);
+  padding: 0;
+  gap: 0;
+  background: var(--bg);
+}
+.app-shell.koto-unified-workspace .main-content.chatgpt-main {
+  grid-column: 2;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  margin: 0 !important;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--bg);
+}
+.app-shell.koto-unified-workspace #workspaceView { display: flex !important; }
+.app-shell.koto-unified-workspace #sideNav.koto-sidebar {
+  position: relative;
+  inset: auto;
+  width: var(--koto-activity-rail-width);
+  min-width: 0;
+  max-width: none;
+  height: 100%;
+  display: flex !important;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  padding: 18px 12px 12px;
+  border: 0;
+  border-right: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface2);
+  box-shadow: none;
+  backdrop-filter: none;
+}
+.koto-sidebar-brand { display: flex; align-items: center; justify-content: space-between; margin: 0 4px 24px; }
+.koto-wordmark { display: flex; align-items: center; gap: 10px; color: var(--text); }
+.koto-wordmark strong { font-size: 21px; font-weight: 650; letter-spacing: -.6px; }
+.koto-brand-mark { font-size: 23px; font-weight: 700; color: var(--accent); }
+.koto-icon-button, .koto-toolbar-button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; height: 34px; border: 0; border-radius: 7px; padding: 6px 9px; background: transparent; color: var(--text-muted); cursor: pointer; font: inherit; font-size: 12px; }
+.koto-icon-button { width: 32px; padding: 7px; }
+.koto-icon-button svg, .koto-toolbar-button svg, .koto-sidebar svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.koto-icon-button:hover, .koto-toolbar-button:hover, .koto-sidebar-settings:hover, .koto-more-tools summary:hover { background: var(--hover); color: var(--text); }
+.koto-sidebar button:focus-visible, .koto-workspace-toolbar button:focus-visible, .koto-more-tools summary:focus-visible, .koto-task-item:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.koto-new-task { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 39px; padding: 9px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; text-align: left; }
+.koto-new-task:hover { border-color: var(--accent); }
+.koto-new-task:disabled { opacity: .5; cursor: wait; }
+.koto-sidebar-history { flex: 1; min-height: 0; overflow: auto; margin-top: 24px; }
+.koto-history-placeholder { color: var(--text-muted); font-size: 12px; padding: 10px; }
+.koto-task-history { display: block; width: 100%; }
+.koto-history-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; padding: 0 8px 8px; color: var(--text-muted); font-size: 11px; }
+.koto-history-heading .koto-icon-button { height: 25px; width: 25px; }
+.koto-history-heading svg { width: 13px; height: 13px; }
+.koto-task-row { position: relative; display: flex; align-items: center; border-radius: 7px; margin-bottom: 2px; }
+.koto-task-row:hover, .koto-task-row.is-active { background: var(--hover); }
+.koto-task-item { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 10px 30px 10px 10px; background: none; border: 0; color: var(--text); font: inherit; cursor: pointer; text-align: left; border-radius: 7px; }
+.koto-task-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; line-height: 1.6; }
+.koto-task-meta { color: var(--text-muted); font-size: 10px; }
+.koto-task-delete { position: absolute; right: 4px; top: 12px; width: 23px; height: 23px; opacity: 0; background: var(--surface2); border: 0; border-radius: 5px; color: var(--text-muted); cursor: pointer; }
+.koto-task-row:hover .koto-task-delete, .koto-task-row:focus-within .koto-task-delete { opacity: 1; }
+.koto-task-delete svg { width: 13px; height: 13px; }
+.koto-history-empty, .koto-history-error { padding: 12px 9px; margin: 0; font-size: 12px; line-height: 1.8; color: var(--text-muted); }
+.koto-history-more { padding: 8px 10px; border: 0; background: none; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.koto-sidebar-footer { position: relative; margin-top: 16px; border-top: 1px solid var(--border); padding-top: 9px; }
+.koto-sidebar-settings, .koto-more-tools summary { display: flex; align-items: center; gap: 10px; min-height: 37px; width: 100%; padding: 8px 11px; border: 0; border-radius: 7px; background: none; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; text-align: left; list-style: none; }
+.koto-more-tools summary::-webkit-details-marker { display: none; }
+.koto-more-menu { position: absolute; bottom: 112px; left: 0; width: 202px; padding: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 8px 28px #00000012; z-index: 95; }
+.koto-more-menu button { display: block; width: 100%; padding: 9px 11px; border: 0; border-radius: 5px; background: none; color: var(--text); text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.koto-more-menu button:hover { background: var(--hover); }
+.koto-sidebar .koto-sidebar-status { display: flex; align-items: center; justify-content: flex-start; gap: 7px; min-height: 28px; width: 100%; margin: 0; padding: 5px 13px; border: 0; background: transparent; color: var(--text-muted); font-size: 10px; cursor: pointer; }
+.koto-sidebar-status .status-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.koto-sidebar .latency-detail.open { position: absolute; left: calc(100% + 10px); bottom: 0; display: block !important; width: 280px; background: var(--surface); border: 1px solid var(--border); border-radius: 9px; box-shadow: 0 8px 28px #00000015; z-index: 100; }
+.koto-workspace-toolbar { height: 56px; flex: 0 0 56px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 24px; border-bottom: 1px solid var(--border); }
+.koto-toolbar-start, .koto-toolbar-actions { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.koto-toolbar-start { flex: 1; }
+.koto-toolbar-actions { flex: 0 0 auto; }
+.koto-workspace-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); font-size: 12px; white-space: nowrap; }
+.koto-workspace-label strong { display: inline-block; max-width: min(42vw, 540px); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; vertical-align: middle; font-size: 12px; font-weight: 500; }
+.koto-workspace-label > span { color: var(--text-muted); margin-left: 10px; }
+#koto-document-toggle { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--accent-medium); color: var(--accent); }
+#koto-document-toggle[hidden] { display: none; }
+#wa-workspace { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0; }
+#workspaceView.wa-embedded #wa-ai { grid-column: 1; grid-row: 1; display: flex; position: relative; inset: auto; width: 100% !important; min-width: 0; max-width: none; height: 100%; padding: 0; border: 0; border-radius: 0; background: var(--bg); box-shadow: none; }
+#workspaceView.wa-embedded #wa-canvas { display: none; width: auto !important; min-width: 0; min-height: 0; border: 0; border-radius: 0; }
+#workspaceView[data-layout="document"] #wa-canvas { grid-column: 1; grid-row: 1; display: flex; }
+#workspaceView[data-layout="document"] #wa-ai { display: none; }
+#workspaceView[data-layout="document"][data-ai-open] #wa-workspace { grid-template-columns: minmax(0, 1fr) 380px; }
+#workspaceView[data-layout="document"][data-ai-open] #wa-ai { display: flex; grid-column: 2; grid-row: 1; border-left: 1px solid var(--border); background: var(--surface); }
+.koto-document-ai-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 30px; padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px; color: var(--accent); background: var(--surface); font: inherit; font-size: 12px; cursor: pointer; white-space: nowrap; }
+.koto-document-ai-button svg { width: 15px; height: 15px; fill: none; stroke: currentColor; stroke-width: 1.7; }
+.koto-document-ai-button:hover, .koto-document-ai-button[aria-expanded="true"] { border-color: var(--accent); background: var(--accent-medium); }
+.koto-document-ai-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Selection popups live in a portal; keep the AI composer clear while typing. */
+body:has(#wa-ai:focus-within) #wa-selection-toolbar { display: none !important; }
+.koto-document-ai-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; min-height: 64px; padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--surface); }
+.koto-document-ai-header > div { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
+.koto-document-ai-header strong { font-size: 13px; font-weight: 600; color: var(--text); }
+#koto-ai-document-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); font-size: 11px; }
+.koto-document-ai-header .koto-icon-button { font-size: 21px; }
+#workspaceView[data-layout="document"] #wa-ai-chat-view { background: var(--surface); }
+#workspaceView[data-layout="conversation"] .koto-document-ai-header { display: none; }
+#workspaceView[data-layout="document"] #wa-ai-messages { padding: 18px 16px; }
+#workspaceView[data-layout="document"] #wa-ai-chat-view.koto-conversation-empty #wa-ai-messages { flex: 1 1 auto; margin-top: 0; padding: 32px 20px; overflow: auto; }
+#workspaceView[data-layout="document"] #wa-ai-welcome { padding: 0; }
+#workspaceView[data-layout="document"] .wa-welcome-hero { align-items: flex-start; text-align: left; }
+#workspaceView[data-layout="document"] .koto-welcome-mark { font-size: 24px; margin-bottom: 16px; }
+#workspaceView[data-layout="document"] .wa-welcome-title { font-size: 18px; font-weight: 600; letter-spacing: 0; }
+#workspaceView[data-layout="document"] .wa-welcome-sub { font-size: 12px; line-height: 1.9; }
+.koto-document-quick-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 22px; }
+.koto-document-quick-actions button { padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--surface); color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.koto-document-quick-actions button:hover { color: var(--accent); border-color: var(--accent); }
+#workspaceView:not([data-has-document]) .koto-document-quick-actions { display: none; }
+#workspaceView[data-layout="document"] #wa-chat-composer-host { width: calc(100% - 24px); margin: 0 auto 12px; }
+#workspaceView[data-layout="document"] #wa-user-input { min-height: 76px; max-height: 160px; font-size: 13px; padding: 10px; }
+#workspaceView[data-layout="document"] .wa-input-box { border-radius: 10px; box-shadow: none; }
+#workspaceView[data-layout="document"] .wa-msg { max-width: 100%; font-size: 12px; }
+#workspaceView[data-layout="document"] .wa-proposal-card { margin-inline: 0; border: 1px solid var(--border); border-radius: 8px; box-shadow: none; }
+#workspaceView[data-layout="document"] .wa-proposal-diff { max-height: 260px; overflow: auto; line-height: 1.8; }
+#workspaceView[data-layout="document"] .wa-proposal-btn.accept { color: var(--bg-primary); background: var(--accent); border-color: var(--accent); }
+#workspaceView[data-layout="document"] .wa-proposal-btn.reject { color: var(--text-muted); background: var(--surface); border-color: var(--border); }
+#workspaceView[data-layout="document"] .wa-task-stage-track { display: none; }
+#workspaceView[data-layout="document"] .wa-task-stage-overview { padding: 0; }
+#workspaceView[data-layout="document"] .wa-task-run .wa-task-stage-current { margin-top: 6px; }
+#workspaceView[data-layout="document"] #wa-task-live-progress { flex-shrink: 0; margin: 0; border: 0; border-bottom: 1px solid var(--border); border-radius: 0; padding: 10px 16px; box-shadow: none; }
+#workspaceView.wa-embedded #wa-left { display: none !important; position: absolute; inset: 56px 0 0 auto; width: min(340px, 100%) !important; min-width: 0; max-width: 100%; z-index: 90; border: 0; border-left: 1px solid var(--border); border-radius: 0; box-shadow: -12px 0 35px #00000012; background: var(--surface); }
+body.wa-mobile-files-open #workspaceView.wa-embedded #wa-left { display: flex !important; transform: none; }
+.koto-files-scrim, .koto-nav-scrim { display: none; position: absolute; inset: 56px 0 0; z-index: 85; border: 0; background: #1c231c28; cursor: default; }
+body.wa-mobile-files-open .koto-files-scrim { display: block; }
+#wa-left-header { gap: 6px; padding: 12px; }
+#wa-left-header .wa-panel-title { font-size: 13px; }
+#wa-left-header .wa-header-actions { gap: 4px; }
+#wa-ai-chat-view { min-height: 0; background: var(--bg); }
+#wa-ai-chat-title { font-size: 12px; font-weight: 500; }
+#wa-ai-chat-subtitle { font-size: 10px; }
+#wa-ai-messages { width: 100%; flex: 1 1 auto; min-height: 0; padding: 24px max(24px, calc((100% - 780px) / 2)); }
+#wa-ai-chat-view.koto-conversation-empty #wa-ai-messages { flex: 0 0 auto; padding: 0; margin-top: clamp(50px, 20vh, 200px); overflow: visible; }
+#wa-ai-welcome { max-width: none; width: 100%; margin: 0; padding: 0 20px 30px; border: 0; background: transparent; box-shadow: none; }
+#wa-ai-welcome[hidden] { display: none; }
+.wa-welcome-hero { display: flex; flex-direction: column; align-items: center; gap: 0; padding: 0; border: 0; background: none; box-shadow: none; text-align: center; }
+.koto-welcome-mark { display: inline-block; color: var(--accent); font-size: 29px; font-weight: 650; margin-bottom: 18px; }
+.wa-welcome-title { margin: 0 0 11px; color: var(--text); font-size: clamp(25px, 2.6vw, 34px); font-weight: 550; letter-spacing: -.7px; line-height: 1.5; }
+.wa-welcome-sub { margin: 0; color: var(--text-muted); font-size: 13px; line-height: 1.8; }
+#wa-chat-composer-host { flex: 0 0 auto; width: calc(100% - 48px); max-width: 760px; margin: 0 auto 22px; }
+#wa-ai-input-area { padding: 0; border: 0; background: transparent; }
+.wa-input-box { padding: 6px; border: 1px solid var(--ai-border); border-radius: 16px; background: var(--surface); box-shadow: 0 3px 16px #202b2010; }
+.wa-input-box:focus-within { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); box-shadow: 0 3px 18px #202b2012; }
+#wa-user-input { min-height: 88px; max-height: 240px; padding: 15px 14px 8px; background: transparent; color: var(--text); font-size: 14px; line-height: 1.7; }
+#wa-user-input::placeholder { color: var(--text-muted); }
+#wa-user-input:focus-visible { outline: none; box-shadow: none; }
+.wa-input-box-footer { padding: 4px 8px 6px; gap: 8px; }
+.wa-footer-actions { gap: 9px; }
+.wa-input-hint { font-size: 10px; }
+#workspaceView[data-layout="document"] .wa-input-hint { display: none; }
+#wa-send-btn { background: var(--accent); border: 0; border-radius: 9px; }
+#wa-send-btn:disabled { opacity: .3; }
+.wa-msg.user { background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 14px; }
+.wa-msg.ai { background: transparent; border: 0; box-shadow: none; }
+.koto-start-suggestions { display: none; justify-content: center; flex-wrap: wrap; gap: 8px; padding: 0 20px 26px; }
+.koto-conversation-empty .koto-start-suggestions { display: flex; }
+.koto-start-suggestions button { border: 1px solid var(--border); border-radius: 20px; padding: 7px 13px; background: transparent; color: var(--text-muted); font: inherit; font-size: 11px; cursor: pointer; }
+.koto-start-suggestions button:hover { background: var(--surface); border-color: var(--accent); color: var(--accent); }
+.app-shell.koto-unified-workspace .settings-panel, .app-shell.koto-unified-workspace .capability-panel { position: fixed; left: var(--koto-activity-rail-width); right: auto; top: 0; bottom: 0; display: flex; flex-direction: column; width: var(--koto-aux-panel-width); max-width: calc(var(--koto-layout-width, 100vw) - var(--koto-activity-rail-width)); height: var(--koto-layout-height, 100vh); background: var(--surface); border: 0; border-right: 1px solid var(--border); transform: none !important; opacity: 0; visibility: hidden; pointer-events: none; z-index: var(--z-panel); box-shadow: 16px 0 34px #00000015; }
+.app-shell.koto-unified-workspace .settings-panel.active, .app-shell.koto-unified-workspace .capability-panel.active { opacity: 1; visibility: visible; pointer-events: auto; }
+.app-shell.koto-nav-collapsed { --koto-activity-rail-width: 64px; }
+.koto-nav-collapsed .koto-wordmark strong, .koto-nav-collapsed .koto-sidebar-brand > button, .koto-nav-collapsed .koto-new-task span, .koto-nav-collapsed .koto-sidebar-history, .koto-nav-collapsed .koto-sidebar-settings span, .koto-nav-collapsed .koto-more-tools summary span, .koto-nav-collapsed .koto-sidebar-status .status-text { display: none; }
+.koto-nav-collapsed .koto-sidebar-brand { justify-content: center; }
+.koto-nav-collapsed .koto-new-task { padding: 9px; justify-content: center; }
+.koto-nav-collapsed .koto-sidebar-footer { margin-top: auto; }
+.koto-nav-collapsed .koto-more-menu { left: calc(100% + 10px); bottom: 20px; }
+body.koto-layout-compact #workspaceView[data-layout="document"][data-ai-open] #wa-workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(180px, 1fr) minmax(260px, 45%); }
+body.koto-layout-compact #workspaceView[data-layout="document"][data-ai-open] #wa-ai { display: flex; grid-column: 1; grid-row: 2; height: 100%; min-height: 0; border-left: 0; border-top: 1px solid var(--border); }
+body.koto-layout-compact .koto-document-ai-header { min-height: 46px; padding-block: 6px; }
+body.koto-layout-compact #workspaceView[data-layout="document"] #wa-ai-chat-view.koto-conversation-empty #wa-ai-messages { padding: 14px 16px; }
+body.koto-layout-compact #workspaceView[data-layout="document"] .koto-welcome-mark { display: none; }
+body.koto-layout-compact #workspaceView[data-layout="document"] .wa-welcome-title { font-size: 14px; margin-bottom: 5px; }
+body.koto-layout-compact .koto-document-quick-actions { margin-top: 10px; }
+body.koto-layout-compact #workspaceView[data-layout="document"] .koto-zoom-wrapper { transform-origin: top left !important; }
+body.koto-layout-max-860 .wa-input-box-footer { flex-wrap: nowrap; }
+body.koto-layout-max-860 .wa-footer-meta { flex: 1 1 auto; }
+body.koto-layout-max-860 .wa-footer-actions { width: auto; }
+body.koto-layout-max-860 .wa-input-hint { display: none; }
+body.koto-layout-phone .app-shell.koto-unified-workspace { --koto-activity-rail-width: 0px; }
+body.koto-layout-phone .app-shell.koto-unified-workspace #sideNav.koto-sidebar { position: absolute; left: 0; top: 0; width: 252px; z-index: 96; transform: translateX(-100%); }
+body.koto-layout-phone.koto-nav-open .app-shell.koto-unified-workspace #sideNav.koto-sidebar { transform: none; }
+body.koto-layout-phone.koto-nav-open .koto-nav-scrim { display: block; position: fixed; inset: 0; z-index: 94; }
+body.koto-layout-phone .koto-workspace-toolbar { padding-inline: 12px; }
+body.koto-layout-phone #koto-document-toggle { max-width: 128px; }
+body.koto-layout-phone .koto-workspace-label > span { display: none; }
+body.koto-layout-phone #wa-chat-composer-host { width: calc(100% - 24px); }
+body.koto-layout-phone #wa-ai-messages { padding-inline: 16px; }
+body.koto-layout-phone .app-shell .settings-panel, body.koto-layout-phone .app-shell .capability-panel { width: 100%; max-width: 100%; }
+@media (prefers-reduced-motion: reduce) { .koto-sidebar *, .koto-workspace-toolbar * { transition: none !important; } }
+/* Live generation stays cheap and preserves partial code/Markdown as text. */
+.wa-stream-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.75; }
+.wa-stream-answer, .wa-task-live-answer { min-width: 0; overflow-wrap: anywhere; }
+.wa-task-live-answer { padding: 16px 18px; margin: 6px 0; font-size: 14px; line-height: 1.75; }
+.wa-stream-operation { margin-bottom: 9px; color: var(--text-muted, #6b7280); font-size: 12px; }
+.wa-document-receipt { margin-top: 12px; border: 1px solid var(--border-color, #e5e7eb); border-radius: 10px; padding: 10px 12px; font-size: 12px; }
+.wa-document-receipt summary { cursor: pointer; font-weight: 600; }
+.wa-document-receipt pre { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0 10px; padding: 8px; background: var(--bg-secondary, #f5f6f8); font-family: inherit; }
+.wa-document-receipt strong { display: block; margin-top: 10px; }
+.wa-document-receipt-path { margin: 5px 0; color: var(--text-muted, #6b7280); overflow-wrap: anywhere; }
+.koto-task-suggestions { display: flex; justify-content: center; gap: 8px; margin: 18px 0 10px; flex-wrap: wrap; }
+.koto-task-suggestions button { border: 1px solid var(--border-color, #e5e7eb); border-radius: 16px; background: var(--bg-secondary, #fff); padding: 7px 14px; color: inherit; cursor: pointer; }
+.koto-context-scope { display: block; width: 100%; border: 0; background: transparent; padding: 7px 3px; color: var(--text-muted); font: inherit; font-size: 11px; text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.koto-context-scope:hover { color: var(--accent); }
+.koto-context-scope:focus-visible, .koto-material-tabs button:focus-visible, .koto-material-name:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.koto-material-tabs { display: flex; gap: 4px; padding: 0 12px 10px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.koto-material-tabs button { flex: 1; padding: 8px 6px; border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.koto-material-tabs [aria-selected="true"] { background: var(--accent-medium); color: var(--accent); font-weight: 600; }
+#koto-task-materials { overflow-y: auto; padding: 0 14px 20px; }
+#koto-all-files { display: flex; flex-direction: column; overflow: auto; min-height: 0; }
+#wa-left [data-materials-panel][hidden] { display: none; }
+.koto-materials-hint, .koto-materials-empty { color: var(--text-muted); font-size: 12px; line-height: 1.75; margin: 16px 0; }
+.koto-material-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 8px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+.koto-material-name { grid-column: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border: 0; background: transparent; color: var(--text); padding: 0; text-align: left; font: inherit; font-size: 12px; cursor: pointer; }
+.koto-material-name:disabled { color: var(--text-muted); cursor: default; }
+.koto-material-row > span { grid-column: 1; color: var(--text-muted); font-size: 10px; margin-top: 5px; overflow-wrap: anywhere; }
+.koto-material-row > .koto-icon-button { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+#koto-add-material { margin-top: 16px; }
+.wa-task-artifact-summary-card li { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.koto-artifact-label { flex: 1 1 130px; min-width: 0; }
+.koto-artifact-label .wa-task-artifact-name { display: block; overflow-wrap: anywhere; }
+.koto-artifact-actions, .wa-task-reconnect-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.koto-artifact-actions button, .koto-artifact-actions a, .wa-task-reconnect-actions button { display: inline-flex; align-items: center; min-height: 30px; padding: 5px 9px; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; color: var(--accent); font: inherit; font-size: 11px; text-decoration: none; cursor: pointer; }
+[data-role="artifact-action-error"] { flex-basis: 100%; color: var(--error-color, #bb4545); font-size: 11px; }
+.wa-task-reconnect-actions { margin-top: 12px; align-items: center; color: var(--text-muted); font-size: 11px; }
+.wa-stream-operations { margin-top: 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--text-muted); font-size: 11px; line-height: 1.8; }
+.wa-stream-operations summary { cursor: pointer; font-weight: 500; }
+.wa-stream-operations > div { padding-top: 5px; overflow-wrap: anywhere; }
+.wa-stream-operations [data-status="failed"] { color: var(--error-color, #bb4545); }
+.wa-stream-follow-controls { position: relative; flex: 0 0 0; height: 0; min-height: 0; z-index: 2; pointer-events: none; }
+.wa-stream-new-content { position: absolute; bottom: 8px; right: 12px; display: block; max-width: calc(100% - 24px); padding: 7px 12px; color: var(--accent); background: var(--surface); border: 1px solid var(--border); border-radius: 18px; box-shadow: 0 3px 12px #00000014; font: inherit; font-size: 12px; cursor: pointer; pointer-events: auto; }
+.wa-stream-new-content[hidden] { display: none; }
+.koto-feature-load-status { padding: 20px; color: var(--text-muted); font-size: 12px; line-height: 1.8; }
+.koto-feature-load-status button { margin-left: 8px; font: inherit; cursor: pointer; }
+body.koto-layout-phone .koto-toolbar-actions { gap: 4px; }
+body.koto-layout-phone #koto-files-toggle { font-size: 11px; padding-inline: 7px; }
+.koto-task-suggestions button:hover { border-color: var(--accent-color, #5b6de3); }

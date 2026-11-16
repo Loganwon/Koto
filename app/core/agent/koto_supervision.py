@@ -229,15 +229,13 @@ def route_map(limit: int = 300, **_: Any) -> Dict[str, Any]:
     }
 
 
-def agent_tool_inventory(
-    full: bool = False, limit: int = 300, **_: Any
-) -> Dict[str, Any]:
-    """Build a Koto agent tool registry and return available tool definitions."""
+def agent_tool_inventory(limit: int = 300, **_: Any) -> Dict[str, Any]:
+    """Return the fixed production Agent tool inventory."""
 
-    from app.core.agent.factory import _build_registry
+    from app.core.agent.tool_profiles import build_tool_registry
 
     limit = _coerce_limit(limit, 300, 1, 1000)
-    registry = _build_registry(api_key=None, full=bool(full))
+    registry, _report = build_tool_registry(profile_name="core", api_key=None)
     tools = registry.get_definitions()
     compact = [
         {

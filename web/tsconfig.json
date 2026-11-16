@@ -29,9 +29,6 @@
                                           "@chat/*":  [
                                                           "chat/*"
                                                       ],
-                                          "@skills/*":  [
-                                                            "skills/*"
-                                                        ],
                                           "@review/*":  [
                                                             "review/*"
                                                         ],

@@ -7,7 +7,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from web.file_organizer import FileOrganizer
+from app.core.services.file_organizer import FileOrganizer
 
 
 def test_dedup_and_similarity():

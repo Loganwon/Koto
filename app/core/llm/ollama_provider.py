@@ -514,8 +514,7 @@ class OllamaModelsProxy:
 
 class OllamaClientProxy:
     """
-    顶层代理对象，提供兼容旧调用方的 Client 形状。
-    web/app.py 访问: client.models.generate_content(...)
+    Ollama provider-internal client facade used by the provider implementation.
     """
 
     def __init__(self, model_tag: str, base_url: str = _OLLAMA_BASE_URL):
@@ -626,6 +625,7 @@ def get_local_model_info() -> Dict[str, Any]:
         ollama_reachable = _is_ollama_running()
         running = ollama_reachable if model_mode == "local" else False
         capabilities = None
+        compatibility = None
         if local_model and ollama_reachable:
             try:
                 from app.core.llm.local_model_capabilities import (
@@ -639,7 +639,20 @@ def get_local_model_info() -> Dict[str, Any]:
             except Exception:
                 pass
 
-        return {
+            try:
+                from app.core.llm.ollama_runtime_compat import (
+                    inspect_ollama_model_compatibility,
+                )
+
+                compatibility = inspect_ollama_model_compatibility(local_model)
+                if compatibility.get("compatible") is False or compatibility.get(
+                    "reason"
+                ):
+                    running = False
+            except Exception:
+                pass
+
+        info = {
             "mode": model_mode,
             "model": local_model,
             "running": running,
@@ -647,5 +660,12 @@ def get_local_model_info() -> Dict[str, Any]:
             "ollama_installed": shutil.which("ollama") is not None,
             "capabilities": capabilities,
         }
+        if compatibility:
+            info["runtime_compatibility"] = compatibility
+            if compatibility.get("compatible") is False:
+                info["runtime_error"] = "runtime_outdated"
+            elif compatibility.get("reason"):
+                info["runtime_error"] = str(compatibility["reason"])
+        return info
     except Exception:
         return {"mode": "cloud", "model": None, "running": False}

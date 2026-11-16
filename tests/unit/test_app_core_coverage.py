@@ -5,8 +5,6 @@ Comprehensive unit tests for low-coverage app/core modules.
 Modules tested:
   1. FileRegistry    — file metadata registry (SQLite-backed)
   2. FileWatcher     — directory polling monitor
-  3. TrainingDB      — local model training database
-  4. ShadowTracer    — shadow trace recording for LoRA fine-tuning
   5. ConfigurationManager — system threshold configuration
   6. JobRunner       — background job executor
   7. OpsEventBus     — operational event bus
@@ -401,350 +399,6 @@ class TestFileWatcher:
 
 
 # ============================================================================
-# 3. TestTrainingDB
-# ============================================================================
-
-
-@pytest.mark.unit
-class TestTrainingDB:
-    """Tests for app.core.learning.training_db.TrainingDB."""
-
-    @pytest.fixture
-    def db(self, tmp_path):
-        """Create a TrainingDB with a temp database."""
-        db_path = tmp_path / "test_training.db"
-        from app.core.learning.training_db import TrainingDB
-
-        tdb = TrainingDB(db_path=db_path)
-        yield tdb
-        # Force WAL checkpoint to release file locks on Windows
-        import sqlite3
-
-        try:
-            c = sqlite3.connect(str(db_path))
-            c.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            c.close()
-        except Exception:
-            pass
-
-    @pytest.fixture
-    def sample(self):
-        from app.core.learning.training_db import DBSample
-
-        return DBSample(
-            user_input="帮我写一份周报",
-            task_type="CHAT",
-            confidence=0.92,
-            source="synthetic",
-            quality=0.90,
-        )
-
-    def test_init_creates_tables(self, db):
-        """__init__ creates the samples and build_history tables."""
-        with db._conn() as conn:
-            tables = [
-                r[0]
-                for r in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            ]
-        assert "samples" in tables
-        assert "build_history" in tables
-        assert "pending_corrections" in tables
-
-    def test_upsert_inserts_new_sample(self, db, sample):
-        """upsert() inserts a new sample and returns (True, 'inserted')."""
-        inserted, action = db.upsert(sample)
-        assert inserted is True
-        assert action == "inserted"
-
-    def test_upsert_skips_duplicate_lower_quality(self, db, sample):
-        """upsert() skips duplicates with equal or lower quality."""
-        db.upsert(sample)
-        from app.core.learning.training_db import DBSample
-
-        dup = DBSample(
-            user_input="帮我写一份周报",
-            task_type="CODER",
-            confidence=0.80,
-            source="synthetic",
-            quality=0.50,  # lower quality
-        )
-        inserted, action = db.upsert(dup)
-        assert inserted is False
-        assert action == "skipped_lower_quality"
-
-    def test_upsert_updates_higher_quality(self, db, sample):
-        """upsert() updates when the new sample has higher quality."""
-        db.upsert(sample)
-        from app.core.learning.training_db import DBSample
-
-        better = DBSample(
-            user_input="帮我写一份周报",
-            task_type="CODER",
-            confidence=0.95,
-            source="manual",
-            quality=0.99,  # higher quality
-        )
-        inserted, action = db.upsert(better)
-        assert inserted is False
-        assert action == "updated"
-
-    def test_upsert_batch(self, db):
-        """upsert_batch() inserts multiple samples and returns stats."""
-        from app.core.learning.training_db import DBSample
-
-        samples = [
-            DBSample(user_input=f"input {i}", task_type="CHAT", quality=0.90)
-            for i in range(5)
-        ]
-        result = db.upsert_batch(samples)
-        assert result["inserted"] == 5
-        assert result["skipped"] == 0
-
-    def test_correct_label_existing(self, db, sample):
-        """correct_label() updates an existing sample's corrected_task."""
-        db.upsert(sample)
-        ok = db.correct_label("帮我写一份周报", "CODER", corrected_by="user")
-        assert ok is True
-        # Verify correction sticks
-        actives = db.get_all_active()
-        match = [s for s in actives if s.user_input == "帮我写一份周报"]
-        assert len(match) == 1
-        assert match[0].corrected_task == "CODER"
-
-    def test_correct_label_new_sample(self, db):
-        """correct_label() creates a new sample when input doesn't exist yet."""
-        ok = db.correct_label("brand new input", "RESEARCH", corrected_by="admin")
-        assert ok is True
-        actives = db.get_all_active(min_quality=0.0)
-        match = [s for s in actives if s.user_input == "brand new input"]
-        assert len(match) == 1
-
-    def test_correct_label_invalid_task_raises(self, db):
-        """correct_label() raises ValueError for invalid task type."""
-        with pytest.raises(ValueError, match="无效任务类型"):
-            db.correct_label("some input", "INVALID_TASK")
-
-    def test_log_prediction(self, db):
-        """log_prediction() records a prediction and returns an ID."""
-        pid = db.log_prediction("test input", "CHAT", session_id="s1")
-        assert isinstance(pid, int)
-        assert pid > 0
-
-    def test_resolve_correction_with_correct_task(self, db):
-        """resolve_correction() writes the correction into samples."""
-        pid = db.log_prediction("resolve me", "CHAT")
-        db.resolve_correction(pid, "CODER")
-        actives = db.get_all_active(min_quality=0.0)
-        match = [s for s in actives if s.user_input == "resolve me"]
-        assert len(match) == 1
-
-    def test_resolve_correction_none_task(self, db):
-        """resolve_correction with None means prediction was correct (no sample added)."""
-        pid = db.log_prediction("correct prediction", "CHAT")
-        db.resolve_correction(pid, None)
-        actives = db.get_all_active(min_quality=0.0)
-        match = [s for s in actives if s.user_input == "correct prediction"]
-        assert len(match) == 0
-
-    def test_get_all_active(self, db):
-        """get_all_active() returns active samples above quality threshold."""
-        from app.core.learning.training_db import DBSample
-
-        db.upsert(DBSample(user_input="high q", task_type="CHAT", quality=0.95))
-        db.upsert(DBSample(user_input="low q", task_type="CHAT", quality=0.30))
-        actives = db.get_all_active(min_quality=0.7)
-        inputs = [s.user_input for s in actives]
-        assert "high q" in inputs
-        assert "low q" not in inputs
-
-    def test_stats(self, db, sample):
-        """stats() returns comprehensive statistics."""
-        db.upsert(sample)
-        s = db.stats()
-        assert s["total"] >= 1
-        assert "by_task" in s
-        assert "by_source" in s
-        assert "db_path" in s
-
-    def test_get_unexported_count(self, db, sample):
-        """get_unexported_count() counts samples not yet exported."""
-        db.upsert(sample)
-        assert db.get_unexported_count() >= 1
-
-    def test_export_jsonl(self, db, sample, tmp_path):
-        """export_jsonl() writes a JSONL file and marks samples exported."""
-        db.upsert(sample)
-        out_dir = tmp_path / "export"
-        path = db.export_jsonl(output_dir=out_dir)
-        assert path.exists()
-        content = path.read_text(encoding="utf-8")
-        assert "CHAT" in content
-        # After export, unexported count should be 0
-        assert db.get_unexported_count() == 0
-
-    def test_export_jsonl_empty_db_raises(self, db, tmp_path):
-        """export_jsonl() raises RuntimeError on an empty database."""
-        out_dir = tmp_path / "empty_export"
-        with pytest.raises(RuntimeError, match="没有可导出的样本"):
-            db.export_jsonl(output_dir=out_dir)
-
-    def test_dbsample_effective_task(self):
-        """DBSample.effective_task prefers corrected_task over task_type."""
-        from app.core.learning.training_db import DBSample
-
-        s = DBSample(user_input="x", task_type="CHAT", corrected_task="CODER")
-        assert s.effective_task == "CODER"
-        assert s.effective_confidence == 0.99
-
-    def test_dbsample_effective_task_no_correction(self):
-        """DBSample.effective_task uses task_type when no correction."""
-        from app.core.learning.training_db import DBSample
-
-        s = DBSample(user_input="x", task_type="CHAT")
-        assert s.effective_task == "CHAT"
-        assert s.effective_confidence == 0.90
-
-
-# ============================================================================
-# 4. TestShadowTracer
-# ============================================================================
-
-
-@pytest.mark.unit
-class TestShadowTracer:
-    """Tests for app.core.learning.shadow_tracer.ShadowTracer."""
-
-    @pytest.fixture(autouse=True)
-    def setup_tracer(self, tmp_path, monkeypatch):
-        """Redirect ShadowTracer to a temp directory and reset state."""
-        from app.core.learning.shadow_tracer import ShadowTracer
-
-        self.tracer = ShadowTracer
-        # Redirect _traces_dir to tmp_path
-        monkeypatch.setattr(
-            ShadowTracer, "_traces_dir", classmethod(lambda cls: tmp_path)
-        )
-        # Reset class state
-        self.tracer.recording_enabled = True
-        self.tracer._listeners = []
-        self.tmp_path = tmp_path
-
-    def test_record_approved_returns_trace_id(self):
-        """record_approved() returns a non-None trace_id when enabled."""
-        trace_id = self.tracer.record_approved(
-            session_id="s1",
-            user_input="hello",
-            ai_response="hi there",
-            skill_id="test_skill",
-        )
-        assert trace_id is not None
-        assert len(trace_id) == 36  # UUID format
-
-    def test_record_approved_disabled_returns_none(self):
-        """record_approved() returns None when recording is disabled."""
-        self.tracer.recording_enabled = False
-        result = self.tracer.record_approved("s1", "hello", "response")
-        assert result is None
-
-    def test_record_adopted(self):
-        """record_adopted() records with 'adopted' feedback type."""
-        trace_id = self.tracer.record_adopted(
-            session_id="s2",
-            user_input="copy this",
-            ai_response="content to copy",
-        )
-        assert trace_id is not None
-
-    def test_record_workflow(self):
-        """record_workflow() records multi-step workflows."""
-        steps = [
-            {"input": "step1", "output": "result1"},
-            {"input": "step2", "output": "result2"},
-        ]
-        trace_id = self.tracer.record_workflow(
-            session_id="s3",
-            steps=steps,
-            skill_id="code_review",
-        )
-        assert trace_id is not None
-
-    def test_get_counts_empty(self):
-        """get_counts() returns empty dict when no manifest exists."""
-        counts = self.tracer.get_counts()
-        assert counts == {}
-
-    def test_get_counts_with_manifest(self):
-        """get_counts() reads from the manifest file."""
-        manifest = self.tmp_path / "_manifest.json"
-        manifest.write_text(json.dumps({"test_skill": 10}), encoding="utf-8")
-        counts = self.tracer.get_counts()
-        assert counts["test_skill"] == 10
-
-    def test_get_traces_empty(self):
-        """get_traces() returns empty list for nonexistent skill."""
-        assert self.tracer.get_traces(skill_id="nonexistent") == []
-
-    def test_get_traces_reads_jsonl(self):
-        """get_traces() reads JSONL records for a skill."""
-        trace_file = self.tmp_path / "my_skill.jsonl"
-        records = [
-            json.dumps({"trace_id": str(uuid.uuid4()), "feedback": "thumbs_up"}),
-            json.dumps({"trace_id": str(uuid.uuid4()), "feedback": "adopted"}),
-        ]
-        trace_file.write_text("\n".join(records) + "\n", encoding="utf-8")
-        result = self.tracer.get_traces(skill_id="my_skill", limit=10)
-        assert len(result) == 2
-        # Most recent first
-        assert result[0]["feedback"] == "adopted"
-
-    def test_add_listener(self):
-        """add_listener() registers a callback."""
-        cb = Mock()
-        self.tracer.add_listener(cb)
-        assert cb in self.tracer._listeners
-
-    def test_clear_traces(self):
-        """clear_traces() deletes the trace file."""
-        trace_file = self.tmp_path / "to_clear.jsonl"
-        trace_file.write_text('{"data":"test"}\n', encoding="utf-8")
-        self.tracer.clear_traces(skill_id="to_clear")
-        assert not trace_file.exists()
-
-    def test_trace_record_to_jsonl_line(self):
-        """TraceRecord.to_jsonl_line() produces valid JSON."""
-        from app.core.learning.shadow_tracer import TraceRecord
-
-        rec = TraceRecord(
-            session_id="s1",
-            user_input="test input",
-            ai_response="test response",
-            feedback="thumbs_up",
-        )
-        line = rec.to_jsonl_line()
-        parsed = json.loads(line)
-        assert parsed["session_id"] == "s1"
-        assert parsed["feedback"] == "thumbs_up"
-
-    def test_trace_file_safe_name(self):
-        """_trace_file() sanitizes special characters in skill_id."""
-        tf = self.tracer._trace_file("my/skill*name")
-        assert "*" not in tf.name
-        assert "/" not in tf.stem
-
-    def test_fire_training_ready_calls_listeners(self):
-        """_fire_training_ready() invokes all registered listeners."""
-        cb = Mock()
-        self.tracer._listeners = [cb]
-        self.tracer._fire_training_ready("skill_x", 10)
-        cb.assert_called_once()
-        args = cb.call_args[0]
-        assert args[1] == "skill_x"
-        assert args[2] == 10
-
-
-# ============================================================================
 # 5. TestConfigurationManager
 # ============================================================================
 
@@ -930,6 +584,31 @@ class TestJobRunner:
         assert task_id == "tid-123"
         mock_ledger.create.assert_called_once()
 
+    @patch("app.core.tasks.task_ledger.get_ledger")
+    def test_retry_requeues_existing_task(self, mock_get_ledger, runner):
+        from app.core.jobs.job_runner import JobSpec
+        from app.core.tasks.task_ledger import TaskStatus
+
+        task = MagicMock(
+            task_id="tid-123",
+            status=TaskStatus.FAILED,
+            metadata='{"job_type":"agent_query","max_retries":2}',
+            task_type="agent_query",
+            user_input='{"query":"retry me"}',
+            session_id="sess-1",
+            priority=2,
+        )
+        ledger = MagicMock()
+        ledger.get.return_value = task
+        mock_get_ledger.return_value = ledger
+
+        assert runner.retry("tid-123") == "tid-123"
+        queued = runner._queue.get_nowait()
+        assert queued[2] == "tid-123"
+        assert isinstance(queued[3], JobSpec)
+        assert queued[3].payload == {"query": "retry me"}
+        ledger._update_fields.assert_called_once()
+
     def test_jobspec_defaults(self):
         """JobSpec has sensible defaults."""
         from app.core.jobs.job_runner import JobSpec
@@ -1025,7 +704,7 @@ class TestJobRunner:
 
     def test_agent_query_handler_uses_job_runner_ledger_only(self):
         """agent_query should not create a second source=agent ledger task."""
-        from app.api.agent_routes import AgentStepType
+        from app.core.agent.types import AgentStepType
         from app.core.jobs.job_runner import JobContext, _handle_agent_query
 
         calls = []
@@ -1049,12 +728,79 @@ class TestJobRunner:
             ledger=MagicMock(),
             bus=MagicMock(),
         )
-        with patch("app.api.agent_routes.get_agent", return_value=FakeAgent()):
+        with patch(
+            "app.core.agent.kernel_agent_service.get_kernel_agent",
+            return_value=FakeAgent(),
+        ):
             result = _handle_agent_query(ctx)
 
         assert result == "done"
         assert calls
         assert calls[0]["record_task"] is False
+
+    def test_proactive_llm_uses_core_provider_boundary(self, monkeypatch):
+        import app.core.llm.model_selection as model_selection
+        import app.core.llm.provider_factory as provider_factory
+        from app.core.jobs.job_runner import _create_proactive_llm
+
+        captured = {}
+
+        class FakeProvider:
+            def generate_content(self, **kwargs):
+                captured.update(kwargs)
+                return {"content": "主动提醒内容"}
+
+        monkeypatch.setattr(
+            model_selection,
+            "get_configured_cloud_model",
+            lambda **kwargs: "deepseek-chat",
+        )
+        monkeypatch.setattr(
+            provider_factory,
+            "get_llm_provider",
+            lambda **kwargs: FakeProvider(),
+        )
+
+        llm_fn = _create_proactive_llm()
+
+        assert llm_fn("生成一句提醒") == "主动提醒内容"
+        assert captured["model"] == "deepseek-chat"
+        assert captured["stream"] is False
+        assert captured["max_tokens"] == 80
+
+    def test_proactive_tick_continues_without_cloud_provider(self):
+        from app.core.jobs.job_runner import JobContext, _handle_proactive_tick
+
+        captured = {}
+
+        class FakeAgent:
+            def tick(self, llm_fn=None):
+                captured["llm_fn"] = llm_fn
+
+            def pending(self):
+                return []
+
+        ctx = JobContext(
+            task_id="proactive-task",
+            session_id="system",
+            payload={},
+            ledger=MagicMock(),
+            bus=MagicMock(),
+        )
+        with (
+            patch(
+                "app.core.jobs.job_runner._create_proactive_llm",
+                side_effect=RuntimeError("cloud unavailable"),
+            ),
+            patch(
+                "app.core.agent.proactive_agent.get_proactive_agent",
+                return_value=FakeAgent(),
+            ),
+        ):
+            result = _handle_proactive_tick(ctx)
+
+        assert result == "巡检完成，待推送消息 0 条"
+        assert captured["llm_fn"] is None
 
     def test_recover_stale_tasks_cleans_startup_health_orphans(self, runner):
         """Startup recovery should cancel old health-check leftovers first."""
@@ -1459,27 +1205,6 @@ class TestOllamaLLMProvider:
         result = provider.generate_content("What is 2+2?")
         assert result["content"] == "Test response"
         mock_post.assert_called_once()
-
-    @patch("app.core.llm.ollama_llm_provider._raw_post")
-    def test_generate_content_with_skill_preamble(self, mock_post):
-        """generate_content() injects skill preamble when Skills marker present."""
-        from app.core.llm.ollama_llm_provider import (
-            _SKILL_BLOCK_MARKER,
-            OllamaLLMProvider,
-        )
-
-        mock_post.return_value = {
-            "message": {"content": "response"},
-        }
-        provider = OllamaLLMProvider(model="test")
-        sys_instr = f"Some instruction\n{_SKILL_BLOCK_MARKER}\n## Skill A"
-        provider.generate_content("hello", system_instruction=sys_instr)
-
-        call_args = mock_post.call_args
-        payload = call_args[0][1]
-        # System message should include the preamble
-        sys_msg = payload["messages"][0]["content"]
-        assert "Koto AI" in sys_msg
 
     def test_resolve_model_explicit(self):
         """_resolve_model() returns the explicit model when set."""

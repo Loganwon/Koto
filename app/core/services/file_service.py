@@ -656,7 +656,7 @@ class FileService:
 
             # --- 尝试使用 FileScanner 索引 ---
             try:
-                from web.file_scanner import FileScanner
+                from app.core.services.file_scanner import FileScanner
 
                 if FileScanner.is_indexed():
                     scanner_results = FileScanner.search(

@@ -6,14 +6,10 @@ Targets:
   1. app.core.routing.__init__          (lazy imports)
   2. app.core.goal.goal_job_handler      (goal check handling)
   3. app.core.monitoring.event_database   (SQLite event storage)
-  4. app.core.learning.lora_pipeline      (LoRA training pipeline)
   5. app.core.analytics.trend_analyzer    (trend analysis)
   6. app.core.scripts.script_generator    (retired guard)
-  7. app.core.learning.distill_manager    (distillation manager)
   8. app.core.ops.remediation_policy      (remediation rules)
-  9. app.core.services.search_service     (search service)
  10. app.core.services.rag_service        (RAG service)
- 11. app.api.distill_routes               (distill API routes)
 """
 
 import json
@@ -44,32 +40,6 @@ except (ImportError, ModuleNotFoundError):
 @pytest.mark.unit
 class TestRoutingInit:
     """Tests for app.core.routing.__init__ lazy attribute loading."""
-
-    def test_smart_dispatcher_direct_import(self):
-        from app.core.routing import SmartDispatcher
-
-        assert SmartDispatcher is not None
-
-    @patch.dict("sys.modules", {"app.core.routing.local_model_router": MagicMock()})
-    def test_local_model_router_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("LocalModelRouter")
-        assert result is not None
-
-    @patch.dict("sys.modules", {"app.core.routing.local_model_router": MagicMock()})
-    def test_router_decision_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("RouterDecision")
-        assert result is not None
-
-    @patch.dict("sys.modules", {"app.core.routing.ai_router": MagicMock()})
-    def test_ai_router_lazy_import(self):
-        import app.core.routing as routing_mod
-
-        result = routing_mod.__getattr__("AIRouter")
-        assert result is not None
 
     @patch.dict("sys.modules", {"app.core.routing.tool_router": MagicMock()})
     def test_tool_router_lazy_import(self):
@@ -177,22 +147,13 @@ class TestGoalJobHandler:
         ctx.task_id = "task-1"
         ctx.is_cancelled.return_value = False
 
-        # Patch the agent imports to raise an exception
-        with patch.dict(
-            "sys.modules",
-            {
-                "app.core.llm.gemini": MagicMock(
-                    get_gemini_client=MagicMock(side_effect=Exception("LLM error"))
-                )
-            },
+        with patch(
+            "app.core.agent.kernel_agent_service.get_kernel_agent",
+            side_effect=Exception("LLM error"),
         ):
-            with patch(
-                "app.core.agent.unified_agent.UnifiedAgent",
-                side_effect=Exception("LLM error"),
-            ):
-                result = _handle_goal_check(ctx)
-                assert result is not None
-                mock_gm.finish_run.assert_called_once()
+            result = _handle_goal_check(ctx)
+            assert result is not None
+            mock_gm.finish_run.assert_called_once()
 
     @patch("app.core.goal.goal_manager.get_goal_manager")
     def test_handle_goal_completed_status_tag(self, mock_get_gm):
@@ -221,27 +182,18 @@ class TestGoalJobHandler:
         ctx.task_id = "task-1"
         ctx.is_cancelled.return_value = False
 
-        # Mock UnifiedAgent to return STATUS:COMPLETED
+        # Mock KernelAgent to return STATUS:COMPLETED
         mock_step = MagicMock()
         mock_step.step_type = MagicMock()
-        mock_step.step_type.value = "ANSWER"
+        mock_step.step_type.value = "answer"
         mock_step.content = "Goal done\nSTATUS:COMPLETED"
 
         mock_agent = MagicMock()
         mock_agent.run.return_value = [mock_step]
 
-        mock_gemini_mod = MagicMock()
-        mock_agent_mod = MagicMock()
-        mock_agent_mod.UnifiedAgent.return_value = mock_agent
-        mock_registry_mod = MagicMock()
-
-        with patch.dict(
-            "sys.modules",
-            {
-                "app.core.llm.gemini": mock_gemini_mod,
-                "app.core.agent.unified_agent": mock_agent_mod,
-                "app.core.agent.tool_registry": mock_registry_mod,
-            },
+        with patch(
+            "app.core.agent.kernel_agent_service.get_kernel_agent",
+            return_value=mock_agent,
         ):
             result = _handle_goal_check(ctx)
             assert result is not None
@@ -360,189 +312,6 @@ class TestEventDatabase:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 4. LoRA Pipeline
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestLoRAPipeline:
-    """Tests for app.core.learning.lora_pipeline."""
-
-    def test_training_config_defaults(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig()
-        assert cfg.base_model == "Qwen/Qwen3-8B"
-        assert cfg.lora_r == 16
-        assert cfg.num_epochs == 3
-
-    def test_training_config_to_dict(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig()
-        d = cfg.to_dict()
-        assert isinstance(d, dict)
-        assert "base_model" in d
-
-    def test_for_hardware_high_vram(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig.for_hardware(vram_gb=24, ram_gb=64)
-        assert "8B" in cfg.base_model
-        assert cfg.fp16 is True
-        assert cfg.use_4bit is False
-
-    def test_for_hardware_mid_vram(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig.for_hardware(vram_gb=12, ram_gb=32)
-        assert "4B" in cfg.base_model
-
-    def test_for_hardware_low_vram(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig.for_hardware(vram_gb=6, ram_gb=16)
-        assert "1.7B" in cfg.base_model
-
-    def test_for_hardware_very_low_vram(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig.for_hardware(vram_gb=4, ram_gb=8)
-        assert "0.6B" in cfg.base_model
-        assert cfg.use_4bit is True
-
-    def test_for_hardware_cpu_only(self):
-        from app.core.learning.lora_pipeline import TrainingConfig
-
-        cfg = TrainingConfig.for_hardware(vram_gb=0, ram_gb=8)
-        assert "0.6B" in cfg.base_model
-        assert cfg.gradient_accumulation_steps == 8
-
-    def test_adapter_meta_roundtrip(self):
-        from app.core.learning.lora_pipeline import AdapterMeta
-
-        meta = AdapterMeta(
-            skill_id="test",
-            adapter_path="/tmp/adapter",
-            base_model="Qwen/Qwen3-8B",
-            trained_at="2025-01-01",
-            num_samples=100,
-            num_epochs=3,
-        )
-        d = meta.to_dict()
-        restored = AdapterMeta.from_dict(d)
-        assert restored.skill_id == "test"
-        assert restored.base_model == "Qwen/Qwen3-8B"
-
-    def test_pipeline_init(self):
-        from app.core.learning.lora_pipeline import LoRAPipeline, TrainingConfig
-
-        cfg = TrainingConfig()
-        pipeline = LoRAPipeline(config=cfg)
-        assert pipeline.config.base_model == "Qwen/Qwen3-8B"
-
-    def test_check_prerequisites_missing_packages(self):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        pipeline = LoRAPipeline()
-        ok, missing = pipeline.check_prerequisites()
-        # Some deps may be missing in test env; just check return types
-        assert isinstance(ok, bool)
-        assert isinstance(missing, list)
-
-    def test_prepare_dataset_no_trace_file(self, tmp_path):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        pipeline = LoRAPipeline()
-        with patch("app.core.learning.lora_pipeline._SHADOW_DIR", str(tmp_path)):
-            result = pipeline.prepare_dataset("nonexistent_skill")
-            assert result is None
-
-    def test_prepare_dataset_too_few_samples(self, tmp_path):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        trace_file = tmp_path / "test_skill.jsonl"
-        trace_file.write_text('{"user_input": "hi", "ai_response": "hello"}\n')
-        pipeline = LoRAPipeline()
-        with patch("app.core.learning.lora_pipeline._SHADOW_DIR", str(tmp_path)):
-            result = pipeline.prepare_dataset("test_skill", min_samples=10)
-            assert result is None
-
-    def test_prepare_dataset_qwen3_format(self, tmp_path):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        trace_file = tmp_path / "test_skill.jsonl"
-        lines = [
-            json.dumps({"user_input": f"question {i}", "ai_response": f"answer {i}"})
-            for i in range(10)
-        ]
-        trace_file.write_text("\n".join(lines))
-        pipeline = LoRAPipeline()
-        ds_dir = tmp_path / "datasets"
-        ds_dir.mkdir()
-        with patch("app.core.learning.lora_pipeline._SHADOW_DIR", str(tmp_path)):
-            with patch("app.core.learning.lora_pipeline._DATASET_DIR", str(ds_dir)):
-                result = pipeline.prepare_dataset("test_skill", min_samples=5)
-                assert result is not None
-                with open(result, encoding="utf-8") as f:
-                    data = json.load(f)
-                assert len(data) == 10
-                assert "messages" in data[0]
-
-    def test_prepare_dataset_alpaca_format(self, tmp_path):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        trace_file = tmp_path / "alpha_skill.jsonl"
-        lines = [
-            json.dumps({"user_input": f"q{i}", "ai_response": f"a{i}"})
-            for i in range(5)
-        ]
-        trace_file.write_text("\n".join(lines))
-        pipeline = LoRAPipeline()
-        ds_dir = tmp_path / "datasets"
-        ds_dir.mkdir()
-        with patch("app.core.learning.lora_pipeline._SHADOW_DIR", str(tmp_path)):
-            with patch("app.core.learning.lora_pipeline._DATASET_DIR", str(ds_dir)):
-                result = pipeline.prepare_dataset(
-                    "alpha_skill", min_samples=3, output_format="alpaca"
-                )
-                assert result is not None
-                with open(result, encoding="utf-8") as f:
-                    data = json.load(f)
-                assert "instruction" in data[0]
-
-    def test_train_already_active(self):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        pipeline = LoRAPipeline()
-        pipeline._active_trainings["busy_skill"] = True
-        result = pipeline.train("busy_skill")
-        assert result["success"] is False
-        assert "正在训练中" in result["error"]
-
-    def test_register_as_adapter(self, tmp_path):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        pipeline = LoRAPipeline()
-        with patch("app.core.learning.lora_pipeline._ADAPTER_DIR", str(tmp_path)):
-            path = pipeline.register_as_adapter(
-                "my_skill", "/tmp/adapter", num_samples=50
-            )
-            assert path.endswith(".json")
-            with open(path, encoding="utf-8") as f:
-                meta = json.load(f)
-            assert meta["skill_id"] == "my_skill"
-
-    def test_list_adapters_empty(self, tmp_path):
-        from app.core.learning.lora_pipeline import LoRAPipeline
-
-        pipeline = LoRAPipeline()
-        with patch("app.core.learning.lora_pipeline._ADAPTER_DIR", str(tmp_path)):
-            result = pipeline.list_adapters()
-            assert result == []
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # 5. TrendAnalyzer
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -631,150 +400,6 @@ class TestScriptGenerator:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 7. DistillManager
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestDistillManager:
-    """Tests for app.core.learning.distill_manager."""
-
-    def test_training_job_to_dict(self):
-        from app.core.learning.distill_manager import TrainingJob
-
-        job = TrainingJob(job_id="j1", skill_id="test_skill")
-        d = job.to_dict()
-        assert d["job_id"] == "j1"
-        assert d["skill_id"] == "test_skill"
-        assert d["status"] == "queued"
-
-    def test_training_job_add_log(self):
-        from app.core.learning.distill_manager import TrainingJob
-
-        job = TrainingJob(job_id="j1", skill_id="test_skill")
-        job.add_log("Starting training")
-        assert len(job.logs) == 1
-        assert "Starting training" in job.logs[0]
-
-    def test_training_job_log_cap(self):
-        from app.core.learning.distill_manager import TrainingJob
-
-        job = TrainingJob(job_id="j1", skill_id="test_skill")
-        for i in range(600):
-            job.add_log(f"log {i}")
-        assert len(job.logs) == 500
-
-    def test_job_status_constants(self):
-        from app.core.learning.distill_manager import JobStatus
-
-        assert JobStatus.QUEUED == "queued"
-        assert JobStatus.RUNNING == "running"
-        assert JobStatus.DONE == "done"
-        assert JobStatus.FAILED == "failed"
-        assert JobStatus.CANCELLED == "cancelled"
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_submit_returns_job_id(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        job_id = mgr.submit("email_writer")
-        assert isinstance(job_id, str)
-        assert len(job_id) == 8
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_submit_duplicate_returns_existing(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        id1 = mgr.submit("same_skill")
-        id2 = mgr.submit("same_skill")
-        assert id1 == id2
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_get_job(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        job_id = mgr.submit("test_skill")
-        job = mgr.get_job(job_id)
-        assert job is not None
-        assert job.skill_id == "test_skill"
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_list_jobs(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        mgr.submit("skill_a")
-        mgr.submit("skill_b")
-        jobs = mgr.list_jobs()
-        assert len(jobs) == 2
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_list_jobs_filter_by_skill(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        mgr.submit("skill_a")
-        mgr.submit("skill_b")
-        jobs = mgr.list_jobs(skill_id="skill_a")
-        assert len(jobs) == 1
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_cancel_queued_job(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        job_id = mgr.submit("cancel_me")
-        assert mgr.cancel(job_id) is True
-        assert mgr.get_job(job_id).status == "cancelled"
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_cancel_nonexistent_job(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        assert mgr.cancel("nonexistent") is False
-
-    @patch("app.core.learning.distill_manager.DistillManager._start_worker")
-    def test_push_event(self, mock_worker):
-        from app.core.learning.distill_manager import DistillManager
-
-        mgr = DistillManager.__new__(DistillManager)
-        mgr._jobs = {}
-        mgr._queues = {}
-        mgr._task_queue = queue.Queue()
-        job_id = mgr.submit("test_skill")
-        mgr._push_event(job_id, "progress", {"pct": 50})
-        q = mgr._queues[job_id]
-        evt = q.get_nowait()
-        assert evt["event"] == "progress"
-        assert evt["pct"] == 50
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # 8. RemediationPolicy
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -793,7 +418,7 @@ class TestRemediationPolicy:
         rules = policy.list_rules()
         names = [r["name"] for r in rules]
         assert "gc_on_memory_pressure" in names
-        assert "disable_failed_skill" in names
+        assert "notify_model_fallback" in names
 
     def test_add_rule(self, policy):
         from app.core.ops.remediation_policy import RemediationRule
@@ -893,114 +518,6 @@ class TestRemediationPolicy:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 9. SearchService
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestSearchService:
-    """Tests for app.core.services.search_service.SearchService."""
-
-    def test_init_no_api_key(self):
-        with patch.dict(os.environ, {}, clear=True):
-            with patch("app.core.services.search_service.HAS_GENAI_V2", False):
-                from app.core.services.search_service import SearchService
-
-                svc = SearchService(api_key=None)
-                assert svc.client is None
-
-    def test_search_no_provider_compat(self):
-        with patch("app.core.services.search_service.HAS_GENAI_V2", False):
-            from app.core.services.search_service import SearchService
-
-            svc = SearchService.__new__(SearchService)
-            svc.api_key = None
-            svc.client = None
-            # Manually set the module-level flag for the duration of the call
-            import app.core.services.search_service as ss_mod
-
-            original = ss_mod.HAS_GENAI_V2
-            ss_mod.HAS_GENAI_V2 = False
-            try:
-                result = svc.search("test query")
-                assert result["success"] is False
-                assert "use the web search workflow" in result.get("error", "")
-            finally:
-                ss_mod.HAS_GENAI_V2 = original
-
-    def test_search_no_client(self):
-        import app.core.services.search_service as ss_mod
-        from app.core.services.search_service import SearchService
-
-        original = ss_mod.HAS_GENAI_V2
-        ss_mod.HAS_GENAI_V2 = True
-        try:
-            svc = SearchService.__new__(SearchService)
-            svc.api_key = None
-            svc.client = None
-            result = svc.search("query")
-            assert result["success"] is False
-            assert "use the web search workflow" in result.get("error", "")
-        finally:
-            ss_mod.HAS_GENAI_V2 = original
-
-    def test_search_does_not_call_legacy_provider(self):
-        import app.core.services.search_service as ss_mod
-        from app.core.services.search_service import SearchService
-
-        original = ss_mod.HAS_GENAI_V2
-        ss_mod.HAS_GENAI_V2 = True
-        try:
-            svc = SearchService.__new__(SearchService)
-            svc.api_key = "fake-key"
-            svc.client = MagicMock()
-            result = svc.search("test query")
-            assert result["success"] is False
-            assert "use the web search workflow" in result["error"]
-            svc.client.models.generate_content.assert_not_called()
-        finally:
-            ss_mod.HAS_GENAI_V2 = original
-
-    def test_search_no_response_text(self):
-        import app.core.services.search_service as ss_mod
-        from app.core.services.search_service import SearchService
-
-        original = ss_mod.HAS_GENAI_V2
-        ss_mod.HAS_GENAI_V2 = True
-        try:
-            svc = SearchService.__new__(SearchService)
-            svc.api_key = "fake-key"
-            mock_response = MagicMock()
-            mock_response.text = ""
-            svc.client = MagicMock()
-            svc.client.models.generate_content.return_value = mock_response
-            result = svc.search("query")
-            assert result["success"] is False
-            assert "use the web search workflow" in result["error"]
-            svc.client.models.generate_content.assert_not_called()
-        finally:
-            ss_mod.HAS_GENAI_V2 = original
-
-    def test_search_ignores_legacy_provider_errors(self):
-        import app.core.services.search_service as ss_mod
-        from app.core.services.search_service import SearchService
-
-        original = ss_mod.HAS_GENAI_V2
-        ss_mod.HAS_GENAI_V2 = True
-        try:
-            svc = SearchService.__new__(SearchService)
-            svc.api_key = "fake-key"
-            svc.client = MagicMock()
-            svc.client.models.generate_content.side_effect = Exception("API error")
-            result = svc.search("query")
-            assert result["success"] is False
-            assert "use the web search workflow" in result["error"]
-            svc.client.models.generate_content.assert_not_called()
-        finally:
-            ss_mod.HAS_GENAI_V2 = original
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # 10. RAGService
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -1066,6 +583,54 @@ class TestRAGService:
         results = svc.hybrid_retrieve("query")
         assert results == []
 
+    def test_missing_embedding_backend_falls_back_to_persisted_lexical_search(
+        self, tmp_path, monkeypatch
+    ):
+        import app.core.services.rag_service as rag_module
+
+        def unavailable(*args, **kwargs):
+            raise rag_module.EmbeddingBackendUnavailable("test backend unavailable")
+
+        monkeypatch.setattr(rag_module, "_get_embeddings", unavailable)
+        index_dir = tmp_path / "lexical_rag"
+        svc = rag_module.RAGService(index_dir=str(index_dir), auto_load=False)
+
+        assert svc.index_text("Koto 支持真实前端文件测试", source="memory_1") == 1
+        assert svc.stats()["retrieval_backend"] == "lexical"
+        assert svc.retrieve("前端文件", k=3)[0]["source"] == "memory_1"
+
+        restored = rag_module.RAGService(index_dir=str(index_dir), auto_load=True)
+        assert restored.stats()["initialized"] is True
+        assert restored.retrieve("Koto 测试", k=3)[0]["source"] == "memory_1"
+
+    def test_ollama_embedding_adapter_uses_current_local_api(self, monkeypatch):
+        import app.core.services.rag_service as rag_module
+
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                return False
+
+            def read(self):
+                return b'{"embeddings":[[0.1,0.2]]}'
+
+        captured = {}
+
+        def fake_urlopen(request, timeout):
+            captured["url"] = request.full_url
+            captured["body"] = request.data
+            captured["timeout"] = timeout
+            return FakeResponse()
+
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        adapter = rag_module._OllamaLocalEmbeddings("nomic-embed-text")
+
+        assert adapter.embed_query("Koto") == [0.1, 0.2]
+        assert captured["url"].endswith("/api/embed")
+        assert b'"input": ["Koto"]' in captured["body"]
+
     def test_tokenize_function(self):
         from app.core.services.rag_service import _tokenize
 
@@ -1079,100 +644,3 @@ class TestRAGService:
         result = svc.rag_answer("what is koto?")
         assert result["context_used"] is False
         assert result["answer"] is None
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 11. Distill Routes (Flask Blueprint)
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestDistillRoutes:
-    """Tests for app.api.distill_routes Flask blueprint."""
-
-    @pytest.fixture
-    def app(self):
-        from flask import Flask
-
-        from app.api.distill_routes import distill_bp
-
-        app = Flask(__name__)
-        app.register_blueprint(distill_bp, url_prefix="/api/distill")
-        app.config["TESTING"] = True
-        return app
-
-    @pytest.fixture
-    def client(self, app):
-        return app.test_client()
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_submit_missing_skill_id(self, mock_mgr, client):
-        resp = client.post("/api/distill/submit", json={})
-        assert resp.status_code == 400
-        assert "skill_id" in resp.get_json()["error"]
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_submit_success(self, mock_mgr, client):
-        mock_mgr.return_value.submit.return_value = "abc12345"
-        resp = client.post("/api/distill/submit", json={"skill_id": "email_writer"})
-        assert resp.status_code == 202
-        data = resp.get_json()
-        assert data["job_id"] == "abc12345"
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_submit_exception(self, mock_mgr, client):
-        mock_mgr.return_value.submit.side_effect = RuntimeError("boom")
-        resp = client.post("/api/distill/submit", json={"skill_id": "test"})
-        assert resp.status_code == 500
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_list_jobs(self, mock_mgr, client):
-        mock_mgr.return_value.list_jobs.return_value = [{"job_id": "j1"}]
-        resp = client.get("/api/distill/jobs")
-        assert resp.status_code == 200
-        data = resp.get_json()
-        assert data["count"] == 1
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_get_job_found(self, mock_mgr, client):
-        mock_job = MagicMock()
-        mock_job.to_dict.return_value = {"job_id": "j1", "status": "running"}
-        mock_mgr.return_value.get_job.return_value = mock_job
-        resp = client.get("/api/distill/jobs/j1")
-        assert resp.status_code == 200
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_get_job_not_found(self, mock_mgr, client):
-        mock_mgr.return_value.get_job.return_value = None
-        resp = client.get("/api/distill/jobs/nonexistent")
-        assert resp.status_code == 404
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_cancel_job_success(self, mock_mgr, client):
-        mock_mgr.return_value.cancel.return_value = True
-        resp = client.post("/api/distill/jobs/j1/cancel")
-        assert resp.status_code == 200
-        assert resp.get_json()["success"] is True
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_cancel_job_not_found(self, mock_mgr, client):
-        mock_mgr.return_value.cancel.return_value = False
-        mock_mgr.return_value.get_job.return_value = None
-        resp = client.post("/api/distill/jobs/j1/cancel")
-        assert resp.status_code == 404
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_cancel_job_conflict(self, mock_mgr, client):
-        mock_mgr.return_value.cancel.return_value = False
-        mock_job = MagicMock()
-        mock_job.status = "running"
-        mock_mgr.return_value.get_job.return_value = mock_job
-        resp = client.post("/api/distill/jobs/j1/cancel")
-        assert resp.status_code == 409
-
-    @patch("app.api.distill_routes._get_manager")
-    def test_list_adapters(self, mock_mgr, client):
-        with patch("glob.glob", return_value=[]):
-            resp = client.get("/api/distill/adapters")
-            assert resp.status_code == 200
-            assert "adapters" in resp.get_json()

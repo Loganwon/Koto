@@ -20,7 +20,7 @@ def test_terminal_check_overrides_rejects_readonly_without_required_context():
     )
 
     assert payload["passed"] is False
-    assert payload["status"] == "needs_attention"
+    assert payload["status"] == "quality_gate_failed"
     assert payload["criteria_results"][0]["criterion"] == "explicit_file_context_read"
 
 

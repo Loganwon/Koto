@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 
 from flask import Blueprint, Response, jsonify, request, stream_with_context
 
@@ -170,7 +171,48 @@ def get_task(task_id: str):
     task = ledger.get(task_id, include_steps=True)
     if not task:
         return _err("任务不存在", 404)
-    return _ok(data=_serialize_task(task, include_steps=True))
+    data = _serialize_task(task, include_steps=True)
+    latest = ledger.latest_run_event(task_id)
+    if latest:
+        data["last_event"] = latest
+        data["run_id"] = latest.get("run_id")
+        data["last_event_seq"] = latest.get("seq")
+    checkpoint = ledger.get_kernel_checkpoint(task_id)
+    if checkpoint:
+        data["recovery"] = {
+            "run_id": checkpoint["run_id"],
+            "phase": checkpoint["phase"],
+            "resumable": checkpoint["resumable"],
+            "active": bool(
+                task.status
+                not in {TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED}
+                and checkpoint.get("owner_id")
+                and checkpoint.get("lease_until", 0) > time.time()
+            ),
+            "revision": checkpoint["revision"],
+        }
+    return _ok(data=data)
+
+
+@task_bp.get("/<task_id>/events")
+def get_task_events(task_id: str):
+    """Read durable facts with the same cursor used by the live SSE stream."""
+    ledger = get_ledger()
+    if ledger.get(task_id) is None:
+        return _err("任务不存在", 404)
+    try:
+        after_seq = max(0, int(request.args.get("after_seq", 0)))
+        limit = max(1, min(10000, int(request.args.get("limit", 1000))))
+    except (TypeError, ValueError):
+        return _err("after_seq 和 limit 必须是整数")
+    return _ok(
+        data=ledger.list_run_events(
+            task_id,
+            request.args.get("run_id") or None,
+            after_seq=after_seq,
+            limit=limit,
+        )
+    )
 
 
 @task_bp.post("/<task_id>/cancel")
@@ -181,13 +223,61 @@ def cancel_task(task_id: str):
     Agent 执行线程会在下一次步骤开始前检查取消标志并中止。
     """
     ledger = get_ledger()
+    body = request.get_json(silent=True) or {}
     task = ledger.get(task_id)
     if not task:
-        return _err("任务不存在", 404)
+        run_id = str(body.get("run_id") or "").strip()
+        if not run_id:
+            return _err("任务不存在", 404)
+        try:
+            ledger.bind_run_identity(task_id, run_id, str(body.get("session_id") or ""))
+        except ValueError as exc:
+            return _err(str(exc), 409)
+        # Preserve a stop that races with initial stream registration.  It is
+        # a request, not evidence that a potentially concurrent write stopped.
+        ledger.cancel_task(task_id)
+        if run_id:
+            ledger.cancel_task(run_id)
+        return (
+            _ok(
+                data={
+                    "task_id": task_id,
+                    "run_id": run_id,
+                    "cancel_requested": True,
+                    "status": "pending",
+                },
+                message="取消请求已登记，等待执行器确认",
+            ),
+            202,
+        )
     if task.status in (TaskStatus.COMPLETED, TaskStatus.FAILED, TaskStatus.CANCELLED):
-        return _err(f"任务已处于终态 ({task.status.value})，无法取消")
+        return _ok(
+            data={
+                "status": task.status.value,
+                "cancel_requested": task.cancel_requested,
+            },
+            message="任务已结束",
+        )
+    metadata = _safe_metadata_dict(task.metadata)
+    run_id = str(body.get("run_id") or metadata.get("run_id") or "").strip()
+    if (
+        body.get("run_id")
+        and metadata.get("run_id")
+        and str(body["run_id"]) != str(metadata["run_id"])
+    ):
+        return _err("运行标识已更新，未取消新的任务执行", 409)
     ledger.cancel_task(task_id)
-    return _ok(message="取消请求已发送，执行线程将在下一步时停止")
+    if run_id:
+        ledger.cancel_task(run_id)
+    return _ok(
+        data={
+            "task_id": task_id,
+            "run_id": run_id,
+            "cancel_requested": True,
+            "status": task.status.value,
+        },
+        message="正在停止，等待当前操作安全结束",
+    )
 
 
 @task_bp.post("/<task_id>/interrupt")
@@ -247,13 +337,62 @@ def resume_task(task_id: str):
     task = ledger.get(task_id)
     if not task:
         return _err("任务不存在", 404)
+    checkpoint = ledger.get_kernel_checkpoint(task_id)
+    if checkpoint and task.status not in {
+        TaskStatus.COMPLETED,
+        TaskStatus.FAILED,
+        TaskStatus.CANCELLED,
+    }:
+        body = request.get_json(silent=True) or {}
+        if body.get("approved") is False:
+            ledger.cancel_task(task_id)
+            ledger.cancel_task(checkpoint["run_id"])
+            return (
+                _ok(
+                    data={"cancel_requested": True},
+                    message="已记录停止请求，未恢复执行",
+                ),
+                202,
+            )
+        if not checkpoint["resumable"]:
+            return _err(
+                "上次写操作的结果尚未核实，不能自动重放；请先检查实际文件状态", 409
+            )
+        if (task.interrupt_requested or task.status == TaskStatus.WAITING) and body.get(
+            "approved"
+        ) is not True:
+            return _err("任务正在等待明确确认，尚未恢复", 409)
+        try:
+            from app.core.jobs.job_runner import get_job_runner
+
+            get_job_runner().resume_kernel(
+                task_id,
+                run_id=checkpoint["run_id"],
+                approved=body.get("approved") is True,
+            )
+        except (LookupError, ValueError) as exc:
+            return _err(str(exc), 409)
+        return (
+            _ok(
+                data={
+                    "task_id": task_id,
+                    "run_id": checkpoint["run_id"],
+                    "status": "pending",
+                },
+                message="已从持久检查点安排继续执行",
+            ),
+            202,
+        )
     if task.status != TaskStatus.WAITING:
         return _err(f"任务当前状态为 {task.status.value}，不处于等待状态")
 
     body = request.get_json(silent=True) or {}
-    approved = body.get("approved", True)
+    approved = body.get("approved")
 
-    if approved:
+    if approved is None:
+        return _err("请明确提供 approved，任务仍在等待确认", 409)
+
+    if approved is True:
         ledger.resume_task(task_id)
         try:
             bus = get_progress_bus()
@@ -303,11 +442,38 @@ def stream_progress(task_id: str):
         return _err("任务不存在", 404)
 
     bus = get_progress_bus()
-    timeout = float(request.args.get("timeout", 300))
+    try:
+        timeout = max(0.0, min(float(request.args.get("timeout", 300)), 3600.0))
+        after_seq = max(0, int(request.args.get("after_seq", 0)))
+    except (TypeError, ValueError):
+        return _err("timeout 和 after_seq 必须是有效数字")
     replay = request.args.get("replay", "true").lower() != "false"
+    run_id = request.args.get("run_id") or None
+    last_id = str(request.headers.get("Last-Event-ID") or "").strip()
+    if last_id:
+        try:
+            last_run, last_seq = last_id.rsplit(":", 1)
+            if run_id and run_id != last_run:
+                return _err("Last-Event-ID 与 run_id 不匹配")
+            run_id = run_id or last_run
+            after_seq = max(after_seq, int(last_seq))
+        except (ValueError, TypeError):
+            return _err("Last-Event-ID 无效")
+    latest = ledger.latest_run_event(task_id, run_id)
 
     def generate():
-        yield from bus.stream_events(task_id, timeout=timeout, replay=replay)
+        if latest or run_id or after_seq:
+            yield from bus.stream_events(
+                task_id,
+                timeout=timeout,
+                replay=replay,
+                after_seq=after_seq,
+                run_id=run_id,
+                event_loader=ledger.list_run_events,
+                session_id=task.session_id,
+            )
+        else:
+            yield from bus.stream_events(task_id, timeout=timeout, replay=replay)
 
     return Response(
         stream_with_context(generate()),
@@ -336,52 +502,6 @@ def delete_task(task_id: str):
     ledger.mark_cancelled(task_id)
     get_progress_bus().cleanup(task_id, delay=0)
     return _ok(message="任务已删除")
-
-
-@task_bp.post("/submit")
-def submit_background_task():
-    """
-    提交后台异步任务（轻量线程池，不经过 TaskLedger）。
-
-    Body JSON:
-      {"task": "任务描述"}
-    Returns:
-      {"ok": true, "task_id": "abc123", "message": "任务已提交"}
-    """
-    body = request.get_json(silent=True) or {}
-    task_text = str(body.get("task", "") or body.get("instruction", "")).strip()
-    if not task_text:
-        return _err("缺少 task 字段")
-
-    try:
-        from web.task_queue import task_queue
-    except ImportError:
-        return _err("后台任务队列未启动", 503)
-
-    task_id = task_queue.submit(
-        name=f"bg:{task_text[:40]}",
-        fn=lambda: _execute_background_file_task(task_text, body),
-    )
-    return _ok(
-        data={"task_id": task_id},
-        message="任务已提交，可通过 GET /api/tasks/<task_id> 查询进度",
-    )
-
-
-def _execute_background_file_task(task_text: str, data: dict) -> dict:
-    """Execute a file task in background (called from worker thread)."""
-    try:
-        from web.file_task_stream import stream_file_task_request
-
-        payload = {"task": task_text}
-        payload.update(
-            {k: v for k, v in data.items() if k not in ("task", "instruction")}
-        )
-        for frame in stream_file_task_request(payload):
-            pass  # Consume the SSE stream
-        return {"ok": True}
-    except Exception as e:
-        raise RuntimeError(f"Background task failed: {e}") from e
 
 
 @task_bp.post("/purge")

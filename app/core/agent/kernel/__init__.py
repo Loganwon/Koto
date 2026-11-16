@@ -1,0 +1,112 @@
+"""Stable, provider-neutral primitives for Koto's agent runtime.
+
+The kernel deliberately knows nothing about Flask, SSE, Office formats, or a
+specific LLM provider.  Those concerns belong to adapters around this package.
+"""
+
+from .catalog import ToolCatalog, ToolRegistrationError
+from .contracts import (
+    KERNEL_API_VERSION,
+    TRUSTED_CONTEXT_ARGUMENT,
+    AgentRunLimits,
+    PluginManifest,
+    ToolCall,
+    ToolErrorCode,
+    ToolResult,
+    ToolSpec,
+)
+from .execution import ToolExecutionPolicy, ToolExecutor
+from .guard import RunGuard, RunLimitExceeded
+from .instructions import build_tool_usage_instruction
+from .lifecycle import (
+    AgentEvent,
+    AgentRequest,
+    EventType,
+    RunMetadata,
+    RunState,
+    evt_code_result,
+    evt_doc_tool_call,
+    evt_error,
+    evt_lifecycle_end,
+    evt_lifecycle_error,
+    evt_lifecycle_start,
+    evt_live_doc_commit,
+    evt_phase,
+    evt_plan,
+    evt_proposal,
+    evt_queue_position,
+    evt_rag_info,
+    evt_status_message,
+    evt_step_done,
+    evt_step_error,
+    evt_step_progress,
+    evt_step_start,
+    evt_stream_block,
+    evt_stream_chunk,
+    evt_task_complete,
+    evt_thought,
+    evt_tool_call,
+    evt_tool_result,
+    evt_validation,
+)
+from .model import ModelGateway, ModelProtocolError, ModelResponse, ModelToolCall
+from .runtime import KernelRuntime, KernelRuntimeConfig
+from .topology import runtime_mermaid, runtime_topology
+from .validation import ResponseValidator, ValidationOutcome
+
+__all__ = [
+    "AgentRunLimits",
+    "AgentEvent",
+    "AgentRequest",
+    "EventType",
+    "KernelRuntime",
+    "KernelRuntimeConfig",
+    "KERNEL_API_VERSION",
+    "ModelGateway",
+    "ModelProtocolError",
+    "ModelResponse",
+    "ModelToolCall",
+    "PluginManifest",
+    "RunGuard",
+    "RunLimitExceeded",
+    "RunMetadata",
+    "RunState",
+    "ResponseValidator",
+    "ToolCall",
+    "ToolCatalog",
+    "ToolErrorCode",
+    "ToolExecutionPolicy",
+    "ToolExecutor",
+    "ToolRegistrationError",
+    "ToolResult",
+    "ToolSpec",
+    "TRUSTED_CONTEXT_ARGUMENT",
+    "ValidationOutcome",
+    "build_tool_usage_instruction",
+    "evt_code_result",
+    "evt_doc_tool_call",
+    "evt_error",
+    "evt_lifecycle_end",
+    "evt_lifecycle_error",
+    "evt_lifecycle_start",
+    "evt_live_doc_commit",
+    "evt_phase",
+    "evt_plan",
+    "evt_proposal",
+    "evt_queue_position",
+    "evt_rag_info",
+    "evt_status_message",
+    "evt_step_done",
+    "evt_step_error",
+    "evt_step_progress",
+    "evt_step_start",
+    "evt_stream_block",
+    "evt_stream_chunk",
+    "evt_task_complete",
+    "evt_thought",
+    "evt_tool_call",
+    "evt_tool_result",
+    "evt_validation",
+    "runtime_mermaid",
+    "runtime_topology",
+]

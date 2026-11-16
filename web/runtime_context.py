@@ -4,33 +4,44 @@
 
 Provides lazy access to runtime services while decoupling consumers from
 the monolithic ``web.app`` module.  New code should use
-:func:`service_registry` instead of calling individual ``get_*`` helpers.
+the ``service_registry`` singleton instead of calling individual ``get_*`` helpers.
 """
 
 from __future__ import annotations
 
-import importlib
 from collections.abc import Callable
+from dataclasses import dataclass
+import importlib
 import logging
-import sys
+import os
+import threading
 from typing import Any
 
 _logger = logging.getLogger(__name__)
 
+
+@dataclass(frozen=True)
+class ModelRuntimeState:
+    """Read-only view of the model-selection state owned by ``web.app``."""
+
+    model_manager: Any
+    model_manager_available: bool
+    model_map: dict
+    model_info: dict
+    fallback_model: str
+    interactions_only_models: set[str]
+    get_display_name: Callable[[str], str]
+    initialize_model_manager: Callable[[], None]
+
 # ?? Internal module resolution ??????????????????????????????
 
 def _app_module() -> Any:
-    """Resolve the runtime application module (``web.app`` or ``__main__``)."""
+    """Return the one canonical runtime module.
 
-    def _is_app(candidate: Any) -> bool:
-        return candidate is not None and (
-            hasattr(candidate, "settings_manager") or hasattr(candidate, "app")
-        )
-
-    for name in ("web.app", "__main__", "app"):
-        module = sys.modules.get(name)
-        if _is_app(module):
-            return module
+    Runtime owners must bind it explicitly during application composition.
+    Importing through ``__main__`` or an ambiguous top-level ``app`` module
+    previously allowed different launchers to expose different service sets.
+    """
     return importlib.import_module("web.app")
 
 
@@ -51,6 +62,51 @@ class ServiceRegistry:
         self._cache: dict[str, Any] = {}
         self._shutdown_hooks: list[Callable[[], None]] = []
         self._factories: dict[str, Callable[[], Any]] = {}
+        self._llm_gateway_mode_key: tuple[str, str] | None = None
+        self._lock = threading.RLock()
+
+    def bind_module(self, module: Any) -> None:
+        """Bind the composed application module as the sole service owner."""
+        if module is None:
+            raise ValueError("runtime module is required")
+        with self._lock:
+            if self._module is not None and self._module is not module:
+                raise RuntimeError("runtime module is already bound")
+            self._module = module
+
+    def register_factory(
+        self,
+        name: str,
+        factory: Callable[[], Any],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Register one explicit service factory without constructing it."""
+        key = str(name or "").strip()
+        if not key:
+            raise ValueError("service name is required")
+        if not callable(factory):
+            raise TypeError("service factory must be callable")
+        with self._lock:
+            if key in self._factories and not replace:
+                raise RuntimeError(f"Runtime service factory already registered: {key}")
+            self._factories[key] = factory
+            self._cache.pop(key, None)
+
+    def resolve(self, name: str) -> Any:
+        """Resolve a registered service once and cache the constructed instance."""
+        key = str(name or "").strip()
+        if not key:
+            raise ValueError("service name is required")
+        with self._lock:
+            if key in self._cache:
+                return self._cache[key]
+            factory = self._factories.get(key)
+            if factory is None:
+                raise RuntimeError(f"Runtime service factory unavailable: {key}")
+            value = factory()
+            self._cache[key] = value
+            return value
 
     # -- module access --
 
@@ -61,28 +117,34 @@ class ServiceRegistry:
         return self._module
 
     def _get(self, attr: str, required: bool = True) -> Any:
-        if attr in self._cache:
-            return self._cache[attr]
-        value = getattr(self.module, attr, None)
-        if value is None and required:
-            raise RuntimeError(f"Runtime service unavailable: {attr}")
-        self._cache[attr] = value
-        return value
+        with self._lock:
+            if attr in self._cache:
+                return self._cache[attr]
+            value = getattr(self.module, attr, None)
+            if value is None and required:
+                raise RuntimeError(f"Runtime service unavailable: {attr}")
+            self._cache[attr] = value
+            return value
 
     def invalidate(self, *attrs: str) -> None:
         """Clear cached service references (useful after hot-reload)."""
-        for attr in attrs:
-            self._cache.pop(attr, None)
-        if not attrs:
-            self._cache.clear()
+        with self._lock:
+            for attr in attrs:
+                self._cache.pop(attr, None)
+            if not attrs:
+                self._cache.clear()
 
     def on_shutdown(self, hook: Callable[[], None]) -> None:
         """Register a function to call on application shutdown."""
-        self._shutdown_hooks.append(hook)
+        with self._lock:
+            self._shutdown_hooks.append(hook)
 
     def shutdown(self) -> None:
         """Call all registered shutdown hooks."""
-        for hook in self._shutdown_hooks:
+        with self._lock:
+            hooks = list(reversed(self._shutdown_hooks))
+            self._shutdown_hooks.clear()
+        for hook in hooks:
             try:
                 hook()
             except Exception:
@@ -109,8 +171,23 @@ class ServiceRegistry:
         return value
 
     @property
-    def client(self) -> Any:
-        return self._get("client")
+    def llm_gateway(self) -> Any:
+        from app.core.llm.local_model_runtime import (
+            get_configured_local_model_tag,
+            get_configured_model_mode,
+        )
+        from app.core.llm.runtime_gateway import create_runtime_llm_gateway
+
+        mode_key = (
+            get_configured_model_mode(),
+            get_configured_local_model_tag(),
+        )
+        if self._llm_gateway_mode_key != mode_key:
+            self._cache.pop("llm_gateway", None)
+            self._llm_gateway_mode_key = mode_key
+        if "llm_gateway" not in self._cache:
+            self._cache["llm_gateway"] = create_runtime_llm_gateway()
+        return self._cache["llm_gateway"]
 
     @property
     def model_map(self) -> dict:
@@ -122,8 +199,9 @@ class ServiceRegistry:
         return self._get("_interrupt_manager", required=False)
 
     @property
-    def smart_dispatcher(self) -> Any:
-        return self._get("SmartDispatcher")
+    def interrupt_flags(self) -> dict:
+        flags = self._get("_interrupt_flags", required=False)
+        return flags if isinstance(flags, dict) else {}
 
     @property
     def web_searcher(self) -> Any:
@@ -134,160 +212,117 @@ class ServiceRegistry:
         return self._get("LocalExecutor")
 
     @property
+    def utils(self) -> Any:
+        return self._get("Utils")
+
+    @property
+    def default_chat_system_instruction(self) -> str:
+        return str(self._get("default_chat_system_instruction", required=False) or "")
+
+    @property
+    def chat_stream_handler(self) -> Callable[..., Any]:
+        return self._get("chat_stream")
+
+    @property
+    def operation_history(self) -> Any:
+        return self._get("operation_history", required=False)
+
+    @property
+    def batch_ops_manager(self) -> Any:
+        return self.resolve("batch_ops_manager")
+
+    @property
     def workspace_dir(self) -> str:
-        return str(getattr(self.module, "WORKSPACE_DIR", "") or "")
+        # Workspace selection is mutable at runtime. Reading web.app's startup
+        # snapshot here made file tasks keep using the previous directory.
+        from app.core.config.workspace_runtime import get_workspace_root
+
+        return get_workspace_root()
 
     @property
     def project_root(self) -> str:
         return str(getattr(self.module, "PROJECT_ROOT", "") or "")
+
+    @property
+    def app_version(self) -> str:
+        return str(getattr(self.module, "APP_VERSION", "") or "")
+
+    @property
+    def detected_proxy(self) -> Any:
+        detector = getattr(self.module, "get_detected_proxy", None)
+        return detector() if callable(detector) else None
+
+    @property
+    def force_proxy(self) -> str:
+        return str(getattr(self.module, "FORCE_PROXY", "") or "")
+
+    @property
+    def model_runtime(self) -> ModelRuntimeState:
+        module = self.module
+        model_map = getattr(module, "MODEL_MAP", None)
+        if not isinstance(model_map, dict):
+            model_map = {}
+        get_display_name = getattr(module, "get_model_display_name", None)
+        initialize_model_manager = getattr(module, "_init_model_manager", None)
+        if not callable(get_display_name) or not callable(initialize_model_manager):
+            raise RuntimeError("Model runtime is not available")
+        return ModelRuntimeState(
+            model_manager=getattr(module, "_model_manager", None),
+            model_manager_available=bool(
+                getattr(module, "_model_manager_available", False)
+            ),
+            model_map=model_map,
+            model_info=getattr(module, "MODEL_INFO", None) or {},
+            fallback_model=str(
+                getattr(module, "_INTERACTIONS_FALLBACK_MODEL", "")
+                or model_map.get("CHAT")
+                or "deepseek-chat"
+            ),
+            interactions_only_models=set(
+                getattr(module, "_INTERACTIONS_ONLY_MODELS", None) or ()
+            ),
+            get_display_name=get_display_name,
+            initialize_model_manager=initialize_model_manager,
+        )
+
+    def reset_llm_gateway(self) -> None:
+        self.invalidate("llm_gateway")
+
+    def update_workspace_dir(self, path: str) -> str:
+        from app.core.config.workspace_runtime import set_workspace_root
+
+        resolved = set_workspace_root(path)
+        os.makedirs(resolved, exist_ok=True)
+        return resolved
+
+    def update_chat_dir(self, path: str) -> str:
+        from web.session_manager import set_chat_dir
+
+        resolved = set_chat_dir(path)
+        os.makedirs(resolved, exist_ok=True)
+        return resolved
+
+    def reset_proxy_detection(self) -> None:
+        module = self.module
+        module._proxy_checked = False
+        module._detected_proxy = None
+        detector = getattr(module, "get_detected_proxy", None)
+        if callable(detector):
+            threading.Thread(
+                target=detector,
+                name="ProxyDetectionRefresh",
+                daemon=True,
+            ).start()
 
 
 # Singleton
 service_registry = ServiceRegistry()
 
 
-# ?? Backward-compatible getters ?????????????????????????????
-# These remain for existing blueprint code.  New imports should use
-# ``service_registry.<property>`` directly.
+def _make_batch_ops_manager() -> Any:
+    from web.files.batch_file_ops import BatchFileOpsManager
 
-def get_app_module() -> Any:
-    return service_registry.module
-
-def get_client() -> Any:
-    return service_registry.client
-
-def get_client_proxy() -> Any:
-    return service_registry.client
-
-def get_types() -> Any:
-    return service_registry._get("types", required=False)
-
-def get_model_map() -> dict:
-    return service_registry.model_map
-
-def get_workspace_dir() -> str:
-    return service_registry.workspace_dir
-
-def get_project_root() -> str:
-    return service_registry.project_root
-
-def get_settings_manager() -> Any:
-    return service_registry.settings_manager
-
-def get_app_attr(name: str, default: Any = None) -> Any:
-    return getattr(service_registry.module, name, default)
-
-def get_utils() -> Any:
-    from web.utils.assistant_utils import Utils
-    return Utils
-
-def get_session_manager() -> Any:
-    return service_registry.session_manager
-
-def get_brain() -> Any:
-    return service_registry.brain
-
-def get_interrupt_manager() -> Any:
-    return service_registry.interrupt_manager
-
-def get_memory_manager() -> Any:
-    # Memory is owned by AppContext.  Do not resolve it from web.app, which
-    # can otherwise create a second lifecycle/cache path for the same store.
-    from web.memory_runtime import get_memory_manager as _get_memory_manager
-
-    return _get_memory_manager()
+    return BatchFileOpsManager()
 
 
-# ?? Domain-specific helpers (kept for convenience) ??????????
-
-def get_model_id(task_type: str = "CHAT", default: str = "") -> str:
-    """Return the best model id for a task type.
-
-    Uses the configured cloud model when available, falling back to
-    the MODEL_MAP entry or the explicit ``default``.
-    """
-    fallback = str(service_registry.model_map.get(task_type, default) or default)
-    try:
-        from app.core.llm.model_selection import get_configured_cloud_model
-        return get_configured_cloud_model(task_type=task_type, fallback_model=fallback) or fallback
-    except Exception:
-        return fallback or "deepseek-chat"
-
-def get_smart_dispatcher() -> Any:
-    return service_registry.smart_dispatcher
-
-def get_web_searcher() -> Any:
-    return service_registry.web_searcher
-
-def get_local_executor() -> Any:
-    return service_registry.local_executor
-
-def get_interrupt_flags() -> dict:
-    return getattr(service_registry.module, "_interrupt_flags", {})
-
-def get_default_chat_system_instruction() -> str:
-    return str(getattr(service_registry.module, "default_chat_system_instruction", "") or "")
-
-def get_chat_stream_handler() -> Any:
-    return service_registry._get("ChatStreamHandler", required=False)
-
-def get_operation_history() -> Any:
-    return service_registry._get("operation_history", required=False)
-
-def get_create_client() -> Any:
-    return service_registry._get("create_client", required=False)
-
-def get_app_version(default: str = "") -> str:
-    return str(getattr(service_registry.module, "APP_VERSION", default) or default)
-
-def get_api_key(default: str = "") -> str:
-    return str(getattr(service_registry.module, "API_KEY", default) or default)
-
-def get_detected_proxy() -> Any:
-    return service_registry._get("detected_proxy", required=False)
-def resolve_requested_model_id(
-    requested_model: str,
-    fallback_model: str = "",
-    task_type: str = "CHAT",
-) -> str:
-    """解析用户请求的模型 ID 为实际可用模型。
-
-    - "auto" / "cloud" / 空 → 使用配置的云端模型
-    - 其他 → 直接返回请求的模型 ID
-    """
-    normalized = str(requested_model or "").strip().lower()
-    if not normalized or normalized in {"auto", "cloud"}:
-        try:
-            from app.core.llm.model_selection import get_configured_cloud_model
-            configured = get_configured_cloud_model(
-                task_type=task_type,
-                fallback_model=fallback_model,
-            )
-            if configured:
-                return configured
-        except Exception:
-            pass
-        return fallback_model or "deepseek-chat"
-    from app.core.llm.provider_boundary import normalize_public_model
-
-    return normalize_public_model(
-        str(requested_model or "").strip() or fallback_model or "deepseek-chat"
-    )
-# ── Editor AI runtime helpers ─────────────────────────────────────────────
-
-def get_configured_local_model_id(default: str = "") -> str:
-    """Return configured local model id from settings."""
-    try:
-        from app.core.config.user_settings import SettingsManager
-        sm = SettingsManager()
-        all_s = sm.get_all()
-        tag = all_s.get("local_model") or (all_s.get("ai") or {}).get("local_model") or ""
-        return str(tag).strip() or default
-    except Exception:
-        return default
-
-def normalize_model_mode(raw: str, default: str = "cloud") -> str:
-    """Delegate model-mode normalization to the canonical core contract."""
-    from app.core.llm.model_mode import normalize_model_mode as _normalize_model_mode
-
-    return _normalize_model_mode(raw, default=default)
+service_registry.register_factory("batch_ops_manager", _make_batch_ops_manager)

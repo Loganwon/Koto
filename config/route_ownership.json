@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "policy": {
+    "unowned_route_families_fail_ci": true,
+    "duplicate_method_paths_fail_ci": true,
+    "release_optional_features_default_off": true,
+    "retired_routes_must_not_redirect": true
+  },
+  "families": {
+    "_app": {"feature": "platform.http-runtime", "tier": "core", "owner": "web/app_http.py"},
+    "auth_api": {"feature": "platform.auth", "tier": "core", "owner": "web/blueprints/auth.py"},
+    "chat": {"feature": "chat.primary", "tier": "core", "owner": "web/blueprints/chat.py"},
+    "editor_ai": {"feature": "file-ai.task-stream", "tier": "core", "owner": "web/blueprints/editor_ai.py"},
+    "file_hub": {"feature": "workspace.file-hub", "tier": "core", "owner": "app/api/file_hub_routes.py"},
+    "file_organize": {"feature": "files.legacy-api", "tier": "optional", "owner": "web/blueprints/file_organize.py"},
+    "goals": {"feature": "automation.goals", "tier": "optional", "owner": "app/api/goal_routes.py"},
+    "health": {"feature": "desktop.startup", "tier": "core", "owner": "web/routes/health.py"},
+    "jobs": {"feature": "automation.jobs", "tier": "optional", "owner": "app/api/job_routes.py"},
+    "mcp": {"feature": "integrations.mcp", "tier": "bundled", "owner": "app/api/mcp_routes.py"},
+    "memory_api": {"feature": "assistant.memory", "tier": "core", "owner": "web/blueprints/memory_api.py"},
+    "misc_api": {"feature": "platform.support-api", "tier": "core", "owner": "web/blueprints/misc_api.py"},
+    "ops": {"feature": "platform.operations", "tier": "bundled", "owner": "app/api/ops_routes.py"},
+    "pages": {"feature": "workspace.shell", "tier": "core", "owner": "web/blueprints/pages.py"},
+    "plugin_protocol": {"feature": "addons.protocol", "tier": "core", "owner": "app/api/plugin_protocol_routes.py"},
+    "ppt_api": {"feature": "pptx.generated-download", "tier": "core", "owner": "web/ppt_api_routes.py"},
+    "rag": {"feature": "knowledge.base", "tier": "optional", "owner": "web/blueprints/rag_api.py"},
+    "response": {"feature": "chat.feedback", "tier": "core", "owner": "app/api/response_routes.py"},
+    "sessions": {"feature": "chat.sessions", "tier": "core", "owner": "web/blueprints/sessions.py"},
+    "settings_routes": {"feature": "settings.model-runtime", "tier": "core", "owner": "web/blueprints/settings.py"},
+    "tasks": {"feature": "file-ai.background-tasks", "tier": "core", "owner": "app/api/task_routes.py"},
+    "telegram": {"feature": "integrations.telegram", "tier": "bundled", "owner": "app/api/telegram_bot_routes.py"},
+    "template": {"feature": "document.templates", "tier": "core", "owner": "web/blueprints/template_api.py"},
+    "voice_routes": {"feature": "document.speech-actions", "tier": "core", "owner": "web/blueprints/voice.py"},
+    "workspace": {"feature": "workspace.navigation", "tier": "core", "owner": "web/blueprints/workspace.py"},
+    "workspace_assistant": {"feature": "workspace.file-open-save", "tier": "core", "owner": "web/blueprints/workspace_assistant.py"}
+  }
+}

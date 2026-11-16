@@ -15,7 +15,7 @@ def _default_store_path() -> Path:
     return Path(
         os.environ.get(
             "KOTO_FILE_TASK_FOLLOWUP_PATH",
-            Path(__file__).resolve().parents[3] / "config" / "file_task_followups.json",
+            Path(__file__).resolve().parents[3] / "data" / "file_task_followups.json",
         )
     )
 

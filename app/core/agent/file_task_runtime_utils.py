@@ -36,11 +36,28 @@ def _json_payload(value: Any) -> Dict[str, Any]:
 
 def _is_error_result(value: Any) -> bool:
     payload = _json_payload(value)
-    if payload.get("error"):
+    if (
+        payload.get("error")
+        or payload.get("failure")
+        or payload.get("ok") is False
+        or payload.get("success") is False
+    ):
         return True
+    stderr = str(payload.get("stderr") or "").strip()
+    if stderr and (
+        re.search(r"(?m)^\s*Traceback \(most recent call last\):", stderr)
+        or re.search(
+            r"(?m)^\s*(?:[A-Za-z_][\w.]*)?(?:Error|Exception):(?:\s|$)",
+            stderr,
+        )
+    ):
+        return True
+    if payload.get("ok") is True or payload.get("success") is True:
+        return False
     text = str(value or "").strip()
     return (
-        text.startswith(("Error:", "Sandbox error:", "[error]")) or "\n[error]" in text
+        text.startswith(("Error:", "Error parsing file:", "Sandbox error:", "[error]"))
+        or "\n[error]" in text
     )
 
 
@@ -86,15 +103,6 @@ def _sanitize_followup_file_changes(value: Any) -> List[Dict[str, Any]]:
         if entry:
             cleaned.append(entry)
     return cleaned
-
-
-def _followup_has_prior_excel_docx_insert(followup_context: Dict[str, Any]) -> bool:
-    for change in _sanitize_followup_file_changes(
-        followup_context.get("previous_task_file_changes")
-    ):
-        if str(change.get("operation") or "").strip() == "insert_excel_as_docx_table":
-            return True
-    return False
 
 
 def workflow_checkpoint_from_options(options: Mapping[str, Any]) -> Dict[str, Any]:

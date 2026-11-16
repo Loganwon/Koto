@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
-from app.core.agent.file_task_recipes import request_file_types
+from app.core.agent.file_task_file_facts import request_file_types
 from app.core.agent.file_task_runtime_utils import (
     _compact_line,
     workflow_checkpoint_from_options,
@@ -27,7 +27,7 @@ def _workflow_resume_control(request: FileTaskRequest) -> Dict[str, Any]:
 
 
 def file_task_suffix(file_info: FileTaskFile) -> str:
-    from app.core.agent.file_task_recipes import file_type_from_file_info
+    from app.core.agent.file_task_file_facts import file_type_from_file_info
 
     return file_type_from_file_info(file_info)
 
@@ -640,6 +640,12 @@ def stepwise_docx_wait_artifact(
     recipe_skeleton: Dict[str, Any],
     target_path_fallback: str = "",
 ) -> Optional[Dict[str, Any]]:
+    """Build the resumable checkpoint after one PDF-to-DOCX window is written.
+
+    The completion contract owns the decision to pause; this helper only turns
+    the already-materialized PDF window into a portable resume request.
+    """
+
     if not looks_like_windowed_pdf_task(request, recipe_skeleton):
         return None
     docx_change = next(
@@ -655,6 +661,7 @@ def stepwise_docx_wait_artifact(
     )
     if not docx_change:
         return None
+
     target_path = str(
         docx_change.get("path")
         or docx_change.get("file_path")
@@ -663,7 +670,8 @@ def stepwise_docx_wait_artifact(
         or ""
     ).strip()
     pdf_file = next(
-        (file_info for file_info in files if file_task_suffix(file_info) == "pdf"), None
+        (item for item in files if file_task_suffix(item) == "pdf"),
+        None,
     )
     latest_pdf_snippet = next(
         (
@@ -703,34 +711,39 @@ def stepwise_docx_wait_artifact(
         str(_workflow_resume_control(request).get("original_task") or "").strip()
         or str(request.task or "").strip()
     )
+    checkpoint = {
+        "adapter": "generic_tool_loop",
+        "policy": "confirm_each_step",
+        "step_index": next_step_index,
+        "window_pages": window_pages,
+        "original_task": original_task,
+        "source_path": pdf_file.path if pdf_file and pdf_file.path else "",
+        "target_path": target_path,
+    }
+    stepwise_context = {
+        "policy": "confirm_each_step",
+        "completed_page_range": f"{current_start}-{current_end}",
+        "next_page_range": f"{next_start}-{next_end}",
+        "next_step_index": next_step_index,
+        "original_task": original_task,
+    }
     resume_request = {
-        "task": f"继续当前分步文件任务的下一步：处理 PDF 第 {next_start}-{next_end} 页，并把本段实质分析追加到同一个 DOCX。",
+        "task": (
+            "继续当前分步文件任务的下一步："
+            f"处理 PDF 第 {next_start}-{next_end} 页，并把本段实质分析追加到同一个 DOCX。"
+        ),
         "session_id": request.session_id,
         "model_mode": request.model_mode,
         "model_id": request.model_id,
         "target_path": target_path,
         "files": resume_files,
         "options": {
-            "workflow_checkpoint": {
-                "adapter": "generic_tool_loop",
-                "policy": "confirm_each_step",
-                "step_index": next_step_index,
-                "window_pages": window_pages,
-                "original_task": original_task,
-                "source_path": pdf_file.path if pdf_file and pdf_file.path else "",
-                "target_path": target_path,
-            },
+            "workflow_checkpoint": checkpoint,
             "followup_context": {
                 "kind": "stepwise_task_resume",
                 "source": "koto_stepwise_resume_artifact",
                 "followup_action": "resume",
-                "stepwise": {
-                    "policy": "confirm_each_step",
-                    "completed_page_range": f"{current_start}-{current_end}",
-                    "next_page_range": f"{next_start}-{next_end}",
-                    "next_step_index": next_step_index,
-                    "original_task": original_task,
-                },
+                "stepwise": stepwise_context,
             },
         },
     }
@@ -738,7 +751,10 @@ def stepwise_docx_wait_artifact(
         "artifact_type": "koto_stepwise_resume_v1",
         "category": "stepwise_confirmation",
         "title": f"继续处理第 {next_start}-{next_end} 页",
-        "summary": f"上一段（第 {current_start}-{current_end} 页）已写入 DOCX。可以继续处理第 {next_start}-{next_end} 页。",
+        "summary": (
+            f"上一段（第 {current_start}-{current_end} 页）已写入 DOCX。"
+            f"可以继续处理第 {next_start}-{next_end} 页。"
+        ),
         "suggested_next_step": f"点击继续处理第 {next_start}-{next_end} 页",
         "action_label": f"继续第 {next_start}-{next_end} 页",
         "route": "long_pdf_stepwise_docx_summary",

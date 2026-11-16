@@ -1,13 +1,21 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 import inspect
+import json
 import logging
 import re
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as _FuturesTimeout
-from typing import Any, Callable, Dict, List, Optional, get_type_hints
+from typing import Any, Callable, Dict, Iterable, List, Optional, get_type_hints
 
 from app.core.agent.base import AgentPlugin
+from app.core.agent.kernel import (
+    ToolCall,
+    ToolCatalog,
+    ToolErrorCode,
+    ToolExecutionPolicy,
+    ToolExecutor,
+    ToolResult,
+    ToolSpec,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +135,59 @@ def _normalize_tool_args(func: Callable, tool_args: Dict[str, Any]) -> Dict[str,
     return _coerce_scalar_tool_args(func, known)
 
 
+def _coerce_structured_tool_args(
+    input_schema: Dict[str, Any], normalized: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Accept legacy JSON strings for fields whose canonical schema is structured.
+
+    Older Koto prompts serialized arrays and objects into strings. New tool
+    contracts expose native JSON to models, while this boundary keeps stored
+    workflows and third-party callers compatible during migration.
+    """
+    properties = input_schema.get("properties")
+    if not isinstance(properties, dict):
+        return normalized
+    for name, value in list(normalized.items()):
+        if not isinstance(value, str):
+            continue
+        property_schema = properties.get(name)
+        if not isinstance(property_schema, dict):
+            continue
+        expected_type = str(property_schema.get("type") or "").lower()
+        if expected_type not in {"array", "object"}:
+            continue
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            continue
+        if expected_type == "array" and isinstance(parsed, list):
+            normalized[name] = parsed
+        elif expected_type == "object" and isinstance(parsed, dict):
+            normalized[name] = parsed
+    return normalized
+
+
+def normalize_tool_args_for_spec(
+    spec: ToolSpec, tool_args: Dict[str, Any]
+) -> Dict[str, Any]:
+    normalized = _normalize_tool_args(spec.handler, tool_args)
+    normalized = _coerce_structured_tool_args(dict(spec.input_schema), normalized)
+    if spec.name == "write_docx_content" and isinstance(
+        normalized.get("paragraphs"), str
+    ):
+        # Historical plans often supplied a plain paragraph or a loose
+        # Python/JSON-ish list. Preserve that input surface while publishing a
+        # precise native-array schema to new model/tool callers.
+        from app.core.agent.toolkits.foundation.docx_minimal import (
+            _coerce_docx_paragraphs_for_write,
+        )
+
+        normalized["paragraphs"] = _coerce_docx_paragraphs_for_write(
+            normalized["paragraphs"]
+        )
+    return normalized
+
+
 class ToolRegistry:
     """
     Manages tools and plugins for the agent.
@@ -134,9 +195,23 @@ class ToolRegistry:
     """
 
     def __init__(self):
+        self._catalog = ToolCatalog()
+        # Kept as compatibility views for older integrations.  The catalog is
+        # authoritative and these views are refreshed after every registration.
         self._tools: Dict[str, Callable] = {}
         self._tool_definitions: List[Dict[str, Any]] = []
         self._plugins: Dict[str, AgentPlugin] = {}
+
+    @property
+    def catalog(self) -> ToolCatalog:
+        """Return the canonical catalog used by the Kernel Runtime.
+
+        The property is intentionally read-only: callers may select and execute
+        registered tools, but replacing the catalog would invalidate the
+        registry's compatibility views.
+        """
+
+        return self._catalog
 
     def register_tool(
         self,
@@ -144,39 +219,83 @@ class ToolRegistry:
         func: Callable,
         description: Optional[str] = None,
         parameters: Optional[Dict] = None,
+        *,
+        source: str = "core",
+        capabilities: Iterable[str] = (),
+        read_only: Optional[bool] = None,
+        timeout_seconds: Optional[float] = None,
     ):
         """
         Register a single tool function.
         """
-        # Avoid duplicate registration
-        if name in self._tools:
+        if name in self._catalog:
             logger.warning(f"Tool {name} is already registered. Updating definition.")
 
-        self._tools[name] = func
-
-        definition = {
-            "name": name,
-            "description": description or func.__doc__ or "No description provided.",
-        }
-
-        if parameters:
-            definition["parameters"] = parameters
-        else:
-            definition["parameters"] = self._generate_schema(func)
-
-        # Update definition in list
-        self._tool_definitions = [
-            t for t in self._tool_definitions if t["name"] != name
-        ]
-        self._tool_definitions.append(definition)
+        spec = ToolSpec(
+            name=name,
+            description=description or func.__doc__ or "No description provided.",
+            input_schema=parameters or self._generate_schema(func),
+            handler=func,
+            source=source,
+            capabilities=tuple(capabilities),
+            read_only=read_only,
+            timeout_seconds=timeout_seconds,
+        )
+        self._catalog.register(spec, replace=True)
+        self._refresh_compatibility_views()
         logger.debug(f"Registered tool: {name}")
 
-    def register_plugin(self, plugin: AgentPlugin):
+    def register_specs(
+        self,
+        specs: Iterable[ToolSpec],
+        *,
+        replace: bool = False,
+    ) -> None:
+        """Atomically register canonical tool specs from a trusted runtime.
+
+        This is the composition seam used by the Add-on runtime.  It preserves
+        protocol-owned metadata and avoids adapting Add-ons to the legacy
+        ``AgentPlugin`` shape.
+        """
+
+        self._catalog.register_many(tuple(specs), replace=replace)
+        self._refresh_compatibility_views()
+
+    def register_plugin(
+        self,
+        plugin: AgentPlugin,
+        *,
+        tool_allowlist: Optional[Iterable[str]] = None,
+    ):
         """
         Register a set of tools via a Plugin.
         """
-        self._plugins[plugin.name] = plugin
         tools = plugin.get_tools()
+        allowed = (
+            {str(name).strip() for name in tool_allowlist}
+            if tool_allowlist is not None
+            else None
+        )
+        if allowed is not None:
+            available = {
+                str(tool.get("name") or "").strip()
+                for tool in tools
+                if isinstance(tool, dict)
+            }
+            missing = sorted(allowed - available)
+            if missing:
+                raise ValueError(
+                    f"Plugin {plugin.name} is missing allowlisted tools: "
+                    f"{', '.join(missing)}"
+                )
+            tools = [tool for tool in tools if tool.get("name") in allowed]
+        pending_specs: List[ToolSpec] = []
+        contributor_source = str(
+            getattr(plugin, "toolkit_source", "") or f"plugin:{plugin.name}"
+        ).strip()
+        contributor_version = str(
+            getattr(plugin, "toolkit_version", "") or "1.0.0"
+        ).strip()
 
         for tool_def in tools:
             name = tool_def.get("name")
@@ -188,52 +307,135 @@ class ToolRegistry:
                 )
                 continue
 
-            self.register_tool(
-                name=name,
-                func=func,
-                description=tool_def.get("description"),
-                parameters=tool_def.get("parameters"),
+            pending_specs.append(
+                ToolSpec(
+                    name=name,
+                    handler=func,
+                    description=(
+                        tool_def.get("description")
+                        or func.__doc__
+                        or "No description provided."
+                    ),
+                    input_schema=(
+                        tool_def.get("parameters") or self._generate_schema(func)
+                    ),
+                    source=contributor_source,
+                    version=contributor_version,
+                    capabilities=tuple(tool_def.get("capabilities") or ()),
+                    read_only=tool_def.get("read_only"),
+                    timeout_seconds=tool_def.get("timeout_seconds"),
+                    requires_invocation_context=bool(
+                        tool_def.get("requires_invocation_context", False)
+                    ),
+                )
             )
+
+        # One plugin is one atomic catalog update.  A malformed spec cannot
+        # leave half of a future plugin installed.
+        self._catalog.register_many(pending_specs, replace=True)
+        self._plugins[plugin.name] = plugin
+        self._refresh_compatibility_views()
         logger.info(f"Registered plugin: {plugin.name} with {len(tools)} tools")
 
     def get_definitions(self) -> List[Dict[str, Any]]:
         """
         Returns JSON schemas for all registered tools, compatible with LLM function calling.
         """
-        return self._tool_definitions
+        return self._catalog.definitions()
 
-    def execute(self, tool_name: str, tool_args: Dict[str, Any]) -> Any:
+    def execute(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        *,
+        invocation_context: Any = None,
+    ) -> Any:
         """
         Execute a tool by name with provided arguments.
         Per-tool timeout: _TOOL_TIMEOUT seconds (prevents hung tools from stalling the agent loop).
         """
-        func = self._tools.get(tool_name)
-        if not func:
+        spec = self._catalog.get(tool_name)
+        if not spec:
             raise ValueError(f"Tool '{tool_name}' not found.")
 
         try:
-            normalized_args = _normalize_tool_args(func, tool_args)
-            timeout_seconds = _TOOL_TIMEOUT_OVERRIDES.get(tool_name, _TOOL_TIMEOUT)
-            _pool = ThreadPoolExecutor(max_workers=1)
-            _future = _pool.submit(func, **normalized_args)
-            try:
-                return _future.result(timeout=timeout_seconds)
-            except _FuturesTimeout:
-                _future.cancel()
-                _pool.shutdown(wait=False, cancel_futures=True)
-                raise RuntimeError(
-                    f"Tool '{tool_name}' timed out after {timeout_seconds}s"
-                )
-            finally:
-                if _future.done():
-                    _pool.shutdown(wait=True)
-        except (ValueError, RuntimeError):
-            raise
-        except TypeError as e:
-            raise ValueError(f"Argument mismatch for tool '{tool_name}': {e}")
-        except Exception as e:
-            logger.error(f"Error executing tool '{tool_name}': {e}", exc_info=True)
-            raise RuntimeError(f"Error executing tool '{tool_name}': {str(e)}")
+            normalized_args = normalize_tool_args_for_spec(spec, tool_args)
+        except Exception as exc:
+            raise ValueError(
+                f"Argument mismatch for tool '{tool_name}': {exc}"
+            ) from exc
+
+        executor = ToolExecutor(
+            self._catalog,
+            ToolExecutionPolicy(
+                default_timeout_seconds=_TOOL_TIMEOUT,
+                timeout_overrides=_TOOL_TIMEOUT_OVERRIDES,
+            ),
+        )
+        outcome = executor.invoke(
+            ToolCall(name=tool_name, arguments=normalized_args),
+            invocation_context=invocation_context,
+        )
+        if outcome.ok:
+            return outcome.value
+        if outcome.error_code is ToolErrorCode.INVALID_ARGUMENTS:
+            message = str(outcome.error_message or "")
+            if not message.startswith("Argument mismatch"):
+                message = f"Argument mismatch for tool '{tool_name}': {message}"
+            raise ValueError(message)
+        if outcome.error_code is ToolErrorCode.NOT_FOUND:
+            raise ValueError(outcome.error_message)
+        if outcome.error_code is ToolErrorCode.EXECUTION_ERROR:
+            logger.error(outcome.error_message)
+        raise RuntimeError(outcome.error_message)
+
+    def execute_result(
+        self,
+        tool_name: str,
+        tool_args: Dict[str, Any],
+        *,
+        call_id: str = "",
+        invocation_context: Any = None,
+    ) -> ToolResult:
+        """Execute through the new kernel and keep the structured outcome.
+
+        New runtimes and plugins should use this method.  ``execute`` remains
+        the exception-based compatibility API for current callers.
+        """
+        spec = self._catalog.get(tool_name)
+        if spec is None:
+            executor = ToolExecutor(self._catalog)
+            return executor.invoke(
+                ToolCall(name=tool_name, arguments=tool_args, call_id=call_id),
+                invocation_context=invocation_context,
+            )
+        try:
+            normalized_args = normalize_tool_args_for_spec(spec, tool_args)
+        except Exception as exc:
+            return ToolResult(
+                call_id=call_id,
+                tool_name=tool_name,
+                ok=False,
+                error_code=ToolErrorCode.INVALID_ARGUMENTS,
+                error_message=f"Argument mismatch for tool '{tool_name}': {exc}",
+            )
+        executor = ToolExecutor(
+            self._catalog,
+            ToolExecutionPolicy(
+                default_timeout_seconds=_TOOL_TIMEOUT,
+                timeout_overrides=_TOOL_TIMEOUT_OVERRIDES,
+            ),
+        )
+        return executor.invoke(
+            ToolCall(name=tool_name, arguments=normalized_args, call_id=call_id),
+            invocation_context=invocation_context,
+        )
+
+    def _refresh_compatibility_views(self) -> None:
+        self._tools = {
+            name: self._catalog.require(name).handler for name in self._catalog.names()
+        }
+        self._tool_definitions = self._catalog.definitions()
 
     def _generate_schema(self, func: Callable) -> Dict[str, Any]:
         """
@@ -252,27 +454,38 @@ class ToolRegistry:
         for param_name, param in sig.parameters.items():
             if param_name in ("self", "cls"):
                 continue
+            if param.kind in (
+                inspect.Parameter.VAR_POSITIONAL,
+                inspect.Parameter.VAR_KEYWORD,
+            ):
+                continue
 
-            # Start with default type string
-            json_type = "STRING"
+            # Untyped Python parameters accept any JSON value. Guessing
+            # ``string`` here made valid numeric/object calls fail once the
+            # Kernel began enforcing schemas.
+            json_type = None
 
             # Map Python types to JSON schema types
             hint = type_hints.get(param_name)
             if hint:
                 if hint is int:
-                    json_type = "INTEGER"
+                    json_type = "integer"
                 elif hint is float:
-                    json_type = "NUMBER"
+                    json_type = "number"
                 elif hint is bool:
-                    json_type = "BOOLEAN"
+                    json_type = "boolean"
                 elif hint is list or getattr(hint, "__origin__", None) is list:
-                    json_type = "ARRAY"
+                    json_type = "array"
                 elif hint is dict or getattr(hint, "__origin__", None) is dict:
-                    json_type = "OBJECT"
+                    json_type = "object"
+                elif hint is str:
+                    json_type = "string"
 
-            properties[param_name] = {"type": json_type}
+            properties[param_name] = (
+                {"type": json_type} if json_type is not None else {}
+            )
 
             if param.default == inspect.Parameter.empty:
                 required.append(param_name)
 
-        return {"type": "OBJECT", "properties": properties, "required": required}
+        return {"type": "object", "properties": properties, "required": required}

@@ -64,7 +64,7 @@ def bot_status():
 @telegram_bp.post("/config")
 def update_config():
     """
-    更新 Telegram Bot 配置（持久化到 gemini_config.env）。
+    更新 Telegram Bot 配置（持久化到 deepseek_config.env）。
     Body JSON 字段（全部可选）:
       token, allowed_chat_ids, morning_brief_chat_id, morning_brief_time
     """
@@ -260,7 +260,7 @@ def send_brief():
 
 
 def _find_env_file() -> str:
-    """查找 gemini_config.env 文件路径。"""
+    """查找 deepseek_config.env 文件路径。"""
     candidates = [
         os.path.join(
             os.path.dirname(__file__),
@@ -269,10 +269,10 @@ def _find_env_file() -> str:
             "..",
             "..",
             "config",
-            "gemini_config.env",
+            "deepseek_config.env",
         ),
         os.path.join(
-            os.path.dirname(__file__), "..", "..", "..", "config", "gemini_config.env"
+            os.path.dirname(__file__), "..", "..", "..", "config", "deepseek_config.env"
         ),
     ]
     for c in candidates:

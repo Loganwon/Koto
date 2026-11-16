@@ -4,6 +4,7 @@
 """Koto environment bootstrap — Python version check, dependency verification, venv management."""
 
 import logging
+import json
 import os
 import subprocess
 import sys
@@ -80,29 +81,33 @@ def get_python_info() -> dict:
 
 
 def find_entry_script(mode: str = "desktop") -> str | None:
-    """Locate the appropriate entry script for the given mode."""
+    """Resolve the single declared entry script for ``mode``.
+
+    P7 intentionally removed candidate probing.  Falling through from the
+    desktop runtime to a server-only script made damaged or mismatched
+    packages appear to start through a different lifecycle.
+    """
     root = Path(__file__).resolve().parent.parent
+    manifest_path = root / "config" / "runtime_entrypoints.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        logger.error("Cannot read canonical runtime entrypoint manifest: %s", exc)
+        return None
 
-    candidates: dict[str, list[str]] = {
-        "desktop": [
-            "src/koto_app.py",
-            "koto_app.py",
-            "src/koto_setup.py",
-            "koto_setup.py",
-        ],
-        "server": [
-            "web/app.py",
-            "server.py",
-            "src/server.py",
-        ],
-    }
+    normalized_mode = mode if mode in {"desktop", "server"} else "desktop"
+    relative_path = manifest.get(normalized_mode)
+    if not isinstance(relative_path, str) or not relative_path.strip():
+        logger.error("No canonical %s entrypoint is declared", normalized_mode)
+        return None
 
-    for candidate in candidates.get(mode, candidates["desktop"]):
-        path = root / candidate
-        if path.exists():
-            return str(path)
-
-    return None
+    path = (root / relative_path).resolve()
+    try:
+        path.relative_to(root.resolve())
+    except ValueError:
+        logger.error("Entrypoint escapes the application root: %s", relative_path)
+        return None
+    return str(path) if path.is_file() else None
 
 
 def run_health_report() -> bool:

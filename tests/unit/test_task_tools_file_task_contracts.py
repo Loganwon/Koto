@@ -98,7 +98,9 @@ def test_parse_file_to_text_pdf_letter_window_skips_table_of_contents(
             )
         return ""
 
-    monkeypatch.setattr(task_tools, "_read_pdf_excerpt", fake_pdf_excerpt)
+    monkeypatch.setattr(
+        "app.core.agent.tools._internal_formats._read_pdf_excerpt", fake_pdf_excerpt
+    )
 
     text = task_tools.parse_file_to_text(
         str(pdf_path),
@@ -136,7 +138,7 @@ def test_extract_koto_paths_reads_primary_structured_marker_keys():
         KOTO_CREATED_RESULT_MARKER,
         KOTO_MODIFIED_RESULT_MARKER,
     )
-    from app.core.agent.file_task_tool_catalog import extract_koto_paths
+    from app.core.agent.toolkits.foundation.catalog import extract_koto_paths
 
     result = {
         "__koto_created__": ["created.docx"],
@@ -181,7 +183,9 @@ def test_task_tools_create_file_uses_context_directory_for_bare_output(
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source_dir = tmp_path / "codex_context_dir"
     source_dir.mkdir()
     (source_dir / "orders.csv").write_text("sku,units\nA100,1\n", encoding="utf-8")
@@ -214,7 +218,9 @@ def test_run_python_relocates_root_created_files_to_context_directory(
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source_dir = tmp_path / "codex_context_dir"
     source_dir.mkdir()
     root_output = tmp_path / "restock_plan.csv"
@@ -237,7 +243,9 @@ def test_task_tools_context_directory_uses_resolved_workspace_root(
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source_dir = tmp_path / "codex_context_dir"
     source_dir.mkdir()
     plugin = task_tools.TaskToolsPlugin(
@@ -255,7 +263,9 @@ def test_create_file_docx_emits_docx_write_metrics_and_valid_package(
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result = json.loads(
         task_tools.create_file(
@@ -282,7 +292,9 @@ def test_create_file_docx_emits_docx_write_metrics_and_valid_package(
 def test_create_file_docx_cleans_markdown_rule_and_bold_markers(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result = json.loads(
         task_tools.create_file(
@@ -309,7 +321,9 @@ def test_write_docx_content_parses_loose_paragraph_objects_with_inner_quotes(
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     loose = (
         '[{"text": "Section 1", "style": "Normal"}, '
         '{"text": "关于"身体"的讨论", "style": "Normal"}]'
@@ -330,9 +344,11 @@ def test_write_docx_content_returns_paragraph_diff_in_file_change(
     tmp_path, monkeypatch
 ):
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result_text = task_tools.write_docx_content(
         "diff-demo.docx",
@@ -389,7 +405,9 @@ def test_insert_docx_paragraph_preserves_existing_table(tmp_path, monkeypatch):
 def test_create_file_xlsx_emits_sheet_metrics_and_valid_workbook(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result = json.loads(task_tools.create_file("analysis.xlsx", "指标,数值\n样本,42"))
 
@@ -414,9 +432,11 @@ def test_write_sheet_data_returns_cell_diff_in_file_change(tmp_path, monkeypatch
     import openpyxl
 
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     workbook_path = tmp_path / "budget.xlsx"
     workbook = openpyxl.Workbook()
     sheet = workbook.active
@@ -471,9 +491,11 @@ def test_fill_docx_template_replaces_placeholders_and_emits_diff(tmp_path, monke
     from docx import Document
 
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source = tmp_path / "template.docx"
     doc = Document()
     doc.add_paragraph("甲方：{{party_a}}")
@@ -511,9 +533,11 @@ def test_convert_docx_to_pdf_emits_file_change_with_converter(tmp_path, monkeypa
     from docx import Document
 
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source = tmp_path / "report.docx"
     doc = Document()
     doc.add_paragraph("报告")
@@ -526,7 +550,8 @@ def test_convert_docx_to_pdf_emits_file_change_with_converter(tmp_path, monkeypa
         return "fake_converter"
 
     monkeypatch.setattr(
-        task_tools, "_convert_docx_to_pdf_with_docx2pdf", fake_converter
+        "app.core.agent.tools.docx_convert._convert_docx_to_pdf_with_docx2pdf",
+        fake_converter,
     )
 
     result_text = task_tools.convert_docx_to_pdf("report.docx", "report.pdf")
@@ -548,10 +573,12 @@ def test_convert_docx_to_pdf_emits_file_change_with_converter(tmp_path, monkeypa
 
 def test_convert_file_emits_standard_file_change(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
-    import web.file_converter as file_converter
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    import app.core.file.exporters as file_exporters
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source = tmp_path / "notes.txt"
     source.write_text("hello", encoding="utf-8")
 
@@ -570,7 +597,7 @@ def test_convert_file_emits_standard_file_change(tmp_path, monkeypatch):
             "error": "",
         }
 
-    monkeypatch.setattr(file_converter, "convert", fake_convert)
+    monkeypatch.setattr(file_exporters, "convert", fake_convert)
 
     result_text = task_tools.convert_file("notes.txt", "md", "notes.md")
     result = json.loads(result_text)
@@ -603,7 +630,9 @@ def test_list_conversions_returns_structured_matrix():
 def test_create_file_pptx_emits_slide_metrics_and_valid_deck(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     result = json.loads(
         task_tools.create_file("deck.pptx", "# 汇报标题\n- 关键发现\n- 后续行动")
@@ -1078,7 +1107,9 @@ def test_verify_task_completion_matches_workspace_relative_target_to_absolute_ch
 ):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     from app.core.agent.task_tools import verify_task_completion
 
     target_path = tmp_path / "notes.txt"
@@ -1194,7 +1225,9 @@ def test_task_file_sandbox_staging_sanitizes_invalid_display_names(tmp_path):
 def test_copy_file_delegates_to_canonical_file_service(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     source = tmp_path / "source.txt"
     source.write_text("hello", encoding="utf-8")
     calls = []
@@ -1221,7 +1254,7 @@ def test_copy_file_delegates_to_canonical_file_service(tmp_path, monkeypatch):
                 "destination": destination_path,
             }
 
-    monkeypatch.setattr(task_tools, "FileService", FakeFileService)
+    monkeypatch.setattr("app.core.agent.task_tools_common.FileService", FakeFileService)
 
     payload = json.loads(task_tools.copy_file("source.txt", "copied.txt"))
 
@@ -1242,38 +1275,15 @@ def test_copy_file_delegates_to_canonical_file_service(tmp_path, monkeypatch):
     assert payload["change_type"] == "create"
 
 
-def test_annotate_file_returns_standard_file_change_payload(tmp_path, monkeypatch):
-    import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
-
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
-    notes_path = tmp_path / "notes.txt"
-    notes_path.write_text("alpha beta", encoding="utf-8")
-
-    result = task_tools.annotate_file(
-        "notes.txt",
-        [{"range_start": 0, "range_end": 5, "comment": "需要核对"}],
-    )
-    payload = json.loads(result)
-    change = parse_file_change("annotate_file", {"path": "notes.txt"}, result)
-
-    assert payload["success"] is True
-    assert payload["path"] == "notes.txt"
-    assert payload["operation"] == "annotate_file"
-    assert payload["change_type"] == "annotate"
-    assert payload["annotations_added"] == 1
-    assert change["path"] == "notes.txt"
-    assert change["operation"] == "annotate_file"
-    assert change["annotations_added"] == 1
-
-
 def test_replace_file_selection_writes_text_selection_and_registers_change(
     tmp_path, monkeypatch
 ):
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     notes_path = tmp_path / "notes.md"
     notes_path.write_text("开场很啰嗦，需要改短。\n下一段保留。", encoding="utf-8")
 
@@ -1305,9 +1315,11 @@ def test_replace_file_selection_writes_text_selection_and_registers_change(
 
 def test_replace_file_selection_requires_existing_selection(tmp_path, monkeypatch):
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
     notes_path = tmp_path / "notes.txt"
     notes_path.write_text("alpha beta", encoding="utf-8")
 
@@ -1329,119 +1341,18 @@ def test_replace_file_selection_requires_existing_selection(tmp_path, monkeypatc
     assert notes_path.read_text(encoding="utf-8") == "alpha beta"
 
 
-def test_annotate_file_docx_requirement_returns_streaming_native_tool_result(
-    tmp_path, monkeypatch
-):
-    import app.core.agent.file_task_doc_annotate_bridge as bridge
-    import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_contract import (
-        FileTaskToolStreamChunk,
-        FileTaskToolStreamResult,
-    )
-    from app.core.agent.file_task_tool_gateway import (
-        FileTaskToolContext,
-        FileTaskToolGateway,
-    )
-
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
-    docx_path = tmp_path / "draft.docx"
-    docx_path.write_bytes(b"PK\x03\x04")
-
-    captured = {}
-
-    def fake_stream_request_as_tool(request, *, workspace_root="", gemini_client=None):
-        captured["request"] = request
-        captured["workspace_root"] = workspace_root
-        captured["gemini_client"] = gemini_client
-        return FileTaskToolStreamResult(
-            chunks=[
-                FileTaskToolStreamChunk(
-                    kind="event",
-                    event_type="step_progress",
-                    payload={
-                        "detail": "已写入 1/2 条修订",
-                        "file_updated": True,
-                        "path": "draft.docx",
-                        "file_path": "draft.docx",
-                        "applied": 1,
-                    },
-                ),
-                FileTaskToolStreamChunk(
-                    kind="result",
-                    payload={
-                        "success": True,
-                        "path": "draft.docx",
-                        "file_path": "draft.docx",
-                        "annotations_added": 2,
-                        "updated_in_place": True,
-                    },
-                ),
-            ]
-        )
-
-    monkeypatch.setattr(bridge, "stream_request_as_tool", fake_stream_request_as_tool)
-
-    gateway = FileTaskToolGateway(
-        context=FileTaskToolContext(
-            task_files=[{"path": "draft.docx", "type": "docx", "target": True}],
-            workspace_root=str(tmp_path),
-            gemini_client="gemini-client",
-            request_context={
-                "task": "请批注不通顺的地方",
-                "target_path": "draft.docx",
-                "model_mode": "cloud",
-                "model_id": "gemini-2.5-pro",
-            },
-        )
-    )
-
-    result = gateway.execute(
-        "annotate_file",
-        {
-            "path": "draft.docx",
-            "annotations": "[]",
-            "requirement": "请批注不通顺的地方",
-        },
-    )
-
-    assert isinstance(result, FileTaskToolStreamResult)
-
-    chunks = list(result.chunks)
-    progress_chunk = next(
-        chunk
-        for chunk in chunks
-        if chunk.kind == "event"
-        and chunk.event_type == "step_progress"
-        and chunk.payload.get("file_updated")
-    )
-    final_chunk = chunks[-1]
-
-    assert captured["gemini_client"] == "gemini-client"
-    assert captured["workspace_root"] == str(tmp_path)
-    assert captured["request"].target_path == "draft.docx"
-    assert captured["request"].task == "请批注不通顺的地方"
-    assert captured["request"].model_id == "gemini-2.5-pro"
-    assert any(
-        file_info.type == "docx" and file_info.target
-        for file_info in captured["request"].files
-    )
-    assert progress_chunk.payload["path"] == "draft.docx"
-    assert final_chunk.kind == "result"
-    assert final_chunk.payload["path"] == "draft.docx"
-    assert final_chunk.payload["annotations_added"] == 2
-    assert final_chunk.payload["updated_in_place"] is True
-
-
 def test_clear_docx_review_marks_removes_docx_comments_and_registers_file_change(
     tmp_path, monkeypatch
 ):
     docx_module = pytest.importorskip("docx")
 
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
-    from web.track_changes_editor import TrackChangesEditor
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
+    from app.core.file.track_changes import TrackChangesEditor
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     docx_path = tmp_path / "draft.docx"
     document = docx_module.Document()
@@ -1544,9 +1455,11 @@ def test_compare_docx_and_annotate_writes_word_comments(tmp_path, monkeypatch):
     docx_module = pytest.importorskip("docx")
 
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     original_path = tmp_path / "humanise!.docx"
     revised_path = tmp_path / "humanise!_revised.docx"
@@ -1615,7 +1528,9 @@ def test_compare_docx_and_annotate_can_mark_original_document(tmp_path, monkeypa
 
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     original_path = tmp_path / "humanise!.docx"
     revised_path = tmp_path / "humanise!_revised.docx"
@@ -1663,9 +1578,11 @@ def test_plan_then_write_docx_comments_marks_original_document(tmp_path, monkeyp
     docx_module = pytest.importorskip("docx")
 
     import app.core.agent.task_tools as task_tools
-    from app.core.agent.file_task_tool_catalog import parse_file_change
+    from app.core.agent.toolkits.foundation.catalog import parse_file_change
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     original_path = tmp_path / "contract_old.docx"
     revised_path = tmp_path / "contract_new.docx"
@@ -1746,7 +1663,9 @@ def test_write_docx_comments_accepts_anchor_text_alias(tmp_path, monkeypatch):
 
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     target_path = tmp_path / "contract_old.docx"
     document = docx_module.Document()
@@ -1776,7 +1695,9 @@ def test_write_docx_comments_appends_after_existing_comments(tmp_path, monkeypat
 
     import app.core.agent.task_tools as task_tools
 
-    monkeypatch.setattr(task_tools, "_WORKSPACE_ROOT", str(tmp_path))
+    monkeypatch.setattr(
+        "app.core.agent.task_tools_common._WORKSPACE_ROOT", str(tmp_path)
+    )
 
     docx_path = tmp_path / "contract_comments.docx"
     doc = docx_module.Document()
@@ -1823,96 +1744,3 @@ def test_normalize_docx_review_clear_scope_accepts_annotation_synonyms():
 
     assert task_tools._normalize_docx_review_clear_scope("标注") == "comments"
     assert task_tools._normalize_docx_review_clear_scope("annotation") == "comments"
-
-
-def test_annotate_file_pdf_docx_requirement_uses_bridge_streaming_tool_result(
-    tmp_path, monkeypatch
-):
-    import app.core.agent.file_task_doc_annotate_bridge as bridge
-    from app.core.agent.file_task_contract import (
-        FileTaskToolStreamChunk,
-        FileTaskToolStreamResult,
-    )
-    from app.core.agent.file_task_tool_gateway import (
-        FileTaskToolContext,
-        FileTaskToolGateway,
-    )
-
-    pdf_path = tmp_path / "source.pdf"
-    pdf_path.write_bytes(b"%PDF-1.4\n")
-    docx_path = tmp_path / "translation.docx"
-    docx_path.write_bytes(b"PK\x03\x04")
-
-    captured = {}
-
-    def fake_stream_request_as_tool(request, *, workspace_root="", gemini_client=None):
-        captured["request"] = request
-        captured["workspace_root"] = workspace_root
-        captured["gemini_client"] = gemini_client
-        return FileTaskToolStreamResult(
-            chunks=[
-                FileTaskToolStreamChunk(
-                    kind="event",
-                    event_type="plan.confirmed",
-                    payload={"summary": "按 3 批执行"},
-                ),
-                FileTaskToolStreamChunk(
-                    kind="result",
-                    payload={
-                        "success": True,
-                        "summary": "文件较大，已生成 3 批执行计划，等待确认开始第 1/3 批。",
-                        "awaiting_confirmation": True,
-                    },
-                ),
-            ]
-        )
-
-    monkeypatch.setattr(bridge, "stream_request_as_tool", fake_stream_request_as_tool)
-
-    gateway = FileTaskToolGateway(
-        context=FileTaskToolContext(
-            task_files=[
-                {"path": str(pdf_path), "type": "pdf"},
-                {"path": str(docx_path), "type": "docx", "target": True},
-            ],
-            workspace_root=str(tmp_path),
-            gemini_client="gemini-client",
-            request_context={
-                "task": "PDF是原文，docx文件是现有翻译稿。文件较大，请拆成多个分段来处理。",
-                "target_path": str(docx_path),
-                "options": {},
-                "model_mode": "cloud",
-                "model_id": "gemini-2.5-pro",
-            },
-        )
-    )
-
-    result = gateway.execute(
-        "annotate_file",
-        {
-            "path": str(docx_path),
-            "annotations": "[]",
-            "requirement": "根据原文审校译稿并拆分执行",
-        },
-    )
-
-    assert isinstance(result, FileTaskToolStreamResult)
-    assert captured["workspace_root"] == str(tmp_path)
-    assert captured["gemini_client"] == "gemini-client"
-    assert captured["request"].target_path == str(docx_path)
-    assert any(file_info.type == "pdf" for file_info in captured["request"].files)
-    assert any(
-        file_info.type == "docx" and file_info.target
-        for file_info in captured["request"].files
-    )
-
-
-def test_file_snapshot_treats_missing_new_target_as_empty_snapshot(tmp_path):
-    from app.core.file.multi_file_coordinator import FileSnapshot
-
-    missing_path = tmp_path / "new_target.txt"
-    snapshot = FileSnapshot.from_file(str(missing_path))
-
-    assert snapshot.path == str(missing_path)
-    assert snapshot.content == ""
-    assert snapshot.content_hash

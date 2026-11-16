@@ -1,6 +1,6 @@
 """
 E2E Test — 真实 Gemini API 端到端测试
-验证 UnifiedAgent 完整 ReAct 循环:
+验证生产 KernelAgent 完整模型—工具循环:
   LLM 调用 → 工具选择 → 工具执行 → 观察 → 最终回答
 """
 
@@ -14,12 +14,12 @@ sys.path.insert(0, PROJECT_ROOT)
 from dotenv import load_dotenv
 
 # Load API key the same way web/app.py does
-config_path = os.path.join(PROJECT_ROOT, "config", "gemini_config.env")
+config_path = os.path.join(PROJECT_ROOT, "config", "deepseek_config.env")
 load_dotenv(config_path)
 
 key = os.getenv("GEMINI_API_KEY") or os.getenv("API_KEY")
 if not key:
-    print("❌ No API key found in config/gemini_config.env")
+    print("❌ No API key found in config/deepseek_config.env")
     sys.exit(1)
 print(f"Key loaded: {key[:8]}...{key[-4:]}")
 

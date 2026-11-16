@@ -5,7 +5,7 @@
 Koto OpenAI Provider
 ====================
 Implements LLMProvider for OpenAI-compatible APIs (gpt-4o, gpt-4.1, etc.).
-Returns the same response dict format as GeminiProvider so UnifiedAgent
+Returns the same response dict format as GeminiProvider so KernelAgent
 and all other consumers work without modification:
 
     {
@@ -28,6 +28,7 @@ import time
 from typing import Any, Dict, Generator, List, Optional, Union
 
 from .base import LLMProvider
+from .stream_control import watch_stream_cancellation
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,8 @@ except ImportError:
 
 class OpenAIProvider(LLMProvider):
     """OpenAI / Azure-OpenAI compatible LLM provider."""
+
+    streaming_tool_calls = True
 
     MAX_RETRIES = 3
     RETRY_BASE_DELAY = 2.0
@@ -116,6 +119,8 @@ class OpenAIProvider(LLMProvider):
         ):
             if kwargs.get(passthrough_key) is not None:
                 call_kwargs[passthrough_key] = kwargs[passthrough_key]
+        if kwargs.get("call_timeout") is not None and "timeout" not in call_kwargs:
+            call_kwargs["timeout"] = kwargs["call_timeout"]
         if oai_tools:
             call_kwargs["tools"] = oai_tools
             call_kwargs["tool_choice"] = "auto"
@@ -133,15 +138,14 @@ class OpenAIProvider(LLMProvider):
                     return self._stream_generator(
                         self.client.chat.completions.create(**call_kwargs),
                         model=model,
-                        skill_id=kwargs.get("skill_id"),
                         session_id=kwargs.get("session_id"),
+                        cancel_check=kwargs.get("_cancel_check"),
                     )
                 resp = self.client.chat.completions.create(**call_kwargs)
                 result = self._format_response(resp)
                 self._track_usage(
                     model,
                     result.get("usage"),
-                    skill_id=kwargs.get("skill_id"),
                     session_id=kwargs.get("session_id"),
                 )
                 return result
@@ -429,10 +433,24 @@ class OpenAIProvider(LLMProvider):
 
         usage = {}
         if resp.usage:
-            usage = {
-                "prompt_tokens": resp.usage.prompt_tokens or 0,
-                "completion_tokens": resp.usage.completion_tokens or 0,
-            }
+            dump = getattr(resp.usage, "model_dump", None)
+            if callable(dump):
+                reported = dump()
+                if isinstance(reported, dict):
+                    usage = reported
+            if not usage:
+                usage = {
+                    "prompt_tokens": getattr(resp.usage, "prompt_tokens", None),
+                    "completion_tokens": getattr(resp.usage, "completion_tokens", None),
+                }
+                for key in (
+                    "total_tokens",
+                    "prompt_tokens_details",
+                    "prompt_cache_hit_tokens",
+                ):
+                    value = getattr(resp.usage, key, None)
+                    if value is not None:
+                        usage[key] = value
 
         result = {"content": content, "tool_calls": tool_calls, "usage": usage}
         if reasoning_content:
@@ -443,28 +461,93 @@ class OpenAIProvider(LLMProvider):
         self,
         stream_resp: Any,
         model: str,
-        skill_id: Optional[str] = None,
         session_id: Optional[str] = None,
+        cancel_check: Any = None,
     ) -> Generator[Dict[str, Any], None, None]:
         accumulated = ""
-        for chunk in stream_resp:
-            usage = getattr(chunk, "usage", None)
-            if usage:
-                self._track_usage(
-                    model,
-                    usage,
-                    skill_id=skill_id,
-                    session_id=session_id,
+        reasoning = ""
+        calls: Dict[int, Dict[str, str]] = {}
+        total_usage: Dict[str, Any] = {}
+        finish_reason = ""
+        cancel_monitor = watch_stream_cancellation(stream_resp, cancel_check)
+        try:
+            for chunk in stream_resp:
+                usage = getattr(chunk, "usage", None)
+                if usage:
+                    self._track_usage(model, usage, session_id=session_id)
+                    total_usage = (
+                        usage.model_dump()
+                        if hasattr(usage, "model_dump")
+                        else dict(usage)
+                    )
+                choices = getattr(chunk, "choices", None) or []
+                if not choices:
+                    continue
+                choice = choices[0]
+                finish_reason = str(
+                    getattr(choice, "finish_reason", None) or finish_reason
                 )
-
-            delta = chunk.choices[0].delta if chunk.choices else None
-            if delta is None:
-                continue
-            piece = delta.content or ""
-            accumulated += piece
+                delta = getattr(choice, "delta", None)
+                if delta is None:
+                    continue
+                piece = str(getattr(delta, "content", None) or "")
+                accumulated += piece
+                reasoning += str(getattr(delta, "reasoning_content", None) or "")
+                for item in getattr(delta, "tool_calls", None) or []:
+                    index = int(getattr(item, "index", 0) or 0)
+                    call = calls.setdefault(
+                        index, {"id": "", "name": "", "arguments": ""}
+                    )
+                    call["id"] += str(getattr(item, "id", None) or "")
+                    function = getattr(item, "function", None)
+                    if function is not None:
+                        call["name"] += str(getattr(function, "name", None) or "")
+                        call["arguments"] += str(
+                            getattr(function, "arguments", None) or ""
+                        )
+                if piece:
+                    yield {
+                        "content": accumulated,
+                        "delta": piece,
+                        "tool_calls": [],
+                        "usage": {},
+                    }
+            if callable(cancel_check) and cancel_check():
+                raise RuntimeError("Model generation cancelled")
+            if finish_reason in {"length", "content_filter"}:
+                raise RuntimeError(
+                    f"Model stream ended before completion: {finish_reason}"
+                )
+            complete_calls = []
+            for index, call in sorted(calls.items()):
+                if not call["name"]:
+                    raise ValueError("Streamed tool call has no function name")
+                if finish_reason != "tool_calls":
+                    raise ValueError(
+                        "Streamed tool call ended without a tool_calls completion"
+                    )
+                arguments = json.loads(call["arguments"] or "{}")
+                if not isinstance(arguments, dict):
+                    raise ValueError("Streamed tool arguments must be a JSON object")
+                complete_calls.append(
+                    {
+                        "id": call["id"] or f"call_{index}",
+                        "name": call["name"],
+                        "args": arguments,
+                    }
+                )
             yield {
                 "content": accumulated,
-                "tool_calls": [],
-                "usage": usage.model_dump() if usage else {},
-                "delta": piece,
+                "delta": "",
+                "tool_calls": complete_calls,
+                "reasoning_content": reasoning,
+                "usage": total_usage,
+                "model": model,
+                "finish_reason": finish_reason,
+                "stream_final": True,
             }
+        finally:
+            cancel_monitor.set()
+            close = getattr(stream_resp, "close", None)
+            if callable(close):
+                close()

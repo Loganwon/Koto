@@ -83,6 +83,13 @@ interface ReviewState {
 
 type ReviewMode = 'all' | 'comments' | 'proposals';
 
+// Keep normalization idempotent without leaking bookkeeping into serialized
+// tab state.  Review rendering calls ensureTabReviewState() from several
+// surfaces; remapping and JSON-cloning every item on every call turns card
+// rendering into O(n²) work for large reviewed documents.
+const normalizedCommentsRef = Symbol('normalizedReviewCommentsRef');
+const normalizedProposalsRef = Symbol('normalizedReviewProposalsRef');
+
 function cleanString(value: any): string {
   return String(value == null ? '' : value).trim();
 }
@@ -164,12 +171,27 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     // resolve an entry and then call ensureTabReviewState() again before
     // mutating it; replacing the arrays with cloned normalized objects here
     // made saves, edits and deletes silently target stale entries.
-    existing.comments = existingComments.length
-      ? existingComments.map((comment: ReviewComment, index: number) => Object.assign(comment, normalizeReviewComment(comment, index)))
-      : serverComments.map(normalizeReviewComment);
-    existing.proposals = existingProposals.length
-      ? existingProposals.map((proposal: ReviewProposal, index: number) => Object.assign(proposal, normalizeReviewProposal(proposal, index)))
-      : mergeReviewProposals([], serverProposals);
+    const commentSource = existing[normalizedCommentsRef] === existingComments
+      ? existingComments
+      : (existingComments.length ? existingComments : serverComments);
+    if (existing[normalizedCommentsRef] !== commentSource) {
+      existing.comments = commentSource.map((comment: ReviewComment, index: number) => (
+        Object.assign(comment, normalizeReviewComment(comment, index))
+      ));
+      existing[normalizedCommentsRef] = existing.comments;
+    }
+
+    const proposalSource = existing[normalizedProposalsRef] === existingProposals
+      ? existingProposals
+      : (existingProposals.length ? existingProposals : serverProposals);
+    if (existing[normalizedProposalsRef] !== proposalSource) {
+      existing.proposals = existingProposals.length
+        ? proposalSource.map((proposal: ReviewProposal, index: number) => (
+            Object.assign(proposal, normalizeReviewProposal(proposal, index))
+          ))
+        : mergeReviewProposals([], serverProposals);
+      existing[normalizedProposalsRef] = existing.proposals;
+    }
     existing.focusedId = cleanString(existing.focusedId);
     existing.expandedId = cleanString(existing.expandedId);
     tab.reviewState = existing;
@@ -262,14 +284,16 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     return out;
   }
 
-  function syncDocCommentStateForActiveFile(nextComments: ReviewComment[]): ReviewComment[] {
+  function syncDocCommentStateForActiveFile(nextComments?: ReviewComment[]): ReviewComment[] {
     const tab = activeReviewTab();
     const reviewState = ensureTabReviewState(tab);
     if (!reviewState) return [];
     if (Array.isArray(nextComments)) {
       reviewState.comments = nextComments.map(normalizeReviewComment);
+      (reviewState as any)[normalizedCommentsRef] = reviewState.comments;
     } else if (tab?.serverData && Array.isArray(tab.serverData.comments)) {
       reviewState.comments = tab.serverData.comments.map(normalizeReviewComment);
+      (reviewState as any)[normalizedCommentsRef] = reviewState.comments;
     }
     return reviewState.comments;
   }
@@ -304,6 +328,7 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     reviewState.proposals = options.replace
       ? mergeReviewProposals([], incoming)
       : mergeReviewProposals(reviewState.proposals, incoming);
+    (reviewState as any)[normalizedProposalsRef] = reviewState.proposals;
     if (tab?.serverData && typeof tab.serverData === 'object') {
       tab.serverData.proposals = reviewState.proposals.map((proposal) => clone(proposal, {}) || {});
     }
@@ -330,5 +355,3 @@ export function createReviewState(deps: { state: AppState; cloneSerializable?: (
     visibleReviewProposals,
   };
 }
-
-(window as any).KotoDocxReviewState = { create: createReviewState };

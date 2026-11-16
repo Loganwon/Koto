@@ -5,7 +5,7 @@
 FileRegistry — Koto 统一文件元数据注册表
 ==========================================
 解决的核心问题：
-  FileScanner / FileIndexer / ArchiveSearchEngine / RAGService / upload 各存各的，
+  FileScanner / ArchiveSearchEngine / RAGService / upload 曾各存各的，
   Agent 找文件无从下手，同一文件可能被多个引擎重复索引。
 
 设计原则：
@@ -35,7 +35,6 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import os
 import sqlite3
 import threading
 import uuid
@@ -44,55 +43,47 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    prepare_runtime_database,
+    runtime_data_path,
+    runtime_database_path,
+)
+
 logger = logging.getLogger(__name__)
 
 # ── 默认路径 ─────────────────────────────────────────────────────────────────
-_DEFAULT_DB_PATH = str(
-    Path(
-        os.environ.get(
-            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+_DEFAULT_DB_PATH = str(runtime_database_path("koto_checkpoints.sqlite"))
+
+
+def _resolve_db_path(db_path: Optional[str] = None) -> str:
+    if db_path:
+        return db_path
+    return str(
+        prepare_runtime_database(
+            _DEFAULT_DB_PATH,
+            legacy_paths=(legacy_config_path("koto_checkpoints.sqlite"),),
         )
     )
-    / "koto_checkpoints.sqlite"
-)
+
 
 # ── 单例 ─────────────────────────────────────────────────────────────────────
 _registry_instance: Optional["FileRegistry"] = None
 _registry_lock = threading.Lock()
 
 # ── 文件语义索引（RAG）─────────────────────────────────────────────────────────
-_file_rag_instance = None
-_file_rag_lock = threading.Lock()
-_FILE_RAG_INDEX_DIR = str(
-    Path(
-        os.environ.get(
-            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
-        )
-    )
-    / "file_rag_index"
-)
+_FILE_RAG_INDEX_DIR = str(runtime_data_path("file_rag_index"))
 
 
 def _get_file_rag_service():
     """懒加载文件专用 RAG 服务（独立索引目录，不污染知识库 rag_index）。"""
-    global _file_rag_instance
-    if _file_rag_instance is None:
-        with _file_rag_lock:
-            if _file_rag_instance is None:
-                try:
-                    from app.core.services.rag_service import RAGService
+    try:
+        from app.core.services.rag_service import get_rag_service
 
-                    _file_rag_instance = RAGService(
-                        index_dir=_FILE_RAG_INDEX_DIR,
-                        auto_load=True,
-                    )
-                    logger.info("[FileRegistry] 🔍 文件语义索引已加载")
-                except Exception as exc:
-                    logger.warning(
-                        f"[FileRegistry] 语义索引不可用，仅使用 FTS5 搜索: {exc}"
-                    )
-                    _file_rag_instance = None
-    return _file_rag_instance
+        return get_rag_service(index_dir=_FILE_RAG_INDEX_DIR)
+    except Exception as exc:
+        logger.warning(f"[FileRegistry] 语义索引不可用，仅使用 FTS5 搜索: {exc}")
+        return None
 
 
 def _index_content_to_rag(path: str, content: str) -> None:
@@ -566,7 +557,7 @@ class FileRegistry:
     """
 
     def __init__(self, db_path: Optional[str] = None):
-        self._db_path = db_path or _DEFAULT_DB_PATH
+        self._db_path = _resolve_db_path(db_path)
         Path(self._db_path).parent.mkdir(parents=True, exist_ok=True)
         self._conn = self._open_conn()
         self._init_schema()

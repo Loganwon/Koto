@@ -41,9 +41,8 @@ Koto ContextProvider — 用户自定义上下文注入系统
 
 更多示例见 config/context/_EXAMPLES/ 目录。
 
-与 Skills 的区别：
-  - Skills 改变 AI 的行为方式（如：步骤化输出、严谨模式）
-  - ContextProvider 注入背景知识（如：项目信息、用户偏好、领域背景）
+ContextProvider 只负责注入背景知识（如项目信息、用户偏好、领域背景），
+不负责外部工具、RAG 或工作流扩展；这些能力由 Add-on 边界管理。
 
 @version 2026-05-26
 """
@@ -241,7 +240,7 @@ class ContextProvider:
         将匹配的上下文块注入到系统提示中。
 
         Args:
-            system_prompt: 当前系统提示（Skills 注入后的版本）
+            system_prompt: 当前系统提示
             task_type:     当前任务类型
 
         Returns:

@@ -11,7 +11,6 @@ Koto RemediationPolicy — 自愈策略引擎
   ─────────────────────────────────────────────────────
   model_fallback        dependency_unhealthy        切换到备用本地模型
   queue_drain           job_failed (连续 5 次)       清空并重排挂起任务
-  skill_circuit_breaker skill_exec 失败计数 ≥ 3      临时禁用技能
   scheduler_backoff     scheduler_skipped ≥ 3       减少调度频率
   gc_on_memory          memory_pressure             强制 Python GC
 
@@ -202,16 +201,6 @@ class RemediationPolicy:
         )
         self.add_rule(
             RemediationRule(
-                name="disable_failed_skill",
-                trigger_event="job_failed",
-                action=_action_disable_failed_skill,
-                cooldown_seconds=300,
-                min_occurrences=3,
-                window_seconds=600,
-            )
-        )
-        self.add_rule(
-            RemediationRule(
                 name="notify_model_fallback",
                 trigger_event="model_fallback",
                 action=_action_log_model_fallback,
@@ -239,32 +228,6 @@ def _action_gc(event, ctx):
     """强制 Python 垃圾回收。"""
     before = gc.collect()
     logger.info("[Remediation] GC 完成，回收对象数: %d", before)
-
-
-def _action_disable_failed_skill(event, ctx):
-    """当某个 skill_exec 作业连续失败时，临时禁用对应技能。"""
-    detail = event.detail
-    skill_id = detail.get("skill_id") or (
-        detail.get("payload", {}).get("skill_id")
-        if isinstance(detail.get("payload"), dict)
-        else None
-    )
-    if not skill_id:
-        return
-    try:
-        from app.core.skills.skill_manager import SkillManager
-
-        SkillManager.set_enabled(skill_id, False)
-        logger.warning("[Remediation] 技能 %s 已自动禁用（多次失败）", skill_id)
-        from app.core.ops.ops_event_bus import get_ops_bus
-
-        get_ops_bus().emit(
-            "skill_disabled",
-            {"skill_id": skill_id, "reason": "auto_disabled_after_repeated_failures"},
-            severity="warning",
-        )
-    except Exception as exc:
-        logger.warning("[Remediation] 禁用技能失败: %s", exc)
 
 
 def _action_log_model_fallback(event, ctx):

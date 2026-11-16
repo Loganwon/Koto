@@ -3,7 +3,6 @@
 # SPDX-License-Identifier: LicenseRef-Koto-Proprietary
 from __future__ import annotations
 
-import re
 from typing import Any, Dict, List
 
 from app.core.agent.file_task_contract import (
@@ -12,78 +11,12 @@ from app.core.agent.file_task_contract import (
     FileTaskIntentPlan,
     FileTaskRequest,
 )
-from app.core.agent.file_task_recipes import (
-    request_file_types,
-    request_target_file_type,
-    semantic_markers,
-)
-from app.core.agent.file_task_tool_catalog import is_write_tool
+from app.core.agent.file_task_file_facts import request_file_types
+from app.core.agent.toolkits.foundation.catalog import is_write_tool
 
 
 def file_types(files: List[FileTaskFile]) -> set[str]:
     return request_file_types(files)
-
-
-def looks_like_chart_request(task: str) -> bool:
-    return semantic_markers(task).get("chart_request", False)
-
-
-def looks_like_problem_analysis_request(task: str) -> bool:
-    return semantic_markers(task).get("problem_analysis_request", False)
-
-
-def looks_like_financial_request(task: str) -> bool:
-    return semantic_markers(task).get("financial_request", False)
-
-
-def looks_like_table_request(task: str) -> bool:
-    return semantic_markers(task).get("table_request", False)
-
-
-def looks_like_summary_request(task: str) -> bool:
-    return semantic_markers(task).get("summary_request", False)
-
-
-def looks_like_translation_request(task: str) -> bool:
-    return semantic_markers(task).get("translation_request", False)
-
-
-def looks_like_polish_request(task: str) -> bool:
-    return semantic_markers(task).get("polish_request", False)
-
-
-def looks_like_ppt_request(task: str, files: List[FileTaskFile]) -> bool:
-    return semantic_markers(task, file_types=file_types(files)).get(
-        "ppt_request", False
-    )
-
-
-def looks_like_ppt_slide_write_request(
-    request: FileTaskRequest, files: List[FileTaskFile]
-) -> bool:
-    return semantic_markers(request.task, file_types=file_types(files)).get(
-        "ppt_slide_write_request", False
-    )
-
-
-def looks_like_docx_report_request(
-    request: FileTaskRequest, files: List[FileTaskFile]
-) -> bool:
-    return semantic_markers(
-        request.task,
-        file_types=file_types(files),
-        target_file_type=request_target_file_type(request, files),
-    ).get("docx_report_request", False)
-
-
-def looks_like_financial_xlsx_docx_chart_report_task(
-    request: FileTaskRequest, files: List[FileTaskFile]
-) -> bool:
-    return semantic_markers(
-        request.task,
-        file_types=file_types(files),
-        target_file_type=request_target_file_type(request, files),
-    ).get("financial_xlsx_docx_chart_report", False)
 
 
 def looks_like_pdf_python_text_read(code: Any) -> bool:
@@ -158,8 +91,6 @@ def should_prompt_for_write_after_tool_round(
         for call in tool_calls
     ):
         return False
-    if looks_like_financial_xlsx_docx_chart_report_task(request, files):
-        return True
     return round_index >= 2
 
 
@@ -169,30 +100,15 @@ def write_retry_message(request: FileTaskRequest, files: List[FileTaskFile]) -> 
         "",
     )
     current_file_types = file_types(files)
-    task_text = str(request.task or "")
     hint = (
         "你还没有完成真实文件写入。不要只总结或结束，下一轮必须调用会修改文件的工具。"
     )
-    if looks_like_financial_xlsx_docx_chart_report_task(request, files):
-        hint += (
-            " 当前是 Excel 财务预测图表+问题写入 DOCX 任务：不要只插入 Excel 原表，也不要只输出 Python stdout。"
-            " 先用 run_python_code 生成真实 PNG/JPG 图表并输出 KOTO_CREATED 路径；"
-            "再调用 write_docx_content 写入问题清单/分析结论；"
-            "最后调用 insert_image_into_docx 把生成的真实图片插入目标 DOCX。"
-            " 解析 P&L 时不要依赖 pandas 默认列名；如果列名是 Unnamed，应扫描每一行找到 2025E/2026E/2027E/2028E 等年份头，再按这些列抽取收入、毛利、费用、净利润等指标。"
-        )
-    elif "xlsx" in current_file_types and "docx" in current_file_types:
+    if "xlsx" in current_file_types and "docx" in current_file_types:
         hint += " 对于把 Excel 加入 Word，优先调用 insert_excel_as_docx_table；如果已经读到真实工作表名，就用真实 sheet 写入目标 docx。"
-    if "docx" in current_file_types and re.search(
-        r"(?:图表|可视化|绘图|画图|画.{0,4}图|图片|chart|plot|graph|image)",
-        task_text,
-        re.IGNORECASE,
-    ):
-        hint += " 如果用户要求把图表或图片加入 DOCX，先用 run_python_code 生成真实 PNG/JPG 文件，再调用 insert_image_into_docx；不要用 write_docx_content 把图片描述文字写进文档代替真实插图。"
     if {"txt", "md", "csv", "json", "py", "js", "html", "css"}.intersection(
         current_file_types
     ):
-        hint += " 对于 TXT/MD/CSV/JSON 或代码文本文件，如果用户提供了选区并要求润色/改写/替换后写回，优先调用 replace_file_selection，用 original_selection=用户选区原文、new_content=改写结果；不要为了单个选区改写去 run_python_code 整文件覆写。没有选区时，先用 read_file_range 或 parse_file_to_text 读取必要内容，再选择 replace_file_selection 或 run_python_code 写回；如果只是批注/审校可用 annotate_file。不要只输出润色后的文本而不落盘。"
+        hint += " 对于 TXT/MD/CSV/JSON 或代码文本文件，如果用户提供了选区并要求润色/改写/替换后写回，优先调用 replace_file_selection，用 original_selection=用户选区原文、new_content=改写结果；不要为了单个选区改写去 run_python_code 整文件覆写。没有选区时，先用 read_file_range 或 parse_file_to_text 读取必要内容，再选择 replace_file_selection 或 run_python_code 写回。只有 DOCX 支持原生批注，应调用 write_docx_comments；其他格式不要声称已经写入批注。不要只输出润色后的文本而不落盘。"
     if "pdf" in current_file_types:
         hint += " 读取 PDF 原文必须调用 parse_file_to_text；长文必须用 start_page/end_page 分段读取，不要用 run_python_code、PyPDF2、pdfplumber 或 fitz 直接解析 PDF。"
     if "pdf" in current_file_types and "docx" in current_file_types:

@@ -55,7 +55,6 @@ def _preprocess_hook(ctx: HookContext) -> None:
 
     ctx.metadata["system_instruction"] = result.system_instruction
     ctx.metadata["prompt"] = result.safe_prompt
-    ctx.metadata["skill_ids"] = result.skill_ids
     ctx.metadata["mask_result"] = result.mask_result
     ctx.metadata["force_local"] = result.force_local
 
@@ -66,12 +65,11 @@ def _fallback_preprocess(ctx: HookContext) -> None:
     system_instruction = ctx.metadata.get("system_instruction", "")
     history = ctx.metadata.get("history", [])
     raw_prompt = getattr(request, "prompt", prompt) if request else prompt
-    output_mode = getattr(request, "output_mode", "") if request else ""
 
     try:
-        from app.core.app_context import ctx as app_context
+        from app.core.services.memory_manager import get_memory_manager
 
-        memory_manager = app_context.memory_manager
+        memory_manager = get_memory_manager()
         if memory_manager is not None:
             memory_context = memory_manager.get_context_string(
                 raw_prompt,
@@ -84,22 +82,6 @@ def _fallback_preprocess(ctx: HookContext) -> None:
     except Exception as exc:
         logger.debug("Memory fallback injection skipped: %s", exc)
 
-    try:
-        from app.core.skills.skill_auto_matcher import SkillAutoMatcher
-        from app.core.skills.skill_manager import SkillManager
-
-        task_type = "CHAT" if output_mode == "chat" else "FILE_GEN"
-        skill_ids = SkillAutoMatcher.match(raw_prompt, task_type=task_type)
-        ctx.metadata["system_instruction"] = SkillManager.inject_into_prompt(
-            ctx.metadata.get("system_instruction", system_instruction),
-            task_type=task_type,
-            user_input=raw_prompt,
-            temp_skill_ids=skill_ids,
-        )
-        ctx.metadata["skill_ids"] = skill_ids
-    except Exception as exc:
-        logger.debug("Skill fallback injection skipped: %s", exc)
-
 
 def _postprocess_hook(ctx: HookContext) -> None:
     try:
@@ -111,7 +93,6 @@ def _postprocess_hook(ctx: HookContext) -> None:
         result = EditorAIPipeline.postprocess(
             response_text=ctx.reply_text,
             mask_result=ctx.metadata.get("mask_result"),
-            skill_ids=ctx.metadata.get("skill_ids", []),
             user_prompt=ctx.metadata.get("raw_prompt", ""),
             file_type=ctx.metadata.get("file_type", ""),
         )
@@ -120,5 +101,4 @@ def _postprocess_hook(ctx: HookContext) -> None:
         return
 
     ctx.reply_text = result.text
-    ctx.metadata["suggestions"] = result.suggestions
     ctx.metadata["validation_action"] = result.validation_action

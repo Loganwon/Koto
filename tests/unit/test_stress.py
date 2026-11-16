@@ -2,7 +2,6 @@
 Stress tests — push core Koto components to their limits.
 
 Categories:
-  1.  AIRouter cache under concurrent load and eviction pressure
   2.  Auth rate-limiter saturation and boundary accuracy
   3.  TaskLedger concurrent writes / reads / lifecycle transitions
   4.  KnowledgeGraph concurrent SQLite connections (new conn per call)
@@ -71,143 +70,6 @@ def _barrier_run(target, n: int = THREADS, timeout: int = TIMEOUT):
 def _assert_no_errors(errors, label=""):
     failed = [(i, e) for i, e in enumerate(errors) if e is not None]
     assert not failed, f"{label} threads raised exceptions: {failed[:5]}"
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# 1. AIRouter cache — concurrent classify and eviction
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestAIRouterCacheStress:
-    """AIRouter._cache is a plain dict — no locks. Stress exposes race conditions."""
-
-    def setup_method(self):
-        from app.core.routing.ai_router import AIRouter
-
-        self.cls = AIRouter
-        self._orig_cache = AIRouter._cache.copy()
-        AIRouter._cache.clear()
-
-    def teardown_method(self):
-        self.cls._cache.clear()
-        self.cls._cache.update(self._orig_cache)
-
-    def test_concurrent_cache_set_no_corruption(self):
-        """50 threads each writing a unique key — final count must be exactly 50."""
-        from app.core.routing.ai_router import AIRouter
-
-        barrier = threading.Barrier(THREADS)
-        errors = []
-
-        def _worker(i):
-            try:
-                barrier.wait(timeout=TIMEOUT)
-                AIRouter._cache_set(f"key_{i}", ("CHAT", 0.9, None))
-            except Exception as exc:
-                errors.append(exc)
-
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(THREADS)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=TIMEOUT + 5)
-
-        assert not errors, f"Errors: {errors[:3]}"
-        # All 50 distinct keys should be present (or eviction ran — either fine)
-        assert len(AIRouter._cache) <= 50
-
-    def test_cache_eviction_under_overflow(self):
-        """Fill cache past _CACHE_MAX_SIZE — eviction must keep size bounded."""
-        from app.core.routing.ai_router import AIRouter
-
-        max_size = AIRouter._CACHE_MAX_SIZE
-
-        # Sequentially overfill
-        for i in range(max_size + 50):
-            AIRouter._cache_set(f"overflow_key_{i}", ("CHAT", 0.8, None))
-
-        # Must never exceed max size
-        assert (
-            len(AIRouter._cache) <= max_size
-        ), f"Cache grew to {len(AIRouter._cache)}, limit is {max_size}"
-
-    def test_concurrent_read_write_mix_no_crash(self):
-        """Mixed concurrent reads and writes must not crash."""
-        from app.core.routing.ai_router import AIRouter
-
-        # Pre-populate some keys
-        for i in range(20):
-            AIRouter._cache[f"pre_{i}"] = ("CODER", 0.7, None)
-
-        barrier = threading.Barrier(THREADS)
-        errors = []
-
-        def _worker(i):
-            try:
-                barrier.wait(timeout=TIMEOUT)
-                if i % 3 == 0:
-                    AIRouter._cache_set(f"new_key_{i}", ("CHAT", 0.9, None))
-                elif i % 3 == 1:
-                    _ = AIRouter._cache.get(f"pre_{i % 20}")
-                else:
-                    AIRouter._cache_set(f"pre_{i % 20}", ("FILE", 0.5, None))
-            except Exception as exc:
-                errors.append(exc)
-
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(THREADS)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=TIMEOUT + 5)
-
-        assert not errors, f"Errors: {errors[:3]}"
-
-    def test_cache_set_is_idempotent_under_concurrent_same_key(self):
-        """All threads writing the same key — no crash, final value is valid."""
-        from app.core.routing.ai_router import AIRouter
-
-        key = "shared_key"
-        barrier = threading.Barrier(THREADS)
-        errors = []
-
-        def _worker(i):
-            try:
-                barrier.wait(timeout=TIMEOUT)
-                AIRouter._cache_set(key, ("CHAT", float(i) / THREADS, None))
-            except Exception as exc:
-                errors.append(exc)
-
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(THREADS)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=TIMEOUT + 5)
-
-        assert not errors
-        assert key in AIRouter._cache
-        val = AIRouter._cache[key]
-        assert val[0] in ("CHAT", "CODER", "FILE", "IMAGE", "SEARCH", "REASON")
-
-    def test_eviction_removes_exactly_half(self):
-        """When cache hits max size, eviction should halve it."""
-        from app.core.routing.ai_router import AIRouter
-
-        max_size = AIRouter._CACHE_MAX_SIZE
-        # Fill to exactly max_size
-        for i in range(max_size):
-            AIRouter._cache[f"k{i}"] = ("CHAT", 0.5, None)
-
-        assert len(AIRouter._cache) == max_size
-
-        # One more write should trigger eviction
-        AIRouter._cache_set("trigger_eviction", ("CHAT", 0.9, None))
-
-        # Should be roughly half (max_size // 2 + 1)
-        expected_max = max_size // 2 + 5  # +5 for any timing variance
-        assert (
-            len(AIRouter._cache) <= expected_max
-        ), f"After eviction expected ≤{expected_max}, got {len(AIRouter._cache)}"
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -553,7 +415,7 @@ class TestKnowledgeGraphStress:
         if "concept_extractor" not in sys.modules:
             sys.modules["concept_extractor"] = MagicMock()
 
-        from web.knowledge_graph import KnowledgeGraph
+        from web.knowledge.knowledge_graph import KnowledgeGraph
 
         self._tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
         self._tmp.close()
@@ -709,124 +571,6 @@ class TestKnowledgeGraphStress:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# 5. SkillPipeline concurrent execution — context isolation
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-@pytest.mark.unit
-class TestSkillPipelineStress:
-    """Verify SkillPipeline creates fresh context per run and doesn't bleed state."""
-
-    def _make_step(self, skill_id: str, output_key: str = None):
-        from app.core.skills.skill_pipeline import PipelineStep
-
-        return PipelineStep(
-            skill_id=skill_id,
-            output_key=output_key or skill_id,
-        )
-
-    def test_concurrent_runs_have_isolated_contexts(self):
-        """50 concurrent run() calls on same pipeline — each sees only its own data."""
-        from app.core.skills.skill_pipeline import SkillPipeline
-
-        call_log: dict[int, list] = {}
-        log_lock = threading.Lock()
-
-        def _mock_dispatch(skill_id, user_input, context=None, **kwargs):
-            thread_id = threading.get_ident()
-            with log_lock:
-                call_log.setdefault(thread_id, []).append(
-                    (skill_id, user_input, id(context))
-                )
-            return f"result_{skill_id}_{user_input}"
-
-        pipeline = SkillPipeline(
-            steps=[
-                self._make_step("step_a"),
-                self._make_step("step_b"),
-            ]
-        )
-
-        barrier = threading.Barrier(THREADS)
-        errors = []
-        final_outputs = []
-        fout_lock = threading.Lock()
-
-        def _worker(i):
-            try:
-                barrier.wait(timeout=TIMEOUT)
-                with patch(
-                    "app.core.skills.skill_capability.SkillCapabilityRegistry.dispatch",
-                    side_effect=_mock_dispatch,
-                ):
-                    result = pipeline.run(user_input=f"user_input_{i}")
-                with fout_lock:
-                    final_outputs.append(result.final_output)
-            except Exception as exc:
-                errors.append(exc)
-
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(THREADS)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=TIMEOUT + 5)
-
-        assert not errors, f"Errors: {errors[:3]}"
-        assert len(final_outputs) == THREADS
-
-    def test_pipeline_success_rate_under_partial_failures(self):
-        """When half the steps error with skip_on_error=True, success rate = 100%."""
-        from app.core.skills.skill_pipeline import PipelineStep, SkillPipeline
-
-        call_count = 0
-        count_lock = threading.Lock()
-
-        def _flaky_dispatch(skill_id, user_input, context=None, **kwargs):
-            with count_lock:
-                nonlocal call_count
-                call_count += 1
-                n = call_count
-            if n % 2 == 0:
-                raise RuntimeError("Simulated flaky step")
-            return f"ok_{n}"
-
-        pipeline = SkillPipeline(
-            steps=[
-                PipelineStep(skill_id="flaky", output_key="flaky", skip_on_error=True),
-            ]
-        )
-
-        n = 40
-        results = []
-        rlock = threading.Lock()
-        barrier = threading.Barrier(n)
-        errors = []
-
-        def _worker(_):
-            try:
-                barrier.wait(timeout=TIMEOUT)
-                with patch(
-                    "app.core.skills.skill_capability.SkillCapabilityRegistry.dispatch",
-                    side_effect=_flaky_dispatch,
-                ):
-                    r = pipeline.run(user_input="test")
-                with rlock:
-                    results.append(r)
-            except Exception as exc:
-                errors.append(exc)
-
-        threads = [threading.Thread(target=_worker, args=(i,)) for i in range(n)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=TIMEOUT + 5)
-
-        assert not errors, f"Errors: {errors[:3]}"
-        # All runs should complete (even failed steps are skip_on_error)
-        assert len(results) == n
-
-
-# ═══════════════════════════════════════════════════════════════════════════════
 # 6. Flask API endpoint flood via test client
 # ═══════════════════════════════════════════════════════════════════════════════
 
@@ -836,7 +580,7 @@ class TestFlaskEndpointFlood:
     """Hit Flask endpoints with many concurrent requests via test client."""
 
     def test_ping_endpoint_concurrent(self, full_client):
-        """100 concurrent GET /api/skills — all must not produce 5xx."""
+        """100 concurrent Addon protocol reads must not produce 5xx."""
         n = 100
         results = []
         rlock = threading.Lock()
@@ -846,7 +590,7 @@ class TestFlaskEndpointFlood:
         def _worker(_):
             try:
                 barrier.wait(timeout=TIMEOUT)
-                r = full_client.get("/api/skills")
+                r = full_client.get("/api/plugin-protocol")
                 with rlock:
                     results.append(r.status_code)
             except Exception as exc:
@@ -919,8 +663,8 @@ class TestFlaskEndpointFlood:
             s < 500 for s in results
         ), f"5xx errors: {[s for s in results if s >= 500]}"
 
-    def test_skill_list_endpoint_flood(self, full_client):
-        """100 concurrent GET /api/skills — must not produce 5xx."""
+    def test_addon_catalog_endpoint_flood(self, full_client):
+        """100 concurrent Addon catalog reads must not produce 5xx."""
         n = 100
         results = []
         rlock = threading.Lock()
@@ -930,7 +674,7 @@ class TestFlaskEndpointFlood:
         def _worker(_):
             try:
                 barrier.wait(timeout=TIMEOUT)
-                r = full_client.get("/api/skills")
+                r = full_client.get("/api/plugin-protocol/catalog")
                 with rlock:
                     results.append(r.status_code)
             except Exception as exc:
@@ -949,7 +693,7 @@ class TestFlaskEndpointFlood:
         ), f"5xx errors: {[s for s in results if s >= 500]}"
 
     def test_concurrent_session_create_and_delete(self, full_client):
-        """50 threads flood skill list and job list concurrently — no 5xx."""
+        """50 threads flood plugin and canonical task lists concurrently."""
         n = 50
         barrier = threading.Barrier(n)
         errors = []
@@ -961,9 +705,9 @@ class TestFlaskEndpointFlood:
                 barrier.wait(timeout=TIMEOUT)
                 # Alternate between two read-only endpoints
                 if i % 2 == 0:
-                    r = full_client.get("/api/skills")
+                    r = full_client.get("/api/plugin-protocol")
                 else:
-                    r = full_client.get("/api/jobs")
+                    r = full_client.get("/api/tasks")
                 with rlock:
                     results.append(r.status_code)
             except Exception as exc:
@@ -989,29 +733,6 @@ class TestFlaskEndpointFlood:
 @pytest.mark.unit
 class TestLargePayloadStress:
     """Verify the system handles large inputs without crashing or truncating."""
-
-    def test_ai_router_classify_long_message(self):
-        """AIRouter.classify must handle a 50 KB message without crashing."""
-        from app.core.routing.ai_router import AIRouter
-
-        long_input = "Please analyze this document. " * 1800  # ~50 KB
-        assert len(long_input) > 50_000
-
-        # AIRouter.classify(client, user_input, timeout) — build a minimal mock client
-        mock_part = MagicMock()
-        mock_part.text = "CHAT"
-        mock_candidate = MagicMock()
-        mock_candidate.content.parts = [mock_part]
-        mock_response = MagicMock()
-        mock_response.candidates = [mock_candidate]
-        mock_client = MagicMock()
-        mock_client.models.generate_content.return_value = mock_response
-
-        try:
-            result = AIRouter.classify(mock_client, long_input, timeout=5.0)
-            assert result is not None
-        except Exception as e:
-            pytest.fail(f"classify() crashed on large input: {e}")
 
     def test_task_ledger_long_user_input(self):
         """TaskLedger handles a 100 KB user_input without crashing (input is stored, truncated to 1000 chars)."""
@@ -1049,7 +770,7 @@ class TestLargePayloadStress:
         if "concept_extractor" not in sys.modules:
             sys.modules["concept_extractor"] = MagicMock()
 
-        from web.knowledge_graph import KnowledgeGraph
+        from web.knowledge.knowledge_graph import KnowledgeGraph
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name
@@ -1094,22 +815,6 @@ class TestLargePayloadStress:
             except Exception:
                 pass
 
-    def test_flask_large_json_payload(self, full_client):
-        """POST endpoint receiving a large JSON body must not crash with 5xx."""
-        # /api/agent/run is registered in full_client (agent_bp at /api/agent)
-        large_payload = {
-            "session_id": "stress_large",
-            "user_input": "Analyze this: " + ("word " * 5000),  # ~30 KB
-        }
-
-        r = full_client.post(
-            "/api/agent/run",
-            json=large_payload,
-            content_type="application/json",
-        )
-        # Any response except 5xx is acceptable (might get 400, 401, 422, etc.)
-        assert r.status_code < 500, f"5xx on large payload: {r.status_code}"
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # 8. Memory growth — repeated operations must not leak
@@ -1123,22 +828,6 @@ class TestMemoryGrowthStress:
     def _count_objects(self):
         gc.collect()
         return len(gc.get_objects())
-
-    def test_ai_router_cache_does_not_grow_unboundedly(self):
-        """Running classify 2000 times must not make cache exceed _CACHE_MAX_SIZE."""
-        from app.core.routing.ai_router import AIRouter
-
-        orig = AIRouter._cache.copy()
-        try:
-            for i in range(2_000):
-                AIRouter._cache_set(f"msg_{i}", ("CHAT", 0.8, None))
-
-            assert (
-                len(AIRouter._cache) <= AIRouter._CACHE_MAX_SIZE
-            ), f"Cache size {len(AIRouter._cache)} exceeds limit {AIRouter._CACHE_MAX_SIZE}"
-        finally:
-            AIRouter._cache.clear()
-            AIRouter._cache.update(orig)
 
     def test_task_ledger_purge_keeps_size_bounded(self):
         """Create 500 tasks, purge all old ones — count should drop."""
@@ -1183,7 +872,7 @@ class TestMemoryGrowthStress:
         if "concept_extractor" not in sys.modules:
             sys.modules["concept_extractor"] = MagicMock()
 
-        from web.knowledge_graph import KnowledgeGraph
+        from web.knowledge.knowledge_graph import KnowledgeGraph
 
         with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
             db_path = f.name

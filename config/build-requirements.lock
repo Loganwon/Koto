@@ -1,0 +1,4 @@
+# Windows release build tools. Runtime dependencies stay in requirements.lock.
+# Keep these pinned so local and GitHub release lanes produce the same layout.
+Cython==3.2.5
+PyInstaller==6.20.0

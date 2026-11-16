@@ -4,16 +4,16 @@
  * Embedded workspace layout helpers.
  */
 
-import { _initSplit } from './panel-layout';
+import { initWorkspaceLayout, showConversationLayout } from './workspace-layout';
+import { showAllMaterials } from './workspace-materials';
 import { _addLocalFilesToAIContext, _attachFilesToTask } from '../workspace/ai-context';
+import { getFeatureRegistry, registerFeatures } from '../shared/feature-registry';
+import { $, showToast } from '../workspace/infrastructure';
+import { state as workspaceState } from '../workspace/state';
+import { ensureFileBrowserLoaded } from '../workspace/fs-tree';
 
-declare function $(id: string): HTMLElement | null;
-declare let state: any;
-declare let WA: any;
-declare function showToast(message: string, kind?: string, duration?: number): void;
-declare function loadFiles(files: FileList | File[]): void;
-declare function loadFileBrowser(): void;
-declare function _openFilePicker(opts?: any): void;
+const state: any = workspaceState;
+const WA = getFeatureRegistry();
 
 export interface DragDropConfig {
   files: File[];
@@ -212,13 +212,13 @@ function _initAIAttachmentDrops(): void {
     hintEl.setAttribute('role', 'button');
     hintEl.setAttribute('tabindex', '0');
     hintEl.addEventListener('click', () => {
-      if (typeof (window as any).WA?.pickAIContextFiles === 'function') (window as any).WA.pickAIContextFiles();
+      if (typeof getFeatureRegistry()?.pickAIContextFiles === 'function') getFeatureRegistry().pickAIContextFiles();
     });
     hintEl.addEventListener('keydown', (event) => {
       const keyboardEvent = event as KeyboardEvent;
       if (keyboardEvent.key === 'Enter' || keyboardEvent.key === ' ') {
         keyboardEvent.preventDefault();
-        if (typeof (window as any).WA?.pickAIContextFiles === 'function') (window as any).WA.pickAIContextFiles();
+        if (typeof getFeatureRegistry()?.pickAIContextFiles === 'function') getFeatureRegistry().pickAIContextFiles();
       }
     });
   });
@@ -259,17 +259,17 @@ export function _closeFileMenu(): void {
 }
 
 function _closeAuxiliaryPanels(): void {
-  if (typeof (window as any).closeSettings === 'function') {
-    try { (window as any).closeSettings(); } catch {}
+  if (typeof getFeatureRegistry().closeSettings === 'function') {
+    try { getFeatureRegistry().closeSettings(); } catch {}
   } else {
     document.getElementById('settingsPanel')?.classList.remove('active');
     document.body.classList.remove('settings-panel-open');
   }
-  if (typeof (window as any).closeSkillsPanel === 'function') {
-    try { (window as any).closeSkillsPanel(); } catch {}
+  if (typeof getFeatureRegistry().closeCapabilityPanel === 'function') {
+    try { getFeatureRegistry().closeCapabilityPanel(); } catch {}
   } else {
-    document.getElementById('skillsPanel')?.classList.remove('active');
-    document.body.classList.remove('skills-panel-open');
+    document.getElementById('capabilityPanel')?.classList.remove('active');
+    document.body.classList.remove('capability-panel-open');
   }
   const cowork = (window as any).CoworkPanel;
   if (cowork && typeof cowork.close === 'function') {
@@ -287,7 +287,6 @@ function _setActivityActive(id: string): void {
 }
 
 export function openInMainView(): void {
-  const chatView = document.getElementById('chatView');
   const wsView = document.getElementById('workspaceView');
   if (!wsView) {
     window.open('/', '_blank');
@@ -298,39 +297,25 @@ export function openInMainView(): void {
   document.body.classList.add('koto-unified-workspace');
   const shell = document.querySelector('.app-shell');
   if (shell) shell.classList.add('koto-unified-workspace');
-  _setActivityActive('navWorkspaceBtn');
-  setMainViewActive(chatView, false);
   setMainViewActive(wsView, true);
   wsView.style.display = 'flex';
   localStorage.setItem('koto.inWorkspace', '1');
-  if ((window as any).KotoSessionBridge && typeof (window as any).KotoSessionBridge.getSession === 'function') {
-    (window as any).WA.useHostSession((window as any).KotoSessionBridge.getSession(), { force: true });
+  if (getFeatureRegistry().KotoSessionBridge && typeof getFeatureRegistry().KotoSessionBridge.getSession === 'function') {
+    getFeatureRegistry().useHostSession(getFeatureRegistry().KotoSessionBridge.getSession(), { force: true });
   }
 
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      _initSplit();
+      initWorkspaceLayout();
     });
   });
-  if ((window as any).WA && typeof (window as any).WA.loadFileBrowser === 'function' && !(window as any)._WA_fileBrowserLoaded) {
-    (window as any)._WA_fileBrowserLoaded = true;
-    (window as any).WA.loadFileBrowser();
-    if (typeof (window as any).WA.refreshRecent === 'function') (window as any).WA.refreshRecent();
-  }
+  void ensureFileBrowserLoaded();
 
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       if (!state.activeEditor) return;
       if (state.fileType === 'xlsx') {
-        const sheetEl = document.getElementById('wa-xlsx-sheet');
-        if (sheetEl && sheetEl.offsetWidth > 0) {
-          const w = sheetEl.offsetWidth;
-          sheetEl.style.width = (w + 1) + 'px';
-          requestAnimationFrame(() => {
-            const dz = parseFloat(sheetEl.dataset.dpiZoom || '0');
-            sheetEl.style.width = dz > 1 ? (dz * 100) + '%' : '';
-          });
-        }
+        if (typeof state.activeEditor.refreshLayout === 'function') state.activeEditor.refreshLayout();
       } else if (state.fileType === 'pptx') {
         const area = document.getElementById('wa-pptx-slide-area');
         if (area && area.clientWidth > 48 && state.activeEditor._renderSlide) {
@@ -343,7 +328,8 @@ export function openInMainView(): void {
 
 export function showFileWorkspace(): void {
   openInMainView();
-  _setActivityActive('navWorkspaceBtn');
+  showAllMaterials();
+  getFeatureRegistry().toggleMobileFiles?.(true);
   requestAnimationFrame(() => {
     const search = document.getElementById('wa-search') as HTMLInputElement | null;
     const fileTree = document.getElementById('wa-browser-tree') as HTMLElement | null;
@@ -357,8 +343,9 @@ export function showFileWorkspace(): void {
 
 export function showAiWorkspace(): void {
   openInMainView();
-  if (typeof (window as any).WA?.showAiChat === 'function') {
-    (window as any).WA.showAiChat();
+  showConversationLayout();
+  if (typeof getFeatureRegistry()?.showAiChat === 'function') {
+    getFeatureRegistry().showAiChat();
   }
   _setActivityActive('navAiBtn');
   requestAnimationFrame(() => {
@@ -370,13 +357,7 @@ export function showAiWorkspace(): void {
 }
 
 export function closeInMainView(): void {
-  const chatView = document.getElementById('chatView');
-  const wsView = document.getElementById('workspaceView');
-  setMainViewActive(wsView, false);
-  setMainViewActive(chatView, true);
-  localStorage.removeItem('koto.inWorkspace');
-  const navBtn = document.getElementById('navWorkspaceBtn');
-  if (navBtn) navBtn.classList.remove('active');
+  showConversationLayout();
 }
 
 export function toggleMainView(): void {
@@ -433,16 +414,18 @@ document.addEventListener('keydown', (e) => {
     (focused as HTMLElement).classList.contains('wa-rename-input')
   )) return;
 
-  const { path, isFolder } = _fsBrowserCtxTarget || {};
+  const { path, isFolder, supported } = _fsBrowserCtxTarget || {};
 
   if (e.key === 'Enter' && path && !isFolder) {
     e.preventDefault();
-    WA._fsBrowserOpen();
+    if (typeof WA.openBrowserFile === 'function') WA.openBrowserFile(path, supported);
     return;
   }
   if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C' && path) {
     e.preventDefault();
-    WA._fsBrowserCopyPath();
+    navigator.clipboard.writeText(path)
+      .then(() => showToast('路径已复制', 'success'))
+      .catch(() => showToast(path, 'info'));
     return;
   }
 });
@@ -471,31 +454,26 @@ document.addEventListener('keydown', (e) => {
 // ── Auto-restore embedded workspace view on page reload ──────────
 if (document.getElementById('workspaceView')) {
   requestAnimationFrame(() => {
-    if (typeof (window as any).WA?.openInMainView === 'function') {
-      (window as any).WA.openInMainView();
+    if (typeof getFeatureRegistry()?.openInMainView === 'function') {
+      getFeatureRegistry().openInMainView();
     }
   });
 } else if (!document.getElementById('workspaceView')) {
   requestAnimationFrame(() => {
-    if ((window as any).WA && typeof (window as any).WA.loadFileBrowser === 'function' && !(window as any)._WA_fileBrowserLoaded) {
-      (window as any)._WA_fileBrowserLoaded = true;
-      (window as any).WA.loadFileBrowser();
-      if ((window as any).WA && typeof (window as any).WA.refreshRecent === 'function') {
-        (window as any).WA.refreshRecent();
-      }
-    }
+    void ensureFileBrowserLoaded();
   });
 }
 
 // ── Backward compat ──
 if (typeof window !== 'undefined') {
-  (window as any).WA = (window as any).WA || {};
-  (window as any).WA.toggleFileMenu = toggleFileMenu;
-  (window as any).WA._closeFileMenu = _closeFileMenu;
-  (window as any).WA.openInMainView = openInMainView;
-  (window as any).WA.closeInMainView = closeInMainView;
-  (window as any).WA.toggleMainView = toggleMainView;
-  (window as any).WA.showFileWorkspace = showFileWorkspace;
-  (window as any).WA.showAiWorkspace = showAiWorkspace;
-  (window as any).switchToChatView = switchToChatView;
+  registerFeatures({
+    toggleFileMenu,
+    _closeFileMenu,
+    openInMainView,
+    closeInMainView,
+    toggleMainView,
+    showFileWorkspace,
+    showAiWorkspace,
+  });
+  getFeatureRegistry().switchToChatView = switchToChatView;
 }

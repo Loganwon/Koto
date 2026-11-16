@@ -1,7 +1,7 @@
 export const FILE_TASK_WAITING_TERMINAL_STATUSES = new Set([
   'awaiting_confirmation',
-  'needs_attention',
   'context_summary_fallback',
+  'needs_review',
   'pending',
   'waiting',
 ]);
@@ -16,9 +16,12 @@ export const FILE_TASK_FAILED_TERMINAL_STATUSES = new Set([
   'error',
   'write_blocked',
   'tool_gap',
-  'no_file_change',
+  'write_not_performed',
   'model_unavailable',
+  'model_timeout',
+  'model_error',
   'quality_gate_failed',
+  'verify_error',
 ]);
 
 export function normalizeFileTaskTerminalStatus(value: unknown): string {
@@ -42,16 +45,10 @@ export function isFileTaskFailureStatus(status: string): boolean {
   return FILE_TASK_FAILED_TERMINAL_STATUSES.has(normalizeFileTaskTerminalStatus(status));
 }
 
-export function isFileTaskAttentionStatus(status: string): boolean {
-  const terminalStatus = normalizeFileTaskTerminalStatus(status);
-  return terminalStatus === 'needs_attention' || terminalStatus === 'context_summary_fallback';
-}
-
 export function isFileTaskTerminalStatus(status: string): boolean {
   const terminalStatus = normalizeFileTaskTerminalStatus(status);
   return ['completed', 'done', 'verified', 'cancelled'].includes(terminalStatus)
-    || isFileTaskConfirmationStatus(terminalStatus)
-    || isFileTaskAttentionStatus(terminalStatus)
+    || isFileTaskWaitingStatus(terminalStatus)
     || isFileTaskFailureStatus(terminalStatus);
 }
 
@@ -64,16 +61,16 @@ export function fileTaskTerminalUiStatus(status: string, completedTask: boolean,
   const terminalStatus = normalizeFileTaskTerminalStatus(status);
   if (String(fatalSummary || '').trim()) return 'error';
   if (terminalStatus === 'cancelled') return 'cancelled';
-  if (isFileTaskConfirmationStatus(terminalStatus)) return 'pending';
-  if (isFileTaskAttentionStatus(terminalStatus)) return 'pending';
+  if (isFileTaskWaitingStatus(terminalStatus)) return 'pending';
   if (isFileTaskIncompleteBlockedStatus(terminalStatus, completedTask)) return 'error';
-  if (!completedTask) return 'pending';
+  if (!completedTask) return 'error';
   return 'done';
 }
 
 export function normalizedResumeStatus(status: string): string {
   const value = normalizeFileTaskTerminalStatus(status);
   if (['completed', 'done'].includes(value)) return 'completed';
+  if (isFileTaskWaitingStatus(value)) return 'waiting';
   if (isFileTaskFailureStatus(value)) return 'failed';
   if (value === 'cancelled') return 'cancelled';
   if (isFileTaskConfirmationStatus(value)) return 'waiting';
@@ -87,7 +84,6 @@ export function fileTaskStatusLabel(status: unknown, fallback = '任务'): strin
   if (normalized === 'running' || normalized === 'streaming') return '进行中';
   if (normalized === 'awaiting_confirmation') return '等待确认';
   if (normalized === 'waiting') return '待处理';
-  if (normalized === 'needs_attention') return '需处理';
   if (normalized === 'context_summary_fallback') return '需复核';
   if (normalized === 'pending') return '排队';
   if (normalized === 'needs_review') return '需复核';
@@ -106,6 +102,51 @@ export interface FileTaskOutcomeCopy {
 
 export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = false): FileTaskOutcomeCopy {
   const normalized = normalizeFileTaskTerminalStatus(status);
+  if (normalized === 'model_timeout') {
+    return {
+      title: '模型执行超时',
+      detail: '模型未在时限内完成文件写入；已保留读取结果和失败阶段。',
+      stepSummary: '模型调用超时，文件写入尚未完成。',
+      toast: '文件任务超时，未生成目标文件',
+      toastType: 'error',
+    };
+  }
+  if (normalized === 'model_unavailable' || normalized === 'model_error') {
+    return {
+      title: '模型执行失败',
+      detail: '模型调用未完成，文件写入没有成功执行。',
+      stepSummary: '模型调用失败，已保留具体失败原因。',
+      toast: '模型执行失败，请查看任务结果',
+      toastType: 'error',
+    };
+  }
+  if (normalized === 'write_not_performed') {
+    return {
+      title: '未执行文件写入',
+      detail: '模型已返回，但没有成功调用文件写入工具。',
+      stepSummary: '本轮没有产生有效文件变更。',
+      toast: '任务未写入文件，请查看执行详情',
+      toastType: 'error',
+    };
+  }
+  if (normalized === 'context_summary_fallback') {
+    return {
+      title: '需复核',
+      detail: '模型未返回完整答案；当前仅显示基于已读上下文的临时摘要。',
+      stepSummary: '已保留临时摘要，仍需重新生成完整回答。',
+      toast: '任务需要复核：当前只是临时摘要',
+      toastType: 'info',
+    };
+  }
+  if (normalized === 'needs_review') {
+    return {
+      title: '需复核',
+      detail: '当前结果已保留，请复核后继续或重新发起。',
+      stepSummary: '结果已保留，等待复核。',
+      toast: '任务结果需要复核',
+      toastType: 'info',
+    };
+  }
   if (isFileTaskFailureStatus(normalized)) {
     return {
       title: '任务未完成',
@@ -140,24 +181,6 @@ export function fileTaskOutcomeCopy(status: unknown, requiresConfirmation = fals
           toast: '任务仍在处理中或等待同步',
           toastType: 'info',
         };
-  }
-  if (normalized === 'needs_attention') {
-    return {
-      title: '需处理',
-      detail: '当前任务未完成，原因和可继续处理的建议已整理到任务结果区域。',
-      stepSummary: '任务需要处理，进度已保留。',
-      toast: '任务需要处理，请查看任务结果',
-      toastType: 'info',
-    };
-  }
-  if (normalized === 'context_summary_fallback') {
-    return {
-      title: '需复核',
-      detail: '模型未返回完整答案；当前仅显示基于已读上下文的临时摘要。',
-      stepSummary: '已保留临时摘要，仍需重新生成完整回答。',
-      toast: '任务需要复核：当前只是临时摘要',
-      toastType: 'info',
-    };
   }
   return {
     title: '任务完成',

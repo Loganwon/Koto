@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Tests for Phase 1–3 Koto optimizations:
-  1. AppContext — DI Container
+  1. Core-owned service lifecycles
   2. Smart Memory Filter — MemoryRouter + CWM
   3. Skill Auto-Suggest — Affinity Tracking + History-aware Suggestions
 """
@@ -9,8 +9,6 @@ Tests for Phase 1–3 Koto optimizations:
 import json
 import math
 import os
-import threading
-import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -18,120 +16,72 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Phase 1: AppContext Tests
+# Phase 1: Core Service Ownership Tests
 # ══════════════════════════════════════════════════════════════════════════════
 
 
-class TestAppContext:
-    """Test the centralized DI container."""
+class TestCoreServiceOwnership:
+    """Each stateful core service exposes one explicit lifecycle owner."""
 
-    def test_import_and_singleton(self):
-        """ctx should be a module-level singleton."""
-        from app.core.app_context import AppContext, ctx
+    def test_memory_manager_is_cached_by_its_service_module(self):
+        from app.core.services import memory_manager as module
 
-        assert isinstance(ctx, AppContext)
+        sentinel = MagicMock()
+        module.reset_memory_manager_for_tests()
+        with patch.object(
+            module, "EnhancedMemoryManager", return_value=sentinel
+        ) as factory:
+            assert module.get_memory_manager() is sentinel
+            assert module.get_memory_manager() is sentinel
+        factory.assert_called_once_with()
 
-    def test_registered_services_exist(self):
-        """All default services should be registered."""
-        from app.core.app_context import ctx
+    def test_knowledge_base_is_cached_by_its_service_module(self):
+        from app.core.services import knowledge_base as module
 
-        expected = [
-            "config_manager",
-            "settings_manager",
-            "memory_manager",
-            "knowledge_base",
-            "file_registry",
-            "task_ledger",
-            "system_monitor",
-            "notification_manager",
-            "checkpointer",
-            "model_manager",
-            "agent",
-            "token_tracker",
-        ]
-        for name in expected:
-            assert name in ctx._slots, f"Service '{name}' not registered"
+        sentinel = MagicMock()
+        module.reset_knowledge_base_for_tests()
+        with patch.object(module, "KnowledgeBase", return_value=sentinel) as factory:
+            assert module.get_knowledge_base() is sentinel
+            assert module.get_knowledge_base() is sentinel
+        factory.assert_called_once_with()
 
-    def test_override_and_reset(self):
-        """Override should replace, reset should restore."""
-        from app.core.app_context import ctx
+    def test_configuration_manager_is_cached_by_its_module(self):
+        from app.core.config import configuration_manager as module
 
-        mock_cfg = MagicMock()
-        ctx.override("config_manager", mock_cfg)
-        assert ctx.get("config_manager") is mock_cfg
-        assert ctx.config_manager is mock_cfg
+        sentinel = MagicMock()
+        module.reset_config_manager_for_tests()
+        with patch.object(
+            module, "ConfigurationManager", return_value=sentinel
+        ) as factory:
+            assert module.get_config_manager() is sentinel
+            assert module.get_config_manager() is sentinel
+        factory.assert_called_once_with()
 
-        ctx.reset("config_manager")
-        # After reset, should no longer return the mock
-        assert ctx.get("config_manager") is not mock_cfg
+    def test_rag_services_are_cached_per_normalized_index_dir(self, tmp_path):
+        from app.core.services import rag_service as module
 
-    def test_override_all_reset(self):
-        """reset() with no name clears all overrides."""
-        from app.core.app_context import ctx
+        first = MagicMock()
+        second = MagicMock()
+        module.reset_rag_service_cache_for_tests()
+        with patch.object(module, "RAGService", side_effect=[first, second]) as factory:
+            assert module.get_rag_service(str(tmp_path / "one")) is first
+            assert module.get_rag_service(str(tmp_path / "one" / ".")) is first
+            assert module.get_rag_service(str(tmp_path / "two")) is second
+        assert factory.call_count == 2
 
-        mock1 = MagicMock()
-        mock2 = MagicMock()
-        ctx.override("config_manager", mock1)
-        ctx.override("settings_manager", mock2)
-        ctx.reset()
-        # Both overrides should be cleared
+    def test_file_rag_indexers_are_cached_per_workspace(self, tmp_path):
+        from app.core.services import file_rag_indexer as module
 
-    def test_lazy_initialization(self):
-        """Services should not be created until accessed."""
-        from app.core.app_context import AppContext
-
-        fresh = AppContext()
-        # No slot should have an instance yet
-        for slot in fresh._slots.values():
-            assert slot.instance is None
-
-    def test_register_custom_service(self):
-        """Custom services can be registered at runtime."""
-        from app.core.app_context import ctx
-
-        ctx.register_custom("my_test_service", lambda: {"test": True})
-        result = ctx.get("my_test_service")
-        assert result == {"test": True}
-        # Cleanup
-        ctx.reset("my_test_service")
-
-    def test_unknown_service_raises(self):
-        """Accessing unregistered service should raise KeyError."""
-        from app.core.app_context import ctx
-
-        with pytest.raises(KeyError):
-            ctx.get("nonexistent_service_xyz")
-
-    def test_thread_safety(self):
-        """Multiple threads accessing the same service should not race."""
-        from app.core.app_context import AppContext
-
-        call_count = {"n": 0}
-        lock = threading.Lock()
-
-        def slow_factory():
-            with lock:
-                call_count["n"] += 1
-            time.sleep(0.01)
-            return {"created": True}
-
-        fresh = AppContext()
-        fresh._register("test_svc", slow_factory)
-
-        results = []
-
-        def worker():
-            results.append(fresh.get("test_svc"))
-
-        threads = [threading.Thread(target=worker) for _ in range(10)]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join()
-
-        # Factory should be called exactly once
-        assert call_count["n"] == 1
-        assert all(r == {"created": True} for r in results)
+        first = MagicMock()
+        second = MagicMock()
+        module.reset_file_rag_indexers_for_tests()
+        with patch.object(
+            module, "FileRAGIndexer", side_effect=[first, second]
+        ) as factory:
+            assert module.get_file_rag_indexer(str(tmp_path / "one")) is first
+            assert module.get_file_rag_indexer(str(tmp_path / "one" / ".")) is first
+            assert module.get_file_rag_indexer(str(tmp_path / "two")) is second
+        assert factory.call_count == 2
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -344,127 +294,3 @@ class TestCWMSmartFilter:
 
         sim2 = _content_similarity("用户喜欢Python", "今天天气很好")
         assert sim2 < 0.3  # Different
-
-
-# ══════════════════════════════════════════════════════════════════════════════
-# Phase 3: Skill Affinity + Auto-Suggest Tests
-# ══════════════════════════════════════════════════════════════════════════════
-
-
-class TestSkillAffinityTracker:
-    """Test the user skill affinity tracking engine."""
-
-    @pytest.fixture
-    def tracker(self, tmp_path):
-        """Create an isolated tracker with temp storage."""
-        from app.core.skills.skill_affinity import SkillAffinityTracker
-
-        t = SkillAffinityTracker.__new__(SkillAffinityTracker)
-        t._path = tmp_path / "skill_affinity.json"
-        t._data = {}
-        t._dirty_count = 0
-        t._data_lock = threading.Lock()
-        return t
-
-    def test_record_activation(self, tracker):
-        tracker.record_activation("step_by_step")
-        assert tracker._data["step_by_step"]["activations"] == 1
-        tracker.record_activation("step_by_step")
-        assert tracker._data["step_by_step"]["activations"] == 2
-
-    def test_get_affinity_scores(self, tracker):
-        tracker.record_activation("step_by_step")
-        tracker.record_activation("step_by_step")
-        tracker.record_activation("concise_mode")
-
-        scores = tracker.get_affinity_scores()
-        assert scores["step_by_step"] > scores["concise_mode"]
-        assert 0 < scores["step_by_step"] <= 1.0
-
-    def test_get_top_skills(self, tracker):
-        for _ in range(5):
-            tracker.record_activation("step_by_step")
-        for _ in range(3):
-            tracker.record_activation("concise_mode")
-        tracker.record_activation("research_depth")
-
-        top = tracker.get_top_skills(n=2)
-        assert top[0] == "step_by_step"
-        assert len(top) == 2
-
-    def test_persistence(self, tracker, tmp_path):
-        tracker.record_activation("test_skill")
-        tracker.record_activation("test_skill")
-        tracker.record_activation("test_skill")
-        tracker.flush()
-
-        # Read from disk
-        data = json.loads(tracker._path.read_text(encoding="utf-8"))
-        assert data["test_skill"]["activations"] == 3
-
-    def test_recency_decay(self, tracker):
-        """Old activations should have lower affinity scores."""
-        # Simulate old activation
-        old_time = (datetime.now() - timedelta(days=60)).isoformat()
-        tracker._data["old_skill"] = {
-            "activations": 5,
-            "last_used": old_time,
-            "decay_score": 0.0,
-        }
-        # Simulate recent activation
-        tracker.record_activation("new_skill")
-        for _ in range(4):
-            tracker.record_activation("new_skill")
-
-        scores = tracker.get_affinity_scores()
-        assert scores["new_skill"] > scores["old_skill"]
-
-
-class TestSkillSuggesterEnhancements:
-    """Test the enhanced SkillSuggester with history awareness."""
-
-    def test_enrich_with_history_empty(self):
-        from app.core.skills.skill_suggester import SkillSuggester
-
-        result = SkillSuggester._enrich_with_history("你好", None)
-        assert result == "你好"
-
-        result = SkillSuggester._enrich_with_history("你好", [])
-        assert result == "你好"
-
-    def test_enrich_with_history_extracts_user_only(self):
-        from app.core.skills.skill_suggester import SkillSuggester
-
-        history = [
-            {"role": "user", "parts": ["帮我分析一下这个Excel文件"]},
-            {"role": "model", "parts": ["好的，我来分析这个表格..."]},
-            {"role": "user", "parts": ["对比一下第二个文件"]},
-            {"role": "model", "parts": ["两个文件的差异如下..."]},
-        ]
-        result = SkillSuggester._enrich_with_history("总结一下", history)
-        assert "Excel" in result
-        assert "总结" in result
-        # Model responses should NOT be included
-        assert "差异如下" not in result
-
-    def test_enrich_limits_to_3_turns(self):
-        from app.core.skills.skill_suggester import SkillSuggester
-
-        history = [{"role": "user", "parts": [f"消息{i}"]} for i in range(20)]
-        result = SkillSuggester._enrich_with_history("最新", history)
-        # Only last 3 user messages should be included
-        assert "消息19" in result
-        assert "消息0" not in result
-
-
-class TestSkillSuggesterIntegration:
-    """Integration test for suggest() with affinity scoring."""
-
-    def test_suggest_signature_accepts_history(self):
-        """suggest() should accept conversation_history parameter."""
-        import inspect
-
-        from app.core.skills.skill_suggester import SkillSuggester
-
-        sig = inspect.signature(SkillSuggester.suggest)
-        assert "conversation_history" in sig.parameters

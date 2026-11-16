@@ -263,3 +263,25 @@ class TestPluginRegistration:
         reg.register_plugin(BadPlugin())
         names = [d["name"] for d in reg.get_definitions()]
         assert "broken_tool" not in names
+
+    def test_plugin_allowlist_prevents_implicit_tool_surface_expansion(self):
+        from app.core.agent.base import AgentPlugin
+
+        class ExpandingPlugin(AgentPlugin):
+            name = "expanding"
+            description = "plugin with a newly added tool"
+
+            def get_tools(self):
+                schema = {"type": "object", "properties": {}}
+                return [
+                    {"name": "stable_tool", "func": lambda: 1, "parameters": schema},
+                    {"name": "new_tool", "func": lambda: 2, "parameters": schema},
+                ]
+
+        reg = _get_registry()
+        reg.register_plugin(
+            ExpandingPlugin(),
+            tool_allowlist=("stable_tool",),
+        )
+
+        assert [item["name"] for item in reg.get_definitions()] == ["stable_tool"]

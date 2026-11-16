@@ -44,12 +44,11 @@ def test_workflow_checkpoint_resume_preserves_routing_decision() -> None:
     assert normalized.target_path == "summary.docx"
 
 
-def test_file_task_classification_facade_exports_routing_helpers() -> None:
-    import app.core.agent.file_task_classification as classification
+def test_file_task_routing_helpers_have_a_focused_owner() -> None:
+    from app.core.agent import file_task_decision_context as decision_context
 
-    assert classification.request_with_task is not None
-    assert classification.trusted_file_task_routing_decision is not None
-    assert classification.build_decision_context_payload is not None
+    assert decision_context.trusted_file_task_routing_decision is not None
+    assert decision_context.build_decision_context_payload is not None
 
 
 def test_hybrid_plan_only_requires_confirmation_when_explicit() -> None:
@@ -87,6 +86,23 @@ def test_source_negation_does_not_hide_explicit_target_write_intent() -> None:
     assert has_readonly_write_negation(task) is False
 
 
+def test_keep_other_text_unchanged_does_not_cancel_explicit_save() -> None:
+    from app.core.agent.file_task_intent_predicates import (
+        has_readonly_write_negation,
+        has_strong_write_intent,
+        has_write_intent,
+    )
+
+    task = (
+        "把当前 DOCX 第二段的‘需要优化的句子’替换为‘已经完成优化的句子’，"
+        "只替换前文乙那一处，前文甲那一处必须保持不变，并保存文件。"
+    )
+
+    assert has_readonly_write_negation(task) is False
+    assert has_strong_write_intent(task) is True
+    assert has_write_intent(task) is True
+
+
 def test_explicit_output_paths_join_split_directory_and_filename() -> None:
     from app.core.agent.file_task_targeting import explicit_output_paths_from_task
 
@@ -120,6 +136,72 @@ def test_explicit_output_name_does_not_include_the_instruction_prefix() -> None:
     ) == ["艺术全球规则_目录摘要.docx"]
 
 
+def test_save_as_target_wins_over_protected_source_reference() -> None:
+    from app.core.agent.file_task_intent_predicates import has_artifact_creation_intent
+    from app.core.agent.file_task_targeting import (
+        explicit_output_path_from_task,
+        explicit_write_target_path_from_task,
+    )
+
+    task = (
+        "读取工作区中的 Koto_Release_Audit_Input_20260717.docx，"
+        "生成一份 5 点中文摘要，并保存为 "
+        "Koto_Release_Audit_Output_20260717.docx。不要修改原文件。"
+    )
+
+    assert has_artifact_creation_intent(task) is True
+    assert (
+        explicit_write_target_path_from_task(task)
+        == "Koto_Release_Audit_Output_20260717.docx"
+    )
+    assert (
+        explicit_output_path_from_task(
+            task, has_artifact_creation_intent=has_artifact_creation_intent
+        )
+        == "Koto_Release_Audit_Output_20260717.docx"
+    )
+
+
+def test_uncreated_request_target_is_not_read_even_when_file_flag_is_stale() -> None:
+    from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
+    from app.core.agent.file_task_targeting import should_skip_uncreated_target_context
+
+    request = FileTaskRequest(
+        task="生成摘要并保存为 Output.docx",
+        target_path="Output.docx",
+    )
+    stale_output_entry = FileTaskFile(
+        path="Output.docx",
+        name="Output.docx",
+        type="docx",
+        target=False,
+    )
+
+    assert (
+        should_skip_uncreated_target_context(
+            request,
+            stale_output_entry,
+            same_path=lambda left, right: str(left).casefold() == str(right).casefold(),
+            has_artifact_creation_intent=lambda _task: True,
+            resolve_task_file_path=lambda _path: "",
+        )
+        is True
+    )
+
+
+def test_explicit_output_paths_exclude_second_file_in_source_list() -> None:
+    from app.core.agent.file_task_targeting import explicit_output_paths_from_task
+
+    task = (
+        "综合读取 financial_analysis_source.docx 和 product_launch_brief.md，"
+        "生成新的 round4_integrated_risk_register.docx，不得修改两个源文件。"
+    )
+
+    assert explicit_output_paths_from_task(
+        task, has_artifact_creation_intent=lambda _task: True
+    ) == ["round4_integrated_risk_register.docx"]
+
+
 def test_named_new_output_is_not_reintroduced_as_a_source_file(tmp_path) -> None:
     from app.core.agent.file_task_targeting import files_explicitly_mentioned_in_task
 
@@ -131,4 +213,68 @@ def test_named_new_output_is_not_reintroduced_as_a_source_file(tmp_path) -> None
             task=task,
         )
         == []
+    )
+
+
+def test_task_without_file_reference_does_not_walk_workspace(
+    monkeypatch, tmp_path
+) -> None:
+    from app.core.agent import file_task_targeting
+
+    def fail_walk(_root):
+        raise AssertionError("ordinary task must not scan the workspace")
+
+    monkeypatch.setattr(file_task_targeting.os, "walk", fail_walk)
+
+    assert (
+        file_task_targeting.files_explicitly_mentioned_in_task(
+            workspace_root=tmp_path,
+            task="分析当前内容并给出结论",
+        )
+        == []
+    )
+
+
+def test_explicit_filename_scan_skips_dependency_directories(tmp_path) -> None:
+    from app.core.agent.file_task_targeting import files_explicitly_mentioned_in_task
+
+    source = tmp_path / "reports" / "source.docx"
+    source.parent.mkdir()
+    source.write_bytes(b"docx")
+    ignored = tmp_path / "node_modules" / "source.docx"
+    ignored.parent.mkdir()
+    ignored.write_bytes(b"duplicate")
+
+    files = files_explicitly_mentioned_in_task(
+        workspace_root=tmp_path,
+        task="请读取 source.docx 并总结",
+    )
+
+    assert [item.path for item in files] == [str(source.resolve())]
+
+
+def test_bare_prompt_output_name_keeps_authoritative_request_directory() -> None:
+    from app.core.agent.file_task_targeting import (
+        resolve_explicit_output_against_request_target,
+    )
+
+    requested = "workspace/runs/round1_financial_diagnostic.docx"
+
+    assert (
+        resolve_explicit_output_against_request_target(
+            requested,
+            "round1_financial_diagnostic.docx",
+        )
+        == requested
+    )
+    assert (
+        resolve_explicit_output_against_request_target(requested, "other.docx")
+        == "other.docx"
+    )
+    assert (
+        resolve_explicit_output_against_request_target(
+            requested,
+            "workspace/explicit/round1_financial_diagnostic.docx",
+        )
+        == "workspace/explicit/round1_financial_diagnostic.docx"
     )

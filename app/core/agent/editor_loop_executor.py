@@ -4,7 +4,7 @@ from collections.abc import Iterator
 
 from app.core.agent.editor_code_action_executor import EditorCodeActionExecutor
 from app.core.agent.editor_quick_action_executor import EditorQuickActionExecutor
-from app.core.agent.lifecycle import AgentEvent, AgentRequest
+from app.core.agent.kernel import AgentEvent, AgentRequest
 
 
 class EditorLoopExecutor:

@@ -108,7 +108,7 @@ class ContextAwarenessSystem:
     }
 
     def __init__(
-        self, db_path: str = "config/context_awareness.db", behavior_monitor=None
+        self, db_path: str = "data/db/context_awareness.db", behavior_monitor=None
     ):
         """初始化情境感知系统"""
         self.db_path = db_path
@@ -623,7 +623,7 @@ _context_awareness_instance = None
 
 
 def get_context_awareness_system(
-    db_path: str = "config/context_awareness.db", behavior_monitor=None
+    db_path: str = "data/db/context_awareness.db", behavior_monitor=None
 ) -> ContextAwarenessSystem:
     """获取情境感知系统实例（单例）"""
     global _context_awareness_instance

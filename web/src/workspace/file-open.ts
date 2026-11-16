@@ -1,7 +1,7 @@
 /**
  * Workspace file mounting for the TS bundle.
  *
- * Exposes WA._applyFileJson so fs-tree can apply parsed file responses.
+ * Registers _applyFileJson so fs-tree can apply parsed file responses.
  */
 
 import {
@@ -21,7 +21,12 @@ import {
 import { _escHtml } from './infrastructure';
 import { _ensurePdfJS, _ensureTipTap, _ensureUniverSheets, _ensureWorkbookDefaults } from '../editors/cdn-loaders';
 import { KotoTextEditor, _setupDocOutline, loadPptxEditor, loadPdfViewer, loadXlsxEditor, loadImageViewer } from '../editors/lazy-loaders';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { createEditorSession } from '../editors/editor-session';
+import { getFeatureRegistry } from '../shared/feature-registry';
+import { syncReviewStateForActiveFile } from './docx-review-runtime';
+import { loadDocxReviewEngine } from './docx-review-loader';
+
+const editorSession = createEditorSession(state);
 
 function _fileExt(fileName: string): string {
   return (String(fileName || '').split('.').pop() || '').toLowerCase();
@@ -119,17 +124,16 @@ export function _rememberSavedSnapshotForTab(tab: TabInfo | null, editor: any = 
 }
 
 async function _mountDocx(tab: TabInfo, data: any): Promise<void> {
-  await _ensureTipTap();
+  await Promise.all([_ensureTipTap(), loadDocxReviewEngine()]);
   const html = typeof tab.cache === 'string' && (tab.cache as string).trim()
     ? tab.cache
     : (data && data.html) || '';
-  state.activeEditor = new (window as any).KotoDocxEditorLib.KotoTipTapEditor() as any;
+  state.activeEditor = editorSession.mount(
+    new (window as any).KotoDocxEditorLib.KotoTipTapEditor(editorSession) as any,
+  );
   state.activeEditor!.render(html, _toDocxRenderOptions(data));
   setTimeout(() => _setupDocOutline((data && data.headings) || []), 0);
-  setTimeout(() => {
-    const syncReviewState = (window as any)._syncReviewStateForActiveFile;
-    if (typeof syncReviewState === 'function') syncReviewState();
-  }, 0);
+  setTimeout(() => { void syncReviewStateForActiveFile(); }, 0);
 }
 
 async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
@@ -140,27 +144,28 @@ async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
     await _mountDocx(tab, data);
   } else if (tab.fileType === 'xlsx') {
     await _ensureUniverSheets();
-    state.activeEditor = new (window as any).KotoXlsxEditor() as any;
+    const { XlsxEditor } = await loadXlsxEditor();
+    state.activeEditor = editorSession.mount(new XlsxEditor(editorSession) as any);
     const workbook = tab.cache && tab.cache.snapshot ? tab.cache.snapshot : data;
     state.activeEditor!.render(_ensureWorkbookDefaults(workbook));
   } else if (tab.fileType === 'pptx') {
-    state.activeEditor = new (await loadPptxEditor()).KotoPptxEditor() as any;
+    state.activeEditor = editorSession.mount(new (await loadPptxEditor()).KotoPptxEditor(editorSession) as any);
     state.activeEditor!.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
   } else if (tab.fileType === 'pdf') {
     try {
       await _ensurePdfJS();
-      state.activeEditor = new (await loadPdfViewer()).KotoPdfViewer() as any;
+      state.activeEditor = editorSession.mount(new (await loadPdfViewer()).KotoPdfViewer(editorSession) as any);
       await state.activeEditor!.render(data && data.raw_url, data);
     } catch (error) {
       console.error('[WA] PDF 打开失败:', error);
       _showPdfOpenError(error);
     }
   } else if (tab.fileType === 'image') {
-    state.activeEditor = new (await loadImageViewer()).KotoImageViewer() as any;
+    state.activeEditor = editorSession.mount(new (await loadImageViewer()).KotoImageViewer(editorSession) as any);
     state.activeEditor!.render(data && data.raw_url);
   } else if (tab.fileType === 'text' || tab.fileType === 'code') {
-    state.activeEditor = new KotoTextEditor(tab.fileType) as any;
-    state.activeEditor!.render(data);
+    state.activeEditor = editorSession.mount(new KotoTextEditor(editorSession, tab.fileType) as any);
+    state.activeEditor!.render(tab.cache !== null && tab.cache !== undefined ? tab.cache : data);
   } else {
     const textEditor = document.getElementById('wa-text-editor');
     const textArea = document.getElementById('wa-text-content') as HTMLTextAreaElement | null;
@@ -170,11 +175,13 @@ async function _mountEditor(tab: TabInfo, data: any): Promise<void> {
     }
   }
   _syncWorkspaceSurfaces();
+  getFeatureRegistry().refreshWorkspaceLayout?.();
 }
 
 function _applyTabState(tab: TabInfo): void {
   state.activeTabPath = tab.path;
   state.fileId = tab.fileId || null;
+  state.sourceSha256 = tab.sourceSha256 || '';
   state.fileType = tab.fileType;
   state.fileName = tab.name;
   state.filePath = tab.filePath || tab.path || null;
@@ -184,7 +191,7 @@ function _applyTabState(tab: TabInfo): void {
   _syncPrimarySaveButtons(tab);
   _syncZoomControls(tab.fileType);
   toggleWorkspace(true);
-  const closeMobileFiles = getWorkspaceApi().closeMobileFiles;
+  const closeMobileFiles = getFeatureRegistry().closeMobileFiles;
   if (typeof closeMobileFiles === 'function') {
     closeMobileFiles();
   }
@@ -237,6 +244,7 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
     filePath: json.temp_path || resolvedPath,
     fileType,
     fileId: json.file_id || null,
+    sourceSha256: String(json.source_sha256 || ''),
     serverData: json.data,
     cache: undefined,
     savedSnapshot: null,
@@ -255,14 +263,14 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
   _applyTabState(tabEntry);
   await _mountEditor(tabEntry, json.data);
   _rememberSavedSnapshotForTab(tabEntry, state.activeEditor);
-  const clearExternalFileChange = getWorkspaceApi().clearExternalFileChange;
+  const clearExternalFileChange = getFeatureRegistry().clearExternalFileChange;
   if (typeof clearExternalFileChange === 'function') {
     clearExternalFileChange(resolvedPath);
   }
   _renderTabs();
   _highlightActiveFile(resolvedPath);
   setTimeout(() => {
-    const refreshBrowser = getWorkspaceApi()._softRefreshBrowser;
+    const refreshBrowser = getFeatureRegistry()._softRefreshBrowser;
     if (typeof refreshBrowser === 'function') {
       refreshBrowser().catch(() => {});
     } else {
@@ -274,15 +282,18 @@ export async function _applyFileJson(json: any, wsPath: string | null, fsHandle:
 
 _registerSwitchToTab(_switchToTabImpl);
 
-const wa = getWorkspaceApi();
-(window as any)._serializeEditorForTab = _serializeEditorForTab;
+const wa = getFeatureRegistry();
 wa._applyFileJson = _applyFileJson;
 wa._syncPrimarySaveButtons = _syncPrimarySaveButtons;
 wa._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
 wa._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
-
-// Keeps old inline templates that call global helpers from breaking in the TS bundle.
-(window as any)._serializeEditorForTab = _serializeEditorForTab;
-(window as any)._stableWorkspaceSnapshot = _stableWorkspaceSnapshot;
-(window as any)._rememberSavedSnapshotForTab = _rememberSavedSnapshotForTab;
-(window as any)._escHtml = (window as any)._escHtml || _escHtml;
+wa._inspectWorkspaceRuntime = () => ({
+  state: editorSession.snapshot(),
+  activeEditor: editorSession.getActiveEditor(),
+});
+wa._saveEditorRange = () => {
+  const editor = editorSession.getActiveEditor() as any;
+  if (editor && typeof editor.saveSelection === 'function') {
+    try { editor.saveSelection(); } catch (_) { /* selection preservation is best effort */ }
+  }
+};

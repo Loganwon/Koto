@@ -225,6 +225,39 @@ def test_exported_docx_comment_roundtrips_anchor_metadata(tmp_path):
     assert comment["anchor_context_after"].startswith("\n")
 
 
+def test_parse_docx_emits_exact_native_comment_anchor_markers(tmp_path):
+    pytest.importorskip("docx", reason="python-docx 未安装")
+    pytest.importorskip("lxml", reason="lxml 未安装")
+    pytest.importorskip("bs4", reason="beautifulsoup4 未安装")
+
+    from app.core.file.file_parser import export_docx, parse_docx
+
+    raw = export_docx(
+        {
+            "html": "<p>前文批注锚点后文</p>",
+            "comments": [
+                {
+                    "id": "comment-anchor-marker",
+                    "text": "请核对此处",
+                    "anchor_text": "批注锚点",
+                }
+            ],
+        }
+    )
+    docx_path = tmp_path / "native-comment-anchor-marker.docx"
+    docx_path.write_bytes(raw)
+
+    parsed = parse_docx(str(docx_path))
+    rendered_html = str(parsed.get("html") or "")
+    comments = list(parsed.get("comments") or [])
+
+    assert len(comments) == 1
+    review_id = str(comments[0]["id"])
+    assert f'data-koto-review-id="{review_id}"' in rendered_html
+    assert 'data-koto-review-source="docx_comment"' in rendered_html
+    assert "批注锚点" in rendered_html
+
+
 def test_extract_docx_comments_reads_modern_comment_metadata(tmp_path):
     from app.core.file.file_parser import _extract_docx_comments
 

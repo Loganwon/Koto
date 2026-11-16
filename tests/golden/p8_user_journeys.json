@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "corpus_version": "2026-07-20",
+  "description": "P8 user-reported startup, PDF and DOCX journeys with executable evidence and per-journey latency budgets.",
+  "cases": [
+    {
+      "id": "startup-without-any-provider",
+      "surface": "startup",
+      "failure_mode": "provider_missing",
+      "real_task": "没有云端密钥、Ollama 和本地模型时打开 Koto，并进入文件与设置界面。",
+      "oracle": ["startup-health 返回 200", "详细健康状态为 degraded 而不是进程失败", "检查过程不发起模型网络请求"],
+      "evidence": ["startup readiness JSON", "runtime capability repair_action"],
+      "max_seconds": 20,
+      "node_ids": ["tests/integration/test_p8_provider_degraded_startup.py::test_no_provider_keeps_startup_ready_and_reports_repairable_degradation"]
+    },
+    {
+      "id": "startup-with-detached-local-model",
+      "surface": "startup",
+      "failure_mode": "local_runtime_unreachable",
+      "real_task": "用户设置仍引用已断开磁盘中的本地模型时启动 Koto。",
+      "oracle": ["startup-health 保持 ready", "主动检查返回 unavailable", "保留启动或安装 Ollama 的修复动作"],
+      "evidence": ["startup readiness JSON", "refreshed capability snapshot"],
+      "max_seconds": 20,
+      "node_ids": ["tests/integration/test_p8_provider_degraded_startup.py::test_unreachable_selected_local_model_never_blocks_startup"]
+    },
+    {
+      "id": "startup-with-runtime-model-version-mismatch",
+      "surface": "startup",
+      "failure_mode": "local_runtime_incompatible",
+      "real_task": "安装包携带的运行时无法加载用户已有模型时启动并诊断。",
+      "oracle": ["/api/show 失败不会误报模型可用", "状态为 incompatible 或 misconfigured", "不调用模型生成"],
+      "evidence": ["Ollama version and required version", "capability reason and repair_action"],
+      "max_seconds": 25,
+      "node_ids": [
+        "tests/unit/test_ollama_runtime_compat.py::test_show_failure_reports_runtime_mismatch_instead_of_available",
+        "tests/unit/test_runtime_capabilities.py::test_show_probe_failure_never_promotes_selected_model_to_available"
+      ]
+    },
+    {
+      "id": "pdf-text-position-zoom-save-reopen",
+      "surface": "pdf",
+      "failure_mode": "pdf_coordinate_drift",
+      "real_task": "在 PDF 目标文本附近放置文本框和高亮，缩放后保存并重新打开。",
+      "oracle": ["归一化坐标缩放前后稳定", "保存后 PDF 注释页码和内容正确", "重新打开仍落在原目标附近"],
+      "evidence": ["browser geometry snapshot", "reopened PDF annotation objects", "before/after render pixels"],
+      "max_seconds": 90,
+      "node_ids": [
+        "tests/unit/test_pdf_annotator.py::test_embed_textbox_honors_rotated_page_viewport",
+        "tests/e2e/test_p4_pdf_document_flows.py::test_pdf_annotation_position_survives_zoom_save_render_and_reload"
+      ]
+    },
+    {
+      "id": "pdf-watermark-change-and-safe-noop",
+      "surface": "pdf",
+      "failure_mode": "watermark_noop",
+      "real_task": "清理自有 PDF 水印，并对没有可清理对象的文件给出诚实 no-op。",
+      "oracle": ["检测到水印时渲染像素和文本均改变", "未检测到水印时响应字节与输入完全一致", "响应明确标记 changed/noop"],
+      "evidence": ["input/output SHA-256", "removed count", "rendered pixel diff"],
+      "max_seconds": 90,
+      "node_ids": [
+        "tests/unit/test_pdf_annotator.py::test_remove_watermark_changes_rendered_pixels_not_only_text_extraction",
+        "tests/integration/test_workspace_assistant_routes.py::TestPdfRemoveWatermark::test_no_watermark_returns_valid_unchanged_content",
+        "tests/e2e/test_p4_pdf_document_flows.py::test_pdf_watermark_cleanup_reports_effect_and_safe_noop"
+      ]
+    },
+    {
+      "id": "pdf-to-office-reopenable-artifacts",
+      "surface": "pdf",
+      "failure_mode": "empty_conversion",
+      "real_task": "把多页 PDF 转成 DOCX、XLSX、PPTX，并用对应应用解析器重新打开。",
+      "oracle": ["三种输出均为有效 OOXML 包", "关键文本或页面图像存在", "响应包含产物散列与字节数"],
+      "evidence": ["OOXML reopen", "artifact SHA-256", "artifact byte count"],
+      "max_seconds": 100,
+      "node_ids": [
+        "tests/integration/test_workspace_assistant_routes.py::TestPdfConversion::test_conversion_endpoint_returns_valid_office_package",
+        "tests/e2e/test_p4_pdf_document_flows.py::test_pdf_conversion_downloads_reopenable_office_packages"
+      ]
+    },
+    {
+      "id": "scanned-pdf-conversion-is-honest",
+      "surface": "pdf",
+      "failure_mode": "empty_conversion",
+      "real_task": "把没有文字层的扫描 PDF 转为 XLSX。",
+      "oracle": ["不返回看似成功的空白工作簿", "工作簿内写入可见说明", "响应可携带扫描型页面警告"],
+      "evidence": ["reopened XLSX first cell", "conversion warning"],
+      "max_seconds": 30,
+      "node_ids": ["tests/unit/test_pdf_annotator.py::test_scanned_pdf_to_xlsx_returns_visible_noneditable_warning"]
+    },
+    {
+      "id": "docx-500-review-items-remain-interactive",
+      "surface": "docx",
+      "failure_mode": "review_render_stall",
+      "real_task": "加载含 500 条批注/修订锚点的 DOCX，打开导航并跳到最后一条。",
+      "oracle": ["可交互时间不超过预算", "DOM 同时最多渲染 120 张卡片", "远端批注可定位且没有浏览器错误"],
+      "evidence": ["ready duration", "long-task maximum", "review window bounds"],
+      "max_seconds": 90,
+      "node_ids": ["tests/e2e/test_docx_review_ui.py::test_docx_large_review_corpus_stays_within_render_budget"]
+    }
+  ]
+}

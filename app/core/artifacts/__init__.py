@@ -11,7 +11,6 @@ from app.core.artifacts.models import (
     ExecutionLog,
     FileChange,
     SourceRef,
-    build_background_artifact_result,
     build_file_task_artifact_result,
     canonical_artifact_path_key,
 )
@@ -22,7 +21,6 @@ __all__ = [
     "ExecutionLog",
     "FileChange",
     "SourceRef",
-    "build_background_artifact_result",
     "build_file_task_artifact_result",
     "canonical_artifact_path_key",
 ]

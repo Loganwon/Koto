@@ -1,6 +1,5 @@
 """
 Tests for large web modules at 0% coverage:
-  - document_feedback.py (973 stmts)
   - track_changes_editor.py (633 stmts)
   - batch_file_ops.py (399 stmts)
   - organize_cleanup.py (340 stmts)
@@ -23,265 +22,12 @@ import pytest
 # DocumentFeedbackSystem
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
-class TestDocumentFeedback:
-    """Tests for web.document_feedback.DocumentFeedbackSystem"""
-
-    def _make(self, **kw):
-        with patch("web.document_reader.DocumentReader"), patch(
-            "web.document_editor.DocumentEditor"
-        ):
-            from web.document_feedback import DocumentFeedbackSystem
-
-            client = kw.get("client")
-            model = kw.get("model", "gemini-test")
-            obj = DocumentFeedbackSystem(gemini_client=client, default_model_id=model)
-        return obj
-
-    # -- construction -------------------------------------------------------
-    def test_init_defaults(self):
-        obj = self._make()
-        assert obj.client is None
-        assert obj.default_model_id == "gemini-test"
-        assert obj._model_cache is None
-
-    def test_init_with_client(self):
-        mock_client = MagicMock()
-        obj = self._make(client=mock_client)
-        assert obj.client is mock_client
-
-    def test_annotate_document_uses_tracked_changes_in_place(self):
-        obj = self._make()
-        annotations = [{"原文片段": "旧文本", "修改建议": "新文本"}]
-
-        with patch("web.track_changes_editor.TrackChangesEditor") as editor_cls:
-            editor = editor_cls.return_value
-            editor.apply_tracked_changes.return_value = {
-                "success": True,
-                "applied": 1,
-                "failed": 0,
-                "total": 1,
-            }
-
-            result = obj.annotate_document("/fake.docx", annotations)
-
-        editor_cls.assert_called_once_with(author="Koto AI")
-        editor.apply_tracked_changes.assert_called_once_with(
-            "/fake.docx",
-            annotations,
-            progress_callback=None,
-        )
-        assert result["success"] is True
-        assert result["revised_file"] == "/fake.docx"
-        assert result["updated_in_place"] is True
-
-    def test_build_annotation_prompt_disallows_comment_style_suggestions(self):
-        obj = self._make()
-        prompt = obj._build_annotation_prompt("docx", "当前片段", "请审校这份文稿")
-
-        assert "结构性批注" not in prompt
-        assert "禁止批注式输出" in prompt
-        assert "建议：..." in prompt
-
-    # -- _extract_summary ---------------------------------------------------
-    def test_extract_summary_from_json(self):
-        obj = self._make()
-        resp = '```json\n{"summary": "Good doc"}\n```'
-        assert obj._extract_summary(resp) == "Good doc"
-
-    def test_extract_summary_fallback_text(self):
-        obj = self._make()
-        assert (
-            obj._extract_summary("Some plain text review") == "Some plain text review"
-        )
-
-    def test_extract_summary_invalid_json(self):
-        obj = self._make()
-        resp = "```json\n{invalid}\n```"
-        assert obj._extract_summary(resp) == "AI建议已生成"
-
-    def test_extract_summary_empty(self):
-        obj = self._make()
-        resp = '```json\n{"modifications": []}\n```'
-        # no summary key -> text fallback or default
-        result = obj._extract_summary(resp)
-        assert isinstance(result, str)
-
-    def test_extract_summary_long_text_truncated(self):
-        obj = self._make()
-        long_text = "A" * 500
-        result = obj._extract_summary(long_text)
-        assert len(result) <= 200
-
-    # -- _INTERACTIONS_ONLY_MODELS ------------------------------------------
-    def test_interactions_only_models_constant(self):
-        from web.document_feedback import DocumentFeedbackSystem
-
-        assert (
-            "deep-research-pro-preview-12-2025"
-            in DocumentFeedbackSystem._INTERACTIONS_ONLY_MODELS
-        )
-
-    # -- _format_model_table ------------------------------------------------
-    def test_format_model_table_empty(self):
-        obj = self._make()
-        assert "暂时无法" in obj._format_model_table([])
-
-    def test_format_model_table_with_models(self):
-        obj = self._make()
-        models = [{"name": "m1", "display_name": "Model One"}]
-        table = obj._format_model_table(models)
-        assert "m1" in table
-        assert "Model One" in table
-        assert "| --- | --- |" in table
-
-    # -- _select_best_model -------------------------------------------------
-    def test_select_best_model_empty_list(self):
-        obj = self._make()
-        obj._model_cache = []
-        name, models = obj._select_best_model("gemini-2.5-flash")
-        assert name == "deepseek-chat"
-        assert models == []
-
-    def test_select_best_model_interactions_only_replaced(self):
-        obj = self._make()
-        obj._model_cache = [{"name": "deepseek-chat", "display_name": "DeepSeek"}]
-        name, _ = obj._select_best_model("deep-research-pro-preview-12-2025")
-        assert name == "deepseek-chat"
-
-    def test_select_best_model_preferred_available(self):
-        obj = self._make()
-        obj._model_cache = [
-            {"name": "gemini-2.5-flash", "display_name": "Flash"},
-            {"name": "my-model", "display_name": "My"},
-        ]
-        name, _ = obj._select_best_model("my-model")
-        assert name == "my-model"
-
-    # -- _list_available_models ---------------------------------------------
-    def test_list_available_models_cached(self):
-        obj = self._make()
-        obj._model_cache = [{"name": "cached"}]
-        assert obj._list_available_models() == [{"name": "cached"}]
-
-    def test_list_available_models_no_client(self):
-        obj = self._make()
-        result = obj._list_available_models()
-        assert result == []
-        assert obj._model_cache == []
-
-    # -- _split_into_chunks_by_paragraphs -----------------------------------
-    def test_split_single_chunk(self):
-        obj = self._make()
-        text = "Para one.\n\nPara two."
-        chunks = obj._split_into_chunks_by_paragraphs(text, 5000)
-        assert len(chunks) == 1
-        assert "Para one." in chunks[0]
-        assert "Para two." in chunks[0]
-
-    def test_split_into_multiple_chunks(self):
-        obj = self._make()
-        text = "A" * 50 + "\n\n" + "B" * 50 + "\n\n" + "C" * 50
-        chunks = obj._split_into_chunks_by_paragraphs(text, 60)
-        assert len(chunks) >= 2
-
-    def test_split_empty_content(self):
-        obj = self._make()
-        assert obj._split_into_chunks_by_paragraphs("", 100) == []
-
-    # -- _parse_annotation_response -----------------------------------------
-    def test_parse_annotation_json_array(self):
-        obj = self._make()
-        payload = json.dumps([{"原文": "旧文本", "改为": "新文本", "原因": "简化"}])
-        resp = f"```json\n{payload}\n```"
-        annotations = obj._parse_annotation_response(resp)
-        assert len(annotations) == 1
-        assert annotations[0]["原文片段"] == "旧文本"
-        assert annotations[0]["修改建议"] == "新文本"
-
-    def test_parse_annotation_raw_array(self):
-        obj = self._make()
-        payload = json.dumps([{"原文片段": "old", "修改建议": "new"}])
-        annotations = obj._parse_annotation_response(payload)
-        assert len(annotations) == 1
-
-    def test_parse_annotation_dict_wrapper(self):
-        obj = self._make()
-        payload = json.dumps({"annotations": [{"original": "old", "modified": "new"}]})
-        annotations = obj._parse_annotation_response(payload)
-        assert len(annotations) == 1
-
-    def test_parse_annotation_invalid(self):
-        obj = self._make()
-        assert obj._parse_annotation_response("not json at all {}{}") == []
-
-    def test_parse_annotation_missing_fields(self):
-        obj = self._make()
-        payload = json.dumps([{"原文": "only original"}])
-        assert obj._parse_annotation_response(payload) == []
-
-    # -- _build_annotation_prompt -------------------------------------------
-    def test_build_annotation_prompt_academic(self):
-        obj = self._make()
-        prompt = obj._build_annotation_prompt("docx", "内容片段", "学术润色")
-        assert "资深中文编辑" in prompt or "资深学术编辑" in prompt
-        assert "内容片段" in prompt
-
-    def test_build_annotation_prompt_resume(self):
-        obj = self._make()
-        prompt = obj._build_annotation_prompt("docx", "内容片段", "优化简历")
-        assert "简历顾问" in prompt
-
-    def test_build_annotation_prompt_with_long_context(self):
-        obj = self._make()
-        ctx = "X" * 40000
-        prompt = obj._build_annotation_prompt("docx", "片段", "", full_doc_context=ctx)
-        # Long context gets truncated
-        assert "全文背景参考" in prompt
-
-    # -- _build_analysis_prompt ---------------------------------------------
-    def test_build_analysis_prompt_ppt(self):
-        obj = self._make()
-        prompt = obj._build_analysis_prompt("ppt", "slide content", "改进排版")
-        assert "slide_index" in prompt
-        assert "改进排版" in prompt
-
-    def test_build_analysis_prompt_word(self):
-        obj = self._make()
-        prompt = obj._build_analysis_prompt("word", "doc content", "")
-        assert "Koto文档智能分析助手" in prompt
-
-    # -- _fallback_annotations_from_chunk -----------------------------------
-    def test_fallback_passive(self):
-        from web.document_feedback import DocumentFeedbackSystem
-
-        chunk = "本文被广泛使用的技术被认为很重要"
-        result = DocumentFeedbackSystem._fallback_annotations_from_chunk(chunk)
-        assert isinstance(result, list)
-        # Should find at least one passive-voice annotation
-        assert any("被" in a.get("原文片段", "") for a in result)
-
-    def test_fallback_nominalization(self):
-        from web.document_feedback import DocumentFeedbackSystem
-
-        chunk = "我们对系统进行了优化，对数据进行分析"
-        result = DocumentFeedbackSystem._fallback_annotations_from_chunk(chunk)
-        assert isinstance(result, list)
-
-    def test_fallback_empty_chunk(self):
-        from web.document_feedback import DocumentFeedbackSystem
-
-        assert DocumentFeedbackSystem._fallback_annotations_from_chunk("") == []
-
-
-# ---------------------------------------------------------------------------
-# TrackChangesEditor
-# ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestTrackChangesEditor:
-    """Tests for web.track_changes_editor.TrackChangesEditor"""
+    """Tests for app.core.file.track_changes.TrackChangesEditor"""
 
     def _make(self, **kw):
-        from web.track_changes_editor import TrackChangesEditor
+        from app.core.file.track_changes import TrackChangesEditor
 
         return TrackChangesEditor(**kw)
 
@@ -297,7 +43,7 @@ class TestTrackChangesEditor:
 
     # -- _esc ---------------------------------------------------------------
     def test_esc_basic(self):
-        from web.track_changes_editor import TrackChangesEditor
+        from app.core.file.track_changes import TrackChangesEditor
 
         assert TrackChangesEditor._esc("a & b") == "a &amp; b"
         assert TrackChangesEditor._esc("<tag>") == "&lt;tag&gt;"
@@ -305,68 +51,15 @@ class TestTrackChangesEditor:
         assert TrackChangesEditor._esc("it's") == "it&apos;s"
 
     def test_esc_empty(self):
-        from web.track_changes_editor import TrackChangesEditor
+        from app.core.file.track_changes import TrackChangesEditor
 
         assert TrackChangesEditor._esc("") == ""
         assert TrackChangesEditor._esc(None) == ""
 
     def test_esc_no_special(self):
-        from web.track_changes_editor import TrackChangesEditor
+        from app.core.file.track_changes import TrackChangesEditor
 
         assert TrackChangesEditor._esc("hello world") == "hello world"
-
-    # -- _get_run_text ------------------------------------------------------
-    def test_get_run_text(self):
-        from docx.oxml.ns import qn
-        from lxml import etree
-
-        obj = self._make()
-        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-        run_xml = f'<w:r xmlns:w="{ns}"><w:t>Hello</w:t><w:t> World</w:t></w:r>'
-        run = etree.fromstring(run_xml)
-        assert obj._get_run_text(run) == "Hello World"
-
-    def test_get_run_text_empty(self):
-        from lxml import etree
-
-        obj = self._make()
-        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-        run_xml = f'<w:r xmlns:w="{ns}"></w:r>'
-        run = etree.fromstring(run_xml)
-        assert obj._get_run_text(run) == ""
-
-    # -- _clone_rPr ---------------------------------------------------------
-    def test_clone_rpr_none(self):
-        obj = self._make()
-        assert obj._clone_rPr(None) == ""
-
-    def test_clone_rpr_element(self):
-        from lxml import etree
-
-        obj = self._make()
-        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-        rpr = etree.fromstring(f'<w:rPr xmlns:w="{ns}"><w:b/></w:rPr>')
-        result = obj._clone_rPr(rpr)
-        assert "rPr" in result
-        assert "b" in result  # bold preserved
-
-    # -- _make_run ----------------------------------------------------------
-    def test_make_run(self):
-        from lxml import etree
-
-        obj = self._make()
-        ns = "http://schemas.openxmlformats.org/wordprocessingml/2006/main"
-        rpr_xml = f'<w:rPr xmlns:w="{ns}"><w:b/></w:rPr>'
-        run = obj._make_run("Hello", rpr_xml)
-        text = run.findall(f"{{{ns}}}t")
-        assert len(text) == 1
-        assert text[0].text == "Hello"
-
-    def test_make_run_escapes_xml(self):
-        obj = self._make()
-        run = obj._make_run("a & b", "")
-        # Should not raise – the & is escaped internally
-        assert run is not None
 
     # -- _add_comments_content_type -----------------------------------------
     def test_add_comments_content_type_new(self):
@@ -425,10 +118,10 @@ class TestTrackChangesEditor:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestBatchFileOps:
-    """Tests for web.batch_file_ops.BatchFileOpsManager"""
+    """Tests for web.files.batch_file_ops.BatchFileOpsManager"""
 
     def _make(self):
-        from web.batch_file_ops import BatchFileOpsManager
+        from web.files.batch_file_ops import BatchFileOpsManager
 
         return BatchFileOpsManager()
 
@@ -657,7 +350,7 @@ class TestBatchFileOps:
 
     # -- _build_summary & _job_to_dict --------------------------------------
     def test_build_summary(self):
-        from web.batch_file_ops import BatchJobRecord
+        from web.files.batch_file_ops import BatchJobRecord
 
         mgr = self._make()
         job = BatchJobRecord(
@@ -709,10 +402,10 @@ class TestBatchFileOps:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestOrganizeCleanup:
-    """Tests for web.organize_cleanup.OrganizeCleanup"""
+    """Tests for app.core.services.organize_cleanup.OrganizeCleanup"""
 
     def _make(self, root=None):
-        from web.organize_cleanup import OrganizeCleanup
+        from app.core.services.organize_cleanup import OrganizeCleanup
 
         return OrganizeCleanup(organize_root=root or "workspace/_organize")
 
@@ -733,7 +426,7 @@ class TestOrganizeCleanup:
 
     # -- _REVISION_PATTERNS ------------------------------------------------
     def test_revision_patterns(self):
-        from web.organize_cleanup import OrganizeCleanup
+        from app.core.services.organize_cleanup import OrganizeCleanup
 
         assert len(OrganizeCleanup._REVISION_PATTERNS) == 8
 
@@ -774,7 +467,7 @@ class TestOrganizeCleanup:
 
     # -- _file_hash ---------------------------------------------------------
     def test_file_hash(self, tmp_path):
-        from web.organize_cleanup import OrganizeCleanup
+        from app.core.services.organize_cleanup import OrganizeCleanup
 
         f = tmp_path / "test.txt"
         f.write_bytes(b"hello world")
@@ -783,14 +476,14 @@ class TestOrganizeCleanup:
         assert h == expected
 
     def test_file_hash_nonexistent(self, tmp_path):
-        from web.organize_cleanup import OrganizeCleanup
+        from app.core.services.organize_cleanup import OrganizeCleanup
 
         h = OrganizeCleanup._file_hash(tmp_path / "nope.txt")
         assert h == ""
 
     # -- _unique_dest -------------------------------------------------------
     def test_unique_dest(self, tmp_path):
-        from web.organize_cleanup import OrganizeCleanup
+        from app.core.services.organize_cleanup import OrganizeCleanup
 
         target = tmp_path / "file.txt"
         # File doesn't exist yet – _unique_dest always appends counter
@@ -799,7 +492,7 @@ class TestOrganizeCleanup:
         assert result.suffix == ".txt"
 
     def test_unique_dest_collisions(self, tmp_path):
-        from web.organize_cleanup import OrganizeCleanup
+        from app.core.services.organize_cleanup import OrganizeCleanup
 
         (tmp_path / "file_1.txt").write_text("x")
         result = OrganizeCleanup._unique_dest(tmp_path / "file.txt")
@@ -889,10 +582,10 @@ class TestOrganizeCleanup:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestFileAnalyzer:
-    """Tests for web.file_analyzer.FileAnalyzer"""
+    """Tests for app.core.services.file_analyzer.FileAnalyzer"""
 
     def _make(self):
-        from web.file_analyzer import FileAnalyzer
+        from app.core.services.file_analyzer import FileAnalyzer
 
         return FileAnalyzer()
 
@@ -906,7 +599,7 @@ class TestFileAnalyzer:
         assert fa.keywords_cache == {}
 
     def test_class_constants(self):
-        from web.file_analyzer import FileAnalyzer
+        from app.core.services.file_analyzer import FileAnalyzer
 
         assert FileAnalyzer.OLLAMA_URL == "http://127.0.0.1:11434"
         assert FileAnalyzer.AI_MODEL == "qwen3.5:9b"
@@ -1104,7 +797,9 @@ class TestFileAnalyzer:
 
     # -- analyze_file -------------------------------------------------------
     @patch.object(
-        __import__("web.file_analyzer", fromlist=["FileAnalyzer"]).FileAnalyzer,
+        __import__(
+            "app.core.services.file_analyzer", fromlist=["FileAnalyzer"]
+        ).FileAnalyzer,
         "_ai_classify",
         return_value=None,
     )
@@ -1119,7 +814,9 @@ class TestFileAnalyzer:
         assert result["timestamp"] == "2024"
 
     @patch.object(
-        __import__("web.file_analyzer", fromlist=["FileAnalyzer"]).FileAnalyzer,
+        __import__(
+            "app.core.services.file_analyzer", fromlist=["FileAnalyzer"]
+        ).FileAnalyzer,
         "_ai_classify",
         return_value=None,
     )
@@ -1130,7 +827,9 @@ class TestFileAnalyzer:
 
     # -- analyze_batch ------------------------------------------------------
     @patch.object(
-        __import__("web.file_analyzer", fromlist=["FileAnalyzer"]).FileAnalyzer,
+        __import__(
+            "app.core.services.file_analyzer", fromlist=["FileAnalyzer"]
+        ).FileAnalyzer,
         "_ai_classify",
         return_value=None,
     )
@@ -1145,9 +844,9 @@ class TestFileAnalyzer:
         assert all(r["success"] for r in results)
 
     # -- _ai_classify (mocked) ----------------------------------------------
-    @patch("web.file_analyzer.requests.post")
+    @patch("app.core.services.file_analyzer.requests.post")
     def test_ai_classify_ollama_unavailable(self, mock_post, tmp_path):
-        from web.file_analyzer import FileAnalyzer
+        from app.core.services.file_analyzer import FileAnalyzer
 
         FileAnalyzer._ai_available = False
         FileAnalyzer._ai_check_time = datetime.now().timestamp()

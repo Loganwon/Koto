@@ -38,6 +38,7 @@ def test_parse_file_to_text_pdf_letter_window_skips_table_of_contents(
     tmp_path, monkeypatch
 ):
     from app.core.agent import task_tools
+    from app.core.agent.tools import _internal_formats
 
     pdf_path = tmp_path / "schiller.pdf"
     pdf_path.write_bytes(b"%PDF-1.4\n% fake test pdf\n")
@@ -72,7 +73,7 @@ def test_parse_file_to_text_pdf_letter_window_skips_table_of_contents(
             )
         return ""
 
-    monkeypatch.setattr(task_tools, "_read_pdf_excerpt", fake_pdf_excerpt)
+    monkeypatch.setattr(_internal_formats, "_read_pdf_excerpt", fake_pdf_excerpt)
 
     text = task_tools.parse_file_to_text(
         str(pdf_path),

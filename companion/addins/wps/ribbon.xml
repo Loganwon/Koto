@@ -1,0 +1,7 @@
+<customUI xmlns="http://schemas.microsoft.com/office/2009/07/customui" onLoad="OnKotoLoad">
+  <ribbon><tabs><tab idMso="TabHome"><group id="KotoGroup" label="Koto"><button id="KotoOpen" label="Koto 助手" size="normal" onAction="OpenKoto" keytip="KT" screentip="打开 Koto" supertip="在右侧打开助手，直接使用当前选区。选中文字后也可以右键打开。"/></group></tab></tabs></ribbon>
+  <contextMenus>
+    <contextMenu idMso="ContextMenuText"><button id="KotoText" label="用 Koto 处理" onAction="OpenKoto"/></contextMenu>
+    <contextMenu idMso="ContextMenuList"><button id="KotoList" label="用 Koto 处理" onAction="OpenKoto"/></contextMenu>
+  </contextMenus>
+</customUI>

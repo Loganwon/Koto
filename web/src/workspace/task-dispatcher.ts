@@ -1,7 +1,52 @@
-import { _csrfFetch } from './infrastructure';
+import { _csrfFetch, showToast } from './infrastructure';
 import { isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
-import { publishWorkspaceApi } from '../shared/workspace-api';
-
+import { previewText, terminalAnswerText } from './task-final-report';
+import {
+  attachTaskContextPackage,
+  cloneTaskPayload,
+  compactFollowupTaskFile,
+  compactFollowupTaskPayload,
+  compactJsonValue,
+  compactPendingResumePayload,
+  compactTaskContext,
+} from './task-dispatcher-payload';
+import {
+  baseNameFromPath,
+  fileTypeFromPath,
+  normalizeTaskPath,
+  type TaskFileInfo,
+} from './task-file-contract';
+import {
+  canonicalTaskFileType,
+  explicitWriteTargetPathFromText,
+  inferAttachedWriteTargetFile,
+} from './task-target-inference';
+import { localModelWritePreflight } from './task-model-preflight';
+import {
+  buildCurrentOpenTaskFile,
+  buildWorkspaceChatFileContextValue,
+  buildWorkspaceRouteFiles,
+  supportsLiveDocumentTools,
+} from './task-workspace-context';
+import {
+  deterministicWorkspaceRouteDecision,
+  fileTaskRouteDecision,
+  isDirectWorkspaceResponse,
+  isWorkspaceOpenFileResponse,
+  normalizeFileTaskRoutingDecision,
+  normalizeWorkspaceRouteDecision,
+  shouldBypassWorkspaceRoute,
+  shouldForceFileTaskForWorkspaceContext,
+  workspaceRouteErrorFallbackDecision,
+} from './task-routing-decision';
+import { createWorkspaceChatStreamer } from './task-direct-chat';
+import { runWorkspaceOpenFileRoute } from './task-open-file-route';
+import { decodeTaskContract } from './task-contract-codec';
+import { taskCardPersistenceStructure } from './task-card-persistence';
+import {
+  buildTaskFollowupContext,
+  looksLikeTaskCritique,
+} from './task-followup-context';
 export interface TaskDispatcherDeps {
   state?: Record<string, any>;
   getSessionId?: () => string;
@@ -10,6 +55,7 @@ export interface TaskDispatcherDeps {
   getModelMode?: () => string;
   getSelectedCloudModelId?: () => string;
   setStreamButton?: (_loading: boolean) => void;
+  openWorkspaceFile?: (_path: string) => Promise<any> | any;
   streamTaskFlow?: (_opts: any) => Promise<any>;
   beginAssistantTaskTurn?: (_metadata?: any) => any;
   syncAssistantTaskTurn?: (_turnId: string, _metadata?: any) => any;
@@ -39,59 +85,12 @@ export interface TaskContext {
   options?: Record<string, any>;
 }
 
-export interface TaskFileInfo {
-  path?: string;
-  name?: string;
-  type?: string;
-  file_type?: string;
-  content?: string;
-  target?: boolean;
-  loading?: boolean;
-}
-
-function terminalTaskTextValue(value: any, depth = 0): string {
-  if (typeof value === 'string') return value.trim();
-  if (!value || depth > 3) return '';
-  if (Array.isArray(value)) {
-    return value.map((item) => terminalTaskTextValue(item, depth + 1)).filter(Boolean).join('\n').trim();
-  }
-  if (typeof value !== 'object') return '';
-  for (const key of ['final_answer', 'finalAnswer', 'answer', 'summary', 'text', 'content', 'output_text', 'output', 'result', 'message', 'error']) {
-    if (!Object.prototype.hasOwnProperty.call(value, key)) continue;
-    const text = terminalTaskTextValue(value[key], depth + 1);
-    if (text) return text;
-  }
-  return '';
-}
-
-function terminalTaskAnswer(payload: any, fallback = ''): string {
-  const data = payload && typeof payload === 'object' ? payload : {};
-  for (const candidate of [
-    data.final_answer, data.finalAnswer, data.answer, data.output_text, data.output,
-    data.result, data.summary, data.text, data.content, data.message, data.error,
-    data.data, data.payload, fallback,
-  ]) {
-    const text = terminalTaskTextValue(candidate);
-    if (text) return text;
-  }
-  return '';
-}
-
 export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   const options = deps || {};
   const state = options.state || {};
   const messageRoutes: MessageRoute[] = [];
   const quickActionHandlers = new Map<string, Function>();
   let defaultQuickActionHandler: Function | null = null;
-  const WORKSPACE_ROUTE_NAMES = new Set(['light_chat', 'web_search', 'file_task', 'open_file', 'system_action']);
-  const WORKSPACE_DIRECT_ROUTES = new Set(['light_chat', 'web_search', 'system_action']);
-  const WORKSPACE_FILE_TASK_ROUTE = 'file_task';
-  const WORKSPACE_FILE_TASK_KIND = 'complex_task';
-  const WORKSPACE_DIRECT_KIND = 'direct_response';
-  const FILE_TASK_CONTEXT_CUE_RE = /(?:当前(?:打开的?)?(?:文件|文档|表格|演示稿)?|这个(?:文件|文档|表格|演示稿)|已打开|附件|选区|读取|阅读|查看|总结|概括|归纳|分析|检查|提取|改写|润色|翻译|批注|修订|写入|写回|修改|更新|处理|基于|文件|文档|表格|演示稿|pdf|docx?|xlsx?|pptx?|txt|md|csv)/i;
-  const EXPLICIT_FILE_REFERENCE_RE = /[\w\u4e00-\u9fff ._()[\]{}~@#$%^&+=,;!-]{1,180}\.(?:pdf|docx?|xlsx?|xlsm|pptx?|txt|md|csv)\b/i;
-  const SYSTEM_ACTION_CUE_RE = /^(?:现在)?(?:几点|时间|日期|几号|星期几|系统状态|电脑状态|系统信息|电脑信息|配置|内存|cpu|硬盘|time|date)$/i;
-  const WHITELISTED_APP_LAUNCH_RE = /^(?:请|帮我|麻烦)?\s*(?:打开|启动|开启|open|launch)\s*(?:微信|wechat|weixin)\s*(?:应用|app)?$/i;
 
   function registerMessageRoute(route: MessageRoute): MessageRoute {
     if (!route || typeof route.match !== 'function' || typeof route.run !== 'function') {
@@ -132,129 +131,6 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     return Promise.resolve(handler(Object.assign({ action }, context)));
   }
 
-  function previewText(value: string, limit: number): string {
-    const text = String(value || '').trim();
-    const max = Number(limit) > 0 ? Number(limit) : 0;
-    if (!max || text.length <= max) return text;
-    return text.slice(0, max) + '...';
-  }
-
-  function cloneTaskPayload(payload: any): any {
-    if (!payload || typeof payload !== 'object') return null;
-    try { return JSON.parse(JSON.stringify(payload)); }
-    catch { return Object.assign({}, payload); }
-  }
-
-  function compactJsonValue(value: any, depth: number, textLimit: number): any {
-    const level = Number(depth) || 0;
-    const limit = Number(textLimit) > 0 ? Number(textLimit) : 2000;
-    if (level > 5) return null;
-    if (value == null) return null;
-    if (typeof value === 'string') return previewText(value, limit);
-    if (typeof value === 'number' || typeof value === 'boolean') return value;
-    if (Array.isArray(value)) {
-      return value.slice(0, 20).map((item: any) => compactJsonValue(item, level + 1, limit)).filter((item: any) => item != null);
-    }
-    if (typeof value === 'object') {
-      const compact: Record<string, any> = {};
-      Object.entries(value).slice(0, 60).forEach(([key, item]) => {
-        const cleanKey = previewText(key, 120);
-        if (!cleanKey) return;
-        const cleanValue = compactJsonValue(item, level + 1, limit);
-        if (cleanValue != null) compact[cleanKey] = cleanValue;
-      });
-      return Object.keys(compact).length ? compact : null;
-    }
-    return previewText(value, limit);
-  }
-
-  function compactFollowupTaskFile(file: any): Record<string, any> | null {
-    if (!file || typeof file !== 'object') return null;
-    const compact: Record<string, any> = {};
-    const path = String(file.path || '').trim();
-    const name = String(file.name || '').trim();
-    const type = String(file.type || file.file_type || '').trim();
-    if (path) compact.path = path;
-    if (name) compact.name = name;
-    if (type) compact.type = type;
-    if (file.target) compact.target = true;
-    return Object.keys(compact).length ? compact : null;
-  }
-
-  function compactTaskFileList(files: any[], limit: number): any[] {
-    const max = Number(limit) > 0 ? Number(limit) : 8;
-    return (Array.isArray(files) ? files : []).map((file) => compactFollowupTaskFile(file)).filter(Boolean).slice(0, max);
-  }
-
-  function compactTaskContext(value: any): Record<string, any> | null {
-    if (!value || typeof value !== 'object') return null;
-    try {
-      const cloned = compactJsonValue(value, 0, 2000);
-      if (!cloned || typeof cloned !== 'object') return null;
-      const c = cloned as Record<string, any>;
-      if (c.files && typeof c.files === 'object') {
-        if (Array.isArray(c.files.sources)) c.files.sources = compactTaskFileList(c.files.sources, 8);
-        if (c.files.current) c.files.current = compactFollowupTaskFile(c.files.current);
-        if (c.files.target) c.files.target = compactFollowupTaskFile(c.files.target);
-      }
-      if (c.continuity && typeof c.continuity === 'object') {
-        if (Array.isArray(c.continuity.previous_file_changes)) {
-          c.continuity.previous_file_changes = c.continuity.previous_file_changes.slice(-8);
-        }
-        if (c.continuity.followup_context && typeof c.continuity.followup_context === 'object') {
-          const followup = c.continuity.followup_context;
-          if (followup.previous_task_summary) followup.previous_task_summary = previewText(followup.previous_task_summary, 2000);
-          if (followup.user_feedback) followup.user_feedback = previewText(followup.user_feedback, 1000);
-        }
-      }
-      return Object.keys(c).length ? c : null;
-    } catch { return null; }
-  }
-
-  function compactFollowupTaskPayload(payload: any): Record<string, any> | null {
-    if (!payload || typeof payload !== 'object') return null;
-    const compact: Record<string, any> = {};
-    const task = String(payload.task || '').trim();
-    const files = Array.isArray(payload.files) ? payload.files.map((f: any) => compactFollowupTaskFile(f)).filter(Boolean) : [];
-    const currentFile = compactFollowupTaskFile(payload.current_file);
-    const selection = String(payload.selection || '').trim();
-    const selectionSource = String(payload.selection_source || '').trim();
-    const targetPath = String(payload.target_path || '').trim();
-    const fileName = String(payload.file_name || '').trim();
-    const fileType = String(payload.file_type || '').trim();
-    const taskContext = compactTaskContext(payload.task_context);
-    if (task) compact.task = task;
-    if (files.length) compact.files = files;
-    if (selection) compact.selection = selection;
-    if (selectionSource) compact.selection_source = selectionSource;
-    if (targetPath) compact.target_path = targetPath;
-    if (fileName) compact.file_name = fileName;
-    if (fileType) compact.file_type = fileType;
-    if (currentFile) compact.current_file = currentFile;
-    if (taskContext) compact.task_context = taskContext;
-    return Object.keys(compact).length ? compact : null;
-  }
-
-  function compactPendingResumePayload(payload: any): Record<string, any> | null {
-    if (!payload || typeof payload !== 'object') return null;
-    const compact = compactFollowupTaskPayload(payload) || {};
-    const task = String(payload.task || '').trim();
-    const taskId = String(payload.task_id || '').trim();
-    const sessionId = String(payload.session_id || '').trim();
-    const modelMode = String(payload.model_mode || '').trim();
-    const modelId = String(payload.model_id || '').trim();
-    const workflowCheckpoint = payload.options && typeof payload.options === 'object'
-      && payload.options.workflow_checkpoint && typeof payload.options.workflow_checkpoint === 'object'
-      ? Object.assign({}, payload.options.workflow_checkpoint) : null;
-    if (task) compact.task = task;
-    if (taskId) compact.task_id = taskId;
-    if (sessionId) compact.session_id = sessionId;
-    if (modelMode) compact.model_mode = modelMode;
-    if (modelId) compact.model_id = modelId;
-    if (workflowCheckpoint) compact.options = { workflow_checkpoint: workflowCheckpoint };
-    return Object.keys(compact).length ? compact : null;
-  }
-
   function setTaskFollowupPayload(loadingEl: HTMLElement, payload: any): void {
     if (!loadingEl || !loadingEl.dataset) return;
     const compactPayload = compactFollowupTaskPayload(payload);
@@ -277,320 +153,36 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     catch { delete loadingEl.dataset.taskPendingResumePayload; }
   }
 
-  function buildTaskContextPackage(params: {
-    task?: string; files?: any[]; currentFile?: any; targetFile?: any;
-    selection?: string; selectionSource?: string; followupContext?: any; workflowCheckpoint?: any;
-  }): Record<string, any> | null {
-    const payload = params && typeof params === 'object' ? params : {};
-    const files = Array.isArray(payload.files) ? payload.files : [];
-    const targetFile = payload.targetFile || files.find((f: any) => f && f.target) || null;
-    const currentFile = payload.currentFile || null;
-    const followupContext = payload.followupContext && typeof payload.followupContext === 'object' ? payload.followupContext : null;
-    const selectionText = String(payload.selection || '').trim();
-    const context: Record<string, any> = {
-      context_version: 'koto_task_context_v1',
-      intent: {
-        request: previewText(payload.task || '', 2000),
-        followup_action: followupContext ? String(followupContext.followup_action || 'question').trim() || 'question' : '',
-        source: followupContext ? String(followupContext.source || '').trim() : 'user_input',
-      },
-      files: {
-        current: compactFollowupTaskFile(currentFile),
-        target: compactFollowupTaskFile(targetFile),
-        sources: compactTaskFileList(files.filter((f: any) => f && f !== targetFile), 8),
-      },
-      selection: { has_selection: !!selectionText, source: previewText(payload.selectionSource || '', 240), preview: previewText(selectionText, 600) },
-      continuity: { followup_context: followupContext },
-    };
-    const workflowCheckpoint = payload.workflowCheckpoint && typeof payload.workflowCheckpoint === 'object' ? payload.workflowCheckpoint : null;
-    if (workflowCheckpoint && String(workflowCheckpoint.policy || '').trim().toLowerCase() === 'confirm_each_step') {
-      context.continuity.stepwise = {
-        policy: 'confirm_each_step', step_index: Number(workflowCheckpoint.step_index || 0) || 0,
-        original_task: previewText(workflowCheckpoint.original_task || payload.task || '', 2000), resume_label: '继续下一步',
-      };
-    }
-    if (followupContext) {
-      context.continuity.previous_run_id = previewText(followupContext.previous_run_id || '', 128);
-      context.continuity.previous_task_status = previewText(followupContext.previous_task_status || '', 80);
-      context.continuity.previous_task_summary = previewText(followupContext.previous_task_summary || '', 2000);
-      if (followupContext.stepwise && typeof followupContext.stepwise === 'object') {
-        context.continuity.stepwise = Object.assign({}, context.continuity.stepwise || {}, compactJsonValue(followupContext.stepwise, 0, 2000) || {});
-      }
-      if (Array.isArray(followupContext.previous_task_file_changes)) {
-        context.continuity.previous_file_changes = followupContext.previous_task_file_changes.slice(-8);
-      }
-    }
-    return compactTaskContext(context);
-  }
-
-  const WRITE_TARGET_HINTS = ['加入', '写入', '插入', '放到', '放入', '放进', '写回', '更新', '同步到', '汇总到', '整理到', '保存到', '输出到', '追加到', 'append', 'insert', 'write', 'save'];
-  const READ_ONLY_HINTS = ['不要修改', '不要改', '别修改', '别改', '不用修改', '无需修改', '不要写入', '不要写回', '不要更新', '不写入', '不写回', '只分析', '仅分析', '只总结', '仅总结', '只检查', '仅检查', '只列出', '仅列出', '只解释', '仅解释', '只给建议', '仅给建议', 'do not modify', 'do not edit', 'do not write', 'do not update', 'read only', 'readonly', 'only analyze', 'only summar'];
-  const TARGET_TYPE_CUES = [
-    { canonical: 'docx', cues: ['docx', 'word'] }, { canonical: 'xlsx', cues: ['xlsx', 'excel'] },
-    { canonical: 'pptx', cues: ['pptx', 'powerpoint', 'slides', 'ppt'] }, { canonical: 'csv', cues: ['csv'] },
-    { canonical: 'md', cues: ['markdown', 'md'] }, { canonical: 'txt', cues: ['txt'] },
-  ];
-  const TARGET_TYPE_FAMILIES: Record<string, string[]> = {
-    docx: ['docx', 'doc'], xlsx: ['xlsx', 'xlsm', 'xls'], pptx: ['pptx', 'ppt'],
-    csv: ['csv'], md: ['md'], txt: ['txt'],
-  };
-  const COMPARE_TASK_HINTS = ['对比', '比较', '对照', '差异', '区别', '不同', 'compare', 'diff', 'difference'];
-  const ANNOTATION_TASK_HINTS = ['标注', '批注', '修订', '审校', '标出来', '注释', 'comment', 'annotate', 'review'];
-  const REVISED_TARGET_NAME_HINTS = ['_revised', '-revised', ' revised', 'revised_', '修订', '修改', '批注', 'annotated', 'reviewed', 'commented', 'markup'];
-
   function workspaceRouteFiles(): any[] {
-    const files = Array.isArray(state._aiFileContext) ? state._aiFileContext : [];
-    return files.filter((file: any) => file && !file.loading && !file.error).slice(0, 8).map((file: any, idx: number) => ({
-      path: previewText(file.path || '', 260),
-      name: previewText(file.name || '', 180),
-      type: previewText(file.type || file.file_type || '', 40),
-      target: idx === state._aiTargetFileIdx || file.target === true,
-      content_preview: previewText(typeof options.sampleTaskContext === 'function' ? options.sampleTaskContext(file.content || '') : String(file.content || ''), 700),
+    return buildWorkspaceRouteFiles(
+      state._aiFileContext,
+      state._aiTargetFileIdx,
+      options.sampleTaskContext,
+    ).map((file) => ({
+      path: file.path,
+      name: file.name,
+      type: file.type,
+      target: file.target,
+      content_preview: file.content,
     }));
   }
 
   function currentOpenTaskFile(): TaskFileInfo | null {
-    const name = String(state.fileName || '').trim();
-    const path = String(state.filePath || state.wsSourcePath || '').trim();
-    const type = String(state.fileType || '').trim();
-    const id = String(state.fileId || '').trim();
-    if (!name && !path && !type && !id) return null;
     const content = typeof options.getActiveEditorContent === 'function'
-      ? previewText(options.getActiveEditorContent() || '', 6000)
+      ? options.getActiveEditorContent() || ''
       : '';
-    return {
-      path: path || id || name,
-      name: name || baseNameFromPath(path || id),
-      type,
-      content,
-      target: false,
-    };
+    return buildCurrentOpenTaskFile(state, content);
   }
 
   function buildWorkspaceChatFileContext(context: TaskContext): Record<string, any> | null {
-    const currentFile = currentOpenTaskFile();
-    const selectionText = String(context && context.pinnedSelText || '').trim();
-    const selectionContext = context && context.selectionContext && typeof context.selectionContext === 'object'
-      ? context.selectionContext
-      : null;
-    const readyFiles = workspaceRouteFiles();
-    if (!currentFile && !selectionText && !readyFiles.length) return null;
-
-    const openTabs = Array.isArray(state.openTabs)
-      ? state.openTabs.slice(0, 10).map((tab: any) => tab && (tab.path || tab.name)).filter(Boolean)
-      : [];
-    const selectionMeta: Record<string, any> = {};
-    if (selectionContext) {
-      ['kind', 'sourceType', 'sheetName', 'rangeA1', 'rows', 'cols', 'rawText'].forEach((key) => {
-        const value = (selectionContext as any)[key];
-        if (value !== undefined && value !== null && String(value).trim() !== '') selectionMeta[key] = value;
-      });
-    }
-
-    return {
-      file_path: currentFile ? currentFile.path || '' : '',
-      file_name: currentFile ? currentFile.name || '' : '',
-      file_type: currentFile ? currentFile.type || currentFile.file_type || '' : '',
-      open_tabs: openTabs,
-      attached_files: readyFiles.map((file: any) => ({
-        path: file.path || '',
-        name: file.name || '',
-        type: file.type || file.file_type || '',
-      })),
-      selection: selectionText,
-      selection_source: String(context && context.pinnedSelSource || '').trim(),
-      selection_preview: previewText(selectionContext && selectionContext.previewText ? selectionContext.previewText : selectionText, 800),
-      selection_kind: String(selectionMeta.kind || selectionMeta.sourceType || '').trim(),
-      selection_meta: selectionMeta,
-    };
-  }
-
-  function mentionsAttachedFileContext(text: string): boolean {
-    const source = String(text || '').trim();
-    if (!source) return false;
-    return /(?:附件|附加|已添加|添加的|分析文档|拖入|上传|attached|uploaded)/i.test(source);
-  }
-
-  function mentionsExplicitTaskFile(text: string): boolean {
-    const source = String(text || '').trim();
-    return !!source && EXPLICIT_FILE_REFERENCE_RE.test(source);
-  }
-
-  function shouldForceFileTaskForWorkspaceContext(context: TaskContext, routeDecision: Record<string, any> | null): boolean {
-    const route = String(routeDecision && routeDecision.route || '').trim().toLowerCase();
-    if (route && !WORKSPACE_DIRECT_ROUTES.has(route)) return false;
-    const text = String(context && context.text || '').trim();
-    if (!text) return false;
-    const hasFileContext = workspaceRouteFiles().length > 0 || !!String(context.pinnedSelText || '').trim();
-    if (!hasFileContext) return false;
-    return FILE_TASK_CONTEXT_CUE_RE.test(text);
-  }
-
-  function fileTaskRouteDecision(routeSource: string, base?: Record<string, any> | null): Record<string, any> {
-    const decision = Object.assign({}, base || {}, {
-      route_kind: WORKSPACE_FILE_TASK_KIND,
-      base_task_type: 'COMPLEX_TASK',
-      route: WORKSPACE_FILE_TASK_ROUTE,
-      task_type: 'FILE_TASK',
-      route_source: routeSource,
-      keyword_policy: 'hint_only',
+    return buildWorkspaceChatFileContextValue({
+      currentFile: currentOpenTaskFile(),
+      readyFiles: workspaceRouteFiles(),
+      openTabs: state.openTabs,
+      selectionText: context && context.pinnedSelText,
+      selectionSource: context && context.pinnedSelSource,
+      selectionContext: context && context.selectionContext,
     });
-    if (
-      routeSource === 'frontend_deterministic_file_context'
-      || routeSource === 'frontend_deterministic_explicit_file_reference'
-      || routeSource === 'frontend_file_context_guard'
-    ) {
-      decision.skip_ai_intent_adjudicator = true;
-    }
-    return decision;
-  }
-
-  function deterministicWorkspaceRouteDecision(context: TaskContext): Record<string, any> | null {
-    const text = String(context && context.text || '').trim();
-    if (!text) return null;
-    if (text.length <= 30 && (SYSTEM_ACTION_CUE_RE.test(text) || WHITELISTED_APP_LAUNCH_RE.test(text))) {
-      return normalizeWorkspaceRouteDecision({
-        route_kind: WORKSPACE_DIRECT_KIND,
-        route: 'system_action',
-        task_type: 'SYSTEM',
-        confidence: 0.99,
-        reason: '前端确定性系统动作短路。',
-        route_source: 'frontend_deterministic_system',
-      });
-    }
-    const hasFileContext = workspaceRouteFiles().length > 0
-      || !!currentOpenTaskFile()
-      || !!String(context.pinnedSelText || '').trim();
-    if (hasFileContext && FILE_TASK_CONTEXT_CUE_RE.test(text)) {
-      return fileTaskRouteDecision('frontend_deterministic_file_context');
-    }
-    if (mentionsExplicitTaskFile(text) && FILE_TASK_CONTEXT_CUE_RE.test(text)) {
-      return fileTaskRouteDecision('frontend_deterministic_explicit_file_reference');
-    }
-    return null;
-  }
-
-  function isDirectWorkspaceResponse(routeDecision: Record<string, any> | null): boolean {
-    if (!routeDecision) return false;
-    const routeKind = String(routeDecision.route_kind || '').trim().toLowerCase();
-    const route = String(routeDecision.route || '').trim().toLowerCase();
-    return routeKind === WORKSPACE_DIRECT_KIND && WORKSPACE_DIRECT_ROUTES.has(route);
-  }
-
-  function normalizeWorkspaceRouteDecision(data: any): Record<string, any> {
-    const payload = data && typeof data === 'object' ? data : {};
-    const route = String(payload.route || '').trim().toLowerCase();
-    const legacyRoute = WORKSPACE_ROUTE_NAMES.has(route) ? route : WORKSPACE_FILE_TASK_ROUTE;
-    const rawTaskType = String(payload.task_type || '').trim().toUpperCase();
-    const normalizedRoute = rawTaskType === 'SYSTEM' && legacyRoute === WORKSPACE_FILE_TASK_ROUTE
-      ? 'system_action'
-      : (legacyRoute === 'open_file' ? WORKSPACE_FILE_TASK_ROUTE : legacyRoute);
-    const routeKind = canonicalWorkspaceRouteKind(normalizedRoute, payload.route_kind);
-    const canonicalTaskType = canonicalWorkspaceTaskType(normalizedRoute, rawTaskType);
-    const explicitSourceTaskType = String(payload.source_task_type || '').trim().toUpperCase();
-    const sourceTaskType = explicitSourceTaskType || (rawTaskType && rawTaskType !== canonicalTaskType ? rawTaskType : '');
-    return {
-      ok: payload.ok !== false,
-      route_kind: routeKind,
-      base_task_type: routeKind === 'direct_response' ? 'DIRECT_RESPONSE' : 'COMPLEX_TASK',
-      route: normalizedRoute,
-      task_type: canonicalTaskType,
-      source_task_type: sourceTaskType,
-      confidence: Math.max(0, Math.min(1, Number(payload.confidence || 0) || 0)),
-      reason: previewText(payload.reason || '', 280),
-      target_path: previewText(payload.target_path || '', 260),
-      hint: previewText(payload.hint || '', 180),
-      route_source: previewText(payload.route_source || '', 160),
-      keyword_policy: String(payload.keyword_policy || '').trim() || 'hint_only',
-      performance: payload.performance && typeof payload.performance === 'object'
-        ? compactJsonValue(payload.performance, 0, 800)
-        : undefined,
-    };
-  }
-
-  function normalizeFileTaskRoutingDecision(value: any): Record<string, any> | null {
-    const source = value && typeof value === 'object' ? value : null;
-    if (!source) return null;
-    const route = String(source.route || '').trim().toLowerCase();
-    if (!route) return null;
-    const routeKind = canonicalWorkspaceRouteKind(route, source.route_kind);
-    const taskType = canonicalWorkspaceTaskType(route, source.task_type);
-    const normalized: Record<string, any> = {
-      route_kind: routeKind,
-      route,
-      task_type: taskType,
-      source_task_type: String(source.source_task_type || '').trim().toUpperCase(),
-      confidence: Math.max(0, Math.min(1, Number(source.confidence || 0) || 0)),
-      reason: previewText(source.reason || '', 500),
-      route_source: previewText(source.route_source || '', 160),
-      router_policy: previewText(source.router_policy || source.route_policy || '', 120),
-      keyword_policy: previewText(source.keyword_policy || '', 120),
-      target_path: previewText(source.target_path || '', 260),
-    };
-    if (source.performance && typeof source.performance === 'object') {
-      normalized.performance = compactJsonValue(source.performance, 0, 800);
-    }
-    if (source.skip_ai_intent_adjudicator === true) {
-      normalized.skip_ai_intent_adjudicator = true;
-    }
-    const candidateWorkflows = Array.isArray(source.candidate_workflows || source.workflow_candidates)
-      ? (source.candidate_workflows || source.workflow_candidates)
-          .slice(0, 8)
-          .map((item: any) => previewText(item || '', 160))
-          .filter(Boolean)
-      : [];
-    if (candidateWorkflows.length) normalized.candidate_workflows = candidateWorkflows;
-    if (Object.prototype.hasOwnProperty.call(source, 'requires_adjudication')) {
-      normalized.requires_adjudication = !!source.requires_adjudication;
-    }
-    const finalToolPath = previewText(source.final_tool_path || source.tool_path || '', 240);
-    if (finalToolPath) normalized.final_tool_path = finalToolPath;
-    const frontendLabel = previewText(source.frontend_label || source.display_label || '', 160);
-    if (frontendLabel) normalized.frontend_label = frontendLabel;
-    const planSteps = Array.isArray(source.plan_steps || source.steps)
-      ? (source.plan_steps || source.steps).slice(0, 8).map((item: any, index: number) => {
-          const step = item && typeof item === 'object' ? item : { label: item };
-          const normalizedStep: Record<string, any> = {
-            id: previewText(step.id || `route_step_${index + 1}`, 64),
-            label: previewText(step.label || step.title || step.step || '', 160),
-            description: previewText(step.description || step.detail || '', 320),
-            tool: previewText(step.tool || step.tool_name || '', 120),
-          };
-          Object.keys(normalizedStep).forEach((key) => {
-            if (!normalizedStep[key]) delete normalizedStep[key];
-          });
-          return normalizedStep;
-        }).filter((item: Record<string, any>) => item.label || item.description || item.tool)
-      : [];
-    if (planSteps.length) normalized.plan_steps = planSteps;
-    return normalized;
-  }
-
-  function canonicalWorkspaceRouteKind(route: string, routeKind?: string): string {
-    const normalizedRoute = String(route || '').trim().toLowerCase();
-    const normalizedKind = String(routeKind || '').trim().toLowerCase();
-    if (normalizedKind === WORKSPACE_DIRECT_KIND || normalizedKind === WORKSPACE_FILE_TASK_KIND) {
-      if (normalizedKind === WORKSPACE_DIRECT_KIND && normalizedRoute === WORKSPACE_FILE_TASK_ROUTE) return WORKSPACE_FILE_TASK_KIND;
-      if (normalizedKind === WORKSPACE_FILE_TASK_KIND && WORKSPACE_DIRECT_ROUTES.has(normalizedRoute)) return WORKSPACE_DIRECT_KIND;
-      return normalizedKind;
-    }
-    return WORKSPACE_DIRECT_ROUTES.has(normalizedRoute) ? WORKSPACE_DIRECT_KIND : WORKSPACE_FILE_TASK_KIND;
-  }
-
-  function canonicalWorkspaceTaskType(route: string, taskType?: string): string {
-    const normalizedRoute = String(route || '').trim().toLowerCase();
-    const normalizedTask = String(taskType || '').trim().toUpperCase();
-    if (normalizedRoute === 'web_search') return 'WEB_SEARCH';
-    if (normalizedRoute === 'system_action') return 'SYSTEM';
-    if (normalizedRoute === 'light_chat') return 'CHAT';
-    if (normalizedRoute === WORKSPACE_FILE_TASK_ROUTE) return 'FILE_TASK';
-    if (normalizedTask === 'CHAT' || normalizedTask === 'WEB_SEARCH') return normalizedTask;
-    return 'FILE_TASK';
-  }
-
-  function shouldBypassWorkspaceRoute(context: TaskContext): boolean {
-    const opts = context && context.options && typeof context.options === 'object' ? context.options : {};
-    return !!(context && context.taskPayload) || !!opts.followup_context || !!opts.workflow_checkpoint;
   }
 
   async function resolveWorkspaceRouteIntent(context: TaskContext): Promise<Record<string, any>> {
@@ -616,149 +208,67 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     return normalizeWorkspaceRouteDecision(await response.json().catch(() => null));
   }
 
-  function renderAssistantText(loadingEl: HTMLElement | undefined, text: string): void {
-    if (!loadingEl) return;
-    const value = String(text || '');
-    loadingEl.dataset!.rawText = value;
-    const renderer = (window as any)._waRenderMarkdown;
-    if (typeof renderer === 'function') {
-      loadingEl.innerHTML = renderer(value);
-      return;
-    }
-    if ((window as any).marked) {
-      try {
-        const sanitizer = (window as any)._sanitizeRenderedHtml;
-        const html = (window as any).marked.parse(value);
-        loadingEl.innerHTML = typeof sanitizer === 'function' ? sanitizer(html) : html;
-        return;
-      } catch { /* noop */ }
-    }
-    loadingEl.textContent = value;
+  const streamWorkspaceChatRoute = createWorkspaceChatStreamer({
+    state,
+    csrfFetch: _csrfFetch,
+    ensureSessionId: options.ensureSessionId,
+    getSessionId: options.getSessionId,
+    getModelMode: options.getModelMode,
+    getSelectedCloudModelId: options.getSelectedCloudModelId,
+    setStreamButton: options.setStreamButton,
+    buildFileContext: buildWorkspaceChatFileContext,
+    appendAssistantTurn: appendAssistantConversationTurn,
+    syncAssistantTurn: options.syncAssistantTaskTurn,
+  });
+
+  function openWorkspaceFileRoute(context: TaskContext, routeDecision: Record<string, any>): Promise<any> {
+    return runWorkspaceOpenFileRoute({
+      state,
+      openWorkspaceFile: options.openWorkspaceFile,
+      appendAssistantTurn: appendAssistantConversationTurn,
+      setStreamButton: options.setStreamButton,
+    }, context, routeDecision);
   }
 
-  function parseWorkspaceSseEvents(buffer: string, flush: boolean): { events: any[]; remainder: string } {
-    const source = String(buffer || '').replace(/\r\n/g, '\n');
-    const frames = source.split('\n\n');
-    const remainder = flush ? '' : (frames.pop() || '');
-    const completeFrames = flush ? frames.filter((frame) => frame.trim()) : frames;
-    const events: any[] = [];
-    completeFrames.forEach((frame) => {
-      const dataLines = String(frame || '').split('\n')
-        .filter((line) => line.startsWith('data:'))
-        .map((line) => line.replace(/^data:\s?/, ''));
-      if (!dataLines.length) return;
-      try { events.push(JSON.parse(dataLines.join('\n'))); } catch { /* noop */ }
-    });
-    return { events, remainder };
-  }
-
-  function chatStreamLockedModel(): string {
-    const mode = typeof options.getModelMode === 'function' ? String(options.getModelMode() || '').trim().toLowerCase() : '';
-    if (mode === 'local') return 'local';
-    const selected = typeof options.getSelectedCloudModelId === 'function' ? String(options.getSelectedCloudModelId() || '').trim() : '';
-    return selected || 'cloud';
-  }
-
-  async function streamWorkspaceChatRoute(context: TaskContext, routeDecision: Record<string, any>): Promise<any> {
+  async function runTaskFlowRoute(context: TaskContext, routeDecision?: Record<string, any>): Promise<any> {
     const loadingEl = context.loadingEl;
-    const route = String(routeDecision.route || '').trim();
-    const lockedTask = route === 'web_search' ? 'WEB_SEARCH' : (route === 'system_action' ? 'SYSTEM' : 'CHAT');
-    const directTaskKind = route === 'web_search' ? 'web_search' : (route === 'system_action' ? 'system_action' : 'message');
-    const ctrl = new AbortController();
-    let assistantText = '';
-    state._streamAbortCtrl = ctrl;
-    state.isLoading = true;
-    if (typeof options.setStreamButton === 'function') options.setStreamButton(true);
-    if (loadingEl) {
-      loadingEl.classList.add('streaming');
-      loadingEl.textContent = route === 'web_search' ? '正在检索…' : (route === 'system_action' ? '正在执行…' : '正在思考…');
-      loadingEl.dataset!.workspaceRoute = route;
-      loadingEl.dataset!.workspaceRouteSource = String(routeDecision.route_source || '');
-    }
-    try {
-      const sessionId = typeof options.ensureSessionId === 'function'
-        ? await options.ensureSessionId()
-        : (typeof options.getSessionId === 'function' ? options.getSessionId() : 'workspace_default');
-      const response = await _csrfFetch('/api/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          session: sessionId || 'workspace_default',
-          message: context.text,
-          locked_task: lockedTask,
-          locked_model: chatStreamLockedModel(),
-          skills_enabled: false,
-          workspace_route_intent: routeDecision,
-          file_context: buildWorkspaceChatFileContext(context),
-        }),
-        signal: ctrl.signal,
-      });
-      if (!response.ok) throw new Error(`HTTP ${response.status}`);
-      if (!response.body) throw new Error('响应流不可用');
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      while (true) {
-        const chunk = await reader.read();
-        if (chunk.done) break;
-        buffer += decoder.decode(chunk.value, { stream: true });
-        const parsed = parseWorkspaceSseEvents(buffer, false);
-        buffer = parsed.remainder;
-        parsed.events.forEach((evt) => {
-          const type = String(evt && evt.type || '').trim();
-          if (type === 'token') {
-            assistantText += String(evt.content || evt.text || '');
-            renderAssistantText(loadingEl, assistantText);
-          } else if (type === 'error') {
-            throw new Error(String(evt.message || evt.text || '对话失败'));
-          }
-        });
-        if (context.msgs) context.msgs.scrollTop = context.msgs.scrollHeight;
-      }
-      const trailing = parseWorkspaceSseEvents(buffer, true);
-      trailing.events.forEach((evt) => {
-        const type = String(evt && evt.type || '').trim();
-        if (type === 'token') {
-          assistantText += String(evt.content || evt.text || '');
-          renderAssistantText(loadingEl, assistantText);
-        }
-      });
-      assistantText = assistantText.trim() || '已完成。';
+    const modelPreflightBlock = localModelWritePreflight({
+      text: context.text,
+      files: workspaceRouteFiles(),
+      modelMode: context.model_mode
+        || (typeof options.getModelMode === 'function' ? options.getModelMode() : ''),
+      lockedModel: state.lockedModel,
+      supportsTools: state._localModelSupportsTools,
+      modelLabel: state._localRuntimeModel,
+    });
+    if (modelPreflightBlock) {
+      const assistantText = modelPreflightBlock.message;
       if (loadingEl) {
         loadingEl.classList.remove('streaming');
-        renderAssistantText(loadingEl, assistantText);
+        loadingEl.textContent = assistantText;
+        loadingEl.dataset.rawText = assistantText;
+        loadingEl.dataset.taskTerminalStatus = 'blocked';
+        loadingEl.dataset.taskCompleted = 'false';
       }
-      appendAssistantConversationTurn(assistantText, {
-        loadingEl,
-        task_kind: directTaskKind,
-        status: 'done',
-        route_intent: routeDecision,
-        skip_model_context: false,
-      });
-      return { routeId: route, assistantText, routeDecision };
-    } catch (error: any) {
-      const aborted = error && error.name === 'AbortError';
-      assistantText = aborted ? '已停止。' : `对话失败：${error && error.message ? error.message : error}`;
-      if (loadingEl) {
-        loadingEl.classList.remove('streaming');
-        renderAssistantText(loadingEl, assistantText);
-      }
-      appendAssistantConversationTurn(assistantText, {
-        loadingEl,
-        task_kind: directTaskKind,
-        status: aborted ? 'cancelled' : 'error',
-        route_intent: routeDecision,
-      });
-      return { routeId: route, assistantText, routeDecision, error };
-    } finally {
-      if (state._streamAbortCtrl === ctrl) state._streamAbortCtrl = null;
       state.isLoading = false;
       if (typeof options.setStreamButton === 'function') options.setStreamButton(false);
+      showToast(assistantText, 'warning', 6000);
+      const modelMenuTrigger = document.querySelector<HTMLButtonElement>('#wa-model-menu-trigger');
+      if (modelMenuTrigger && modelMenuTrigger.getAttribute('aria-expanded') !== 'true') modelMenuTrigger.click();
+      appendAssistantConversationTurn(assistantText, {
+        task_kind: 'file_task',
+        status: 'blocked',
+        block_code: modelPreflightBlock.code,
+        skip_model_context: true,
+      });
+      return Promise.resolve({
+        routeId: 'task-flow',
+        assistantText,
+        blocked: true,
+        blockCode: modelPreflightBlock.code,
+        routeDecision,
+      });
     }
-  }
-
-  function runTaskFlowRoute(context: TaskContext, routeDecision?: Record<string, any>): Promise<any> {
-    const loadingEl = context.loadingEl;
     const streamTaskFlow = typeof options.streamTaskFlow === 'function' ? options.streamTaskFlow : null;
     if (typeof streamTaskFlow !== 'function') {
       const assistantText = '任务流程运行时未加载，请刷新后重试。';
@@ -785,6 +295,13 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
           }),
         })
       : context;
+    if (typeof options.ensureSessionId === 'function') {
+      try {
+        await options.ensureSessionId();
+      } catch (error) {
+        console.warn('[WA] unable to establish the task persistence session:', error);
+      }
+    }
     const payload = buildWhiteboxTaskPayload(context.text, context.pinnedSelText, context.pinnedSelSource, routedContext);
     if (loadingEl) {
       setTaskFollowupPayload(loadingEl, payload);
@@ -792,6 +309,12 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     }
     let terminalTaskPersisted = false;
     let activeTaskCard: HTMLElement | undefined = loadingEl || undefined;
+    const requestCancellation = (): void => {
+      const handler = (activeTaskCard as any)?._cancelHandler;
+      if (typeof handler === 'function') handler();
+      else showToast('正在登记任务，请稍后再次停止。', 'info');
+    };
+    state._cancelCurrentTask = requestCancellation;
     let terminalPersistTimer: number | null = null;
     let terminalPersistDelayTimer: number | null = null;
     const basePersistMetadata = (card?: HTMLElement, extra?: Record<string, any>) => Object.assign({
@@ -825,7 +348,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
           task_title: '文件任务结果',
           partial: false,
           skip_model_context: false,
-        }, taskTurnMetadataFromLoadingEl(targetCard)), payload.files || [], undefined);
+        }, taskTurnMetadataFromLoadingEl(targetCard)), payload.files || [], targetCard);
       }
       return assistantText;
     };
@@ -887,6 +410,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       }, taskTurnMetadataFromLoadingEl(loadingEl)), [], loadingEl);
       return { routeId: 'task-flow', assistantText, error, routeDecision };
     }).finally(() => {
+      if (state._cancelCurrentTask === requestCancellation) state._cancelCurrentTask = null;
       stopTerminalPersistWatch();
       if (state._streamAbortCtrl === ctrl) state._streamAbortCtrl = null;
       state.isLoading = false;
@@ -895,11 +419,37 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   }
 
   async function runWorkspaceModelRoutedTask(context: TaskContext): Promise<any> {
+    const pendingModelChoice = state._modelChoicePromise;
+    if (pendingModelChoice && typeof pendingModelChoice.then === 'function') {
+      await pendingModelChoice;
+    }
     if (shouldBypassWorkspaceRoute(context)) {
       return runTaskFlowRoute(context, fileTaskRouteDecision('explicit_task_payload'));
     }
-    const deterministicRoute = deterministicWorkspaceRouteDecision(context);
+    const readyRouteFiles = workspaceRouteFiles();
+    // An explicitly open document is the current environment. Let the Kernel
+    // read its live selection and execute semantic edits, rather than copying
+    // its contents into a separate disk-only file workflow.
+    const activeFile = currentOpenTaskFile();
+    if (activeFile && readyRouteFiles.length === 0 && !supportsLiveDocumentTools(activeFile)) {
+      return runTaskFlowRoute(context, fileTaskRouteDecision('active_file_format'));
+    }
+    if (supportsLiveDocumentTools(activeFile) && readyRouteFiles.length === 0) {
+      return streamWorkspaceChatRoute(context, {
+        route: 'light_chat', route_kind: 'direct_response', task_type: 'AGENT',
+        route_source: 'active_document_context',
+      });
+    }
+    const deterministicRoute = deterministicWorkspaceRouteDecision({
+      text: context.text,
+      hasFileContext: readyRouteFiles.length > 0
+        || !!currentOpenTaskFile()
+        || !!String(context.pinnedSelText || '').trim(),
+    });
     if (deterministicRoute) {
+      if (isWorkspaceOpenFileResponse(deterministicRoute)) {
+        return openWorkspaceFileRoute(context, deterministicRoute);
+      }
       if (isDirectWorkspaceResponse(deterministicRoute)) {
         return streamWorkspaceChatRoute(context, deterministicRoute);
       }
@@ -910,10 +460,23 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     try {
       routeDecision = await resolveWorkspaceRouteIntent(context);
     } catch (error) {
-      console.warn('[WA] workspace route intent failed, falling back to file task:', error);
+      console.warn('[WA] workspace route intent failed, applying contextual fallback:', error);
+      routeDecision = workspaceRouteErrorFallbackDecision({
+        text: context.text,
+        hasFileContext: readyRouteFiles.length > 0
+          || !!currentOpenTaskFile()
+          || !!String(context.pinnedSelText || '').trim(),
+      });
     }
-    if (shouldForceFileTaskForWorkspaceContext(context, routeDecision)) {
+    if (shouldForceFileTaskForWorkspaceContext({
+      text: context.text,
+      hasFileContext: readyRouteFiles.length > 0
+        || !!String(context.pinnedSelText || '').trim(),
+    }, routeDecision)) {
       routeDecision = fileTaskRouteDecision('frontend_file_context_guard', routeDecision);
+    }
+    if (isWorkspaceOpenFileResponse(routeDecision)) {
+      return openWorkspaceFileRoute(context, routeDecision!);
     }
     if (isDirectWorkspaceResponse(routeDecision)) {
       return streamWorkspaceChatRoute(context, routeDecision!);
@@ -997,8 +560,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       metadata.task_intent_requires_confirmation = String(dataset.taskIntentRequiresConfirmation || '').trim().toLowerCase() === 'true';
     }
     if (dataset.taskTargetFileType) metadata.task_target_file_type = String(dataset.taskTargetFileType || '').trim();
-    const taskContract = (window as any).WA && typeof (window as any).WA.decodeTaskContract === 'function'
-      ? (window as any).WA.decodeTaskContract(dataset.taskContract || '') : null;
+    const taskContract = decodeTaskContract(dataset.taskContract || '');
     if (taskContract) metadata.task_contract = taskContract;
     if (Object.prototype.hasOwnProperty.call(dataset, 'taskClassificationConfidence')) {
       const confidence = Number(dataset.taskClassificationConfidence || '');
@@ -1025,86 +587,13 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     }
     const taskVisibleTrace = taskCardVisibleTrace(loadingEl);
     if (taskVisibleTrace) metadata.task_visible_trace = taskVisibleTrace;
-    const testStructure = taskCardTestStructure(loadingEl);
-    if (testStructure) metadata.test_structure = testStructure;
+    const persistenceStructure = taskCardPersistenceStructure(loadingEl);
+    if (persistenceStructure) metadata.test_structure = persistenceStructure;
     if (Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted')) {
       metadata.completed_task = String(dataset.taskCompleted || '').trim().toLowerCase() === 'true';
     }
     return metadata;
   }
-
-  function taskCardCheckLine(value: unknown): string {
-    let text = String(value || '').replace(/\s+/g, ' ').trim();
-    if (!text) return '';
-    if (/详细内容见任务结果|较长内容.*任务结果/u.test(text)) return '';
-    text = text.replace(/^(进行中|完成|待处理|失败|警告)\s*/u, '').trim();
-    if (/whitebox_v1.*开始执行任务/u.test(text)) return '任务流已启动';
-    if (/决策已完成执行决策/u.test(text)) return '模型决策已完成';
-    if (/Model planning and tool use/i.test(text)) return '模型正在规划并选择工具';
-    if (/Round \d+ complete/i.test(text)) return '本轮执行已完成';
-    if (/Loaded \d+ context snippet/i.test(text)) return '已读取必要上下文';
-    if (/模型调用路由.*文件任务/u.test(text)) return 'AI 已判断为文件任务';
-    return previewText(text, 180);
-  }
-
-  function taskCardTestStructure(loadingEl?: HTMLElement): Record<string, any> | null {
-    if (!loadingEl || !loadingEl.querySelectorAll || !loadingEl.classList || !loadingEl.classList.contains('wa-task-run')) return null;
-    const dataset = loadingEl.dataset || {};
-    const steps = Array.from(loadingEl.querySelectorAll('.wa-task-step')).map((step: Element) => {
-      const el = step as HTMLElement;
-      const title = String(el.querySelector('.wa-task-step-title')?.textContent || '').trim() || String(el.dataset.stepId || '').trim() || '步骤';
-      const status = el.classList.contains('failed') ? 'failed'
-        : el.classList.contains('done') ? 'done'
-          : el.classList.contains('running') ? 'running'
-            : 'pending';
-      const checks = Array.from(el.querySelectorAll('.wa-task-row'))
-        .map((row: Element) => taskCardCheckLine((row as HTMLElement).innerText || row.textContent || ''))
-        .filter(Boolean)
-        .slice(-4);
-      return {
-        id: String(el.dataset.stepId || '').trim(),
-        title,
-        status,
-        checks,
-      };
-    }).filter((step: any) => step.id || step.title || step.checks.length);
-    const terminal = normalizeFileTaskTerminalStatus(dataset.taskTerminalStatus || '');
-    const completed = Object.prototype.hasOwnProperty.call(dataset, 'taskCompleted')
-      ? String(dataset.taskCompleted || '').trim().toLowerCase() === 'true'
-      : ['completed', 'done', 'verified'].includes(terminal);
-    const summaryEl = loadingEl.querySelector('[data-role="summary"]') as HTMLElement | null;
-    const finalSummary = previewText(
-      String(dataset.taskSummary || (summaryEl && (summaryEl.innerText || summaryEl.textContent)) || '').replace(/\s+/g, ' ').trim(),
-      220,
-    );
-    return {
-      schema: 'koto_ai_task_chain_test_v1',
-      entrypoint: '工作区输入框 -> AI 意图判断 -> 文件任务流 -> 监管执行',
-      route_policy: 'AI 先判断任务类型',
-      supervisor_policy: '每一步执行后验证',
-      technical_entrypoint: 'workspace.sendMessage -> taskDispatcher.dispatchMessage -> route-intent -> task-stream -> FileTaskRuntime',
-      technical_route_policy: 'model_primary_intent',
-      technical_supervisor_policy: 'plan_step_verification_required',
-      task_id: String(dataset.taskId || '').trim(),
-      run_id: String(dataset.taskRunId || '').trim(),
-      request: String(dataset.taskRequest || '').trim(),
-      final_summary: finalSummary,
-      mode: String(dataset.taskMode || '').trim(),
-      request_kind: String(dataset.taskRequestKind || '').trim(),
-      task_family: String(dataset.taskFamily || '').trim(),
-      operation_kind: String(dataset.taskOperationKind || '').trim(),
-      execution_mode: String(dataset.taskExecutionMode || '').trim(),
-      output_mode: String(dataset.taskOutputMode || '').trim(),
-      terminal_status: terminal,
-      completed_task: completed,
-      step_count: steps.length,
-      steps,
-    };
-  }
-
-  const runtimeWa = (window as any).WA || {};
-  runtimeWa.taskCardTestStructure = taskCardTestStructure;
-  (window as any).WA = runtimeWa;
 
   function taskCardVisibleTrace(loadingEl?: HTMLElement): string {
     if (!loadingEl || !loadingEl.querySelector) return '';
@@ -1130,7 +619,7 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
   function finalizeWhiteboxTaskTurn(taskTurnId: string, loadingEl: HTMLElement | undefined, result: any, fallbackStatus: string, skipModelContext: boolean): string {
     const payload = result && typeof result === 'object' ? result : { summary: result };
     const dataset = loadingEl && loadingEl.dataset ? loadingEl.dataset : {};
-    const assistantText = terminalTaskAnswer(
+    const assistantText = terminalAnswerText(
       payload,
       String(dataset.taskFinalAnswer || dataset.taskSummary || '').trim(),
     ) || '文件任务流已结束。';
@@ -1215,21 +704,16 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     const inferredTargetPath = targetFile ? (targetFile.path || targetFile.name || '') : explicitTextTargetPath;
     const inferredFileName = targetFile ? (targetFile.name || '') : baseNameFromPath(explicitTextTargetPath);
     const inferredFileType = targetFile ? (targetFile.type || targetFile.file_type || '') : fileTypeFromPath(explicitTextTargetPath);
-    const followupContext = buildTaskFollowupContext(text);
+    const followupContext = buildTaskFollowupContext(text, state.conversation);
     if (followupContext && !overrideOptions.followup_context) overrideOptions.followup_context = followupContext;
     if (targetFile && !overrideOptions.inferred_target_file_type) overrideOptions.inferred_target_file_type = canonicalTaskFileType(targetFile);
-    const taskContext = buildTaskContextPackage({
-      task: text, files: rawFiles, currentFile, targetFile, selection: pinnedSelText || '',
-      selectionSource: pinnedSelSource || '', followupContext: overrideOptions.followup_context || null,
-      workflowCheckpoint: overrideOptions.workflow_checkpoint || null,
-    });
     const payload: Record<string, any> = {
       task: text, session_id: typeof options.getSessionId === 'function' ? options.getSessionId() : '',
       selection: pinnedSelText || '', selection_source: pinnedSelSource || '', files: rawFiles,
       target_path: inferredTargetPath, file_name: inferredFileName, file_type: inferredFileType,
       current_file: currentFile,
       routing_decision: routingDecision,
-      task_context: taskContext, model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',
+      model_mode: typeof options.getModelMode === 'function' ? options.getModelMode() : 'auto',
       model_id: typeof options.getSelectedCloudModelId === 'function' ? options.getSelectedCloudModelId() : '',
       options: overrideOptions,
       history: typeof options.getConversationHistory === 'function' ? options.getConversationHistory() : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []),
@@ -1240,16 +724,13 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       const stepwisePayload = ensureStepwiseResumePayload(payload, text);
       if (stepwisePayload) return stepwisePayload;
     }
-    return payload;
+    return attachTaskContextPackage(payload);
   }
 
   function finalizeExplicitTaskPayload(taskPayload: any, text: string, pinnedSelText?: string, pinnedSelSource?: string, overrideOptions?: Record<string, any>, requestOverrides?: any, routingDecision?: Record<string, any> | null): Record<string, any> | null {
     const explicitTaskPayload = cloneTaskPayload(taskPayload);
     if (!explicitTaskPayload) return null;
     const explicitOptions = explicitTaskPayload.options && typeof explicitTaskPayload.options === 'object' ? Object.assign({}, explicitTaskPayload.options) : {};
-    explicitTaskPayload.task = String(explicitTaskPayload.task || text || '').trim();
-    explicitTaskPayload.selection = Object.prototype.hasOwnProperty.call(explicitTaskPayload, 'selection') ? explicitTaskPayload.selection : (pinnedSelText || '');
-    explicitTaskPayload.selection_source = Object.prototype.hasOwnProperty.call(explicitTaskPayload, 'selection_source') ? explicitTaskPayload.selection_source : (pinnedSelSource || '');
     explicitTaskPayload.file_name = explicitTaskPayload.file_name || state.fileName || '';
     explicitTaskPayload.file_type = explicitTaskPayload.file_type || state.fileType || '';
     explicitTaskPayload.session_id = explicitTaskPayload.session_id || (typeof options.getSessionId === 'function' ? options.getSessionId() : '');
@@ -1263,17 +744,11 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     if (!Array.isArray(explicitTaskPayload.history)) {
       explicitTaskPayload.history = typeof options.getConversationHistory === 'function' ? options.getConversationHistory() : (Array.isArray(state.conversation) ? state.conversation.slice(-12) : []);
     }
-    const explicitFiles = Array.isArray(explicitTaskPayload.files) ? explicitTaskPayload.files.filter((f: any) => f && typeof f === 'object') : [];
-    const explicitSelectionText = String(explicitTaskPayload.selection || '').trim();
-    if (!explicitSelectionText && Object.prototype.hasOwnProperty.call(explicitTaskPayload, 'current_file')) delete explicitTaskPayload.current_file;
-    const explicitFollowupContext = explicitTaskPayload.options && typeof explicitTaskPayload.options === 'object' ? explicitTaskPayload.options.followup_context : null;
-    const existingTaskContext = explicitTaskPayload.task_context && typeof explicitTaskPayload.task_context === 'object' ? explicitTaskPayload.task_context : {};
-    const existingTaskContextFiles = existingTaskContext.files && typeof existingTaskContext.files === 'object' ? existingTaskContext.files : {};
-    explicitTaskPayload.task_context = buildTaskContextPackage({
-      task: explicitTaskPayload.task, files: explicitFiles, currentFile: explicitTaskPayload.current_file || null,
-      targetFile: explicitFiles.find((f: any) => f && f.target) || existingTaskContextFiles.target || null,
-      selection: explicitTaskPayload.selection || '', selectionSource: explicitTaskPayload.selection_source || '',
-      followupContext: explicitFollowupContext, workflowCheckpoint: explicitTaskPayload.options && explicitTaskPayload.options.workflow_checkpoint,
+    attachTaskContextPackage(explicitTaskPayload, {
+      defaultTask: text,
+      defaultSelection: pinnedSelText || '',
+      defaultSelectionSource: pinnedSelSource || '',
+      dropCurrentFileWithoutSelection: true,
     });
     if (requestOverrides.model_mode) explicitTaskPayload.model_mode = requestOverrides.model_mode;
     if (requestOverrides.model_id) explicitTaskPayload.model_id = requestOverrides.model_id;
@@ -1312,120 +787,6 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
       || /(下一步|下一批|第\s*\d+\s*(?:\/\s*\d+\s*批?|批)).{0,10}(继续|开始|执行|确认)/i.test(source);
   }
 
-  function looksLikeTaskCritique(text: string): boolean {
-    const source = String(text || '').trim();
-    if (!source) return false;
-    if (looksLikeDiagnosticLead(source)) return true;
-    if (looksLikeTaskFollowupContinuation(source)) return true;
-    if (source.length > 240) return false;
-    if (looksLikeStandaloneTaskInstruction(source)) return false;
-    return /(为什么|为啥|为何|怎么会|怎么没有|为什么没有|为什么没|不对|不太对|有问题|结果不好|结果很差|不行|不满意|错了|哪里不对|解释一下|说明一下|给我解释|依据是什么|原因是什么|你这是|你为什么|为什么这么|为什么这样|质疑|反馈|review this result|why did you|this is wrong|not good|bad result|explain this)/i.test(source);
-  }
-
-  function looksLikeDiagnosticLead(text: string): boolean {
-    const source = String(text || '').trim();
-    if (!source) return false;
-    if (source.length > 240) return false;
-    return /^(?:为什么|为啥|为何|怎么会|怎么没有|为什么没有|为什么没|失败原因|原因是什么|怎么回事|哪里出了问题|请解释|解释一下|说明一下|帮我解释|帮我说明)/i.test(source)
-      || /^(?:这个任务|这次任务|这个结果|这次结果|上一轮|上次|这轮|这个流程|这次审校).{0,18}(?:为什么|为啥|为何|失败|出错|不对|有问题)/i.test(source)
-      || ((/(?:上一轮|上次|这次|这个任务|这个结果|这次任务|这次结果)/i.test(source) || /(?:任务|结果|审校|修订|写回|批注|修改|删除|失败|报错|权限|permission denied)/i.test(source))
-        && /(?:为什么|为啥|为何|解释|说明|失败|问题|不对|怎么会|怎么没有)/i.test(source));
-  }
-
-  function looksLikePreviousTaskReference(text: string): boolean {
-    const source = String(text || '').trim();
-    if (!source) return false;
-    return /(?:上一轮|上一版|上一次|上次|前一轮|刚才|这次|这个任务|这次任务|这个结果|这次结果|上一轮结果|上一轮建议|上一轮审校|上一轮处理|当前结果|当前方案)/i.test(source);
-  }
-
-  function looksLikeTaskFollowupContinuation(text: string): boolean {
-    const source = String(text || '').trim();
-    if (!source) return false;
-    if (source.length > 240) return false;
-    if (!looksLikePreviousTaskReference(source)) return false;
-    return /(?:继续|再|重新|重做|重写|补充|优化|改进|修复|调整|完善|细化|补强|按上一轮|按建议|按方案|应用建议|直接应用|继续处理|继续执行|重新分析|重新总结|再分析|再总结|continue|improve|refine|fix|apply)/i.test(source);
-  }
-
-  function looksLikeStandaloneTaskInstruction(text: string): boolean {
-    const source = String(text || '').trim();
-    if (!source) return false;
-    if (looksLikePreviousTaskReference(source)) return false;
-    return /^(?:帮我|请|麻烦|需要|把|将|给我|新建|打开|创建|生成|导出|翻译|润色|审校|批注|写入|保存|插入|删除|替换|修改|重写|create|write|edit|revise|translate|export|save|insert|replace|open)/i.test(source)
-      || /(?:新建|打开|创建|生成|导出|翻译|润色|审校|批注|写入|保存|插入|删除|替换|修改|重写).{0,20}(?:文件|文档|表格|工作表|演示稿|ppt|docx|xlsx|pdf|slide|sheet)/i.test(source);
-  }
-
-  function buildTaskFollowupContext(text: string): Record<string, any> | null {
-    if (!looksLikeTaskCritique(text)) return null;
-    const previousTaskTurn = latestCompletedFileTaskTurn();
-    if (!previousTaskTurn) return null;
-    const previousUserTurn = latestUserTurnBefore(previousTaskTurn);
-    const previousTaskVisibleTrace = previewText(previousTaskTurn.task_visible_trace || '', 1600);
-    const previousTaskSummary = previousTaskVisibleTrace
-      ? previewText(`${previousTaskTurn.content || ''}\n\n任务轨迹：\n${previousTaskVisibleTrace}`, 2000)
-      : previewText(previousTaskTurn.content || '', 2000);
-    const context: Record<string, any> = {
-      kind: 'review_last_task', followup_action: inferTaskFollowupAction(text), source: 'workspace_task_dispatcher',
-      user_feedback: previewText(text, 1000), previous_task_summary: previousTaskSummary,
-      previous_task_status: String(previousTaskTurn.status || 'done').trim() || 'done',
-      previous_task_timestamp: String(previousTaskTurn.timestamp || '').trim(),
-      previous_user_request: previousUserTurn ? previewText(previousUserTurn.content || '', 1500) : '',
-    };
-    const previousRunId = previewText(previousTaskTurn.run_id || previousTaskTurn.task_run_id || '', 128);
-    const previousTaskRequest = previewText(previousTaskTurn.task_request || (previousUserTurn ? previousUserTurn.content || '' : ''), 1500);
-    const previousTaskMode = previewText(previousTaskTurn.task_mode || '', 120);
-    const previousTaskRequestKind = previewText(previousTaskTurn.task_request_kind || '', 120);
-    const previousTaskFamily = previewText(previousTaskTurn.task_family || '', 120);
-    const previousTaskOperationKind = previewText(previousTaskTurn.task_operation_kind || '', 120);
-    const previousTaskExecutionMode = previewText(previousTaskTurn.task_execution_mode || '', 120);
-    const previousTaskSelectedRecipe = previewText(previousTaskTurn.task_selected_recipe || '', 160);
-    const previousTaskOutputMode = previewText(previousTaskTurn.task_output_mode || '', 120);
-    const previousTaskFileChanges = Array.isArray(previousTaskTurn.task_file_changes) ? previousTaskTurn.task_file_changes.filter((i: any) => i && typeof i === 'object').slice(-8) : [];
-    const previousTaskContext = compactTaskContext(previousTaskTurn.task_context);
-    if (previousRunId) context.previous_run_id = previousRunId;
-    if (previousTaskRequest) context.previous_task_request = previousTaskRequest;
-    if (previousTaskMode) context.previous_task_mode = previousTaskMode;
-    if (previousTaskRequestKind) context.previous_task_request_kind = previousTaskRequestKind;
-    if (previousTaskFamily) context.previous_task_family = previousTaskFamily;
-    if (previousTaskOperationKind) context.previous_task_operation_kind = previousTaskOperationKind;
-    if (previousTaskExecutionMode) context.previous_task_execution_mode = previousTaskExecutionMode;
-    if (previousTaskSelectedRecipe) context.previous_task_selected_recipe = previousTaskSelectedRecipe;
-    if (previousTaskOutputMode) context.previous_task_output_mode = previousTaskOutputMode;
-    if (previousTaskContext) context.previous_task_context = previousTaskContext;
-    if (previousTaskFileChanges.length) context.previous_task_file_changes = previousTaskFileChanges;
-    return context;
-  }
-
-  function inferTaskFollowupAction(text: string): string {
-    const source = String(text || '').trim();
-    if (!source) return 'question';
-    if (looksLikePreviousTaskReference(source) && /(?:直接应用|应用建议|按上一轮|按建议|按方案|apply)/i.test(source)) return 'apply';
-    if (looksLikeTaskFollowupContinuation(source)) return 'improve';
-    return 'question';
-  }
-
-  function latestCompletedFileTaskTurn(): any {
-    const turns = Array.isArray(state.conversation) ? state.conversation : [];
-    for (let index = turns.length - 1; index >= 0; index -= 1) {
-      const turn = turns[index];
-      if (!turn || String(turn.role || '').trim() !== 'assistant') continue;
-      if (String(turn.task_kind || '').trim() !== 'file_task') continue;
-      if (String(turn.status || '').trim() && String(turn.status || '').trim() !== 'done') continue;
-      return turn;
-    }
-    return null;
-  }
-
-  function latestUserTurnBefore(turn: any): any {
-    const turns = Array.isArray(state.conversation) ? state.conversation : [];
-    const targetIndex = turns.indexOf(turn);
-    if (targetIndex <= 0) return null;
-    for (let index = targetIndex - 1; index >= 0; index -= 1) {
-      const candidate = turns[index];
-      if (candidate && String(candidate.role || '').trim() === 'user' && String(candidate.content || '').trim()) return candidate;
-    }
-    return null;
-  }
-
   function taskRequestsStepwiseConfirmation(text: string): boolean {
     const source = String(text || '').trim();
     if (!source) return false;
@@ -1461,15 +822,10 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     cloned.options = options;
     cloned.task = String(cloned.task || text || options.workflow_checkpoint.original_task || '').trim()
       || normalizeStepwiseTaskText(options.workflow_checkpoint.original_task || text || '');
-    const files = Array.isArray(cloned.files) ? cloned.files : [];
-    const existingContext = cloned.task_context && typeof cloned.task_context === 'object' ? cloned.task_context : {};
-    const existingContextFiles = existingContext.files && typeof existingContext.files === 'object' ? existingContext.files : {};
-    cloned.task_context = buildTaskContextPackage({
-      task: cloned.task, files, currentFile: cloned.current_file || null,
-      targetFile: files.find((f: any) => f && f.target) || existingContextFiles.target || null,
-      selection: cloned.selection || '', selectionSource: cloned.selection_source || '', followupContext, workflowCheckpoint: options.workflow_checkpoint,
+    return attachTaskContextPackage(cloned, {
+      followupContext,
+      workflowCheckpoint: options.workflow_checkpoint,
     });
-    return cloned;
   }
 
   function normalizeStepwiseTaskText(text: string): string {
@@ -1479,217 +835,6 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     return `继续当前分步文件任务的下一步。原始任务：${previewText(source, 1200)}`;
   }
 
-  function inferAttachedWriteTargetFile(text: string, files: TaskFileInfo[]): TaskFileInfo | null {
-    if (!Array.isArray(files) || !files.length) return null;
-    const lowered = String(text || '').toLowerCase();
-    const targetMentionMatches = files.map((f) => ({ file: f, score: targetMentionScore(lowered, f) }))
-      .filter((e) => e.score > 0).sort((a, b) => b.score - a.score);
-    if (targetMentionMatches.length && targetMentionMatches[0].score !== (targetMentionMatches[1] && targetMentionMatches[1].score || 0)) {
-      return targetMentionMatches[0].file;
-    }
-    const roleHintTarget = inferCompareTargetFromRoleHint(text, files);
-    if (roleHintTarget) return roleHintTarget;
-    const compareTarget = inferCompareAnnotatedTargetFile(text, files);
-    if (compareTarget) return compareTarget;
-    if (!hasWriteTargetHint(text)) return null;
-    const writableFamilies = new Set(files.map((f) => canonicalTaskFileType(f)).filter((t) => Object.prototype.hasOwnProperty.call(TARGET_TYPE_FAMILIES, t)));
-    if (writableFamilies.size < 2) return null;
-    let preferredType = '';
-    let bestIndex = -1;
-    for (const entry of TARGET_TYPE_CUES) {
-      if (!writableFamilies.has(entry.canonical)) continue;
-      for (const cue of entry.cues) {
-        const index = lowered.lastIndexOf(cue);
-        if (index > bestIndex) { bestIndex = index; preferredType = entry.canonical; }
-      }
-    }
-    if (!preferredType) return null;
-    const matches = files.filter((f) => canonicalTaskFileType(f) === preferredType);
-    return matches.length === 1 ? matches[0] : null;
-  }
-
-  function targetMentionScore(text: string, file: TaskFileInfo): number {
-    const lowered = String(text || '').trim().toLowerCase();
-    if (!lowered || !file) return 0;
-    let score = 0;
-    taskFileNameAliases(file).forEach((alias) => {
-      let index = lowered.indexOf(alias);
-      while (index >= 0) {
-        const before = lowered.slice(Math.max(0, index - 18), index);
-        const after = lowered.slice(index + alias.length, index + alias.length + 24);
-        if (/(?:在|到|给|向|于|目标|target|into|in|on)\s*$/i.test(before)) score += 4;
-        if (/^\s*(?:上|里|中|内|旁|文件|文档)?\s*(?:标注|批注|写入|写回|添加|加上|comment|annotate|mark|write)/i.test(after)) score += 5;
-        if (/^\s*(?:作为|为)?\s*(?:目标|被标注|被批注|被修改|target)/i.test(after)) score += 3;
-        index = lowered.indexOf(alias, index + alias.length);
-      }
-    });
-    return score;
-  }
-
-  function taskFileNameAliases(file: TaskFileInfo): string[] {
-    const values = [file && file.name, file && file.path, String(file && file.path || '').split(/[\\/]/).pop()];
-    return Array.from(new Set(values.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean)));
-  }
-
-  function canonicalTaskFileType(file: TaskFileInfo): string {
-    const rawType = String(file && (file.type || file.file_type) || '').trim().toLowerCase().replace(/^\./, '');
-    const rawName = String(file && (file.name || file.path) || '').trim();
-    const ext = rawType || (rawName.includes('.') ? rawName.split('.').pop()!.toLowerCase() : '');
-    for (const [canonical, family] of Object.entries(TARGET_TYPE_FAMILIES)) {
-      if (family.includes(ext)) return canonical;
-    }
-    return ext;
-  }
-
-  function inferCompareTargetFromRoleHint(text: string, files: TaskFileInfo[]): TaskFileInfo | null {
-    if (!Array.isArray(files) || files.length !== 2 || !looksLikeCompareAnnotationTask(text)) return null;
-    const docxFiles = files.filter((f) => ['docx', 'doc'].includes(canonicalTaskFileType(f)));
-    if (docxFiles.length !== 2) return null;
-    const lowered = String(text || '').trim().toLowerCase();
-    if (!lowered) return null;
-    const firstDocx = docxFiles[0];
-    const secondDocx = docxFiles[1];
-    if (/(?:原文|原文件|原稿|旧版|第一份|第一版|source|original)/i.test(lowered)) {
-      const originalScored = docxFiles.map((f, idx) => ({ file: f, score: (idx === 0 ? 1 : 0) + (/(?:original|source|原文|原稿|旧|old)/i.test(taskFileNameAliases(f).join(' ')) ? 2 : 0) - compareTargetNameScore(f) })).sort((a, b) => b.score - a.score);
-      return originalScored[0] && originalScored[0].score !== originalScored[1].score ? originalScored[0].file : firstDocx;
-    }
-    if (/(?:修订稿|修改稿|新版|第二份|第二版|revised|reviewed|commented)/i.test(lowered)) {
-      const revisedScored = docxFiles.map((f, idx) => ({ file: f, score: compareTargetNameScore(f) + (idx === 1 ? 1 : 0) })).sort((a, b) => b.score - a.score);
-      return revisedScored[0] && revisedScored[0].score !== revisedScored[1].score ? revisedScored[0].file : secondDocx;
-    }
-    return null;
-  }
-
-  function inferCompareAnnotatedTargetFile(text: string, files: TaskFileInfo[]): TaskFileInfo | null {
-    if (!Array.isArray(files) || files.length !== 2 || !looksLikeCompareAnnotationTask(text)) return null;
-    const docxFiles = files.filter((f) => ['docx', 'doc'].includes(canonicalTaskFileType(f)));
-    if (docxFiles.length !== 2) return null;
-    const scored = docxFiles.map((f) => ({ file: f, score: compareTargetNameScore(f) })).filter((e) => e.score > 0);
-    return scored.length === 1 ? scored[0].file : null;
-  }
-
-  function compareTargetNameScore(file: TaskFileInfo): number {
-    const baseName = String(file && (file.name || file.path) || '').trim().toLowerCase();
-    if (!baseName) return 0;
-    return REVISED_TARGET_NAME_HINTS.reduce((score, marker) => score + (baseName.includes(marker) ? 1 : 0), 0);
-  }
-
-  function looksLikeCompareAnnotationTask(text: string): boolean {
-    const lowered = String(text || '').trim().toLowerCase();
-    if (!lowered) return false;
-    return COMPARE_TASK_HINTS.some((w) => lowered.includes(w)) && ANNOTATION_TASK_HINTS.some((w) => lowered.includes(w));
-  }
-
-  function hasWriteTargetHint(text: string): boolean {
-    const lowered = String(text || '').trim().toLowerCase();
-    return !!lowered && WRITE_TARGET_HINTS.some((w) => lowered.includes(w));
-  }
-
-  function hasReadOnlyHint(text: string): boolean {
-    const lowered = String(text || '').trim().toLowerCase();
-    if (!lowered) return false;
-    if (READ_ONLY_HINTS.some((w) => lowered.includes(w))) return true;
-    return /(?:不要|不用|无需|不需要|别).{0,8}(?:修改|改动|编辑|写入|写回|更新|保存|插入|删除|替换|应用)/i.test(lowered)
-      || /(?:只|仅).{0,6}(?:分析|总结|解释|检查|列出|指出|给建议|输出建议)/i.test(lowered);
-  }
-
-  function explicitWriteTargetPathFromText(text: string): string {
-    const source = String(text || '').trim();
-    if (!source) return '';
-    const namedOutputPattern = /(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*(?:[《「“"'])?([^\s"'<>|:：,，。；;、!?！？()[\]【】《》「」“”]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
-    const filePattern = /((?:[A-Za-z]:[\\/])?[^\s"'<>|:：,，。；;、!?！？()[\]【】]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))/ig;
-    const writePattern = /(继续优化|优化|修改|更新|保存|写入|写回|追加|添加|插入|落盘|continue|improve|modify|edit|update|save|write|append|insert)/i;
-    const protectPattern = /(不要|不用|无需|不需要|不必|别|不|do not|don't|dont|without).{0,24}(修改|改动|编辑|覆盖|替换|删除|写入|写回|更新|modify|edit|overwrite|replace|delete|write|update)/i;
-    const readSourcePattern = /(读取|阅读|查看|分析|基于|来自|原文|原文件|源文件|输入文件|已添加|source|input|read)/i;
-    const explicitOutputBeforePattern = /(保存为|另存为|保存在|保存到|保存至|输出到|输出至|写入到|导出到|save as|export to|write to).{0,80}$/i;
-    const sourceBeforePattern = /(读取|阅读|查看|分析|基于|来自|当前打开|当前文件|原文|原文件|源文件|输入文件|已添加|source|input|read).{0,36}$/i;
-    const filenameLabelBeforePattern = /(文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)\s*$/i;
-    const candidates: Array<{ path: string; score: number; index: number }> = [];
-    let namedMatch: RegExpExecArray | null;
-    while ((namedMatch = namedOutputPattern.exec(source)) !== null) {
-      const rawPath = String(namedMatch[1] || '').trim();
-      if (!rawPath) continue;
-      const start = namedMatch.index + namedMatch[0].lastIndexOf(rawPath);
-      const end = start + rawPath.length;
-      candidates.push({
-        path: joinSplitDirectoryTargetPath(source, rawPath, start, end),
-        score: 100,
-        index: start,
-      });
-    }
-    let match: RegExpExecArray | null;
-    while ((match = filePattern.exec(source)) !== null) {
-      const rawPath = String(match[1] || '').replace(/[ \t\r\n,，。；;、!?！？()[\]【】"']+$/g, '');
-      const start = match.index;
-      const end = start + rawPath.length;
-      const before = source.slice(Math.max(0, start - 80), start);
-      const near = source.slice(Math.max(0, start - 80), Math.min(source.length, end + 80));
-      const targetPath = joinSplitDirectoryTargetPath(source, rawPath, start, end);
-      if (
-        hasReadOnlyHint(source)
-        && mentionsAttachedFileContext(near)
-        && !explicitOutputBeforePattern.test(before)
-      ) {
-        continue;
-      }
-      let score = 0;
-      if (writePattern.test(near) && !protectPattern.test(near)) score += 5;
-      if (explicitOutputBeforePattern.test(before)) score += 8;
-      if (sourceBeforePattern.test(before)) score -= 8;
-      if (/(同一个|当前|目标|target|same)/i.test(near)) score += 2;
-      if (/(同一个|当前|目标).{0,16}(docx|word|xlsx|excel|pptx|ppt|pdf|文档|表格|幻灯片|文件)/i.test(near)) score += 5;
-      if (readSourcePattern.test(near)) score -= 2;
-      if (protectPattern.test(before)) score -= 8;
-      if (targetPath !== rawPath) score += 8;
-      if (filenameLabelBeforePattern.test(before)) score += 6;
-      if (score > 0) candidates.push({ path: targetPath, score, index: start });
-    }
-    candidates.sort((a, b) => (b.score - a.score) || (a.index - b.index));
-    return candidates.length ? candidates[0].path : '';
-  }
-
-  function joinSplitDirectoryTargetPath(source: string, rawPath: string, start: number, end: number): string {
-    const normalizedPath = String(rawPath || '').trim().replace(/\\/g, '/');
-    if (!normalizedPath || normalizedPath.replace(/^\/+|\/+$/g, '').includes('/')) return rawPath;
-    const before = String(source || '').slice(Math.max(0, start - 140), start);
-    const after = String(source || '').slice(end, Math.min(String(source || '').length, end + 140));
-    const directory = splitOutputDirectoryAfterFile(after) || splitOutputDirectoryBeforeFile(before);
-    const fileName = baseNameFromPath(rawPath);
-    if (!directory || !fileName) return rawPath;
-    return `${directory.replace(/\\/g, '/').replace(/\/+$/g, '')}/${fileName}`;
-  }
-
-  function splitOutputDirectoryAfterFile(after: string): string {
-    const match = /^[\s,，。；;、]*(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)\s*((?:[A-Za-z]:[\\/])?[^\s"'<>|,，。；;、!?！？()[\]【】]+)\s*(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory)/i.exec(String(after || ''));
-    return cleanSplitOutputDirectory(match ? match[1] : '');
-  }
-
-  function splitOutputDirectoryBeforeFile(before: string): string {
-    const match = /(?:保存在|保存到|保存至|输出到|输出至|导出到|写入到|放到|放在|存到|存入|save(?:d)?\s+(?:in|to)|export\s+to|write\s+to)\s*((?:[A-Za-z]:[\\/])?[^\s"'<>|,，。；;、!?！？()[\]【】]+)\s*(?:目录下|目录中|目录里|目录|文件夹下|文件夹中|文件夹里|文件夹|folder|directory).{0,80}(?:文件名为|文件名是|文件命名为|命名为|名为|filename\s*(?:is|:)?|named|called)?\s*$/i.exec(String(before || ''));
-    return cleanSplitOutputDirectory(match ? match[1] : '');
-  }
-
-  function cleanSplitOutputDirectory(value: string): string {
-    const clean = String(value || '').trim().replace(/^[\s,，。；;、!?！？()[\]【】"']+|[\s,，。；;、!?！？()[\]【】"']+$/g, '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
-    if (!clean || /\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?)$/i.test(clean)) return '';
-    return clean;
-  }
-
-  function normalizeTaskPath(value: string): string {
-    return String(value || '').trim().replace(/\\/g, '/').toLowerCase();
-  }
-
-  function fileTypeFromPath(value: string): string {
-    const text = String(value || '').trim();
-    const match = /\.([A-Za-z0-9]+)(?:$|[?#])/i.exec(text);
-    return match ? match[1].toLowerCase() : '';
-  }
-
-  function baseNameFromPath(value: string): string {
-    const text = String(value || '').trim().replace(/\\/g, '/');
-    return text ? text.split('/').pop() || '' : '';
-  }
-
   return {
     registerMessageRoute,
     registerQuickActionHandler,
@@ -1697,9 +842,8 @@ export function createTaskDispatcher(deps: TaskDispatcherDeps = {}) {
     dispatchMessage,
     dispatchQuickAction,
     matchQuickAction,
+    taskCardPersistenceStructure,
     buildWhiteboxTaskPayload,
     buildFileTaskPayload: buildWhiteboxTaskPayload,
   };
 }
-
-publishWorkspaceApi({ createTaskDispatcher });

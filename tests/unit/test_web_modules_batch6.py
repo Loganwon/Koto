@@ -35,13 +35,13 @@ import pytest
 class TestDocumentComparator:
 
     def test_init(self):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         comp = DocumentComparator()
         assert ".txt" in comp.supported_formats
 
     def test_compare_documents_file_not_found(self):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         comp = DocumentComparator()
         result = comp.compare_documents("/no/a.txt", "/no/b.txt")
@@ -49,7 +49,7 @@ class TestDocumentComparator:
         assert "不存在" in result["error"]
 
     def test_compare_documents_success(self, tmp_path):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         fa = tmp_path / "a.txt"
         fb = tmp_path / "b.txt"
@@ -62,7 +62,7 @@ class TestDocumentComparator:
         assert "summary" in result
 
     def test_compare_documents_html_format(self, tmp_path):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         fa = tmp_path / "a.txt"
         fb = tmp_path / "b.txt"
@@ -74,7 +74,7 @@ class TestDocumentComparator:
         assert "<" in result["diff"]  # HTML tags
 
     def test_compare_documents_text_format(self, tmp_path):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         fa = tmp_path / "a.txt"
         fb = tmp_path / "b.txt"
@@ -85,14 +85,14 @@ class TestDocumentComparator:
         assert result["success"] is True
 
     def test_compare_versions_less_than_two(self):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         comp = DocumentComparator()
         result = comp.compare_versions(["only_one.txt"])
         assert result["success"] is False
 
     def test_compare_versions_success(self, tmp_path):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         files = []
         for i in range(3):
@@ -105,7 +105,7 @@ class TestDocumentComparator:
         assert result["total_versions"] == 3
 
     def test_generate_change_log(self, tmp_path):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         comp = DocumentComparator()
         comparisons = [
@@ -125,7 +125,7 @@ class TestDocumentComparator:
         assert out.exists()
 
     def test_generate_summary_levels(self):
-        from web.document_comparator import DocumentComparator
+        from web.documents.document_comparator import DocumentComparator
 
         comp = DocumentComparator()
         # Very high similarity
@@ -163,13 +163,13 @@ class TestDocumentComparator:
 class TestDocumentReader:
 
     def test_read_document_unsupported_format(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         result = DocumentReader.read_document("test.xyz")
         assert result["success"] is False
 
     def test_read_document_dispatches_pptx(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         with patch.object(
             DocumentReader, "read_ppt", return_value={"success": True}
@@ -179,7 +179,7 @@ class TestDocumentReader:
             assert result["success"] is True
 
     def test_read_document_dispatches_docx(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         with patch.object(
             DocumentReader, "read_word", return_value={"success": True}
@@ -188,7 +188,7 @@ class TestDocumentReader:
             m.assert_called_once()
 
     def test_read_document_dispatches_xlsx(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         with patch.object(
             DocumentReader, "read_excel", return_value={"success": True}
@@ -199,7 +199,7 @@ class TestDocumentReader:
     def test_read_ppt_import_error(self):
         import sys
 
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         with patch.dict(sys.modules, {"pptx": None}):
             result = DocumentReader.read_ppt("test.pptx")
@@ -209,7 +209,7 @@ class TestDocumentReader:
     def test_read_excel_import_error(self):
         import sys
 
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         with patch.dict(sys.modules, {"openpyxl": None}):
             result = DocumentReader.read_excel("test.xlsx")
@@ -217,13 +217,13 @@ class TestDocumentReader:
         assert "openpyxl" in result["error"]
 
     def test_format_for_ai_error_data(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         result = DocumentReader.format_for_ai({"success": False, "error": "broken"})
         assert "broken" in result
 
     def test_format_for_ai_ppt(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         data = {
             "success": True,
@@ -238,7 +238,7 @@ class TestDocumentReader:
         assert "Slide 1" in text
 
     def test_format_for_ai_excel(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         data = {
             "success": True,
@@ -253,7 +253,7 @@ class TestDocumentReader:
         assert "Sheet1" in text
 
     def test_extract_text_from_doc_data_empty(self):
-        from web.document_reader import DocumentReader
+        from app.core.file.readers import DocumentReader
 
         assert DocumentReader._extract_text_from_doc_data(None) == ""
         assert DocumentReader._extract_text_from_doc_data({"success": False}) == ""
@@ -268,7 +268,7 @@ class TestDocumentReader:
 class TestDocumentValidator:
 
     def test_validate_empty_original(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "some text", [{"original": "", "modified": "x"}]
@@ -277,7 +277,7 @@ class TestDocumentValidator:
         assert len(result["issues"]) > 0
 
     def test_validate_original_not_found(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "Hello World",
@@ -286,7 +286,7 @@ class TestDocumentValidator:
         assert result["risk_level"] == "HIGH"
 
     def test_validate_successful_modification(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "The quick brown fox jumps over the lazy dog",
@@ -296,7 +296,7 @@ class TestDocumentValidator:
         assert result["success"] is True
 
     def test_validate_no_change(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "same text", [{"original": "same text", "modified": "same text"}]
@@ -306,7 +306,7 @@ class TestDocumentValidator:
         assert any("无变化" in i for i in result["issues"])
 
     def test_validate_modified_is_none(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "some content", [{"original": "some", "modified": None}]
@@ -314,7 +314,7 @@ class TestDocumentValidator:
         assert any("为空" in i for i in result["issues"])
 
     def test_validate_multiple_occurrences_short(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "ab ab ab", [{"original": "ab", "modified": "cd"}]
@@ -322,7 +322,7 @@ class TestDocumentValidator:
         assert result["risk_level"] in ("MEDIUM", "HIGH")
 
     def test_validate_fuzzy_whitespace_match(self):
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         result = DocumentValidator.validate_modifications(
             "Hello   World", [{"original": "Hello World", "modified": "Hi World"}]
@@ -333,7 +333,7 @@ class TestDocumentValidator:
     def test_verify_track_changes_integrity(self):
         import sys
 
-        from web.document_validator import DocumentValidator
+        from app.core.services.document_validator import DocumentValidator
 
         mock_docx = MagicMock()
         mock_para = MagicMock()
@@ -367,7 +367,7 @@ class TestEmailManager:
 class TestFileOrganizer:
 
     def test_init_creates_dirs(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         root = tmp_path / "organize"
         org = FileOrganizer(organize_root=str(root))
@@ -375,21 +375,21 @@ class TestFileOrganizer:
         assert (root / "index.json").exists()
 
     def test_sanitize_path(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org = FileOrganizer(organize_root=str(tmp_path / "org"))
         assert org._sanitize_path("a\\b:c*d") == "a/b_c_d"
         assert "  " not in org._sanitize_path("a  b  c")
 
     def test_organize_file_source_not_found(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org = FileOrganizer(organize_root=str(tmp_path / "org"))
         result = org.organize_file("/no/such/file.txt", "test_folder")
         assert result["success"] is False
 
     def test_organize_file_success(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org_root = tmp_path / "org"
         org = FileOrganizer(organize_root=str(org_root))
@@ -400,7 +400,7 @@ class TestFileOrganizer:
         assert os.path.exists(result["dest_file"])
 
     def test_organize_file_duplicate_content(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org_root = tmp_path / "org"
         org = FileOrganizer(organize_root=str(org_root))
@@ -414,7 +414,7 @@ class TestFileOrganizer:
         assert result.get("skipped_duplicate", False) or result["success"]
 
     def test_search_files(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org = FileOrganizer(organize_root=str(tmp_path / "org"))
         src = tmp_path / "report.txt"
@@ -424,7 +424,7 @@ class TestFileOrganizer:
         assert len(results) >= 1
 
     def test_get_categories_stats(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org = FileOrganizer(organize_root=str(tmp_path / "org"))
         src = tmp_path / "file.txt"
@@ -434,7 +434,7 @@ class TestFileOrganizer:
         assert "tech" in stats
 
     def test_organize_batch(self, tmp_path):
-        from web.file_organizer import FileOrganizer
+        from app.core.services.file_organizer import FileOrganizer
 
         org = FileOrganizer(organize_root=str(tmp_path / "org"))
         f1 = tmp_path / "a.txt"
@@ -461,7 +461,7 @@ class TestFileScanner:
 
     def _reset_scanner(self):
         """Reset FileScanner singleton state between tests."""
-        from web.file_scanner import FileScanner
+        from app.core.services.file_scanner import FileScanner
 
         with FileScanner._lock:
             FileScanner._index = {}
@@ -481,7 +481,7 @@ class TestFileScanner:
         return FileScanner
 
     def test_classify(self):
-        from web.file_scanner import _classify
+        from app.core.services.file_scanner import _classify
 
         assert _classify(".pdf") == "文档"
         assert _classify(".jpg") == "图片"
@@ -511,7 +511,7 @@ class TestFileScanner:
 
     def test_search_with_index(self):
         FS = self._reset_scanner()
-        from web.file_scanner import FileEntry
+        from app.core.services.file_scanner import FileEntry
 
         entry = FileEntry(
             path="C:\\docs\\report.pdf",
@@ -548,13 +548,13 @@ class TestFileScanner:
         assert FS.is_indexed() is False
 
     def test_extract_query_from_input(self):
-        from web.file_scanner import extract_query_from_input
+        from app.core.services.file_scanner import extract_query_from_input
 
         assert "报告" in extract_query_from_input("帮我找一下 报告")
         assert extract_query_from_input("open my_file.docx") == "my_file.docx"
 
     def test_is_disk_search_intent(self):
-        from web.file_scanner import is_disk_search_intent
+        from app.core.services.file_scanner import is_disk_search_intent
 
         assert is_disk_search_intent("帮我找一下报告") is True
         assert is_disk_search_intent("C:\\Users\\file.txt") is True
@@ -653,7 +653,7 @@ class TestNotificationManager:
 class TestOperationHistory:
 
     def test_init_creates_dirs(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         hdir = str(tmp_path / "history")
         oh = OperationHistory(history_dir=hdir)
@@ -661,7 +661,7 @@ class TestOperationHistory:
         assert os.path.isdir(oh.backup_dir)
 
     def test_record_and_get_operation(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         f = tmp_path / "test.txt"
@@ -673,7 +673,7 @@ class TestOperationHistory:
         assert op["type"] == "edit"
 
     def test_rollback_edit(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         f = tmp_path / "doc.txt"
@@ -685,14 +685,14 @@ class TestOperationHistory:
         assert f.read_text(encoding="utf-8") == "original"
 
     def test_rollback_nonexistent_id(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         result = oh.rollback("no_such_id")
         assert result["success"] is False
 
     def test_rollback_create_op(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         f = tmp_path / "created.txt"
@@ -703,7 +703,7 @@ class TestOperationHistory:
         assert result["success"] is False
 
     def test_get_history_with_filter(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         f1 = tmp_path / "a.txt"
@@ -716,7 +716,7 @@ class TestOperationHistory:
         assert all(op["file_path"] == str(f1) for op in filtered)
 
     def test_get_statistics(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         f = tmp_path / "s.txt"
@@ -727,7 +727,7 @@ class TestOperationHistory:
         assert "edit" in stats["by_type"]
 
     def test_cleanup_old_backups(self, tmp_path):
-        from web.operation_history import OperationHistory
+        from web.tasks.operation_history import OperationHistory
 
         oh = OperationHistory(history_dir=str(tmp_path / "hist"))
         f = tmp_path / "old.txt"
@@ -764,6 +764,28 @@ class TestQuickNoteManager:
         assert note["content"] == "Test content"
         retrieved = nm.get_note(note["id"])
         assert retrieved["content"] == "Test content"
+
+    def test_update_note_preserves_identity_and_refreshes_index(self, tmp_path):
+        from web.note_manager import QuickNoteManager
+
+        nm = QuickNoteManager(notes_dir=str(tmp_path / "notes"))
+        note = nm.add_note("Original", tags=["old"], category="draft", title="Old")
+
+        updated = nm.update_note(
+            note["id"],
+            "Revised content",
+            tags=["new"],
+            category="final",
+            title="Revised",
+        )
+
+        assert updated["id"] == note["id"]
+        assert updated["created_at"] == note["created_at"]
+        assert updated["title"] == "Revised"
+        assert updated["content"] == "Revised content"
+        assert len(nm.notes) == 1
+        assert nm.notes[0]["preview"] == "Revised content"
+        assert nm.get_note(note["id"])["tags"] == ["new"]
 
     def test_search_notes_by_query(self, tmp_path):
         from web.note_manager import QuickNoteManager

@@ -207,9 +207,7 @@ def resolve_requested_model_id(
             if item.get("id")
         ]
     except Exception as exc:
-        _logger.debug(
-            "[ModelLock] 获取可用模型列表失败，跳过显式模型校验: %s", exc
-        )
+        _logger.debug("[ModelLock] 获取可用模型列表失败，跳过显式模型校验: %s", exc)
         if not normalized or normalized in {"auto", "local", "cloud"}:
             return cloud_fallback
         return normalized
@@ -251,3 +249,15 @@ def resolve_requested_model_id(
         return resolved_target
 
     return normalized
+
+
+def format_model_display_name(model_id, model_info, model_manager=None) -> str:
+    """Format a model label from static metadata or refreshed capabilities."""
+    info = model_info.get(model_id)
+    if info:
+        return f"{info['name']} {info['speed']}"
+    if model_manager:
+        capabilities = model_manager._cached_caps.get(model_id)
+        if capabilities and capabilities.get("display"):
+            return capabilities["display"]
+    return model_id

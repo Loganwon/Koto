@@ -9,31 +9,38 @@ def _read(rel_path: str) -> str:
     return (_repo_root() / rel_path).read_text(encoding="utf-8")
 
 
-def test_file_task_refresh_controller_treats_no_pending_refresh_as_noop():
-    refresh_js = _read("web/src/workspace/task-refresh.ts")
+def test_file_task_refresh_has_one_execution_event_owner():
+    root = _repo_root()
+    task_runner = _read("web/src/workspace/task-runner.ts")
+    execution_events = _read("web/src/workspace/task-execution-event-handlers.ts")
+    run_events = _read("web/src/workspace/task-run-event-handlers.ts")
+    workspace_bundle = _read("web/src/bundles/workspace.ts")
 
-    assert "return { ok: true, refreshed: false };" in refresh_js
-    assert (
-        "const didRefresh = refreshResult ? refreshResult.refreshed : false;"
-        in refresh_js
-    )
-    assert "finalizeOptions.showRefreshingStatus && didRefresh" in refresh_js
-    assert (
-        "options.setStatus(card, refreshOk ? '已刷新文件' : '文件刷新失败');"
-        in refresh_js
-    )
-    assert "publishWorkspaceApi({ createFileTaskRefreshController });" in refresh_js
+    assert not (root / "web/src/workspace/task-refresh.ts").exists()
+    assert "task-refresh" not in workspace_bundle
+    assert "createFileTaskRefreshController" not in task_runner
+    assert "file_refresh: handleFileRefresh" in execution_events
+    assert "function handleEvent_file_refresh" not in task_runner
+    assert "function openFinalTaskOutput" in run_events
+    assert "function openFinalTaskOutput" not in task_runner
 
 
 def test_file_task_refresh_normalizes_workspace_prefixed_paths():
-    refresh_js = _read("web/src/workspace/task-refresh.ts")
+    task_runner = _read("web/src/workspace/task-runner.ts")
+    execution_events = _read("web/src/workspace/task-execution-event-handlers.ts")
     review_js = _read("web/src/workspace/docx-review-runtime.ts")
 
     assert (
-        "const rawPath = payload.path || payload.file_path || payload.output_path || payload.target_path;"
-        in refresh_js
+        "import { normalizeWorkspaceFilePath } from './docx-review-runtime';"
+        in task_runner
     )
-    assert "const path = normalizePath(rawPath || '') || rawPath;" in refresh_js
+    assert task_runner.count("normalizeWorkspacePath: normalizeWorkspaceFilePath") == 2
+    assert "workspaceApi.normalizeWorkspaceFilePath" not in task_runner
+    assert (
+        "refreshWorkspaceFile(eventPath.refreshPath || eventPath.path)"
+        in execution_events
+    )
+    assert "requestFileBrowserRefreshAfterExternalChange" in task_runner
     assert (
         "return normalizedPath.replace(/^\\//, '').replace(/^workspace\\//i, '');"
         in review_js

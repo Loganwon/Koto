@@ -55,7 +55,7 @@ python demo_file_organization.py
 
 ### 🔍 文件分析 (FileAnalyzer)
 
-**位置**: `web/file_analyzer.py`
+**位置**: `app/core/services/file_analyzer.py`
 
 **功能**: 分析文件内容，识别：
 
@@ -89,7 +89,7 @@ print(result['suggested_folder']) # finance/2026/Q1/Contract/融资
 
 ### 📁 文件组织 (FileOrganizer)
 
-**位置**: `web/file_organizer.py`
+**位置**: `app/core/services/file_organizer.py`
 
 **功能**: 根据分析结果，自动创建文件夹并组织文件
 
@@ -272,7 +272,7 @@ curl http://localhost:5000/api/organize/stats
 
 ### 自定义分类规则
 
-编辑 `web/file_analyzer.py` 中的分类规则：
+编辑 `app/core/services/file_analyzer.py` 中的分类规则：
 
 ```python
 # 修改行业关键字
@@ -386,7 +386,7 @@ def get_file_organizer():
 
 ### 添加新的行业分类
 
-编辑 `web/file_analyzer.py`：
+编辑 `app/core/services/file_analyzer.py`：
 
 ```python
 CLASSIFICATION_RULES = {
@@ -410,7 +410,7 @@ CLASSIFICATION_RULES = {
 
 **原因**: 关键词匹配不准确
 **解决**: 
-1. 检查 `web/file_analyzer.py` 中的关键词
+1. 检查 `app/core/services/file_analyzer.py` 中的关键词
 2. 在演示中观察分析结果的置信度
 3. 手动调整分类规则
 
@@ -437,8 +437,8 @@ CLASSIFICATION_RULES = {
 - **设计文档**: `docs/FILE_ORGANIZATION_DESIGN.md`
 - **测试报告**: `TEST_RESULTS_REPORT.md`
 - **源代码**: 
-  - `web/file_analyzer.py` - 分析引擎
-  - `web/file_organizer.py` - 组织引擎
+  - `app/core/services/file_analyzer.py` - 分析引擎
+  - `app/core/services/file_organizer.py` - 组织引擎
   - `web/app.py` - API 接口
 - **测试脚本**:
   - `test_file_organization.py` - 完整测试

@@ -3,15 +3,12 @@ from __future__ import annotations
 
 
 def test_chat_system_context_preserves_explicit_selection_metadata() -> None:
-    from app.api.agent_routes import _build_chat_system_context
+    from web.services.chat_stream.orchestrator import _workspace_file_context_block
 
-    result = _build_chat_system_context(
-        message="只总结选区",
-        history=[],
-        session_id="session-1",
-        context_files=[],
-        file_context={
-            "active_file": "workspace/report.xlsx",
+    context = _workspace_file_context_block(
+        {
+            "file_path": "workspace/report.xlsx",
+            "file_type": "xlsx",
             "selection": "产品\t销量\nA\t10",
             "selection_kind": "xlsx-range",
             "selection_source": "report.xlsx",
@@ -21,9 +18,8 @@ def test_chat_system_context_preserves_explicit_selection_metadata() -> None:
                 "rows": 2,
                 "cols": 2,
             },
-        },
+        }
     )
-    context = result[1]
 
     assert "优先使用用户明确提供的选区和附加文件" in context
     assert "选区类型: xlsx-range" in context

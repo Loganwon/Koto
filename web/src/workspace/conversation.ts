@@ -3,12 +3,13 @@
  * Manages turn history, rendering, and session hydration.
  */
 
-import { fileTaskStatusLabel, isFileTaskTerminalStatus, normalizeFileTaskTerminalStatus } from './file-task-status';
+import { fileTaskStatusLabel, normalizeFileTaskTerminalStatus } from './file-task-status';
 import { taskReportStageTitle } from './task-report-layout';
+import { syncTaskInteractionSummary } from './task-interaction-summary';
+import { restoreTaskRunCard } from './task-runner';
 import { _escHtml as escHtml } from './infrastructure';
-import { getWorkspaceApi, publishWorkspaceApi } from '../shared/workspace-api';
-
-const workspaceApi = getWorkspaceApi();
+import { appendDocumentReceipt, type DocumentReceiptRecord } from './task-document-receipt';
+import { getFeatureRegistry } from '../shared/feature-registry';
 
 interface WATurn {
   id: string;
@@ -32,6 +33,7 @@ interface WATurn {
   model_context_text?: string;
   task_context?: Record<string, any>;
   task_kind?: string;
+  document_receipts?: DocumentReceiptRecord[];
   test_structure?: TaskTestStructure;
   run_id?: string;
   turn_id?: string;
@@ -60,6 +62,12 @@ interface TaskTestStructure {
   final_summary?: string;
   terminal_status?: string;
   completed_task?: boolean;
+  progress_count?: number;
+  progress_journal?: Array<{
+    stage?: string;
+    title?: string;
+    status?: string;
+  }>;
   step_count?: number;
   steps?: Array<{
     id?: string;
@@ -71,7 +79,7 @@ interface TaskTestStructure {
 }
 
 interface ConversationState {
-  conversation?: WATurn[];
+  conversation?: Array<{ role: string; content: string; [key: string]: any }>;
   [key: string]: any;
 }
 
@@ -168,7 +176,7 @@ function historyTaskSnapshotOptions(): Record<string, any> {
   return {
     history: true,
     history_label: '历史任务记录',
-    history_note: '这是一条历史运行记录，不代表当前文件状态。',
+    history_note: '',
   };
 }
 
@@ -189,9 +197,7 @@ function applyTaskHistoryMetadata(element: HTMLElement | null, turn: WATurn): vo
   applyTaskHistoryTitle(element, taskHistoryTitle(turn));
   const memorySummary = String(turn.memory_summary || turn.model_context_text || '').trim();
   if (memorySummary) element.dataset.taskMemorySummary = memorySummary;
-  if (typeof workspaceApi.syncTaskInteractionSummary === 'function') {
-    try { workspaceApi.syncTaskInteractionSummary(element); } catch (_) { /* noop */ }
-  }
+  try { syncTaskInteractionSummary(element); } catch (_) { /* noop */ }
 }
 
 function testStructureText(value: unknown, limit: number): string {
@@ -232,19 +238,12 @@ function testStructureCheckText(value: unknown): string {
   return testStructureText(text, 180);
 }
 
-function taskTurnIsTerminal(turn: WATurn): boolean {
-  const status = String(turn && (turn.status || turn.task_terminal_status || '') || '').trim().toLowerCase();
-  const structure = turn && turn.test_structure;
-  const terminal = String(structure && structure.terminal_status || '').trim().toLowerCase();
-  return structure && structure.completed_task === true
-    || isFileTaskTerminalStatus(status)
-    || status === 'success'
-    || isFileTaskTerminalStatus(terminal);
-}
-
 function renderTestStructure(structure?: TaskTestStructure): HTMLElement | null {
   if (!structure || typeof structure !== 'object') return null;
   const steps = Array.isArray(structure.steps) ? structure.steps : [];
+  const progressJournal = Array.isArray(structure.progress_journal)
+    ? structure.progress_journal.slice(-30)
+    : [];
   const host = document.createElement('section');
   host.className = 'wa-task-process-report wa-history-test-structure';
   const completed = structure.completed_task === true;
@@ -264,7 +263,6 @@ function renderTestStructure(structure?: TaskTestStructure): HTMLElement | null 
   header.appendChild(badge);
   host.appendChild(header);
 
-  const finalSummary = testStructureText(structure.final_summary || '', 260);
   const meta = document.createElement('div');
   meta.className = 'wa-history-test-meta';
   const metaItems = [
@@ -278,6 +276,37 @@ function renderTestStructure(structure?: TaskTestStructure): HTMLElement | null 
     meta.appendChild(item);
   });
   if (meta.childNodes.length) host.appendChild(meta);
+
+  if (progressJournal.length) {
+    const progress = document.createElement('details');
+    progress.className = 'wa-history-task-progress';
+    const progressCount = Math.max(
+      progressJournal.length,
+      Number(structure.progress_count || 0) || 0,
+    );
+    const head = document.createElement('summary');
+    head.textContent = progressCount > progressJournal.length
+      ? `进展记录 · 最近 ${progressJournal.length} / 共 ${progressCount} 条`
+      : `进展记录 · ${progressCount} 条`;
+    progress.appendChild(head);
+    const list = document.createElement('ol');
+    progressJournal.forEach((entry) => {
+      const title = testStructureText(entry && entry.title, 120);
+      if (!title) return;
+      const item = document.createElement('li');
+      const status = String(entry && entry.status || 'running').trim().toLowerCase();
+      item.dataset.status = status;
+      const stage = document.createElement('span');
+      stage.textContent = testStructureText(entry && entry.stage || '任务', 40);
+      const copy = document.createElement('strong');
+      copy.textContent = title;
+      item.appendChild(stage);
+      item.appendChild(copy);
+      list.appendChild(item);
+    });
+    progress.appendChild(list);
+    host.appendChild(progress);
+  }
 
   if (steps.length) {
     const list = document.createElement('div');
@@ -308,12 +337,6 @@ function renderTestStructure(structure?: TaskTestStructure): HTMLElement | null 
     });
     host.appendChild(list);
   }
-  if (finalSummary) {
-    const result = document.createElement('div');
-    result.className = 'wa-history-test-result';
-    result.textContent = `本轮结论：${finalSummary}`;
-    host.appendChild(result);
-  }
   return host;
 }
 
@@ -326,9 +349,6 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
   const getSessionId = typeof options.getSessionId === 'function'
     ? options.getSessionId
     : () => 'workspace_default';
-  const getDocId = typeof options.getDocId === 'function'
-    ? options.getDocId
-    : () => '';
   const hideWelcome = typeof options.hideWelcome === 'function'
     ? options.hideWelcome
     : () => {
@@ -407,7 +427,11 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
 
   function taskPlanSummaryFromElement(element: HTMLElement | null): string {
     if (!element || !element.querySelector) return '';
-    return String(element.querySelector('[data-role="plan"]')?.textContent || '').trim();
+    return String(
+      element.querySelector(
+        '[data-role="plan"] .wa-task-plan-summary',
+      )?.textContent || '',
+    ).trim();
   }
 
   function syncAssistantTaskTurn(turnId: string, metadata?: Record<string, any>): WATurn | null {
@@ -505,20 +529,24 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
   function renderAssistantTurn(turn: WATurn, msgs?: HTMLElement): HTMLElement | null {
     const host = msgs || getMessagesElement();
     if (!host || !turn) return null;
-    const shouldRenderStructuredTaskReport = !!turn.test_structure && taskTurnIsTerminal(turn);
-    if (!shouldRenderStructuredTaskReport && turn.task_card_snapshot && typeof workspaceApi.restoreTaskRunCard === 'function') {
-      const restored = workspaceApi.restoreTaskRunCard(turn.task_card_snapshot, historyTaskSnapshotOptions());
+    if (turn.task_card_snapshot) {
+      const restored = restoreTaskRunCard(
+        turn.task_card_snapshot,
+        historyTaskSnapshotOptions(),
+      );
       if (restored) {
         restored.dataset.turnId = turn.id;
         restored.dataset.rawText = turn.content;
         const plan = restored.querySelector('[data-role="plan"]') as HTMLElement | null;
         if (plan && !String(plan.textContent || '').trim() && turn.task_plan_summary) {
-          plan.textContent = turn.task_plan_summary;
+          plan.innerHTML = '<div class="wa-task-plan-summary"></div>';
+          const summary = plan.querySelector(
+            '.wa-task-plan-summary',
+          ) as HTMLElement | null;
+          if (summary) summary.textContent = turn.task_plan_summary;
           plan.hidden = false;
         }
         applyTaskHistoryMetadata(restored, turn);
-        const structure = renderTestStructure(turn.test_structure);
-        if (structure) restored.appendChild(structure);
         host.appendChild(restored);
         return restored;
       }
@@ -538,6 +566,9 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       el.appendChild(answer);
     } else {
       el.innerHTML = renderMarkdown(turn.content);
+    }
+    if (Array.isArray(turn.document_receipts)) {
+      turn.document_receipts.forEach((receipt) => appendDocumentReceipt(el, receipt));
     }
     host.appendChild(el);
     return el;
@@ -598,6 +629,10 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
       }
     }
     renderHistory(turns);
+    const recover = getFeatureRegistry().recoverRunningSessionTasks;
+    if (typeof recover === 'function') {
+      void Promise.resolve(recover(sessionId)).catch(() => { /* History remains usable while reconnecting. */ });
+    }
     return ensureConversation(sessionId);
   }
 
@@ -616,7 +651,7 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
     });
     if (turn && payload.render !== false) renderUserTurn(turn);
     if (turn) hideWelcome();
-    scrollToBottom();
+    if (!payload.preserve_scroll_position) scrollToBottom();
     return turn;
   }
 
@@ -705,5 +740,3 @@ export function createWorkspaceAiConversation(deps: ConversationDeps = {}): Conv
     normalizeTurn,
   };
 }
-
-publishWorkspaceApi({ createWorkspaceAiConversation });

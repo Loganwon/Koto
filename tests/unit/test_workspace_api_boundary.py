@@ -1,32 +1,28 @@
 from pathlib import Path
 
+from tests.source_graph import partition_aware_root
+
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return partition_aware_root()
 
 
-def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods():
+def test_feature_registry_is_the_single_publisher_for_cross_bundle_methods():
     root = _repo_root()
-    api = (root / "web" / "src" / "shared" / "workspace-api.ts").read_text(
+    api = (root / "web" / "src" / "shared" / "feature-registry.ts").read_text(
         encoding="utf-8"
     )
 
-    assert "export function getWorkspaceApi" in api
-    assert "export function publishWorkspaceApi" in api
-    assert "export function getWorkspaceApiMethod" in api
+    assert "export function getFeatureRegistry" in api
+    assert "export function registerFeatures" in api
+    assert "export function getFeature" in api
 
     publishers = {
         "web/src/editors/cdn-loaders.ts": "_ensurePdfJS",
         "web/src/editors/docx-outline.ts": "_setupDocOutline",
-        "web/src/workspace/transport.ts": "createWorkspaceAiTransport",
-        "web/src/workspace/task-refresh.ts": "createFileTaskRefreshController",
-        "web/src/workspace/task-dispatcher.ts": "createTaskDispatcher",
-        "web/src/workspace/quick-actions.ts": "createQuickActionDispatcher",
-        "web/src/workspace/task-runner.ts": "streamTaskFlow",
         "web/src/workspace/ai-review.ts": "sendMessage",
         "web/src/workspace/runtime-init.ts": "hydrateAiHistory",
         "web/src/editors/pdf-viewer.ts": "pdfAIAnnotate",
-        "web/src/workspace/conversation.ts": "createWorkspaceAiConversation",
         "web/src/workspace/conversation-list.ts": "openAiSession",
         "web/src/workspace/task-workbench.ts": "openTaskWorkbenchForCurrentRun",
         "web/src/workspace/ai-context.ts": "attachFilesToTask",
@@ -39,12 +35,98 @@ def test_workspace_api_is_the_single_publisher_for_migrated_cross_bundle_methods
     }
     for relative_path, public_method in publishers.items():
         source = (root / relative_path).read_text(encoding="utf-8")
-        assert "publishWorkspaceApi" in source
+        assert "registerFeatures" in source
         assert public_method in source
-        assert "publishWorkspaceApi({" in source
+        assert "registerFeatures({" in source
 
 
-def test_workspace_file_and_context_modules_read_the_compatibility_boundary_only():
+def test_workspace_runtime_factories_are_direct_module_dependencies():
+    root = _repo_root()
+    runtime = (root / "web/src/workspace/runtime-init.ts").read_text(encoding="utf-8")
+    owners = {
+        "web/src/workspace/conversation.ts": "createWorkspaceAiConversation",
+        "web/src/workspace/task-dispatcher.ts": "createTaskDispatcher",
+        "web/src/workspace/results.ts": "createWorkspaceAiResultsRuntime",
+        "web/src/workspace/quick-actions.ts": "createQuickActionDispatcher",
+    }
+
+    for relative_path, factory in owners.items():
+        source = (root / relative_path).read_text(encoding="utf-8")
+        assert f"import {{ {factory} }} from './" in runtime
+        assert f"workspaceApi.{factory}" not in runtime
+        assert f"registerFeatures({{ {factory} }})" not in source
+
+    quick_actions = (root / "web/src/workspace/quick-actions.ts").read_text(
+        encoding="utf-8"
+    )
+    assert "createWorkspaceQuickActionRuntime" not in quick_actions
+    assert "createWorkspaceQuickActionRuntime" not in runtime
+    assert (
+        "state,"
+        not in runtime.split(
+            "_waQuickActionRuntime = createQuickActionDispatcher({", 1
+        )[1].split("});", 1)[0]
+    )
+
+
+def test_task_flow_runtime_has_no_same_bundle_window_bus_or_raw_runtime_aliases():
+    root = _repo_root()
+    runtime = (root / "web/src/workspace/runtime-init.ts").read_text(encoding="utf-8")
+    review = (root / "web/src/workspace/ai-review.ts").read_text(encoding="utf-8")
+    dispatcher = (root / "web/src/workspace/task-dispatcher.ts").read_text(
+        encoding="utf-8"
+    )
+    direct_chat = (root / "web/src/workspace/task-direct-chat.ts").read_text(
+        encoding="utf-8"
+    )
+    final_report = (root / "web/src/workspace/task-final-report.ts").read_text(
+        encoding="utf-8"
+    )
+
+    assert "registerFeatures({ taskCardTestStructure });" not in dispatcher
+    assert "taskCardPersistenceStructure," in dispatcher
+    assert "_waTaskDispatcher.taskCardPersistenceStructure(card)" in runtime
+
+    for source in (runtime, review, direct_chat, final_report):
+        assert "(window as any)._waRenderMarkdown" not in source
+        assert "(window as any)._sanitizeRenderedHtml" not in source
+
+    for alias in (
+        "_waAiResultsRuntime",
+        "_waQuickActionRuntime",
+        "_waConversationRuntime",
+        "_waTaskDispatcher",
+        "_waQuickActionDispatcherAttached",
+        "_initWorkspaceAiRuntimes",
+        "_hydrateAiConversation",
+        "_waSession",
+        "_waQuickActionModelMode",
+        "_waSampleTaskContext",
+        "_persistWorkspaceConversationTurn",
+        "_persistTerminalTaskRunCard",
+        "_retryWorkspaceConversationPersistence",
+    ):
+        assert f"(window as any).{alias} =" not in runtime
+
+    assert "getWorkspaceConversationRuntime?.()" in review
+    assert "getWorkspaceTaskDispatcher?.()" in review
+    assert "getWorkspaceQuickActionRuntime?.()" in review
+    assert "getWorkspaceAiResultsRuntime?.()" in review
+    assert "_setStreamBtn," in review.split("registerFeatures({", 1)[1]
+    assert "getWorkspaceSessionId: _waSession," in runtime
+
+
+def test_retired_generic_workspace_transport_stays_removed():
+    root = _repo_root()
+    bundle = (root / "web/src/bundles/workspace.ts").read_text(encoding="utf-8")
+
+    assert not (root / "web/src/workspace/transport.ts").exists()
+    assert "import '../workspace/transport';" not in bundle
+    assert (root / "web/src/workspace/task-stream-transport.ts").is_file()
+    assert (root / "web/src/workspace/task-direct-chat.ts").is_file()
+
+
+def test_workspace_file_and_context_modules_read_the_feature_registry_only():
     root = _repo_root()
     consumers = (
         "web/src/workspace/ai-context.ts",
@@ -56,7 +138,6 @@ def test_workspace_file_and_context_modules_read_the_compatibility_boundary_only
         "web/src/workspace/ai-review.ts",
         "web/src/workspace/runtime-init.ts",
         "web/src/editors/pdf-viewer.ts",
-        "web/src/workspace/conversation.ts",
         "web/src/workspace/conversation-list.ts",
         "web/src/workspace/task-workbench.ts",
         "web/src/ui/docx-pptx-toolbar.ts",
@@ -67,9 +148,29 @@ def test_workspace_file_and_context_modules_read_the_compatibility_boundary_only
     )
     for relative_path in consumers:
         source = (root / relative_path).read_text(encoding="utf-8")
-        assert "getWorkspaceApi" in source
+        assert "getFeatureRegistry" in source
         assert "(window as any).WA" not in source
         assert "window.WA" not in source
+
+    conversation = (root / "web/src/workspace/conversation.ts").read_text(
+        encoding="utf-8"
+    )
+    runtime_init = (root / "web/src/workspace/runtime-init.ts").read_text(
+        encoding="utf-8"
+    )
+    # History restoration reads the lazy task bundle's recovery bridge. It must
+    # not publish a second task runtime or reach through the legacy WA global.
+    assert (
+        "const recover = getFeatureRegistry().recoverRunningSessionTasks;"
+        in conversation
+    )
+    assert "typeof recover === 'function'" in conversation
+    assert "recover(sessionId)" in conversation
+    assert "registerFeatures" not in conversation
+    assert "window.WA" not in conversation
+    assert "(window as any).WA" not in conversation
+    assert "createWorkspaceAiConversation(deps: ConversationDeps = {})" in conversation
+    assert "_waConversationRuntime = createWorkspaceAiConversation({" in runtime_init
 
 
 def test_workspace_context_menu_uses_delegated_actions_for_dynamic_rows():
@@ -79,7 +180,7 @@ def test_workspace_context_menu_uses_delegated_actions_for_dynamic_rows():
     assert 'onclick="WA.' not in source
     assert "data-wa-context-menu-action" in source
     assert "function _installContextMenuActionDelegation(): void" in source
-    assert "publishWorkspaceApi({" in source
+    assert "registerFeatures({" in source
 
 
 def test_workspace_state_file_rows_use_delegated_actions():
@@ -106,7 +207,7 @@ def test_selection_context_bar_uses_delegated_actions():
     assert 'onclick="WA.clearAIFileContext()"' not in source
     assert "data-wa-selection-context-action" in source
     assert "function _installSelectionToolbarEvents(): void" in source
-    assert "publishWorkspaceApi({" in source
+    assert "registerFeatures({" in source
 
 
 def test_find_replace_uses_delegated_template_actions():
@@ -123,3 +224,27 @@ def test_find_replace_uses_delegated_template_actions():
     assert 'onkeydown="WA.pptxFind' not in template
     assert 'onclick="WA.docxFind' not in template
     assert 'onclick="WA.pptxFind' not in template
+
+
+def test_editor_lazy_loading_uses_native_modules_without_global_module_objects():
+    root = _repo_root()
+    loader = (root / "web/src/editors/lazy-loaders.ts").read_text(encoding="utf-8")
+    build = (root / "web/scripts/build-bundles.mjs").read_text(encoding="utf-8")
+    assets = (root / "web/templates/_workspace_asset_scripts.html").read_text(
+        encoding="utf-8"
+    )
+
+    assert "import(/* @vite-ignore */ getWorkspaceAssetUrl(bundleName))" in loader
+    assert "window" not in loader
+    assert "nativeModuleEntries" in build
+    assert "format: nativeModuleEntries.has(name) ? 'es' : 'iife'" in build
+    for name, constructor in (
+        ("pptx-editor", "KotoPptxEditor"),
+        ("pdf-viewer", "KotoPdfViewer"),
+        ("xlsx-editor", "XlsxEditor"),
+        ("image-viewer", "KotoImageViewer"),
+    ):
+        entry = (root / f"web/src/bundles/{name}.ts").read_text(encoding="utf-8")
+        assert f"export {{ {constructor} }}" in entry
+        assert f"data-{name}-bundle-url" in assets
+        assert f"Koto{constructor}Module" not in entry

@@ -33,7 +33,7 @@ if str(ROOT) not in sys.path:
 
 class TestLifecycle:
     def test_run_state_terminal(self):
-        from app.core.agent.lifecycle import RunState
+        from app.core.agent.kernel import RunState
 
         assert RunState.SUCCEEDED.is_terminal
         assert RunState.FAILED.is_terminal
@@ -43,14 +43,14 @@ class TestLifecycle:
         assert not RunState.QUEUED.is_terminal
 
     def test_agent_event_repr(self):
-        from app.core.agent.lifecycle import AgentEvent, EventType
+        from app.core.agent.kernel import AgentEvent, EventType
 
         e = AgentEvent(EventType.STREAM_CHUNK, {"chunk": "hello"})
         assert "stream_chunk" in repr(e)
         assert "chunk" in repr(e)
 
     def test_run_metadata_lifecycle(self):
-        from app.core.agent.lifecycle import RunMetadata, RunState
+        from app.core.agent.kernel import RunMetadata, RunState
 
         meta = RunMetadata(session_id="s1")
         assert meta.state == RunState.QUEUED
@@ -67,7 +67,7 @@ class TestLifecycle:
         assert meta.elapsed >= 0
 
     def test_event_constructors(self):
-        from app.core.agent.lifecycle import (
+        from app.core.agent.kernel import (
             EventType,
             evt_error,
             evt_lifecycle_start,
@@ -104,7 +104,7 @@ class TestLifecycle:
         assert e4.data["text"] == "oops"
 
     def test_agent_request_defaults(self):
-        from app.core.agent.lifecycle import AgentRequest
+        from app.core.agent.kernel import AgentRequest
 
         req = AgentRequest(prompt="test")
         assert req.session_id == ""
@@ -362,7 +362,7 @@ class TestDocWebSocketAgentExecutor:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         provider = self._make_fake_provider(["你好世界 这是AI回复"])
         monkeypatch.setattr(
@@ -391,7 +391,7 @@ class TestDocWebSocketAgentExecutor:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         provider = self._make_fake_provider(["统一主链返回结果"])
         monkeypatch.setattr(
@@ -429,7 +429,7 @@ class TestDocWebSocketAgentExecutor:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         response = '已修改。<TOOL>{"type":"set_html","value":"<p>新内容</p>"}</TOOL>'
         provider = self._make_fake_provider([response])
@@ -459,7 +459,7 @@ class TestDocWebSocketAgentExecutor:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         response = (
             '已润色。<TOOL>{"type":"set_html","value":"<p>润色后的文字</p>"}</TOOL>'
@@ -493,7 +493,7 @@ class TestDocWebSocketAgentExecutor:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         request = AgentRequest(prompt="")
 
@@ -507,7 +507,7 @@ class TestDocWebSocketAgentExecutor:
             DocWebSocketAgentExecutor,
         )
         from app.core.agent.hooks import HookContext, HookPoint, HookRegistry
-        from app.core.agent.lifecycle import AgentRequest
+        from app.core.agent.kernel import AgentRequest
 
         registry = HookRegistry()
         hook_called = [False]
@@ -537,7 +537,7 @@ class TestDocWebSocketAgentExecutor:
             DocWebSocketAgentExecutor,
         )
         from app.core.agent.hooks import HookPoint, HookRegistry
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         registry = HookRegistry()
 
@@ -561,7 +561,7 @@ class TestDocWebSocketAgentExecutor:
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         monkeypatch.setattr(llm_provider_helpers, "is_ollama_alive", lambda: False)
         request = AgentRequest(
@@ -577,14 +577,14 @@ class TestDocWebSocketAgentExecutor:
 
         assert "本地模式已启用" in complete.data["error"]
         assert "qwen3.5:9b" in complete.data["error"]
-        assert "config/gemini_config.env" not in complete.data["error"]
+        assert "config/deepseek_config.env" not in complete.data["error"]
 
     def test_local_mode_provider_exception_returns_local_error(self, monkeypatch):
         from app.core.agent import llm_provider_helpers
         from app.core.agent.doc_websocket_agent_executor import (
             DocWebSocketAgentExecutor,
         )
-        from app.core.agent.lifecycle import AgentRequest, EventType
+        from app.core.agent.kernel import AgentRequest, EventType
 
         class FailingLocalProvider:
             def generate_content(self, **_kwargs):

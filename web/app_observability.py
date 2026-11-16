@@ -46,6 +46,17 @@ def configure_observability(
     unauthorized_response,
 ) -> None:
     """Configure optional observability and API docs integrations."""
+    deploy_mode = os.environ.get("KOTO_DEPLOY_MODE", "local").strip().lower()
+    metrics_enabled = (
+        os.environ.get("KOTO_ENABLE_METRICS", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+        or deploy_mode in {"cloud", "production", "prod"}
+    )
+    swagger_enabled = (
+        os.environ.get("KOTO_ENABLE_API_DOCS", "").strip().lower()
+        in {"1", "true", "yes", "on"}
+        or app.debug
+    )
     sentry_dsn = os.environ.get("SENTRY_DSN", "")
     if sentry_dsn:
         try:
@@ -64,6 +75,8 @@ def configure_observability(
             logger.warning("SENTRY_DSN set but sentry-sdk not installed; skipping")
 
     try:
+        if not metrics_enabled:
+            raise ModuleNotFoundError("metrics disabled by runtime profile")
         from prometheus_flask_exporter import PrometheusMetrics
 
         metrics_token = os.environ.get("METRICS_TOKEN", "")
@@ -87,12 +100,14 @@ def configure_observability(
 
         logger.info("Prometheus metrics enabled at /metrics")
     except ImportError:
-        logger.debug("prometheus-flask-exporter not installed; /metrics disabled")
+        logger.debug("Prometheus metrics disabled or dependency unavailable")
 
     try:
+        if not swagger_enabled:
+            raise ModuleNotFoundError("API docs disabled by runtime profile")
         from flasgger import Swagger
 
         Swagger(app, config=_SWAGGER_CONFIG, template=_SWAGGER_TEMPLATE)
         logger.info("Swagger UI enabled at /apidocs/")
     except ImportError:
-        logger.debug("flasgger not installed; Swagger UI disabled")
+        logger.debug("Swagger UI disabled or dependency unavailable")

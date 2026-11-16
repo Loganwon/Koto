@@ -1,10 +1,7 @@
-"""Intent accuracy evaluation for the file assistant AI adjudicator.
+"""Intent accuracy evaluation for the canonical file-task classifier.
 
-These tests use real LLM calls to verify that the AI intent adjudicator
-correctly classifies user requests.  Each test case is a (user_message,
-expected_intent, expected_should_write) tuple.
-
-All tests auto-skip when GOOGLE_API_KEY is not set.
+Classification now follows explicit request/file contracts and the native
+planner boundary; there is no separate free-text intent-adjudication pass.
 
 Run:  pytest tests/evaluation/test_intent_accuracy.py -v --tb=short
 """
@@ -54,7 +51,7 @@ INTENT_CASES: List[Dict[str, Any]] = [
         "files": [
             FileTaskFile(path="essay.docx", name="essay.docx", type="docx", target=True)
         ],
-        "expected": {"output_mode": "write", "write_intent": True},
+        "expected": {"output_mode": "hybrid", "write_intent": True},
     },
     {
         "label": "总结 PDF",
@@ -116,7 +113,7 @@ INTENT_CASES: List[Dict[str, Any]] = [
         "files": [
             FileTaskFile(path="deck.pptx", name="deck.pptx", type="pptx", target=True)
         ],
-        "expected": {"output_mode": "write", "write_intent": True},
+        "expected": {"output_mode": "hybrid", "write_intent": True},
     },
     {
         "label": "纯聊天",
@@ -157,7 +154,7 @@ INTENT_CASES: List[Dict[str, Any]] = [
 
 
 def _make_runtime():
-    """Create a FileTaskRuntime with a real model client."""
+    """Create the production FileTaskRuntime with its normal model client."""
     return FileTaskRuntime(
         model_client=FileTaskModelClient(),
         workspace_root=".",
@@ -173,7 +170,11 @@ def _check_expected(
     errors: List[str] = []
 
     for key, expected_val in expected.items():
-        actual = getattr(classification, key, None)
+        actual = (
+            classification.write_authorized
+            if key == "write_intent"
+            else getattr(classification, key, None)
+        )
         if actual != expected_val:
             errors.append(f"{key}: expected={expected_val}, got={actual}")
 
@@ -181,7 +182,7 @@ def _check_expected(
         "pass": len(errors) == 0,
         "errors": errors,
         "output_mode": classification.output_mode,
-        "write_intent": classification.write_intent,
+        "write_intent": classification.write_authorized,
         "diagnostic_request": classification.diagnostic_request,
         "reason_codes": classification.reason_codes,
         "adjudication_intent": adjudication.get("intent", ""),
@@ -205,12 +206,7 @@ def test_intent_accuracy(case, eval_provider, evaluator):
 
     classification = runtime._classify_request(request, files)
 
-    adjudication = runtime._adjudicate_intent_if_needed(request, files, classification)
-
-    if adjudication.get("status") == "ok":
-        classification = runtime._apply_intent_adjudication(
-            request, files, classification, adjudication
-        )
+    adjudication: Dict[str, Any] = {}
 
     result = _check_expected(classification, adjudication, case["expected"])
 
@@ -220,7 +216,7 @@ def test_intent_accuracy(case, eval_provider, evaluator):
             user_task=case["task"],
             predicted={
                 "output_mode": classification.output_mode,
-                "write_intent": classification.write_intent,
+                "write_intent": classification.write_authorized,
                 "diagnostic_request": classification.diagnostic_request,
                 "adjudication_intent": adjudication.get("intent", ""),
                 "reason_codes": classification.reason_codes,
@@ -254,14 +250,7 @@ def test_intent_accuracy_report(evaluator):
             model_mode="cloud",
         )
         classification = runtime._classify_request(request, files)
-        adjudication = runtime._adjudicate_intent_if_needed(
-            request, files, classification
-        )
-
-        if adjudication.get("status") == "ok":
-            classification = runtime._apply_intent_adjudication(
-                request, files, classification, adjudication
-            )
+        adjudication: Dict[str, Any] = {}
 
         result = _check_expected(classification, adjudication, case["expected"])
         result["label"] = case["label"]

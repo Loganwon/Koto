@@ -4,13 +4,12 @@
 Deep coverage tests for web/app.py internal classes and functions.
 
 Targets large, under-tested components: KotoBrain,
-_TrackedModels, run_with_timeout, run_with_heartbeat,
+run_with_timeout, run_with_heartbeat,
 stream_with_keepalive, LocalDispatcher, auto_save_files, and many more.
 """
 
 from __future__ import annotations
 
-import asyncio
 import json
 import os
 import re
@@ -19,6 +18,7 @@ import tempfile
 import threading
 import time
 import types
+from contextlib import contextmanager
 from pathlib import Path
 from unittest.mock import MagicMock, Mock, PropertyMock, call, patch
 
@@ -44,6 +44,18 @@ os.environ.setdefault("GEMINI_API_KEY", "test-key-for-unit-tests")
 os.environ.setdefault("DEEPSEEK_API_KEY", "test-key-for-unit-tests")
 
 
+@contextmanager
+def _using_workspace_root(path):
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
+
+    previous_root = get_workspace_root()
+    set_workspace_root(path)
+    try:
+        yield
+    finally:
+        set_workspace_root(previous_root)
+
+
 # =====================================================================
 # Helpers
 # =====================================================================
@@ -58,18 +70,6 @@ def _import_memory_runtime():
     import web.memory_runtime as memory_runtime
 
     return memory_runtime
-
-
-def _import_task_orchestrator():
-    from web.task_orchestrator import TaskOrchestrator
-
-    return TaskOrchestrator
-
-
-def _import_filegen_time_context():
-    import web.filegen_time_context as filegen_time_context
-
-    return filegen_time_context
 
 
 # =====================================================================
@@ -125,32 +125,37 @@ class TestGetLocalModelConfig:
 @pytest.mark.unit
 class TestExtractPromptText:
     def test_none_contents(self):
-        app = _import_app()
-        text, sys = app._extract_prompt_text(None)
+        from web.llm_runtime_helpers import extract_prompt_text
+
+        text, sys = extract_prompt_text(None)
         assert text == ""
         assert sys is None
 
     def test_string_contents(self):
-        app = _import_app()
-        text, sys = app._extract_prompt_text("hello world")
+        from web.llm_runtime_helpers import extract_prompt_text
+
+        text, sys = extract_prompt_text("hello world")
         assert text == "hello world"
         assert sys is None
 
     def test_list_of_strings(self):
-        app = _import_app()
-        text, _ = app._extract_prompt_text(["a", "b", "c"])
+        from web.llm_runtime_helpers import extract_prompt_text
+
+        text, _ = extract_prompt_text(["a", "b", "c"])
         assert text == "a\nb\nc"
 
     def test_list_with_text_attr(self):
-        app = _import_app()
+        from web.llm_runtime_helpers import extract_prompt_text
+
         obj = Mock()
         obj.text = "from obj"
         obj.parts = None  # so hasattr(item, "parts") won't recurse
-        text, _ = app._extract_prompt_text([obj])
+        text, _ = extract_prompt_text([obj])
         assert "from obj" in text
 
     def test_list_with_parts(self):
-        app = _import_app()
+        from web.llm_runtime_helpers import extract_prompt_text
+
         part = Mock()
         part.text = "part_text"
         item = Mock(spec=[])  # no .text attribute
@@ -162,43 +167,47 @@ class TestExtractPromptText:
             text = None
             parts = [part]
 
-        text, _ = app._extract_prompt_text([ItemWithParts()])
+        text, _ = extract_prompt_text([ItemWithParts()])
         assert "part_text" in text
 
     def test_non_string_non_list(self):
-        app = _import_app()
-        text, _ = app._extract_prompt_text(12345)
+        from web.llm_runtime_helpers import extract_prompt_text
+
+        text, _ = extract_prompt_text(12345)
         assert text == "12345"
 
     def test_with_system_instruction(self):
-        app = _import_app()
+        from web.llm_runtime_helpers import extract_prompt_text
+
         cfg = Mock()
         cfg.system_instruction = "be helpful"
-        text, sys = app._extract_prompt_text("hello", config=cfg)
+        text, sys = extract_prompt_text("hello", config=cfg)
         assert text == "hello"
         assert sys == "be helpful"
 
     def test_config_without_system_instruction(self):
-        app = _import_app()
+        from web.llm_runtime_helpers import extract_prompt_text
+
         cfg = Mock(spec=[])  # no system_instruction attribute
-        text, sys = app._extract_prompt_text("hello", config=cfg)
+        text, sys = extract_prompt_text("hello", config=cfg)
         assert text == "hello"
         assert sys is None
 
     def test_empty_list(self):
-        app = _import_app()
-        text, _ = app._extract_prompt_text([])
+        from web.llm_runtime_helpers import extract_prompt_text
+
+        text, _ = extract_prompt_text([])
         assert text == ""
 
     def test_list_with_fallback_str(self):
-        app = _import_app()
+        from web.llm_runtime_helpers import extract_prompt_text
 
         # Object without .text or .parts
         class Opaque:
             def __str__(self):
                 return "opaque_value"
 
-        text, _ = app._extract_prompt_text([Opaque()])
+        text, _ = extract_prompt_text([Opaque()])
         assert "opaque_value" in text
 
 
@@ -208,110 +217,34 @@ class TestExtractPromptText:
 @pytest.mark.unit
 class TestFakeGenerateContentResponse:
     def test_attributes(self):
-        app = _import_app()
-        resp = app._FakeGenerateContentResponse("hello")
+        from web.llm_runtime_helpers import FakeGenerateContentResponse
+
+        resp = FakeGenerateContentResponse("hello")
         assert resp.text == "hello"
         assert resp.candidates == []
         assert resp.usage_metadata is None
 
 
 # =====================================================================
-# 4. _TrackedModels
+# 4. Runtime gateway boundary
 # =====================================================================
 @pytest.mark.unit
-class TestTrackedModels:
-    def _make(self):
+class TestRuntimeGatewayBoundary:
+    def test_web_app_does_not_reintroduce_sdk_client_proxies(self):
         app = _import_app()
-        real = MagicMock()
-        return app._TrackedModels(real), real, app
+        assert not hasattr(app, "_TrackedModels")
+        assert not hasattr(app, "_ClientProxy")
+        assert not hasattr(app, "client")
 
-    def test_generate_content_normal(self):
-        tm, real, app = self._make()
-        real.generate_content.return_value = Mock(text="ok", usage_metadata=None)
-        with patch.object(app, "_is_interactions_only", return_value=False):
-            resp = tm.generate_content(model="deepseek-chat", contents="hi")
-        assert resp.text == "ok"
+    def test_runtime_gateway_is_the_generation_owner(self):
+        from app.core.llm.runtime_gateway import LLMRuntimeGateway
 
-    def test_generate_content_interactions_only_passthrough(self):
-        """After refactor, generate_content no longer pre-checks _is_interactions_only;
-        it always delegates to the real SDK's generate_content."""
-        tm, real, app = self._make()
-        real.generate_content.return_value = Mock(
-            text="sdk_result", usage_metadata=None
+        provider = MagicMock()
+        provider.generate_content.return_value = {"content": "ok"}
+        response = LLMRuntimeGateway(provider, "model-a").generate_content(
+            contents="hello"
         )
-        with patch.object(app, "_is_interactions_only", return_value=False):
-            resp = tm.generate_content(model="gemini-3-flash-preview", contents="hi")
-        assert resp.text == "sdk_result"
-        real.generate_content.assert_called_once()
-
-    def test_generate_content_error_propagates(self):
-        """Archived Interactions errors preserve the original provider failure."""
-        tm, real, _app = self._make()
-        real.generate_content.side_effect = Exception("Interactions API required")
-        with pytest.raises(Exception, match="Interactions API required"):
-            tm.generate_content(model="some-model", contents="hi")
-
-    def test_generate_content_non_interactions_error_raises(self):
-        tm, real, app = self._make()
-        real.generate_content.side_effect = ValueError("bad input")
-        with patch.object(app, "_is_interactions_only", return_value=False):
-            with pytest.raises(ValueError, match="bad input"):
-                tm.generate_content(model="m", contents="hi")
-
-    def test_generate_content_stream_normal(self):
-        tm, real, app = self._make()
-        chunk = Mock(text="chunk1", usage_metadata=None)
-        real.generate_content_stream.return_value = iter([chunk])
-        with patch.object(app, "_is_interactions_only", return_value=False):
-            chunks = list(tm.generate_content_stream(model="m", contents="hi"))
-        assert len(chunks) == 1
-        assert chunks[0].text == "chunk1"
-
-    def test_generate_content_stream_passthrough(self):
-        """After refactor, generate_content_stream always delegates to the real SDK."""
-        tm, real, app = self._make()
-        chunk = Mock(text="stream_chunk", usage_metadata=None)
-        real.generate_content_stream.return_value = iter([chunk])
-        with patch.object(app, "_is_interactions_only", return_value=False):
-            chunks = list(
-                tm.generate_content_stream(
-                    model="gemini-3-flash-preview", contents="hi"
-                )
-            )
-        assert len(chunks) == 1
-        assert chunks[0].text == "stream_chunk"
-
-    def test_generate_images_is_blocked_by_archive_boundary(self):
-        tm, real, app = self._make()
-        with pytest.raises(RuntimeError, match="图片生成提供商未配置"):
-            tm.generate_images(model="archived-image-model", prompt="cat")
-        real.generate_images.assert_not_called()
-
-    def test_embed_content_with_usage_metadata_is_blocked(self):
-        tm, real, app = self._make()
-        with pytest.raises(RuntimeError, match="云端 embedding 未配置"):
-            tm.embed_content(model="text-embedding-004", contents="text")
-        real.embed_content.assert_not_called()
-
-    def test_embed_content_without_usage_is_blocked(self):
-        tm, real, app = self._make()
-        with pytest.raises(RuntimeError, match="云端 embedding 未配置"):
-            tm.embed_content(model="text-embedding-004", contents="hello world test")
-        real.embed_content.assert_not_called()
-
-    def test_getattr_passthrough(self):
-        tm, real, app = self._make()
-        real.some_method.return_value = "val"
-        assert tm.some_method() == "val"
-
-    def test_generate_content_with_positional_model(self):
-        """Test fallback when model=None and model is first positional arg."""
-        tm, real, app = self._make()
-        real.generate_content.return_value = Mock(text="pos", usage_metadata=None)
-        with patch.object(app, "_is_interactions_only", return_value=False):
-            resp = tm.generate_content(None, "positional-model", contents="hi")
-        # model should be extracted from args
-        assert resp.text == "pos"
+        assert response.text == "ok"
 
 
 # =====================================================================
@@ -365,30 +298,31 @@ class TestInteractionsChecks:
 @pytest.mark.unit
 class TestRunWithTimeout:
     def test_success(self):
-        app = _import_app()
-        result, error, timed_out = app.run_with_timeout(lambda: 42, 5)
+        from web.utils.threading_utils import run_with_timeout
+
+        result, error, timed_out = run_with_timeout(lambda: 42, 5)
         assert result == 42
         assert error is None
         assert timed_out is False
 
     def test_exception_captured(self):
-        app = _import_app()
+        from web.utils.threading_utils import run_with_timeout
 
         def boom():
             raise ValueError("fail")
 
-        result, error, timed_out = app.run_with_timeout(boom, 5)
+        result, error, timed_out = run_with_timeout(boom, 5)
         assert result is None
         assert isinstance(error, ValueError)
         assert timed_out is False
 
     def test_timeout(self):
-        app = _import_app()
+        from web.utils.threading_utils import run_with_timeout
 
         def slow():
             time.sleep(10)
 
-        result, error, timed_out = app.run_with_timeout(slow, 0.1)
+        result, error, timed_out = run_with_timeout(slow, 0.1)
         assert timed_out is True
         assert isinstance(error, TimeoutError)
 
@@ -399,8 +333,9 @@ class TestRunWithTimeout:
 @pytest.mark.unit
 class TestRunWithHeartbeat:
     def test_success(self):
-        app = _import_app()
-        result, error, timed_out = app.run_with_heartbeat(
+        from web.utils.threading_utils import run_with_heartbeat
+
+        result, error, timed_out = run_with_heartbeat(
             lambda: "ok",
             start_time=time.time(),
             heartbeat_callback=lambda e: None,
@@ -412,12 +347,12 @@ class TestRunWithHeartbeat:
         assert timed_out is False
 
     def test_error(self):
-        app = _import_app()
+        from web.utils.threading_utils import run_with_heartbeat
 
         def boom():
             raise RuntimeError("fail")
 
-        result, error, timed_out = app.run_with_heartbeat(
+        result, error, timed_out = run_with_heartbeat(
             boom,
             start_time=time.time(),
             heartbeat_callback=lambda e: None,
@@ -428,12 +363,12 @@ class TestRunWithHeartbeat:
         assert timed_out is False
 
     def test_timeout(self):
-        app = _import_app()
+        from web.utils.threading_utils import run_with_heartbeat
 
         def slow():
             time.sleep(10)
 
-        result, error, timed_out = app.run_with_heartbeat(
+        result, error, timed_out = run_with_heartbeat(
             slow,
             start_time=time.time() - 100,  # Already elapsed
             heartbeat_callback=lambda e: None,
@@ -442,14 +377,15 @@ class TestRunWithHeartbeat:
         assert timed_out is True
 
     def test_heartbeat_called(self):
-        app = _import_app()
+        from web.utils.threading_utils import run_with_heartbeat
+
         beats = []
 
         def slow():
             time.sleep(3)
             return "done"
 
-        result, error, timed_out = app.run_with_heartbeat(
+        result, error, timed_out = run_with_heartbeat(
             slow,
             start_time=time.time(),
             heartbeat_callback=lambda e: beats.append(e),
@@ -524,44 +460,6 @@ class TestStreamWithKeepalive:
 # 9–10. _poll_interaction and _extract_interaction_text_global were
 # removed from module level in PR #45; tests removed accordingly.
 # =====================================================================
-
-
-# =====================================================================
-# 11. _build_filegen_time_context / _parse_time_info_for_filegen
-# =====================================================================
-@pytest.mark.unit
-class TestFilegenTimeContext:
-    def test_no_month_detected(self):
-        helper = _import_filegen_time_context()
-        ctx_text, parsed = helper.build_filegen_time_context("做一个文档")
-        assert "未检测到明确月份" in ctx_text
-        assert parsed["rule_hit"] is False
-
-    def test_month_only(self):
-        helper = _import_filegen_time_context()
-        ctx_text, parsed = helper.build_filegen_time_context("1月新番列表")
-        assert parsed["resolved_month"] == 1
-        assert parsed["rule_hit"] is True
-        assert "按当前年份解析" in ctx_text
-
-    def test_year_and_month(self):
-        helper = _import_filegen_time_context()
-        ctx_text, parsed = helper.build_filegen_time_context("2024年3月报告")
-        assert parsed["resolved_year"] == 2024
-        assert parsed["resolved_month"] == 3
-        assert parsed["rule_hit"] is False
-
-    def test_parse_time_info_no_match(self):
-        helper = _import_filegen_time_context()
-        info = helper.parse_time_info_for_filegen("no time info here")
-        assert info["rule_hit"] is False
-        assert info["month"] is None
-
-    def test_parse_time_info_month_12(self):
-        helper = _import_filegen_time_context()
-        info = helper.parse_time_info_for_filegen("12月动漫推荐")
-        assert info["month"] == 12
-        assert info["rule_hit"] is True
 
 
 # =====================================================================
@@ -642,129 +540,6 @@ class TestAssignRequestId:
 
 
 # =====================================================================
-# 14. TaskOrchestrator._merge_results
-# =====================================================================
-@pytest.mark.unit
-class TestTaskOrchestratorMergeResults:
-    def test_merge_with_completed_subtasks(self):
-        orchestrator = _import_task_orchestrator()
-        subtasks = [
-            {
-                "task_type": "WEB_SEARCH",
-                "status": "completed",
-                "description": "search",
-                "result": {"output": "found"},
-                "error": None,
-            },
-            {
-                "task_type": "FILE_GEN",
-                "status": "completed",
-                "description": "gen",
-                "result": {"output": "generated"},
-                "error": None,
-            },
-        ]
-        merged = orchestrator._merge_results(subtasks, {})
-        assert len(merged["steps"]) == 2
-        assert merged["final_output"] == "generated"
-
-    def test_merge_with_failed_subtask(self):
-        orchestrator = _import_task_orchestrator()
-        subtasks = [
-            {
-                "task_type": "WEB_SEARCH",
-                "status": "failed",
-                "description": "search",
-                "result": None,
-                "error": "timeout",
-            },
-        ]
-        merged = orchestrator._merge_results(subtasks, {})
-        assert merged["steps"][0]["error"] == "timeout"
-        assert merged["final_output"] == ""
-
-    def test_merge_empty(self):
-        orchestrator = _import_task_orchestrator()
-        merged = orchestrator._merge_results([], {})
-        assert merged["final_output"] == ""
-        assert len(merged["steps"]) == 0
-
-
-# =====================================================================
-# 15. TaskOrchestrator._validate_quality
-# =====================================================================
-@pytest.mark.unit
-class TestTaskOrchestratorValidateQuality:
-    def test_no_output(self):
-        orchestrator = _import_task_orchestrator()
-        combined = {"steps": [], "final_output": ""}
-        score = asyncio.run(orchestrator._validate_quality("test", combined, {}))
-        assert 0 <= score <= 100
-
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_with_completed_steps(self):
-        orchestrator = _import_task_orchestrator()
-        combined = {
-            "steps": [{"status": "completed"}, {"status": "completed"}],
-            "final_output": "some output",
-        }
-        mock_resp = Mock()
-        mock_resp.text = "25"
-        with patch("web.task_orchestrator_quality.client") as mock_client:
-            mock_client.models.generate_content.return_value = mock_resp
-            score = asyncio.run(orchestrator._validate_quality("test", combined, {}))
-        assert score >= 40
-
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_semantic_scoring_fails_gracefully(self):
-        orchestrator = _import_task_orchestrator()
-        combined = {
-            "steps": [{"status": "completed"}],
-            "final_output": "output",
-        }
-        with patch("web.task_orchestrator_quality.client") as mock_client:
-            mock_client.models.generate_content.side_effect = Exception("API down")
-            score = asyncio.run(orchestrator._validate_quality("test", combined, {}))
-        assert 0 <= score <= 100
-
-
-# =====================================================================
-# 16. TaskOrchestrator.execute_compound_task
-# =====================================================================
-@pytest.mark.unit
-class TestExecuteCompoundTask:
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_unknown_task_type(self):
-        orchestrator = _import_task_orchestrator()
-        subtasks = [
-            {"task_type": "UNKNOWN", "description": "mystery", "input": "x"},
-        ]
-        mock_resp = Mock()
-        mock_resp.text = "20"
-        with patch("web.task_orchestrator_quality.client") as mc:
-            mc.models.generate_content.return_value = mock_resp
-            result = asyncio.run(orchestrator.execute_compound_task("test", subtasks))
-        assert result["success"] is False or any(
-            "未知" in e for e in result.get("errors", [])
-        )
-
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_subtask_exception(self):
-        orchestrator = _import_task_orchestrator()
-        subtasks = [
-            {"task_type": "WEB_SEARCH", "description": "search", "input": "x"},
-        ]
-        mock_resp = Mock()
-        mock_resp.text = "10"
-        with patch.object(
-            orchestrator, "_execute_web_search", side_effect=Exception("boom")
-        ), patch("web.task_orchestrator_quality.client") as mc:
-            mc.models.generate_content.return_value = mock_resp
-            result = asyncio.run(orchestrator.execute_compound_task("test", subtasks))
-        assert len(result["errors"]) > 0
-
-
-# =====================================================================
 # 17. LocalDispatcher
 # =====================================================================
 @pytest.mark.unit
@@ -784,13 +559,12 @@ class TestLocalDispatcher:
         ):
             assert app.LocalDispatcher.is_ollama_running() is False
 
-    def test_analyze_delegates(self):
+    def test_analyze_signature_contract(self):
         app = _import_app()
-        with patch.object(
-            app.SmartDispatcher, "analyze", return_value=("CHAT", "auto", {})
-        ):
-            result = app.LocalDispatcher.analyze("hello")
-        assert result == ("CHAT", "auto", {})
+        # Free-text routing is owned by the Kernel/model boundary; the legacy
+        # LocalDispatcher analysis method must stay absent.
+        assert not hasattr(app, "SmartDispatcher")
+        assert not hasattr(app.LocalDispatcher, "analyze")
 
 
 # =====================================================================
@@ -800,27 +574,27 @@ class TestLocalDispatcher:
 class TestAutoSaveFiles:
     def test_begin_end_file_pattern(self, tmp_path):
         app = _import_app()
-        with patch.object(app, "WORKSPACE_DIR", str(tmp_path)):
+        with _using_workspace_root(tmp_path):
             text = "---BEGIN_FILE: test_output.py---\nprint('hello')\n---END_FILE---"
             saved = app.Utils.auto_save_files(text)
         assert "test_output.py" in saved
 
     def test_no_match(self, tmp_path):
         app = _import_app()
-        with patch.object(app, "WORKSPACE_DIR", str(tmp_path)):
+        with _using_workspace_root(tmp_path):
             saved = app.Utils.auto_save_files("just plain text, no files")
         assert saved == []
 
     def test_python_code_block_with_filename(self, tmp_path):
         app = _import_app()
-        with patch.object(app, "WORKSPACE_DIR", str(tmp_path)):
+        with _using_workspace_root(tmp_path):
             text = "```python\n# filename: my_script.py\nimport os\nprint(os.getcwd())\nprint('hello world this is a test')\n```"
             saved = app.Utils.auto_save_files(text)
         assert "my_script.py" in saved
 
     def test_file_without_extension(self, tmp_path):
         app = _import_app()
-        with patch.object(app, "WORKSPACE_DIR", str(tmp_path)):
+        with _using_workspace_root(tmp_path):
             text = "---BEGIN_FILE: noext---\ncontent here\n---END_FILE---"
             saved = app.Utils.auto_save_files(text)
         assert any("noext" in f for f in saved)
@@ -829,14 +603,14 @@ class TestAutoSaveFiles:
         app = _import_app()
         code_dir = str(tmp_path / "code")
         os.makedirs(code_dir, exist_ok=True)
-        with patch.object(app, "WORKSPACE_DIR", str(tmp_path)):
+        with _using_workspace_root(tmp_path):
             text = "---BEGIN_FILE: script.py---\nprint(1)\n---END_FILE---"
             saved = app.Utils.auto_save_files(text)
         assert "script.py" in saved
 
     def test_get_save_dir_non_code_ext(self, tmp_path):
         app = _import_app()
-        with patch.object(app, "WORKSPACE_DIR", str(tmp_path)):
+        with _using_workspace_root(tmp_path):
             text = "---BEGIN_FILE: report.pdf---\nbinary content\n---END_FILE---"
             saved = app.Utils.auto_save_files(text)
         assert "report.pdf" in saved
@@ -910,12 +684,11 @@ class TestGetMemoryManager:
         app = _import_app()
         memory_runtime = _import_memory_runtime()
         mock_mgr = MagicMock()
-        ctx_mod = types.ModuleType("app.core.app_context")
-        ctx_mod.ctx = MagicMock(memory_manager=mock_mgr)
 
-        with patch.dict(sys.modules, {"app.core.app_context": ctx_mod}), patch.object(
-            memory_runtime, "_inject_memory_adapters"
-        ):
+        with patch(
+            "app.core.services.memory_manager.get_memory_manager",
+            return_value=mock_mgr,
+        ), patch.object(memory_runtime, "_inject_memory_adapters"):
             assert app.get_memory_manager() is mock_mgr
 
     def test_has_no_legacy_manager_fallback(self):
@@ -927,21 +700,6 @@ class TestGetMemoryManager:
 
 
 # =====================================================================
-# 21. get_knowledge_base
-# =====================================================================
-@pytest.mark.unit
-class TestGetKnowledgeBase:
-    def test_returns_instance(self):
-        app = _import_app()
-        mock_kb = MagicMock()
-        ctx_mod = types.ModuleType("app.core.app_context")
-        ctx_mod.ctx = MagicMock(knowledge_base=mock_kb)
-
-        with patch.dict(sys.modules, {"app.core.app_context": ctx_mod}):
-            assert app.get_knowledge_base() is mock_kb
-
-
-# =====================================================================
 # 22. KotoBrain.chat - SYSTEM route
 # =====================================================================
 @pytest.mark.unit
@@ -950,30 +708,31 @@ class TestKotoBrainChat:
         app = _import_app()
         return app.KotoBrain(), app
 
-    def test_system_route(self):
+    def test_chat_returns_response_and_model(self):
         brain, app = self._make_brain()
-        with patch.object(app, "SmartDispatcher") as mock_sd:
-            mock_sd.analyze.return_value = ("SYSTEM", "auto", {})
-            mock_sd.get_model_for_task.return_value = "gemini-2.5-flash"
-            with patch.object(app, "LocalExecutor") as mock_exec:
-                mock_exec.execute.return_value = {
-                    "message": "opened notepad",
-                    "details": "pid=123",
-                }
-                result = brain.chat([], "open notepad")
-        assert result["task"] == "SYSTEM"
-        assert "notepad" in result["response"]
+        fake_provider = MagicMock()
+        fake_provider.generate_content.return_value = MagicMock(text="hello back")
+        from web.runtime_context import service_registry
+
+        with patch.object(
+            type(service_registry),
+            "llm_gateway",
+            new_callable=PropertyMock,
+            return_value=fake_provider,
+        ):
+            result = brain.chat([], "hello")
+        assert result["response"] == "hello back"
+        assert "model" in result
 
     @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
     def test_manual_model_selection(self):
         brain, app = self._make_brain()
-        mock_resp = Mock()
-        mock_resp.text = "manual response"
-        mock_resp.usage_metadata = None
-        with patch.object(app, "client") as mock_client, patch.object(
-            app, "_start_memory_extraction"
-        ):
-            mock_client.models.generate_content.return_value = mock_resp
+        provider = MagicMock()
+        provider.generate_content.return_value = {"content": "manual response"}
+        with patch(
+            "app.core.llm.provider_factory.get_llm_provider",
+            return_value=provider,
+        ), patch.object(app, "_start_memory_extraction"):
             result = brain.chat(
                 [],
                 "hello",
@@ -983,54 +742,53 @@ class TestKotoBrainChat:
             )
         assert result["model"] == "deepseek-chat"
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_image_file_edit_route(self):
+    def test_chat_appends_user_message_to_history(self):
         brain, app = self._make_brain()
-        file_data = {"mime_type": "image/png", "data": b"fake_img"}
-        with patch.object(app, "SmartDispatcher") as mock_sd, patch.object(
-            app, "client"
-        ) as mock_client, patch.object(
-            app, "settings_manager", Mock(images_dir="/tmp/images")
-        ), patch.object(
-            app, "_start_memory_extraction"
-        ):
-            mock_sd.get_model_for_task.return_value = "deepseek-chat"
-            mock_resp = Mock()
-            mock_resp.text = "no code generated"
-            mock_resp.usage_metadata = None
-            mock_client.models.generate_content.return_value = mock_resp
-            result = brain.chat([], "修改背景为蓝色", file_data=file_data)
-        assert result["task"] == "PAINTER"
+        fake_provider = MagicMock()
+        fake_provider.generate_content.return_value = MagicMock(text="ok")
+        from web.runtime_context import service_registry
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_image_file_analysis_route(self):
-        brain, app = self._make_brain()
-        file_data = {"mime_type": "image/jpeg", "data": b"fake_img"}
-        mock_resp = Mock()
-        mock_resp.text = "This is a cat photo"
-        mock_resp.usage_metadata = None
-        with patch.object(app, "SmartDispatcher") as mock_sd, patch.object(
-            app, "client"
-        ) as mock_client, patch.object(app, "_start_memory_extraction"):
-            mock_sd.get_model_for_task.return_value = "gemini-2.5-flash"
-            mock_client.models.generate_content.return_value = mock_resp
-            result = brain.chat([], "describe this image", file_data=file_data)
-        assert result["task"] == "VISION"
+        service_registry._cache["llm_gateway"] = fake_provider
+        try:
+            brain.chat([{"role": "user", "content": "hi"}], "next")
+        finally:
+            service_registry._cache.pop("llm_gateway", None)
+        _, kwargs = fake_provider.generate_content.call_args
+        messages = kwargs["contents"]
+        assert messages[-1] == {"role": "user", "content": "next"}
+        assert len(messages) == 2
 
-    @pytest.mark.skipif(not HAS_GENAI, reason="google.genai not properly installed")
-    def test_binary_doc_route(self):
+    def test_chat_handles_gateway_error(self):
         brain, app = self._make_brain()
-        file_data = {"mime_type": "application/pdf", "data": b"fake_pdf"}
-        mock_resp = Mock()
-        mock_resp.text = "PDF contents summary"
-        mock_resp.usage_metadata = None
-        with patch.object(app, "client") as mock_client, patch.object(
-            app, "_start_memory_extraction"
-        ):
-            mock_client.models.generate_content.return_value = mock_resp
-            result = brain.chat([], "summarize this PDF", file_data=file_data)
-        assert result["task"] == "CHAT"
-        assert result["route_method"] == "📄 Binary-Doc-Read"
+        fake_provider = MagicMock()
+        fake_provider.generate_content.side_effect = Exception("boom")
+        from web.runtime_context import service_registry
+
+        service_registry._cache["llm_gateway"] = fake_provider
+        try:
+            result = brain.chat([], "hello")
+        finally:
+            service_registry._cache.pop("llm_gateway", None)
+        assert "boom" in result["response"]
+
+    def test_chat_resolves_local_model(self):
+        from dataclasses import replace
+
+        brain, app = self._make_brain()
+        fake_provider = MagicMock()
+        fake_provider.generate_content.return_value = MagicMock(text="ok")
+        brain._runtime = replace(
+            brain._runtime,
+            select_model_for_task=lambda *_args, **_kwargs: "qwen2.5:7b",
+        )
+        from web.runtime_context import service_registry
+
+        service_registry._cache["llm_gateway"] = fake_provider
+        try:
+            result = brain.chat([], "hello")
+        finally:
+            service_registry._cache.pop("llm_gateway", None)
+        assert result["model"] == "qwen2.5:7b"
 
 
 # =====================================================================
@@ -1180,38 +938,15 @@ class TestExtractMarkdownTable:
 
 
 # =====================================================================
-# 26. _ClientProxy
-# =====================================================================
-@pytest.mark.unit
-class TestClientProxy:
-    def test_models_returns_tracked(self):
-        app = _import_app()
-        proxy = app._ClientProxy()
-        with patch.object(app, "get_client") as mock_gc:
-            mock_gc.return_value = Mock()
-            models = proxy.models
-        assert isinstance(models, app._TrackedModels)
-
-    def test_non_models_passthrough(self):
-        app = _import_app()
-        proxy = app._ClientProxy()
-        mock_client = Mock()
-        mock_client.other_attr = "value"
-        with patch.object(app, "get_client", return_value=mock_client):
-            assert proxy.other_attr == "value"
-
-
-# =====================================================================
 # 27. KotoBrain.IMAGE_EDIT_KEYWORDS
 # =====================================================================
 @pytest.mark.unit
 class TestKotoBrainKeywords:
-    def test_keywords_exist(self):
+    def test_legacy_keyword_attributes_removed(self):
         app = _import_app()
         brain = app.KotoBrain()
-        assert "修改" in brain.IMAGE_EDIT_KEYWORDS
-        assert "edit" in brain.IMAGE_EDIT_KEYWORDS
-        assert len(brain.IMAGE_EDIT_KEYWORDS) > 10
+        assert not hasattr(brain, "IMAGE_EDIT_KEYWORDS")
+        assert not hasattr(brain, "SYSTEM_KEYWORDS")
 
 
 # =====================================================================
@@ -1220,23 +955,26 @@ class TestKotoBrainKeywords:
 @pytest.mark.unit
 class TestSessionManager:
     def test_delete_nonexistent(self, tmp_path):
-        app = _import_app()
-        with patch.object(app, "CHAT_DIR", str(tmp_path)):
-            mgr = app.SessionManager()
-            assert mgr.delete("nonexistent.json") is False
+        from web.session_manager import SessionManager, set_chat_dir
+
+        set_chat_dir(str(tmp_path))
+        mgr = SessionManager()
+        assert mgr.delete("nonexistent.json") is False
 
     def test_load_missing_file(self, tmp_path):
-        app = _import_app()
-        with patch.object(app, "CHAT_DIR", str(tmp_path)):
-            mgr = app.SessionManager()
-            assert mgr.load("missing.json") == []
+        from web.session_manager import SessionManager, set_chat_dir
+
+        set_chat_dir(str(tmp_path))
+        mgr = SessionManager()
+        assert mgr.load("missing.json") == []
 
     def test_load_corrupt_json(self, tmp_path):
-        app = _import_app()
         (tmp_path / "bad.json").write_text("NOT JSON", encoding="utf-8")
-        with patch.object(app, "CHAT_DIR", str(tmp_path)):
-            mgr = app.SessionManager()
-            assert mgr.load("bad.json") == []
+        from web.session_manager import SessionManager, set_chat_dir
+
+        set_chat_dir(str(tmp_path))
+        mgr = SessionManager()
+        assert mgr.load("bad.json") == []
 
 
 # =====================================================================
@@ -1262,57 +1000,44 @@ class TestFlaskErrorHandlers:
 
 
 # =====================================================================
-# 30. lazy loader registry
+# 30. runtime service registry
 # =====================================================================
 @pytest.mark.unit
-class TestLazyLoadRegistry:
-    def teardown_method(self):
-        from web.lazy_loaders.registry import _lazy_cache
+class TestRuntimeServiceRegistry:
+    def test_registered_factory_constructs_once(self):
+        from web.runtime_context import ServiceRegistry
 
-        _lazy_cache.pop("unit_dummy", None)
-
-    def test_lazy_load_caches_constructed_service(self):
-        from web.lazy_loaders.registry import _lazy_cache, _lazy_load
-
+        registry = ServiceRegistry()
         calls = []
-        mod = types.ModuleType("web._test_lazy_registry_mod")
 
         class Dummy:
             def __init__(self):
                 self.attr = "value"
                 calls.append(1)
 
-        mod.Dummy = Dummy
-
-        with patch.dict(sys.modules, {"web._test_lazy_registry_mod": mod}):
-            assert "unit_dummy" not in _lazy_cache
-            first = _lazy_load("unit_dummy", "_test_lazy_registry_mod", "Dummy")
-            second = _lazy_load("unit_dummy", "_test_lazy_registry_mod", "Dummy")
+        registry.register_factory("unit_dummy", Dummy)
+        first = registry.resolve("unit_dummy")
+        second = registry.resolve("unit_dummy")
 
         assert first is second
         assert first.attr == "value"
         assert calls == [1]
 
+    def test_invalidate_reconstructs_registered_service(self):
+        from web.runtime_context import ServiceRegistry
+
+        registry = ServiceRegistry()
+        registry.register_factory("unit_dummy", object)
+        first = registry.resolve("unit_dummy")
+        registry.invalidate("unit_dummy")
+
+        assert registry.resolve("unit_dummy") is not first
+
     def test_legacy_lazy_module_stays_removed_from_app(self):
         app = _import_app()
 
         assert not hasattr(app, "_LazyModule")
-
-
-# =====================================================================
-# 31. TASK_PROMPTS
-# =====================================================================
-@pytest.mark.unit
-class TestTaskPrompts:
-    def test_all_task_types_have_prompts(self):
-        app = _import_app()
-        expected = {"CHAT", "CODER", "FILE_GEN", "PAINTER", "RESEARCH", "SYSTEM"}
-        assert expected.issubset(set(app.TASK_PROMPTS.keys()))
-
-    def test_prompts_are_non_empty(self):
-        app = _import_app()
-        for key, val in app.TASK_PROMPTS.items():
-            assert len(val.strip()) > 0, f"TASK_PROMPTS[{key}] is empty"
+        assert not list((Path(_PROJECT_ROOT) / "web" / "lazy_loaders").glob("*.py"))
 
 
 # =====================================================================

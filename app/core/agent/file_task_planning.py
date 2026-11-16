@@ -6,24 +6,18 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
-from app.core.agent.file_task_classification import build_decision_context_payload
-from app.core.agent.file_task_classification import (
+from app.core.agent.file_task_completion_contract import build_completion_contract
+from app.core.agent.file_task_decision_context import build_decision_context_payload
+from app.core.agent.file_task_decision_context import (
     routing_decision_payload as _decision_context_routing_decision_payload,
 )
-from app.core.agent.file_task_completion_contract import build_completion_contract
-from app.core.agent.file_task_doc_annotate_fallback import (
-    apply_doc_annotate_bridge_fallback,
-)
-from app.core.agent.file_task_doc_annotate_request import (
-    docx_annotation_has_request_contract as _doc_annotate_has_request_contract,
-)
 from app.core.agent.file_task_supervisor_audit import build_supervisor_audit
-from app.core.agent.file_task_tool_catalog import supported_file_workflows
 from app.core.agent.file_task_whitebox import build_recipe_skeleton
 from app.core.agent.file_task_workflow_state import (
     build_workflow_state,
     supervisor_status_payload,
 )
+from app.core.agent.toolkits.foundation.catalog import supported_file_workflows
 
 
 @dataclass
@@ -38,9 +32,10 @@ class FileTaskPlanResult:
     plan_check: Any
     quick_action_mode: str
     simple_quick_action: bool
-    write_intent: bool
-    bridge_execution_mode: bool
+    write_authorized: bool
+    write_required: bool
     tool_defs: List[Dict[str, Any]]
+    tool_gateway: Any
     executor: Any
     recipe_skeleton: Dict[str, Any]
     completion_contract_payload: Dict[str, Any]
@@ -72,20 +67,12 @@ class FileTaskPlanningPhase:
         runtime = self._runtime
         context_files = runtime._context_files(request)
         mark_phase("context_files")
-        base_classification = runtime._classify_request(request, context_files)
+        classification = runtime._classify_request(request, context_files)
         mark_phase("classification")
-        intent_adjudication = runtime._adjudicate_intent_if_needed(
-            request, context_files, base_classification
-        )
-        mark_phase("intent_adjudication")
-        classification = runtime._apply_intent_adjudication(
-            request, context_files, base_classification, intent_adjudication
-        )
-        classification = runtime._normalize_mainline_contract(
-            request, context_files, classification
-        )
-        mark_phase("classification_normalization")
-
+        # Routing is deterministic. The only model call in a file task belongs
+        # to KernelRuntime; the retired AI intent adjudicator must not create a
+        # second pre-execution model route.
+        intent_adjudication: Dict[str, Any] = {}
         execution_context = runtime._build_execution_context(
             request,
             context_files,
@@ -101,17 +88,8 @@ class FileTaskPlanningPhase:
         plan_check = execution_context.plan_check
         quick_action_mode = execution_context.quick_action_mode
         simple_quick_action = execution_context.simple_quick_action
-        write_intent = execution_context.write_intent
-        bridge_fallback = apply_doc_annotate_bridge_fallback(
-            request=request,
-            files=context_files,
-            classification=classification,
-            write_intent=write_intent,
-            docx_annotation_has_contract=_doc_annotate_has_request_contract,
-        )
-        classification = bridge_fallback.classification
-        write_intent = bridge_fallback.write_intent
-        bridge_execution_mode = classification.execution_mode == "doc_annotate_bridge"
+        write_authorized = execution_context.write_authorized
+        write_required = execution_context.write_required
 
         def _result(*, terminal: bool = False) -> FileTaskPlanResult:
             return FileTaskPlanResult(
@@ -125,9 +103,10 @@ class FileTaskPlanningPhase:
                 plan_check=plan_check,
                 quick_action_mode=quick_action_mode,
                 simple_quick_action=simple_quick_action,
-                write_intent=write_intent,
-                bridge_execution_mode=bridge_execution_mode,
+                write_authorized=write_authorized,
+                write_required=write_required,
                 tool_defs=tool_defs,
+                tool_gateway=tool_gateway,
                 executor=executor,
                 recipe_skeleton=recipe_skeleton,
                 completion_contract_payload=completion_contract_payload,
@@ -142,16 +121,12 @@ class FileTaskPlanningPhase:
                 decision_context_payload=decision_context_payload,
             )
 
-        if bridge_execution_mode:
-            tool_defs = []
-            executor = None
-        else:
-            gateway = runtime._build_tool_gateway(request, context_files)
-            tool_defs = runtime._tool_defs_for_classification(
-                gateway.definitions(),
-                classification,
-            )
-            executor = gateway.execute
+        tool_gateway = runtime._build_tool_gateway(request, context_files)
+        tool_defs = runtime._tool_defs_for_classification(
+            tool_gateway.definitions(),
+            classification,
+        )
+        executor = tool_gateway.execute
         recipe_skeleton = build_recipe_skeleton(
             request,
             context_files,
@@ -395,7 +370,7 @@ class FileTaskPlanningPhase:
         plan_steps = intent_plan.dynamic_steps or runtime._build_plan(
             request,
             context_files,
-            write_intent,
+            write_required,
             classification.output_mode,
             known_tool_gap,
         )
@@ -404,7 +379,7 @@ class FileTaskPlanningPhase:
                 "plan.created",
                 {
                     "summary": runtime._plan_summary(
-                        request, context_files, write_intent
+                        request, context_files, write_required
                     ),
                     "steps": plan_steps,
                     "success_criteria": completion_criteria,

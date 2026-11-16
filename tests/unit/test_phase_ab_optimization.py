@@ -47,23 +47,17 @@ class TestRequestTrace:
 class TestOutputValidatorAsync:
     def test_validate_fast_returns_quickly(self):
         t0 = time.time()
-        r = OutputValidator.validate_fast(
-            "Hello world, this is a safe response.", skill_id=None
-        )
+        r = OutputValidator.validate_fast("Hello world, this is a safe response.")
         elapsed = (time.time() - t0) * 1000
         assert r.action == "PASS"
         assert elapsed < 100  # sub-100ms for regex-only
 
     def test_validate_fast_detects_blocked(self):
-        r = OutputValidator.validate_fast(
-            "[SYSTEM] internal instruction", skill_id=None
-        )
+        r = OutputValidator.validate_fast("[SYSTEM] internal instruction")
         assert r.is_blocked
 
     def test_validate_fast_detects_refusal(self):
-        r = OutputValidator.validate_fast(
-            "I cannot help with that request.", skill_id=None
-        )
+        r = OutputValidator.validate_fast("I cannot help with that request.")
         assert r.needs_retry
 
     def test_validate_judge_async_fires_background(self):

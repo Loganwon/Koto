@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 try:
+    from src.ollama_compat import inspect_model_compatibility
+except ImportError:
+    from ollama_compat import inspect_model_compatibility
+
+try:
     from src.runtime_bootstrap import (
         configure_process_environment,
         resolve_runtime_roots,
@@ -361,17 +366,16 @@ def save_setup_result(model_tag: str, mode: str = "local"):
     with open(SETUP_FLAG, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
 
-    # 同步写入 user_settings.json
-    settings_path = APP_ROOT / "config" / "user_settings.json"
+    # 同步写入统一设置存储，避免安装器与运行中的 Koto 相互覆盖。
     try:
-        settings = {}
-        if settings_path.exists():
-            with open(settings_path, "r", encoding="utf-8") as f:
-                settings = json.load(f)
-        settings["local_model"] = model_tag
-        settings["model_mode"] = mode
-        with open(settings_path, "w", encoding="utf-8") as f:
-            json.dump(settings, f, ensure_ascii=False, indent=2)
+        from app.core.config.settings_store import atomic_update_settings
+        from app.core.config.user_settings import DEFAULT_SETTINGS, SETTINGS_FILE
+
+        atomic_update_settings(
+            SETTINGS_FILE,
+            {"local_model": model_tag, "model_mode": mode},
+            defaults=DEFAULT_SETTINGS,
+        )
     except Exception:
         pass
 
@@ -784,6 +788,25 @@ def run_downloader_gui(on_complete=None):
 
         if not success:
             log(f"❌ 模型 {tag} 下载失败")
+            root.after(0, lambda: btn_start.config(state="normal"))
+            return
+
+        compatibility = inspect_model_compatibility(tag)
+        if compatibility.get("compatible") is False:
+            current = compatibility.get("current_version") or "未知"
+            required = compatibility.get("required_version") or "最新版"
+            log(
+                f"❌ 模型已下载，但 Ollama {current} 无法加载；"
+                f"该模型要求 Ollama {required} 或更高版本"
+            )
+            root.after(
+                0,
+                lambda: messagebox.showerror(
+                    "需要升级 Ollama",
+                    f"模型 {tag} 要求 Ollama {required} 或更高版本。\n"
+                    f"当前版本：{current}\n\n请先更新 Ollama，再重新运行安装。",
+                ),
+            )
             root.after(0, lambda: btn_start.config(state="normal"))
             return
 

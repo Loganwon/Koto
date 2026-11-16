@@ -15,9 +15,6 @@ Koto 的处理管线（无需修改核心代码）。
   def post_response(text: str, ctx: HookContext) -> str | None:
       \"\"\"在 AI 回答返回用户前调用。返回新的文本替换回复；返回 None 则不替换。\"\"\"
 
-  def on_skill_change(skill_id: str, enabled: bool, ctx: HookContext) -> None:
-      \"\"\"Skill 被启用/禁用时调用（无返回值）。\"\"\"
-
   def on_session_start(session_id: str, ctx: HookContext) -> None:
       \"\"\"新会话被创建时调用（无返回值）。\"\"\"
 
@@ -37,8 +34,8 @@ Koto 的处理管线（无需修改核心代码）。
 
 关键特性：
   - 所有钩子出错都被静默捕获，永远不会影响主管线
-  - 钩子文件热重载：每次 SkillManager.reload() 时自动重新加载钩子文件
-  - HookContext 包含：session_id、task_type、skill_id、active_skills、extra（可扩展字典）
+  - 钩子文件支持显式热重载
+  - HookContext 包含：session_id、task_type、extra（可扩展字典）
 
 @version 2026-05-26
 """
@@ -59,14 +56,12 @@ _HOOKS_DIR = Path(__file__).parent.parent.parent.parent / "config" / "hooks"
 # 钩子点枚举
 HOOK_PRE_MESSAGE = "pre_message"
 HOOK_POST_RESPONSE = "post_response"
-HOOK_ON_SKILL_CHANGE = "on_skill_change"
 HOOK_ON_SESSION_START = "on_session_start"
 HOOK_ON_TOOL_RESULT = "on_tool_result"
 
 _KNOWN_HOOKS = {
     HOOK_PRE_MESSAGE,
     HOOK_POST_RESPONSE,
-    HOOK_ON_SKILL_CHANGE,
     HOOK_ON_SESSION_START,
     HOOK_ON_TOOL_RESULT,
 }
@@ -78,8 +73,6 @@ class HookContext:
 
     session_id: str = ""
     task_type: str = ""
-    skill_id: str = ""
-    active_skills: List[str] = field(default_factory=list)
     # 可自由读写的扩展字典（钩子之间可通过此字段传递临时状态）
     extra: Dict[str, Any] = field(default_factory=dict)
 
@@ -195,17 +188,6 @@ class HookManager:
             except Exception as e:
                 logger.warning(f"[HookManager] post_response 钩子异常: {e}")
         return result
-
-    def fire_on_skill_change(
-        self, skill_id: str, enabled: bool, ctx: Optional[HookContext] = None
-    ) -> None:
-        """触发 on_skill_change 钩子（无返回值）。"""
-        _ctx = ctx or HookContext()
-        for fn in self._hooks[HOOK_ON_SKILL_CHANGE]:
-            try:
-                fn(skill_id, enabled, _ctx)
-            except Exception as e:
-                logger.warning(f"[HookManager] on_skill_change 钩子异常: {e}")
 
     def fire_on_session_start(
         self, session_id: str, ctx: Optional[HookContext] = None

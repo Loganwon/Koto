@@ -23,6 +23,18 @@ def normalize_proxy_url(proxy_value: str) -> str:
     return value
 
 
+def get_local_model_config() -> tuple[str, str | None]:
+    """Read the explicit local/cloud mode without mutating provider state."""
+    try:
+        from app.core.llm.provider_factory import is_local_mode, get_local_model_tag
+
+        if not is_local_mode():
+            return "cloud", None
+        return "local", get_local_model_tag() or None
+    except Exception:
+        return "cloud", None
+
+
 class FakeGenerateContentResponse:
     """
     Lightweight response wrapper used when an alternate runtime returns text

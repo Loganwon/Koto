@@ -6,16 +6,17 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Dict, Iterable, List, Optional
 
+from app.core.agent.file_task_completion_gates import (
+    apply_declared_incomplete_read_completion_gate,
+    apply_readonly_source_coverage_completion_gate,
+)
 from app.core.agent.file_task_contract import FileTaskEvent
 from app.core.agent.file_task_terminal_report import (
     apply_terminal_check_overrides,
     build_terminal_run_summary,
     terminal_completed_task,
 )
-from app.core.agent.file_task_workflow_state import (
-    attach_workflow_checkpoint,
-    supervisor_status_payload,
-)
+from app.core.agent.file_task_workflow_state import supervisor_status_payload
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,7 @@ class FileTaskFinalizationPhase:
         final_summary: str,
         completed_task: bool,
         model_failed: bool,
+        execution_failure: Optional[Dict[str, Any]],
         readonly_fallback_used: bool,
         planner_runtime_payload: Dict[str, Any],
         last_check_payload: Optional[Dict[str, Any]],
@@ -99,6 +101,7 @@ class FileTaskFinalizationPhase:
                 tool_runtime_outcome,
                 tool_gap,
                 next_action_artifact,
+                execution_failure=execution_failure,
             )
         )
         missing_read_refs = runtime._unsatisfied_explicit_read_file_references(
@@ -118,6 +121,20 @@ class FileTaskFinalizationPhase:
             ),
             missing_read_refs=missing_read_refs,
         )
+        check_payload = apply_readonly_source_coverage_completion_gate(
+            check_payload=check_payload,
+            task=request.task,
+            files=context_files,
+            final_summary=final_summary,
+            readonly_tool_outputs=readonly_tool_outputs,
+            write_intent=write_intent,
+        )
+        check_payload = apply_declared_incomplete_read_completion_gate(
+            check_payload=check_payload,
+            files=context_files,
+            final_summary=final_summary,
+            write_intent=write_intent,
+        )
         pending_generated_images = runtime._pending_generated_docx_images(
             request, context_files, generated_artifacts, file_changes
         )
@@ -126,38 +143,18 @@ class FileTaskFinalizationPhase:
                 check_payload,
                 pending_generated_images,
             )
-        stepwise_artifact = runtime._stepwise_docx_wait_artifact(
-            request,
-            context_files,
-            snippets,
-            file_changes,
-            recipe_skeleton,
-        )
-        if stepwise_artifact and bool(check_payload.get("passed")):
-            stepwise_artifact = attach_workflow_checkpoint(
-                stepwise_artifact,
-                workflow_state,
-            )
-            next_action_artifact = stepwise_artifact
-            check_payload = dict(check_payload)
-            check_payload["passed"] = False
-            check_payload["status"] = "awaiting_confirmation"
-            check_payload["summary"] = (
-                "当前步骤已写入 DOCX，等待用户说“继续”后处理下一段。"
-            )
-            check_payload["remaining"] = [
-                "用户说“继续”后处理下一页窗口，并继续追加 DOCX。"
-            ]
-            check_payload["next_action_artifact"] = stepwise_artifact
         terminal_runtime = runtime._build_runtime_metadata(
             terminal_status=str(check_payload.get("status") or "").strip(),
             readonly_fallback_used=readonly_fallback_used,
             model_failed=model_failed,
+            execution_failure=execution_failure,
             planner_payload=planner_runtime_payload,
         )
         terminal_runtime["performance"] = performance_snapshot(total=True)
         check_payload["runtime"] = terminal_runtime
         check_payload["performance"] = terminal_runtime["performance"]
+        if isinstance(execution_failure, dict) and execution_failure:
+            check_payload["failure"] = dict(execution_failure)
 
         yield ledger.event("check.finished", check_payload, step_id=check_step_id)
         terminal_completed_steps = list(verification_completed_steps)
@@ -272,6 +269,8 @@ class FileTaskFinalizationPhase:
             "performance": terminal_runtime["performance"],
             "quick_action_mode": quick_action_mode,
         }
+        if isinstance(execution_failure, dict) and execution_failure:
+            run_payload["failure"] = dict(execution_failure)
         if not is_text_quick_action:
             run_payload.update(
                 {

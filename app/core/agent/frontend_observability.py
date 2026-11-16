@@ -5,14 +5,22 @@
 
 from __future__ import annotations
 
+import copy
+import hashlib
 import json
+import posixpath
 import re
 import threading
 import time
 import uuid
 from collections import Counter, deque
+from dataclasses import dataclass, fields, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Dict, Iterable, List
+
+from app.core.tasks.frontend_action_store import FrontendActionStore
+from app.core.tasks.task_ledger import get_ledger
 
 _MAX_EVENTS = 500
 _MAX_FILE_LINES = 1000
@@ -20,13 +28,75 @@ _MAX_FIELD_CHARS = 4000
 _MAX_ACTIONS = 200
 _EVENTS: deque[Dict[str, Any]] = deque(maxlen=_MAX_EVENTS)
 _ACTIONS: deque[Dict[str, Any]] = deque(maxlen=_MAX_ACTIONS)
+# Compatibility projections for supervision; SQLite is the deduplication owner.
+_DOCUMENT_OPERATION_LEDGER: Dict[str, Dict[str, Any]] = {}
 _LOCK = threading.RLock()
 _ACTION_CONDITION = threading.Condition(_LOCK)
+_DOCUMENT_ACTIONS = {"ui_read_context", "ui_apply_edit", "ui_save"}
+_DOCUMENT_MUTATIONS = {"ui_apply_edit", "ui_save"}
+_READ_ONLY_ACTIONS = {
+    "snapshot",
+    "read_dom",
+    "task_result_evidence",
+    "surface_inventory",
+    "wait_for",
+    "list_workspace_files",
+    "current_file_state",
+    "read_editor_content",
+    "current_selection",
+    "document_context",
+    "ui_read_context",
+}
 _SENSITIVE_KEY_RE = re.compile(
     r"(password|passwd|pwd|token|secret|api[_-]?key|authorization|credential|cookie|session)",
     re.IGNORECASE,
 )
 _REDACTED = "[redacted]"
+
+
+def _action_store() -> FrontendActionStore:
+    ledger = get_ledger()
+    with ledger._lock:
+        store = getattr(ledger, "_frontend_action_store", None)
+        if store is None:
+            store = FrontendActionStore(ledger)
+            ledger._frontend_action_store = store
+        if time.time() >= getattr(store, "_next_retention_check", 0):
+            store.purge()
+            store._next_retention_check = time.time() + 86400
+        return store
+
+
+def _action_view(item):
+    if item is None:
+        return None
+    item = copy.deepcopy(item)
+    if item.get("status") == "dispatched":
+        item["status"] = "delivered"  # compatibility transport spelling
+    return item
+
+
+def _remember_action(item, *, append=True):
+    """The small supervision feed is a projection, never the dedup owner."""
+    if not item:
+        return
+    view = _action_view(item)
+    view.pop("delivery_token", None)
+    with _LOCK:
+        existing = next(
+            (entry for entry in _ACTIONS if entry["id"] == item["id"]), None
+        )
+        if existing is None:
+            if append:
+                _ACTIONS.append(view)
+        else:
+            existing.clear()
+            existing.update(view)
+        if item.get("action") in _DOCUMENT_MUTATIONS:
+            _DOCUMENT_OPERATION_LEDGER[item["id"]] = view
+            if len(_DOCUMENT_OPERATION_LEDGER) > 2000:
+                _DOCUMENT_OPERATION_LEDGER.pop(next(iter(_DOCUMENT_OPERATION_LEDGER)))
+        _ACTION_CONDITION.notify_all()
 
 
 def _project_root() -> Path:
@@ -200,6 +270,7 @@ def clear_frontend_events(**_: Any) -> Dict[str, Any]:
         count = len(_EVENTS)
         _EVENTS.clear()
         _ACTIONS.clear()
+        _DOCUMENT_OPERATION_LEDGER.clear()
         _ACTION_CONDITION.notify_all()
     try:
         path = _event_log_path()
@@ -261,35 +332,34 @@ def enqueue_frontend_action(
     target_session_id: str = "",
     options: Dict[str, Any] | None = None,
     wait_ms: int = 0,
+    action_id: str = "",
+    expires_after_ms: int = 0,
+    trusted_scope=None,
+    operation_id: str = "",
     **_: Any,
 ) -> Dict[str, Any]:
+    from collections.abc import Mapping
+
     action_name = str(action or "").strip().lower()
-    allowed = {
+    if not isinstance(options or {}, dict):
+        return {"success": False, "error": "Frontend action options must be an object"}
+    allowed = _READ_ONLY_ACTIONS | {
         "click",
         "fill",
         "type",
         "press",
-        "snapshot",
-        "read_dom",
-        "task_result_evidence",
-        "surface_inventory",
-        "wait_for",
         "open_panel",
         "search_workspace",
         "submit_prompt",
         "attach_task_file",
-        "list_workspace_files",
         "open_workspace_file",
-        "current_file_state",
-        "read_editor_content",
-        "current_selection",
-        "document_context",
         "select_text_range",
         "replace_text_selection",
         "set_editor_content",
         "replace_docx_anchor_text",
         "set_pptx_shape_text",
         "save_current_file",
+        *_DOCUMENT_ACTIONS,
     }
     if action_name not in allowed:
         return {
@@ -297,60 +367,104 @@ def enqueue_frontend_action(
             "error": f"Unsupported frontend action: {action_name or '<empty>'}",
             "allowed": sorted(allowed),
         }
-    resolved_target_session_id = str(target_session_id or "")[:200]
-    if not resolved_target_session_id:
-        resolved_target_session_id = str(session_id or "")[:200]
-    if not resolved_target_session_id:
+    scope = dict(trusted_scope) if isinstance(trusted_scope, Mapping) else {}
+    target = str(
+        scope.get("frontend_session_id") or target_session_id or session_id or ""
+    )[:200]
+    if not target:
         with _LOCK:
-            resolved_target_session_id = _latest_frontend_session_id()[:200]
+            target = _latest_frontend_session_id()[:200]
+    now = time.time()
     item = {
-        "id": str(uuid.uuid4()),
-        "server_ts": time.time(),
-        "updated_ts": time.time(),
+        "id": str(action_id or uuid.uuid4()),
+        "server_ts": now,
+        "updated_ts": now,
         "status": "queued",
-        "target_session_id": resolved_target_session_id,
+        "target_session_id": target,
         "action": action_name,
         "selector": str(selector or "")[:1000],
         "panel": str(panel or "")[:100],
-        "path": str(path or "")[:1000],
-        "text": str(text or "")[:2000],
-        "value": _trim(str(value or ""), 4000),
+        "path": str(scope.get("document_path") or path or "")[:4000],
+        "text": str(text or ""),
+        "value": str(value or ""),
         "key": str(key or "")[:100],
-        "options": _trim(options or {}),
+        # Document anchors, undo receipts and complete before/after text must
+        # never be silently truncated by the telemetry redactor.
+        "options": copy.deepcopy(options or {}),
+        "mutation": action_name not in _READ_ONLY_ACTIONS,
+        "request_id": str(scope.get("request_id") or ""),
+        "session_id": str(scope.get("session_id") or ""),
+        "tenant_id": str(scope.get("tenant_id") or ""),
+        "principal_id": str(scope.get("principal_id") or ""),
+        "task_id": str(scope.get("task_id") or ""),
+        "run_id": str(scope.get("run_id") or ""),
+        "document_path": str(
+            scope.get("document_path")
+            or path
+            or (options or {}).get("document_path")
+            or ""
+        ),
+        "file_id": str(scope.get("file_id") or (options or {}).get("file_id") or ""),
+        "operation_id": str(operation_id or ""),
     }
-    with _LOCK:
-        _ACTIONS.append(item)
-        _ACTION_CONDITION.notify_all()
+    item["operation_namespace"] = hashlib.sha256(
+        json.dumps(
+            [
+                item[k]
+                for k in (
+                    "request_id",
+                    "session_id",
+                    "target_session_id",
+                    "document_path",
+                    "file_id",
+                    "operation_id",
+                )
+            ],
+            ensure_ascii=False,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    if expires_after_ms:
+        item["expires_at"] = now + max(1, min(int(expires_after_ms), 30000)) / 1000
+    immutable = {
+        k: v
+        for k, v in item.items()
+        if k not in {"id", "status", "server_ts", "updated_ts", "expires_at"}
+    }
+    item["request_fingerprint"] = hashlib.sha256(
+        json.dumps(immutable, sort_keys=True, ensure_ascii=False).encode()
+    ).hexdigest()
+    try:
+        queued = _action_store().queue(item)
+    except (ValueError, TypeError) as exc:
+        return {"success": False, "error": str(exc)}
+    if not queued.get("success"):
+        return queued
+    _remember_action(queued["action"], append=not queued.get("duplicate"))
+    queued["action"] = _action_view(queued["action"])
     if wait_ms:
         waited = wait_frontend_action(action_id=item["id"], timeout_ms=wait_ms)
-        waited["queued_action"] = item
+        waited["queued_action"] = queued["action"]
         return waited
-    return {"success": True, "action": item}
+    return queued
 
 
 def next_frontend_action(
     session_id: str = "", timeout_ms: int = 0, **_: Any
 ) -> Dict[str, Any]:
-    session_id = str(session_id or "").strip()
-    deadline = time.time() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
-    with _ACTION_CONDITION:
-        while True:
-            now = time.time()
-            for item in _ACTIONS:
-                if item.get("status") != "queued":
-                    continue
-                target_session_id = str(item.get("target_session_id") or "").strip()
-                if target_session_id and session_id and target_session_id != session_id:
-                    continue
-                if session_id and not target_session_id:
-                    item["target_session_id"] = session_id[:200]
-                item["status"] = "delivered"
-                item["updated_ts"] = now
-                return {"success": True, "action": dict(item)}
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                return {"success": True, "action": None}
-            _ACTION_CONDITION.wait(timeout=min(remaining, 5.0))
+    browser_id = str(session_id or "").strip()
+    deadline = time.monotonic() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
+    while True:
+        item = _action_store().dispatch(browser_id)
+        if item is not None:
+            _remember_action(item)
+            return {"success": True, "action": _action_view(item)}
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return {"success": True, "action": None}
+        # Poll the durable owner across workers; notification is only a hint.
+        with _ACTION_CONDITION:
+            _ACTION_CONDITION.wait(timeout=min(remaining, 0.25))
 
 
 def complete_frontend_action(
@@ -359,48 +473,106 @@ def complete_frontend_action(
     ok: bool = True,
     result: Dict[str, Any] | None = None,
     error: str = "",
+    browser_id: str = "",
+    delivery_token: str = "",
+    unknown: bool = False,
     **_: Any,
 ) -> Dict[str, Any]:
-    action_id = str(action_id or id or "")
-    with _LOCK:
-        for item in _ACTIONS:
-            if item.get("id") == action_id:
-                item["status"] = "completed" if ok else "failed"
-                item["ok"] = bool(ok)
-                item["result"] = _trim(result or {})
-                item["error"] = str(error or "")[:2000]
-                item["updated_ts"] = time.time()
-                _ACTION_CONDITION.notify_all()
-                return {"success": True, "action": dict(item)}
-    return {"success": False, "error": "action not found", "action": None}
+    if not isinstance(result or {}, dict):
+        return {
+            "success": False,
+            "http_status": 400,
+            "error": "A browser receipt must be an object",
+        }
+    try:
+        completed = _action_store().complete(
+            str(action_id or id or ""),
+            browser_id=str(browser_id or ""),
+            delivery_token=str(delivery_token or ""),
+            ok=ok is True,
+            result=result or {},
+            error=error,
+            unknown=unknown is True,
+            request_id=str(_.get("request_id") or ""),
+            session_id=str(_.get("session_id") or ""),
+        )
+    except (TypeError, ValueError) as exc:
+        return {"success": False, "http_status": 400, "error": str(exc)}
+    if completed.get("action"):
+        _remember_action(completed["action"])
+        completed["action"] = _action_view(completed["action"])
+    return completed
 
 
-def frontend_action_status(action_id: str = "", **_: Any) -> Dict[str, Any]:
-    action_id = str(action_id or "")
-    with _LOCK:
-        actions = list(_ACTIONS)
-    if action_id:
-        for item in actions:
-            if item.get("id") == action_id:
-                return {"success": True, "action": item}
+def frontend_action_status(
+    action_id: str = "", trusted_scope=None, **_: Any
+) -> Dict[str, Any]:
+    item = _action_store().get(str(action_id)) if action_id else None
+    if action_id and item is None:
         return {"success": False, "error": "action not found", "action": None}
-    return {"success": True, "actions": actions[-20:]}
+    if item is not None and trusted_scope is not None:
+        from collections.abc import Mapping
+
+        if not isinstance(trusted_scope, Mapping):
+            return {
+                "success": False,
+                "error": "Trusted request scope is required",
+                "action": None,
+            }
+        expected = {
+            "request_id": trusted_scope.get("request_id"),
+            "session_id": trusted_scope.get("session_id"),
+            "target_session_id": trusted_scope.get("frontend_session_id"),
+            "file_id": trusted_scope.get("file_id"),
+            "tenant_id": trusted_scope.get("tenant_id"),
+            "principal_id": trusted_scope.get("principal_id"),
+        }
+        if any(
+            str(value or "") != str(item.get(key) or "")
+            for key, value in expected.items()
+        ) or _document_path(item.get("document_path")) != _document_path(
+            trusted_scope.get("document_path")
+        ):
+            return {
+                "success": False,
+                "error": "Action belongs to a different trusted request or document scope",
+                "action": None,
+            }
+    if item:
+        _remember_action(item, append=False)
+        return {"success": True, "action": _action_view(item)}
+    return {
+        "success": True,
+        "actions": [_action_view(entry) for entry in _action_store().list_recent()],
+    }
 
 
 def wait_frontend_action(
     action_id: str = "", timeout_ms: int = 5000, **_: Any
 ) -> Dict[str, Any]:
-    deadline = time.time() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
-    with _ACTION_CONDITION:
-        while True:
-            status = frontend_action_status(action_id=action_id)
-            action = status.get("action")
-            if action and action.get("status") in {"completed", "failed"}:
-                return status
-            remaining = deadline - time.time()
-            if remaining <= 0:
-                return status
-            _ACTION_CONDITION.wait(timeout=min(remaining, 0.5))
+    deadline = time.monotonic() + max(0, min(int(timeout_ms or 0), 30000)) / 1000
+    while True:
+        status = frontend_action_status(action_id=action_id)
+        action = status.get("action")
+        if not action or action.get("status") in {
+            "completed",
+            "failed",
+            "expired",
+            "cancelled",
+            "unknown",
+        }:
+            return status
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            if (
+                action.get("status") == "queued"
+                and action.get("action") in _DOCUMENT_ACTIONS
+            ):
+                _action_store().expire(action_id)
+                status = frontend_action_status(action_id=action_id)
+            return {**status, "timed_out": True, "completed": False}
+        with _ACTION_CONDITION:
+            _ACTION_CONDITION.wait(timeout=min(remaining, 0.25))
 
 
 def frontend_surface_inventory(
@@ -450,3 +622,112 @@ def frontend_surface_inventory(
         waited["queued_action"] = action
         return waited
     return {"success": True, "surface_inventory": queued}
+
+
+def _document_path(value: Any) -> str:
+    """Compare exact document identities; never use suffix/path guessing."""
+    text = str(value or "").strip().replace("\\", "/")
+    return posixpath.normpath(text).casefold() if text else ""
+
+
+def bind_frontend_document_context(
+    base_context, frontend_scope, *, session_id: str = ""
+):
+    """Bind a host context only to a recently observed browser/document pair.
+
+    Request scope is transport metadata, not model arguments. Client supplied
+    permissions are ignored; supported operations are fixed by the host.
+    Missing/stale or mismatched metadata leaves the original context unchanged.
+    """
+    from app.core.agent.plugin_protocol.lifecycle import AddonInvocationContext
+
+    if not isinstance(frontend_scope, dict):
+        return base_context
+    browser_id = str(frontend_scope.get("frontend_session_id") or "").strip()
+    path = str(frontend_scope.get("document_path") or "").strip()
+    file_id = str(frontend_scope.get("file_id") or "").strip()
+    if not browser_id or not path or not file_id:
+        return base_context
+    now = time.time()
+    with _LOCK:
+        snapshot = next(
+            (
+                event
+                for event in reversed(_EVENTS)
+                if event.get("type") == "snapshot"
+                and event.get("session_id") == browser_id
+                and now - float(event.get("server_ts") or 0) <= 120
+            ),
+            None,
+        )
+    workspace = ((snapshot or {}).get("details") or {}).get("workspace") or {}
+    observed_path = (
+        workspace.get("activeTabPath") or workspace.get("wsSourcePath") or ""
+    )
+    observed_id = (
+        workspace.get("fileId")
+        or (workspace.get("activeTab") or {}).get("fileId")
+        or ""
+    )
+    if _document_path(path) != _document_path(observed_path) or file_id != str(
+        observed_id
+    ):
+        return base_context
+    if base_context is not None and not isinstance(
+        base_context, AddonInvocationContext
+    ):
+        return base_context
+    base = base_context or AddonInvocationContext(
+        request_id=str(uuid.uuid4()),
+        session_id=session_id,
+        tenant_id="local",
+        principal_id="local-user",
+        purpose_code="document_task",
+    )
+    kind = str(workspace.get("fileType") or "").lower()
+    operations = (
+        ("read", "edit", "save")
+        if kind in {"docx", "text", "code", "txt", "md"}
+        else ("read",)
+    )
+    scope = MappingProxyType(
+        {
+            "frontend_session_id": browser_id,
+            "document_path": path,
+            "file_id": file_id,
+            "file_type": kind,
+            "allowed_operations": operations,
+        }
+    )
+    return _scoped_context_type()(
+        **{
+            field.name: getattr(base, field.name)
+            for field in fields(AddonInvocationContext)
+        },
+        frontend_document_scope=scope,
+    )
+
+
+_SCOPED_CONTEXT_TYPE = None
+
+
+def _scoped_context_type():
+    global _SCOPED_CONTEXT_TYPE
+    if _SCOPED_CONTEXT_TYPE is None:
+        from app.core.agent.plugin_protocol.lifecycle import AddonInvocationContext
+
+        @dataclass(frozen=True)
+        class FrontendDocumentInvocationContext(AddonInvocationContext):
+            frontend_document_scope: Any = None
+            task_id: str = ""
+            run_id: str = ""
+
+        _SCOPED_CONTEXT_TYPE = FrontendDocumentInvocationContext
+    return _SCOPED_CONTEXT_TYPE
+
+
+def bind_frontend_run_context(context, *, task_id: str, run_id: str):
+    """Attach the real Kernel run identity to an already host-bound scope."""
+    if not isinstance(context, _scoped_context_type()):
+        return context
+    return replace(context, task_id=str(task_id or ""), run_id=str(run_id or ""))

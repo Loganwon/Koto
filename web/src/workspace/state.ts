@@ -3,9 +3,8 @@
  * Workspace state.
  */
 
-import { _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
-import { logger } from '../shared/logger';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { _csrfFetch, _fileIcon, _escHtml, showToast, _FOLDER_SVG, _FOLDER_OPEN_SVG } from './infrastructure';
+import { getFeatureRegistry } from '../shared/feature-registry';
 
 // ── Interfaces ──
 
@@ -15,6 +14,7 @@ export interface TabInfo {
   ext: string;
   fileType: string;
   fileId?: string | null;
+  sourceSha256?: string;
   filePath?: string | null;
   serverData: ServerFileData;
   cache?: Record<string, unknown>;
@@ -134,12 +134,16 @@ export interface EditorInstance {
   getContent?: () => unknown;
   setContent?: (data: unknown) => void;
   render: (...args: unknown[]) => unknown;
+  applyToolCall?: (command: any) => unknown;
+  appendToolCall?: (command: any) => unknown;
+  replaceSelectionWith?: (mode: string, selection: any, rawText: string) => unknown;
   editor?: unknown;
   [key: string]: unknown;
 }
 
 export interface WorkspaceState {
   fileId: string | null;
+  sourceSha256?: string;
   fileType: string | null;
   fileName: string | null;
   filePath: string | null;
@@ -171,6 +175,7 @@ export interface WorkspaceState {
   _reviewLauncherVisible: boolean;
   _activeProposalBatch: Record<string, unknown>[];
   _streamAbortCtrl: AbortController | null;
+  _cancelCurrentTask?: (() => void | Promise<void>) | null;
   _pendingTaskPayload: TaskPayload | null;
   _pendingTaskPayloadUsesFeedback: boolean;
   _pendingTaskFollowupContext: Record<string, unknown> | null;
@@ -195,8 +200,10 @@ export interface WorkspaceState {
   _activeRoute: Record<string, unknown> | null;
   _activeTaskReconnectors: Map<string, any>;
   _localRuntimeModel: string;
+  _localModelSupportsTools: boolean | null;
   _modelChoicePendingMode?: string;
   _modelChoiceUpdatedAt?: number;
+  _modelChoicePromise?: Promise<any> | null;
   useAgentMode: boolean;
   _aiFileContext: AiFileContext[];
   _aiTargetFileIdx: number;
@@ -214,7 +221,7 @@ const _WA_EMPTY_WORKSPACE_LAYOUT = {
 
 const _WA_MODEL_MODES = new Set(['cloud', 'deepseek', 'local']);
 
-function _normalizeWorkspaceModelMode(value: string, fallback: string = 'deepseek'): string {
+export function _normalizeWorkspaceModelMode(value: string, fallback: string = 'deepseek'): string {
   const normalized = String(value || '').trim().toLowerCase();
   return _WA_MODEL_MODES.has(normalized) ? normalized : fallback;
 }
@@ -281,6 +288,8 @@ export const state: WorkspaceState = {
   _activeRoute: null,
   _activeTaskReconnectors: new Map(),
   _localRuntimeModel: '',
+  _localModelSupportsTools: null,
+  _modelChoicePromise: null,
   useAgentMode: localStorage.getItem('wa_use_agent') !== 'off',
   _aiFileContext: [],
   _aiTargetFileIdx: -1,
@@ -391,153 +400,12 @@ function _cloneSerializable(value: any, fallback: any = null): any {
   }
 }
 
-// ── Tab Info ──
+import { _clearActiveFileState, _destroyActiveEditorForClosedFile, _removeOpenTabAfterFileDeleted, _renderTabs, _setSwitchToTabImpl, _switchToTabImpl } from './state-tab-lifecycle';
+export * from './state-tab-lifecycle';
 
-function _tabDisplayInfo(tab: TabInfo | null): { extAttr: string; title: string } {
-  const profile = _normalizeCapabilityProfile(tab?.capabilityProfile, tab?.fileType || null, tab?.name || null);
-  const extAttr = String(profile.format || tab?.ext || tab?.fileType || '').toLowerCase();
-  return {
-    extAttr,
-    title: String((tab?.name || '')).trim(),
-  };
-}
-
-export function _activeCapabilityProfile(tab?: TabInfo | null): CapabilityProfile {
-  const source = tab || state.openTabs.find((item) => item.path === state.activeTabPath) || null;
-  if (source) return _normalizeCapabilityProfile(source.capabilityProfile, source.fileType, source.name);
-  return _normalizeCapabilityProfile(state.capabilityProfile, state.fileType, state.fileName);
-}
-
-// ── Clear Active File ──
-
-export function _clearActiveFileState(): void {
-  state.activeTabPath = null;
-  state.fileId = null;
-  state.fileType = null;
-  state.fileName = null;
-  state.filePath = null;
-  state.wsSourcePath = null;
-  state.capabilityProfile = null;
-  const fileNameEl = document.getElementById('wa-file-name');
-  if (fileNameEl) fileNameEl.textContent = '全格式 AI 工作区';
-  _syncCurrentFileChrome();
-  const saveBtn = document.getElementById('wa-save-btn') as HTMLButtonElement | null;
-  if (saveBtn) saveBtn.disabled = true;
-  const saveAsBtn = document.getElementById('wa-saveas-btn') as HTMLButtonElement | null;
-  if (saveAsBtn) saveAsBtn.disabled = true;
-}
-
-export function _syncCurrentFileChrome(): void {
-  const activeTab = state.openTabs.find((tab) => tab.path === state.activeTabPath) || null;
-  const toolbar = document.querySelector('.wa-unified-toolbar') as HTMLElement | null;
-  const fileNameEl = document.getElementById('wa-file-name');
-  const filePathEl = document.getElementById('wa-file-path');
-  const dirtyEl = document.getElementById('wa-file-dirty');
-  if (toolbar) toolbar.hidden = !activeTab;
-  if (fileNameEl) fileNameEl.textContent = activeTab ? (activeTab.name || '未命名文件') : '全格式 AI 工作区';
-  if (filePathEl) {
-    filePathEl.textContent = '';
-    filePathEl.toggleAttribute('hidden', true);
-    filePathEl.removeAttribute('title');
-  }
-  if (dirtyEl) dirtyEl.toggleAttribute('hidden', !activeTab?.modified);
-}
-
-// ── Destroy Editor ──
-
-export function _destroyActiveEditorForClosedFile(): void {
-  if (state.activeEditor) {
-    try {
-      state.activeEditor.destroy?.();
-    } catch (error) {
-      logger.error('state', 'Editor destroy failed', error);
-    }
-  }
-  state.activeEditor = null;
-  _deactivateWorkspaceEditors();
-  // _docListeners cleanup is in infrastructure; skip duplication
-}
-
-function _deactivateWorkspaceEditors(): void {
-  [
-    'wa-docx-editor',
-    'wa-xlsx-editor',
-    'wa-pptx-editor',
-    'wa-pdf-editor',
-    'wa-pdf-viewer',
-    'wa-image-viewer',
-    'wa-text-editor',
-  ].forEach((id) => document.getElementById(id)?.classList.remove('active'));
-  _syncWorkspaceSurfaces();
-}
-
-// ── Remove Tab After Delete ──
-
-export async function _removeOpenTabAfterFileDeleted(path: string): Promise<boolean> {
-  const idx = state.openTabs.findIndex((tab) => tab.path === path);
-  if (idx < 0) return false;
-  const wasActive = state.openTabs[idx].path === state.activeTabPath;
-  if (wasActive) {
-    _destroyActiveEditorForClosedFile();
-    _clearActiveFileState();
-    _deactivateWorkspaceEditors();
-  }
-  state.openTabs.splice(idx, 1);
-  if (wasActive) {
-    if (state.openTabs.length > 0) {
-      const neighborIdx = Math.min(idx, state.openTabs.length - 1);
-      await _switchToTab(state.openTabs[neighborIdx].path);
-    } else {
-      toggleWorkspace(false);
-      _renderTabs();
-    }
-  } else {
-    _renderTabs();
-  }
-  return true;
-}
-
-// ── Render Tabs ──
-
-export function _renderTabs(): void {
-  const bar = document.getElementById('wa-tab-bar');
-  if (!bar) return;
-  bar.classList.toggle('single-tab', state.openTabs.length <= 1);
-  bar.innerHTML = state.openTabs
-    .map((tab) => {
-      const active = tab.path === state.activeTabPath ? ' active' : '';
-      const modified = tab.modified ? ' modified' : '';
-      const pathEsc = tab.path.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-      const info = _tabDisplayInfo(tab);
-      const extAttr = _escHtml(info.extAttr || '');
-      const nameEsc = _escHtml(tab.name || '');
-      const titleEsc = _escHtml(info.title || tab.name || '');
-      return (
-        `<div class="wa-tab${active}${modified}" data-path="${tab.path.replace(/"/g, '&quot;')}" data-ext="${extAttr}"` +
-        ` onclick="WA._tabClick('${pathEsc}')" title="${titleEsc}">` +
-        `<span class="tab-icon">${_fileIcon(tab.ext)}</span>` +
-        `<span class="tab-main">` +
-        `<span class="tab-label">${nameEsc}</span>` +
-        `</span>` +
-        `<span class="tab-dirty"></span>` +
-        `<button class="tab-close" onclick="event.stopPropagation();WA._closeTab('${pathEsc}')" title="关闭">×</button>` +
-        `</div>`
-      );
-    })
-    .join('');
-  _syncCurrentFileChrome();
-  _updateStatusBar();
-}
-
-// ── Switch Tab ──
-
-// These are declared here but full implementations reference editor mounters defined elsewhere.
-// We export the signatures and assign full implementations after all modules are loaded.
-
-let _switchToTabImpl: ((path: string) => Promise<void>) | null = null;
 
 export function _registerSwitchToTab(fn: (path: string) => Promise<void>): void {
-  _switchToTabImpl = fn;
+  _setSwitchToTabImpl(fn);
 }
 
 export async function _switchToTab(path: string): Promise<void> {
@@ -547,6 +415,7 @@ export async function _switchToTab(path: string): Promise<void> {
   const tab = state.openTabs.find((item) => item.path === path);
   if (tab) {
     state.fileId = tab.fileId || null;
+    state.sourceSha256 = tab.sourceSha256 || '';
     state.fileType = tab.fileType;
     state.fileName = tab.name;
     state.filePath = tab.filePath || tab.path || null;
@@ -554,91 +423,9 @@ export async function _switchToTab(path: string): Promise<void> {
     state.capabilityProfile = tab.capabilityProfile || null;
   }
   _renderTabs();
-}
+}import { _syncWorkspaceSurfaces } from './state-editor-layout';
+export * from './state-editor-layout';
 
-// ── Editor Layout Helpers ──
-
-function _editorLayoutContainerId(fileType: string): string | null {
-  return fileType === 'xlsx'
-    ? 'wa-xlsx-editor'
-    : fileType === 'pptx'
-      ? 'wa-pptx-editor'
-      : fileType === 'pdf'
-        ? 'wa-pdf-editor'
-        : null;
-}
-
-const _WORKSPACE_SURFACE_IDS = [
-  'wa-drop-zone',
-  'wa-docx-editor',
-  'wa-xlsx-editor',
-  'wa-pptx-editor',
-  'wa-pdf-editor',
-  'wa-pdf-viewer',
-  'wa-image-viewer',
-  'wa-text-editor',
-];
-
-function _setSurfaceA11y(el: HTMLElement, isActive: boolean): void {
-  el.setAttribute('aria-hidden', isActive ? 'false' : 'true');
-  (el as any).inert = !isActive;
-  el.toggleAttribute('inert', !isActive);
-}
-
-export function _syncWorkspaceSurfaces(): void {
-  _WORKSPACE_SURFACE_IDS.forEach((id) => {
-    const el = document.getElementById(id) as HTMLElement | null;
-    if (!el) return;
-    const isDropZone = id === 'wa-drop-zone';
-    const isActive = isDropZone ? !el.classList.contains('hidden') : el.classList.contains('active');
-    _setSurfaceA11y(el, isActive);
-  });
-}
-
-export function _primeEditorLayout(fileType: string): void {
-  const containerId = _editorLayoutContainerId(fileType);
-  if (!containerId) return;
-  const el = document.getElementById(containerId);
-  if (el) el.classList.add('active');
-  if (fileType === 'pdf') {
-    document.getElementById('wa-pdf-viewer')?.classList.add('active');
-  }
-  _syncWorkspaceSurfaces();
-}
-
-export function _waitForEditorLayout(fileType: string, timeoutMs: number = 800): Promise<void> {
-  const containerId = _editorLayoutContainerId(fileType);
-  if (!containerId) return Promise.resolve();
-  const isReady = () => {
-    const el = document.getElementById(containerId);
-    return !!(el && el.offsetWidth > 0 && el.offsetHeight > 0);
-  };
-  if (isReady()) return Promise.resolve();
-  return new Promise((resolve) => {
-    const deadline = Date.now() + timeoutMs;
-    function check() {
-      const el = document.getElementById(containerId!);
-      if (el && el.offsetWidth > 0 && el.offsetHeight > 0) {
-        resolve();
-        return;
-      }
-      if (Date.now() >= deadline) {
-        console.warn(
-          '[WA] _waitForEditorLayout timeout for',
-          containerId,
-          'offsetW:',
-          el ? el.offsetWidth : 'null',
-          'offsetH:',
-          el ? el.offsetHeight : 'null'
-        );
-        resolve();
-        return;
-      }
-      requestAnimationFrame(check);
-    }
-    requestAnimationFrame(check);
-  });
-}
 
 // ── Toggle Workspace / Loading ──
 
@@ -646,6 +433,7 @@ export function toggleWorkspace(show: boolean): void {
   const dropZone = document.getElementById('wa-drop-zone');
   if (dropZone) dropZone.classList.toggle('hidden', show);
   _syncWorkspaceSurfaces();
+  document.dispatchEvent(new CustomEvent('koto:workspace-file-change'));
 }
 
 export function setLoading(show: boolean, msg?: string): void {
@@ -698,165 +486,12 @@ export async function loadWorkspaceFiles(): Promise<void> {
     showToast('获取工作区目录网络异常...', 'error');
   }
   // _softRefreshBrowser() is in fs-tree module — call after modules load
-  if (typeof (window as any).WA?._softRefreshBrowser === 'function') {
-    await (window as any).WA._softRefreshBrowser();
+  if (typeof getFeatureRegistry()?._softRefreshBrowser === 'function') {
+    await getFeatureRegistry()._softRefreshBrowser();
   }
-}
+}import { loadRecentFiles } from './state-recent-files';
+export * from './state-recent-files';
 
-// ── Recent Files ──
-
-export const _WA_RECENT_KEY = 'wa_user_recent_v1';
-
-function _recentFileSupportedExt(ext: string): boolean {
-  return new Set([
-    'docx', 'xlsx', 'pptx', 'pdf',
-    'txt', 'md', 'markdown', 'csv', 'json',
-    'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'svg',
-  ]).has(String(ext || '').toLowerCase().replace(/^\./, ''));
-}
-
-function _formatRecentSize(bytes: number): string {
-  if (!bytes || bytes < 0) return '';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / 1048576).toFixed(1) + ' MB';
-}
-
-export function _trackUserOpen(path: string): void {
-  if (!path) return;
-  const name = path.split(/[\\/]/).pop() || path;
-  try {
-    const list: RecentFileEntry[] = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
-    const normalizedPath = _normalizeRecentPath(path);
-    const filtered = list.filter((file) => _normalizeRecentPath(file.path) !== normalizedPath);
-    filtered.unshift({ path, name, ts: Date.now() });
-    localStorage.setItem(_WA_RECENT_KEY, JSON.stringify(filtered.slice(0, 30)));
-  } catch (_) {
-    /* ignore */
-  }
-}
-
-export function _forgetRecentPath(path: string): void {
-  if (!path) return;
-  try {
-    const normalizedPath = _normalizeRecentPath(path);
-    const list: RecentFileEntry[] = JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
-    const filtered = list.filter((file) => _normalizeRecentPath(file.path) !== normalizedPath);
-    if (filtered.length !== list.length) {
-      localStorage.setItem(_WA_RECENT_KEY, JSON.stringify(filtered));
-    }
-  } catch (_) {
-    /* ignore */
-  }
-}
-
-function _normalizeRecentPath(path: string): string {
-  return String(path || '').trim().replace(/\\/g, '/').toLowerCase();
-}
-
-function _recentFileDragAttrs(): string {
-  return 'draggable="true" data-wa-file-draggable="true"';
-}
-
-function _recentFileOpenHitDragAttrs(): string {
-  return 'draggable="false" data-wa-file-action="open"';
-}
-
-function _loadLocalRecentFiles(): RecentFileEntry[] {
-  try {
-    return JSON.parse(localStorage.getItem(_WA_RECENT_KEY) || '[]');
-  } catch (_) {
-    return [];
-  }
-}
-
-function _normalizeRecentEntry(file: any, source: 'local' | 'api'): RecentFileEntry | null {
-  const path = String(file && file.path || '').trim();
-  if (!path) return null;
-  const name = String(file.name || path.split(/[\\/]/).pop() || path).trim();
-  const rawTs = Number(file.ts || 0);
-  const mtimeTs = Number(file.mtime || 0) ? Number(file.mtime) * 1000 : 0;
-  return {
-    path,
-    name,
-    ts: source === 'local' ? (rawTs || Date.now()) : (mtimeTs || rawTs || 0),
-    category: String(file.category || '').trim(),
-    size_bytes: Number(file.size_bytes || 0) || 0,
-  };
-}
-
-function _mergeRecentFiles(localRecent: RecentFileEntry[], apiRecent: RecentFileEntry[]): RecentFileEntry[] {
-  if (localRecent.length) {
-    const apiByPath = new Map(apiRecent.map((file) => [_normalizeRecentPath(file.path), file]));
-    return localRecent
-      .map((file) => {
-        const apiFile = apiByPath.get(_normalizeRecentPath(file.path));
-        return Object.assign({}, apiFile || {}, file, {
-          category: file.category || apiFile?.category,
-          size_bytes: file.size_bytes || apiFile?.size_bytes,
-        });
-      })
-      .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
-      .slice(0, 20);
-  }
-  const seen = new Set<string>();
-  const out: RecentFileEntry[] = [];
-  apiRecent.forEach((file) => {
-    const normalized = _normalizeRecentPath(file.path);
-    if (!normalized || seen.has(normalized)) return;
-    seen.add(normalized);
-    out.push(file);
-  });
-  return out
-    .sort((a, b) => Number(b.ts || 0) - Number(a.ts || 0))
-    .slice(0, 20);
-}
-
-export async function loadRecentFiles(): Promise<void> {
-  const list = document.getElementById('wa-recent-list');
-  if (!list) return;
-  const localRecent = _loadLocalRecentFiles()
-    .map((file) => _normalizeRecentEntry(file, 'local'))
-    .filter(Boolean) as RecentFileEntry[];
-  let apiRecent: RecentFileEntry[] = [];
-  try {
-    const res = await fetch('/api/files/recent?days=30&limit=20');
-    if (res.ok) {
-      const data = await res.json();
-      if (Array.isArray(data.files)) {
-        apiRecent = data.files
-          .map((file: any) => _normalizeRecentEntry(file, 'api'))
-          .filter(Boolean) as RecentFileEntry[];
-      }
-    }
-  } catch (_) {
-    apiRecent = [];
-  }
-
-  const userRecent = _mergeRecentFiles(localRecent, apiRecent);
-  if (!userRecent.length) {
-    list.innerHTML = '<div class="wa-empty-row">暂无最近文件</div>';
-    return;
-  }
-
-  list.innerHTML = userRecent.slice(0, 20).map((file) => {
-    const name = file.name || (file.path || '').split(/[\\/]/).pop() || '';
-    const ext = (name.includes('.') ? (name.split('.').pop() || '') : '').toLowerCase();
-    const icon = _fileIcon(ext, file.category || '');
-    const date = file.ts ? new Date(file.ts).toLocaleDateString('zh-CN') : '';
-    const size = file.size_bytes ? ' · ' + _formatRecentSize(file.size_bytes) : '';
-    const supported = _recentFileSupportedExt(ext);
-    return `<div class="wa-file-item file wa-recent-file" title="${_escHtml(file.path || '')}"`
-      + ` data-path="${_escHtml(file.path || '')}" data-supported="${supported}"`
-      + ` ${_recentFileDragAttrs()}`
-      + `>`
-      + `<button type="button" class="wa-file-open-hit" ${_recentFileOpenHitDragAttrs()} aria-label="打开 ${_escHtml(name)}"></button>`
-      + `<span class="wa-recent-indent"></span>${icon}`
-      + `<span class="wa-file-label">${_escHtml(name)}</span>`
-      + `<span class="wa-recent-date">${date}${size}</span>`
-      + `</div>`;
-  }).join('');
-}
 
 // ── My Workspace ──
 
@@ -1013,6 +648,20 @@ function _installWorkspaceRowActionDelegation(): void {
   _workspaceRowActionDelegationInstalled = true;
   document.addEventListener('click', (event) => {
     const target = event.target as HTMLElement | null;
+    const tabControl = target?.closest<HTMLElement>('[data-wa-tab-action]');
+    if (tabControl) {
+      const tab = tabControl.closest<HTMLElement>('.wa-tab');
+      const path = String(tab?.dataset.path || '').trim();
+      const action = String(tabControl.dataset.waTabAction || '');
+      if (path) {
+        event.preventDefault();
+        event.stopPropagation();
+        const features = getFeatureRegistry();
+        if (action === 'open') void features._tabClick?.(path);
+        if (action === 'close') void features._closeTab?.(path);
+      }
+      return;
+    }
     const control = target && target.closest ? target.closest<HTMLElement>('[data-wa-workspace-row-action]') : null;
     if (!control) return;
     const row = control.closest<HTMLElement>('.wa-myws-item');
@@ -1021,7 +670,7 @@ function _installWorkspaceRowActionDelegation(): void {
     if (!path) return;
     event.preventDefault();
     event.stopPropagation();
-    const workspaceApi = getWorkspaceApi();
+    const workspaceApi = getFeatureRegistry();
     if (action === 'open' && typeof workspaceApi.openBrowserFile === 'function') {
       void workspaceApi.openBrowserFile(path, true);
     } else if (action === 'remove-my' && typeof workspaceApi.removeFromMyWorkspace === 'function') {
@@ -1034,32 +683,22 @@ function _installWorkspaceRowActionDelegation(): void {
 
 _installWorkspaceRowActionDelegation();
 
-// ── Placeholder helpers (implemented in other modules) ──
+// ── Cross-module status bridge ──
 
-function _updateStatusBar(): void {
-  /* placeholder - actual impl in another section */
-}
-function _updateSubjectBar(_name?: string | null, _type?: string | null): void {
-  /* placeholder */
-}
-function _syncReviewStateForActiveFile(): Promise<void> {
-  return Promise.resolve();
-}
-function _updateContextBar(_ctx?: any): void {
-  /* placeholder */
+export function _updateStatusBar(): void {
+  const update = getFeatureRegistry()._updateStatusBar;
+  if (typeof update === 'function') update();
 }
 
-// ── Register with window.WA ──
+// ── Register with getFeatureRegistry() ──
 
-const wa = getWorkspaceApi();
+const wa = getFeatureRegistry();
 
 function _syncMobileFilesA11y(): void {
   const left = document.getElementById('wa-left') as HTMLElement | null;
   if (!left) return;
-  const isNarrow = typeof window.matchMedia === 'function'
-    && window.matchMedia('(max-width: 760px)').matches;
   const isOpen = document.body.classList.contains('wa-mobile-files-open');
-  const hidden = isNarrow && !isOpen;
+  const hidden = !isOpen;
   left.setAttribute('aria-hidden', hidden ? 'true' : 'false');
   (left as any).inert = hidden;
   left.toggleAttribute('inert', hidden);
@@ -1070,8 +709,9 @@ wa.toggleMobileFiles = (force?: boolean) => {
     ? force
     : !document.body.classList.contains('wa-mobile-files-open');
   document.body.classList.toggle('wa-mobile-files-open', isOpen);
-  const btn = document.getElementById('wa-mobile-files-toggle');
-  if (btn) btn.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+  document.querySelectorAll('[aria-controls="wa-left"]').forEach((btn) => {
+    btn.setAttribute('aria-expanded', String(isOpen));
+  });
   _syncMobileFilesA11y();
 };
 
@@ -1087,11 +727,11 @@ if (document.readyState === 'loading') {
   _syncMobileFilesA11y();
 }
 window.addEventListener('resize', _syncMobileFilesA11y);
-(window as any).state = state;
-(window as any)._WA_RUNTIME_SESSION_ID = _WA_RUNTIME_SESSION_ID;
-(window as any)._fsHandleMap = _fsHandleMap;
-(window as any)._normalizeWorkspaceModelMode = _normalizeWorkspaceModelMode;
-(window as any)._cloneSerializable = _cloneSerializable;
+window.addEventListener('koto-ui-zoom-change', _syncMobileFilesA11y);
+getFeatureRegistry()._WA_RUNTIME_SESSION_ID = _WA_RUNTIME_SESSION_ID;
+getFeatureRegistry()._fsHandleMap = _fsHandleMap;
+getFeatureRegistry()._normalizeWorkspaceModelMode = _normalizeWorkspaceModelMode;
+getFeatureRegistry()._cloneSerializable = _cloneSerializable;
 
 wa._renderTabs = _renderTabs;
 wa._removeOpenTabAfterFileDeleted = _removeOpenTabAfterFileDeleted;
@@ -1103,7 +743,7 @@ wa._closeTab = async (path: string) => {
   if (idx < 0) return;
   const tab = state.openTabs[idx];
 
-  const wa = (window as any).WA || {};
+  const wa = getFeatureRegistry() || {};
   const isUnsaved = typeof wa.isTabActuallyUnsaved === 'function'
     ? wa.isTabActuallyUnsaved(tab)
     : !!tab.modified;
@@ -1176,7 +816,7 @@ wa.setSearchFilter = (category: string) => {
 wa.clearSearch = () => {
   const input = document.getElementById('wa-search') as HTMLInputElement | null;
   if (input) input.value = '';
-  if (typeof (window as any).WA !== 'undefined' && (window as any).WA.filterFiles) (window as any).WA.filterFiles('');
+  if (typeof getFeatureRegistry() !== 'undefined' && getFeatureRegistry().filterFiles) getFeatureRegistry().filterFiles('');
 };
 
 function _syncSectionToggleState(id: string, open: boolean): void {
@@ -1215,7 +855,7 @@ wa.toggleRecentSection = () => {
   if (arrow) arrow.classList.toggle('open', state._recentOpen);
 };
 
-(window as any).loadRecentFiles = loadRecentFiles;
+getFeatureRegistry().loadRecentFiles = loadRecentFiles;
 
 wa.addToMyWorkspace = (path: string) => {
   let targetPath = path;

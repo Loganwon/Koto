@@ -1,3 +1,5 @@
+import { getFeatureRegistry } from './feature-registry';
+
 let lastSidePanelFocus: HTMLElement | null = null;
 
 function _panel(id: string): HTMLElement | null {
@@ -10,18 +12,18 @@ function _sidePanelScrim(): HTMLElement | null {
 
 const PANEL_TRIGGER_IDS: Record<string, string[]> = {
   settingsPanel: ['navSettingsBtn'],
-  skillsPanel: ['navSkillsBtn', 'csbToggleBtn'],
+  capabilityPanel: ['navCapabilityBtn'],
 };
 
 function _activeSidePanels(): HTMLElement[] {
-  return ['settingsPanel', 'skillsPanel']
+  return ['settingsPanel', 'capabilityPanel']
     .map(id => _panel(id))
     .filter((panel): panel is HTMLElement => !!panel && panel.classList.contains('active'));
 }
 
 function _hasBlockingModal(): boolean {
   if (document.querySelector('.modal-overlay.active, .koto-dialog-overlay, .agent-dialog-overlay')) return true;
-  const modalSelectors = ['.skill-editor-modal', '.edit-modal-overlay', '.sc-overlay', '.sm-drawer-overlay'];
+  const modalSelectors = ['.catalog-wizard-modal', '.edit-modal-overlay', '.sc-overlay', '.sm-drawer-overlay'];
   return modalSelectors.some(selector => {
     const el = document.querySelector(selector) as HTMLElement | null;
     if (!el) return false;
@@ -92,13 +94,13 @@ export function markSidePanelClosed(panelId: string, restoreFocus = true): void 
 export function closeActiveSidePanel(): boolean {
   if (_hasBlockingModal()) return false;
   const settings = _panel('settingsPanel');
-  if (settings?.classList.contains('active') && typeof (window as any).closeSettings === 'function') {
-    (window as any).closeSettings();
+  if (settings?.classList.contains('active') && typeof getFeatureRegistry().closeSettings === 'function') {
+    getFeatureRegistry().closeSettings();
     return true;
   }
-  const skills = _panel('skillsPanel');
-  if (skills?.classList.contains('active') && typeof (window as any).closeSkillsPanel === 'function') {
-    (window as any).closeSkillsPanel();
+  const capabilities = _panel('capabilityPanel');
+  if (capabilities?.classList.contains('active') && typeof getFeatureRegistry().closeCapabilityPanel === 'function') {
+    getFeatureRegistry().closeCapabilityPanel();
     return true;
   }
   return false;
@@ -121,4 +123,4 @@ document.addEventListener('DOMContentLoaded', () => {
   refreshSidePanelScrim();
 });
 
-(window as any).closeActiveSidePanel = closeActiveSidePanel;
+getFeatureRegistry().closeActiveSidePanel = closeActiveSidePanel;

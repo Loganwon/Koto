@@ -2,6 +2,7 @@
 # Copyright (C) 2024-2026 Koto AI. All rights reserved.
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -9,6 +10,27 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def _read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
+
+
+def _read_file_task_runtime() -> str:
+    """Read the runtime facade and current phase mixins."""
+    paths = [
+        "app/core/agent/file_task_runtime.py",
+        "app/core/agent/runtime/read_phase.py",
+        "app/core/agent/runtime/plan_phase.py",
+        "app/core/agent/runtime/execute_phase.py",
+        "app/core/agent/runtime/verify_phase.py",
+    ]
+    return "\n".join(_read(path) for path in paths)
+
+
+def _read_task_tools() -> str:
+    """Read the two remaining task-tools owners."""
+    paths = [
+        "app/core/agent/task_tools.py",
+        "app/core/agent/task_tools_common.py",
+    ]
+    return "\n".join(_read(path) for path in paths)
 
 
 def _body_between(source: str, start_marker: str, end_marker: str) -> str:
@@ -34,22 +56,59 @@ def test_workspace_chat_has_single_file_task_entrypoint() -> None:
 def test_workspace_uses_bundled_ts_assets_without_legacy_static_entrypoints() -> None:
     assets = _read("web/templates/_workspace_asset_scripts.html")
     bundle_entry = _read("web/src/bundles/workspace.ts")
+    build_script = _read("web/scripts/build-bundles.mjs")
+    layout = _read("web/src/ui/workspace-layout.ts")
+    shell_css = _read("web/static/css/workspace-shell.css")
 
     assert "js/build/workspace-bundle.js" in assets
     assert "workspace-assistant.js" not in assets
     assert "workspace-task-dispatcher.js" not in assets
     assert "range(100000,999999)|random" not in assets
-    assert "asset_url('vendor/split.min.js')" in assets
+    # The current shell uses native CSS grid; Split.js has no production
+    # consumer and must not be restored as an eager workspace dependency.
+    assert "split.min.js" not in assets
+    assert "Split(" not in layout
+    assert "grid-template-columns" in shell_css
+    assert "export function refreshWorkspaceLayout" in layout
     assert "asset_url('js/build/workspace-bundle.js')" in assets
-    assert "asset_url('js/build/review-bundle.js')" in assets
-    assert assets.index("split.min.js") < assets.index("workspace-bundle.js")
-    assert assets.index("workspace-bundle.js") < assets.index("review-bundle.js")
+    assert 'data-workspace-bundle-url="{{ asset_url(' in assets
+    assert "src=\"{{ asset_url('js/build/workspace-bundle.js') }}\"" not in assets
+    assert "'js/build/review-bundle.js'" not in assets
+    assert "data-document-review-bundle-url" in assets
+    assert "data-rag-panel-bundle-url" in assets
+    assert "import '../workspace/rag-panel';" not in bundle_entry
+    assert "import '../workspace/rag-panel-loader';" in bundle_entry
+    assert "pure: ['console.debug']" in build_script
     assert "import '../workspace/ai-review';" in bundle_entry
     assert "import '../workspace/task-dispatcher';" in bundle_entry
     assert not (ROOT / "web/static/js/workspace-assistant.js").exists()
     assert not (ROOT / "web/static/js/workspace-task-dispatcher.js").exists()
     assert not (ROOT / "web/static/js/src/workspace-assistant.js").exists()
     assert not (ROOT / "web/static/js/src/workspace-task-dispatcher.js").exists()
+
+
+def test_desktop_ai_entry_has_no_classic_composer_compatibility_path() -> None:
+    sources = {
+        "index": _read("web/templates/index.html"),
+        "main": _read("web/src/app/main.ts"),
+        "active_composer": _read("web/src/shared/active-composer.ts"),
+        "frontend_observer": _read("web/src/mcp/frontend-observer.ts"),
+        "desktop_css": _read("web/static/css/style.css"),
+    }
+
+    assert sources["index"].count('id="wa-user-input"') == 1
+    assert sources["index"].count('id="wa-send-btn"') == 1
+    for source in sources.values():
+        assert "messageInput" not in source
+        assert "legacyFallback" not in source
+    assert 'id="sendBtn"' not in sources["index"]
+    assert "getElementById('sendBtn')" not in sources["main"]
+    assert "window as any).sendMessage" not in sources["main"]
+    assert "delegateHiddenLegacySendToWorkspace" not in sources["main"]
+    assert ".chat-input-form" not in sources["desktop_css"]
+    assert ".chat-input-container" not in sources["desktop_css"]
+    assert not (ROOT / "web/src/extras/tarot-picker.ts").exists()
+    assert not (ROOT / "web/src/skills/skill-ui.ts").exists()
 
 
 def test_unified_workspace_shell_has_no_hidden_legacy_sidebar_surface() -> None:
@@ -71,15 +130,17 @@ def test_workspace_page_routes_are_registered_without_legacy_page_shell() -> Non
 
     assert '@pages_bp.route("/")' in pages
     assert '@pages_bp.route("/app")' in pages
-    assert '@pages_bp.route("/workspace-assistant")' in pages
-    assert "redirect(target, code=302)" in pages
+    assert '@pages_bp.route("/workspace-assistant")' not in pages
+    assert '@pages_bp.route("/workspace")' not in pages
+    assert "redirect(target, code=302)" not in pages
     assert 'render_template("index.html", initial_theme=_get_initial_theme())' in pages
-    assert '("web.blueprints.pages", "pages_bp", None, "Pages")' in blueprints
+    assert 'BlueprintSpec("web.blueprints.pages", "pages_bp", "Pages")' in blueprints
     assert "workspace-assistant.js" not in pages
 
 
 def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> None:
     source = _read("web/src/workspace/task-dispatcher.ts")
+    routing = _read("web/src/workspace/task-routing-decision.ts")
     route_body = _body_between(
         source,
         "async function runWorkspaceModelRoutedTask(context: TaskContext): Promise<any> {",
@@ -92,32 +153,31 @@ def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> 
     )
 
     assert "_csrfFetch('/api/workspace/ai/route-intent'" in source
-    assert "function deterministicWorkspaceRouteDecision(" in source
+    assert "export function deterministicWorkspaceRouteDecision(" in routing
     assert (
-        "const deterministicRoute = deterministicWorkspaceRouteDecision(context);"
-        in route_body
+        "const deterministicRoute = deterministicWorkspaceRouteDecision({" in route_body
     )
     assert route_body.index("deterministicWorkspaceRouteDecision") < route_body.index(
         "resolveWorkspaceRouteIntent"
     )
-    assert "const EXPLICIT_FILE_REFERENCE_RE" in source
-    assert "function mentionsExplicitTaskFile(" in source
-    assert "frontend_deterministic_explicit_file_reference" in source
+    assert "const EXPLICIT_FILE_REFERENCE_RE" in routing
+    assert "function mentionsExplicitTaskFile(" in routing
+    assert "frontend_deterministic_explicit_file_reference" in routing
     assert (
         "mentionsExplicitTaskFile(text) && FILE_TASK_CONTEXT_CUE_RE.test(text)"
-        in source
+        in routing
     )
     assert (
         "routeSource === 'frontend_deterministic_explicit_file_reference'"
-    ) in source
+    ) in routing
     assert "routeDecision = await resolveWorkspaceRouteIntent(context);" in route_body
     assert route_body.index("resolveWorkspaceRouteIntent") < route_body.rindex(
         "return runTaskFlowRoute"
     )
-    assert "function fileTaskRouteDecision(" in source
-    assert "route_source: routeSource" in source
-    assert "keyword_policy: 'hint_only'" in source
-    assert "skip_ai_intent_adjudicator" in source
+    assert "export function fileTaskRouteDecision(" in routing
+    assert "route_source: routeSource" in routing
+    assert "keyword_policy: 'hint_only'" in routing
+    assert "skip_ai_intent_adjudicator" in routing
     assert "fileTaskRouteDecision('explicit_task_payload')" in route_body
     assert (
         "fileTaskRouteDecision('frontend_file_context_guard', routeDecision)"
@@ -132,7 +192,9 @@ def test_workspace_dispatcher_uses_model_primary_intent_before_task_stream() -> 
     ) in payload_body
 
 
-def test_workspace_route_intent_has_deterministic_fast_path_before_model() -> None:
+def test_workspace_route_intent_has_deterministic_fast_path_before_kernel_default() -> (
+    None
+):
     editor_ai = _read("web/blueprints/editor_ai.py")
     route_endpoint = _body_between(
         editor_ai,
@@ -147,10 +209,13 @@ def test_workspace_route_intent_has_deterministic_fast_path_before_model() -> No
     assert "_EXPLICIT_FILE_REFERENCE_RE" in editor_ai
     assert "def _workspace_mentions_explicit_task_file(text: str) -> bool:" in editor_ai
     assert 'source="deterministic:explicit_file_reference"' in editor_ai
-    assert (
-        "_workspace_mentions_explicit_task_file(text) and _FILE_CONTEXT_TASK_RE.search(text)"
-        in editor_ai
+    deterministic_route = _body_between(
+        editor_ai,
+        "def _deterministic_workspace_route(data: dict) -> dict | None:",
+        "\n\ndef _truncate_context(",
     )
+    assert "_workspace_mentions_explicit_task_file(text)" in deterministic_route
+    assert "_FILE_CONTEXT_TASK_RE.search(" in deterministic_route
     assert '"skip_ai_intent_adjudicator": True' in editor_ai
     assert (
         "deterministic_route = _deterministic_workspace_route(data)" in route_endpoint
@@ -160,17 +225,16 @@ def test_workspace_route_intent_has_deterministic_fast_path_before_model() -> No
     assert '"route_path"' in route_endpoint
     assert route_endpoint.index(
         "_deterministic_workspace_route"
-    ) < route_endpoint.index("_model_workspace_route")
+    ) < route_endpoint.index('"route_source": "kernel_default"')
+    assert '"task_type": "FILE_TASK"' in route_endpoint
+    assert "SmartDispatcher" not in route_endpoint
 
 
 def test_workspace_direct_response_is_locked_to_chat_stream() -> None:
     dispatcher = _read("web/src/workspace/task-dispatcher.ts")
+    routing = _read("web/src/workspace/task-routing-decision.ts")
+    direct_chat = _read("web/src/workspace/task-direct-chat.ts")
     editor_ai = _read("web/blueprints/editor_ai.py")
-    chat_stream_body = _body_between(
-        dispatcher,
-        "async function streamWorkspaceChatRoute(context: TaskContext, routeDecision: Record<string, any>): Promise<any> {",
-        "  function runTaskFlowRoute(",
-    )
     route_body = _body_between(
         dispatcher,
         "async function runWorkspaceModelRoutedTask(context: TaskContext): Promise<any> {",
@@ -178,31 +242,33 @@ def test_workspace_direct_response_is_locked_to_chat_stream() -> None:
     )
     orchestrator = _body_between(
         _read("web/services/chat_stream/orchestrator.py"),
-        "SmartDispatcher.analyze() + task type resolution",
-        "Workflow routing",
+        "# ── Explicit route contract or Kernel default",
+        "# ── Add-on capability planning",
     )
 
     assert "/api/workspace/ai/direct-response" not in dispatcher
-    assert "'system_action'" in dispatcher
+    assert "'system_action'" in direct_chat
     assert '"system_action"' in editor_ai
-    assert "WHITELISTED_APP_LAUNCH_RE" in dispatcher
-    assert "WHITELISTED_APP_LAUNCH_RE.test(text)" in dispatcher
-    assert 'if normalized == "SYSTEM":' in editor_ai
-    assert 'return "system_action"' in editor_ai
-    assert "_csrfFetch('/api/chat/stream'" in chat_stream_body
-    assert "locked_task: lockedTask" in chat_stream_body
-    assert "route === 'system_action' ? 'SYSTEM'" in chat_stream_body
-    assert "skills_enabled: false" in chat_stream_body
-    assert "function isDirectWorkspaceResponse(" in dispatcher
+    assert "WHITELISTED_APP_LAUNCH_RE" in routing
+    assert "WHITELISTED_APP_LAUNCH_RE.test(text)" in routing
+    assert 'if raw_task_type == "SYSTEM"' in editor_ai
+    assert 'route = "system_action"' in editor_ai
+    assert "createWorkspaceChatStreamer" in dispatcher
+    assert "deps.csrfFetch('/api/chat/stream'" in direct_chat
+    assert (
+        "...(route.lockedTask ? { locked_task: route.lockedTask } : {})" in direct_chat
+    )
+    assert "lockedTask: 'SYSTEM'" in direct_chat
+    assert "skills_enabled" not in direct_chat
+    assert "export function isDirectWorkspaceResponse(" in routing
     assert "if (isDirectWorkspaceResponse(routeDecision))" in route_body
     assert "if locked_task:" in orchestrator
-    assert orchestrator.index("if locked_task:") < orchestrator.index(
-        "task_type, route_method, context_info = SmartDispatcher.analyze("
-    )
+    assert 'task_type = "AGENT"' in orchestrator
+    assert "SmartDispatcher" not in orchestrator
 
 
 def test_task_stream_backend_does_not_call_legacy_agents_or_router() -> None:
-    source = _read("web/file_task_stream.py")
+    source = _read("app/core/services/file_task_stream.py")
     forbidden = [
         "SmartDispatcher",
         "UnifiedAgent",
@@ -212,6 +278,7 @@ def test_task_stream_backend_does_not_call_legacy_agents_or_router() -> None:
     ]
 
     assert "FileTaskRuntime(" in source
+    assert not (ROOT / "web/file_task_stream.py").exists()
     for token in forbidden:
         assert token not in source
 
@@ -235,23 +302,20 @@ def test_file_task_tool_gateway_is_only_a_tool_boundary() -> None:
 
 
 def test_runtime_records_decision_and_supervisor_verification_per_tool_step() -> None:
-    runtime_source = _read("app/core/agent/file_task_runtime.py")
-    execution_source = _read("app/core/agent/file_task_execution_loop.py")
+    runtime_source = _read_file_task_runtime()
+    execution_source = _read("app/core/agent/file_task_kernel_adapter.py")
     finalization_source = _read("app/core/agent/file_task_finalization.py")
 
-    assert "FileTaskExecutionLoop(self).stream(" in runtime_source
+    assert "FileTaskKernelAdapter(self).stream(" in runtime_source
     assert "FileTaskFinalizationPhase(self).stream(" in runtime_source
-    assert '"decision.made"' in execution_source
-    assert '"supervisor.step_verified"' in execution_source
-    assert execution_source.index('"decision.made"') < execution_source.index(
-        '"supervisor.step_verified"'
-    )
+    assert "KernelRuntime(" in execution_source
+    assert "supervisor.step_verified" in execution_source
     assert '"check.finished"' in finalization_source
     assert '"supervisor.verified"' in finalization_source
 
 
 def test_runtime_path_resolution_logs_unexpected_resolver_failures() -> None:
-    source = _read("app/core/agent/file_task_runtime.py")
+    source = _read_file_task_runtime()
     start = source.index("    def _resolve_task_file_path(")
     end = source.index("    def _plan_summary(", start)
     resolver = source[start:end]
@@ -262,13 +326,129 @@ def test_runtime_path_resolution_logs_unexpected_resolver_failures() -> None:
 
 
 def test_file_conversion_implementation_stays_outside_task_tools_registry() -> None:
-    task_tools = _read("app/core/agent/task_tools.py")
-    conversion = _read("app/core/agent/task_tools_conversion.py")
+    task_tools = _read_task_tools()
+    conversion = _read("app/core/agent/toolkits/foundation/conversion.py")
 
-    assert "from app.core.agent.task_tools_conversion import (" in task_tools
+    assert "from app.core.agent.toolkits.foundation.conversion import (" in task_tools
     assert "def convert_docx_to_pdf_with_libreoffice(" in conversion
     assert "def convert_file(" in conversion
     assert "def list_conversions(" in conversion
-    assert "return _conversion_convert_docx_to_pdf(" in task_tools
-    assert "return _conversion_convert_file(" in task_tools
-    assert "return _conversion_list_conversions(file_ext)" in task_tools
+    assert "convert_docx_to_pdf as _conversion_convert_docx_to_pdf" in task_tools
+    assert "convert_file as _conversion_convert_file" in task_tools
+    assert "list_conversions as _conversion_list_conversions" in task_tools
+    facade = ast.parse(_read("app/core/agent/task_tools.py"))
+    public_tools = {
+        alias.name
+        for node in ast.walk(facade)
+        if isinstance(node, ast.ImportFrom) and node.module == "app.core.agent.tools"
+        for alias in node.names
+    }
+    assert {
+        "fill_docx_template",
+        "convert_docx_to_pdf",
+        "convert_file",
+        "list_conversions",
+    } <= public_tools
+
+
+def test_workspace_task_runner_exports_only_cross_module_runtime_contract() -> None:
+    source = _read("web/src/workspace/task-runner.ts")
+    exported = source.split("export {", 1)[1].split("};", 1)[0]
+    published = source.split("registerFeatures({", 1)[1].split("});", 1)[0]
+
+    for module_name in (
+        "streamTaskFlow",
+        "restoreTaskRunCard",
+        "resumePersistedFileTask",
+    ):
+        assert module_name in exported
+    assert "restoreTaskRunCard" not in published
+    assert "resumePersistedFileTask" not in published
+    assert "registerFeatures({\n  streamTaskFlow" not in source
+
+    for internal_name in (
+        "compactTaskContract",
+        "decodeTaskContract",
+        "syncTaskInteractionSummary",
+        "cancelFileTaskRun",
+        "encodeTaskContract",
+        "ensureTaskUiState",
+        "syncTaskLiveProgress",
+        "getEventHandlers",
+        "parseSseEvents",
+        "setTaskRunContext",
+        "taskTerminalResult",
+        "handleEvent_error",
+        "TaskStatus",
+    ):
+        assert internal_name not in exported
+        assert internal_name not in published
+
+    assert "taskFlowTestHarness" in published
+    assert "recoverRunningSessionTasks" in published
+    assert source.count("registerFeatures({") == 1
+    assert "makeRunCard" in published
+    assert "processEvent: processFileTaskStreamEvent" in published
+
+
+def test_workspace_task_helpers_use_direct_module_owners_not_wa_bus() -> None:
+    ai_review = _read("web/src/workspace/ai-review.ts")
+    interactions = _read("web/src/workspace/task-card-interactions.ts")
+    dispatcher = _read("web/src/workspace/task-dispatcher.ts")
+    conversation = _read("web/src/workspace/conversation.ts")
+    runtime_init = _read("web/src/workspace/runtime-init.ts")
+    file_utils = _read("web/src/workspace/file-utils.ts")
+
+    assert "import { compactTaskContract } from './task-contract-codec';" in ai_review
+    assert "workspaceApi.compactTaskContract" not in ai_review
+    assert "decodeTaskContract: (_value: string)" in interactions
+    assert "api.decodeTaskContract" not in interactions
+    assert "import { decodeTaskContract } from './task-contract-codec';" in dispatcher
+    assert "(window as any).WA.decodeTaskContract" not in dispatcher
+    for source in (conversation, runtime_init):
+        assert "from './task-interaction-summary';" in source
+        assert "workspaceApi.syncTaskInteractionSummary" not in source
+    assert "import { streamTaskFlow } from './task-runner';" in runtime_init
+    assert (
+        "streamTaskFlow: (options: any) => workspaceApi.streamTaskFlow"
+        not in runtime_init
+    )
+    assert "import { restoreTaskRunCard } from './task-runner';" in conversation
+    assert "workspaceApi.restoreTaskRunCard" not in conversation
+    for source in (ai_review, file_utils):
+        assert "import { resumePersistedFileTask } from './task-runner';" in source
+        assert "workspaceApi.resumePersistedFileTask" not in source
+
+
+def test_workspace_task_browser_harness_is_e2e_gated_and_namespaced() -> None:
+    runner = _read("web/src/workspace/task-runner.ts")
+    browser = _read("tests/e2e/test_workspace_ai_assistant.py")
+
+    assert "getFeatureRegistry().__KOTO_E2E__ === true" in runner
+    assert "__KOTO_E2E__?: boolean" in runner
+    assert "taskFlowTestHarness:" in runner
+    assert "processEvent: processFileTaskStreamEvent" in runner
+    assert "document.__kotoFeatureRegistry__.streamTaskFlow" not in browser
+    assert (
+        "document.__kotoFeatureRegistry__.taskFlowTestHarness.streamTaskFlow" in browser
+    )
+    assert 'page.add_init_script("window.__KOTO_E2E__ = true")' in browser
+    assert "document.__kotoFeatureRegistry__.makeRunCard" not in browser
+    assert "document.__kotoFeatureRegistry__.processFileTaskStreamEvent" not in browser
+    assert "document.__kotoFeatureRegistry__.taskFlowTestHarness.makeRunCard" in browser
+    assert (
+        "document.__kotoFeatureRegistry__.taskFlowTestHarness.processEvent" in browser
+    )
+
+
+def test_generated_artifact_transactions_have_one_runtime_owner() -> None:
+    transaction = _read("app/core/agent/file_task_artifact_transaction.py")
+    validation = _read("app/core/agent/file_task_generated_image_validation.py")
+
+    assert not (ROOT / "app/core/agent/file_task_financial_report_recovery.py").exists()
+    assert "def run_scoped_staging_path(" in transaction
+    assert "def commit_staged_artifact(" in transaction
+    assert "def cleanup_run_owned_paths(" in transaction
+    assert "def pending_generated_docx_images(" in validation
+    assert "os.replace(" not in validation
+    assert len(transaction.splitlines()) <= 140

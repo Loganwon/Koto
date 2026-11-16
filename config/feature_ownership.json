@@ -1,0 +1,113 @@
+{
+  "schema_version": 1,
+  "features": [
+    {
+      "id": "desktop.startup",
+      "release_status": "stable",
+      "frontend_owners": ["src/koto_app.py"],
+      "backend_owners": ["launcher/entry.py", "src/server.py"],
+      "entrypoints": ["Koto.exe", "launcher.entry:main"],
+      "tests": ["tests/unit/test_startup_reliability_contract.py", "tests/unit/test_runtime_capabilities.py", "tests/installer/test_installer_e2e.ps1", "tests/installer/test_portable_e2e.ps1"],
+      "acceptance": ["Main window opens when every AI provider is unavailable.", "Health reports degraded instead of terminating the process.", "Installer and portable packages pass the eight-scenario provider-independent startup matrix."]
+    },
+    {
+      "id": "settings.model-runtime",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/workspace/model-settings.ts", "web/src/app/settings.ts"],
+      "backend_owners": ["web/blueprints/settings.py", "app/core/llm/local_model_runtime.py", "app/core/llm/runtime_capabilities.py"],
+      "entrypoints": ["#settingsPanel", "/api/settings", "/api/v1/models/refresh", "/api/capabilities"],
+      "tests": ["tests/unit/test_workspace_model_settings_contract.py", "tests/unit/test_settings_frontend_contract.py", "tests/unit/test_runtime_capabilities.py", "tests/installer/test_installer_e2e.ps1", "tests/installer/test_portable_e2e.ps1"],
+      "acceptance": ["Unavailable or incompatible local models are repairable from settings.", "Changing model mode does not require an application restart.", "Capability inspection never loads model weights and only probes providers after an explicit user action."]
+    },
+    {
+      "id": "chat.primary",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/app/chat-ui.ts"],
+      "backend_owners": ["web/blueprints/chat.py", "web/services/chat_stream/orchestrator.py"],
+      "entrypoints": ["POST /api/chat/stream", "#messageInput"],
+      "tests": ["tests/e2e/test_chat_interface.py", "tests/unit/test_chat_stream_orchestrator_contract.py"],
+      "acceptance": ["A user message produces one ordered stream and one persisted assistant turn."]
+    },
+    {
+      "id": "workspace.file-open-save",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/workspace/file-open.ts", "web/src/workspace/save.ts"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py"],
+      "entrypoints": ["FeatureRegistry.openWorkspaceFile", "/api/v1/workspace/open_file", "/api/v1/workspace/save_file"],
+      "tests": ["tests/e2e/test_workspace_file_editor.py", "tests/integration/test_workspace_assistant_routes.py"],
+      "acceptance": ["A supported file opens in exactly one editor session.", "Saved bytes can be reopened by the corresponding format parser."]
+    },
+    {
+      "id": "docx.edit-review",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/workspace/docx-review-runtime.ts", "web/src/review/layout-position.ts", "web/tiptap-editor/koto-docx-editor.js"],
+      "backend_owners": ["app/core/file/parsers/docx_rich_renderer.py", "web/blueprints/workspace_assistant.py"],
+      "entrypoints": ["DOCX editor mount", "DOCX review rail"],
+      "tests": ["tests/e2e/test_docx_review_ui.py", "tests/unit/test_docx_review_performance_contract.py"],
+      "acceptance": ["Comments and tracked changes resolve to stable document anchors.", "Large review sets remain within the P4 performance budget."]
+    },
+    {
+      "id": "xlsx.edit",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/editors/xlsx-editor.ts", "web/univer-editor/sheets-main.js"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py", "app/core/file/exporters/xlsx_exporter.py"],
+      "entrypoints": ["XLSX editor mount", "/api/v1/workspace/save_file"],
+      "tests": ["tests/integration/test_xlsx_comprehensive.py"],
+      "acceptance": ["Edited cell values, formulas and styles survive save and reopen."]
+    },
+    {
+      "id": "pptx.edit",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/editors/pptx-editor.ts"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py", "app/core/file/pptx_editor.py"],
+      "entrypoints": ["PPTX editor mount", "/api/v1/workspace/open_file", "/api/v1/workspace/save_file"],
+      "tests": ["tests/integration/test_workspace_assistant_routes.py", "tests/e2e_pptx_editor.py"],
+      "acceptance": ["Text and slide edits survive download and reopen."]
+    },
+    {
+      "id": "pdf.view-annotate",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/editors/pdf-viewer.ts"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py", "app/core/services/pdf_annotator.py"],
+      "entrypoints": ["PDF editor mount", "/api/v1/workspace/pdf/save_annotations", "/api/v1/workspace/pdf/load_annotations/<file_id>"],
+      "tests": ["tests/unit/test_pdf_annotator.py", "tests/unit/test_pdf_viewer_render_guards.py", "tests/integration/test_workspace_assistant_routes.py", "tests/e2e/test_p4_pdf_document_flows.py"],
+      "acceptance": ["Annotation geometry survives zoom, rotation, save and reload.", "Rendered appearances are visible in an independent PDF renderer."]
+    },
+    {
+      "id": "pdf.page-operations",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/editors/pdf-viewer.ts"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py", "app/core/services/pdf_annotator.py"],
+      "entrypoints": ["/api/v1/workspace/pdf/page_ops"],
+      "tests": ["tests/unit/test_pdf_annotator.py", "tests/integration/test_workspace_assistant_routes.py", "tests/e2e/test_p4_pdf_document_flows.py"],
+      "acceptance": ["Rotate, reorder, delete and export produce a valid PDF with the requested page sequence."]
+    },
+    {
+      "id": "pdf.convert",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/editors/pdf-viewer.ts"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py", "app/core/services/pdf_annotator.py"],
+      "entrypoints": ["/api/v1/workspace/pdf/convert"],
+      "tests": ["tests/integration/test_workspace_assistant_routes.py", "tests/e2e/test_p4_pdf_document_flows.py"],
+      "acceptance": ["DOCX, XLSX and PPTX outputs reopen and contain expected semantic content.", "Missing conversion dependencies produce an actionable error instead of an empty success."]
+    },
+    {
+      "id": "pdf.remove-watermark",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/editors/pdf-viewer.ts"],
+      "backend_owners": ["web/blueprints/workspace_assistant.py", "app/core/services/pdf_annotator.py"],
+      "entrypoints": ["/api/v1/workspace/pdf/remove_watermark"],
+      "tests": ["tests/unit/test_pdf_annotator.py", "tests/integration/test_workspace_assistant_routes.py", "tests/e2e/test_p4_pdf_document_flows.py"],
+      "acceptance": ["A supported watermark is absent in rendered output.", "A no-op reports zero removals and a reason rather than success."]
+    },
+    {
+      "id": "file-ai.task-stream",
+      "release_status": "stable",
+      "frontend_owners": ["web/src/workspace/task-runner.ts", "web/src/workspace/task-dispatcher.ts"],
+      "backend_owners": ["web/blueprints/editor_ai.py", "app/core/services/file_task_stream.py", "app/core/agent/file_task_runtime.py"],
+      "entrypoints": ["POST /api/editor/ai/task-stream"],
+      "tests": ["tests/e2e/test_workspace_ai_assistant.py", "tests/unit/test_file_task_runtime.py"],
+      "acceptance": ["One request uses one canonical execution path and reports the actual output artifact."]
+    }
+  ]
+}

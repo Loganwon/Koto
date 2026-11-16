@@ -10,6 +10,9 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from app.core.agent.file_task_contract import FileTaskFile, FileTaskRequest
+from app.core.agent.file_task_intent_predicates import (
+    has_global_readonly_write_negation,
+)
 from app.core.agent.file_task_runtime_patterns import (
     _OUTPUT_PATH_CONTEXT_PATTERNS,
     _SOURCE_PATH_CONTEXT_PATTERNS,
@@ -17,14 +20,99 @@ from app.core.agent.file_task_runtime_patterns import (
     _TASK_TEXT_FILE_REFERENCE_PATTERN,
     _TASK_TEXT_OUTPUT_EXTENSIONS,
 )
-from app.core.agent.file_task_tool_catalog import is_write_tool, write_target_for_tool
 from app.core.agent.file_task_workflow_state import workflow_resume_control
+from app.core.agent.toolkits.foundation.catalog import (
+    is_write_tool,
+    write_target_for_tool,
+)
 
 logger = logging.getLogger(__name__)
 
 BoolPredicate = Callable[[str], bool]
 PathComparator = Callable[[Any, Any], bool]
 PathResolver = Callable[[Any], str]
+
+
+def task_file_reference_spans(task: str, known_paths=()) -> List[tuple[str, int, int]]:
+    """Lex file tokens without folding instruction prose into their names.
+
+    Quotes and trusted inventory names are literals. For unquoted references,
+    only the existing path-context grammar may precede the filename; it is
+    never stripped by a matching basename suffix.
+    """
+    text = str(task or "")
+    known = {str(path).replace("\\", "/").casefold() for path in known_paths if path}
+    known.update(Path(path).name for path in tuple(known))
+    quoted = re.compile(
+        r"""["'“‘《「`](?P<path>[^"'”’》」`\r\n]+?\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))["'”’》」`]""",
+        re.IGNORECASE,
+    )
+    spans = [
+        (match.group("path"), *match.span("path")) for match in quoted.finditer(text)
+    ]
+    occupied = [match.span() for match in quoted.finditer(text)]
+    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(text):
+        start, end = match.span("path")
+        if any(start < right and end > left for left, right in occupied):
+            continue
+        if end < len(text) and re.match(r"[A-Za-z0-9_./\\-]", text[end]):
+            continue
+        raw = match.group("path")
+        if raw.replace("\\", "/").casefold() not in known:
+            # Bind an inventory literal only after an existing grammatical
+            # file marker or source-list separator. A suffix alone (for
+            # example report.docx inside 财务report.docx) is never a binding.
+            for literal in sorted(known, key=len, reverse=True):
+                normalized = raw.replace("\\", "/").casefold()
+                if not normalized.endswith(literal):
+                    continue
+                cut = len(raw) - len(literal)
+                if not cut or re.search(r"[A-Za-z0-9_./\\-]$", raw[:cut]):
+                    continue
+                before = text[max(0, start + cut - 100) : start + cut]
+                after = text[end : end + 100]
+                immediate_marker = any(
+                    found.end() == len(raw[:cut])
+                    for pattern in (
+                        *_OUTPUT_PATH_CONTEXT_PATTERNS,
+                        *_SOURCE_PATH_CONTEXT_PATTERNS,
+                    )
+                    for found in pattern.finditer(raw[:cut])
+                )
+                if immediate_marker or _candidate_path_is_immediate_source_reference(
+                    before,
+                    after,
+                    Path(literal).suffix.lstrip("."),
+                ):
+                    raw = raw[cut:]
+                    start += cut
+                    break
+            # Reuse the established file-reference grammar, not a new intent
+            # classifier. A Chinese filename after the verb remains intact.
+            prefixes = [
+                found
+                for pattern in (
+                    *_OUTPUT_PATH_CONTEXT_PATTERNS,
+                    *_SOURCE_PATH_CONTEXT_PATTERNS,
+                )
+                if (found := pattern.match(raw)) is not None
+                and raw.replace("\\", "/").casefold() not in known
+                # English verbs are separate words; source.txt/output.xlsx
+                # are literal filenames, not a verb followed by a filename.
+                and not found.group().isascii()
+                and Path(raw[found.end() :].replace("\\", "/")).stem
+                and not raw[found.end() :].startswith(".")
+            ]
+            if prefixes:
+                cut = max(found.end() for found in prefixes)
+                raw = raw[cut:]
+                start += cut
+        clean = raw.strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'《》「」“”‘’`")
+        start += raw.find(clean) if clean else 0
+        if clean:
+            spans.append((clean, start, start + len(clean)))
+    return sorted(spans, key=lambda item: item[1])
+
 
 _TASK_TEXT_DIRECTORY_SEGMENT = (
     r"(?:[A-Za-z]:[\\/])?[^\s\"'<>|,，。；;、!?！？()（）\[\]【】]+"
@@ -45,6 +133,28 @@ _TASK_TEXT_NAMED_OUTPUT_PATTERN = re.compile(
     r"\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))",
     re.IGNORECASE,
 )
+_TASK_TEXT_SAVE_AS_LABEL = r"(?:另存为|保存为|输出为|导出为|save\s+as|export\s+as)"
+_TASK_TEXT_SAVE_AS_OUTPUT_PATTERN = re.compile(
+    rf"{_TASK_TEXT_SAVE_AS_LABEL}\s*(?:[《「“\"'])?"
+    r"(?P<path>[^\s\"'<>|:：,，。；;、!?！？()（）\[\]【】《》「」“”]+?"
+    r"\.(?:csv|docx?|html|json|md|pdf|pptx?|txt|xlsx?))",
+    re.IGNORECASE,
+)
+
+_WORKSPACE_SCAN_IGNORED_DIRS = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".svn",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+}
+_WORKSPACE_SCAN_MAX_FILES = 20_000
 
 
 def request_with_target_path(
@@ -110,6 +220,33 @@ def target_path_with_file_alias(request: FileTaskRequest, target_path: str) -> s
     return clean_target
 
 
+def resolve_explicit_output_against_request_target(
+    request_target: str,
+    explicit_output: str,
+) -> str:
+    """Keep an authoritative target directory when the prompt repeats its name.
+
+    Workspace requests often carry the full output path while the visible task
+    text mentions only ``report.docx``. Treating that basename as a different
+    target silently moved artifacts to the workspace root and let verification
+    check the wrong file. A prompt path with its own directory remains an
+    explicit override; only a matching basename inherits the request directory.
+    """
+    clean_output = str(explicit_output or "").strip()
+    clean_target = str(request_target or "").strip()
+    if not clean_output or not clean_target:
+        return clean_output
+    normalized_output = clean_output.replace("\\", "/").strip()
+    if "/" in normalized_output.strip("/"):
+        return clean_output
+    if (
+        Path(clean_target.replace("\\", "/")).name.casefold()
+        == Path(normalized_output).name.casefold()
+    ):
+        return clean_target
+    return clean_output
+
+
 def request_target_points_to_source(
     request: FileTaskRequest,
     target_path: str,
@@ -135,23 +272,28 @@ def explicit_output_path_from_task(
     task: str,
     *,
     has_artifact_creation_intent: BoolPredicate,
+    known_paths=(),
 ) -> str:
     task_text = str(task or "").strip()
-    if not task_text or not has_artifact_creation_intent(task_text):
+    if not task_text or has_global_readonly_write_negation(task_text):
         return ""
-    named_outputs = _explicitly_named_output_paths(task_text)
-    if named_outputs:
-        return named_outputs[-1][1]
+    declared_outputs = _explicitly_declared_output_paths(task_text)
+    if declared_outputs:
+        return declared_outputs[-1][1]
+    if not has_artifact_creation_intent(task_text):
+        return ""
     candidates: List[tuple[int, int, str]] = []
-    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
-        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+    for raw_path, start, end in task_file_reference_spans(task_text, known_paths):
         suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
         if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
             continue
-        start, end = match.span("path")
         before = task_text[max(0, start - 72) : start]
         after = task_text[end : min(len(task_text), end + 48)]
         near = f"{before}{after}"
+        if not _output_reference_has_literal_boundary(
+            task_text, raw_path, start, known_paths
+        ):
+            continue
         if _candidate_path_has_local_write_negation(before):
             continue
         if _candidate_path_is_immediate_source_reference(before, after, suffix):
@@ -160,8 +302,6 @@ def explicit_output_path_from_task(
             task_text, raw_path, start, end
         )
         score = 0
-        if suffix in {"doc", "docx", "ppt", "pptx", "xls", "xlsx", "pdf"}:
-            score += 2
         if any(pattern.search(near) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS):
             score += 5
         if any(pattern.search(near) for pattern in _SOURCE_PATH_CONTEXT_PATTERNS):
@@ -182,27 +322,56 @@ def explicit_output_path_from_task(
     return candidates[0][2]
 
 
+def _output_reference_has_literal_boundary(
+    task: str, path: str, start: int, known_paths=()
+) -> bool:
+    """Require filename evidence before assigning an unbound prose token."""
+    normalized = path.replace("\\", "/").casefold()
+    known = {str(value).replace("\\", "/").casefold() for value in known_paths if value}
+    known.update(Path(value).name for value in tuple(known))
+    if (
+        path.isascii()
+        or normalized in known
+        or (start and task[start - 1] in "\"'“‘《「`")
+    ):
+        return True
+    before = task[max(0, start - 100) : start].rstrip()
+    return any(
+        found.end() == len(before) or "/" in normalized
+        for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS
+        for found in pattern.finditer(before)
+    )
+
+
 def explicit_output_paths_from_task(
     task: str,
     *,
     has_artifact_creation_intent: BoolPredicate,
+    known_target_path: str = "",
+    known_paths=(),
 ) -> List[str]:
     task_text = str(task or "").strip()
-    if not task_text or not has_artifact_creation_intent(task_text):
+    if not task_text or has_global_readonly_write_negation(task_text):
         return []
-    named_outputs = _explicitly_named_output_paths(task_text)
-    if named_outputs:
-        return _unique_output_paths(named_outputs)
+    declared_outputs = _explicitly_declared_output_paths(task_text)
+    if declared_outputs:
+        return _unique_output_paths(declared_outputs)
+    if not has_artifact_creation_intent(task_text):
+        return []
     candidates: List[tuple[int, int, str]] = []
-    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
-        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+    for raw_path, start, end in task_file_reference_spans(
+        task_text, (*known_paths, known_target_path)
+    ):
         suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
         if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
             continue
-        start, end = match.span("path")
         before = task_text[max(0, start - 72) : start]
         after = task_text[end : min(len(task_text), end + 72)]
         near = f"{before}{after}"
+        if not _output_reference_has_literal_boundary(
+            task_text, raw_path, start, (*known_paths, known_target_path)
+        ):
+            continue
         if _candidate_path_has_local_write_negation(before):
             continue
         if _candidate_path_is_immediate_source_reference(before, after, suffix):
@@ -253,6 +422,40 @@ def _explicitly_named_output_paths(task_text: str) -> List[tuple[int, str]]:
     return candidates
 
 
+def _explicitly_declared_output_paths(task_text: str) -> List[tuple[int, str]]:
+    candidates = _explicitly_named_output_paths(task_text)
+    # Quoted filenames can contain spaces. Read them as one literal rather
+    # than extracting a basename suffix from the general token matcher.
+    for raw_path, start, end in task_file_reference_spans(task_text):
+        if not start or task_text[start - 1] not in "\"'“‘《「`":
+            continue
+        before_quote = task_text[: start - 1].rstrip()
+        if re.search(
+            rf"(?:{_TASK_TEXT_SAVE_AS_LABEL}|{_TASK_TEXT_FILENAME_LABEL})\s*$",
+            before_quote,
+            re.IGNORECASE,
+        ):
+            candidates.append(
+                (
+                    start,
+                    _path_with_split_output_directory(task_text, raw_path, start, end),
+                )
+            )
+    for match in _TASK_TEXT_SAVE_AS_OUTPUT_PATTERN.finditer(task_text):
+        raw_path = match.group("path").strip()
+        suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
+        if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
+            continue
+        start, end = match.span("path")
+        candidate_path = _path_with_split_output_directory(
+            task_text, raw_path, start, end
+        )
+        if candidate_path:
+            candidates.append((start, candidate_path))
+    candidates.sort(key=lambda item: item[0])
+    return candidates
+
+
 def _unique_output_paths(candidates: List[tuple[Any, ...]]) -> List[str]:
     seen: set[str] = set()
     outputs: List[str] = []
@@ -270,13 +473,20 @@ def explicit_write_target_path_from_task(task: str) -> str:
     task_text = str(task or "").strip()
     if not task_text:
         return ""
+    declared_outputs = _explicitly_declared_output_paths(task_text)
+    if declared_outputs:
+        return declared_outputs[-1][1]
     candidates: List[tuple[int, int, str]] = []
-    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
-        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+    for raw_path, start, end in task_file_reference_spans(task_text):
+        if not raw_path.isascii() and not (
+            start and task_text[start - 1] in "\"'“‘《「`"
+        ):
+            # An unbound prose fragment is not an edit destination. New
+            # explicitly named outputs are handled by the output grammar.
+            continue
         suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
         if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
             continue
-        start, end = match.span("path")
         before = task_text[max(0, start - 80) : start]
         after = task_text[end : min(len(task_text), end + 80)]
         near = f"{before}{after}"
@@ -361,6 +571,21 @@ def _candidate_path_is_immediate_source_reference(
         re.IGNORECASE,
     ):
         return True
+    source_list_match = re.search(
+        r"(?:读取|阅读|查看|分析|综合读取|基于|来自|打开|导入|read|source|from|input)"
+        r".{0,96}(?:和|与|及|以及|、|,|，|and)\s*$",
+        local_before,
+        re.IGNORECASE,
+    )
+    output_clause_after_source = re.search(
+        r"(?:生成|创建|输出|导出|产出|保存|写入|制作|"
+        r"generate|create|export|produce|save|write)"
+        r".{0,96}(?:和|与|及|以及|、|,|，|and)\s*$",
+        local_before,
+        re.IGNORECASE,
+    )
+    if source_list_match and not output_clause_after_source:
+        return True
     if suffix in {"xls", "xlsx", "csv"} and re.match(
         r"\s*(?:的|中|里|内|里的|中的|sheet|worksheet).{0,40}"
         r"(?:工作表|sheet|worksheet|数据|表格|rows?|cells?)",
@@ -440,25 +665,27 @@ def _strong_output_reference_file_names(task_text: str) -> set[str]:
         return names
     # Named outputs are unambiguous. Seed these first so the broad matcher
     # cannot turn “生成一份名为《报告.docx》” into a fake source-file path.
-    for _start, output_path in _explicitly_named_output_paths(source):
+    for _start, output_path in _explicitly_declared_output_paths(source):
         name = Path(output_path.replace("\\", "/")).name.casefold()
         if name:
             names.add(name)
-    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(source):
-        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+    for raw_path, start, end in task_file_reference_spans(source):
         suffix = Path(raw_path.replace("\\", "/")).suffix.lower().lstrip(".")
         if suffix not in _TASK_TEXT_OUTPUT_EXTENSIONS:
             continue
-        start, end = match.span("path")
         before = source[max(0, start - 100) : start]
         after = source[end : min(len(source), end + 120)]
         if _candidate_path_is_immediate_source_reference(before, after, suffix):
             continue
         split_path = _path_with_split_output_directory(source, raw_path, start, end)
-        if split_path != raw_path or re.search(
-            rf"{_TASK_TEXT_FILENAME_LABEL}\s*$",
-            before,
-            re.IGNORECASE,
+        if (
+            split_path != raw_path
+            or re.search(
+                rf"{_TASK_TEXT_FILENAME_LABEL}\s*$",
+                before,
+                re.IGNORECASE,
+            )
+            or any(pattern.search(before) for pattern in _OUTPUT_PATH_CONTEXT_PATTERNS)
         ):
             name = Path(raw_path.replace("\\", "/")).name.casefold()
             if name:
@@ -530,8 +757,6 @@ def should_skip_uncreated_target_context(
     has_artifact_creation_intent: BoolPredicate,
     resolve_task_file_path: PathResolver,
 ) -> bool:
-    if not getattr(file_info, "target", False):
-        return False
     path_text = str(file_info.path or file_info.name or "").strip()
     if not path_text or not same_path(path_text, request.target_path):
         return False
@@ -672,9 +897,16 @@ def files_explicitly_mentioned_in_task(
     *,
     workspace_root: Optional[Path],
     task: str,
+    known_paths=(),
 ) -> List[FileTaskFile]:
     task_text = str(task or "").strip()
     if not task_text:
+        return []
+
+    # Avoid walking a potentially huge workspace for ordinary natural-language
+    # tasks.  The scan is only a fallback for prompts that contain a file-like
+    # reference; attached/current files already arrive through the request.
+    if not _TASK_TEXT_FILE_REFERENCE_PATTERN.search(task_text):
         return []
 
     task_folded = task_text.replace("\\", "/").casefold()
@@ -692,32 +924,48 @@ def files_explicitly_mentioned_in_task(
             output_reference_names=output_reference_names,
             workspace_reference_names=set(),
             existing_keys=set(),
+            known_paths=known_paths,
         )
 
+    scanned_files = 0
+    scan_truncated = False
     try:
-        workspace_files = workspace_root.rglob("*")
-        for path in workspace_files:
-            if not path.is_file():
-                continue
-            if path.suffix.casefold() not in _TASK_TEXT_FILE_EXTENSIONS:
-                continue
-            try:
-                rel_path = path.relative_to(workspace_root).as_posix()
-            except ValueError:
-                continue
-            rel_folded = rel_path.casefold()
-            name_folded = path.name.casefold()
-            if task_text_mentions_path(
-                task_folded, rel_folded
-            ) or task_text_mentions_path(task_folded, f"workspace/{rel_folded}"):
+        for root_text, dir_names, file_names in os.walk(workspace_root):
+            dir_names[:] = sorted(
+                name
+                for name in dir_names
+                if name.casefold() not in _WORKSPACE_SCAN_IGNORED_DIRS
+                and not name.startswith(".")
+            )
+            for file_name in sorted(file_names):
+                scanned_files += 1
+                if scanned_files > _WORKSPACE_SCAN_MAX_FILES:
+                    scan_truncated = True
+                    break
+                path = Path(root_text) / file_name
+                if path.suffix.casefold() not in _TASK_TEXT_FILE_EXTENSIONS:
+                    continue
+                # Most workspace files are irrelevant.  The basename check
+                # avoids path normalization and resolution for every entry.
+                name_folded = path.name.casefold()
+                if not name_folded or name_folded not in task_folded:
+                    continue
                 if name_folded in output_reference_names:
                     continue
-                exact_matches[str(path.resolve()).casefold()] = path
-                continue
-            if name_folded and name_folded in task_folded:
-                if name_folded in output_reference_names:
+                try:
+                    rel_path = path.relative_to(workspace_root).as_posix()
+                except ValueError:
                     continue
-                basename_matches.setdefault(name_folded, []).append(path)
+                rel_folded = rel_path.casefold()
+                if task_text_mentions_path(
+                    task_folded, rel_folded
+                ) or task_text_mentions_path(task_folded, f"workspace/{rel_folded}"):
+                    exact_matches[str(path.resolve()).casefold()] = path
+                    continue
+                if task_text_mentions_path(task_folded, name_folded):
+                    basename_matches.setdefault(name_folded, []).append(path)
+            if scan_truncated:
+                break
     except OSError as exc:
         logger.debug("[FileTaskRuntime] workspace task-file scan skipped: %s", exc)
         return _weak_files_explicitly_mentioned_in_task(
@@ -725,6 +973,14 @@ def files_explicitly_mentioned_in_task(
             output_reference_names=output_reference_names,
             workspace_reference_names=set(),
             existing_keys=set(),
+            known_paths=known_paths,
+        )
+
+    if scan_truncated:
+        logger.warning(
+            "[FileTaskRuntime] workspace task-file scan capped at %s files under %s",
+            _WORKSPACE_SCAN_MAX_FILES,
+            workspace_root,
         )
 
     for matches in basename_matches.values():
@@ -753,6 +1009,7 @@ def files_explicitly_mentioned_in_task(
             existing_keys={
                 key for item in resolved for key in _context_file_seen_keys(item) if key
             },
+            known_paths=known_paths,
         )
     )
     return resolved
@@ -764,12 +1021,24 @@ def _weak_files_explicitly_mentioned_in_task(
     output_reference_names: set[str],
     workspace_reference_names: set[str],
     existing_keys: set[str],
+    known_paths=(),
 ) -> List[FileTaskFile]:
     result: List[FileTaskFile] = []
     seen = set(existing_keys)
-    for match in _TASK_TEXT_FILE_REFERENCE_PATTERN.finditer(task_text):
-        raw_path = match.group("path").strip(" \t\r\n,，。；;、!?！？()（）[]【】\"'")
+    known_names = {
+        str(path).replace("\\", "/").casefold() for path in known_paths if path
+    }
+    known_names.update(Path(path).name for path in tuple(known_names))
+    for raw_path, start, end in task_file_reference_spans(task_text, known_paths):
         normalized_path = raw_path.replace("\\", "/").rstrip("/")
+        if (
+            not raw_path.isascii()
+            and normalized_path.casefold() not in known_names
+            and not (start and task_text[start - 1] in "\"'“‘《「`")
+        ):
+            # Unbound Chinese prose is not an invented host path. Real files
+            # were matched against the inventory above; quotes name literals.
+            continue
         suffix = Path(normalized_path).suffix.lower().lstrip(".")
         if (
             suffix not in _TASK_TEXT_FILE_EXTENSIONS
@@ -779,19 +1048,7 @@ def _weak_files_explicitly_mentioned_in_task(
         name = Path(normalized_path).name
         if name.casefold() in output_reference_names:
             continue
-        # The broad matcher may include the natural-language prefix before a
-        # named output (for example ``生成一份名为《报告.docx``).  Its basename
-        # is then no longer equal to ``报告.docx``, but it still ends with the
-        # known output name and must not become a phantom source file.
-        if any(
-            normalized_path.casefold().endswith(output_name)
-            for output_name in output_reference_names
-        ):
-            continue
-        if any(
-            name.casefold().endswith(workspace_name)
-            for workspace_name in workspace_reference_names
-        ):
+        if name.casefold() in workspace_reference_names:
             continue
         file_info = FileTaskFile(path=raw_path, name=name, type=suffix, target=False)
         key = _context_file_key(file_info)
@@ -815,16 +1072,13 @@ def resolved_workspace_root(workspace_root: str) -> Optional[Path]:
 
 
 def task_text_mentions_path(task_text: str, rel_path: str) -> bool:
-    if not rel_path:
+    expected = str(rel_path or "").replace("\\", "/").casefold().strip()
+    if not expected:
         return False
-    if rel_path in task_text:
-        return True
-    basename = rel_path.rsplit("/", 1)[-1]
-    if "/" not in rel_path or not basename:
-        return False
-    compact_task = re.sub(r"\s+", "", task_text)
-    compact_rel = re.sub(r"\s+", "", rel_path)
-    return bool(compact_rel and compact_rel in compact_task)
+    return any(
+        path.replace("\\", "/").casefold() == expected
+        for path, _, _ in task_file_reference_spans(task_text, (rel_path,))
+    )
 
 
 def protected_source_write_block_message(

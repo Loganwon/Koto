@@ -35,81 +35,14 @@ class TestRemovedLegacyVoiceModules:
 # 3. AutoExecution
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
-class TestAutoExecutionEngine:
-    """Tests for web.auto_execution.AutoExecutionEngine"""
-
-    def _make(self, tmp_path):
-        db = str(tmp_path / "auto_exec.db")
-        ws = str(tmp_path / "workspace")
-        os.makedirs(ws, exist_ok=True)
-        from web.auto_execution import AutoExecutionEngine
-
-        return AutoExecutionEngine(db_path=db, workspace_root=ws)
-
-    def test_init_creates_db(self, tmp_path):
-        engine = self._make(tmp_path)
-        assert os.path.exists(engine.db_path)
-
-    def test_builtin_tasks_registered(self, tmp_path):
-        engine = self._make(tmp_path)
-        assert "organize_files" in engine.task_handlers
-        assert "backup_file" in engine.task_handlers
-
-    def test_register_custom_task(self, tmp_path):
-        engine = self._make(tmp_path)
-        engine.register_task(
-            "custom", "Custom Task", "desc", "safe", lambda p: {"ok": True}
-        )
-        assert "custom" in engine.task_handlers
-
-    def test_authorize_and_can_execute(self, tmp_path):
-        engine = self._make(tmp_path)
-        engine.authorize_task("user1", "backup_file", auto_execute=True)
-        ok, msg = engine.can_execute("user1", "backup_file")
-        assert ok is True
-
-    def test_can_execute_unauthorized(self, tmp_path):
-        engine = self._make(tmp_path)
-        ok, msg = engine.can_execute("user1", "backup_file")
-        assert ok is False
-
-    def test_execute_task_unknown_type(self, tmp_path):
-        engine = self._make(tmp_path)
-        result = engine.execute_task("u1", "nonexistent_task", {})
-        assert result["success"] is False
-        assert "未知" in result["error"]
-
-    def test_execute_task_force(self, tmp_path):
-        engine = self._make(tmp_path)
-        engine.register_task("echo", "Echo", "echo", "safe", lambda p: {"echoed": True})
-        result = engine.execute_task("u1", "echo", {}, force=True)
-        assert result["success"] is True
-        assert result["result"]["echoed"] is True
-
-    def test_queue_task(self, tmp_path):
-        engine = self._make(tmp_path)
-        tid = engine.queue_task("user1", "backup_file", {"file": "a.txt"})
-        assert isinstance(tid, int) and tid > 0
-
-    def test_revoke_authorization(self, tmp_path):
-        engine = self._make(tmp_path)
-        engine.authorize_task("u1", "backup_file")
-        engine.revoke_authorization("u1", "backup_file")
-        ok, _ = engine.can_execute("u1", "backup_file")
-        assert ok is False
-
-
-# ---------------------------------------------------------------------------
-# 4. AutoCatalogScheduler
-# ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestAutoCatalogScheduler:
-    """Tests for web.auto_catalog_scheduler.AutoCatalogScheduler"""
+    """Tests for app.core.services.auto_catalog_scheduler.AutoCatalogScheduler"""
 
     def _make(self, tmp_path):
         settings = tmp_path / "settings.json"
         settings.write_text("{}", encoding="utf-8")
-        from web.auto_catalog_scheduler import AutoCatalogScheduler
+        from app.core.services.auto_catalog_scheduler import AutoCatalogScheduler
 
         return AutoCatalogScheduler(settings_file=str(settings))
 
@@ -129,7 +62,9 @@ class TestAutoCatalogScheduler:
         sched = self._make(tmp_path)
         assert sched.get_source_directories() == []
 
-    @patch("web.auto_catalog_scheduler.AutoCatalogScheduler._register_scheduled_task")
+    @patch(
+        "app.core.services.auto_catalog_scheduler.AutoCatalogScheduler._register_scheduled_task"
+    )
     def test_enable_auto_catalog(self, mock_reg, tmp_path):
         sched = self._make(tmp_path)
         sched.enable_auto_catalog("03:00")
@@ -137,7 +72,9 @@ class TestAutoCatalogScheduler:
         assert sched.config["auto_catalog"]["schedule_time"] == "03:00"
         mock_reg.assert_called_once()
 
-    @patch("web.auto_catalog_scheduler.AutoCatalogScheduler._cancel_scheduled_task")
+    @patch(
+        "app.core.services.auto_catalog_scheduler.AutoCatalogScheduler._cancel_scheduled_task"
+    )
     def test_disable_auto_catalog(self, mock_cancel, tmp_path):
         sched = self._make(tmp_path)
         sched.disable_auto_catalog()
@@ -152,6 +89,7 @@ class TestAutoCatalogScheduler:
 
     def test_get_backup_directory_creates(self, tmp_path):
         sched = self._make(tmp_path)
+        sched.config = {"auto_catalog": {"backup_dir": str(tmp_path / "backups")}}
         bd = sched.get_backup_directory()
         assert os.path.isdir(bd)
 
@@ -373,10 +311,10 @@ class TestAuthManager:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestImageManager:
-    """Tests for web.image_manager.ImageManager"""
+    """Tests for the Core-owned ImageManager."""
 
     def _make(self, tmp_path):
-        from web.image_manager import ImageManager
+        from app.core.services.image_manager import ImageManager
 
         return ImageManager(client=None, workspace_dir=str(tmp_path))
 
@@ -424,17 +362,16 @@ class TestImageManager:
 # ---------------------------------------------------------------------------
 @pytest.mark.unit
 class TestCalendarManager:
-    """Tests for web.calendar_manager.CalendarManager"""
+    """Tests for app.core.services.calendar_manager.CalendarManager"""
 
     def _make(self, tmp_path):
-        with patch("web.calendar_manager.get_reminder_manager") as mock_rm:
+        with patch(
+            "app.core.services.calendar_manager.get_reminder_manager"
+        ) as mock_rm:
             mock_rm.return_value = MagicMock()
-            with patch("web.calendar_manager.os.path.dirname") as mock_dir:
-                # Redirect project_root to tmp_path so file I/O stays in temp
-                mock_dir.side_effect = lambda p: str(tmp_path)
-                from web.calendar_manager import CalendarManager
+            from app.core.services.calendar_manager import CalendarManager
 
-                mgr = CalendarManager()
+            mgr = CalendarManager(str(tmp_path / "calendar" / "events.json"))
         return mgr
 
     def test_init_empty_events(self, tmp_path):
@@ -443,7 +380,9 @@ class TestCalendarManager:
 
     def test_add_event(self, tmp_path):
         mgr = self._make(tmp_path)
-        with patch("web.calendar_manager.get_reminder_manager") as mock_rm:
+        with patch(
+            "app.core.services.calendar_manager.get_reminder_manager"
+        ) as mock_rm:
             mock_rm.return_value = MagicMock()
             eid = mgr.add_event(
                 "Meeting", "Team sync", datetime.now() + timedelta(hours=1)
@@ -453,7 +392,9 @@ class TestCalendarManager:
 
     def test_list_events_sorted(self, tmp_path):
         mgr = self._make(tmp_path)
-        with patch("web.calendar_manager.get_reminder_manager") as mock_rm:
+        with patch(
+            "app.core.services.calendar_manager.get_reminder_manager"
+        ) as mock_rm:
             mock_rm.return_value = MagicMock()
             mgr.add_event("B", "later", datetime(2099, 6, 1))
             mgr.add_event("A", "earlier", datetime(2099, 1, 1))
@@ -462,7 +403,9 @@ class TestCalendarManager:
 
     def test_delete_event(self, tmp_path):
         mgr = self._make(tmp_path)
-        with patch("web.calendar_manager.get_reminder_manager") as mock_rm:
+        with patch(
+            "app.core.services.calendar_manager.get_reminder_manager"
+        ) as mock_rm:
             mock_rm.return_value = MagicMock()
             eid = mgr.add_event("Temp", "delete me", datetime(2099, 1, 1))
         assert mgr.delete_event(eid) is True
@@ -474,7 +417,9 @@ class TestCalendarManager:
 
     def test_list_events_with_limit(self, tmp_path):
         mgr = self._make(tmp_path)
-        with patch("web.calendar_manager.get_reminder_manager") as mock_rm:
+        with patch(
+            "app.core.services.calendar_manager.get_reminder_manager"
+        ) as mock_rm:
             mock_rm.return_value = MagicMock()
             for i in range(5):
                 mgr.add_event(f"E{i}", "", datetime(2099, 1, i + 1))

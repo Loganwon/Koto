@@ -10,7 +10,6 @@ import re
 from app.core.llm.chat_generation_policy import (
     first_token_timeout_seconds,
     select_regular_model,
-    should_try_local_chat_fast_path,
 )
 from web.sse.sanitizer import safe_sse as _safe_sse
 
@@ -62,7 +61,9 @@ def _stream_from_provider(
                 delta = choices[0].get("delta", {})
                 content = delta.get("content", "")
             else:
-                content = chunk.get("content", "")
+                # Provider ``content`` is a cumulative snapshot; ``delta`` is
+                # the only value that is safe for an append-only SSE token.
+                content = chunk.get("delta", chunk.get("content", ""))
         else:
             content = getattr(chunk, "content", "") or str(chunk)
         yield _StreamChunk(text=content)

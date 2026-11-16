@@ -14,7 +14,6 @@ from app.core.agent.file_task_contract import (
 from app.core.agent.file_task_evidence_guard import source_grounding_policy
 from app.core.agent.file_task_prompt_sections import followup_prompt_prefix
 from app.core.agent.file_task_runtime_utils import _preview
-from app.core.agent.file_task_whitebox import whitebox_execution_plan_schema
 from app.core.agent.tool_design_protocol import TOOL_DESIGN_PROTOCOL
 
 
@@ -29,7 +28,6 @@ def build_file_task_messages(
     capability_profiles: list[dict[str, Any]],
     followup_context: dict[str, Any],
     recipe_skeleton: dict[str, Any],
-    execution_brief_schema: dict[str, Any],
 ) -> list[dict[str, Any]]:
     context: dict[str, Any] = {
         "task": request.task,
@@ -38,22 +36,18 @@ def build_file_task_messages(
         "task_feedback_mode": {
             "output_mode": classification.output_mode,
             "label": _output_mode_label(classification.output_mode),
-            "write_intent": bool(classification.write_intent),
-            "should_write_this_round": str(classification.output_mode or "")
-            .strip()
-            .lower()
-            == "write",
+            "write_authorized": bool(classification.write_authorized),
+            "write_required": bool(classification.write_required),
+            "should_write_this_round": bool(classification.write_required),
         },
         "intent_plan": intent_plan.public_dict(),
         "files": [file_info.public_dict() for file_info in files],
         "file_capability_profiles": capability_profiles,
         "context_snippets": snippets[:10],
         "recipe_skeleton": recipe_skeleton,
-        "execution_plan_schema": whitebox_execution_plan_schema(),
-        "execution_brief_schema": execution_brief_schema,
         "tool_design_protocol": TOOL_DESIGN_PROTOCOL,
     }
-    if not classification.write_intent and (snippets or files or request.selection):
+    if not classification.write_required and (snippets or files or request.selection):
         context["source_grounding"] = source_grounding_policy(
             task=request.task,
             has_source_context=bool(snippets or files or request.selection),

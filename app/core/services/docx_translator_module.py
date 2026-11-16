@@ -182,7 +182,7 @@ def _translate_batch_llm(texts: list, target_language: str, llm_client) -> list:
     try:
         from app.core.llm.provider_compat import types as gtypes
 
-        resp = llm_client.models.generate_content(
+        resp = llm_client.generate_content(
             model="deepseek-chat",
             contents=prompt,
             config=gtypes.GenerateContentConfig(
@@ -225,7 +225,7 @@ def _translate_one_by_one(texts: list, target_language: str, llm_client) -> list
                 "Return ONLY the translation, nothing else.\n\n"
                 f"{text}"
             )
-            resp = llm_client.models.generate_content(
+            resp = llm_client.generate_content(
                 model="deepseek-chat",
                 contents=prompt,
                 config=gtypes.GenerateContentConfig(

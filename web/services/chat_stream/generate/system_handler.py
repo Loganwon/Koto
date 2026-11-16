@@ -6,14 +6,14 @@ import time
 import os
 
 from web.sse.sanitizer import safe_sse as _safe_sse
-from web.local_executor import LocalExecutor
+from web.tasks.local_executor import LocalExecutor
 from app.core.llm.provider_compat import types
 
 
 def handle_system(yield_thinking, user_input, session_name, start_time, client, model_id, system_instruction, session_manager, _app_logger):
-    from web.chat_runtime_services import get_utils
+    from web.runtime_context import service_registry
 
-    Utils = get_utils()
+    Utils = service_registry.utils
 
     used_model = "LocalExecutor"
     yield _safe_sse({"type": "progress", "message": "正在分析系统指令...", "detail": ""})
@@ -34,7 +34,7 @@ def handle_system(yield_thinking, user_input, session_name, start_time, client, 
         fix_prompt = Utils.build_fix_prompt(
             "SYSTEM", user_input, response_text
         )
-        fix_resp = client.models.generate_content(
+        fix_resp = client.generate_content(
             model=model_id,
             contents=fix_prompt,
             config=types.GenerateContentConfig(

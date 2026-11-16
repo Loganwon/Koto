@@ -1,0 +1,1788 @@
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-count {
+      padding: 0 2px;
+      color: var(--text-muted);
+      font-size: 10px;
+      line-height: 1.4;
+      text-align: right;
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-overview,
+    #wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-item {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 4px;
+      padding: 8px 10px;
+      border: 1px solid rgba(15, 23, 42, 0.08);
+      border-radius: 10px;
+      background: #ffffff;
+      color: var(--text);
+      text-align: left;
+      cursor: pointer;
+      pointer-events: auto;
+      transition: border-color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-overview:hover,
+    #wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-item:hover {
+      border-color: color-mix(in srgb, var(--accent) 38%, var(--ai-border));
+      background: color-mix(in srgb, var(--accent) 5%, #ffffff);
+      box-shadow: 0 0 0 3px rgba(0, 122, 255, 0.06);
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-overview {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-item-badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 18px;
+      padding: 0 7px;
+      border-radius: 999px;
+      background: rgba(0, 122, 255, 0.08);
+      color: var(--accent);
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-item-badge.is-proposal {
+      background: rgba(3, 105, 161, 0.08);
+      color: #0369a1;
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-item-preview {
+      font-size: 12px;
+      font-weight: 600;
+      line-height: 1.45;
+      color: var(--text);
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-item-meta {
+      font-size: 10px;
+      line-height: 1.4;
+      color: var(--text-muted);
+    }
+
+#wa-docx-editor .koto-tt-toolbar .wa-docx-review-nav-empty {
+      padding: 10px 12px;
+      border-radius: 10px;
+      background: color-mix(in srgb, var(--surface, #ffffff) 88%, var(--bg-secondary, #f7f8fb) 12%);
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--text-muted);
+    }
+
+#wa-docx-editor .koto-tt-toolbar .tt-btn[disabled] {
+      opacity: 0.45;
+      cursor: not-allowed;
+      pointer-events: none;
+    }
+
+/* ── TipTap Table styles (ProseMirror tables extension) ─────────────── */
+    #wa-docx-editor .ProseMirror .tableWrapper {
+      /* Keep the wrapper out of scroll-container/BFC mode, but also avoid
+         shaving off the last column border when the table width lands on a
+         sub-pixel page edge. */
+      overflow: visible;
+      margin: 0 auto;       /* center the table wrapper */
+      max-width: 100%;      /* never exceed page content width */
+    }
+
+#wa-docx-editor .ProseMirror table.koto-docx-table {
+      border-collapse: collapse;
+      table-layout: fixed;
+      width: auto;          /* let ProseMirror/TableView honor actual colwidths */
+      max-width: none;
+      font-size: inherit;    /* inherit from .ProseMirror */
+      margin: 0 auto;       /* center table within the page */
+      box-sizing: border-box;
+      word-wrap: break-word;
+      overflow-wrap: break-word;
+    }
+
+/* User-inserted tables also centered */
+    #wa-docx-editor .ProseMirror table:not(.koto-docx-table) {
+      max-width: 100%;
+      margin: 0 auto;
+    }
+
+/* ── Whole-table selected state (Word-like border click selection) ──── */
+    #wa-docx-editor .ProseMirror .tableWrapper.koto-table-selected {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+      border-radius: 2px;
+    }
+
+#wa-docx-editor .ProseMirror .tableWrapper.koto-table-selected table {
+      cursor: default;
+    }
+
+/* Selected table node (ProseMirror NodeSelection or all-cells CellSelection) */
+    #wa-docx-editor .ProseMirror table.ProseMirror-selectednode {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+/* DOCX-imported tables: inline border/padding from parser are the sole source */
+    #wa-docx-editor .ProseMirror table.koto-docx-table td,
+    #wa-docx-editor .ProseMirror table.koto-docx-table th {
+      border: none;          /* inline style from parser wins */
+      padding: 0 5.4pt;     /* OOXML default — overridden by inline style from parser */
+      min-width: 20px;
+      vertical-align: top;
+      word-break: break-word;
+      overflow-wrap: break-word;
+      position: relative;
+      font-size: inherit;
+      line-height: inherit;
+    }
+
+/* When TipTap normalizes an imported cell to explicit "none" on all four
+       sides, restoring the imported-table class removes the generic user-table
+       grid fallback entirely. Re-add a light grid only for those fully borderless
+       imported cells so tables don't visually disappear. */
+    #wa-docx-editor .ProseMirror table.koto-docx-table td[data-koto-borderless-cell="true"],
+    #wa-docx-editor .ProseMirror table.koto-docx-table th[data-koto-borderless-cell="true"],
+    #wa-docx-editor .ProseMirror table.koto-docx-table td[bordertop="none"][borderbottom="none"][borderleft="none"][borderright="none"],
+    #wa-docx-editor .ProseMirror table.koto-docx-table th[bordertop="none"][borderbottom="none"][borderleft="none"][borderright="none"] {
+      border: 1px solid #a0a4b8 !important;
+    }
+
+/* User-inserted tables (no .koto-docx-table): keep visible grid */
+    #wa-docx-editor .ProseMirror table:not(.koto-docx-table) td,
+    #wa-docx-editor .ProseMirror table:not(.koto-docx-table) th {
+      border: 1px solid #a0a4b8;
+      padding: 5px 8px;
+      min-width: 40px;
+      vertical-align: top;
+      word-break: break-word;
+      position: relative;
+    }
+
+#wa-docx-editor .ProseMirror table:not(.koto-docx-table) th {
+      background: #eef1f8;
+      font-weight: 600;
+      text-align: left;
+    }
+
+#wa-docx-editor .ProseMirror table:not(.koto-docx-table) tr:nth-child(even) td {
+      background: rgba(240,242,250,0.5);
+    }
+
+/* Selected cell highlight */
+    #wa-docx-editor .ProseMirror table td.selectedCell,
+    #wa-docx-editor .ProseMirror table th.selectedCell {
+      background: rgba(79, 126, 255, 0.12) !important;
+      outline: 2px solid var(--accent);
+      outline-offset: -1px;
+    }
+
+#wa-docx-editor .ProseMirror .tableWrapper.koto-table-selected td.selectedCell,
+    #wa-docx-editor .ProseMirror .tableWrapper.koto-table-selected th.selectedCell {
+      background: transparent !important;
+      outline: none !important;
+      box-shadow: none !important;
+    }
+
+/* Word suppresses space_after on the last paragraph in each table cell.
+       Critical for page-count accuracy — prevents ~40 phantom pages. */
+    #wa-docx-editor .ProseMirror table td > p:last-child,
+    #wa-docx-editor .ProseMirror table th > p:last-child {
+      margin-bottom: 0 !important;
+    }
+
+#wa-docx-editor .ProseMirror table td > p:first-child,
+    #wa-docx-editor .ProseMirror table th > p:first-child {
+      margin-top: 0 !important;
+    }
+
+/* ── TipTap column resize handle ───────────────────────────────────────
+       DOCX uses a cursor-only resize plugin. Keep any stray widget handles
+       hidden so hover does not inject layout-affecting DOM into table cells. */
+    #wa-docx-editor .ProseMirror.koto-row-resize-cursor {
+      cursor: row-resize;
+    }
+
+#wa-docx-editor .ProseMirror.resize-cursor {
+      cursor: col-resize;
+    }
+
+#wa-docx-editor .ProseMirror .column-resize-handle {
+      display: none !important;
+    }
+
+/* ── Floating table toolbar ───────────────────────────────────────────── */
+    .koto-table-float-toolbar {
+      display: none;
+      align-items: center;
+      gap: 0;
+      padding: 8px 10px;
+      background: rgba(248, 249, 253, 0.98);
+      border-top: 1px solid #d8dae5;
+      border-bottom: 1px solid #e4e7f0;
+      user-select: none;
+      -webkit-user-select: none;
+      position: absolute;
+      left: 0;
+      right: 0;
+      bottom: 26px;
+      z-index: 35;
+      min-height: 48px;
+      box-shadow: 0 -10px 28px rgba(15, 23, 42, 0.08);
+      overflow-x: auto;
+      overflow-y: hidden;
+      scrollbar-width: thin;
+    }
+
+.koto-table-float-toolbar,
+    .koto-table-float-toolbar * {
+      user-select: none;
+      -webkit-user-select: none;
+    }
+
+.koto-table-float-toolbar::selection,
+    .koto-table-float-toolbar *::selection {
+      background: transparent;
+      color: inherit;
+    }
+
+.koto-table-float-toolbar .ttf-bar-actions {
+      display: flex;
+      align-items: center;
+      flex-wrap: nowrap;
+      gap: 4px;
+      min-width: max-content;
+      flex: 1 1 auto;
+      padding-right: 2px;
+    }
+
+.koto-table-float-toolbar .ttf-bar-sep {
+      width: 1px;
+      height: 16px;
+      background: rgba(110, 124, 166, 0.22);
+      margin: 0 1px;
+      flex-shrink: 0;
+    }
+
+.koto-table-float-toolbar .ttf-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      min-width: 32px;
+      height: 30px;
+      padding: 0 9px;
+      border: 1px solid #d5daea;
+      border-radius: 7px;
+      background: #ffffff;
+      color: #2f3850;
+      font-size: 11px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.14s, border-color 0.14s, color 0.14s, transform 0.14s, box-shadow 0.14s;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
+      white-space: nowrap;
+    }
+
+.koto-table-float-toolbar .ttf-btn:hover {
+      background: #eef3ff;
+      border-color: #a9bdf8;
+      color: #1f4ed8;
+    }
+
+.koto-table-float-toolbar .ttf-btn.is-active {
+      background: #dbe7ff;
+      border-color: #7ba2ff;
+      color: #1944b8;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.5);
+    }
+
+.koto-table-float-toolbar .ttf-btn-text {
+      line-height: 1;
+    }
+
+.koto-table-float-toolbar .ttf-color-indicator {
+      display: block;
+      width: 12px;
+      height: 3px;
+      border-radius: 999px;
+      background: transparent;
+      box-shadow: inset 0 0 0 1px rgba(41, 50, 77, 0.2);
+      flex-shrink: 0;
+    }
+
+.koto-table-float-toolbar .ttf-btn-color {
+      justify-content: flex-start;
+      min-width: 68px;
+    }
+
+.koto-table-float-toolbar .ttf-btn-color .ttf-color-indicator {
+      margin-left: auto;
+    }
+
+.koto-table-float-toolbar .ttf-btn-danger {
+      color: #9c1e1e;
+      border-color: #e7c5c5;
+      background: #fff5f5;
+    }
+
+.koto-table-float-toolbar .ttf-btn-danger:hover {
+      background: #ffe7e7;
+      border-color: #eba4a4;
+      color: #861313;
+    }
+
+.koto-table-float-toolbar .ttf-cp-popup {
+      position: fixed;
+      background: #1b2030;
+      border: 1px solid rgba(111, 126, 167, 0.35);
+      border-radius: 12px;
+      padding: 10px;
+      z-index: var(--z-topmost-critical);
+      box-shadow: 0 16px 40px rgba(0, 0, 0, 0.42);
+      user-select: none;
+    }
+
+.koto-table-float-toolbar .ttf-cp-clear:hover {
+      color: #fff;
+      border-color: #9097b8;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+body.koto-layout-max-900 .koto-table-float-toolbar {
+        padding: 8px 8px;
+    }
+
+body.koto-layout-max-900 .koto-table-float-toolbar .ttf-bar-actions {
+        min-width: max-content;
+    }
+
+/* ── Table size picker grid ────────────────────────────────────────────── */
+    .tt-table-insert-wrap { position: relative; display: inline-flex; }
+
+.tt-tpick-cell {
+      width: 18px;
+      height: 18px;
+      border: 1px solid #555;
+      border-radius: 2px;
+      background: transparent;
+      cursor: pointer;
+      box-sizing: border-box;
+      transition: background 0.08s, border-color 0.08s;
+    }
+
+.tt-tpick-cell:hover,
+    .tt-tpick-cell.active {
+      background: rgba(79, 126, 255, 0.25);
+      border-color: rgba(79, 126, 255, 0.6);
+    }
+
+/* ── Table whole-selection highlight ────────────────────────────────────── */
+    .tableWrapper.koto-table-selected table {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+/* ── TipTap image inside DOCX ─────────────────────────────────────────── */
+    #wa-docx-editor .ProseMirror img.koto-docx-img {
+      max-width: 100%;
+      max-height: calc(var(--koto-docx-content-height, 880px) - 24px);
+      object-fit: contain;
+    }
+
+#wa-docx-editor .ProseMirror img.koto-docx-img.ProseMirror-selectednode {
+      outline: 2px solid var(--accent);
+    }
+
+/* ── TipTap code block ────────────────────────────────────────────────── */
+    #wa-docx-editor .ProseMirror pre.koto-code {
+      background: var(--code-bg);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px 16px;
+      font-family: 'Consolas', 'Courier New', 'Menlo', monospace;
+      font-size: 13px;
+      color: var(--code-text);
+      overflow-x: auto;
+      margin: 12px 0;
+    }
+
+#wa-docx-editor .ProseMirror pre.koto-code code {
+      background: none;
+      border: none;
+      padding: 0;
+      font-size: inherit;
+      color: inherit;
+    }
+
+/* ── CSS Custom Highlights API — pinned selection & accepted text ── */
+    ::highlight(wa-pinned)            { background-color: var(--accent-medium); }
+
+::highlight(wa-accepted-highlight){ background-color: rgba(72,199,142,0.22); color: inherit; }
+
+::highlight(wa-ai-review-pending) { background-color: rgba(236, 179, 59, 0.22); color: inherit; }
+
+::highlight(wa-ai-review-focus)   { background-color: rgba(65, 145, 255, 0.24); color: inherit; }
+
+::highlight(wa-docx-comment-anchor) { background-color: rgba(0, 122, 255, 0.12); color: inherit; }
+
+::highlight(wa-docx-comment-anchor-focus) { background-color: rgba(0, 122, 255, 0.2); color: inherit; }
+
+/* XLSX: Univer Sheets container */
+    #wa-xlsx-editor {
+      position: absolute;
+      inset: 0;
+      display: none;
+      overflow: clip;     /* clip scroll bleed WITHOUT creating a scroll container,
+                             so position:fixed popup portals can escape the bounds */
+      background: #fff;
+      z-index: 60;        /* above drop-zone (50), below modals */
+    }
+
+#wa-xlsx-editor.active { display: block; }
+
+/* Force Univer internals to light theme — Koto's dark body/global CSS can
+       override inherited color/bg. Univer has its own theme; only reset the
+       container backgrounds, NOT all text colors (the wildcard `color:initial`
+       was breaking SVG icon colors and toolbar label rendering). */
+    #wa-xlsx-editor {
+      color: #333; /* baseline for SVG currentColor + any inherited text; no * wildcard */
+    }
+
+#wa-xlsx-editor .univer-app-container,
+    #wa-xlsx-editor .univer-container {
+      background: #fff !important;
+    }
+
+/* Toolbar: left-align buttons (Univer default is justify-content:center
+       which leaves an empty gap before the first button group).
+       Also override overflow:hidden→clip so the container does not become a
+       scroll-container BFC — an overflow:hidden scroll container can affect
+       position:fixed dropdown portal coordinates in Blink/WebView2 builds. */
+    #wa-xlsx-editor .univer-toolbar-container {
+      justify-content: flex-start;
+      overflow: clip;
+    }
+
+/* The viewport follows Koto layout; the inner Univer runtime counter-scales
+       body zoom so Canvas backing pixels are never enlarged after rendering. */
+    #wa-xlsx-viewport {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+    }
+
+#wa-xlsx-sheet {
+      position: absolute;
+      left: 0;
+      top: 0;
+      transform-origin: top left;
+      transform: none !important;
+    }
+
+/* Univer manages its own scrollbars. Restore them inside the editor
+       since Koto's global CSS hides horizontal scrollbars everywhere. */
+    #wa-xlsx-editor *::-webkit-scrollbar:horizontal {
+      height: revert !important;
+      background: revert !important;
+    }
+
+#wa-xlsx-editor *::-webkit-scrollbar-thumb:horizontal {
+      background: revert !important;
+    }
+
+/* ═══════════════════════════════════════════════
+       Layout: [thumbstrip | main(ribbon + canvas + statusbar)]
+       ═══════════════════════════════════════════════ */
+    #wa-pptx-editor {
+      position: absolute;
+      inset: 0;
+      display: none;           /* overridden by .active */
+      flex-direction: row;     /* thumbstrip LEFT + main RIGHT */
+      overflow: hidden;
+      background: var(--wa-pptx-shell-bg);
+    }
+
+#wa-pptx-editor.active { display: flex; }
+
+/* ── Left: Slide thumbnail strip ────────────── */
+    #wa-pptx-thumbstrip {
+      width: 160px;
+      flex-shrink: 0;
+      overflow-y: auto;
+      overflow-x: hidden;
+      background: var(--wa-pptx-sidebar-bg);
+      border-right: 1px solid var(--wa-pptx-divider);
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+#wa-pptx-thumbstrip::-webkit-scrollbar { width: 4px; }
+
+#wa-pptx-thumbstrip::-webkit-scrollbar-thumb { background: var(--wa-pptx-scrollbar); border-radius: 2px; }
+
+.wa-pptx-thumb-wrap {
+      position: relative;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+.wa-pptx-thumb {
+      border: 2px solid transparent;
+      border-radius: 3px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 8px 20px rgba(0,0,0,.08), 0 1px 4px rgba(0,0,0,.06);
+      transition: border-color .12s;
+    }
+
+.wa-pptx-thumb:hover { border-color: var(--accent-medium); }
+
+.wa-pptx-thumb.active { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-subtle), 0 10px 24px rgba(0,0,0,.08); }
+
+.wa-pptx-thumb canvas { display: block; width: 100%; }
+
+.wa-pptx-thumb-idx {
+      display: block;
+      text-align: center;
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 3px;
+      user-select: none;
+    }
+
+.wa-pptx-thumb.active + .wa-pptx-thumb-idx { color: var(--active-text); }
+
+/* ── Right: Main editing pane ───────────────── */
+    #wa-pptx-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+    }
+
+/* ── Ribbon tab bar ─────────────────────────── */
+    #wa-pptx-ribbon-tabs {
+      display: flex;
+      align-items: flex-end;
+      background: var(--wa-pptx-panel-bg);
+      border-bottom: 1px solid var(--wa-pptx-divider);
+      padding: 0 8px;
+      flex-shrink: 0;
+      height: 30px;
+    }
+
+.wa-pptx-rtab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 12px;
+      padding: 4px 12px;
+      cursor: pointer;
+      height: 100%;
+      transition: color .12s, border-color .12s;
+      margin-bottom: -1px;
+      white-space: nowrap;
+    }
+
+.wa-pptx-rtab:hover { color: var(--text); }
+
+.wa-pptx-rtab.active { color: var(--active-text); border-bottom-color: var(--accent); }
+
+/* ── Ribbon toolbar ─────────────────────────── */
+    #wa-pptx-toolbar {
+      display: flex;
+      align-items: stretch;
+      background: var(--wa-pptx-panel-bg);
+      border-bottom: 1px solid var(--wa-pptx-divider);
+      padding: 4px 8px;
+      gap: 0;
+      min-height: 54px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+
+#wa-pptx-toolbar::-webkit-scrollbar { height: 3px; }
+
+#wa-pptx-toolbar::-webkit-scrollbar-thumb { background: var(--wa-pptx-scrollbar); }
+
+.wa-pptx-tb-grp {
+      display: flex;
+      flex-direction: column;
+      align-items: stretch;
+      padding: 0 8px;
+      gap: 2px;
+    }
+
+.wa-pptx-tb-grp-btns {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      flex: 1;
+    }
+
+.wa-pptx-tb-grp-label {
+      font-size: 9.5px;
+      color: var(--text-muted);
+      text-align: center;
+      white-space: nowrap;
+      padding-bottom: 1px;
+      border-top: 1px solid var(--wa-pptx-divider);
+      margin-top: 2px;
+      padding-top: 2px;
+    }
+
+.wa-pptx-tb-sep {
+      width: 1px;
+      background: var(--wa-pptx-divider);
+      margin: 4px 4px;
+      align-self: stretch;
+    }
+
+.wa-pptx-tb-vsep {
+      width: 1px;
+      height: 22px;
+      background: var(--wa-pptx-divider);
+      margin: 0 3px;
+      flex-shrink: 0;
+    }
+
+.wa-pptx-tb-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      padding: 4px 8px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 3px;
+      color: var(--text);
+      font-size: 12px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .1s, border-color .1s;
+      min-width: 28px;
+      min-height: 28px;
+    }
+
+.wa-pptx-tb-btn:hover { background: var(--surface-hover); border-color: var(--wa-pptx-control-border); }
+
+.wa-pptx-tb-btn.active { background: var(--active-bg); border-color: var(--accent-medium); color: var(--active-text); }
+
+.wa-pptx-tb-btn.wa-pptx-fmt.on { background: var(--active-bg); border-color: var(--accent-medium); color: var(--active-text); }
+
+.wa-pptx-newslide-btn {
+      flex-direction: column;
+      padding: 4px 12px;
+      font-size: 11px;
+      min-height: 40px;
+      gap: 2px;
+    }
+
+.wa-pptx-tb-input-font {
+      background: var(--wa-pptx-control-bg);
+      border: 1px solid var(--wa-pptx-control-border);
+      border-radius: 3px;
+      color: var(--text);
+      font-size: 11.5px;
+      padding: 3px 6px;
+      width: 90px;
+      outline: none;
+    }
+
+.wa-pptx-tb-input-font:focus { border-color: var(--accent); }
+
+.wa-pptx-tb-select {
+      background: var(--wa-pptx-control-bg);
+      border: 1px solid var(--wa-pptx-control-border);
+      border-radius: 3px;
+      color: var(--text);
+      font-size: 11.5px;
+      padding: 3px 4px;
+      width: 52px;
+      outline: none;
+      cursor: pointer;
+    }
+
+.wa-pptx-color-btn {
+      position: relative;
+      cursor: pointer;
+    }
+
+.wa-pptx-color-swatch {
+      width: 14px;
+      height: 4px;
+      border-radius: 1px;
+      position: absolute;
+      bottom: 3px;
+      left: 50%;
+      transform: translateX(-50%);
+    }
+
+/* ── Slide canvas area (gray surround, scrollable) ── */
+    #wa-pptx-slide-area {
+      flex: 1;
+      overflow: auto;
+      background: var(--wa-pptx-stage-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      min-height: 0;
+    }
+
+#wa-pptx-slide-area::-webkit-scrollbar { width: 6px; height: 6px; }
+
+#wa-pptx-slide-area::-webkit-scrollbar-thumb { background: var(--wa-pptx-scrollbar); border-radius: 3px; }
+
+/* The white slide rectangle */
+    #wa-pptx-slide-canvas {
+      position: relative;
+      background: #fff;
+      box-shadow: var(--wa-pptx-stage-shadow);
+      flex-shrink: 0;
+      outline: none;
+    }
+
+/* ── Shape elements inside canvas ──────────── */
+    .wa-pptx-shape {
+      position: absolute;
+      box-sizing: border-box;
+      overflow: hidden;
+    }
+
+.wa-pptx-shape.wa-pptx-selected {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+      overflow: visible !important;  /* allow resize handles to appear outside bounds */
+    }
+
+.wa-pptx-shape.wa-pptx-editing {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+      overflow: visible !important;
+    }
+
+/* ── Resize handles ─────────────────────────────────────── */
+    .wa-pptx-handle {
+      position: absolute;
+      width: 8px;
+      height: 8px;
+      background: var(--surface);
+      border: 1.5px solid var(--accent);
+      border-radius: 1px;
+      box-sizing: border-box;
+      z-index: var(--z-topmost-critical);
+    }
+
+.wa-pptx-handle[data-h="nw"] { top: -4px; left: -4px;              cursor: nw-resize; }
+
+.wa-pptx-handle[data-h="n"]  { top: -4px; left: calc(50% - 4px);   cursor: n-resize;  }
+
+.wa-pptx-handle[data-h="ne"] { top: -4px; right: -4px;             cursor: ne-resize; }
+
+.wa-pptx-handle[data-h="e"]  { top: calc(50% - 4px); right: -4px;  cursor: e-resize;  }
+
+.wa-pptx-handle[data-h="se"] { bottom: -4px; right: -4px;          cursor: se-resize; }
+
+.wa-pptx-handle[data-h="s"]  { bottom: -4px; left: calc(50% - 4px); cursor: s-resize; }
+
+.wa-pptx-handle[data-h="sw"] { bottom: -4px; left: -4px;           cursor: sw-resize; }
+
+.wa-pptx-handle[data-h="w"]  { top: calc(50% - 4px); left: -4px;   cursor: w-resize;  }
+
+.wa-pptx-run {
+      outline: none;
+      caret-color: var(--accent);
+    }
+
+.wa-pptx-run[contenteditable="true"]:empty::before {
+      content: '\200B'; /* zero-width space keeps caret visible */
+    }
+
+/* ── Bullet / numbered list paragraphs ─────────────────── */
+    .wa-pptx-para[data-bullet]::before {
+      content: attr(data-bullet);
+      display: inline-block;
+      width: 1.2em;
+      margin-left: -1.5em;
+      text-align: center;
+    }
+
+.wa-pptx-para[data-numbered]::before {
+      counter-increment: wa-pptx-list;
+      content: counter(wa-pptx-list) '.';
+      display: inline-block;
+      width: 1.5em;
+      margin-left: -1.8em;
+      text-align: right;
+      margin-right: 0.3em;
+    }
+
+.wa-pptx-inner { counter-reset: wa-pptx-list; }
+
+/* ── Status bar (bottom nav + zoom) ─────────── */
+    #wa-pptx-statusbar {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      flex-shrink: 0;
+      background: var(--wa-pptx-panel-alt-bg);
+      border-top: 1px solid var(--wa-pptx-divider);
+      padding: 0 10px;
+      gap: 4px;
+      font-size: 11.5px;
+      color: var(--text-muted);
+    }
+
+.wa-pptx-sb-nav {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      padding: 3px 6px;
+      border-radius: 3px;
+      display: flex;
+      align-items: center;
+    }
+
+.wa-pptx-sb-nav:hover { background: var(--surface-hover); color: var(--text); }
+
+.wa-pptx-sb-nav:disabled { opacity: .35; cursor: not-allowed; }
+
+.wa-pptx-sb-counter { font-size: 11px; min-width: 40px; text-align: center; }
+
+.wa-pptx-sb-sep { width: 1px; height: 14px; background: var(--wa-pptx-divider); margin: 0 4px; }
+
+.wa-pptx-sb-spacer { flex: 1; }
+
+.wa-pptx-sb-zoom-label {
+      font-size: 11px;
+      min-width: 34px;
+      text-align: right;
+      color: var(--text-muted);
+    }
+
+.wa-pptx-sb-zoom-slider {
+      appearance: none;
+      -webkit-appearance: none;
+      width: 90px;
+      height: 3px;
+      border-radius: 2px;
+      background: var(--wa-pptx-control-border);
+      outline: none;
+    }
+
+.wa-pptx-sb-zoom-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: var(--accent);
+      cursor: pointer;
+    }
+
+.wa-pptx-sb-view-btn {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 5px;
+      border-radius: 3px;
+      cursor: pointer;
+      color: var(--text-muted);
+    }
+
+.wa-pptx-sb-view-btn.active { color: var(--active-text); }
+
+/* Context menu (already inline-styled but add base) */
+    #wa-pptx-ctx {
+      font-size: 13px;
+      user-select: none;
+    }
+
+.wa-pptx-ctx-item {
+      padding: 6px 16px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background .1s;
+    }
+
+.wa-pptx-ctx-item:hover { background: var(--surface-hover); }
+
+.wa-pptx-ctx-item.danger { color: var(--danger); }
+
+.wa-pptx-ctx-item.danger:hover { background: rgba(255, 59, 48, 0.10); }
+
+.wa-pptx-ctx-sep { height: 1px; background: var(--wa-pptx-divider); margin: 4px 0; }
+
+/* 16:9 canvas — shapes are absolutely positioned inside */
+    .wa-slide-canvas {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+      background: #fff;
+      min-height: 80px; /* fallback if aspect-ratio not supported */
+    }
+
+.wa-shape-text {
+      position: absolute;
+      box-sizing: border-box;
+      overflow: hidden;
+      outline: none;
+      cursor: text;
+      white-space: pre-wrap;
+      word-break: break-word;
+      padding: 3px 5px;
+      line-height: 1.35;
+    }
+
+.wa-shape-text:hover {
+      outline: 1px dashed var(--accent-medium);
+    }
+
+.wa-shape-text:focus {
+      outline: 1.5px solid var(--accent);
+      background: var(--accent-subtle) !important;
+    }
+
+.wa-shape-img {
+      position: absolute;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+.wa-shape-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block;
+    }
+
+.wa-img-replace-btn {
+      display: none;
+      position: absolute;
+      bottom: 4px;
+      right: 4px;
+      background: rgba(0,0,0,0.62);
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      font-size: 11px;
+      padding: 3px 9px;
+      cursor: pointer;
+    }
+
+.wa-shape-img:hover .wa-img-replace-btn { display: block; }
+
+.wa-shape-table {
+      position: absolute;
+      overflow: auto;
+      box-sizing: border-box;
+    }
+
+.wa-shape-table table {
+      border-collapse: collapse;
+      width: 100%;
+      height: 100%;
+    }
+
+.wa-shape-table:not(.wa-pptx-editing) .wa-pptx-cell {
+      user-select: none;
+      cursor: default;
+    }
+
+.wa-shape-table.wa-pptx-editing .wa-pptx-cell {
+      user-select: text;
+      cursor: text;
+    }
+
+.wa-shape-table td {
+      border: 1px solid #d0d0d0;
+      padding: 3px 6px;
+      vertical-align: top;
+      min-width: 40px;
+      outline: none;
+      font-size: 12px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+.wa-shape-table td.wa-pptx-cell-selected {
+      background: rgba(0, 120, 212, 0.12);
+      box-shadow: inset 0 0 0 1.5px var(--accent, #0078d4);
+    }
+
+.wa-shape-table td:focus {
+      background: var(--accent-subtle);
+      outline: 1.5px solid var(--accent);
+    }
+
+.wa-slide-notes {
+      background: var(--surface2);
+      font-size: 11px;
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-top: 1px solid var(--border);
+    }
+
+.wa-slide-notes summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text-muted);
+      user-select: none;
+    }
+
+.wa-slide-notes p {
+      margin: 6px 0 2px;
+      line-height: 1.5;
+    }
+
+/* Image viewer */
+    #wa-image-viewer {
+      height: 100%;
+      overflow: auto;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: #4a4a4a;
+      padding: 24px;
+    }
+
+#wa-image-viewer.active { display: flex; }
+
+.wa-image-wrap {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      max-width: 100%;
+      max-height: 100%;
+    }
+
+.wa-image-wrap img {
+      max-width: 100%;
+      max-height: 100%;
+      object-fit: contain;
+      border-radius: 4px;
+      box-shadow: 0 2px 16px rgba(0,0,0,0.1);
+      transition: transform 0.15s ease;
+      /* Keep enlarged edges in the viewer's positive scrollable area. */
+      transform-origin: top left;
+    }
+
+/* Text / Code editor */
+    #wa-text-editor {
+      position: relative;
+      display: none;
+      flex-direction: column;
+      height: 100%;
+      background: var(--bg);
+    }
+
+#wa-text-editor.active { display: flex; }
+
+#wa-text-lang-badge {
+      display: none;
+      position: absolute;
+      top: 8px;
+      right: 12px;
+      font-size: 11px;
+      font-family: monospace;
+      color: var(--text-muted);
+      background: var(--surface2);
+      padding: 2px 7px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: var(--z-base);
+    }
+
+#wa-text-content {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      padding: 16px;
+      box-sizing: border-box;
+      border: none;
+      outline: none;
+      resize: none;
+      font-family: 'Consolas', 'Courier New', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: var(--text);
+      background: var(--bg);
+      tab-size: 4;
+    }
+
+#wa-text-content::selection {
+      background: rgba(100, 149, 237, 0.35);
+    }
+
+.wa-pdf-page-wrap {
+      box-shadow: 0 1px 6px rgba(0,0,0,0.5), 0 3px 12px rgba(0,0,0,0.35);
+      border-radius: 2px;
+      overflow: visible;
+      position: relative;   /* contains the annotation SVG overlay */
+      flex-shrink: 0;
+    }
+
+.wa-pdf-page-wrap canvas {
+      display: block;
+      /* width/height are set precisely in JS; no CSS scaling to avoid blur */
+      border-radius: 2px;
+    }
+
+/* ── PDF text layer (PDF.js) ── aligned with pdfjs-dist@3.11.174 .textLayer CSS ── */
+    .wa-pdf-text-layer {
+      position: absolute;
+      left: 0; top: 0;
+      /* width/height are set precisely in JS from textViewport — do NOT use right/bottom    */
+      /* because they would stretch the layer independently of the viewport dimensions,       */
+      /* breaking span coordinate alignment if the parent wrap has any size discrepancy.      */
+      overflow: hidden;
+      /* opacity MUST stay < 1: WebView2/Edge ignores user-select:text on children when      */
+      /* the parent has user-select:none AND the parent is at opacity:1 (no compositing      */
+      /* group). At opacity<1 the browser creates an isolated composite group and honours    */
+      /* the per-span override. Never set this to 1.                                         */
+      opacity: 0.2;
+      line-height: 1;
+      text-align: initial;             /* required by pdfjs: prevents browser default align  */
+      -webkit-text-size-adjust: none;  /* prevent browser text resize → span drift */
+         -moz-text-size-adjust: none;
+              text-size-adjust: none;
+      forced-color-adjust: none;
+      transform-origin: 0 0;           /* required: span transforms align with canvas */
+      z-index: var(--z-above);                      /* above canvas (z:auto), below annot layer (z:3) */
+      -webkit-user-select: text;
+         -moz-user-select: text;
+              user-select: text;
+    }
+
+.wa-pdf-text-layer :is(span, br) {
+      color: transparent;
+      position: absolute;
+      white-space: pre;
+      cursor: text;
+      transform-origin: 0% 0%;
+      /* Be explicit instead of relying on user-select:auto inheritance. Some embedded       */
+      /* Chromium/WebView2 builds otherwise render the text layer but never create a Range. */
+      -webkit-user-select: text;
+         -moz-user-select: text;
+              user-select: text;
+    }
+
+/* endOfContent remains the only non-selectable element in the text layer.              */
+    .wa-pdf-text-layer span.markedContent { top: 0; height: 0; user-select: none; }
+
+/* endOfContent: PDF.js renderTextLayer() creates this for selection containment */
+    .wa-pdf-text-layer .endOfContent {
+      display: block;
+      position: absolute;
+      inset: 100% 0 0;
+      z-index: -1;
+      cursor: default;
+      -webkit-user-select: none;
+         -moz-user-select: none;
+              user-select: none;
+    }
+
+.wa-pdf-text-layer .endOfContent.active { top: 0; }
+
+/* Use fully-opaque color; layer opacity (0.2) attenuates the final visual to ~20%.      */
+    /* Do NOT use rgba() here — it interacts badly with the layer opacity composite.         */
+    .wa-pdf-text-layer ::-moz-selection { background: rgb(0, 120, 212); }
+
+.wa-pdf-text-layer ::selection { background: rgb(0, 120, 212); }
+
+/* ── PDF annotation SVG overlay ── */
+    .wa-pdf-annot-layer {
+      position: absolute;
+      left: 0; top: 0;
+      pointer-events: none;
+      overflow: visible;
+      z-index: var(--z-base);  /* below text layer (z:2) so text selection is not blocked */
+    }
+
+.wa-pdf-annot-layer .wa-annot-hi { opacity: 0.45; pointer-events: auto; cursor: pointer; }
+
+.wa-pdf-annot-layer .wa-annot-ul { opacity: 0.85; pointer-events: auto; cursor: pointer; }
+
+.wa-pdf-annot-layer .wa-annot-st { opacity: 0.75; pointer-events: auto; cursor: pointer; }
+
+.wa-pdf-annot-layer .wa-annot-draw { fill: none; pointer-events: auto; cursor: pointer; }
+
+.wa-annot-selected { stroke: #0078d4 !important; stroke-width: 2px !important; outline: none; }
+
+/* ── Search match highlights ── */
+    .wa-pdf-search-hl { fill: #FACC15; opacity: 0.55; pointer-events: none; }
+
+.wa-pdf-search-hl.current { fill: #F97316; opacity: 0.7; }
+
+/* ── Sticky note anchor ── */
+    .wa-pdf-note-icon {
+      position: absolute;
+      width: 22px; height: 22px;
+      background: #facc15;
+      border-radius: 50% 50% 0% 50%;
+      transform: rotate(-45deg);
+      cursor: pointer;
+      pointer-events: auto;
+      box-shadow: 0 1px 4px rgba(0,0,0,.4);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 10px; color: #333;
+      z-index: 10;
+    }
+
+.wa-pdf-note-icon:hover { background: #fbbf24; }
+
+/* ── Sticky note popup ── */
+    .wa-pdf-note-popup {
+      position: absolute;
+      background: #fffbeb;
+      border: 1px solid #fbbf24;
+      border-radius: 6px;
+      box-shadow: 0 4px 16px rgba(0,0,0,.25);
+      min-width: 200px;
+      max-width: 280px;
+      z-index: var(--z-overlay);
+      pointer-events: auto;
+    }
+
+.wa-pdf-note-header {
+      display: flex;
+      align-items: center;
+      background: #fbbf24;
+      padding: 4px 8px;
+      border-radius: 5px 5px 0 0;
+      gap: 4px;
+      cursor: move;
+    }
+
+.wa-pdf-note-header span { flex: 1; font-size: 11px; font-weight: 600; color: #333; }
+
+.wa-pdf-note-close {
+      background: transparent; border: none; cursor: pointer;
+      color: #333; font-size: 13px; line-height: 1; padding: 0 2px;
+    }
+
+.wa-pdf-note-body {
+      width: 100%; min-height: 60px;
+      border: none; outline: none; resize: vertical;
+      padding: 8px; font-size: 12px; background: transparent;
+      color: #333; font-family: inherit; box-sizing: border-box;
+    }
+
+.wa-pdf-note-footer {
+      display: flex; justify-content: flex-end; gap: 4px;
+      padding: 4px 8px 6px;
+    }
+
+.wa-pdf-note-save {
+      background: #f59e0b; border: none; border-radius: 4px;
+      color: #fff; font-size: 11px; padding: 3px 10px; cursor: pointer;
+    }
+
+/* ═══════════════════════════════
+       PDF EDITOR OUTER CONTAINER
+       ═══════════════════════════════ */
+    #wa-pdf-editor {
+      position: absolute;
+      inset: 0;
+      display: none;
+      flex-direction: row;
+      overflow: hidden;
+      background: #292b35;
+    }
+
+#wa-pdf-editor.active { display: flex; }
+
+/* ── Left: Sidebar ─────────────────── */
+    #wa-pdf-sidebar {
+      width: 164px;
+      flex-shrink: 0;
+      display: flex;
+      flex-direction: column;
+      background: #1e2029;
+      border-right: 1px solid #363845;
+      overflow: hidden;
+    }
+
+#wa-pdf-sidebar-tabs {
+      display: flex;
+      background: #1a1c26;
+      border-bottom: 1px solid #363845;
+      flex-shrink: 0;
+    }
+
+.wa-pdf-stab {
+      flex: 1;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: #778;
+      padding: 7px 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: color .15s, border-color .15s;
+    }
+
+.wa-pdf-stab:hover { color: #aab; }
+
+.wa-pdf-stab.active { color: #e74c3c; border-bottom-color: #e74c3c; }
+
+.wa-pdf-sidebar-panel {
+      flex: 1;
+      overflow-y: auto;
+      overflow-x: hidden;
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+.wa-pdf-sidebar-panel::-webkit-scrollbar { width: 4px; }
+
+.wa-pdf-sidebar-panel::-webkit-scrollbar-thumb { background: #444; border-radius: 2px; }
+
+/* Thumbnails */
+    .wa-pdf-thumb-wrap {
+      position: relative;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+.wa-pdf-thumb {
+      border: 2px solid transparent;
+      border-radius: 3px;
+      overflow: hidden;
+      background: #fff;
+      box-shadow: 0 1px 4px rgba(0,0,0,.45);
+      transition: border-color .12s;
+    }
+
+.wa-pdf-thumb:hover { border-color: #888; }
+
+.wa-pdf-thumb.active { border-color: #e74c3c; box-shadow: 0 0 0 1px #e74c3c44; }
+
+.wa-pdf-thumb canvas { display: block; width: 100%; }
+
+.wa-pdf-thumb-idx {
+      display: block;
+      text-align: center;
+      font-size: 10px;
+      color: #888;
+      margin-top: 3px;
+      user-select: none;
+    }
+
+.wa-pdf-thumb.active + .wa-pdf-thumb-idx { color: #e74c3c; }
+
+/* Bookmarks tree */
+    .wa-pdf-bm-item {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 12px;
+      color: #bbc;
+      transition: background .1s, color .1s;
+    }
+
+.wa-pdf-bm-item:hover { background: #2a2d3a; color: #fff; }
+
+.wa-pdf-bm-item .wa-pdf-bm-pg {
+      margin-left: auto;
+      font-size: 10px;
+      color: #556;
+      white-space: nowrap;
+    }
+
+.wa-pdf-bm-children { padding-left: 12px; }
+
+.wa-pdf-bm-toggle { opacity: 0.6; font-size: 10px; min-width: 12px; }
+
+.wa-pdf-bm-empty { color: #556; font-size: 12px; padding: 8px; text-align: center; }
+
+/* ── Right: Main area ──────────────── */
+    #wa-pdf-main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+      container-type: inline-size;
+    }
+
+/* ── Search bar ───────────────────── */
+    #wa-pdf-search-bar {
+      display: flex;
+      align-items: center;
+      background: #2a2d3a;
+      border-bottom: 1px solid #3e4057;
+      padding: 5px 10px;
+      gap: 6px;
+      flex-shrink: 0;
+      color: #aab;
+      font-size: 12px;
+    }
+
+#wa-pdf-search-bar svg { flex-shrink: 0; opacity: 0.7; }
+
+#wa-pdf-search-input {
+      flex: 1;
+      background: #1e2029;
+      border: 1px solid #3e4057;
+      border-radius: 4px;
+      color: #ccd;
+      font-size: 12px;
+      padding: 3px 8px;
+      outline: none;
+      min-width: 0;
+    }
+
+#wa-pdf-search-input:focus { border-color: #e74c3c88; }
+
+.wa-pdf-search-count { font-size: 11px; color: #778; white-space: nowrap; min-width: 56px; text-align: right; }
+
+.wa-pdf-search-nav {
+      background: transparent; border: none; color: #aab; cursor: pointer;
+      padding: 3px 6px; border-radius: 3px; display: flex; align-items: center;
+    }
+
+.wa-pdf-search-nav:hover { background: var(--surface-hover); color: #fff; }
+
+.wa-pdf-search-close {
+      background: transparent; border: none; color: #778; cursor: pointer;
+      padding: 3px 6px; border-radius: 3px; font-size: 14px; line-height: 1;
+    }
+
+.wa-pdf-search-close:hover { color: #ff7070; }
+
+/* ── Shared find/replace bar (DOCX + PPTX) ───────────── */
+    .wa-find-bar-base,
+    #wa-docx-find-bar,
+    #wa-pptx-find-bar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      background: var(--surface, #2a2d3a);
+      border-bottom: 1px solid var(--border, #3e4057);
+      padding: 5px 10px;
+      gap: 5px;
+      flex-shrink: 0;
+      color: var(--text-muted, #aab);
+      font-size: 12px;
+      z-index: 10;
+      position: relative;
+    }
+
+#wa-docx-find-bar svg,
+    #wa-pptx-find-bar svg { flex-shrink: 0; opacity: 0.65; }
+
+#wa-docx-find-input,
+    #wa-pptx-find-input {
+      flex: 1;
+      min-width: 120px;
+      max-width: 260px;
+      background: var(--bg, #1e2029);
+      border: 1px solid var(--border, #3e4057);
+      border-radius: 4px;
+      color: var(--text, #ccd);
+      font-size: 12px;
+      padding: 3px 8px;
+      outline: none;
+    }
+
+#wa-docx-find-input:focus,
+    #wa-pptx-find-input:focus { border-color: #4a9eff88; }
+
+#wa-docx-find-input.no-match,
+    #wa-pptx-find-input.no-match { border-color: #e74c3c88; background: #3a2020; }
+
+.wa-find-count { font-size: 11px; color: var(--text-muted, #778); white-space: nowrap; min-width: 54px; text-align: right; }
+
+.wa-find-nav {
+      background: transparent; border: none; color: var(--text-muted, #aab); cursor: pointer;
+      padding: 3px 6px; border-radius: 3px; display: flex; align-items: center;
+    }
+
+.wa-find-nav:hover { background: var(--surface-hover, #3a3d50); color: #fff; }
+
+.wa-find-opt { display: flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; user-select: none; color: var(--text-muted, #aab); }
+
+.wa-find-opt input[type=checkbox] { cursor: pointer; }
+
+.wa-find-replace-toggle {
+      background: transparent; border: 1px solid var(--border, #3e4057); border-radius: 4px;
+      color: var(--text-muted, #aab); cursor: pointer; padding: 2px 7px; font-size: 11px;
+    }
+
+.wa-find-replace-toggle:hover { background: var(--surface-hover, #3a3d50); color: var(--text, #ccd); }
+
+.wa-find-replace-toggle.active { background: #4a9eff22; border-color: #4a9eff55; color: #4a9eff; }
+
+.wa-find-close {
+      background: transparent; border: none; color: var(--text-muted, #778); cursor: pointer;
+      padding: 3px 6px; border-radius: 3px; font-size: 14px; line-height: 1; margin-left: auto;
+    }
+
+.wa-find-close:hover { color: #ff7070; }
+
+#wa-docx-replace-row,
+    #wa-pptx-replace-row {
+      display: flex; align-items: center; gap: 5px; width: 100%;
+      padding-top: 4px; border-top: 1px solid var(--border, #3e4057); margin-top: 2px;
+    }
+
+#wa-docx-replace-input,
+    #wa-pptx-replace-input {
+      flex: 1; min-width: 120px; max-width: 260px;
+      background: var(--bg, #1e2029); border: 1px solid var(--border, #3e4057);
+      border-radius: 4px; color: var(--text, #ccd); font-size: 12px; padding: 3px 8px; outline: none;
+    }
+
+#wa-docx-replace-input:focus,
+    #wa-pptx-replace-input:focus { border-color: #4a9eff88; }
+
+.wa-find-replace-btn {
+      background: transparent; border: 1px solid var(--border, #3e4057); border-radius: 4px;
+      color: var(--text-muted, #aab); cursor: pointer; padding: 2px 9px; font-size: 11px;
+    }
+
+.wa-find-replace-btn:hover { background: #4a9eff22; border-color: #4a9eff55; color: #4a9eff; }
+
+/* Highlight matches in DOCX editor */
+    .wa-docx-find-hl { background: rgba(250, 204, 21, 0.45) !important; border-radius: 2px; }
+
+.wa-docx-find-hl.current { background: rgba(249, 115, 22, 0.65) !important; }
+
+/* ── Annotation toolbar ───────────── */
+    #wa-pdf-annot-bar {
+      display: flex;
+      align-items: center;
+      background: #2a2d3a;
+      border-bottom: 1px solid #3e4057;
+      padding: 4px 10px;
+      gap: 2px;
+      flex-shrink: 0;
+      flex-wrap: nowrap;
+      overflow-x: auto;
+    }
+
+#wa-pdf-annot-bar::-webkit-scrollbar { height: 3px; }
+
+#wa-pdf-annot-bar::-webkit-scrollbar-thumb { background: #555; }
+
+.wa-pdf-annot-group { display: flex; align-items: center; gap: 2px; }
+
+.wa-pdf-annot-sep {
+      width: 1px; height: 22px; background: #3e4057; margin: 0 6px; flex-shrink: 0;
+    }
+
+.wa-pdf-abt {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 4px 8px; background: transparent;
+      border: 1px solid transparent; border-radius: 3px;
+      color: #bbc; font-size: 11.5px; cursor: pointer;
+      white-space: nowrap; transition: background .1s, border-color .1s;
+      min-height: 26px;
+    }
+
+.wa-pdf-abt:hover { background: var(--surface-hover); border-color: #555; color: #fff; }
+
+.wa-pdf-abt:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.wa-pdf-abt:disabled:hover { background: transparent; border-color: transparent; color: #bbc; }
+
+.wa-pdf-abt.active { background: rgba(231,76,60,.2); border-color: #e74c3c88; color: #ff9580; }
+
+.wa-pdf-abt-close { margin-left: 2px; padding: 4px 7px; }
+
+.wa-pdf-annot-color-btn { position: relative; cursor: pointer; }
+
+.wa-pdf-annot-color-btn input[type="color"] {
+      position: absolute; opacity: 0; width: 100%; height: 100%;
+      inset: 0; cursor: pointer; border: none;
+    }
+
+/* ── Line-width slider ────────────── */
+    .wa-pdf-lw-slider {
+      width: 64px; height: 3px; accent-color: var(--primary, #7c6af5);
+      cursor: pointer; border: none; background: transparent;
+    }
+
+/* ── Watermark modal ──────────────── */
+    #wa-pdf-watermark-overlay { display: none; }
+
+#wa-pdf-watermark-overlay.open {
+      display: flex !important; align-items: center; justify-content: center;
+    }
+
+#wa-pdf-watermark-dialog {
+      background: var(--surface, #23273a); border: 1px solid var(--border, #3a3d52);
+      border-radius: 8px; width: 360px; max-width: 90vw;
+      box-shadow: 0 8px 32px rgba(0,0,0,.45);
+      display: flex; flex-direction: column; overflow: hidden;
+    }
+
+.wa-pwm-header {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 14px; border-bottom: 1px solid var(--border, #3a3d52);
+      font-size: 13px; font-weight: 600; color: var(--text, #dde);
+    }
+
+.wa-pwm-close { background: none; border: none; color: #778; cursor: pointer; font-size: 14px; padding: 2px 6px; margin-left: auto; }
+
+.wa-pwm-close:hover { color: #ff7070; }
+
+.wa-pwm-body { padding: 16px 14px; }
+
+.wa-pwm-footer {
+      display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+      padding: 10px 14px; border-top: 1px solid var(--border, #3a3d52);
+    }
+
+/* ── PDF canvas area ──────────────── */
+    #wa-pdf-viewer {
+      height: 100%;            /* fills #wa-canvas-body so overflow-y:auto actually scrolls */
+      overflow-y: auto;
+      overflow-x: auto;
+      padding: 20px;
+      display: none;
+      flex-direction: column;
+      gap: 18px;
+      align-items: center;
+      background: #4a4a4e;
+      box-sizing: border-box;  /* padding included in height:100% */
+    }
+
+#wa-pdf-viewer.active { display: flex; }
+
+/* ── Status bar ───────────────────── */
+    #wa-pdf-statusbar {
+      display: flex;
+      align-items: center;
+      height: 28px;
+      flex-shrink: 0;
+      background: #1e2029;
+      border-top: 1px solid #363845;
+      padding: 0 10px;
+      gap: 4px;
+      font-size: 11.5px;
+      color: #aab;
+    }
+
+.wa-pdf-sb-btn {
+      background: transparent; border: none; color: #aab;
+      cursor: pointer; padding: 3px 5px; border-radius: 3px;
+      display: flex; align-items: center; gap: 3px;
+      white-space: nowrap; flex-shrink: 0;
+    }
+
+.wa-pdf-sb-btn svg,
+    .wa-pdf-sb-sep { flex-shrink: 0; }
+
+.wa-pdf-sb-btn:hover { background: var(--surface-hover); color: #fff; }
+
+.wa-pdf-sb-sep { width: 1px; height: 14px; background: #3e4057; margin: 0 2px; }
+
+.wa-pdf-sb-counter { font-size: 11px; color: #aab; white-space: nowrap; }
+
+@container (max-width: 520px) {
+      .wa-pdf-sb-label { display: none; }
+      #wa-pdf-statusbar { padding-inline: 5px; gap: 2px; }
+      .wa-pdf-sb-btn { padding-inline: 4px; }
+    }
+
+/* ── PDF Page Manager Modal ─────────────────────────────────────────── */
+    #wa-pdf-pagemgr {
+      position: absolute;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.55);
+      z-index: var(--z-sticky);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+#wa-pdf-pagemgr-dialog {
+      background: #1e2029;
+      border: 1px solid #363845;
+      border-radius: 10px;
+      width: min(92%, 860px);
+      max-height: 80vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      box-shadow: 0 16px 48px rgba(0,0,0,0.45);
+      animation: wa-dialog-in 0.2s cubic-bezier(0.2, 0, 0.2, 1);
+    }
+
+#wa-pdf-pagemgr-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 14px;
+      border-bottom: 1px solid #363845;
+      font-size: 13px;
+      font-weight: 600;
+      color: #cdd;
+      flex-shrink: 0;
+    }
+
+#wa-pdf-pagemgr-hint {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      font-size: 11px;
+      color: #778;
+      background: #171920;
+      border-bottom: 1px solid #2a2c3a;
+      flex-shrink: 0;
+    }
+
+#wa-pdf-pagemgr-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 14px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+.wa-pmgr-card {
+      position: relative;
+      width: 110px;
+      background: #14151e;
+      border: 2px solid #2e3046;
+      border-radius: 6px;
+      cursor: grab;
+      transition: border-color 0.15s, transform 0.12s;
+      user-select: none;
+    }
+
+.wa-pmgr-card:hover { border-color: #565a82; }
+
+.wa-pmgr-card.selected { border-color: #e74c3c; }
+
+.wa-pmgr-card.dragging { opacity: 0.45; transform: scale(0.95); }
+
+.wa-pmgr-card.drag-over { border-color: #4e9bff; border-style: dashed; }
+
+.wa-pmgr-card.deleted {
+      opacity: 0.25;
+      filter: grayscale(1);
+      pointer-events: none;
+    }

@@ -14,7 +14,7 @@ Koto ContactManager — 关系记忆 / 社交 CRM
   - 支持手动增删查改
 
 集成点：
-  - MemoryReflector.reflect_async() 调用后触发 observe_turn()
+  - ConversationMemoryExtractor 在结构化提取后触发 observe_turn()
   - ProactiveAgent.tick() 检查需要跟进的联系人
 
 存储结构（SQLite table: contacts）:
@@ -40,22 +40,30 @@ import sqlite3
 import threading
 import uuid
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional
+
+from app.core.config.runtime_storage import (
+    legacy_config_path,
+    prepare_runtime_database,
+    runtime_database_path,
+)
 
 logger = logging.getLogger(__name__)
 
 # ── 数据库路径（与 GoalManager、TaskLedger 共用）──────────────────────────────
-import os
+_DEFAULT_DB_PATH = str(runtime_database_path("koto_checkpoints.sqlite"))
 
-_DEFAULT_DB_PATH = str(
-    Path(
-        os.environ.get(
-            "KOTO_DB_DIR", Path(__file__).parent.parent.parent.parent / "config"
+
+def _resolve_db_path(db_path: Optional[str] = None) -> str:
+    if db_path:
+        return db_path
+    return str(
+        prepare_runtime_database(
+            _DEFAULT_DB_PATH,
+            legacy_paths=(legacy_config_path("koto_checkpoints.sqlite"),),
         )
     )
-    / "koto_checkpoints.sqlite"
-)
+
 
 # ── 姓名识别模式 ──────────────────────────────────────────────────────────────
 # 捕获人名：中文姓名 2-4 字，或前缀关系词后的名字
@@ -125,8 +133,8 @@ def get_contact_manager() -> "ContactManager":
 class ContactManager:
     """轻量级社交 CRM —— 基于 SQLite 持久化。"""
 
-    def __init__(self, db_path: str = _DEFAULT_DB_PATH):
-        self._db_path = db_path
+    def __init__(self, db_path: Optional[str] = None):
+        self._db_path = _resolve_db_path(db_path)
         self._lock = threading.Lock()
         self._init_db()
 
@@ -161,7 +169,7 @@ class ContactManager:
     def observe_turn(self, user_msg: str, ai_msg: str, topic: str = ""):
         """
         分析一轮对话，提取人物提及并更新联系人记录。
-        由 MemoryReflector 或 app.py 的对话管道在每轮结束后异步调用。
+        由 ConversationMemoryExtractor 在每轮结束后异步调用。
         """
         names = self._extract_names(user_msg + " " + ai_msg)
         if not names:

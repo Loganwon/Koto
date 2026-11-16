@@ -130,29 +130,26 @@ def env(tmp_path_factory):
         d.mkdir()
 
     import web.blueprints.workspace_assistant as _wa
-    import web.shared as _shared
+    from app.core.config.workspace_runtime import get_workspace_root, set_workspace_root
 
     orig_tmp = _wa._TMP_DIR
-    orig_ws = getattr(_shared, "WORKSPACE_DIR", None)
+    orig_ws = get_workspace_root()
     _wa._TMP_DIR = tmp_dir
-    _shared.WORKSPACE_DIR = str(ws_dir)
+    set_workspace_root(str(ws_dir))
 
     from flask import Flask
 
-    from web.blueprints.pptx_editor import pptx_editor_bp
     from web.blueprints.workspace_assistant import workspace_assistant_bp
 
     app = Flask(__name__)
     app.register_blueprint(workspace_assistant_bp)
-    app.register_blueprint(pptx_editor_bp)
     app.config["TESTING"] = True
 
     with app.test_client() as client:
         yield client, tmp_dir, ws_dir, ext_dir
 
     _wa._TMP_DIR = orig_tmp
-    if orig_ws is not None:
-        _shared.WORKSPACE_DIR = orig_ws
+    set_workspace_root(orig_ws)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

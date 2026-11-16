@@ -19,7 +19,7 @@ def handle_tree_of_thought(
     start_time,
     model_id,
     system_instruction,
-    _uses_standard_workflow_route,
+    use_tot,
     settings_manager,
     session_manager,
     MODEL_MAP,
@@ -38,7 +38,7 @@ def handle_tree_of_thought(
         for k in ["excel", "xlsx", ".xls", "电子表格", "spreadsheet"]
     )
     _tot_enabled = (
-        _uses_standard_workflow_route()
+        use_tot 
         and task_type in ("RESEARCH", "FILE_GEN")
         and len(str(effective_input)) >= 20
         and not str(model_id or "").startswith("deep-research-pro-preview")

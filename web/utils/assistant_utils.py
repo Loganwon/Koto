@@ -15,18 +15,18 @@ import sys
 import time
 from typing import Any
 
-from web.runtime_context import (
-    get_client_proxy,
-    get_types,
-    get_workspace_dir,
-    service_registry,
-)
+from app.core.llm.provider_compat import types as provider_types
+from web.runtime_context import service_registry
 
 logger = logging.getLogger(__name__)
 
 
 def _client() -> Any:
-    return get_client_proxy()
+    return service_registry.llm_gateway
+
+
+def _workspace_dir() -> str:
+    return service_registry.workspace_dir
 
 
 def _settings_manager() -> Any:
@@ -37,12 +37,7 @@ def _settings_manager() -> Any:
 
 
 def _types() -> Any:
-    types_module = get_types()
-    if types_module is not None:
-        return types_module
-    from app.core.llm.provider_compat import types as genai_types
-
-    return genai_types
+    return provider_types
 
 
 
@@ -167,7 +162,7 @@ class Utils:
                 f"用户需求: {user_input}\n"
                 f"模型输出:\n{output_text}\n"
             )
-            response = _client().models.generate_content(
+            response = _client().generate_content(
                 model="deepseek-chat",
                 contents=check_prompt,
                 config=_types().GenerateContentConfig(
@@ -268,7 +263,7 @@ class Utils:
         """自动从响应中提取并保存文件"""
         saved = []
 
-        code_dir = os.path.join(get_workspace_dir(), "code")
+        code_dir = os.path.join(_workspace_dir(), "code")
         os.makedirs(code_dir, exist_ok=True)
 
         def _get_save_dir(filename):
@@ -306,7 +301,7 @@ class Utils:
                 ".html",
                 ".css",
             }
-            return code_dir if ext in code_exts else get_workspace_dir()
+            return code_dir if ext in code_exts else _workspace_dir()
 
         # 调试：打印前800字符看看格式
         logger.debug(f"[FILE_GEN] Response first 800 chars:\n{text[:800]}\n")
@@ -469,16 +464,16 @@ class Utils:
             # 返回相对于 workspace 的路径
             # 确保路径始终在 workspace 下，且格式为正斜杠
             try:
-                rel_path = os.path.relpath(filepath, get_workspace_dir())
+                rel_path = os.path.relpath(filepath, _workspace_dir())
                 # 如果包含 .. 说明不在 workspace 下，需要处理
                 if ".." in rel_path:
                     # 降级为只返回文件名，放在 workspace/images 下
-                    abs_workspace_images = os.path.join(get_workspace_dir(), "images")
+                    abs_workspace_images = os.path.join(_workspace_dir(), "images")
                     os.makedirs(abs_workspace_images, exist_ok=True)
                     fallback_path = os.path.join(abs_workspace_images, filename)
                     with open(fallback_path, "wb") as f:
                         f.write(blob_part.inline_data.data)
-                    rel_path = os.path.relpath(fallback_path, get_workspace_dir())
+                    rel_path = os.path.relpath(fallback_path, _workspace_dir())
                     logger.debug(
                         f"[IMAGE] Falling back to workspace/images: {rel_path}"
                     )
@@ -489,12 +484,12 @@ class Utils:
             except Exception as path_err:
                 logger.debug(f"[IMAGE] Path calculation error: {path_err}")
                 # 最后的保险方案：直接保存到 workspace/images
-                abs_workspace_images = os.path.join(get_workspace_dir(), "images")
+                abs_workspace_images = os.path.join(_workspace_dir(), "images")
                 os.makedirs(abs_workspace_images, exist_ok=True)
                 fallback_path = os.path.join(abs_workspace_images, filename)
                 with open(fallback_path, "wb") as f:
                     f.write(blob_part.inline_data.data)
-                result = os.path.relpath(fallback_path, get_workspace_dir()).replace(
+                result = os.path.relpath(fallback_path, _workspace_dir()).replace(
                     "\\", "/"
                 )
                 logger.debug(f"[IMAGE] Emergency fallback: {result}")

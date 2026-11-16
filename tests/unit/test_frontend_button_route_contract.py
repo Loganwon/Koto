@@ -27,31 +27,10 @@ class _NullLogger:
 def _app_from_deferred_loader() -> Flask:
     import web.app_blueprints as app_blueprints
 
-    previous = app_blueprints._blueprints_registered
-    try:
-        app_blueprints._blueprints_registered = False
-        app = Flask(__name__)
-        app_blueprints.register_blueprints_deferred(app, _NullLogger())
-        return app
-    finally:
-        app_blueprints._blueprints_registered = previous
-
-
-def _app_from_service_loader() -> Flask:
-    import web.services.blueprint_loader as blueprint_loader
-
-    had_previous = hasattr(blueprint_loader, "_blueprints_registered")
-    previous = getattr(blueprint_loader, "_blueprints_registered", False)
-    try:
-        blueprint_loader._blueprints_registered = False
-        app = Flask(__name__)
-        blueprint_loader.register_all_blueprints(app, _NullLogger())
-        return app
-    finally:
-        if had_previous:
-            blueprint_loader._blueprints_registered = previous
-        elif hasattr(blueprint_loader, "_blueprints_registered"):
-            delattr(blueprint_loader, "_blueprints_registered")
+    app = Flask(__name__)
+    app.config["KOTO_OPTIONAL_FEATURES"] = "*"
+    app_blueprints.register_blueprints_deferred(app, _NullLogger())
+    return app
 
 
 def _adapter(app: Flask) -> MapAdapter:
@@ -59,22 +38,25 @@ def _adapter(app: Flask) -> MapAdapter:
 
 
 def _assert_route(adapter: MapAdapter, method: str, path: str) -> None:
-    adapter.match(path, method=method)
+    try:
+        adapter.match(path, method=method)
+    except Exception as exc:
+        raise AssertionError(f"missing frontend route: {method} {path}") from exc
 
 
-def _frontend_api_refs() -> set[tuple[str, str]]:
+def _frontend_api_refs(root: Path = Path("web")) -> set[tuple[str, str]]:
     pattern = re.compile(r"['\"](/api/[A-Za-z0-9_./{}?=&:%+-]+)['\"]")
     paths = [
-        *Path("web").rglob("*.js"),
-        *Path("web").rglob("*.ts"),
-        *Path("web").rglob("*.html"),
+        *root.rglob("*.js"),
+        *root.rglob("*.ts"),
+        *root.rglob("*.html"),
     ]
     refs: set[tuple[str, str]] = set()
     for path in paths:
         if "node_modules" in path.parts:
             continue
-        if path.name == "workflow_dag.html":
-            continue  # Served only by the debug-only dev blueprint.
+        if path.name.endswith((".test.ts", ".spec.ts", ".test.js", ".spec.js")):
+            continue
         if not path.is_file():
             continue
         try:
@@ -200,7 +182,7 @@ def _workspace_wa_method_names() -> set[str]:
         r"(?:\bWA|\bwa|window\.WA|\(window as any\)\.WA)\.([A-Za-z_$][\w$]*)\s*="
     )
     export_pattern = re.compile(r"export function ([A-Za-z_$][\w$]*)\s*\(")
-    publish_pattern = re.compile(r"publishWorkspaceApi\(\s*\{(.*?)\}\s*\)", re.S)
+    publish_pattern = re.compile(r"registerFeatures\(\s*\{(.*?)\}\s*\)", re.S)
     published_name_pattern = re.compile(r"^\s*([A-Za-z_$][\w$]*)\s*(?=[:,}]|$)", re.M)
     names: set[str] = set()
     for path in Path("web/src").rglob("*.ts"):
@@ -309,16 +291,18 @@ def _frontend_global_function_names() -> set[str]:
 
 def _reachable_frontend_sources() -> set[Path]:
     source_root = Path("web/src").resolve()
-    entrypoints = [
-        "shared/auth.ts",
-        "bundles/app.ts",
-        "bundles/skills-ui.ts",
-        "skills/skills-panel.ts",
-        "bundles/workspace.ts",
-        "bundles/review.ts",
-        "skills/skill-marketplace.ts",
-        "skills/skill-community.ts",
-    ]
+    build_recipe = Path("web/scripts/build-bundles.mjs").read_text(encoding="utf-8")
+    entry_map = re.search(r"(?ms)^const entries = \{(.*?)^\};", build_recipe)
+    assert entry_map is not None, "frontend build entry map is missing"
+    entrypoints = re.findall(
+        r"['\"][^'\"]+['\"]\s*:\s*['\"]src/([^'\"]+\.ts)['\"]",
+        entry_map.group(1),
+    )
+    assert entrypoints, "frontend build entry map has no TypeScript entries"
+    # Auth is also loaded as a standalone script, outside the bundle recipe.
+    entrypoints.append("shared/auth.ts")
+    for entrypoint in entrypoints:
+        assert (source_root / entrypoint).is_file(), entrypoint
     import_pattern = re.compile(
         r"(?:import|export)\s*(?:\(|(?:[^'\"]*?\s+from\s+)?)['\"]([^'\"]+)['\"]"
     )
@@ -344,64 +328,58 @@ def _reachable_frontend_sources() -> set[Path]:
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
-)
+def test_api_reference_scan_excludes_test_fixtures_but_keeps_production(tmp_path):
+    (tmp_path / "actions.ts").write_text("fetch('/api/real_action');", encoding="utf-8")
+    for name in ["actions.test.ts", "actions.spec.ts", "actions.test.js"]:
+        (tmp_path / name).write_text("fetch('/api/fake_fixture');", encoding="utf-8")
+
+    assert _frontend_api_refs(tmp_path) == {
+        (str(tmp_path / "actions.ts"), "/api/real_action")
+    }
+
+
+@pytest.mark.unit
+def test_reachable_sources_follow_declared_lazy_entries_without_hiding_orphans(
+    tmp_path, monkeypatch
+):
+    monkeypatch.chdir(tmp_path)
+    source_root = tmp_path / "web/src"
+    (source_root / "bundles").mkdir(parents=True)
+    (source_root / "shared").mkdir()
+    (tmp_path / "web/scripts").mkdir()
+    (tmp_path / "web/scripts/build-bundles.mjs").write_text(
+        "const entries = {\n 'lazy-review-bundle': 'src/bundles/review.ts',\n};\n",
+        encoding="utf-8",
+    )
+    (source_root / "bundles/review.ts").write_text(
+        "import '../review-actions';", encoding="utf-8"
+    )
+    (source_root / "review-actions.ts").write_text("export {};", encoding="utf-8")
+    (source_root / "orphan.ts").write_text("export {};", encoding="utf-8")
+    (source_root / "shared/auth.ts").write_text("export {};", encoding="utf-8")
+
+    assert _reachable_frontend_sources() == {
+        source_root / "bundles/review.ts",
+        source_root / "review-actions.ts",
+        source_root / "shared/auth.ts",
+    }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("app_factory", [_app_from_deferred_loader])
 def test_frontend_exposed_button_routes_are_registered(app_factory):
     adapter = _adapter(app_factory())
 
     expected_routes = [
         ("GET", "/"),
         ("GET", "/app"),
-        ("GET", "/workspace"),
-        ("GET", "/workspace-assistant"),
         ("GET", "/mini"),
-        ("GET", "/skill-community"),
-        ("GET", "/skill-marketplace"),
-        ("GET", "/api/token-stats"),
-        ("POST", "/api/token-stats/reset"),
-        ("GET", "/api/shadow/status"),
-        ("GET", "/api/shadow/observations"),
-        ("GET", "/api/shadow/memories"),
-        ("POST", "/api/shadow/memories"),
-        ("DELETE", "/api/shadow/memories/mem_1"),
-        ("GET", "/api/shadow/pending"),
-        ("POST", "/api/shadow/dismiss/msg_1"),
-        ("POST", "/api/shadow/dismiss-all"),
-        ("POST", "/api/shadow/toggle"),
-        ("POST", "/api/shadow/tick"),
-        ("GET", "/api/shadow/open-tasks"),
-        ("POST", "/api/shadow/dismiss-task/task_1"),
-        ("GET", "/api/shadow/retry-context/task_1"),
-        ("GET", "/api/macro/pending"),
-        ("POST", "/api/macro/dismiss/"),
-        ("POST", "/api/macro/dismiss/suggestion_1"),
-        ("POST", "/api/macro/confirm/"),
-        ("POST", "/api/macro/confirm/suggestion_1"),
-        ("GET", "/api/bg-agent"),
-        ("GET", "/api/bg-agent/"),
-        ("POST", "/api/bg-agent/submit"),
-        ("GET", "/api/bg-agent/list"),
-        ("GET", "/api/bg-agent/task_1"),
-        ("GET", "/api/bg-agent/task_1/stream"),
-        ("POST", "/api/bg-agent/task_1/approve"),
-        ("POST", "/api/bg-agent/task_1/reject"),
-        ("POST", "/api/bg-agent/task_1/cancel"),
-        ("GET", "/api/jobs/triggers"),
-        ("POST", "/api/jobs/triggers"),
-        ("POST", "/api/jobs/triggers/bootstrap"),
-        ("PATCH", "/api/jobs/triggers/trigger_1"),
-        ("DELETE", "/api/jobs/triggers/trigger_1"),
-        ("POST", "/api/jobs/triggers/trigger_1/fire"),
+        ("GET", "/addons"),
         ("GET", "/api/memories"),
         ("POST", "/api/memories"),
         ("POST", "/api/memories/import-profile"),
         ("POST", "/api/memories/batch-extract"),
         ("POST", "/api/memory/style-profile"),
-        ("GET", "/api/skillmarket"),
-        ("GET", "/api/skillmarket/"),
-        ("GET", "/api/skillmarket/community/skill/"),
-        ("POST", "/api/skillmarket/community/install/"),
         ("POST", "/api/response/rate"),
         ("GET", "/api/auth/status"),
         ("GET", "/api/auth/me"),
@@ -415,17 +393,12 @@ def test_frontend_exposed_button_routes_are_registered(app_factory):
 
 
 @pytest.mark.unit
-def test_blueprint_loader_wrapper_keeps_route_map_identical():
-    deferred_routes = _route_signature(_app_from_deferred_loader())
-    service_routes = _route_signature(_app_from_service_loader())
-
-    assert service_routes == deferred_routes
+def test_retired_blueprint_loader_wrapper_stays_removed():
+    assert not Path("web/services/blueprint_loader.py").exists()
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
-)
+@pytest.mark.parametrize("app_factory", [_app_from_deferred_loader])
 def test_frontend_api_string_references_have_backend_routes(app_factory):
     adapter = _adapter(app_factory())
     missing = sorted(
@@ -438,9 +411,7 @@ def test_frontend_api_string_references_have_backend_routes(app_factory):
 
 
 @pytest.mark.unit
-@pytest.mark.parametrize(
-    "app_factory", [_app_from_deferred_loader, _app_from_service_loader]
-)
+@pytest.mark.parametrize("app_factory", [_app_from_deferred_loader])
 def test_frontend_page_links_have_backend_routes(app_factory):
     adapter = _adapter(app_factory())
     missing = sorted(
@@ -453,15 +424,8 @@ def test_frontend_page_links_have_backend_routes(app_factory):
 
 
 @pytest.mark.unit
-def test_template_wa_handlers_have_workspace_exports():
-    methods = _workspace_wa_method_names()
-    missing = sorted(
-        (source, method)
-        for source, method in _frontend_wa_handler_refs()
-        if method not in methods
-    )
-
-    assert missing == []
+def test_templates_have_no_window_wa_business_handlers():
+    assert _frontend_wa_handler_refs() == set()
 
 
 @pytest.mark.unit
@@ -477,17 +441,84 @@ def test_inline_global_handlers_have_frontend_exports():
 
 
 @pytest.mark.unit
-def test_skills_panel_lazy_loader_installs_global_bridges_before_first_click():
-    html = Path("web/templates/index.html").read_text(encoding="utf-8")
+def test_p3_template_event_routes_are_complete_and_inline_free():
+    routed_sources = [
+        Path("web/templates/index.html"),
+        Path("web/templates/_workspace_close_warn_dialog.html"),
+        Path("web/templates/_workspace_docx_color_picker.html"),
+        Path("web/templates/_workspace_selection_toolbar.html"),
+        Path("web/src/app/template-runtime.ts"),
+    ]
+    controller = Path("web/src/app/template-event-controller.ts").read_text(
+        encoding="utf-8"
+    )
+    handler_ids = set(re.findall(r'"(h_[A-Za-z0-9_]+)"\s*:', controller))
+    references: set[str] = set()
+    inline_event_pattern = re.compile(
+        r"\bon(?:click|change|input|submit|keydown|keyup|mousedown|mouseup|"
+        r"pointerdown|dragover|dragleave|drop|contextmenu)\s*=\s*['\"]",
+        re.IGNORECASE,
+    )
+    for path in routed_sources:
+        source = path.read_text(encoding="utf-8")
+        assert inline_event_pattern.search(source) is None, path.as_posix()
+        references.update(
+            re.findall(r'data-koto-event-[\w-]+="(h_[A-Za-z0-9_]+)"', source)
+        )
 
-    assert "js/build/skills-ui-bundle.js" in html
-    assert "js/build/skills-panel-bundle.js" in html
-    assert "window.KotoSkillsLoader={load:load}" in html
-    assert "['openSkillsPanel','closeSkillsPanel','toggleSkillsPanel']" in html
-    assert "window[name]=stubs[name]" in html
-    assert "callAfterLoad(name, arguments)" in html
-    assert "#navSkillsBtn,#csbToggleBtn,#skillsPanel .close-panel" in html
-    assert '[data-action="open-skills"]' in html
+    assert references
+    assert sorted(references - handler_ids) == []
+
+
+@pytest.mark.unit
+def test_template_event_routes_resolve_business_actions_through_feature_registry():
+    controller_path = Path("web/src/app/template-event-controller.ts")
+    controller = controller_path.read_text(encoding="utf-8")
+    registered_actions: set[str] = set()
+    for path in Path("web/src").rglob("*.ts"):
+        if path == controller_path:
+            continue
+        source = path.read_text(encoding="utf-8")
+        registered_actions.update(
+            re.findall(r"getFeatureRegistry\(\)\.([A-Za-z_$][\w$]*)\s*=", source)
+        )
+
+    bare_calls = sorted(
+        name
+        for name in registered_actions
+        if re.search(rf"(?<![\w.]){re.escape(name)}\s*\(", controller)
+    )
+
+    assert registered_actions
+    assert bare_calls == []
+    assert "LegacyTemplateAction" not in controller
+    assert "window." not in controller
+
+
+@pytest.mark.unit
+def test_capability_panel_lazy_loader_installs_registry_bridges_before_first_click():
+    html = Path("web/templates/_workspace_asset_scripts.html").read_text(
+        encoding="utf-8"
+    )
+    runtime = Path("web/src/app/template-runtime.ts").read_text(encoding="utf-8")
+    app_entry = Path("web/src/bundles/app.ts").read_text(encoding="utf-8")
+    build_script = Path("web/scripts/build-bundles.mjs").read_text(encoding="utf-8")
+
+    assert "data-capability-panel-bundle-url" in html
+    assert "data-workspace-bundle-url" in html
+    assert "'capability-panel-bundle': 'src/addons/capability-panel.ts'" in build_script
+    assert "capability-panel" not in app_entry
+    assert "marketplace" not in app_entry
+    assert "registerFeatures({ loadCapabilityPanelBundle: load })" in runtime
+    assert "registerFeatures({ loadWorkspaceBundle: load })" in runtime
+    assert "koto:workspace-ready" in runtime
+    assert "'openCapabilityPanel'" in runtime
+    assert "'closeCapabilityPanel'" in runtime
+    assert "'toggleCapabilityPanel'" in runtime
+    assert "getFeatureRegistry()[name] = stubs[name]" in runtime
+    assert "callAfterLoad(name, args)" in runtime
+    assert "#navCapabilityBtn,#capabilityPanel .ui-close-button" in runtime
+    assert '[data-action="open-addons"]' in runtime
 
 
 @pytest.mark.unit
@@ -527,6 +558,14 @@ def test_retired_frontend_artifacts_stay_removed():
         "web/templates/_workspace_model_controls_compact.html",
         "web/src/editors/docx-readview.ts",
         "web/src/workspace/tiptap-types.ts",
+        "web/src/bundles/skills-ui.ts",
+        "web/src/skills/skill-marketplace.ts",
+        "web/src/skills/skill-community.ts",
+        "web/src/skills/skill-ui-extensions.ts",
+        "web/src/skills/skill-ui.ts",
+        "web/src/app/marketplace.ts",
+        "web/src/extras/tarot-picker.ts",
+        "web/src/skills/skills-panel.ts",
     ]
 
     assert [path for path in retired if Path(path).exists()] == []
@@ -538,28 +577,23 @@ def test_frontend_button_sources_keep_matching_backend_clusters():
         Path(path).read_text(encoding="utf-8")
         for path in [
             "web/src/app/main.ts",
-            "web/src/app/marketplace.ts",
             "web/src/app/settings.ts",
-            "web/src/skills/skills-panel.ts",
+            "web/src/addons/capability-panel.ts",
             "web/templates/index.html",
         ]
     )
     job_routes = Path("app/api/job_routes.py").read_text(encoding="utf-8")
+    app_runtime = Path("web/app_runtime.py").read_text(encoding="utf-8")
     app_blueprints = Path("web/app_blueprints.py").read_text(encoding="utf-8")
-    blueprint_loader = Path("web/services/blueprint_loader.py").read_text(
-        encoding="utf-8"
-    )
 
-    assert "/api/shadow/" in frontend_sources
-    assert "from app.api.shadow_routes import shadow_bp" in app_blueprints
-    assert '"web.blueprints.token_stats", "token_stats_bp"' in app_blueprints
-    assert '@job_bp.get("/triggers")' in job_routes
-    assert '@job_bp.post("/triggers/bootstrap")' in job_routes
-    assert '# @job_bp.get("/triggers")' not in job_routes
+    assert "/api/shadow/" not in frontend_sources
+    assert "app.api.shadow_routes" not in app_blueprints
+    assert "web.blueprints.token_stats" not in app_blueprints
+    assert not Path("web/blueprints/token_stats.py").exists()
+    assert '"/triggers"' not in job_routes
+    assert "get_trigger_registry" not in app_runtime
     assert "register_memory_routes" in app_blueprints
-    assert "from web.blueprints.auth import register_auth_routes" in app_blueprints
+    assert 'importlib.import_module("web.blueprints.auth")' in app_blueprints
     assert "from web.app_http import configure_http_wiring" in app_blueprints
-    assert "from app.api.response_routes import response_bp" in app_blueprints
-    assert "register_blueprints_deferred" in blueprint_loader
-    assert "from app.api.shadow_routes import shadow_bp" not in blueprint_loader
-    assert "_WEB_BLUEPRINT_CONFIGS" not in blueprint_loader
+    assert '"app.api.response_routes", "response_bp", "ResponseAPI"' in app_blueprints
+    assert not Path("web/services/blueprint_loader.py").exists()

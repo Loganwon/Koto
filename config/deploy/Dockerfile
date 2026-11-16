@@ -21,10 +21,12 @@ RUN pip install --no-cache-dir -r requirements.lock
 COPY web/ web/
 COPY app/ app/
 COPY src/server.py server.py
+COPY src/__init__.py src/runtime_bootstrap.py src/config_validator.py src/
+COPY config/deepseek_config.env.example config/deepseek_config.env
 COPY config/gemini_config.env.example config/gemini_config.env
 
 # 创建必要目录
-RUN mkdir -p logs chats workspace config
+RUN mkdir -p logs chats workspace config data/db
 
 # 非 root 用户运行（安全加固）
 RUN useradd -m -u 1000 koto && chown -R koto:koto /app
@@ -37,7 +39,7 @@ ENV KOTO_DEPLOY_MODE=cloud
 
 # 健康检查（start-period 延长以等待 gunicorn 完全启动）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-    CMD python -c "import requests; requests.get('http://localhost:5000/api/health').raise_for_status()" || exit 1
+    CMD python -c "import requests; requests.get('http://localhost:5000/api/health', timeout=3).raise_for_status()" || exit 1
 
 EXPOSE 5000
 

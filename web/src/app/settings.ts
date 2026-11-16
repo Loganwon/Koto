@@ -1,16 +1,17 @@
-/**
+﻿/**
  * Koto Settings Module — settings panel, user preferences, setup wizard
  */
 
 import { csrfFetch } from '../shared/csrf';
 import { markSidePanelClosed, markSidePanelOpen } from '../shared/side-panels';
-import { getWorkspaceApi } from '../shared/workspace-api';
+import { getFeatureRegistry } from '../shared/feature-registry';
 
 interface KotoSettings {
   storage?: { workspace_dir?: string; documents_dir?: string; images_dir?: string; chats_dir?: string };
   appearance?: { theme?: string; ui_zoom?: string };
-  ai?: { cloud_provider?: string; show_thinking?: boolean; show_task_type?: boolean; auto_save_files?: boolean; enable_mini_game?: boolean; use_local_only?: boolean; local_model?: string };
+  ai?: { cloud_provider?: string; show_thinking?: boolean; show_task_type?: boolean; auto_save_files?: boolean; use_local_only?: boolean; local_model?: string };
   local_model?: string;
+  model_mode?: 'cloud' | 'local';
   proxy?: { enabled?: boolean; manual_proxy?: string };
 }
 
@@ -18,23 +19,33 @@ let currentSettings: KotoSettings | null = null;
 let currentBrowseTarget: string | null = null;
 let currentBrowsePath: string = '';
 let allLocalModels: string[] = [];
-(window as any).currentSettings = currentSettings;
-(window as any).browseHomeDir = '';
+let settingsWriteQueue: Promise<void> = Promise.resolve();
+let settingsLoadPromise: Promise<void> | null = null;
+getFeatureRegistry().currentSettings = currentSettings;
+getFeatureRegistry().browseHomeDir = '';
 
-export async function loadSettings(): Promise<void> {
+async function fetchSettings(): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const response = await fetch('/api/settings');
+      const response = await fetch('/api/settings', { cache: 'no-store' });
       if (response.ok) {
         currentSettings = await response.json();
-        (window as any).currentSettings = currentSettings;
+        getFeatureRegistry().currentSettings = currentSettings;
         applySettingsToUI();
         return;
       }
-    } catch (error) { /* retry */ }
+    } catch (_error) { /* retry */ }
     if (attempt < 2) await new Promise(r => setTimeout(r, 500));
   }
   console.error('Failed to load settings after all retries');
+}
+
+export function loadSettings(): Promise<void> {
+  if (settingsLoadPromise) return settingsLoadPromise;
+  settingsLoadPromise = fetchSettings().finally(() => {
+    settingsLoadPromise = null;
+  });
+  return settingsLoadPromise;
 }
 
 export function applySettingsToUI(): void {
@@ -45,11 +56,11 @@ export function applySettingsToUI(): void {
   setVal('settingDocumentsDir', s.storage?.documents_dir || '');
   setVal('settingImagesDir', s.storage?.images_dir || '');
   setVal('settingChatsDir', s.storage?.chats_dir || '');
-  (window as any).browseHomeDir = s.storage?.workspace_dir || '';
+  getFeatureRegistry().browseHomeDir = s.storage?.workspace_dir || '';
 
   const currentTheme = s.appearance?.theme || 'light';
-  if (typeof (window as any).updateThemeSelector === 'function') (window as any).updateThemeSelector(currentTheme);
-  if (typeof (window as any).applyTheme === 'function') (window as any).applyTheme(currentTheme);
+  if (typeof getFeatureRegistry().updateThemeSelector === 'function') getFeatureRegistry().updateThemeSelector(currentTheme);
+  if (typeof getFeatureRegistry().applyTheme === 'function') getFeatureRegistry().applyTheme(currentTheme);
   localStorage.setItem('koto.theme', currentTheme);
 
   const cloudProviderEl = document.getElementById('settingCloudProvider') as HTMLSelectElement | null;
@@ -60,23 +71,22 @@ export function applySettingsToUI(): void {
 
   const showTaskTypeCheckbox = document.getElementById('settingShowTaskType') as HTMLInputElement | null;
   if (showTaskTypeCheckbox) showTaskTypeCheckbox.checked = s.ai?.show_task_type === true;
+  applyWorkspacePresentationSettings(s);
 
   const autoSaveFilesCheckbox = document.getElementById('settingAutoSaveFiles') as HTMLInputElement | null;
   if (autoSaveFilesCheckbox) autoSaveFilesCheckbox.checked = s.ai?.auto_save_files !== false;
 
-  const miniGameCheckbox = document.getElementById('settingEnableMiniGame') as HTMLInputElement | null;
-  if (miniGameCheckbox) {
-    const isEnabled = s.ai?.enable_mini_game !== false;
-    miniGameCheckbox.checked = isEnabled;
-    (window as any).enableMiniGame = isEnabled;
+  const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
+  // Read both model_mode (canonical) and ai.use_local_only (legacy) so the
+  // checkbox stays in sync regardless of which key the writer touched.
+  if (localOnlyEl) {
+    const modeIsLocal = (s as any).model_mode === 'local';
+    localOnlyEl.checked = s.ai?.use_local_only === true || modeIsLocal;
   }
 
-  const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
-  if (localOnlyEl) localOnlyEl.checked = s.ai?.use_local_only === true;
-
   const savedZoom = parseFloat(String(s.appearance?.ui_zoom || '1'));
-  if (Number.isFinite(savedZoom) && typeof (window as any).setUIZoom === 'function') {
-    (window as any).setUIZoom(String(savedZoom), true);
+  if (Number.isFinite(savedZoom) && typeof getFeatureRegistry().setUIZoom === 'function') {
+    getFeatureRegistry().setUIZoom(String(savedZoom), true);
   }
 
   const proxyEnabledEl = document.getElementById('settingProxyEnabled') as HTMLInputElement | null;
@@ -96,15 +106,15 @@ function isUnifiedWorkspace(): boolean {
 }
 
 export function openSettings(): void {
-  if (typeof (window as any).closeSkillsPanel === 'function') (window as any).closeSkillsPanel();
+  getFeatureRegistry().closeCapabilityPanel?.();
   loadSettings();
-  if (typeof (window as any).loadSkills === 'function') (window as any).loadSkills();
-  if (typeof (window as any).loadSkillBindings === 'function') (window as any).loadSkillBindings();
-  if (typeof (window as any).loadTriggers === 'function') (window as any).loadTriggers();
-  if (typeof (window as any).loadShadowStatus === 'function') (window as any).loadShadowStatus();
-  if (typeof (window as any).detectLocalModels === 'function') (window as any).detectLocalModels();
+  if (typeof getFeatureRegistry().detectLocalModels === 'function') getFeatureRegistry().detectLocalModels();
   const panel = document.getElementById('settingsPanel');
   if (panel) panel.classList.add('active');
+  const defaultAppsSection = document.getElementById('defaultAppsSettingsSection');
+  if (defaultAppsSection) {
+    defaultAppsSection.hidden = typeof (window as any).pywebview?.api?.open_default_apps_settings !== 'function';
+  }
   document.body.classList.add('settings-panel-open');
   markSidePanelOpen('settingsPanel');
   setActivityActive('navSettingsBtn');
@@ -129,31 +139,73 @@ export function toggleSettings(): void {
   }
 }
 
-export function syncCloudProviderUi(provider: string): void {
+export async function openDefaultAppsSettings(): Promise<void> {
+  const desktopApi = (window as any).pywebview?.api;
+  const notify = getFeatureRegistry().showNotification;
+  if (typeof desktopApi?.open_default_apps_settings !== 'function') {
+    notify?.('此功能仅在 Koto Windows 桌面版中可用', 'info', 3000);
+    return;
+  }
+  try {
+    const result = await desktopApi.open_default_apps_settings();
+    if (result?.success !== true) {
+      throw new Error(result?.error || '无法打开 Windows 默认应用设置');
+    }
+    notify?.('请在 Windows 中为需要的文件类型选择 Koto', 'info', 5000);
+  } catch (error: any) {
+    notify?.(error?.message || '无法打开 Windows 默认应用设置', 'error', 4000);
+  }
+}
+
+export function syncCloudProviderUi(_provider: string): void {
   const normalized = 'deepseek';
   const desc = document.getElementById('settingsApiKeyDesc');
   const hint = document.getElementById('settingCloudProviderHint');
   const input = document.getElementById('settingsApiKeyInput') as HTMLInputElement | null;
   const providerEl = document.getElementById('settingCloudProvider') as HTMLSelectElement | null;
   if (providerEl) providerEl.value = normalized;
-  if (desc) desc.innerHTML = '更新 DeepSeek API 密钥。选择 DeepSeek 后，云端任务流默认使用 DeepSeek Chat。';
-  if (hint) hint.textContent = '云端模式下使用 DeepSeek Chat，支持文字对话、代码和文件任务规划。';
+  if (desc) desc.innerHTML = '配置并启用 DeepSeek API 密钥；对话与文件任务会使用同一云端模型。';
+  if (hint) hint.textContent = 'DeepSeek Chat 用于云端对话和文件任务；需要完全本地时开启本地模型。';
   if (input) input.placeholder = '粘贴 DeepSeek API Key…';
 }
 
-export async function onCloudProviderChange(provider: string): Promise<void> {
+export async function onCloudProviderChange(_provider: string): Promise<void> {
   const normalized = 'deepseek';
   syncCloudProviderUi(normalized);
   await updateSetting('ai', 'cloud_provider', normalized);
   if (normalized === 'deepseek') { await updateSetting('ai', 'deepseek_model', 'deepseek-chat'); }
-  csrfFetch('/api/local-model/switch', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'cloud' }) }).catch(() => {});
-  getWorkspaceApi().refreshModelCatalog?.(true);
+  const response = await csrfFetch('/api/local-model/switch', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode: 'cloud' }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok || data.success === false) throw new Error(data.error || 'DeepSeek 云端模式切换失败');
+  if (currentSettings) {
+    currentSettings.model_mode = 'cloud';
+    currentSettings.ai = { ...(currentSettings.ai || {}), cloud_provider: normalized, use_local_only: false };
+    getFeatureRegistry().currentSettings = currentSettings;
+  }
+  window.dispatchEvent(new CustomEvent('koto:model-runtime-changed', {
+    detail: { ...(data.active_model || {}), mode: data.mode || 'cloud', cloudModel: data.cloud_model || 'deepseek-chat', localModel: data.local_model || '', source: 'settings' },
+  }));
+  getFeatureRegistry().refreshModelCatalog?.(true);
+}
+
+/** Keep unified-workspace presentation settings in the same live state as the panel. */
+function applyWorkspacePresentationSettings(settings: KotoSettings): void {
+  const root = document.documentElement;
+  root.dataset.kotoShowThinking = settings.ai?.show_thinking === true ? 'true' : 'false';
+  root.dataset.kotoShowTaskType = settings.ai?.show_task_type === true ? 'true' : 'false';
+  window.dispatchEvent(new CustomEvent('koto:workspace-presentation-changed', {
+    detail: {
+      showThinking: settings.ai?.show_thinking === true,
+      showTaskType: settings.ai?.show_task_type === true,
+    },
+  }));
 }
 
 export async function saveSettingsApiKey(): Promise<void> {
   const input = document.getElementById('settingsApiKeyInput') as HTMLInputElement | null;
   const status = document.getElementById('settingsApiKeyStatus');
-  const providerEl = document.getElementById('settingCloudProvider') as HTMLSelectElement | null;
   const provider = 'deepseek';
   const apiKey = input?.value.trim();
   if (!apiKey || apiKey.length < 10) {
@@ -165,10 +217,10 @@ export async function saveSettingsApiKey(): Promise<void> {
     const res = await csrfFetch('/api/setup/apikey', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ api_key: apiKey, provider }) });
     const data = await res.json();
     if (data.success) {
-      if (status) { status.textContent = '✅ 已保存，正在生效…'; status.style.color = 'var(--accent-primary, #10b981)'; }
+      await onCloudProviderChange(provider);
+      if (status) { status.textContent = '✅ 已保存并启用 DeepSeek；对话与文件任务已同步。'; status.style.color = 'var(--accent-primary, #10b981)'; }
       if (input) input.value = '';
-      const banner = document.getElementById('apiKeyBanner');
-      if (banner) banner.style.display = 'none';
+      setApiKeyBannerVisible(false);
       setTimeout(() => { if (status) status.textContent = ''; }, 3000);
     } else {
       if (status) { status.textContent = '❌ ' + (data.error || '保存失败'); status.style.color = 'var(--accent-error, #ef4444)'; }
@@ -186,29 +238,34 @@ function rememberSetting(category: string, key: string, value: any): void {
       [key]: value,
     },
   };
-  (window as any).currentSettings = currentSettings;
+  getFeatureRegistry().currentSettings = currentSettings;
 }
 
 export async function updateSetting(category: string, key: string, value: any): Promise<boolean> {
-  try {
-    const response = await csrfFetch('/api/settings', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ category, key, value })
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || data.success === false) {
-      throw new Error(data.error || '设置保存失败');
+  let resolveResult: (saved: boolean) => void = () => {};
+  const result = new Promise<boolean>((resolve) => { resolveResult = resolve; });
+  settingsWriteQueue = settingsWriteQueue.then(async () => {
+    try {
+      const response = await csrfFetch('/api/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ category, key, value })
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || data.success === false) {
+        throw new Error(data.error || '设置保存失败');
+      }
+      rememberSetting(category, key, value);
+      resolveResult(true);
+    } catch (e: any) {
+      if (typeof getFeatureRegistry().showNotification === 'function') {
+        getFeatureRegistry().showNotification(e?.message || '设置保存失败', 'error', 2200);
+      }
+      console.warn('Failed to update setting', category, key, e);
+      resolveResult(false);
     }
-    rememberSetting(category, key, value);
-    return true;
-  } catch (e: any) {
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification(e?.message || '设置保存失败', 'error', 2200);
-    }
-    console.warn('Failed to update setting', category, key, e);
-    return false;
-  }
+  });
+  return result;
 }
 
 export async function onBooleanSettingChange(input: HTMLInputElement, category: string, key: string): Promise<void> {
@@ -221,16 +278,15 @@ export async function onBooleanSettingChange(input: HTMLInputElement, category: 
     input.checked = previousValue;
     return;
   }
-  if (category === 'ai' && key === 'enable_mini_game') {
-    (window as any).enableMiniGame = nextValue;
-    if (!nextValue) (window as any).hideMiniGame?.();
+  if (category === 'ai' && (key === 'show_thinking' || key === 'show_task_type')) {
+    applyWorkspacePresentationSettings(currentSettings || {});
   }
 }
 
 export function applyLocalOnlyMode(enabled: boolean): void {
-  // The workspace owns the visible chat-mode control.  Settings only
-  // publishes confirmed server state, avoiding a second mode-switch request.
-  window.dispatchEvent(new CustomEvent('koto:model-mode-changed', {
+  // All entry points consume this one confirmed runtime event.  No browser
+  // preference is allowed to compete with the persisted server selection.
+  window.dispatchEvent(new CustomEvent('koto:model-runtime-changed', {
     detail: { mode: enabled ? 'local' : 'cloud', source: 'settings' },
   }));
 }
@@ -243,11 +299,11 @@ function syncLocalOnlyControlFromWorkspace(event: Event): void {
   if (localOnlyEl) localOnlyEl.checked = enabled;
   if (currentSettings) {
     currentSettings.ai = { ...(currentSettings.ai || {}), use_local_only: enabled };
-    (window as any).currentSettings = currentSettings;
+    getFeatureRegistry().currentSettings = currentSettings;
   }
 }
 
-window.addEventListener('koto:model-mode-changed', syncLocalOnlyControlFromWorkspace);
+window.addEventListener('koto:model-runtime-changed', syncLocalOnlyControlFromWorkspace);
 
 export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
   const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
@@ -268,16 +324,16 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
           : errMsg.includes('未安装')
             ? '⚠️ Ollama 未安装。请访问 ollama.com 下载安装后再开启本地模式。'
             : '⚠️ Ollama 未运行。请先启动 Ollama，再开启本地模式。';
-        if (typeof (window as any).showNotification === 'function') {
-          (window as any).showNotification(msg, 'warning', 6000);
+        if (typeof getFeatureRegistry().showNotification === 'function') {
+          getFeatureRegistry().showNotification(msg, 'warning', 6000);
         }
         return;
       }
       if (!selectEl || !selectEl.value) {
         if (localOnlyEl) localOnlyEl.checked = false;
         applyLocalOnlyMode(false);
-        if (typeof (window as any).showNotification === 'function') {
-          (window as any).showNotification('⚠️ 请先在下方选择一个本地模型', 'warning', 4000);
+        if (typeof getFeatureRegistry().showNotification === 'function') {
+          getFeatureRegistry().showNotification('⚠️ 请先在下方选择一个本地模型', 'warning', 4000);
         }
         const pickerRow = document.getElementById('localModelPickerRow');
         if (pickerRow) pickerRow.style.display = '';
@@ -287,8 +343,8 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
     } catch (_) {
       if (localOnlyEl) localOnlyEl.checked = false;
       applyLocalOnlyMode(false);
-      if (typeof (window as any).showNotification === 'function') {
-        (window as any).showNotification('⚠️ 无法检测 Ollama 状态，请确认 Ollama 已启动', 'warning', 5000);
+      if (typeof getFeatureRegistry().showNotification === 'function') {
+        getFeatureRegistry().showNotification('⚠️ 无法检测 Ollama 状态，请确认 Ollama 已启动', 'warning', 5000);
       }
       return;
     }
@@ -307,12 +363,13 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
     if (!response.ok || data.success === false) throw new Error(data.error || '本地模型切换失败');
     runtimeSwitched = true;
     if (currentSettings) {
+      currentSettings.model_mode = enabled ? 'local' : 'cloud';
       currentSettings.ai = { ...(currentSettings.ai || {}), use_local_only: enabled };
-      (window as any).currentSettings = currentSettings;
+      getFeatureRegistry().currentSettings = currentSettings;
     }
     applyLocalOnlyMode(enabled);
-    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
-      detail: { model: data.model || modelTag, source: 'settings' },
+    window.dispatchEvent(new CustomEvent('koto:model-runtime-changed', {
+      detail: { ...(data.active_model || {}), mode: data.mode || (enabled ? 'local' : 'cloud'), cloudModel: data.cloud_model || 'deepseek-chat', localModel: data.local_model || data.model || modelTag, source: 'settings' },
     }));
   } catch (error: any) {
     if (localOnlyEl) localOnlyEl.checked = previousEnabled;
@@ -324,8 +381,8 @@ export async function onLocalOnlyChange(enabled: boolean): Promise<void> {
         body: JSON.stringify(previousEnabled ? { mode: 'local', model_tag: modelTag } : { mode: 'cloud' }),
       });
     }
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 4000);
+    if (typeof getFeatureRegistry().showNotification === 'function') {
+      getFeatureRegistry().showNotification(error?.message || '本地模型切换失败', 'error', 4000);
     }
   }
 }
@@ -398,31 +455,34 @@ export async function onLocalModelChange(modelTag: string): Promise<void> {
   const nextModel = String(modelTag || '').trim();
   if (!nextModel) return;
   try {
-    const localOnly = (document.getElementById('settingLocalOnly') as HTMLInputElement | null)?.checked === true;
-    // Always use the model-switch endpoint.  It atomically mirrors the
-    // top-level runtime model and ai.local_model while preserving the current
-    // local/cloud mode when no mode is supplied.  Going through updateSetting
-    // here left the runtime source stale whenever local-only was unchecked.
+    // Choosing a concrete local model is an explicit user choice to use it.
+    // Previously this only saved a tag while retaining cloud mode, leaving the
+    // composer and status widget on DeepSeek even though Settings displayed a
+    // selected Ollama model.
     const resp = await csrfFetch('/api/local-model/switch', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model_tag: nextModel }),
+      body: JSON.stringify({ mode: 'local', model_tag: nextModel }),
     });
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok || data.success === false) throw new Error(data.error || '本地模型保存失败');
     if (currentSettings) {
+      currentSettings.model_mode = 'local';
       currentSettings.local_model = nextModel;
-      currentSettings.ai = { ...(currentSettings.ai || {}), local_model: nextModel };
-      (window as any).currentSettings = currentSettings;
+      currentSettings.ai = { ...(currentSettings.ai || {}), local_model: nextModel, use_local_only: true };
+      getFeatureRegistry().currentSettings = currentSettings;
     }
-    window.dispatchEvent(new CustomEvent('koto:local-model-changed', {
-      detail: { model: data.model || nextModel, source: 'settings' },
+    const localOnlyEl = document.getElementById('settingLocalOnly') as HTMLInputElement | null;
+    if (localOnlyEl) localOnlyEl.checked = true;
+    window.dispatchEvent(new CustomEvent('koto:model-runtime-changed', {
+      detail: { ...(data.active_model || {}), mode: 'local', cloudModel: data.cloud_model || 'deepseek-chat', localModel: data.local_model || data.model || nextModel, source: 'settings' },
     }));
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification(localOnly ? `已切换本地模型：${nextModel}` : `已保存本地模型：${nextModel}`, 'success', 1800);
+    void checkStatus(true);
+    if (typeof getFeatureRegistry().showNotification === 'function') {
+      getFeatureRegistry().showNotification(`已启用本地模型：${nextModel}`, 'success', 1800);
     }
   } catch (error: any) {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(error?.message || '本地模型切换失败', 'error', 3000);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification(error?.message || '本地模型切换失败', 'error', 3000);
   }
 }
 
@@ -431,11 +491,13 @@ let setupCloudProvider: string = 'deepseek';
 
 export async function checkSetupStatus(): Promise<void> {
   try {
-    const response = await fetch('/api/setup/status');
+    const response = await fetch('/api/capabilities', { cache: 'no-store' });
     const data = await response.json();
-    selectSetupProvider('deepseek');
-    if (!data.initialized || !data.has_api_key) { showSetupWizard(); } else { (window as any).setupComplete = true; }
-  } catch (error) { /* ignore */ }
+    const active = data?.capabilities?.active_model || {};
+    const configured = ['available', 'checking'].includes(String(active.status || ''));
+    getFeatureRegistry().setupComplete = true;
+    setApiKeyBannerVisible(!configured);
+  } catch (_error) { /* ignore */ }
 }
 
 export function showSetupWizard(): void {
@@ -451,6 +513,7 @@ export function hideSetupWizard(): void {
 }
 
 export function selectSetupProvider(provider: string): void {
+  void provider;
   const normalized = 'deepseek';
   setupCloudProvider = normalized;
   const deepseekBtn = document.getElementById('setupProviderDeepSeek');
@@ -479,7 +542,7 @@ export async function saveApiKey(): Promise<void> {
     } else {
       if (status) { status.textContent = '❌ ' + (data.error || '保存失败'); status.className = 'step-status error'; }
     }
-  } catch (error) { if (status) { status.textContent = '❌ 网络错误'; status.className = 'step-status error'; } }
+  } catch (_error) { if (status) { status.textContent = '❌ 网络错误'; status.className = 'step-status error'; } }
 }
 
 export async function useActivationCode(): Promise<void> {
@@ -498,7 +561,7 @@ export async function useActivationCode(): Promise<void> {
         if (step2) step2.classList.add('active');
       }, 800);
     } else { if (status) { status.textContent = '❌ ' + (data.error || '激活失败'); status.className = 'step-status error'; } }
-  } catch (err) { if (status) { status.textContent = '❌ 网络错误，请重试'; status.className = 'step-status error'; } }
+  } catch (_err) { if (status) { status.textContent = '❌ 网络错误，请重试'; status.className = 'step-status error'; } }
 }
 
 export async function saveWorkspace(): Promise<void> {
@@ -514,7 +577,7 @@ export async function saveWorkspace(): Promise<void> {
       if (step2) { step2.classList.remove('active'); step2.classList.add('completed'); }
       if (step3) step3.classList.add('active');
     } else { if (status) { status.textContent = '❌ ' + (data.error || '创建失败'); status.className = 'step-status error'; } }
-  } catch (error) { if (status) { status.textContent = '❌ 网络错误'; status.className = 'step-status error'; } }
+  } catch (_error) { if (status) { status.textContent = '❌ 网络错误'; status.className = 'step-status error'; } }
 }
 
 export async function testConnection(): Promise<void> {
@@ -544,42 +607,47 @@ export async function activateWithCode(): Promise<void> {
     const data = await response.json();
     if (data.success) {
       if (status) { status.textContent = '✅ 激活成功！正在启动 Koto...'; status.className = 'step-status success'; }
-      setTimeout(() => { (window as any).setupComplete = true; hideSetupWizard(); if (typeof (window as any).loadSessions === 'function') (window as any).loadSessions(); if (typeof (window as any).checkStatus === 'function') (window as any).checkStatus(); }, 800);
+      setTimeout(() => { getFeatureRegistry().setupComplete = true; hideSetupWizard(); if (typeof getFeatureRegistry().loadSessions === 'function') getFeatureRegistry().loadSessions(); if (typeof getFeatureRegistry().checkStatus === 'function') getFeatureRegistry().checkStatus(); }, 800);
     } else { if (status) { status.textContent = '❌ ' + (data.error || '激活失败'); status.className = 'step-status error'; } }
-  } catch (error) { if (status) { status.textContent = '❌ 网络错误'; status.className = 'step-status error'; } }
+  } catch (_error) { if (status) { status.textContent = '❌ 网络错误'; status.className = 'step-status error'; } }
 }
 
 export function skipSetup(): void {
   if (confirm('跳过设置可能导致部分功能无法使用，确定要跳过吗？')) {
     hideSetupWizard();
-    const banner = document.getElementById('apiKeyBanner');
-    if (banner) banner.style.display = 'flex';
+    setApiKeyBannerVisible(true);
   }
 }
 
-export function dismissApiKeyBanner(): void {
+function setApiKeyBannerVisible(visible: boolean): void {
   const banner = document.getElementById('apiKeyBanner');
-  if (banner) banner.style.display = 'none';
+  if (!banner) return;
+  banner.toggleAttribute('hidden', !visible);
+  banner.setAttribute('aria-hidden', visible ? 'false' : 'true');
+}
+
+export function dismissApiKeyBanner(): void {
+  setApiKeyBannerVisible(false);
 }
 
 export function finishSetup(): void {
-  (window as any).setupComplete = true;
+  getFeatureRegistry().setupComplete = true;
   hideSetupWizard();
-  if (typeof (window as any).loadSessions === 'function') (window as any).loadSessions();
-  if (typeof (window as any).checkStatus === 'function') (window as any).checkStatus();
+  if (typeof getFeatureRegistry().loadSessions === 'function') getFeatureRegistry().loadSessions();
+  if (typeof getFeatureRegistry().checkStatus === 'function') getFeatureRegistry().checkStatus();
 }
 
 export function browseSetupFolder(): void {
   currentBrowseTarget = 'setup_workspace';
   const pathInput = document.getElementById('setupWorkspacePath') as HTMLInputElement | null;
-  const startPath = pathInput?.value.trim() || (window as any).browseHomeDir || '';
+  const startPath = pathInput?.value.trim() || getFeatureRegistry().browseHomeDir || '';
   currentBrowsePath = startPath;
   const manualPathInput = document.getElementById('manualPathInput') as HTMLInputElement | null;
   if (manualPathInput) manualPathInput.value = startPath;
   if (startPath) {
-    if (typeof (window as any).loadFolderList === 'function') (window as any).loadFolderList(startPath);
+    if (typeof getFeatureRegistry().loadFolderList === 'function') getFeatureRegistry().loadFolderList(startPath);
   } else {
-    if (typeof (window as any).loadFolderDrives === 'function') (window as any).loadFolderDrives();
+    if (typeof getFeatureRegistry().loadFolderDrives === 'function') getFeatureRegistry().loadFolderDrives();
   }
   const folderModal = document.getElementById('folderModal');
   if (folderModal) folderModal.classList.add('active');
@@ -587,7 +655,7 @@ export function browseSetupFolder(): void {
 
 export function browseFolder(target: string): void {
   currentBrowseTarget = target;
-  (window as any).currentBrowseTarget = target;
+  getFeatureRegistry().currentBrowseTarget = target;
   const field = document.getElementById(`setting${target.split('_').map(part => part ? part[0].toUpperCase() + part.slice(1) : '').join('')}`) as HTMLInputElement | null;
   const explicitMap: Record<string, string> = {
     workspace_dir: 'settingWorkspaceDir',
@@ -596,15 +664,15 @@ export function browseFolder(target: string): void {
     chats_dir: 'settingChatsDir',
   };
   const input = document.getElementById(explicitMap[target] || '') as HTMLInputElement | null;
-  const startPath = (input || field)?.value.trim() || (window as any).browseHomeDir || '';
+  const startPath = (input || field)?.value.trim() || getFeatureRegistry().browseHomeDir || '';
   currentBrowsePath = startPath;
-  (window as any).currentBrowsePath = startPath;
+  getFeatureRegistry().currentBrowsePath = startPath;
   const manualPathInput = document.getElementById('manualPathInput') as HTMLInputElement | null;
   if (manualPathInput) manualPathInput.value = startPath;
-  if (startPath && typeof (window as any).loadFolderList === 'function') {
-    (window as any).loadFolderList(startPath);
-  } else if (typeof (window as any).loadFolderDrives === 'function') {
-    (window as any).loadFolderDrives();
+  if (startPath && typeof getFeatureRegistry().loadFolderList === 'function') {
+    getFeatureRegistry().loadFolderList(startPath);
+  } else if (typeof getFeatureRegistry().loadFolderDrives === 'function') {
+    getFeatureRegistry().loadFolderDrives();
   }
   document.getElementById('folderModal')?.classList.add('active');
 }
@@ -612,12 +680,12 @@ export function browseFolder(target: string): void {
 export function closeFolderModal(): void {
   document.getElementById('folderModal')?.classList.remove('active');
   currentBrowseTarget = null;
-  (window as any).currentBrowseTarget = null;
+  getFeatureRegistry().currentBrowseTarget = null;
 }
 
 export async function confirmFolderSelect(): Promise<void> {
   const path = ((document.getElementById('manualPathInput') as HTMLInputElement | null)?.value || '').trim();
-  const target = currentBrowseTarget || (window as any).currentBrowseTarget;
+  const target = currentBrowseTarget || getFeatureRegistry().currentBrowseTarget;
   if (!path || !target) return;
   if (target === 'setup_workspace') {
     const input = document.getElementById('setupWorkspacePath') as HTMLInputElement | null;
@@ -649,24 +717,34 @@ export function formatLatency(providerData: any): string {
   if (!providerData) return '--';
   if (providerData.error === 'checking') return '检查中';
   if (providerData.reachable && providerData.latency_ms != null) return `${providerData.latency_ms}ms`;
-  if (providerData.error === 'timeout') return '超时';
-  return '不可达';
+  if (providerData.error === 'runtime_outdated') {
+    return providerData.required_version ? `需 Ollama ${providerData.required_version}` : '需升级 Ollama';
+  }
+  const errors: Record<string, string> = {
+    key_missing: 'Key 未配置', key_invalid: 'Key 不可用', model_missing: '未选模型',
+    model_not_found: '模型不存在', model_load_failed: '模型损坏', rate_limited: '限流中', timeout: '超时',
+    service_unavailable: '未启动', network_error: '网络异常', checking: '检查中',
+  };
+  return errors[String(providerData.error || '')] || '不可用';
 }
 
 export function updateLatencyProvider(provider: string, providerData: any): void {
-  const id = 'Deepseek';
+  const id = provider === 'local' ? 'Local' : 'Deepseek';
   const row = document.getElementById(`latency${id}`);
   const value = document.getElementById(`latency${id}Val`);
   const bar = document.getElementById(`latency${id}Bar`);
+  const label = document.getElementById(`latency${id}Name`);
   const latencyMs = providerData && providerData.reachable ? providerData.latency_ms : null;
   const latencyClass = getLatencyClass(latencyMs);
   if (value) value.textContent = formatLatency(providerData);
-  if (bar) { bar.className = `latency-bar-fill ${latencyClass}`.trim(); bar.style.width = latencyMs == null ? '0%' : `${Math.max(8, Math.min(100, latencyMs / 20))}%`; }
+  if (label && providerData?.model_id) label.textContent = provider === 'local' ? `本地 · ${providerData.model_id}` : `DeepSeek · ${providerData.model_id}`;
+  if (bar) { bar.className = `latency-bar-fill ${latencyMs == null ? 'failed' : latencyClass}`.trim(); bar.style.width = latencyMs == null ? '100%' : `${Math.max(8, Math.min(100, latencyMs / 20))}%`; }
   if (row) { row.classList.toggle('offline', !(providerData && providerData.reachable)); }
 }
 
 export function updateLatencyDetail(results: any): void {
   updateLatencyProvider('deepseek', results && results.deepseek);
+  updateLatencyProvider('local', results && results.local);
 }
 
 export function toggleLatencyDetail(event?: Event): void {
@@ -675,10 +753,10 @@ export function toggleLatencyDetail(event?: Event): void {
   if (!detail) return;
   const willOpen = !detail.classList.contains('open');
   if (willOpen) {
-    updateLatencyDetail((window as any)._lastCloudLatency || { deepseek: { reachable: false, error: 'checking' } });
-    checkStatus();
+    updateLatencyDetail(getFeatureRegistry()._lastModelLatency || { deepseek: { reachable: false, error: 'checking' }, local: { reachable: false, error: 'checking' } });
+    checkStatus(true);
   }
-  // The status detail belongs to the activity rail.  Moving it into the file
+  // The status detail belongs to the task sidebar.  Moving it into the file
   // browser made a global component participate in the workspace column's
   // flex layout, which caused both panels to overlap in narrow windows.
   // Keep its DOM owner stable; the activity-rail CSS positions it as a popover.
@@ -688,46 +766,52 @@ export function toggleLatencyDetail(event?: Event): void {
   const indicator = document.getElementById('statusIndicator'); if (indicator) indicator.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
 }
 
-export async function checkStatus(): Promise<void> {
+export async function checkStatus(probeModels: boolean = false): Promise<void> {
   const dot = document.querySelector('.status-dot');
   const text = document.querySelector('.status-text');
 
-  try {
-    const response = await fetch('/api/ping');
-    const data = await response.json();
-    if (data.status === 'ok') {
-      if (dot) { dot.classList.add('online'); dot.classList.remove('offline'); }
-      if (text) text.textContent = data.ollama ? '🦙 ...' : '...';
-    } else {
-      if (dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
-      if (text) text.textContent = 'Offline';
-    }
-  } catch (error) {
-    if (dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
-    if (text) text.textContent = 'Error';
-  }
-
   const noticeBar = document.getElementById('wechat-notice-bar');
   try {
-    const cResp = await fetch('/api/ping/cloud/all', { signal: AbortSignal.timeout(12000) });
+    const endpoint = probeModels ? '/api/ping/models' : '/api/capabilities';
+    const timeout = probeModels ? 25000 : 3000;
+    const cResp = await fetch(endpoint, { signal: AbortSignal.timeout(timeout), cache: 'no-store' });
     if (cResp.ok) {
-      const cloud = await cResp.json();
-      (window as any)._lastCloudLatency = cloud;
-      updateLatencyDetail(cloud);
-      const providerOrder = ['deepseek'];
-      const reachable = providerOrder.map(p => cloud && cloud[p]).filter((item: any) => item && item.reachable && item.latency_ms != null);
-      const ollamaHint = text?.textContent?.startsWith('🦙') ? ' | 🦙' : '';
-      if (reachable.length) {
-        const fastest = reachable.reduce((best: any, item: any) => item.latency_ms < best.latency_ms ? item : best);
-        if (text) text.textContent = `☁ ${fastest.latency_ms}ms${ollamaHint}`;
+      const models = await cResp.json();
+      if (probeModels) {
+        getFeatureRegistry()._lastModelLatency = models;
+        updateLatencyDetail(models);
+      }
+      const active = probeModels ? models?.active : models?.capabilities?.active_model;
+      const activeMode = probeModels ? active?.mode : active?.metadata?.mode;
+      const isReady = probeModels ? active?.reachable : ['available', 'checking'].includes(active?.status);
+      if (isReady) {
+        const provider = activeMode === 'local' ? '本地' : 'DeepSeek';
+        const latency = activeMode === 'local' ? models.local?.latency_ms : models.deepseek?.latency_ms;
+        if (dot) { dot.classList.add('online'); dot.classList.remove('offline'); }
+        if (text) text.textContent = probeModels
+          ? `${provider} ${latency}ms`
+          : (active?.status === 'checking' ? `${provider} 待检测` : `${provider} 已配置`);
         if (noticeBar) noticeBar.style.display = 'none';
       } else {
-        if (text) text.textContent = `☁ 超时${ollamaHint}`;
+        const provider = activeMode === 'local' ? '本地' : 'DeepSeek';
+        const capabilityText: Record<string, string> = {
+          misconfigured: `${provider} 待配置`,
+          unavailable: `${provider} 服务未启动`,
+          incompatible: `${provider} 运行时需升级`,
+        };
+        if (dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+        if (text) text.textContent = probeModels ? `${provider} 不可用` : (capabilityText[active?.status] || `${provider} 不可用`);
         if (noticeBar) noticeBar.style.display = 'block';
       }
-    } else { if (noticeBar) noticeBar.style.display = 'block'; }
+    } else {
+      if (dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+      if (text) text.textContent = '模型检查失败';
+      if (noticeBar) noticeBar.style.display = 'block';
+    }
   } catch (_) {
-    updateLatencyDetail((window as any)._lastCloudLatency || {});
+    updateLatencyDetail(getFeatureRegistry()._lastModelLatency || {});
+    if (dot) { dot.classList.add('offline'); dot.classList.remove('online'); }
+    if (text) text.textContent = '模型检查失败';
     if (noticeBar) noticeBar.style.display = 'block';
   }
 
@@ -749,7 +833,12 @@ const batchJobsState = { timer: null as ReturnType<typeof setInterval> | null };
 
 export function openBatchJobsPanel(): void {
   const modal = document.getElementById('batchPanelModal');
-  if (modal) modal.style.display = 'flex';
+  if (!modal) return;
+  modal.classList.add('active');
+  modal.setAttribute('aria-hidden', 'false');
+  requestAnimationFrame(() => {
+    (modal.querySelector('.ui-close-button') as HTMLElement | null)?.focus();
+  });
   refreshBatchJobs();
   if (batchJobsState.timer) clearInterval(batchJobsState.timer);
   batchJobsState.timer = setInterval(refreshBatchJobs, 2000);
@@ -757,7 +846,10 @@ export function openBatchJobsPanel(): void {
 
 export function closeBatchJobsPanel(): void {
   const modal = document.getElementById('batchPanelModal');
-  if (modal) modal.style.display = 'none';
+  if (modal) {
+    modal.classList.remove('active');
+    modal.setAttribute('aria-hidden', 'true');
+  }
   if (batchJobsState.timer) { clearInterval(batchJobsState.timer); batchJobsState.timer = null; }
 }
 
@@ -777,9 +869,9 @@ export async function refreshBatchJobs(): Promise<void> {
       const outputDir = job.output_dir || '';
       const encodedOutput = encodeURIComponent(outputDir);
       const status = job.status || 'unknown';
-      return `<div class="batch-job-card"><div class="batch-job-title">${escHtml(job.name || job.job_id)}</div><div class="batch-job-meta"><span>状态: ${escHtml(status)}</span><span>${processed}/${total}</span></div><div class="batch-job-progress"><div class="batch-job-progress-fill" style="width:${percent}%"></div></div><div class="batch-job-meta" style="margin-top:6px;"><span>${escHtml(outputDir)}</span><button class="ghost-btn" style="padding:2px 8px;font-size:12px;" onclick="openPath('${encodedOutput}')">复制路径</button></div></div>`;
+      return `<div class="batch-job-card"><div class="batch-job-title">${escHtml(job.name || job.job_id)}</div><div class="batch-job-meta"><span>状态: ${escHtml(status)}</span><span>${processed}/${total}</span></div><div class="batch-job-progress"><div class="batch-job-progress-fill" style="width:${percent}%"></div></div><div class="batch-job-meta batch-job-output"><span>${escHtml(outputDir)}</span><button class="ui-ghost-button ui-ghost-button--compact" data-koto-action="copy-output-path" data-path="${encodedOutput}">复制路径</button></div></div>`;
     }).join('');
-  } catch (error) { /* ignore */ }
+  } catch (_error) { /* ignore */ }
 }
 
 export async function resetSettings(): Promise<void> {
@@ -789,80 +881,21 @@ export async function resetSettings(): Promise<void> {
     const data = await response.json();
     if (!response.ok || data.success === false) throw new Error(data.error || '重置失败');
     await loadSettings();
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification('设置已恢复默认', 'success', 1800);
+    if (typeof getFeatureRegistry().showNotification === 'function') {
+      getFeatureRegistry().showNotification('设置已恢复默认', 'success', 1800);
     }
   } catch (error: any) {
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification('重置失败: ' + (error.message || error), 'error');
+    if (typeof getFeatureRegistry().showNotification === 'function') {
+      getFeatureRegistry().showNotification('重置失败: ' + (error.message || error), 'error');
     }
   }
 }
 
-export async function bootstrapTriggers(force: boolean = false): Promise<void> {
-  const label = force ? '重建' : '初始化';
-  if (force && !confirm('确定重建所有推荐触发器吗？已有推荐触发器将被替换。')) return;
-  try {
-    const resp = await csrfFetch('/api/jobs/triggers/bootstrap', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ force }),
-    });
-    const data = await resp.json();
-    if (!resp.ok || data.ok === false) throw new Error(data.error || '操作失败');
-    if (typeof (window as any).loadTriggers === 'function') await (window as any).loadTriggers();
-    if (typeof (window as any).showNotification === 'function') {
-      const created = (data.data && data.data.created || []).length;
-      const skipped = (data.data && data.data.skipped || []).length;
-      (window as any).showNotification(`${label}完成：创建 ${created}，跳过 ${skipped}`, 'success', 2200);
-    }
-  } catch (error: any) {
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification(`${label}失败: ` + (error.message || error), 'error');
-    }
-  }
-}
-
-export async function shadowOpenObservations(): Promise<void> {
-  try {
-    const resp = await fetch('/api/shadow/observations');
-    const data = await resp.json();
-    if (!resp.ok || data.ok === false) throw new Error(data.error || '获取失败');
-    const obs = data.data || {};
-    const topics = Object.entries(obs.topics || {})
-      .sort((a: any, b: any) => Number(b[1]) - Number(a[1]))
-      .slice(0, 10)
-      .map(([key, value]) => `${key}x${value}`)
-      .join(', ');
-    const hours = Object.entries(obs.active_hours || {})
-      .sort((a: any, b: any) => Number(a[0]) - Number(b[0]))
-      .map(([hour, count]) => `${hour}时:${count}`)
-      .join('  ');
-    const detail = [
-      `总观察次数: ${obs.total_observations || 0}`,
-      `连续天数: ${obs.streak?.days || 0}`,
-      `活跃时段: ${hours || '暂无记录'}`,
-      `话题词频: ${topics || '暂无'}`,
-      `开放任务: ${(obs.open_tasks || []).filter((task: any) => !task.done).length} 项待处理`,
-      `最后活跃: ${obs.last_seen || '无'}`,
-    ].join('\n');
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification(detail, 'info', 8000);
-    } else {
-      alert(detail);
-    }
-  } catch (error: any) {
-    if (typeof (window as any).showNotification === 'function') {
-      (window as any).showNotification('获取失败: ' + (error.message || error), 'error');
-    }
-  }
-}
-
-function openPath(path: string): void { if (path) copyPathToClipboard(decodeURIComponent(path), '输出路径'); }
+export function openPath(path: string): void { if (path) copyPathToClipboard(path, '输出路径'); }
 
 function copyPathToClipboard(path: string, label: string = '路径'): void {
   navigator.clipboard.writeText(path).then(() => {
-    if (typeof (window as any).showNotification === 'function') (window as any).showNotification(`已复制${label}`, 'success', 1500);
+    if (typeof getFeatureRegistry().showNotification === 'function') getFeatureRegistry().showNotification(`已复制${label}`, 'success', 1500);
   }).catch(() => { prompt(`复制${label}：`, path); });
 }
 
@@ -871,46 +904,57 @@ function escHtml(str: string): string {
 }
 
 // ── Backward compat ──
-(window as any).loadSettings = loadSettings;
-(window as any).applySettingsToUI = applySettingsToUI;
-(window as any).openSettings = openSettings;
-(window as any).closeSettings = closeSettings;
-(window as any).toggleSettings = toggleSettings;
-(window as any).syncCloudProviderUi = syncCloudProviderUi;
-(window as any).onCloudProviderChange = onCloudProviderChange;
-(window as any).saveSettingsApiKey = saveSettingsApiKey;
-(window as any).updateSetting = updateSetting;
-(window as any).onBooleanSettingChange = onBooleanSettingChange;
-(window as any).applyLocalOnlyMode = applyLocalOnlyMode;
-(window as any).onLocalOnlyChange = onLocalOnlyChange;
-(window as any).filterLocalModels = filterLocalModels;
-(window as any).detectLocalModels = detectLocalModels;
-(window as any).onLocalModelChange = onLocalModelChange;
-(window as any).checkSetupStatus = checkSetupStatus;
-(window as any).showSetupWizard = showSetupWizard;
-(window as any).hideSetupWizard = hideSetupWizard;
-(window as any).selectSetupProvider = selectSetupProvider;
-(window as any).saveApiKey = saveApiKey;
-(window as any).useActivationCode = useActivationCode;
-(window as any).saveWorkspace = saveWorkspace;
-(window as any).testConnection = testConnection;
-(window as any).activateWithCode = activateWithCode;
-(window as any).skipSetup = skipSetup;
-(window as any).dismissApiKeyBanner = dismissApiKeyBanner;
-(window as any).finishSetup = finishSetup;
-(window as any).browseSetupFolder = browseSetupFolder;
-(window as any).browseFolder = browseFolder;
-(window as any).closeFolderModal = closeFolderModal;
-(window as any).confirmFolderSelect = confirmFolderSelect;
-(window as any).checkStatus = checkStatus;
-(window as any).updateLatencyDetail = updateLatencyDetail;
-(window as any).toggleLatencyDetail = toggleLatencyDetail;
-(window as any).openBatchJobsPanel = openBatchJobsPanel;
-(window as any).closeBatchJobsPanel = closeBatchJobsPanel;
-(window as any).refreshBatchJobs = refreshBatchJobs;
-(window as any).resetSettings = resetSettings;
-(window as any).bootstrapTriggers = bootstrapTriggers;
-(window as any).shadowOpenObservations = shadowOpenObservations;
-(window as any).currentSettings = currentSettings;
-(window as any).currentBrowseTarget = currentBrowseTarget;
-(window as any).currentBrowsePath = currentBrowsePath;
+getFeatureRegistry().loadSettings = loadSettings;
+getFeatureRegistry().applySettingsToUI = applySettingsToUI;
+getFeatureRegistry().openSettings = openSettings;
+getFeatureRegistry().closeSettings = closeSettings;
+getFeatureRegistry().toggleSettings = toggleSettings;
+getFeatureRegistry().openDefaultAppsSettings = openDefaultAppsSettings;
+getFeatureRegistry().syncCloudProviderUi = syncCloudProviderUi;
+getFeatureRegistry().onCloudProviderChange = onCloudProviderChange;
+getFeatureRegistry().saveSettingsApiKey = saveSettingsApiKey;
+getFeatureRegistry().updateSetting = updateSetting;
+getFeatureRegistry().onBooleanSettingChange = onBooleanSettingChange;
+getFeatureRegistry().applyLocalOnlyMode = applyLocalOnlyMode;
+getFeatureRegistry().onLocalOnlyChange = onLocalOnlyChange;
+getFeatureRegistry().filterLocalModels = filterLocalModels;
+getFeatureRegistry().detectLocalModels = detectLocalModels;
+getFeatureRegistry().onLocalModelChange = onLocalModelChange;
+getFeatureRegistry().checkSetupStatus = checkSetupStatus;
+getFeatureRegistry().showSetupWizard = showSetupWizard;
+getFeatureRegistry().hideSetupWizard = hideSetupWizard;
+getFeatureRegistry().selectSetupProvider = selectSetupProvider;
+getFeatureRegistry().saveApiKey = saveApiKey;
+getFeatureRegistry().useActivationCode = useActivationCode;
+getFeatureRegistry().saveWorkspace = saveWorkspace;
+getFeatureRegistry().testConnection = testConnection;
+getFeatureRegistry().activateWithCode = activateWithCode;
+getFeatureRegistry().skipSetup = skipSetup;
+getFeatureRegistry().dismissApiKeyBanner = dismissApiKeyBanner;
+getFeatureRegistry().finishSetup = finishSetup;
+getFeatureRegistry().browseSetupFolder = browseSetupFolder;
+getFeatureRegistry().browseFolder = browseFolder;
+getFeatureRegistry().closeFolderModal = closeFolderModal;
+getFeatureRegistry().confirmFolderSelect = confirmFolderSelect;
+getFeatureRegistry().checkStatus = checkStatus;
+getFeatureRegistry().updateLatencyDetail = updateLatencyDetail;
+getFeatureRegistry().toggleLatencyDetail = toggleLatencyDetail;
+getFeatureRegistry().openBatchJobsPanel = openBatchJobsPanel;
+getFeatureRegistry().closeBatchJobsPanel = closeBatchJobsPanel;
+getFeatureRegistry().refreshBatchJobs = refreshBatchJobs;
+getFeatureRegistry().resetSettings = resetSettings;
+getFeatureRegistry().openPath = openPath;
+getFeatureRegistry().currentSettings = currentSettings;
+getFeatureRegistry().currentBrowseTarget = currentBrowseTarget;
+getFeatureRegistry().currentBrowsePath = currentBrowsePath;
+
+// ?? Global exposure for inline HTML onclick handlers ??
+const w = window as any;
+w.closeSettings = closeSettings;
+w.openSettings = openSettings;
+w.toggleSettings = toggleSettings;
+w.saveSettingsApiKey = saveSettingsApiKey;
+w.browseFolder = browseFolder;
+w.detectLocalModels = detectLocalModels;
+w.resetSettings = resetSettings;
+w.onCloudProviderChange = onCloudProviderChange;

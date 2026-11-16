@@ -134,8 +134,7 @@ class TestStreamInterruptManager:
 @pytest.mark.unit
 class TestLoadUserSettings:
     def test_returns_dict_from_file(self, tmp_path):
-        import web.config as webcfg
-        from web import app as webapp
+        import web.shared as webcfg
 
         settings_path = tmp_path / "config" / "user_settings.json"
         settings_path.parent.mkdir(parents=True, exist_ok=True)
@@ -145,28 +144,26 @@ class TestLoadUserSettings:
 
         webcfg._user_settings_cache.clear()
         with patch.dict(os.environ, {"KOTO_USER_SETTINGS_PATH": str(settings_path)}):
-            result = webapp._load_user_settings()
+            result = webcfg._load_user_settings()
         assert result == {"storage": {"workspace_dir": "/w"}}
         webcfg._user_settings_cache.clear()
 
     def test_returns_empty_dict_on_missing_file(self, tmp_path):
-        import web.config as webcfg
-        from web import app as webapp
+        import web.shared as webcfg
 
         settings_path = tmp_path / "config" / "user_settings.json"
         webcfg._user_settings_cache.clear()
         with patch.dict(os.environ, {"KOTO_USER_SETTINGS_PATH": str(settings_path)}):
-            result = webapp._load_user_settings()
+            result = webcfg._load_user_settings()
         assert result == {}
         webcfg._user_settings_cache.clear()
 
     def test_caches_result(self, tmp_path):
-        import web.config as webcfg
-        from web import app as webapp
+        import web.shared as webcfg
 
         webcfg._user_settings_cache.clear()
         webcfg._user_settings_cache["data"] = {"cached": True}
-        result = webapp._load_user_settings()
+        result = webcfg._load_user_settings()
         assert result == {"cached": True}
         webcfg._user_settings_cache.clear()
 
@@ -177,21 +174,29 @@ class TestLoadUserSettings:
 @pytest.mark.unit
 class TestStorageHelpers:
     def _with_settings(self, settings_dict):
-        import web.config as webcfg
-        from web import app as webapp
+        import web.shared as webcfg
 
         webcfg._user_settings_cache.clear()
         webcfg._user_settings_cache["data"] = settings_dict
-        return webapp
+        return webcfg
 
     def teardown_method(self):
-        import web.config as webcfg
+        import web.shared as webcfg
 
         webcfg._user_settings_cache.clear()
 
-    def test_workspace_root_from_settings(self):
-        webapp = self._with_settings({"storage": {"workspace_dir": "D:\\work"}})
-        assert webapp.get_workspace_root() == "D:\\work"
+    def test_workspace_root_from_runtime_owner(self):
+        from app.core.config.workspace_runtime import (
+            clear_workspace_root_override,
+            set_workspace_root,
+        )
+        from web import shared
+
+        try:
+            expected = set_workspace_root("D:\\work")
+            assert shared.get_workspace_root() == expected
+        finally:
+            clear_workspace_root_override()
 
     def test_workspace_root_default(self):
         webapp = self._with_settings({})
@@ -404,7 +409,7 @@ class TestIsInteractionsOnly:
 @pytest.mark.unit
 class TestWebSearcher:
     def setup_method(self):
-        from web.web_searcher import WebSearcher
+        from web.knowledge.web_searcher import WebSearcher
 
         self.cls = WebSearcher
 
@@ -456,95 +461,6 @@ class TestWebSearcher:
     def test_build_context_general(self):
         q, instr = self.cls._build_search_context("latest news", "general")
         assert "Koto" in instr
-
-
-# =====================================================================
-# 11. ContextAnalyzer
-# =====================================================================
-@pytest.mark.unit
-class TestContextAnalyzer:
-    def setup_method(self):
-        from web.context_analyzer import ContextAnalyzer
-
-        self.cls = ContextAnalyzer
-
-    # -- extract_entities --
-    def test_extract_color(self):
-        entities = self.cls.extract_entities("我想要红色背景")
-        values = [e["value"] for e in entities]
-        assert "红色" in values
-
-    def test_extract_style(self):
-        entities = self.cls.extract_entities("卡通风格头像")
-        values = [e["value"] for e in entities]
-        assert "卡通" in values
-
-    def test_extract_subject(self):
-        entities = self.cls.extract_entities("画一只猫")
-        values = [e["value"] for e in entities]
-        assert "猫" in values
-
-    def test_extract_task_specific(self):
-        entities = self.cls.extract_entities("调整颜色", task_type="PAINTER")
-        values = [e["value"] for e in entities]
-        assert "颜色" in values
-
-    def test_extract_no_entities(self):
-        entities = self.cls.extract_entities("hello world 123")
-        assert entities == []
-
-    # -- build_context_summary --
-    def test_summary_empty_history(self):
-        summary = self.cls.build_context_summary([])
-        assert summary["task_history"] == []
-        assert summary["last_user_intent"] == ""
-
-    def test_summary_with_history(self):
-        history = [
-            {"role": "user", "parts": ["画一只猫"]},
-            {"role": "model", "parts": ["图像已生成"]},
-        ]
-        summary = self.cls.build_context_summary(history)
-        assert summary["last_user_intent"] == "画一只猫"
-        assert summary["last_model_output"] == "图像已生成"
-
-    def test_summary_detects_task_type(self):
-        history = [
-            {"role": "user", "parts": ["写一段python代码"]},
-            {"role": "model", "parts": ["```python\nprint('hi')```"]},
-        ]
-        summary = self.cls.build_context_summary(history)
-        types = [t["type"] for t in summary["task_history"]]
-        assert "CODER" in types
-
-    # -- analyze_context --
-    def test_analyze_no_history(self):
-        result = self.cls.analyze_context("hello", [])
-        assert result["is_continuation"] is False
-
-    def test_analyze_short_history(self):
-        result = self.cls.analyze_context("hi", [{"role": "user", "parts": ["hi"]}])
-        assert result["is_continuation"] is False
-
-    def test_analyze_continuation_modify(self):
-        history = [
-            {"role": "user", "parts": ["画一只猫"]},
-            {"role": "model", "parts": ["图像已生成"]},
-        ]
-        result = self.cls.analyze_context("再来一张", history)
-        assert result["is_continuation"] is True
-        assert result["continuation_type"] == "modify"
-
-    def test_analyze_new_topic_not_continuation(self):
-        history = [
-            {"role": "user", "parts": ["画一只猫"]},
-            {"role": "model", "parts": ["图像已生成"]},
-        ]
-        result = self.cls.analyze_context(
-            "帮我写一份详细的市场分析报告关于人工智能发展趋势", history
-        )
-        # Long new-topic input should not be a continuation
-        assert result["confidence"] < 0.6 or result["is_continuation"] is False
 
 
 # =====================================================================
@@ -721,109 +637,31 @@ class TestSessionManager:
 @pytest.mark.unit
 class TestChatSystemInstruction:
     def test_default_instruction_returns_string(self):
-        from web.chat_system_instruction import get_default_chat_system_instruction
+        from app.core.services.chat_system_instruction import (
+            get_default_chat_system_instruction,
+        )
 
         result = get_default_chat_system_instruction()
         assert isinstance(result, str)
         assert "Koto" in result
 
     def test_instruction_without_question(self):
-        from web.chat_system_instruction import get_chat_system_instruction
+        from app.core.services.chat_system_instruction import (
+            get_chat_system_instruction,
+        )
 
         result = get_chat_system_instruction()
         assert isinstance(result, str)
         assert "Koto" in result
 
-    def test_instruction_with_question_fallback(self):
-        from web.chat_system_instruction import get_chat_system_instruction
-
-        # When context_injector fails, should fall back
-        with patch(
-            "web.context_injector.get_dynamic_system_instruction",
-            side_effect=Exception("fail"),
-        ):
-            result = get_chat_system_instruction(question="hello")
-        assert isinstance(result, str)
-        assert "Koto" in result
-
-
-# =====================================================================
-# 15. _parse_time_info_for_filegen / _build_filegen_time_context
-# =====================================================================
-@pytest.mark.unit
-class TestTimeInfoParsing:
-    def setup_method(self):
-        from web.filegen_time_context import (
-            build_filegen_time_context,
-            parse_time_info_for_filegen,
+    def test_instruction_does_not_classify_question_into_another_prompt(self):
+        from app.core.services.chat_system_instruction import (
+            get_chat_system_instruction,
         )
 
-        self.parse = parse_time_info_for_filegen
-        self.build = build_filegen_time_context
-
-    def test_parse_full_date(self):
-        info = self.parse("2024年6月的报告")
-        assert info["year"] == 2024
-        assert info["month"] == 6
-        assert info["rule_hit"] is False
-
-    def test_parse_month_only(self):
-        info = self.parse("3月销售数据")
-        assert info["year"] is None
-        assert info["month"] == 3
-        assert info["rule_hit"] is True
-
-    def test_parse_no_date(self):
-        info = self.parse("hello world")
-        assert info["year"] is None
-        assert info["month"] is None
-
-    def test_parse_empty(self):
-        info = self.parse("")
-        assert info["raw"] == ""
-
-    def test_build_with_month(self):
-        context_str, parsed = self.build("6月报告")
-        assert "时间上下文" in context_str
-        assert parsed["month"] == 6
-
-    def test_build_without_month(self):
-        context_str, parsed = self.build("写一个报告")
-        assert "未检测到明确月份" in context_str
-
-
-# =====================================================================
-# 16. filter_history (classmethod on ContextAnalyzer)
-# =====================================================================
-@pytest.mark.unit
-class TestFilterHistory:
-    def setup_method(self):
-        from web.context_analyzer import ContextAnalyzer
-
-        self.cls = ContextAnalyzer
-
-    def test_empty_history(self):
-        assert self.cls.filter_history("hi", []) == []
-
-    def test_short_history_returns_all(self):
-        history = [{"parts": ["a"]}, {"parts": ["b"]}]
-        result = self.cls.filter_history("test", history, keep_turns=6)
-        assert len(result) == 2
-
-    def test_long_history_keeps_tail(self):
-        history = [{"parts": [f"msg{i}"]} for i in range(30)]
-        result = self.cls.filter_history("xyz", history, keep_turns=3)
-        # Should at least keep last 6 entries (tail_count)
-        assert len(result) >= 6
-
-    def test_keyword_matching_preserves_relevant(self):
-        history = [
-            {"parts": ["Python编程教程"]},
-            {"parts": ["好的，Python基础"]},
-        ] + [{"parts": [f"filler{i}"]} for i in range(20)]
-        result = self.cls.filter_history("Python", history, keep_turns=3)
-        texts = [h["parts"][0] for h in result]
-        assert any("Python" in t for t in texts)
+        base = get_chat_system_instruction()
+        result = get_chat_system_instruction(question="运行 Python 脚本并删除文件")
+        assert result == base
 
 
 # =====================================================================
@@ -1351,24 +1189,9 @@ class TestEdgeCases:
         assert not hasattr(webapp, "FileOperator")
 
     def test_web_searcher_keywords_exist(self):
-        from web.web_searcher import WebSearcher
+        from web.knowledge.web_searcher import WebSearcher
 
         assert len(WebSearcher.WEB_KEYWORDS) > 20
-
-    def test_context_analyzer_task_signatures(self):
-        from web.context_analyzer import ContextAnalyzer
-
-        assert "PAINTER" in ContextAnalyzer.TASK_SIGNATURES
-        assert "FILE_GEN" in ContextAnalyzer.TASK_SIGNATURES
-        assert "CODER" in ContextAnalyzer.TASK_SIGNATURES
-        assert "CHAT" in ContextAnalyzer.TASK_SIGNATURES
-
-    def test_context_analyzer_continuation_patterns(self):
-        from web.context_analyzer import ContextAnalyzer
-
-        assert "modify" in ContextAnalyzer.CONTINUATION_PATTERNS
-        assert "convert" in ContextAnalyzer.CONTINUATION_PATTERNS
-        assert "continue" in ContextAnalyzer.CONTINUATION_PATTERNS
 
     def test_utils_package_allowlist(self):
         from web.utils.assistant_utils import Utils
@@ -1391,25 +1214,11 @@ class TestEdgeCases:
             assert result[1]["role"] == "model"
 
     def test_web_searcher_news_keyword(self):
-        from web.web_searcher import WebSearcher
+        from web.knowledge.web_searcher import WebSearcher
 
         assert WebSearcher.needs_web_search("最新新闻") is True
 
     def test_web_searcher_flight_keyword(self):
-        from web.web_searcher import WebSearcher
+        from web.knowledge.web_searcher import WebSearcher
 
         assert WebSearcher.needs_web_search("查航班动态") is True
-
-    def test_context_build_rag_prompt(self):
-        from web.context_analyzer import ContextAnalyzer
-
-        summary = {
-            "conversation_topic": "PAINTER",
-            "key_entities": [{"type": "color", "value": "红色"}],
-            "last_user_intent": "画一只猫",
-            "last_model_output": "图像已生成",
-        }
-        prompt = ContextAnalyzer.build_rag_prompt("更大一点", summary, "modify")
-        assert "PAINTER" in prompt
-        assert "红色" in prompt
-        assert "更大一点" in prompt

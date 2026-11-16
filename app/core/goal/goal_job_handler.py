@@ -32,7 +32,7 @@ def _handle_goal_check(ctx) -> Optional[str]:
     执行流程：
     1. 从 GoalManager 加载目标
     2. 启动一条 GoalRun 记录
-    3. 构建 Agent 提示词并调用 UnifiedAgent
+    3. 构建 Agent 提示词并调用 KernelAgent
     4. 解析执行结果，判断目标是否已完成
     5. 更新 GoalTask 状态与下次检查时间
     """
@@ -72,23 +72,13 @@ def _handle_goal_check(ctx) -> Optional[str]:
         f"如需用户提供信息，最后一行单独写：STATUS:WAITING_USER:<原因>"
     )
 
-    # ── 调用 UnifiedAgent ─────────────────────────────────────────────────────
+    # ── 调用生产 KernelAgent ─────────────────────────────────────────────────
     result_text = ""
     tool_call_names = []
     try:
-        from app.core.agent.tool_registry import ToolRegistry
-        from app.core.agent.unified_agent import UnifiedAgent
-        from app.core.llm.provider_factory import get_llm_provider
+        from app.core.agent.kernel_agent_service import get_kernel_agent
 
-        llm = get_llm_provider(allow_local_fallback=False)
-        agent = UnifiedAgent(
-            llm_provider=llm,
-            tool_registry=ToolRegistry(),
-            system_instruction=(
-                "你是 Koto，正在追踪一个用户委托的长期目标。"
-                "请以简洁、清晰的方式汇报进展，重点说明本次做了什么和下一步。"
-            ),
-        )
+        agent = get_kernel_agent()
 
         answer_parts = []
         for step in agent.run(prompt, session_id=goal.session_id or goal_id):
@@ -97,14 +87,14 @@ def _handle_goal_check(ctx) -> Optional[str]:
                 if hasattr(step.step_type, "value")
                 else str(step.step_type)
             )
-            if step_type == "ACTION" and step.content:
+            if step_type == "action" and step.content:
                 tool_call_names.append(step.content[:80])
                 ctx.step(
                     "ACTION",
                     step.content[:200],
                     tool_name=getattr(step, "tool_name", None),
                 )
-            elif step_type == "ANSWER":
+            elif step_type == "answer":
                 answer_parts.append(step.content)
                 ctx.step("ANSWER", step.content[:200], progress=90)
             elif ctx.is_cancelled():

@@ -14,22 +14,17 @@ PAGE_TIMEOUT = 15_000  # ms
 
 PAGES = [
     "/",
-    "/skill-marketplace",
-    "/mobile",
-    "/landing",
-    "/file-network",
-    "/knowledge-graph",
+    "/addons",
+    "/mini",
 ]
 
 
 def _navigate(page, base_url, path):
-    """Navigate to a page; skip the test if the route returns 404."""
+    """Navigate to a current product page and require it to exist."""
     resp = page.goto(
         f"{base_url}{path}", wait_until="domcontentloaded", timeout=PAGE_TIMEOUT
     )
-    if resp is not None and resp.status == 404:
-        pytest.skip(f"{path} route not available")
-    assert resp is not None and resp.status < 500, f"{path} returned {resp.status}"
+    assert resp is not None and resp.status < 400, f"{path} returned {resp.status}"
     page.wait_for_timeout(1000)
 
 
@@ -57,11 +52,10 @@ class TestAccessibility:
             return missing;
         }""")
 
-        if images_without_alt:
-            pytest.skip(
-                f"Images missing alt text on {path} ({len(images_without_alt)}): "
-                + "; ".join(images_without_alt[:5])
-            )
+        assert not images_without_alt, (
+            f"Images missing alt text on {path} ({len(images_without_alt)}): "
+            + "; ".join(images_without_alt[:5])
+        )
 
     # -- Form inputs ----------------------------------------------------------
     @pytest.mark.parametrize("path", PAGES, ids=PAGES)
@@ -74,6 +68,7 @@ class TestAccessibility:
             const missing = [];
             inputs.forEach(el => {
                 if (el.type === 'hidden') return;
+                if (!el.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})) return;
                 const hasLabel = el.id && document.querySelector('label[for="' + el.id + '"]');
                 const hasAria = el.getAttribute('aria-label') || el.getAttribute('aria-labelledby');
                 const hasPlaceholder = el.getAttribute('placeholder');
@@ -85,11 +80,9 @@ class TestAccessibility:
             return missing;
         }""")
 
-        if unlabeled:
-            pytest.skip(
-                f"Unlabeled inputs on {path} ({len(unlabeled)}): "
-                + "; ".join(unlabeled[:5])
-            )
+        assert (
+            not unlabeled
+        ), f"Unlabeled inputs on {path} ({len(unlabeled)}): " + "; ".join(unlabeled[:5])
 
     # -- Buttons --------------------------------------------------------------
     @pytest.mark.parametrize("path", PAGES, ids=PAGES)
@@ -101,6 +94,7 @@ class TestAccessibility:
             const buttons = document.querySelectorAll('button, [role="button"]');
             const missing = [];
             buttons.forEach(btn => {
+                if (!btn.checkVisibility({checkOpacity: true, checkVisibilityCSS: true})) return;
                 const text = btn.textContent.trim();
                 const ariaLabel = btn.getAttribute('aria-label');
                 const title = btn.getAttribute('title');
@@ -111,11 +105,10 @@ class TestAccessibility:
             return missing;
         }""")
 
-        if unnamed:
-            pytest.skip(
-                f"Buttons without accessible names on {path} ({len(unnamed)}): "
-                + "; ".join(unnamed[:5])
-            )
+        assert not unnamed, (
+            f"Buttons without accessible names on {path} ({len(unnamed)}): "
+            + "; ".join(unnamed[:5])
+        )
 
     # -- Heading hierarchy ----------------------------------------------------
     @pytest.mark.parametrize("path", PAGES, ids=PAGES)
@@ -125,7 +118,9 @@ class TestAccessibility:
 
         skipped = e2e_page.evaluate("""() => {
             const headings = document.querySelectorAll('h1, h2, h3, h4, h5, h6');
-            const levels = Array.from(headings).map(h => parseInt(h.tagName[1]));
+            const levels = Array.from(headings)
+                .filter(h => h.checkVisibility({checkOpacity: true, checkVisibilityCSS: true}))
+                .map(h => parseInt(h.tagName[1]));
             const skips = [];
             for (let i = 1; i < levels.length; i++) {
                 if (levels[i] > levels[i-1] + 1) {
@@ -135,8 +130,7 @@ class TestAccessibility:
             return skips;
         }""")
 
-        if skipped:
-            pytest.skip(f"Heading hierarchy skips on {path}: {skipped}")
+        assert not skipped, f"Heading hierarchy skips on {path}: {skipped}"
 
     # -- Tabindex -------------------------------------------------------------
     @pytest.mark.parametrize("path", PAGES, ids=PAGES)
@@ -166,8 +160,7 @@ class TestAccessibility:
         _navigate(e2e_page, e2e_base_url, "/")
 
         lang = e2e_page.evaluate("document.documentElement.getAttribute('lang')")
-        if not lang:
-            pytest.skip("HTML element missing lang attribute — add lang='en' to <html>")
+        assert lang, "HTML element is missing a lang attribute"
 
     # -- Landmark regions -----------------------------------------------------
     def test_main_page_has_landmark_roles(self, e2e_page, e2e_base_url):
@@ -181,7 +174,6 @@ class TestAccessibility:
             };
         }""")
 
-        if landmarks["main"] == 0 and landmarks["nav"] == 0:
-            pytest.skip(
-                "No landmark regions found (main, nav) — consider adding for screen readers"
-            )
+        assert (
+            landmarks["main"] > 0 or landmarks["nav"] > 0
+        ), "No landmark regions found (main, nav)"
